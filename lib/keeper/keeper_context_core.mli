@@ -228,7 +228,7 @@ val checkpoint_text_cap_marker : string
     public contract. *)
 
 (** Pick the keeper's preferred model for checkpointing —
-    canonical cascade name first, then a fallback list of
+    canonical runtime name first, then a fallback list of
     provider-default labels. *)
 val checkpoint_model_of_meta : Keeper_meta_contract.keeper_meta -> string
 

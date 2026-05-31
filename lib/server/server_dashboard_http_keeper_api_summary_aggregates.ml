@@ -33,7 +33,7 @@ let provider_attempts_summary_json (scan : runtime_manifest_scan) : Yojson.Safe.
     ; ( "terminal_fallback_authority"
       , Json_util.string_opt_to_json (terminal_decision_string "fallback_authority") )
     ; ( "terminal_provider_source_runtime"
-      , Json_util.string_opt_to_json (terminal_decision_string "provider_source_cascade") )
+      , Json_util.string_opt_to_json (terminal_decision_string "provider_source_runtime") )
     ; "terminal_error", Json_util.string_opt_to_json (terminal_decision_string "error")
     ; ( "terminal_exception_kind"
       , Json_util.string_opt_to_json (terminal_decision_string "exception_kind") )

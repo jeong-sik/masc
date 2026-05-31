@@ -1,6 +1,6 @@
 (** Provider-attempt provenance and health helpers for keeper turn driver. *)
 
-open Runtime_attempt_fsm
+open Keeper_runtime_attempt
 
 let provider_attempt_status_of_result = function
   | Ok _ -> "provider_returned"
@@ -39,15 +39,15 @@ type provider_attempt_provenance =
   ; resolved_model_source : string
   ; capability_source : string
   ; fallback_authority : string
-  ; provider_source_cascade : string option
+  ; provider_source_runtime : string option
   }
 
 let base_provider_attempt_provenance =
-  { model_source = "named_cascade"
+  { model_source = "named_runtime"
   ; resolved_model_source = "runtime_catalog_binding"
   ; capability_source = "provider_config_from_runtime_catalog"
-  ; fallback_authority = "declared_cascade"
-  ; provider_source_cascade = None
+  ; fallback_authority = "declared_runtime"
+  ; provider_source_runtime = None
   }
 
 let provider_attempt_provenance_fields p =
@@ -58,10 +58,10 @@ let provider_attempt_provenance_fields p =
     ; ("fallback_authority", `String p.fallback_authority)
     ]
   in
-  match p.provider_source_cascade with
+  match p.provider_source_runtime with
   | None -> base
-  | Some source_cascade ->
-      ("provider_source_cascade", `String source_cascade) :: base
+  | Some source_runtime ->
+      ("provider_source_runtime", `String source_runtime) :: base
 
 type provider_attempt_started_record =
   { started_provenance : provider_attempt_provenance
@@ -137,7 +137,7 @@ let success_selected_model_raw candidate =
 
 (* Error/rejected/exhausted observations intentionally leave the concrete
    selected model absent. Downstream attribution uses candidate_models or the
-   cascade route for those outcomes. *)
+   runtime route for those outcomes. *)
 let error_selected_model_raw = None
 
 let health_error_kind label =

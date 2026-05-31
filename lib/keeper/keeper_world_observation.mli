@@ -69,7 +69,7 @@ type world_observation = {
 
   provider_capacity_blocked_task_count : int;
   (** Number of otherwise-claimable tasks currently held back by provider
-      capacity/cooldown when no fail-open cascade is available. *)
+      capacity/cooldown when no fail-open runtime is available. *)
 
   failed_task_count : int;
   (** Number of failed/cancelled tasks in the room backlog. *)

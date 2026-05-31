@@ -185,8 +185,8 @@ let test_masc_transition_schema () =
       | Some props ->
           Alcotest.(check bool) "has completion_contract" true
             (List.mem_assoc "completion_contract" props);
-          Alcotest.(check bool) "has evaluator_cascade" true
-            (List.mem_assoc "evaluator_cascade" props);
+          Alcotest.(check bool) "has evaluator_runtime" true
+            (List.mem_assoc "evaluator_runtime" props);
           Alcotest.(check bool) "has handoff_context" true
             (List.mem_assoc "handoff_context" props)
       | None -> Alcotest.fail "masc_transition missing properties");
@@ -521,7 +521,7 @@ let test_masc_persona_authoring_schemas () =
           Alcotest.(check string) "language default follows contract"
             Contract.default_generation_language (default_string "language");
           Alcotest.(check string) "runtime default follows contract"
-            Contract.default_generation_cascade_name (default_string "runtime_id");
+            Contract.default_generation_runtime_id (default_string "runtime_id");
           Alcotest.(check bool) "proactive default follows contract"
             Contract.default_generation_proactive_enabled (default_bool "proactive_enabled")
       | None -> Alcotest.fail "masc_persona_generate missing properties"));

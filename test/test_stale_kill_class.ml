@@ -90,7 +90,7 @@ let test_failure_reason_to_string_provider_runtime_error () =
     (failure_reason_to_string
        (Provider_runtime_error
           { code = "provider_error"; detail = "provider_c unicode crash"
-          ; provider_id = None; http_status = None; cascade_name = None }))
+          ; provider_id = None; http_status = None; runtime_id = None }))
 
 let test_failure_reason_to_string_tool_required_unsatisfied () =
   r "Tool_required_unsatisfied includes terminal code"
@@ -169,7 +169,7 @@ let test_terminal_failure_cohort_keys () =
        (Some
           (Provider_runtime_error
              { code = "provider_error"; detail = "x"
-             ; provider_id = None; http_status = None; cascade_name = None })));
+             ; provider_id = None; http_status = None; runtime_id = None })));
   r "Tool_required_unsatisfied cohort_key" "tool_required_unsatisfied"
     (failure_reason_cohort_key
        (Some
@@ -179,7 +179,7 @@ let test_terminal_failure_cohort_keys () =
 let test_stale_watchdog_preserves_terminal_failure_reason () =
   let prior =
     Provider_runtime_error { code = "provider_error"; detail = "provider_c"
-                           ; provider_id = None; http_status = None; cascade_name = None }
+                           ; provider_id = None; http_status = None; runtime_id = None }
   in
   let kill_class = Idle_turn { stall_seconds = 305.0 } in
   match stale_watchdog_failure_reason ~prior:(Some prior) ~kill_class with
@@ -280,8 +280,8 @@ let root_cause_label reasons =
   |> SW.batch_root_cause_to_string
 
 let test_batch_root_cause_labels () =
-  r "cascade_unhealthy label" "cascade_unhealthy"
-    (SW.batch_root_cause_to_string SW.Cascade_unhealthy);
+  r "runtime_unhealthy label" "runtime_unhealthy"
+    (SW.batch_root_cause_to_string SW.Runtime_unhealthy);
   r "provider_timeout label" "provider_timeout"
     (SW.batch_root_cause_to_string SW.Provider_timeout);
   r "provider_auth label" "provider_auth"
@@ -297,14 +297,14 @@ let test_batch_root_cause_provider_auth () =
        [
          Provider_runtime_error
            { code = "auth_error"; detail = "bad key rejected"
-           ; provider_id = None; http_status = None; cascade_name = None };
+           ; provider_id = None; http_status = None; runtime_id = None };
        ])
 
 let test_batch_root_cause_fd_exhaustion () =
   r "fd exhaustion" "fd_exhaustion"
     (root_cause_label [ Exception "too many open files (os error 24)" ])
 
-let test_batch_root_cause_cascade_unhealthy () =
+let test_batch_root_cause_runtime_unhealthy () =
   r "provider timeout" "provider_timeout"
     (root_cause_label [ Provider_timeout_loop { count = 2 } ])
 
@@ -314,7 +314,7 @@ let test_batch_root_cause_mixed () =
        [
          Provider_runtime_error
            { code = "auth_error"; detail = "bad key rejected"
-           ; provider_id = None; http_status = None; cascade_name = None };
+           ; provider_id = None; http_status = None; runtime_id = None };
          Exception "too many open files";
        ])
 
@@ -477,8 +477,8 @@ let () =
             test_batch_root_cause_provider_auth;
           Alcotest.test_case "fd exhaustion" `Quick
             test_batch_root_cause_fd_exhaustion;
-          Alcotest.test_case "cascade unhealthy" `Quick
-            test_batch_root_cause_cascade_unhealthy;
+          Alcotest.test_case "runtime unhealthy" `Quick
+            test_batch_root_cause_runtime_unhealthy;
           Alcotest.test_case "mixed" `Quick test_batch_root_cause_mixed;
           Alcotest.test_case "unknown" `Quick
             test_batch_root_cause_unknown;

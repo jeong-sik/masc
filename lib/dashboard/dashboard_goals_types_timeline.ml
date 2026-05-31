@@ -174,8 +174,8 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
       ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
       ( "approval_profile",
         Json_util.string_opt_to_json (Option.bind latest_receipt receipt_approval_profile) );
-      ( "cascade_outcome",
-        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_cascade_outcome) );
+      ( "runtime_outcome",
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_runtime_outcome) );
       ( "latest_execution_outcome",
         Json_util.string_opt_to_json latest_execution_outcome );
       ( "latest_execution_at",
@@ -380,7 +380,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                        let severity =
                          if receipt_has_error receipt then "bad"
                          else if receipt_has_sandbox_risk receipt
-                                 || receipt_has_cascade_risk receipt
+                                 || receipt_has_runtime_risk receipt
                          then "warn"
                          else "ok"
                        in
@@ -391,7 +391,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                             ~summary:
                               (Printf.sprintf "%s · %s"
                                  outcome
-                                 (receipt_cascade_name receipt
+                                 (receipt_runtime_id receipt
                                   |> Option.value ~default:(Keeper_meta_contract.runtime_id_of_meta detail.meta)))
                             ~severity)))
   in

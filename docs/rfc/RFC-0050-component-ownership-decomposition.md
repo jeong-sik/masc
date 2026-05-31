@@ -28,7 +28,7 @@ LoC inventory at origin/main @ eeddea6095:
 |---|---:|---|
 | `connector-status.ts` | 1689 | Per-connector display (Discord, Slack, iMessage, Telegram) — metadata, accent colors, sidecar commands, channel icons |
 | `cost-dashboard.ts` | 1442 | Cost view types + token formatting + actor summarization |
-| `cascade-config-panel.ts` | 1386 | Single render — cascade config editor |
+| `runtime-config-panel.ts` | 1386 | Single render — runtime config editor |
 | `keeper-detail.ts` | 1310 | Keeper state signal + detail page lifecycle (open/close/select) |
 | `fleet-fsm-matrix.ts` | 1247 | FSM visualization tokens + history constants + state chips |
 | `keeper-detail-panels.ts` | 1239 | KPI grid + autonomy hints + formatting utilities |
@@ -145,8 +145,8 @@ they fail criterion 1 (plurality of distinct domains):
   three lookup tables × 4 rows ≈ 30 LoC out of 1689. Splitting would
   move 30 LoC and leave 1650 LoC in place — exactly the §2 cap-fix
   anti-pattern.
-- **`cascade-config-panel.ts` (1386)** — single render of a single
-  domain (cascade config editor). Split would fragment the visual tree.
+- **`runtime-config-panel.ts` (1386)** — single render of a single
+  domain (runtime config editor). Split would fragment the visual tree.
 - **`goal-tree.ts` (1390 — referenced in research)** — single component
   render, internal helpers tightly coupled. Same.
 - **`keeper-detail-panels.ts` (1239)** — 13 sub-components of one

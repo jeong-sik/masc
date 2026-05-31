@@ -118,7 +118,7 @@ val evaluate :
 
 ### Phase C (P1): `coord_task_transitions` hook
 
-**Principle**: submit time 에만 평가. heartbeat / polling 추가 금지 (cascade budget pressure 방지).
+**Principle**: submit time 에만 평가. heartbeat / polling 추가 금지 (runtime budget pressure 방지).
 
 Hook point: `lib/coord/coord_task_transitions.ml` 의 submit_for_verification path.
 

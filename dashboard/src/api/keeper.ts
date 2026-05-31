@@ -43,7 +43,7 @@ export type {
   KeeperCompositePhase,
   KeeperCompositeTurnPhase,
   KeeperCompositeDecisionStage,
-  KeeperCompositeCascadeState,
+  KeeperCompositeRuntimeState,
   KeeperCompositeCompactionStage,
   FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
@@ -575,14 +575,14 @@ export interface KeeperStateDiagramResponse {
   current_phase: string
   mermaid: string
   decision_pipeline_mermaid?: string
-  cascade_fsm_mermaid?: string
+  runtime_fsm_mermaid?: string
   compaction_submachine_mermaid?: string | null
   // Structured data for Cytoscape FSM rendering
   thompson_alpha?: number
   thompson_beta?: number
   tool_count?: number
   recovery_floor_count?: number
-  cascade_models?: string[]
+  runtime_models?: string[]
   last_provider_result?: string | null
   memory_kind_usage?: MemoryKindUsageEntry[]
   /** RFC-0149 §3.1 — sibling field carrying the typed memory-bank
@@ -722,7 +722,7 @@ export interface KeeperRuntimeTraceMemorySummary {
 export interface KeeperRuntimeTraceProviderAttempt {
   ts: string
   event: string
-  cascade_name: string | null
+  runtime_id: string | null
   status: string
   error: string | null
   exception_kind: string | null
@@ -826,10 +826,10 @@ export interface KeeperRuntimeLensConfigDriftAxis {
   status: string
   error: string | null
   has_live_override: boolean
-  cascade_override: boolean
+  runtime_override: boolean
   override_fields: string[]
-  default_cascade_name: string | null
-  live_cascade_name: string | null
+  default_runtime_id: string | null
+  live_runtime_id: string | null
   active_config_root: string | null
   active_config_root_source: string | null
   default_manifest_path: string | null
@@ -900,7 +900,7 @@ export interface KeeperRuntimeLensLane {
 
 export interface KeeperRuntimeLensSwimlanes {
   keeper: KeeperRuntimeLensLane
-  masc_policy_cascade: KeeperRuntimeLensLane
+  masc_policy_runtime: KeeperRuntimeLensLane
   oas_agent: KeeperRuntimeLensLane
   provider: KeeperRuntimeLensLane
   tool_runtime: KeeperRuntimeLensLane
@@ -1122,7 +1122,7 @@ function parseRuntimeTraceProviderAttempt(raw: unknown): KeeperRuntimeTraceProvi
   return {
     ts: stringField(obj, 'ts'),
     event: stringField(obj, 'event'),
-    cascade_name: nullableStringField(obj, 'cascade_name'),
+    runtime_id: nullableStringField(obj, 'runtime_id'),
     status: stringField(obj, 'status'),
     error: nullableStringField(obj, 'error'),
     exception_kind: nullableStringField(obj, 'exception_kind'),
@@ -1291,10 +1291,10 @@ function parseRuntimeLensConfigDriftAxis(raw: unknown): KeeperRuntimeLensConfigD
     status: stringField(obj, 'status') || 'unknown',
     error: nullableStringField(obj, 'error'),
     has_live_override: obj.has_live_override === true,
-    cascade_override: obj.cascade_override === true,
+    runtime_override: obj.runtime_override === true,
     override_fields: stringListField(obj, 'override_fields'),
-    default_cascade_name: nullableStringField(obj, 'default_cascade_name'),
-    live_cascade_name: nullableStringField(obj, 'live_cascade_name'),
+    default_runtime_id: nullableStringField(obj, 'default_runtime_id'),
+    live_runtime_id: nullableStringField(obj, 'live_runtime_id'),
     active_config_root: nullableStringField(obj, 'active_config_root'),
     active_config_root_source: nullableStringField(obj, 'active_config_root_source'),
     default_manifest_path: nullableStringField(obj, 'default_manifest_path'),
@@ -1384,7 +1384,7 @@ function parseRuntimeLensSwimlanes(raw: unknown): KeeperRuntimeLensSwimlanes {
   const obj = isRecord(raw) ? raw : {}
   return {
     keeper: parseRuntimeLensLane(obj.keeper, 'keeper', 'Keeper'),
-    masc_policy_cascade: parseRuntimeLensLane(obj.masc_policy_cascade, 'masc_policy_cascade', 'MASC Cascade'),
+    masc_policy_runtime: parseRuntimeLensLane(obj.masc_policy_runtime, 'masc_policy_runtime', 'MASC Runtime'),
     oas_agent: parseRuntimeLensLane(obj.oas_agent, 'oas_agent', 'OAS'),
     provider: parseRuntimeLensLane(obj.provider, 'provider', 'Provider'),
     tool_runtime: parseRuntimeLensLane(obj.tool_runtime, 'tool_runtime', 'Tool Runtime'),

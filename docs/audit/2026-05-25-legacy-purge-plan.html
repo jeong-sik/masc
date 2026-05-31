@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 13:30:53 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 13:30:53 KST. Scope: Keeper, Runtime, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -127,7 +127,7 @@
       </div>
       <div class="panel">
         <strong>Branching</strong>
-        <div class="small">Small draft PRs per axis. Do not batch broad Tool_result or Memory schema breaks with Cascade/OTel cleanup.</div>
+        <div class="small">Small draft PRs per axis. Do not batch broad Tool_result or Memory schema breaks with Runtime/OTel cleanup.</div>
       </div>
     </section>
 
@@ -144,15 +144,15 @@
         </thead>
         <tbody>
           <tr>
-            <td><code>cascade_legacy_runner</code> module name</td>
+            <td><code>runtime_legacy_runner</code> module name</td>
             <td><span class="status done">draft PR #18351</span></td>
-            <td>Rename <code>Cascade_legacy_runner</code> and file names to <code>Cascade_observation</code>. Remove the legacy runner surface from code, tests, docs, and lint baselines.</td>
-            <td><code>rg "Cascade_legacy_runner|cascade_legacy_runner|legacy_runner|legacy-runner"</code> returns no matches on the PR branch.</td>
+            <td>Rename <code>Runtime_legacy_runner</code> and file names to <code>Runtime_observation</code>. Remove the legacy runner surface from code, tests, docs, and lint baselines.</td>
+            <td><code>rg "Runtime_legacy_runner|runtime_legacy_runner|legacy_runner|legacy-runner"</code> returns no matches on the PR branch.</td>
           </tr>
           <tr>
             <td>OTel duplicate legacy span attributes</td>
             <td><span class="status done">draft PR #18356</span></td>
-            <td>Stop emitting duplicate <code>keeper.cascade.name</code>, <code>tool.name</code>, <code>tool.success</code>, and <code>tool.duration_ms</code>.</td>
+            <td>Stop emitting duplicate <code>keeper.runtime.name</code>, <code>tool.name</code>, <code>tool.success</code>, and <code>tool.duration_ms</code>.</td>
             <td>Tests now assert canonical <code>gen_ai.*</code> / <code>masc.gen_ai.*</code> attributes and absence of the old duplicate keys.</td>
           </tr>
           <tr>
@@ -164,7 +164,7 @@
           <tr>
             <td>Operator confirm compatibility result keys</td>
             <td><span class="status done">draft PR #18416</span></td>
-            <td>Delete the operator snapshot <code>json_ok</code> facade that was kept only for cascade-include compatibility, move <code>Operator_control</code> callers to <code>Tool_args.ok_assoc</code> directly, and stop emitting/accepting the deprecated <code>delegated_tool_result</code> confirm-response key.</td>
+            <td>Delete the operator snapshot <code>json_ok</code> facade that was kept only for runtime-include compatibility, move <code>Operator_control</code> callers to <code>Tool_args.ok_assoc</code> directly, and stop emitting/accepting the deprecated <code>delegated_tool_result</code> confirm-response key.</td>
             <td><code>rg "delegated_tool_result|Operator_control_snapshot\.json_ok|\bjson_ok\b" lib/operator dashboard/src/api/schemas/operator-action.ts dashboard/src/api/schemas/operator-action.test.ts dashboard/src/operator-actions.ts</code> returns no matches on the PR branch. Local OCaml parse/format, dashboard typecheck/Vitest, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
@@ -270,13 +270,13 @@
             <td>The compatibility-only default test was deleted and public docs now describe the current p95 predictor contract. Local format, diff, grep, ignore, godfile, and code-smell ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
-            <td>Cascade capability fallback shim</td>
+            <td>Runtime capability fallback shim</td>
             <td><span class="status done">draft PR #18391</span></td>
-            <td>Delete <code>Cascade_config_provider_filter.legacy_capabilities_for_unbound_config</code> and stop branching capability filtering on whether a runtime binding exists.</td>
+            <td>Delete <code>Runtime_config_provider_filter.legacy_capabilities_for_unbound_config</code> and stop branching capability filtering on whether a runtime binding exists.</td>
             <td>Capability filtering now delegates to <code>Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config</code> as the single catalog/registry/model resolver. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
-            <td>Cascade legacy resumable marker</td>
+            <td>Runtime legacy resumable marker</td>
             <td><span class="status done">draft PR #18392</span></td>
             <td>Delete the old <code>"the session is resumable with -r flag."</code> public marker from JSON-stream CLI resumable-session detection while keeping raw resume hints and the current canonical marker.</td>
             <td>Backstop grep is clean for the removed marker and constant. Local format, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
@@ -387,7 +387,7 @@
             <td><code>Keeper_types.ensure_api_keys_for_labels</code> facade leaf</td>
             <td><span class="status done">merged #18572</span></td>
             <td>Stop exposing the support-owned API-key availability check through the broad <code>Keeper_types</code> facade. Keeper turn paths now call <code>Keeper_types_support.ensure_api_keys_for_labels</code> directly.</td>
-            <td>Backstop grep is clean for the removed <code>Keeper_types</code> signature value and unqualified keeper-turn calls. Existing cascade runtime tests already cover the canonical owner.</td>
+            <td>Backstop grep is clean for the removed <code>Keeper_types</code> signature value and unqualified keeper-turn calls. Existing runtime runtime tests already cover the canonical owner.</td>
           </tr>
           <tr>
             <td><code>Keeper_types</code> history-source facade leaves</td>
@@ -458,7 +458,7 @@
           <tr>
             <td><code>Keeper_oas_checkpoint.partial_response_of_stop</code> model-id arg</td>
             <td><span class="status done">merged #18438</span></td>
-            <td>Remove the ignored <code>~model_id</code> compatibility argument from synthetic early-stop responses and update <code>Cascade_runner</code> callers to rely on the redacted runtime lane directly.</td>
+            <td>Remove the ignored <code>~model_id</code> compatibility argument from synthetic early-stop responses and update <code>Runtime_runner</code> callers to rely on the redacted runtime lane directly.</td>
             <td>Targeted compatibility grep is clean. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
@@ -498,19 +498,19 @@
             <td>Targeted code grep is clean for the removed name-only helpers and the old legacy-unscoped sandbox wording. Local OCaml format/parse and diff checks pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>
           <tr>
-            <td>Cascade runtime MCP no-agent bridge fallback</td>
+            <td>Runtime runtime MCP no-agent bridge fallback</td>
             <td><span class="status done">merged #18532</span></td>
             <td>Remove the no-agent header-stripping fallback in <code>runtime_mcp_policy_for_provider</code>. Providers that require per-keeper bridging now fail closed when no <code>agent_name</code> is available, and the fallback-only metric/test are deleted.</td>
             <td>Targeted grep is clean for the retired fallback metric, test name, and strip-all wording. Local OCaml format/parse and diff checks pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>
           <tr>
-            <td>Cascade attempt-liveness mode aliases and config shadow</td>
+            <td>Runtime attempt-liveness mode aliases and config shadow</td>
             <td><span class="status done">merged #18536</span></td>
-            <td>Remove the duplicate <code>Env_config_keeper.CascadeAttemptLiveness</code> parser/type, move the pure runtime decision helper to the actual <code>Cascade_attempt_liveness_config</code> type, and accept only canonical <code>off</code>, <code>observe</code>, and <code>enforce</code> values. Unset still defaults to <code>enforce</code>; explicit empty, boolean-style, rollout-era, uppercase, and unknown values now raise a config error instead of downgrading to observe mode.</td>
+            <td>Remove the duplicate <code>Env_config_keeper.RuntimeAttemptLiveness</code> parser/type, move the pure runtime decision helper to the actual <code>Runtime_attempt_liveness_config</code> type, and accept only canonical <code>off</code>, <code>observe</code>, and <code>enforce</code> values. Unset still defaults to <code>enforce</code>; explicit empty, boolean-style, rollout-era, uppercase, and unknown values now raise a config error instead of downgrading to observe mode.</td>
             <td>Compatibility-preservation tests for <code>0</code>, <code>kill</code>, uppercase, empty, and unknown values were collapsed into rejection coverage. Local OCaml format/parse, diff check, unknown-permissive-default lint, comment-terminator lint, and godfile ratchet pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>
           <tr>
-            <td>Cascade named-worker liveness empty-env alias test</td>
+            <td>Runtime named-worker liveness empty-env alias test</td>
             <td><span class="status done">merged #18537</span></td>
             <td>Remove the remaining integration smoke test that preserved empty <code>MASC_CASCADE_ATTEMPT_LIVENESS</code> as observe mode. The helper now truly unsets the env var for the default path, pins unset to <code>enforce</code>, and treats explicit empty string as a config error.</td>
             <td>Targeted grep is clean for the removed empty-string observe test and stale alias labels. Local OCaml format/parse, diff check, unknown-permissive-default lint, and comment-terminator lint pass; focused Dune is blocked by external bare <code>dune build --root .</code> / <code>dune exec</code> processes.</td>
@@ -558,9 +558,9 @@
             <td>Backstop grep for the facade and its compatibility comment is clean. Fast CI checks recovered after the leftover <code>mkdir_p</code> call was removed; <code>Build and Test</code> and <code>TLA+ Model Checking</code> are still running upstream. Local focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
-            <td>Cascade deprecated profile names</td>
+            <td>Runtime deprecated profile names</td>
             <td><span class="status done">draft PR #18363</span></td>
-            <td>Turn deprecated raw cascade tier/profile names into fatal configuration errors and remove the deprecated-profile filter metric.</td>
+            <td>Turn deprecated raw runtime tier/profile names into fatal configuration errors and remove the deprecated-profile filter metric.</td>
             <td>Compatibility tests became rejection tests; deprecated-profile telemetry and allow paths no longer define acceptable behavior.</td>
           </tr>
           <tr>
@@ -668,14 +668,14 @@
           <tr>
             <td>Keeper status-bridge summary recovery</td>
             <td><span class="status done">merged #18687</span></td>
-            <td>Stop reparsing typed blocker summaries as <code>[masc_oas_error]</code> payloads and stop projecting <code>Resumable_cli_session</code> into <code>Cascade_exhausted (Other_detail ...)</code>.</td>
+            <td>Stop reparsing typed blocker summaries as <code>[masc_oas_error]</code> payloads and stop projecting <code>Resumable_cli_session</code> into <code>Runtime_exhausted (Other_detail ...)</code>.</td>
             <td>Merged as <code>f8b48d4a4</code>. Status bridge blockers now derive only from typed blocker values; summaries remain display text.</td>
           </tr>
           <tr>
-            <td>Cascade/OAS string recovery purge</td>
+            <td>Runtime/OAS string recovery purge</td>
             <td><span class="status done">merged #18707</span></td>
-            <td>Remove the remaining P1 string recovery paths: raw resumable CLI hint promotion, <code>cascade_exhaustion_reason_from_message</code>, and <code>max_execution_time_s</code> substring-based timeout/saturation promotion.</td>
-            <td>Merged as <code>e88d5758e</code>. Structured <code>Resumable_cli_session</code>, <code>Provider_timeout</code>, and typed <code>Structural_attempt_timeout</code> envelopes remain, but free-form text stays opaque. Raw CLI resume hints are redacted at the transport boundary and no longer promoted to typed cascade errors.</td>
+            <td>Remove the remaining P1 string recovery paths: raw resumable CLI hint promotion, <code>runtime_exhaustion_reason_from_message</code>, and <code>max_execution_time_s</code> substring-based timeout/saturation promotion.</td>
+            <td>Merged as <code>e88d5758e</code>. Structured <code>Resumable_cli_session</code>, <code>Provider_timeout</code>, and typed <code>Structural_attempt_timeout</code> envelopes remain, but free-form text stays opaque. Raw CLI resume hints are redacted at the transport boundary and no longer promoted to typed runtime errors.</td>
           </tr>
           <tr>
             <td>Memory/context canonical row purge</td>
@@ -902,7 +902,7 @@
         </thead>
         <tbody>
           <tr>
-            <td colspan="5">No queued tuple-result candidate remains in this narrow Tool/Keeper result purge queue. Next broad scan should switch to Cascade fallback naming or Memory compatibility surfaces.</td>
+            <td colspan="5">No queued tuple-result candidate remains in this narrow Tool/Keeper result purge queue. Next broad scan should switch to Runtime fallback naming or Memory compatibility surfaces.</td>
           </tr>
         </tbody>
       </table>

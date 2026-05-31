@@ -93,7 +93,7 @@ Owner 분산이 안 되어 있어 다음 두 비용이 영구 발생:
 
 | # | Goal |
 |---|------|
-| G1 | 도메인 모듈 (keeper / sse / oas / ws / cascade / ...) 이 자기 metric 을 자기 파일에 정의 |
+| G1 | 도메인 모듈 (keeper / sse / oas / ws / runtime / ...) 이 자기 metric 을 자기 파일에 정의 |
 | G2 | `lib/prometheus.ml` 은 *runtime registry* + *wire format* (collect / expose) 만 |
 | G3 | godfile cap 위반 자연 해소 (3059 → 예상 ~600 LOC) |
 | G4 | 신규 telemetry 추가 시 도메인 모듈 single-file 변경으로 완료 |
@@ -120,7 +120,7 @@ sse:        16
 oas:        15
 llm:        15
 ws:         12
-cascade:     9
+runtime:     9
 grpc:        8
 inference:   7
 tool:        6
@@ -146,7 +146,7 @@ keeper:    480 references  (in lib/keeper/)
 transport:  68
 dashboard:  65 + 67 (lib/dashboard.ml + lib/dashboard/)
 server:     24
-cascade:    16
+runtime:    16
 llm:        13
 tool:       12
 oas:        11
@@ -191,7 +191,7 @@ let register_all () =
   Prometheus.register_counter
     ~name:metric_turn_total
     ~help:"Total keeper turns initiated"
-    ~labels:[("keeper", ""); ("cascade", "")]
+    ~labels:[("keeper", ""); ("runtime", "")]
     ();
   (* ... *)
 ;;
@@ -249,7 +249,7 @@ let register_all_metrics () =
 |----|-------|-------|--------------------------|----------|
 | **PR-1** | introduce empty domain modules + `register_all` no-op | ~10 신규 (.ml/.mli pair × 5 도메인) | +200 (추정, 빈 모듈) | – |
 | **PR-2** | 187 `metric_keeper_*` 상수 → `Keeper_metrics`; `Prometheus` 에 alias 유지 | 1 prometheus.ml (-) + 1 신규 (+) | prometheus.ml: 187 const × ~3 LOC 평균 = ~-560 *측정 base*; new module: ~600; alias: ~190 → net new module ~+800, prometheus net ~-560+190(alias)=−370 | ✅ **3059 → ~2700, cap 통과** |
-| **PR-3** | sse/oas/llm/ws/cascade (~70 metrics) → 5 도메인 모듈; alias 유지 | 5 신규 + 1 prometheus.ml | prometheus.ml: −210; new modules: +210; alias: +70 | – |
+| **PR-3** | sse/oas/llm/ws/runtime (~70 metrics) → 5 도메인 모듈; alias 유지 | 5 신규 + 1 prometheus.ml | prometheus.ml: −210; new modules: +210; alias: +70 | – |
 | **PR-4** | 나머지 (~115 metrics) | 10+ 신규 + 1 prometheus.ml | prometheus.ml: −345; new modules: +345; alias: +115 | – |
 | **PR-5** | call site 마이그 (`Prometheus.metric_*` → `<Domain>_metrics.metric_*`) + alias 제거 | **140 caller files (use site 측정)** + 1 prometheus.ml | use site rename ~772; prometheus alias drop ~−372 | – |
 

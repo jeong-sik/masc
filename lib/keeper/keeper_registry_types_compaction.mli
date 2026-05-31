@@ -1,9 +1,9 @@
 (** Keeper_registry_types_compaction — compaction-stage (KMC) FSM types and
     transitions.
 
-    Re-homed from the deleted [Keeper_registry_types_cascade] (RFC-0206). The
-    compaction sub-lifecycle is independent of the removed cascade selection
-    FSM and survives the cascade purge. *)
+    Re-homed from the deleted [Keeper_registry_types_runtime] (RFC-0206). The
+    compaction sub-lifecycle is independent of the removed runtime selection
+    FSM and survives the runtime purge. *)
 
 type compaction_stage =
   | Compaction_accumulating [@tla.idle]

@@ -354,7 +354,7 @@ let make_routes ~port ~host ~sw ~clock =
   |> Server_routes_http_routes_room.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_provider_runs.add_routes ~sw
-  |> Server_routes_http_routes_cascade.add_routes
+  |> Server_routes_http_routes_runtime.add_routes
   |> Server_routes_http_routes_activity.add_routes ~sw ~clock
   |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
 ```
@@ -367,7 +367,7 @@ let make_routes ~port ~host ~sw ~clock =
 | Dashboard | `/api/v1/dashboard/*` | `_dashboard` | `GET /api/v1/dashboard/shell` |
 | Room | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_room` | `GET /api/v1/status` |
 | Provider Runs | `/api/v1/chains/*` | `_provider_runs` | `GET /api/v1/chains/summary` |
-| Cascade | `/api/v1/cascade/*` | `_cascade` | `GET /api/v1/cascade/health` |
+| Runtime | `/api/v1/runtime/*` | `_runtime` | `GET /api/v1/runtime/health` |
 | Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/events` |
 | Channel Gate | `/api/v1/gate/*` | `_channel_gate` | `GET /api/v1/gate/health` |
 | Board | `/api/v1/board/*` | main_eio 직접 | `GET /api/v1/board/{id}` |

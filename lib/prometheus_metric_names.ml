@@ -85,23 +85,23 @@
    counts directly. *)
 
 (* #9933 follow-up: per-turn latency buckets split by the effective
-   provider/model/cascade surface.  [Keeper_metrics.(to_string TurnLatencyBucket)]
+   provider/model/runtime surface.  [Keeper_metrics.(to_string TurnLatencyBucket)]
    tells operators which keeper is slow; this counter answers the next
-   operational question: which provider/cascade/profile is burning the
+   operational question: which provider/runtime/profile is burning the
    timeout budget.  Labels are bounded by fleet size, configured model
-   labels, configured cascades, channel vocabulary, and the five bucket
+   labels, configured runtimes, channel vocabulary, and the five bucket
    names from [Keeper_unified_metrics.turn_latency_bucket]. *)
 
 (* P-DASH-01: provider cooldown skip counter.
-   When a cascade's provider is in cooldown and the keeper
-   fail-opens to a fallback cascade, increment this counter
+   When a runtime's provider is in cooldown and the keeper
+   fail-opens to a fallback runtime, increment this counter
    so operators can see how often cooldown is triggering
-   cascade switches.  Labels: keeper, from_cascade, to_cascade. *)
+   runtime switches.  Labels: keeper, from_runtime, to_runtime. *)
 
 (* P-DASH-01: provider cooldown remaining seconds gauge.
    Exposes the current cooldown duration so operators can see
-   which cascade is blocked and for how long without log parsing.
-   Labels: keeper, cascade. *)
+   which runtime is blocked and for how long without log parsing.
+   Labels: keeper, runtime. *)
 
 (* P-DASH-13: provider block duration histogram.
    Records the duration (in seconds) for which a provider is placed
@@ -134,7 +134,7 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
 
    The supervisor sweep is a Pulse loop that recovers crashed
    keepers.  When the loop fails to start (or stops), the fleet
-   silently dies — keepers exit on cascade exhaustion and nobody
+   silently dies — keepers exit on runtime exhaustion and nobody
    restarts them.  Observed 2026-04-24: 14 keepers dead, supervisor
    "started" log line missing for 4h+ across a server restart.
 
@@ -235,7 +235,7 @@ let metric_tool_keeper_cache_ttl_parse_failures =
    channels = ~30 series, well within Prometheus best practice. *)
 
 (* Goal-loop Observe contract: the Grafana p99 query consumes
-   [masc_keeper_semaphore_wait_seconds_bucket] grouped by keeper and cascade.
+   [masc_keeper_semaphore_wait_seconds_bucket] grouped by keeper and runtime.
    The generic [register_histogram] exporter currently exposes summaries, so
    keeper_turn_slot emits the cumulative bucket companion explicitly. *)
 
@@ -314,13 +314,13 @@ let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
    without masking the strict gate. *)
 (* #10474: no_tool_capable_provider and proactive cycle outcome counters.
    [Keeper_metrics.(to_string NoToolProvider)] fires every time a keeper's
-   cascade has zero tool-capable providers, labelled by cascade so
-   the operator sees which cascade definition needs fixing.
+   runtime has zero tool-capable providers, labelled by runtime so
+   the operator sees which runtime definition needs fixing.
    [Keeper_metrics.(to_string ProactiveOutcome)] classifies every scheduled
    autonomous cycle into tool_called | noop | error, giving a fleet-wide
    health ratio in Grafana. *)
 (* PR-B: keeper turn skipped due to ollama saturation pre-check.
-   Labelled by [keeper] and [cascade]. *)
+   Labelled by [keeper] and [runtime]. *)
 (* Tool-setup and task-load failures during keeper tool surface assembly.
    task_load: Coord.get_tasks_raw exception while loading current task contract.
    tool_selection: TopK_llm or tool discovery exception during per-turn tool set assembly. *)

@@ -153,11 +153,11 @@ OAS Memory Bridge 5-tier 매핑 완전. Hebbian Learning(synapse model) 운용.
 ### 13-OAS Integration (100% IMPL)
 
 단방향 경계(MASC→OAS) 14개 모듈에서 완벽 준수.
-Oas_worker, Cascade config, Verifier, Event bus(13 types), Context compaction(4 strategies) 전부 운용.
+Oas_worker, Runtime config, Verifier, Event bus(13 types), Context compaction(4 strategies) 전부 운용.
 
 ### 14-Configuration (100% IMPL)
 
-7-layer 설정 계층, 80+ env var, 22 카테고리, 8 mode presets, 3-layer filter, cascade.json hot-reload 전부 운용.
+7-layer 설정 계층, 80+ env var, 22 카테고리, 8 mode presets, 3-layer filter, runtime.json hot-reload 전부 운용.
 
 ### 15-Testing (100% IMPL)
 

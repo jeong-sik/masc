@@ -1,4 +1,4 @@
-(** Source-level guard for legacy provider cascade-prefix leaks.
+(** Source-level guard for legacy provider runtime-prefix leaks.
 
     Provider prefix ownership moved out of the removed [Provider_adapter]
     boundary. Library code must not reach for the old adapter record helpers
@@ -78,10 +78,10 @@ let relative_path ~root path =
 ;;
 
 let line_violation line =
-  if contains ~needle:(".Provider_adapter" ^ ".cascade_prefix") line
+  if contains ~needle:(".Provider_adapter" ^ ".runtime_prefix") line
   then Some "direct adapter record field access"
   else if
-    contains ~needle:("Provider_adapter" ^ ".cascade_prefix_of_adapter") line
+    contains ~needle:("Provider_adapter" ^ ".runtime_prefix_of_adapter") line
     && contains ~needle:"^" line
   then Some "manual label concatenation after prefix helper"
   else None

@@ -100,7 +100,7 @@ C1 (token refresh tests) remains TBD — Phase 3 must locate refresh implementat
 ## 4. Phase 3 priorities (proposal — fixes deferred to follow-up PRs)
 
 Tier P1 (high-leverage gap closures):
-- Add Prometheus counter to `auth_resolve.ml` (cascade dispatch failure modes)
+- Add Prometheus counter to `auth_resolve.ml` (runtime dispatch failure modes)
 - Add Prometheus counter to `auth_strict_mode.ml` (would-reject vs actual reject divergence)
 - Add at least one identity-resolution counter to `agent_identity.ml`
 

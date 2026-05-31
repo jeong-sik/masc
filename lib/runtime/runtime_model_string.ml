@@ -1,9 +1,9 @@
 (** Model-label string → [Provider_config.t] resolution (RFC-0206).
 
-    Re-homed from the deleted [Cascade_config_parser.parse_model_string] path.
+    Re-homed from the deleted [Runtime_config_parser.parse_model_string] path.
     Resolves a ["provider:model"] (or ["custom:model@url"]) label to a hot-path
     {!Llm_provider.Provider_config.t} using {!Llm_provider.Provider_registry} as
-    the single source of truth — NO cascade routing/weighted-entry machinery is
+    the single source of truth — NO runtime routing/weighted-entry machinery is
     ported (the weighted-entry / selection / strategy parsing stayed deleted).
 
     Provider identity helpers live in {!Runtime_provider_binding}; auto-model

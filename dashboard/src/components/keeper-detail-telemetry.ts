@@ -108,8 +108,8 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             ${latestProviderTimeoutPlan?.source
               ? html`<span>${latestProviderTimeoutPlan.source}</span>`
               : null}
-            ${latest?.cascade_strategy
-              ? html`<span>strategy ${latest.cascade_strategy}</span>`
+            ${latest?.runtime_strategy
+              ? html`<span>strategy ${latest.runtime_strategy}</span>`
               : null}
           </div>
         <//>

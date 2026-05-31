@@ -2,8 +2,8 @@
 status: runbook
 last_verified: 2026-05-12
 code_refs:
-  - lib/cascade/cascade_events.ml
-  - lib/cascade/cascade_event_bridge.ml
+  - lib/runtime/runtime_events.ml
+  - lib/runtime/runtime_event_bridge.ml
   - lib/telemetry_unified.ml
 ---
 
@@ -18,17 +18,17 @@ This audit records the producer -> bridge -> durable store -> dashboard consumer
 ### 1. Producers
 
 - OAS native runtime events originate in `agent_sdk` and enter the shared `Agent_sdk.Event_bus`.
-- MASC custom observability events are published by `lib/cascade/cascade_events.ml` under the `masc:*` namespace.
+- MASC custom observability events are published by `lib/runtime/runtime_events.ml` under the `masc:*` namespace.
 
 ### 2. Bridge
 
-- `lib/cascade/cascade_event_bridge.ml` subscribes to the OAS event bus with `accept_all`.
+- `lib/runtime/runtime_event_bridge.ml` subscribes to the OAS event bus with `accept_all`.
 - Native events are serialized with an `oas:` prefix.
 - Envelope fields `correlation_id`, `run_id`, and `ts_unix` are emitted for every relayed event.
 
 ### 3. Durable Store
 
-- `lib/cascade/cascade_event_bridge.ml` appends every relayed OAS event to `.masc/oas-events/` through `Dated_jsonl.append`.
+- `lib/runtime/runtime_event_bridge.ml` appends every relayed OAS event to `.masc/oas-events/` through `Dated_jsonl.append`.
 - This durable JSONL store is the replay source for dashboard recovery and telemetry inspection.
 
 ### 4. Server Read Path

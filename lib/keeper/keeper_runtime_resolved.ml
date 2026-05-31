@@ -77,7 +77,7 @@ let turn_timeout_sec_live () =
      (range [60, timeout_hard_ceiling_sec=900], default 600). Drift here
      was the mathematical root of #10388 (1200 - 30 oas_guard = 1170 s
      budget). The 900 s ceiling was lifted from 600 in PR #13861 along
-     with the RFC-0012/0022 permission for per-cascade overrides. *)
+     with the RFC-0012/0022 permission for per-runtime overrides. *)
   Float.max 60.0
     (Float.min 900.0
        (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
@@ -121,7 +121,7 @@ let oas_timeout_override_sec_live ~turn_timeout_sec =
    (same env var, same clamp [10, 600]). Mirrors the
    [oas_timeout_override_sec_live] / [stream_idle_timeout_sec_live]
    idiom: read raw env, clamp, return option. Opt-in: unset → None
-   → cascade falls back to the per-attempt max_execution_time. *)
+   → runtime falls back to the per-attempt max_execution_time. *)
 let body_timeout_override_sec_live () =
   match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
   | Some raw ->

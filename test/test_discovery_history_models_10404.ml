@@ -1,6 +1,6 @@
 (** #10404: pre-fix [Discovery_history.endpoint_to_record] kept only the
     head of the loaded model list, recording 'qwen3:8b' for every probe
-    while four cascades referenced 'qwen3.6:27b-coding-nvfp4'.  These
+    while four runtimes referenced 'qwen3.6:27b-coding-nvfp4'.  These
     tests pin the new [models : string list] field and verify the head
     backward-compatibility (model_id stays populated). *)
 

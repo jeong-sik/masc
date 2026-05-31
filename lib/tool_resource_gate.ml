@@ -1,7 +1,7 @@
 (** Tool_resource_gate — bounded local tool lanes for active Keeper fleets.
 
     This is intentionally separate from {!Admission_queue}.  OAS/provider
-    capacity still belongs to the cascade layer; this module only protects
+    capacity still belongs to the runtime layer; this module only protects
     host-local MCP tool bottlenecks that a 24-Keeper burst can stampede:
     shell subprocesses, GitHub/gh calls, Docker, filesystem scans/writes,
     board/coordination JSONL writes, and web I/O. *)

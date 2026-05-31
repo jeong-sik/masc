@@ -42,7 +42,7 @@
 | Sub-task | scope | 신규 RFC | 의존 RFC | 우선순위 | LOC 추정 | Issue |
 |---|---|---|---|---|---|---|
 | **P0-A** worktree presence | server SSE + topbar chip mapper | repo RFC-0033 | RFC-0010 | P0 | ~250 | #13197 |
-| **P0-B** cascade overlay | LAYERS 'cascade' entry + line-level data | DS RFC-0023 | RFC-0019, 0020 | P0 | ~300 | #13198 |
+| **P0-B** runtime overlay | LAYERS 'runtime' entry + line-level data | DS RFC-0023 | RFC-0019, 0020 | P0 | ~300 | #13198 |
 | **P1-A** BDI inspector slot | inspector rail BDI peek | DS RFC-0024 | RFC-0019, 0008 | P1 | ~200 | #13199 |
 | **P1-B** Execute output drawer | drawer + ring buffer SSE | DS RFC-0025 | (없음) | P1 | ~400 | #13200 |
 | **P2** audit replay | scrubber + timestamp filter | DS RFC-0026 | RFC-0021 | P2 | ~330 | #13201 |
@@ -59,7 +59,7 @@ PR-2  P0-A server SSE  ─┐
                          ├─ 독립 (server endpoint scope 분리)
 PR-3  P0-A client mapper┘  PR-2 머지 후
 
-PR-4  P0-B cascade overlay  RFC-0019/0020 producer wire 후
+PR-4  P0-B runtime overlay  RFC-0019/0020 producer wire 후
 
 PR-5  P1-A BDI inspector slot  RFC-0019 producer wire 후
 
@@ -78,7 +78,7 @@ PR-2~8 은 server endpoint scope 가 분리되어 있어 keeper 별 병렬 가�
 |---|---|---|---|
 | **sangsu** | yes | sangsu | P0-A 서버 (coding preset, 안전 패턴) |
 | **nick0cave** | (toml 없음) | (link) | P0-A 클라이언트 wire-up |
-| **masc-improver** | yes | analyst | P0-B cascade (delivery preset, cascade 도메인) |
+| **masc-improver** | yes | analyst | P0-B runtime (delivery preset, runtime 도메인) |
 | **issue_king** | yes | issue_king | P2 audit replay (delivery preset, 감사 도메인) |
 | **ramarama** | yes | (link) | P1-B drawer 서버 (delivery, sandbox) |
 | **taskmaster** | yes | (link) | umbrella 진행 추적 (delivery preset) |
@@ -119,6 +119,6 @@ audit §6 checklist + 다음:
 
 1. **drawer terminal input 권한**: PR-7 read-only. input 은 별도 RFC + RBAC 검토 필요.
 2. **audit replay free-range vs PR-bound**: 1단계 PR-bound → 2단계 free-range. 데이터 cardinality 측정 후 결정.
-3. **cascade overlay line-level vs commit-level**: 1단계 commit-level (적은 data join), 2단계 line-level (diff hunk join 추가).
+3. **runtime overlay line-level vs commit-level**: 1단계 commit-level (적은 data join), 2단계 line-level (diff hunk join 추가).
 
 이 질문들은 draft acceptance 를 막지 않으나 각 PR 시작 전 close 한다.

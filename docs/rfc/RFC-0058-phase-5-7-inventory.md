@@ -22,7 +22,7 @@ Audit baseline for [RFC-0058 Phase 5.7](RFC-0058-phase-5-7-doctor-modules.md). S
 
 | leak_class | Count | Phase 5.7 target |
 |------------|-------|------------------|
-| `symbol_reference` | 75 | Symbol uses like `codex_mcp_*`, `Codex_mcp_*`. Most resolve when binding sites rename (cascade through type system). |
+| `symbol_reference` | 75 | Symbol uses like `codex_mcp_*`, `Codex_mcp_*`. Most resolve when binding sites rename (runtime through type system). |
 | `needs_review` | 47 | Heuristic could not classify. Hand-classify in 5.7.2/5.7.3 PRs as they touch each cluster. |
 | `user_msg_string` | 34 | User-facing diagnostic text ("skipped because Agent-Code config did not parse as TOML"). Survives in TOML `[providers.<id>.diagnostic_messages]` or doctor receives a `~display_name:string` argument. |
 | `header_or_env_literal` | 19 | `X-MASC-Agent: agent-code-mcp-client`, `MASC_AGENT-CODE_CONFIG_PATH` env var. Survives in `[providers.<id>.mcp_client_config.header_values]` + `env_var_prefix`. |
@@ -44,7 +44,7 @@ The `codex_mcp_config_doctor.ml` filename is **1 leak** but its impact is module
 
 - **Behavioural correctness**: the CSV is grep-shaped, not semantically verified. A line tagged `symbol_reference` may carry semantic content that does not survive a mechanical rename (e.g., a branch that genuinely depends on Agent-Code-specific behaviour).
 - **Test coverage**: which doctor outputs are covered by snapshot tests is unknown at this baseline. RFC §6 risk "user-facing behaviour change" needs test coverage measurement before 5.7.5 ships.
-- **Out-of-scope modules**: this audit covers the three files named in RFC §1. Adjacent files (`lib/keeper/keeper source/filex_*` if any, `lib/cascade/*_codex_*` if any) are not measured here. RFC §6 risk "hidden product knowledge" addresses this — new findings go to a follow-up RFC, not into 5.7 scope.
+- **Out-of-scope modules**: this audit covers the three files named in RFC §1. Adjacent files (`lib/keeper/keeper source/filex_*` if any, `lib/runtime/*_codex_*` if any) are not measured here. RFC §6 risk "hidden product knowledge" addresses this — new findings go to a follow-up RFC, not into 5.7 scope.
 
 ## How to use the CSV during phase work
 

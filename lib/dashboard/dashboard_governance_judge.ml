@@ -647,7 +647,7 @@ let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~build_facts =
-  let cascade_name =
+  let runtime_id =
     Runtime.get_default_runtime_id ()
   in
   match
@@ -661,7 +661,7 @@ let compute_judgments
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
       let prompt = prompt_for_facts factual_json in
-      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve
@@ -733,7 +733,7 @@ let append_judgments base_path judgments =
 
 let should_backoff ~sw:_ ~net:_ =
   (* RFC-0206 single-binding: the deleted
-     [Cascade_runtime.local_capacity_for_selections] probed local-runtime
+     [Runtime_runtime.local_capacity_for_selections] probed local-runtime
      endpoint queues live. Under single-binding the runtime pool tracks lease
      saturation directly, so back off when every configured concurrency slot on
      a healthy runtime is already leased.

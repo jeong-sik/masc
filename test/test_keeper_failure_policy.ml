@@ -165,7 +165,7 @@ let test_only_liveness_failures_allow_keeper_death () =
   let non_liveness_failures =
     [
       Policy.Transient_provider_failure;
-      Policy.Cascade_exhausted { retryable = false };
+      Policy.Runtime_exhausted { retryable = false };
       Policy.Required_tool_contract_violation;
       Policy.Stale_turn { progress_seen = true };
       Policy.Stale_termination_storm { count = 6 };

@@ -3,7 +3,7 @@
 ; RFC-0004 Phase A0.1 PR-1 — typed SSE event library.
 ; Production lib (no (optional)).  Bridges atd-generated payload
 ; types and the manual envelope wrap.  Callers will replace
-; cascade_event_bridge.native_event_to_json arms with these
+; runtime_event_bridge.native_event_to_json arms with these
 ; constructors in PR-2 (agent_started/completed/failed migration).
 (library
  (name sse_event)

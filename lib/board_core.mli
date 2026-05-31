@@ -20,7 +20,7 @@
     - {b Public board operations} — create / get / list /
       search / reclassify post + comment APIs.
 
-    Cascade-include preserves type identity end-to-end with
+    Runtime-include preserves type identity end-to-end with
     [include module type of struct include M end] (cycle
     187 rationale).  {!Board_votes} does its own
     [include Board_core], which transitively reaches the

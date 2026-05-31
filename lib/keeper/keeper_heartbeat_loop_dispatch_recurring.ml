@@ -7,7 +7,7 @@
        were previously auto-disabled by [Keeper_recurring.dispatch_due]'s
        [max_failures] guard (without this re-enable step the keeper
        falls silent for the lifetime of the process and triggers
-       stale-kill cascades).
+       stale-kill runtimes).
     2. Dispatch all due tasks via [Keeper_recurring.dispatch_due],
        broadcasting each via [Coord.broadcast] tagged
        [\[loop:<label>\] <msg>]. Per-task broadcast failures tick
@@ -33,7 +33,7 @@ let dispatch_recurring_keepalive
      auto-disabled tasks via [dispatch_due]'s [max_failures] guard.
      Without this call the keeper's heartbeat broadcasts stay silent
      for the lifetime of the process, eventually triggering stale-kill
-     cascades.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
+     runtimes.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
   let _reenabled =
     Keeper_recurring.reenable_due_tasks ~keeper_name:meta_after_proactive.name ~now_ts
   in

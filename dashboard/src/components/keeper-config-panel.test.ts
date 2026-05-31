@@ -459,7 +459,7 @@ const mocks = vi.hoisted(() => ({
       overall_convergence_pct: 0,
     },
   })),
-  fetchCascadeProfiles: vi.fn(async () => ({
+  fetchRuntimeProfiles: vi.fn(async () => ({
     profiles: ['tier-group.keeper_unified', 'tier.resilient_breaker'],
     invalid_profiles: [
       {
@@ -469,15 +469,15 @@ const mocks = vi.hoisted(() => ({
     ],
   })),
   patchKeeperConfig: vi.fn(),
-  updateKeeperCascade: vi.fn(async () => ({ ok: true })),
+  updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
 }))
 
 vi.mock('../api/dashboard', () => ({
-  fetchCascadeProfiles: mocks.fetchCascadeProfiles,
+  fetchRuntimeProfiles: mocks.fetchRuntimeProfiles,
   fetchDashboardGoalsTree: mocks.fetchDashboardGoalsTree,
   fetchKeeperConfig: mocks.fetchKeeperConfig,
   patchKeeperConfig: mocks.patchKeeperConfig,
-  updateKeeperCascade: mocks.updateKeeperCascade,
+  updateKeeperRuntime: mocks.updateKeeperRuntime,
 }))
 
 import { KeeperConfigPanel, loadKeeperConfig, resetKeeperConfig } from './keeper-config-panel'
@@ -495,9 +495,9 @@ describe('KeeperConfigPanel', () => {
     resetKeeperConfig()
     mocks.fetchKeeperConfig.mockClear()
     mocks.fetchDashboardGoalsTree.mockClear()
-    mocks.fetchCascadeProfiles.mockClear()
+    mocks.fetchRuntimeProfiles.mockClear()
     mocks.patchKeeperConfig.mockClear()
-    mocks.updateKeeperCascade.mockClear()
+    mocks.updateKeeperRuntime.mockClear()
   })
 
   afterEach(() => {
@@ -513,9 +513,9 @@ describe('KeeperConfigPanel', () => {
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
     expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
-    expect(mocks.fetchCascadeProfiles).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchRuntimeProfiles).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('편집 가능 범위')
-    expect(container.textContent).toContain('runtime_id')
+    expect(container.textContent).toContain('keeper TOML의 runtime_id')
     expect(container.textContent).toContain('Runtime 선택')
     expect(container.textContent).toContain('tier-group.keeper_unified')
     expect(container.textContent).toContain('broken_profile')
@@ -541,16 +541,16 @@ describe('KeeperConfigPanel', () => {
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
   })
 
-  it('exposes cascade selection controls directly in the config panel', async () => {
+  it('exposes runtime selection controls directly in the config panel', async () => {
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
 
-    const cascadeSelect = Array.from(container.querySelectorAll('select')).find(
+    const runtimeSelect = Array.from(container.querySelectorAll('select')).find(
       (select) => !select.getAttribute('aria-label'),
     ) as HTMLSelectElement | undefined
-    expect(cascadeSelect).toBeDefined()
-    expect(cascadeSelect?.value).toBe('tier-group.keeper_unified')
+    expect(runtimeSelect).toBeDefined()
+    expect(runtimeSelect?.value).toBe('tier-group.keeper_unified')
 
     mocks.fetchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
@@ -566,12 +566,12 @@ describe('KeeperConfigPanel', () => {
       }),
     )
 
-    cascadeSelect!.value = 'tier.resilient_breaker'
-    cascadeSelect!.dispatchEvent(new Event('change', { bubbles: true }))
+    runtimeSelect!.value = 'tier.resilient_breaker'
+    runtimeSelect!.dispatchEvent(new Event('change', { bubbles: true }))
     await flush()
     await flush()
 
-    expect(mocks.updateKeeperCascade).toHaveBeenCalledWith(
+    expect(mocks.updateKeeperRuntime).toHaveBeenCalledWith(
       'keeper-sangsu',
       'tier.resilient_breaker',
     )

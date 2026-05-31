@@ -93,9 +93,9 @@ let should_throttle ~agent_type =
 
 let agent_type_of_mention = Mention.agent_type_of_mention
 
-(* --- MODEL mode: shared cascade + in-process MASC HTTP tools/call --- *)
+(* --- MODEL mode: shared runtime + in-process MASC HTTP tools/call --- *)
 
-let cascade_name_for_agent_type _agent_type =
+let runtime_id_for_agent_type _agent_type =
   Runtime.get_default_runtime_id ()
 
 (** Validate model response using structural fields, not text heuristics.
@@ -112,12 +112,12 @@ let model_response_is_valid (resp : Agent_sdk_response.api_response) =
       | Agent_sdk.Types.Unknown _ -> true)
 
 let call_model_direct_sync ~agent_type ~prompt =
-  let cascade_name = cascade_name_for_agent_type agent_type in
+  let runtime_id = runtime_id_for_agent_type agent_type in
   try
     match
       Masc_oas_bridge.run_with_caller
         ~caller:Env_config_oas_bridge.Auto_responder (fun () ->
-        Keeper_turn_driver.run_named ~cascade_name
+        Keeper_turn_driver.run_named ~runtime_id
           ~goal:prompt ~max_turns:1
           ~accept:model_response_is_valid ~max_tokens:500
           ~approval:Approval_callbacks.auto_approve
@@ -132,7 +132,7 @@ let call_model_direct_sync ~agent_type ~prompt =
              resp.model agent_type);
         if String.trim text = "" then "no response" else text
     | Error err ->
-        Log.AutoResponder.error "MODEL cascade failed: %s" (Agent_sdk.Error.to_string err);
+        Log.AutoResponder.error "MODEL runtime failed: %s" (Agent_sdk.Error.to_string err);
         "no response"
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

@@ -3,7 +3,7 @@
 
     Owns [parse_telemetry_entry] (decisions.jsonl rows) and
     [parse_cost_entry] (costs.jsonl rows), plus the model-attribution
-    helpers (cascade name canonicalization, candidate-model fallback,
+    helpers (runtime name canonicalization, candidate-model fallback,
     provider hints) that both parsers share. Produces internal
     {!Model_inference_metrics_entry.raw_entry} values tagged with the
     typed {!Model_inference_metrics_entry.parse_error} reason on
@@ -43,9 +43,9 @@ let runtime_model_attribution_of_fields (fields : (string * Yojson.Safe.t) list)
   | Some runtime_id ->
     Some ((fun s -> s) runtime_id ^ " (runtime)")
   | None ->
-    (match json_string_field_opt "cascade_name" fields with
-     | Some cascade_name ->
-       Some ((fun s -> s) cascade_name ^ " (legacy cascade)")
+    (match json_string_field_opt "runtime_id" fields with
+     | Some runtime_id ->
+       Some ((fun s -> s) runtime_id ^ " (legacy runtime)")
      | None -> None)
 ;;
 
@@ -59,7 +59,7 @@ let first_json_string_field_opt key field_sets =
   List.find_map (json_string_field_opt key) field_sets
 ;;
 
-let first_cascade_model_attribution field_sets =
+let first_runtime_model_attribution field_sets =
   List.find_map runtime_model_attribution_of_fields field_sets
 ;;
 
@@ -123,7 +123,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              match first_candidate_model model_attribution_field_sets with
              | Some model -> Ok model
              | None ->
-               (match first_cascade_model_attribution model_attribution_field_sets with
+               (match first_runtime_model_attribution model_attribution_field_sets with
                 | Some model -> Ok model
                 | None -> Error Missing_error_model_attribution)
            in
@@ -164,7 +164,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          else (
            (* Success turns: full telemetry parsing.
               Model attribution is structural: prefer explicit selected/model
-              fields, then fall back to the cascade route when the row proves
+              fields, then fall back to the runtime route when the row proves
               the route but OAS did not surface the concrete model. This keeps
               null-model historical rows from being repeatedly dropped without
               reintroducing the old "unknown" bucket. *)
@@ -182,7 +182,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                    with
                    | Some s -> Ok s
                    | None ->
-                  (match first_cascade_model_attribution model_attribution_field_sets with
+                  (match first_runtime_model_attribution model_attribution_field_sets with
                    | Some model -> Ok model
                    | None -> Error Missing_success_model)))
            in

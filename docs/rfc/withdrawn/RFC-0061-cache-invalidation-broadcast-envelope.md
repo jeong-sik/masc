@@ -20,7 +20,7 @@ withdrawn_reason: "Dashboard cache work proceeded via RFC-0138 lock-free immutab
 
 `lib/coord/coord_broadcast.ml:79-121` rewrites `content` to a `cache_invalidated` notice **before** `pre_extract_mention` (line 130). The rewritten string contains no `@target` token, so `Mention.extract` returns `None`. Downstream wake logic (`keeper_prompt.ml:16`, `keeper_context_runtime.ml:418`) never sees the mention. The recipient stays asleep even though the sender intended a directed ping.
 
-This is the single largest blocker in the Reactive axis. While it is alive, improvements in Cascade, Sandbox, or Tool axes are invisible to operators because the feedback loop dies at stage 1.
+This is the single largest blocker in the Reactive axis. While it is alive, improvements in Runtime, Sandbox, or Tool axes are invisible to operators because the feedback loop dies at stage 1.
 
 ### Concrete failure path
 

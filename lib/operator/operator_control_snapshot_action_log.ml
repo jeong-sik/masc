@@ -8,7 +8,7 @@
     type identities and value bindings flow through unchanged.
 
     Wire schema: every operator action (keeper spawn, restart, pause,
-    cascade switch, etc.) is appended as one JSONL line to
+    runtime switch, etc.) is appended as one JSONL line to
     `<operator_dir>/action_log.jsonl`. The schema covers identity
     (trace_id, actor, remote session/client), target (type/id), the
     delegated tool, confirmation state (preview/immediate/expired/

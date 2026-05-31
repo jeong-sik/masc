@@ -10,7 +10,7 @@ open Keeper_status_bridge
 
 include Dashboard_http_keeper_detail
 
-(** Health constants + compute_health_score + live_keeper_cascade_name moved
+(** Health constants + compute_health_score + live_keeper_runtime_id moved
     to Dashboard_http_keeper_types (intra-library file split, 2026-05-16). *)
 include Dashboard_http_keeper_types
 module Outcomes = Dashboard_http_keeper_outcomes
@@ -131,12 +131,12 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
           in
           let trace_history_count = List.length m.runtime.trace_history in
-          (* RFC-0149 §3.3 — removed [_effective_cascade_name] zombie
+          (* RFC-0149 §3.3 — removed [_effective_runtime_id] zombie
              binding (commit f0075c3611, "domain-owned counter").  The
              bound name was unused; the line existed only to trigger
-             [Cascade_metrics.on_resolve_live_fallback] through the
+             [Runtime_metrics.on_resolve_live_fallback] through the
              silent-fallback path — exactly the workaround RFC-0149
-             §3.3 sunsets.  No replacement needed: unresolved cascades
+             §3.3 sunsets.  No replacement needed: unresolved runtimes
              surface on the canonical JSON field via the Result-returning
              resolver at the other call site below. *)
           let primary_model = "" in

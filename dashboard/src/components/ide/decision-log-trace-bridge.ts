@@ -22,14 +22,14 @@ import {
  *   - The key never appears outside this module. The only consumer is
  *     `alreadyEmitted: ReadonlySet<string>` owned by the calling
  *     component — same lifecycle pattern as PR-δ-1 (#13375 anchored-
- *     thread) and PR-δ-2 (cascade-hop).
+ *     thread) and PR-δ-2 (runtime-hop).
  *
  * Mapping (KeeperDecision → KeeperTraceEvent[decision-log]):
  *   id              ← `decision:${keeper_name}:${ts_unix}:${event_type}`
  *   tsMs            ← unixishToMs(decision.ts_unix)  (NaN-guarded; null/
  *                     non-finite skip)
  *   keeperName      ← decision.keeper_name  (real keeper-level — unlike
- *                     cascade-hop which uses cascade_name as a logical
+ *                     runtime-hop which uses runtime_id as a logical
  *                     bucket)
  *   source          ← 'decision-log'
  *   decisionId      ← same as id (RFC-0026 KeeperDecision has no

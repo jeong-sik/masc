@@ -1,7 +1,7 @@
 // MASC Dashboard — K1 · ToolAccess summary variant (read-only)
 //
 // Phase 2 spec (`design-system/preview/cb-group-h.jsx:KeeperToolAccess`)
-// expects a compact <dl> of cascade / sandbox / network / auto_handoff /
+// expects a compact <dl> of runtime / sandbox / network / auto_handoff /
 // handoff_threshold / proactive_idle / mention targets,
 // rendered as a quick-scan summary before the operator dives into the
 // editable form. Production has all the data on `KeeperConfig` but only

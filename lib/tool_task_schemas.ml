@@ -267,9 +267,9 @@ Tasks created through %s normally route action='done' into awaiting_verification
           ("items", `Assoc [ ("type", `String "string") ]);
           ("description", `String "Optional acceptance checklist that completion notes must satisfy before action='done' is accepted");
         ]);
-        ("evaluator_cascade", `Assoc [
+        ("evaluator_runtime", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional evaluator cascade override for anti-rationalization review. Default comes from routes.cross_verifier");
+          ("description", `String "Optional evaluator runtime override for anti-rationalization review. Default comes from routes.cross_verifier");
         ]);
         ("reason", `Assoc [
           ("type", `String "string");

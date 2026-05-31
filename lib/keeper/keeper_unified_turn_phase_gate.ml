@@ -52,7 +52,7 @@ let decide_and_record
       ~config
       ~meta
       ~generation
-      ~cascade_name:
+      ~runtime_id:
         (           (runtime_id_of_meta meta))
       ~outcome:`Cancelled
       ~terminal_reason_code:"supervisor_stop"
@@ -92,7 +92,7 @@ let decide_and_record
         ~config
         ~meta
         ~generation
-        ~cascade_name:
+        ~runtime_id:
           (             (runtime_id_of_meta meta))
         ~outcome:`Skipped
         ~terminal_reason_code
@@ -128,7 +128,7 @@ let decide_and_record
         ~config
         ~meta
         ~generation
-        ~cascade_name:
+        ~runtime_id:
           (             (runtime_id_of_meta meta))
         ~outcome:`Error
         ~terminal_reason_code

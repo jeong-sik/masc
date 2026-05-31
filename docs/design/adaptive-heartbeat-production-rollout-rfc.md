@@ -50,7 +50,7 @@ code_refs:
 
 - gRPC heartbeat production rollout
 - phi-accrual production enablement
-- cascade scheduler rollout
+- runtime scheduler rollout
 - 코드 구현 상세 알고리즘 설명 자체
 
 gRPC / phi-accrual은 `adaptive-heartbeat-grpc-and-phi-rollout-rfc.md` 에서 다룬다. 이 문서의 production sign-off는 canonical path에만 유효하다.

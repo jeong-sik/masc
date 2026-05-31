@@ -12,7 +12,7 @@ type resolution =
 (* Reuse the same split semantics as Runtime_model_string.split_provider_model
    so that both paths agree on what "provider:model" means. Duplicated
    here (rather than imported) to avoid a circular dependency between
-   this module and Cascade_config, which delegates to us. *)
+   this module and Runtime_config, which delegates to us. *)
 let split_provider_model (s : string) : (string * string) option =
   match String.index_opt s ':' with
   | None -> None

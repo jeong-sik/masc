@@ -463,18 +463,18 @@ export function normalizeDashboardConfigResolution(
   if (!isRecord(raw)) return null
   const status = asString(raw.status)
   const configRoot = normalizeDashboardConfigResolutionItem(raw.config_root)
-  const cascadeAuthoring = normalizeDashboardConfigResolutionItem(raw.cascade_authoring)
-  const cascade = normalizeDashboardConfigResolutionItem(raw.cascade)
+  const runtimeAuthoring = normalizeDashboardConfigResolutionItem(raw.runtime_authoring)
+  const runtime = normalizeDashboardConfigResolutionItem(raw.runtime)
   const prompts = normalizeDashboardConfigResolutionItem(raw.prompts)
   const keepers = normalizeDashboardConfigResolutionItem(raw.keepers)
   const personas = normalizeDashboardConfigResolutionItem(raw.personas)
-  if (!status || !configRoot || !cascadeAuthoring || !cascade || !prompts || !keepers || !personas) return null
+  if (!status || !configRoot || !runtimeAuthoring || !runtime || !prompts || !keepers || !personas) return null
   return {
     status: status as DashboardConfigResolution['status'],
     warnings: asStringArray(raw.warnings),
     config_root: configRoot,
-    cascade_authoring: cascadeAuthoring,
-    cascade,
+    runtime_authoring: runtimeAuthoring,
+    runtime,
     prompts,
     keepers,
     personas,

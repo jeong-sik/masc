@@ -13,8 +13,8 @@
 #   - docs/keeper-turn-lifecycle.md
 #
 # Convention: rules use the [masc:keeper_turn_fsm_<facet>:rate<window>]
-# namespace, mirroring the [masc:cascade_<facet>:rate<window>] pattern
-# in cascade-slo.yml.  Operators can find recording rules by querying
+# namespace, mirroring the [masc:runtime_<facet>:rate<window>] pattern
+# in runtime-slo.yml.  Operators can find recording rules by querying
 # [{__name__=~"masc:keeper_turn_fsm_.*"}].
 #
 # Cardinality: 5 records × {global, per-keeper subset} -- bounded by

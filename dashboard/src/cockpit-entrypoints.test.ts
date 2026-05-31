@@ -69,7 +69,7 @@ describe('cockpit entrypoint registry', () => {
       'task-board',
       'board-feed',
       'composer',
-      'cascade',
+      'runtime',
       'audit',
       'safety',
       'cost',
@@ -216,7 +216,7 @@ describe('cockpit entrypoint registry', () => {
       tab: 'monitoring',
       params: { section: 'runtime', view: 'cost', focus: 'latency' },
     })
-    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'cascade-compare' })).toEqual({
+    expect(cockpitTargetForParams({ mode: 'Observe', tab: 'runtime-compare' })).toEqual({
       tab: 'monitoring',
       params: { section: 'runtime', view: 'inspector', focus: 'compare' },
     })

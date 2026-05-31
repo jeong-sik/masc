@@ -15,7 +15,7 @@ type http_status =
   | `Too_many_requests     (** 429: rate-limit / quota *)
   | `Internal_server_error (** 500: unclassified backend failure *)
   | `Bad_gateway           (** 502: upstream provider error *)
-  | `Service_unavailable   (** 503: provider unavailable / cascade exhausted *)
+  | `Service_unavailable   (** 503: provider unavailable / runtime exhausted *)
   | `Gateway_timeout       (** 504: structural timeout *)
   ]
 

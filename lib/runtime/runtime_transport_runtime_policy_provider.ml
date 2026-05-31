@@ -1,5 +1,5 @@
 (** Provider-driven runtime MCP policy resolver, extracted from
-    [cascade_transport.ml] (godfile decomp).
+    [runtime_transport.ml] (godfile decomp).
 
     - [runtime_mcp_policy_for_provider] — RFC-0058 §2.4 dispatch by
       local tool-delivery policy ([requires_per_keeper_bridging]),

@@ -2,7 +2,7 @@
 
     OAS owns provider identity through [Agent_sdk.Provider_runtime_binding].
     This module only projects those bindings into MASC's local label and
-    fallback conventions, so cascade callers do not depend on a MASC-owned
+    fallback conventions, so runtime callers do not depend on a MASC-owned
     provider adapter boundary. *)
 
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
@@ -27,7 +27,7 @@ type provider_profile =
   ; kind : Runtime_binding.provider_kind
   ; base_url : string
   ; runtime_kind : runtime_kind
-  ; cascade_prefix : string
+  ; runtime_prefix : string
   ; supported_models : string list
   }
 
@@ -118,7 +118,7 @@ let profile_of_binding (binding : Runtime_binding.t) =
   ; kind = binding.Runtime_binding.kind
   ; base_url = binding.Runtime_binding.base_url
   ; runtime_kind = runtime_kind_of_binding binding
-  ; cascade_prefix = binding.Runtime_binding.id
+  ; runtime_prefix = binding.Runtime_binding.id
   ; supported_models = supported_models_of_binding binding
   }
 ;;
@@ -135,18 +135,18 @@ let find_profile_by_alias label =
       List.exists (fun alias -> String.equal alias normalized) profile.aliases)
 ;;
 
-let find_profile_by_cascade_prefix label =
+let find_profile_by_runtime_prefix label =
   let normalized = normalize_label label in
   all_profiles ()
   |> List.find_opt (fun profile ->
-    String.equal (normalize_label profile.cascade_prefix) normalized)
+    String.equal (normalize_label profile.runtime_prefix) normalized)
 ;;
 
-let cascade_prefix_of_provider_label label =
-  find_profile_by_alias label |> Option.map (fun profile -> profile.cascade_prefix)
+let runtime_prefix_of_provider_label label =
+  find_profile_by_alias label |> Option.map (fun profile -> profile.runtime_prefix)
 ;;
 
-let provider_profile_for_cascade_prefix = find_profile_by_cascade_prefix
+let provider_profile_for_runtime_prefix = find_profile_by_runtime_prefix
 
 let default_model_candidate_of_binding ?getenv (binding : Runtime_binding.t) =
   let env_var = binding_env_fragment binding ^ "_DEFAULT_MODEL" in
@@ -158,7 +158,7 @@ let default_model_candidate_of_binding ?getenv (binding : Runtime_binding.t) =
       (default_model_id_of_binding binding)
 ;;
 
-let default_model_candidate_for_cascade_prefix ?getenv provider_name =
+let default_model_candidate_for_runtime_prefix ?getenv provider_name =
   match Runtime_binding.find provider_name with
   | Some binding -> default_model_candidate_of_binding ?getenv binding
   | None -> None
@@ -176,7 +176,7 @@ let nonempty_env name = env_value_opt name
 let env_present name = Option.is_some (nonempty_env name)
 
 let configured_default_model_label_result () =
-  match Env_config.Model_defaults.default_cascade_opt () with
+  match Env_config.Model_defaults.default_runtime_opt () with
   | Some raw ->
     let labels = split_csv_nonempty raw in
     (match labels with
@@ -195,7 +195,7 @@ let configured_default_model_label_result () =
 let local_runtime_provider_id () =
   all_profiles ()
   |> List.find_opt (fun profile -> profile.runtime_kind = Local)
-  |> Option.map (fun profile -> profile.cascade_prefix)
+  |> Option.map (fun profile -> profile.runtime_prefix)
 ;;
 
 let default_local_fallback_label () =
@@ -217,10 +217,10 @@ let binding_auth_available (binding : Runtime_binding.t) =
 let default_model_label_for_binding (binding : Runtime_binding.t) =
   let profile = profile_of_binding binding in
   match profile.runtime_kind with
-  | Local -> Ok (profile.cascade_prefix ^ ":auto")
+  | Local -> Ok (profile.runtime_prefix ^ ":auto")
   | Cli_agent | Direct_api ->
     (match default_model_candidate_of_binding binding with
-     | Some _ -> Ok (profile.cascade_prefix ^ ":auto")
+     | Some _ -> Ok (profile.runtime_prefix ^ ":auto")
      | None ->
        Error
          (Printf.sprintf
@@ -261,17 +261,17 @@ let preferred_execution_model_labels () =
         |> List.filter_map auto_label_for_binding))
 ;;
 
-(* RFC-0206 single-binding: cascade routing removed. Model strings come
-   directly from the projection; the deleted [Cascade_runtime] layer only
-   wrapped this with cascade-name canonicalization + metrics. The
-   [_cascade_name] argument is retained at call sites but no longer selects
+(* RFC-0206 single-binding: runtime routing removed. Model strings come
+   directly from the projection; the deleted [Runtime_runtime] layer only
+   wrapped this with runtime-name canonicalization + metrics. The
+   [_runtime_id] argument is retained at call sites but no longer selects
    a model set — every keeper uses the default runtime. *)
-let default_execution_model_strings _cascade_name =
+let default_execution_model_strings _runtime_id =
   match preferred_execution_model_labels () with
   | [] -> [ default_local_fallback_label () ]
   | labels -> labels
 ;;
 
-let default_execution_model_strings_result cascade_name =
-  Ok (default_execution_model_strings cascade_name)
+let default_execution_model_strings_result runtime_id =
+  Ok (default_execution_model_strings runtime_id)
 ;;

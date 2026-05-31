@@ -39,9 +39,9 @@ Measured 2026-05-26:
 
 ### 1.2 Coupling hypothesis
 
-`types_core.ml` aggregates types across at least 5 domains observed in source: keeper-side, cascade-side, OAS-side, shell-side, dashboard-side. Today every caller imports the entire 1,067-LoC module to use a single domain's types. This:
+`types_core.ml` aggregates types across at least 5 domains observed in source: keeper-side, runtime-side, OAS-side, shell-side, dashboard-side. Today every caller imports the entire 1,067-LoC module to use a single domain's types. This:
 
-1. Inflates compile fan-out for unrelated changes (touching one keeper type recompiles cascade callers).
+1. Inflates compile fan-out for unrelated changes (touching one keeper type recompiles runtime callers).
 2. Defeats the cycle-avoidance property `_intf.ml` would provide — when two sub-libraries each need the same type, only direct embedding works (or duplication).
 3. Makes Sprint 2 functor-driven design (P1-4 of the plan) infeasible: functor parameters need narrow module-type surfaces, but `types_core.ml` has no such surfaces.
 
@@ -143,8 +143,8 @@ All 7 checks pass → Override conditions not invoked.
 ## 7. Open questions for review
 
 1. Should `_intf.ml` files live under `lib/types_<domain>/intf.ml` (clean dir) or `lib/types_<domain>/types_<domain>_intf.ml` (long but unambiguous)?
-2. Are `ppx_deriving` derivers (`show`, `eq`) part of the typed-SSOT surface or per-consumer? RFC-0058 `cascade_decl` precedent suggests per-sub-library.
-3. Does Phase 0 PoC pick the smallest domain (keeper-sub-FSM, ~150 LoC est.) or the highest-coupling domain (cascade)? Smallest = lower risk; highest-coupling = highest signal.
+2. Are `ppx_deriving` derivers (`show`, `eq`) part of the typed-SSOT surface or per-consumer? RFC-0058 `runtime_decl` precedent suggests per-sub-library.
+3. Does Phase 0 PoC pick the smallest domain (keeper-sub-FSM, ~150 LoC est.) or the highest-coupling domain (runtime)? Smallest = lower risk; highest-coupling = highest signal.
 
 ## 8. Iteration log
 

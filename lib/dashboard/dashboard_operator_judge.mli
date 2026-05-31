@@ -43,5 +43,5 @@ val start :
   unit
 (** Spawn the judge daemon for [config.base_path] iff
     [Env_config.Operator.judge_enabled] and not already running.
-    Backoff doubles up to 5x and caps at 300s when local cascade slots
+    Backoff doubles up to 5x and caps at 300s when local runtime slots
     are saturated. Idempotent: subsequent calls are no-ops. *)

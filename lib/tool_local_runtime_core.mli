@@ -54,7 +54,7 @@ type bench_sample = {
     type via include. *)
 
 (** Aliases over {!Json_util.*_opt_to_json} re-exported for the
-    sibling include cascade. *)
+    sibling include runtime. *)
 
 (** {1 Parse helpers} *)
 

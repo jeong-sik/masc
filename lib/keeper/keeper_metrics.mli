@@ -137,7 +137,7 @@ type t =
   | ToolUsageFlushFailures
   | TurnTimeoutCommitted
   | TurnErrorAfterTools
-  | CascadeSyncFailures
+  | RuntimeSyncFailures
   | LocalDiscoveryFailures
   | ThinkingPersistFailures
   | CheckpointFailures
@@ -204,7 +204,7 @@ type t =
   | StaleTerminationBatch
   | StaleBroadcastEmitFailures
   | OasRunTimeout
-  | CascadeSaturationSignal
+  | RuntimeSaturationSignal
   | ToolUseFailure
   | ToolNotAllowed
   | TurnGateRejectedTerminal
@@ -222,6 +222,6 @@ type t =
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
-  | CascadeHttpProbeJsonParseFailures
+  | RuntimeHttpProbeJsonParseFailures
 
 val to_string : t -> string

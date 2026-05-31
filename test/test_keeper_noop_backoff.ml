@@ -1,5 +1,5 @@
 (** test_keeper_noop_backoff — Verify noop cycle classification and
-    that No_tool_capable (inside Cascade_exhausted) does NOT count
+    that No_tool_capable (inside Runtime_exhausted) does NOT count
     toward proactive backoff.
 
     The exclusion was introduced because No_tool_capable is a

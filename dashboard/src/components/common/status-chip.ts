@@ -21,7 +21,7 @@
 // Caller helpers continue to work without audit.
 //
 // Also adds `children` support. The prior API was label-only but
-// ~12 caller sites already pass children (cascade-config-panel,
+// ~12 caller sites already pass children (runtime-config-panel,
 // verification-requests-panel.test mocks). Accepting both keeps
 // every existing usage compiling while the caller mix converges.
 //

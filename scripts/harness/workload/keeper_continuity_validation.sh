@@ -484,7 +484,7 @@ create_keeper() {
     --arg name "$KEEPER_NAME" \
     --arg goal "Validate real keeper continuity under isolated load." \
     --arg instructions "모든 응답은 한국어로 작성하세요. 짧고 구조적으로 답하세요." \
-    --arg cascade_name "$KEEPER_CASCADE_NAME" \
+    --arg runtime_id "$KEEPER_CASCADE_NAME" \
     --argjson compaction_ratio_gate "$KEEPER_COMPACTION_RATIO_GATE" \
     --argjson compaction_message_gate "$KEEPER_COMPACTION_MESSAGE_GATE" \
     --argjson continuity_compaction_cooldown_sec "$KEEPER_CONTINUITY_COOLDOWN_SEC" \
@@ -503,7 +503,7 @@ create_keeper() {
       handoff_threshold:$handoff_threshold,
       handoff_cooldown_sec:30,
       drift_enabled:false
-    } + (if ($cascade_name | length) > 0 then {runtime_id:$cascade_name} else {} end)')"
+    } + (if ($runtime_id | length) > 0 then {runtime_id:$runtime_id} else {} end)')"
   call_mcp_tool 1100 "masc_keeper_up" "$args" 60
 }
 
@@ -633,7 +633,7 @@ finalize_report() {
     --arg server_log "$SERVER_LOG" \
     --arg base_path "${BASE_PATH:-$TEMP_BASE_PATH}" \
     --arg keeper_name "$KEEPER_NAME" \
-    --arg cascade_name "$KEEPER_CASCADE_NAME" \
+    --arg runtime_id "$KEEPER_CASCADE_NAME" \
     --arg latest_input_preview "$LATEST_INPUT_PREVIEW" \
     --arg latest_output_preview "$LATEST_OUTPUT_PREVIEW" \
     --arg latest_trace_id "$LATEST_TRACE_ID" \
@@ -666,7 +666,7 @@ finalize_report() {
         base_path:$base_path,
         server_log:$server_log,
         keeper_name:$keeper_name,
-        runtime_id:$cascade_name,
+        runtime_id:$runtime_id,
         target_phases:$target_phases
       },
       evidence:{
@@ -698,7 +698,7 @@ finalize_report() {
 - Classification: **$classification**
 - Dry run: $( [[ "$(normalize_bool "$DRY_RUN")" == "1" ]] && echo "yes" || echo "no" )
 - Keeper: \`$KEEPER_NAME\`
-- Cascade: \`$KEEPER_CASCADE_NAME\`
+- Runtime: \`$KEEPER_CASCADE_NAME\`
 - MCP URL: \`${MCP_URL:-n/a}\`
 
 ## Result
@@ -996,7 +996,7 @@ real_run() {
       append_phase "recovery" "fail" "keeper_down failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
     else
       sleep 1
-      if ! call_mcp_tool 1500 "masc_keeper_up" "$(jq -cn --arg name "$KEEPER_NAME" --arg cascade_name "$KEEPER_CASCADE_NAME" '{name:$name} + (if ($cascade_name | length) > 0 then {runtime_id:$cascade_name} else {} end)')" 30; then
+      if ! call_mcp_tool 1500 "masc_keeper_up" "$(jq -cn --arg name "$KEEPER_NAME" --arg runtime_id "$KEEPER_CASCADE_NAME" '{name:$name} + (if ($runtime_id | length) > 0 then {runtime_id:$runtime_id} else {} end)')" 30; then
         snapshot_info="$(capture_snapshot recovery-up)"
         snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
         heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"

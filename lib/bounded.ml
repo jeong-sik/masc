@@ -73,7 +73,7 @@ module Usage_history = struct
   let max_samples_per_agent = 64
   let min_samples_for_p95 = 10
   let unknown_agent_fallback = 1024
-  (* RFC-0028 §4.2.  Conservative upper bound for one cascade turn's
+  (* RFC-0028 §4.2.  Conservative upper bound for one runtime turn's
      output tokens against current defaults (model-d-mini / qwen3-9B /
      qwen3-35B-A3B).  No formal heuristic_metrics evidence is
      attached today — this gap is acknowledged in the RFC.  Re-measure
@@ -183,7 +183,7 @@ let retryable_error_re =
 
 (** Hard quota/capacity exhaustion is not retryable inside this
     same-agent bounded loop.  Cross-provider fallback and long
-    cooldown decisions are owned by keeper/cascade classifiers. *)
+    cooldown decisions are owned by keeper/runtime classifiers. *)
 let hard_quota_error_indicators = [
   "hard_quota";
   "terminalquotaerror";

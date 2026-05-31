@@ -29,7 +29,7 @@ describe('buildCompositeFsmSpec', () => {
     phase: 'running',
     turnPhase: 'idle',
     decisionStage: 'undecided',
-    cascadeState: 'idle',
+    runtimeState: 'idle',
     compactionStage: 'accumulating',
   }
 
@@ -57,7 +57,7 @@ describe('buildCompositeFsmSpec', () => {
     expect(ids).toEqual(KDP_STATES)
   })
 
-  it('creates the KCL cluster with all 5 cascade states', () => {
+  it('creates the KCL cluster with all 5 runtime states', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const ids = spec.nodes.filter(n => n.parent === 'KCL').map(n => n.id.split(':')[1])
     expect(ids).toEqual(KCL_STATES)
@@ -117,8 +117,8 @@ describe('buildCompositeFsmSpec', () => {
     expect(spec.nodes.find(n => n.id === 'KDP:gate_rejected')!.type).toBe('err')
   })
 
-  it('marks an exhausted cascade as err', () => {
-    const spec = buildCompositeFsmSpec({ ...defaultParams, cascadeState: 'exhausted' })
+  it('marks an exhausted runtime as err', () => {
+    const spec = buildCompositeFsmSpec({ ...defaultParams, runtimeState: 'exhausted' })
     expect(spec.nodes.find(n => n.id === 'KCL:exhausted')!.type).toBe('err')
   })
 

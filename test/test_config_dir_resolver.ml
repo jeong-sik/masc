@@ -59,7 +59,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "cascade.toml") "";
+  write_file (Filename.concat config "keeper_runtime.toml") "";
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config
 
@@ -69,7 +69,7 @@ let make_toml_only_config_root root =
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
   write_file
-    (Filename.concat config "cascade.toml")
+    (Filename.concat config "keeper_runtime.toml")
     {|
 [providers.ollama]
 display-name = "Ollama Local"
@@ -86,17 +86,17 @@ streaming = true
 is-default = true
 max-concurrent = 1
 
-[cascade.primary]
+[runtime.primary]
 members = ["ollama.provider_h"]
 strategy = "failover"
 
-[cascade.primary]
+[runtime.primary]
 tiers = ["primary"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "cascade.primary"
+target = "runtime.primary"
 |};
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config
@@ -433,7 +433,7 @@ let test_personas_dirs_ignores_base_path_fallback () =
   mkdir_p (Filename.concat config_root "prompts");
   mkdir_p (Filename.concat config_root "keepers");
   mkdir_p (Filename.concat config_root "personas");
-  write_file (Filename.concat config_root "cascade.toml") "";
+  write_file (Filename.concat config_root "keeper_runtime.toml") "";
   write_file (Filename.concat config_root "tool_policy.toml") "# test marker\n";
   let base = Filename.dirname config_root in
   let base_personas = Filename.concat (Filename.concat base Common.masc_dirname) "personas" in

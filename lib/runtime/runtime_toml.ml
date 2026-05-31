@@ -1,6 +1,6 @@
-(** Declarative Runtime TOML parser (RFC-0206, cascade→Runtime rebirth).
+(** Declarative Runtime TOML parser (RFC-0206, runtime→Runtime rebirth).
 
-    Re-homed from the deleted [Cascade_declarative_parser]. Parses RFC-0058
+    Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
     layers 1-3 plus [[runtime].default] into a self-standing
     {!Runtime_schema.config}. Reserved top-level namespaces: providers,
     models, runtime (plus the dropped routing namespaces system, routes,
@@ -416,7 +416,7 @@ let parse_models (toml : Otoml.t)
 
 (* The dropped routing namespaces (system, routes, profiles) remain
    reserved: keeping them out of the provider-table scan ensures a stale
-   [[routes]]/[[profiles]] table in an existing cascade.toml is silently
+   [[routes]]/[[profiles]] table in an existing keeper_runtime.toml is silently
    ignored rather than misread as a provider with bogus model bindings. *)
 let reserved_namespaces =
   [ "providers"; "models"; "system"; "routes"; "profiles"; "runtime" ]

@@ -50,7 +50,7 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     activity_label: '최근 활동',
     activity_source: 'last_activity',
     model: 'test-model',
-    cascade_label: null,
+    runtime_label: null,
     provider_label: null,
     fallback_label: null,
     tool_calls: 5,
@@ -155,18 +155,18 @@ describe('buildFleetRows runtime labels', () => {
   it('redacts model/provider identity while keeping lane outcome evidence', () => {
     const [row] = buildFleetRows([
       {
-        name: 'cascade-keeper',
+        name: 'runtime-keeper',
         status: 'active',
         keepalive_running: true,
-        cascade_name: 'oas-keeper_unified',
-        cascade_canonical: 'primary',
+        runtime_id: 'oas-keeper_unified',
+        runtime_canonical: 'primary',
         active_model_label: 'cli-tool-a:auto',
         trust: {
           execution_summary: {
             provider_selected_model: 'provider-a:model-a-sonnet',
             provider_attempt_count: 2,
             provider_fallback_applied: true,
-            cascade_outcome: 'passed_to_next_model',
+            runtime_outcome: 'passed_to_next_model',
           },
         },
         metrics_series: [
@@ -195,11 +195,11 @@ describe('buildFleetRows runtime labels', () => {
             total_tokens: null,
             wall_tokens_per_second: null,
             inference_telemetry: null,
-            cascade_name: 'primary',
+            runtime_id: 'primary',
             runtime_selected_model: 'provider-a:model-a-sonnet',
-            cascade_attempt_count: 2,
-            cascade_outcome: 'passed_to_next_model',
-            cascade_strategy: 'round_robin',
+            runtime_attempt_count: 2,
+            runtime_outcome: 'passed_to_next_model',
+            runtime_strategy: 'round_robin',
             fallback_applied: true,
             fallback_hops: 1,
             fallback_from: 'provider-d:gpt-5.4',
@@ -221,7 +221,7 @@ describe('buildFleetRows runtime labels', () => {
 
     expect(row).toMatchObject({
       model: 'runtime',
-      cascade_label: 'oas-keeper_unified -> primary',
+      runtime_label: 'oas-keeper_unified -> primary',
       provider_label: 'passed_to_next_model · 2 attempts · fallback',
       fallback_label: 'fallback · turn_timeout · 1 hops',
     })

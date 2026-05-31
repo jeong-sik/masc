@@ -467,12 +467,12 @@ let keeper_bootstrap_entries =
       "Keeper stale turn threshold (seconds)";
   ]
 
-let keeper_cascade_entries =
+let keeper_runtime_entries =
   [
     entry ~default:"(none)" "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST"
-      "Comma-separated provider allowlist for cascade (None=unfiltered)";
+      "Comma-separated provider allowlist for runtime (None=unfiltered)";
     entry ~default:"enforce" "MASC_CASCADE_ATTEMPT_LIVENESS"
-      "Cascade attempt-liveness gate mode (off|observe|enforce). RFC-0022 \
+      "Runtime attempt-liveness gate mode (off|observe|enforce). RFC-0022 \
        Explicit values must be canonical; invalid values raise a config error.";
   ]
 
@@ -555,7 +555,7 @@ let keeper_supervisor_entries =
 let keeper_tool_entries =
   [
     entry ~default:"(none)" "MASC_KEEPER_LLM_RERANK_CASCADE"
-      "Named cascade profile for LLM reranker";
+      "Named runtime profile for LLM reranker";
     entry ~default:"3" "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"
       "Max consecutive failures for same tool+args before blocking (clamped 2-20)";
     entry ~default:"(none)" "MASC_KEEPER_TOOL_AFFINITY_K"
@@ -599,7 +599,7 @@ let message_gc_entries =
 let model_routing_entries =
   [
     entry ~default:"(none)" "MASC_DEFAULT_CASCADE"
-      "Default cascade label; None when unset";
+      "Default runtime label; None when unset";
     entry ~default:"(none)" "MASC_DEFAULT_MODEL"
       "Default model id; None when unset";
     entry ~default:"(none)" "MASC_DEFAULT_PROVIDER"
@@ -609,7 +609,7 @@ let model_routing_entries =
     entry ~default:"(none)" "MASC_GOAL_MODELS"
       "Goal models comma-separated; None when unset";
     entry ~default:"(none)" "MASC_ROUTING_CASCADE"
-      "Routing cascade for team session routing";
+      "Routing runtime for team session routing";
   ]
 
 let oas_sse_entries =
@@ -868,7 +868,7 @@ let all_categories () =
        @ keeper_sandbox_entries);
     category "keeper_execution"
       (keeper_execution_entries @ compaction_entries @ decision_entries
-       @ keeper_tool_entries @ keeper_cascade_entries
+       @ keeper_tool_entries @ keeper_runtime_entries
        @ keeper_proactive_entries @ keeper_grpc_entries);
     category "keeper_guardrails" keeper_guardrail_entries;
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);

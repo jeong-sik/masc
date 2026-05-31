@@ -61,7 +61,7 @@ import {
 /**
  * Pure filter for fleet rows.
  *
- * Case-insensitive substring match on keeper identity, runtime/cascade
+ * Case-insensitive substring match on keeper identity, runtime/runtime
  * attempt labels, and runtime blocker.
  *
  * Empty/whitespace query returns the input reference unchanged (no
@@ -78,7 +78,7 @@ function filterFleetRows(
   return rows.filter(row => {
     if (row.name.toLowerCase().includes(needle)) return true
     if (row.model && row.model.toLowerCase().includes(needle)) return true
-    if (row.cascade_label && row.cascade_label.toLowerCase().includes(needle)) return true
+    if (row.runtime_label && row.runtime_label.toLowerCase().includes(needle)) return true
     if (row.provider_label && row.provider_label.toLowerCase().includes(needle)) return true
     if (row.fallback_label && row.fallback_label.toLowerCase().includes(needle)) return true
     if (row.runtime_blocker_class && row.runtime_blocker_class.toLowerCase().includes(needle)) return true
@@ -370,7 +370,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
     model === 'runtime' ? 'runtime lane' : model
   const runtimeModelTitle = (model: string): string =>
     model === 'runtime'
-      ? 'provider/model identity is redacted; use cascade and attempts details below'
+      ? 'provider/model identity is redacted; use runtime and attempts details below'
       : model
 
   return html`
@@ -502,8 +502,8 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 >
                   ${runtimeModelLabel(row.model)}
                 </div>
-                ${row.cascade_label
-                  ? html`<div class="max-w-56 truncate" title=${row.cascade_label}>cascade ${row.cascade_label}</div>`
+                ${row.runtime_label
+                  ? html`<div class="max-w-56 truncate" title=${row.runtime_label}>runtime ${row.runtime_label}</div>`
                   : null}
                 ${row.provider_label
                   ? html`<div class="max-w-56 truncate" title=${row.provider_label}>attempts ${row.provider_label}</div>`

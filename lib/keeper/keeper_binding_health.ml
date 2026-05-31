@@ -1,8 +1,8 @@
-(** Reactive health tracking for cascade providers.
+(** Reactive health tracking for runtime providers.
 
     Tracks per-provider success/failure rates using a rolling time window.
     Providers in cooldown (consecutive failures exceed threshold) are
-    temporarily skipped.  Health data feeds into weighted cascade selection
+    temporarily skipped.  Health data feeds into weighted runtime selection
     via {!effective_weight}.
 
     Design: LiteLLM cooldown + OpenRouter rolling-window hybrid.
@@ -39,7 +39,7 @@ let cooldown_config_for = Keeper_binding_health_config.cooldown_config_for
 (* ── Types ────────────────────────────────────── *)
 
 (* [Rejected] is the third outcome kind introduced in 0.160.0.  It
-   represents "response arrived but the cascade's accept predicate
+   represents "response arrived but the runtime's accept predicate
    rejected it" — behaviorally equivalent to [Failure] (same cooldown
    trigger, same success-rate impact) but visible to the dashboard so
    operators can tell a down provider apart from one whose outputs are
@@ -49,13 +49,13 @@ let cooldown_config_for = Keeper_binding_health_config.cooldown_config_for
    0, monthly quota reached, resource exhausted)" — classified via OAS
    [Llm_provider.Retry.is_hard_quota].  Unlike [Failure], a single event
    triggers an immediate long cooldown ([hard_quota_cooldown_sec]); the
-   [cooldown_threshold] does not apply because retry on the next cascade
+   [cooldown_threshold] does not apply because retry on the next runtime
    tick is pointless when the upstream account is out of credit. *)
 (* [Terminal_failure] represents structural provider/adapter failures that are
    deterministic for the current runtime state.  A provider CLI
    resumable-session conflict is the motivating case: fallback is correct for
    the current call, but repeatedly attempting the same provider first on every
-   later call only adds latency and silently degrades cascade diversity. *)
+   later call only adds latency and silently degrades runtime diversity. *)
 (* [Soft_rate_limited] represents a transient HTTP 429 — provider is healthy
    but momentarily over its rate budget.  Distinct from [Failure] so a single
    event triggers an immediate (short) cooldown without waiting for the
@@ -142,7 +142,7 @@ let create () : t = {
    in test_keeper_unified because [Eio.Mutex.use_rw] depends on the
    [Cancel.Get_context] effect handler, which is only installed
    inside an [Eio_main.run] event loop. Tests calling
-   [provider_cooldown_remaining_sec_for_cascade → provider_info]
+   [provider_cooldown_remaining_sec_for_runtime → provider_info]
    outside that loop propagate [Stdlib.Effect.Unhandled].
 
    Stdlib.Mutex has no effect dependency — a keeper scheduling
@@ -406,7 +406,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       end
     | Soft_rate_limited ->
       (* Transient HTTP 429.  Apply an immediate short cooldown so the
-         current cascade cycle skips this provider for the next selection
+         current runtime cycle skips this provider for the next selection
          tick — without forcing the [cooldown_threshold] count-to-three
          that [Failure] uses.  Honor caller-supplied Retry-After when
          present; clamp positive values to [soft_rate_limit_max_clamp_sec]
@@ -469,7 +469,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       end
     | Terminal_failure ->
       (* Terminal structural errors are not quota exhaustion, but they have the
-         same retry shape: the next cascade tick will hit the same provider
+         same retry shape: the next runtime tick will hit the same provider
          state and fail again.  Cool down immediately to keep fallback from
          becoming a hidden tax on every request.  #10441: the
          [apply_trust_failure_locked] step was removed by #10412 (Phase 1
@@ -535,7 +535,7 @@ let success_rate t ~provider_key =
         float_of_int successes /. float_of_int (List.length recent))
 
 (** Whether the provider is currently in cooldown.  A cooled-down provider
-    should be skipped in cascade selection.
+    should be skipped in runtime selection.
 
     @return [true] if in cooldown AND cooldown has not expired *)
 let is_in_cooldown t ~provider_key =
@@ -907,6 +907,6 @@ let recent_outcome_count t ~provider_key ~outcome ~window_s =
 
 (* ── Global singleton ─────────────────────────── *)
 
-(** Global health tracker shared across all cascade calls in this process.
+(** Global health tracker shared across all runtime calls in this process.
     Thread-safe via internal Mutex. *)
 let global : t = create ()

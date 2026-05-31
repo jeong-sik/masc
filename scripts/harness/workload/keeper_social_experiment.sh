@@ -297,7 +297,7 @@ main() {
     --arg mcp_url "$MCP_URL" \
     --arg topic "$TOPIC" \
     --arg arms "$ARMS" \
-    --arg model_cascade "$MODEL_CASCADE" \
+    --arg model_runtime "$MODEL_CASCADE" \
     --arg dry_run "$DRY_RUN" \
     --arg rounds "$ROUNDS" \
     '{
@@ -306,7 +306,7 @@ main() {
       mcp_url:$mcp_url,
       topic:$topic,
       arms:$arms,
-      model_cascade:$model_cascade,
+      model_runtime:$model_runtime,
       dry_run:($dry_run=="1"),
       rounds:($rounds|tonumber),
       started_at:(now|todateiso8601)

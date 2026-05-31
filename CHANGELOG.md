@@ -94,7 +94,7 @@
 - Continued legacy alias purging across board sort-order, MCP join-state, and
   keeper identity facade surfaces.
 - Tightened task claim readiness/recovery handling with typed decisions and
-  tolerated degraded retry cascade receipts without relying on legacy aliases.
+  tolerated degraded retry runtime receipts without relying on legacy aliases.
 - Improved runtime operator visibility by exposing MCP tool call IO previews
   and defaulting OAS event retention for dashboard/runtime inspection.
 
@@ -123,7 +123,7 @@
 ### Changed
 - Bumped `agent_sdk` (OAS) pin from `v0.196.7` to `v0.196.8` and SHA from
   `609600d8` to `8ea10c7b` (origin/main HEAD). Picks up `feat(error): carry
-  completion contract violation detail` (#1660), `test(cascade): cover capacity
+  completion contract violation detail` (#1660), `test(runtime): cover capacity
   admission fast-fail` (#1659), and CLI/capabilities refactors (#1662, #1663).
 
 ## [0.19.27] - 2026-05-20
@@ -140,7 +140,7 @@
 
 ### Fixed
 - Repaired the tier-admission metric label export that broke the main build
-  after the cascade saturation wire-in.
+  after the runtime saturation wire-in.
 - Corrected dashboard runtime truth around paused Keeper counts, crashed-phase
   SSOT handling, and tool-quality trend rendering.
 - Rolled up status-only board automation posts so board history stays readable.
@@ -148,11 +148,11 @@
 ## [0.19.26] - 2026-05-20
 
 ### Added
-- RFC-0153 Phase A/B for cascade saturation: added the typed `Cascade_saturation_signal`, wired tier admission into keeper attempts, and emitted the new saturation metric.
+- RFC-0153 Phase A/B for runtime saturation: added the typed `Runtime_saturation_signal`, wired tier admission into keeper attempts, and emitted the new saturation metric.
 - RFC-0148 closed-sum `tool_error` module (7 variants) with codemod adoption at six LLM-facing sites.
 - RFC-0142 `Json_field` typed extraction helper for boundary parsing.
 - RFC-0141 `Field_resolution` typed TOML extractor in `repo_manager`.
-- RFC-0143 typed `catalog_metadata_query` bridge for `keeper_cascade_profile`.
+- RFC-0143 typed `catalog_metadata_query` bridge for `keeper_runtime_profile`.
 - RFC-0139 dashboard agent-status typed SSOT module.
 - RFC-0135 keeper-operational-state typed SSOT promotion across vocab outliers.
 - Typed `drain_outcome` sum for background tasks and a typed `validator_stage` enum in `exec_core` (RFC-0092 Cluster C).
@@ -167,9 +167,9 @@
 - `cdal_loader` boundary parsing: split `Yojson.Json_error` from the catch-all in `read_json_file` and preserve `Sys_error` reason in `File_not_found`.
 - `worker_helper` / `worker_runtime_helper_protocol`: labelled bare `Failure` handlers and split `run_result_of_yojson` failure modes.
 - `ide_annotation_types`: kind-aware parse errors with total integer parsers; exposed JSON shape in two `of_json` errors.
-- `cascade_http_probe`: log HTTP transport failures instead of returning silent `None`.
+- `runtime_http_probe`: log HTTP transport failures instead of returning silent `None`.
 - `mode_enforcer` / `anti_rationalization` / `eval_harness`: kind-aware boundary parse errors and bounded entry dumps.
-- Build break in `test_cascade_saturation_signal_phase_a2` from an `Unix.unsetenv` reference (no such stdlib function) and a wrong `Masc_mcp.Env_config_keeper` qualifier.
+- Build break in `test_runtime_saturation_signal_phase_a2` from an `Unix.unsetenv` reference (no such stdlib function) and a wrong `Masc_mcp.Env_config_keeper` qualifier.
 
 ## [0.19.25] - 2026-05-17
 
@@ -249,13 +249,13 @@
 ### Changed
 - Runtime configuration now continues purging legacy path/default fallback surfaces, including repo-config fallback removal and legacy path default cleanup.
 - Log retention defaults are opt-in disabled as part of the RFC-0103 closeout path.
-- Cascade legacy-runner worker tuning constants are lifted to SSOT, and the obsolete swarm harness entrypoint is removed.
+- Runtime legacy-runner worker tuning constants are lifted to SSOT, and the obsolete swarm harness entrypoint is removed.
 - RFC-0004 docs now record Phase A0.1 completion and add the Phase A0.2 implementation plan while additional SSE event arms move onto typed emitters.
 
 ### Fixed
 - Keeper/tool gates: lane semaphores, generic required-tool gate behavior, typed handoff-context vocabulary, and tool-input validation exception qualification.
 - Process/tool task reliability: background task reserve/release wiring into spawn, stale `pr_url` blob cleanup, and the OCaml comment terminator regression in `tool_task`.
-- Transport/runtime visibility: cascade HTTP probe silent JSON parse drops now warn/count, and board-post validation stays at the correct boundary.
+- Transport/runtime visibility: runtime HTTP probe silent JSON parse drops now warn/count, and board-post validation stays at the correct boundary.
 
 ## [0.19.20] - 2026-05-17
 
@@ -268,8 +268,8 @@
 ### Changed
 - `lib/dashboard/` and dashboard runtime trust views label system-blocked states as `Blocked` rather than human `Pause`, separating operator pauses from runtime blockers.
 - MCP server internals remove the legacy `respond_mcp_*` / `mcp_internal_error_json` factories from the active response path.
-- Cascade max-token handling clamps model/provider output ceilings explicitly.
-- Cascade qwen configuration declares chat-template thinking support explicitly and removes the legacy `cap_auto_resolved_max_tokens` alias from active cascade code and historical DD-020 notes.
+- Runtime max-token handling clamps model/provider output ceilings explicitly.
+- Runtime qwen configuration declares chat-template thinking support explicitly and removes the legacy `cap_auto_resolved_max_tokens` alias from active runtime code and historical DD-020 notes.
 
 ### Fixed
 - `lib/keeper/keeper_agent_run.ml`: captured CDAL proof files are persisted into keeper run outputs.
@@ -308,7 +308,7 @@
 ## [0.19.17] - 2026-05-11
 
 ### Fixed
-- `lib/keeper/keeper_telemetry_consumer.ml`: drain loop now yields between iterations (`Eio.Time.sleep clock 0.1`). The fiber introduced by #14491 saturated a single Eio domain at ~100% CPU because `Agent_sdk_metrics_bridge.drain` is non-blocking and the loop recursed without sleeping. Co-located fibers (HTTP handlers, lazy startup tasks) starved — server boot stalled at `lazy_task: starting restore_sessions`, `/health` timed out, and HTTP handlers never responded despite ports being LISTEN. Mirrors the sibling drain loops in `keeper_compact_audit`, `cascade_event_bridge`, and `server_bootstrap_loops` keeper-lifecycle, all of which already sleep between drains. PR #14499.
+- `lib/keeper/keeper_telemetry_consumer.ml`: drain loop now yields between iterations (`Eio.Time.sleep clock 0.1`). The fiber introduced by #14491 saturated a single Eio domain at ~100% CPU because `Agent_sdk_metrics_bridge.drain` is non-blocking and the loop recursed without sleeping. Co-located fibers (HTTP handlers, lazy startup tasks) starved — server boot stalled at `lazy_task: starting restore_sessions`, `/health` timed out, and HTTP handlers never responded despite ports being LISTEN. Mirrors the sibling drain loops in `keeper_compact_audit`, `runtime_event_bridge`, and `server_bootstrap_loops` keeper-lifecycle, all of which already sleep between drains. PR #14499.
 
 ## [0.19.16] - 2026-05-07
 
@@ -353,12 +353,12 @@
 ## [0.19.11] - 2026-05-06
 
 ### Added
-- `scripts/verify_audit_claim.sh`: deterministic verifier for audit count claims (`<expected> <pattern> <path...>`). Forces measurement against the working tree before count claims are acted on. Origin: 2026-05-06 hallucinated audit cascade where a "16 silent-empty antipatterns" claim cross-cited by 4 keepers measured as 2 against actual code (8x overstated). Exit 0 on match, 1 on mismatch with overstatement ratio.
+- `scripts/verify_audit_claim.sh`: deterministic verifier for audit count claims (`<expected> <pattern> <path...>`). Forces measurement against the working tree before count claims are acted on. Origin: 2026-05-06 hallucinated audit runtime where a "16 silent-empty antipatterns" claim cross-cited by 4 keepers measured as 2 against actual code (8x overstated). Exit 0 on match, 1 on mismatch with overstatement ratio.
 
 ## [0.19.10] - 2026-05-05
 
 ### Added
-- `feat(cascade)`: RFC-0027 PR-9c per-secondary metric label `dual_track_swap` (#13158).
+- `feat(runtime)`: RFC-0027 PR-9c per-secondary metric label `dual_track_swap` (#13158).
 - `feat(dashboard)`: board comment thread controls (#13142).
 - `feat(goal)`: goal attainment projection surfaced in dashboard (#13131).
 - `feat`: observed keeper PR work metrics (#13177).
@@ -378,10 +378,10 @@
 - `fix`: bound keeper autoboot warmup jitter (#13119).
 - `fix`: `Int32` arithmetic for platform-stable warmup hash (#13156).
 
-### Fixed — Cascade & provider routing
-- `fix`: cascade on model access denial (#13146).
-- `fix(cascade)`: unblock `validate_path_result` on warning 16 (#13159).
-- `fix`: probe local providers in cascade catalog (#13124).
+### Fixed — Runtime & provider routing
+- `fix`: runtime on model access denial (#13146).
+- `fix(runtime)`: unblock `validate_path_result` on warning 16 (#13159).
+- `fix`: probe local providers in runtime catalog (#13124).
 
 ### Fixed — OAS / tooling
 - `fix(oas)`: enable codex CLI keeper MCP approval (#13169).
@@ -433,14 +433,14 @@
 
 ### Added
 - RFC-0026 keeper admission router + WFQ overflow + persona policy types (shadow-mode).
-- Per-provider token bucket primitive and cascade confidence ring buffer.
+- Per-provider token bucket primitive and runtime confidence ring buffer.
 - Stale-binary warning at startup via `commit_age_seconds` build identity.
 - Dashboard provider color tokens and keeper-aware `/api/v1/git/blame` + `/api/v1/git/diff`.
 
 ### Fixed
-- Cap cascade rotation to per-attempt timeout budget.
+- Cap runtime rotation to per-attempt timeout budget.
 - Stamp `Fiber_unresolved` blocker_class and clean up #12910 revert leftovers.
-- Dedup `fallback_cascade` cycle WARN per (config_path, cycle_set).
+- Dedup `fallback_runtime` cycle WARN per (config_path, cycle_set).
 - `oas_compat` includes truncated body in all `error_message` fallback paths.
 - Restore missing `metric_keeper_slot_yield_total` and `run_unified_turn` wrapper.
 
@@ -466,8 +466,8 @@
 
 ### Added
 - Semaphore holder tracking so timeouts can name the blocker.
-- Cycle detection for fallback_cascade at load_catalog time.
-- Per-candidate cascade attempt emitted to system_log.
+- Cycle detection for fallback_runtime at load_catalog time.
+- Per-candidate runtime attempt emitted to system_log.
 - Real workspace/git API endpoints replacing IDE mock data.
 
 ### Fixed
@@ -498,7 +498,7 @@
 ### Added
 - Passive loop action injection — nudge keeper to act when stuck in read-only loop.
 - Prometheus counters for tool setup and task load failures.
-- Issue dependency graph: liveness recovery, cascade rotation, lifecycle timeline.
+- Issue dependency graph: liveness recovery, runtime rotation, lifecycle timeline.
 
 ### Fixed
 - Inject stream_idle_timeout default when caller omits option.
@@ -510,7 +510,7 @@
 ## [0.19.3] - 2026-05-02
 
 ### Added
-- Health-Aware Provider Circuit Breaker to prevent cascade stagnation with a 30-second cooldown.
+- Health-Aware Provider Circuit Breaker to prevent runtime stagnation with a 30-second cooldown.
 - Adaptive Pheromone Evaporation with Max-Min Conductivity Bounds.
 - 3-Layer Context Auto-Compaction (Working, Episodic, Semantic).
 - TLA+ Runtime Invariant verification (`ZombiePhaseInvariant`).
@@ -519,7 +519,7 @@
 ### Fixed
 - SafeAuto source path recovery to prevent backtrace loss in Effect Handler.
 - Fiber Yield Starvation with `Eio_context.fair_yield ()`.
-- Flaky `test_cascade_retry` test using deterministic structured concurrency.
+- Flaky `test_runtime_retry` test using deterministic structured concurrency.
 
 ## [0.19.2] - 2026-05-01
 
@@ -555,7 +555,7 @@ Post-v0.19.0 release-truth follow-up for the keeper Event Layer consumer path, d
 
 ### Changed
 
-- Keeper run cascade context now uses a typed boundary for runtime cascade names (#12418).
+- Keeper run runtime context now uses a typed boundary for runtime runtime names (#12418).
 - `lib/dune` now relies on Dune `:standard` module auto-discovery while preserving the checked-in `private_modules` surface, reducing merge conflicts for new modules (#12422).
 - Package and release metadata advanced from `0.19.0` to `0.19.1`.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.19.1`.
@@ -584,7 +584,7 @@ Multi-repository architecture Phase 1. Introduces explicit repository registry a
 
 ## [0.18.25] - 2026-05-01
 
-Post-v0.18.24 merge train for keeper event-queue registry wiring, silent-failure visibility, cascade typing/FSM message cleanup, runtime memory config, prompt XML escaping, and release-truth sync. No breaking API changes.
+Post-v0.18.24 merge train for keeper event-queue registry wiring, silent-failure visibility, runtime typing/FSM message cleanup, runtime memory config, prompt XML escaping, and release-truth sync. No breaking API changes.
 
 ### Added
 
@@ -594,15 +594,15 @@ Post-v0.18.24 merge train for keeper event-queue registry wiring, silent-failure
 
 ### Changed
 
-- Runtime cascade lookups now use typed `Keeper_cascade_profile.runtime_name` boundaries internally while preserving existing public/OAS string entry points (#12404).
+- Runtime runtime lookups now use typed `Keeper_runtime_profile.runtime_name` boundaries internally while preserving existing public/OAS string entry points (#12404).
 - Package and release metadata advanced from `0.18.24` to `0.18.25`.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.25`.
 
 ### Fixed
 
-- Remaining dev-only diagnostics in agent, cascade, provider, repo-manager, sidecar, tool, and verification paths now surface through structured operator-visible logging instead of disappearing silently (#12400).
+- Remaining dev-only diagnostics in agent, runtime, provider, repo-manager, sidecar, tool, and verification paths now surface through structured operator-visible logging instead of disappearing silently (#12400).
 - Keeper memory compaction knobs now route through `keeper_runtime.toml` / env precedence so boot-time runtime overrides are visible to memory-bank readers (#12384).
-- Cascade exhaustion user messages now render through the cascade FSM boundary instead of duplicated worker-side string formatting (#12383).
+- Runtime exhaustion user messages now render through the runtime FSM boundary instead of duplicated worker-side string formatting (#12383).
 - Persona and goal prompt blocks now escape XML predefined entities before injection into pseudo-XML prompt tags (#12408).
 
 ## [0.18.24] - 2026-05-01
@@ -626,7 +626,7 @@ Post-v0.18.23 release-truth follow-up for the silent-failure cleanup, keeper eve
 
 ## [0.18.23] - 2026-05-01
 
-Post-v0.18.22 merge train for keeper silent-failure visibility, sandbox dispatch regression coverage, TLA/FSM naming cleanup, cascade-name typing, RFC-0019 keeper repo access control, and release-truth baseline cleanup. No breaking API changes.
+Post-v0.18.22 merge train for keeper silent-failure visibility, sandbox dispatch regression coverage, TLA/FSM naming cleanup, runtime-name typing, RFC-0019 keeper repo access control, and release-truth baseline cleanup. No breaking API changes.
 
 ### Added
 
@@ -638,15 +638,15 @@ Post-v0.18.22 merge train for keeper silent-failure visibility, sandbox dispatch
 
 ### Changed
 
-- Cascade record names now use typed cascade-name boundaries instead of raw string propagation (#12374).
-- Turn execution cascade routing now carries typed cascade names through keeper turn budget and unified-turn boundaries (#12394).
+- Runtime record names now use typed runtime-name boundaries instead of raw string propagation (#12374).
+- Turn execution runtime routing now carries typed runtime names through keeper turn budget and unified-turn boundaries (#12394).
 - Package and release metadata advanced from `0.18.22` to `0.18.23`.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.23`.
 
 ### Fixed
 
 - Keeper compact-audit dispatch paths now use structured keeper logging instead of raw `Printf.eprintf` output (#12389).
-- SSE keepalive and cascade health paths now use structured server logging instead of raw `Printf.eprintf` output (#12390).
+- SSE keepalive and runtime health paths now use structured server logging instead of raw `Printf.eprintf` output (#12390).
 - Non-relative read errors redact resolved host paths so sandbox/path leaks do not reach operator-visible failures (#12388).
 - Keepalive dispatch rejections now surface instead of disappearing behind silent control-flow paths (#12375).
 - Profile-defaults validation keeps the intermediate result `unit`-typed until tool-access defaults are bound, preserving the #12378 compile fix after the latest FSM merge train.
@@ -674,7 +674,7 @@ Release-truth follow-up after the `0.18.20` version bump landed before the rest 
 
 ### Fixed
 
-- Dashboard render errors in cascade inspector and agent surfaces were repaired, including the keeper metadata type reference that blocked the `v0.18.20` Linux release build (#12338).
+- Dashboard render errors in runtime inspector and agent surfaces were repaired, including the keeper metadata type reference that blocked the `v0.18.20` Linux release build (#12338).
 - Draft auto-merge guard races were closed so merged PR current-state checks fail closed instead of racing stale draft state (#12339, #12342, #12343).
 - `do-not-merge` is now a hard-stop label that overrides human-approved and non-agent bypass paths in PR automation (#12346).
 - Model inference metrics and provider routes were brought back into sync with the `latency_buckets` aggregate field and keeper type-source split (#12349, #12351, #12354).
@@ -682,7 +682,7 @@ Release-truth follow-up after the `0.18.20` version bump landed before the rest 
 ### Changed
 
 - Routine keeper runtime log noise was reduced after the 0.18.20 boundary (#12344).
-- Cascade strategy signal contexts now carry typed cascade runtime names through the string boundary (#12350).
+- Runtime strategy signal contexts now carry typed runtime runtime names through the string boundary (#12350).
 - Dead keeper SOUL.md / "SYSTEM: SOUL INFUSION" path handling was removed from the checked-in runtime surface (#12353).
 - Package and release metadata advanced from `0.18.20` to `0.18.21` so the published release boundary includes the post-tag fixes.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.21`.
@@ -703,7 +703,7 @@ Post-v0.18.19 merge train for the OAS `0.187.4` downstream pin and the first IDE
 ### Changed
 
 - OAS agent SDK pin metadata advanced to `0.187.4`, including the regenerated public API surface fingerprint and downstream pin documentation (#12327, #12331).
-- Multi-repo management, dashboard connector status, cascade inventory naming, and goal-FSM freshness surfaces were hardened or consolidated after the `0.18.19` release boundary (#12321, #12322, #12324, #12326).
+- Multi-repo management, dashboard connector status, runtime inventory naming, and goal-FSM freshness surfaces were hardened or consolidated after the `0.18.19` release boundary (#12321, #12322, #12324, #12326).
 - Package and release metadata advanced from `0.18.19` to `0.18.20`.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.20`.
 
@@ -740,7 +740,7 @@ Post-v0.18.17 merge train through the release boundary. No breaking API changes.
 
 ### Changed
 
-- Cascade/OAS labels are now typed at metric and FSM boundaries, and routine keeper logs are demoted to reduce operator noise (#12298, #12308, #12299).
+- Runtime/OAS labels are now typed at metric and FSM boundaries, and routine keeper logs are demoted to reduce operator noise (#12298, #12308, #12299).
 - OAS agent SDK pin metadata advanced to `0.187.3` after the downstream pin lane landed (#12312).
 - Package and release metadata advanced from `0.18.17` to `0.18.18` after the post-v0.18.17 merge train.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.18`.
@@ -815,7 +815,7 @@ This is a release-truth catch-up for the 0.18.10-0.18.13 stabilization train. Th
 
 ### Added
 
-- OAS provider error variant contract, metric export, and dashboard telemetry samples for provider/cascade diagnosis.
+- OAS provider error variant contract, metric export, and dashboard telemetry samples for provider/runtime diagnosis.
 - Resolved-goal verification evidence and expanded dashboard/runtime surfaces for operator truth.
 - Performance and reliability instrumentation, including dashboard WS load harness, cache hit/miss counters, GC quick-stat sampling, and cold/warm tool-call labels.
 
@@ -823,7 +823,7 @@ This is a release-truth catch-up for the 0.18.10-0.18.13 stabilization train. Th
 
 - Keeper OAS timeout behavior: fallback budget reservation, repeated `oas_timeout_budget` auto-pause, hard-quota fail-fast handling, and local Ollama token-cap tuning.
 - Docker-backed keeper execution: `HOME=/tmp` coverage for run/exec/shell paths and runtime contract visibility fixes.
-- Dashboard CI/typecheck stability, provider cascade clarity, fleet idle recovery false positives, and stale TLA/spec-line references.
+- Dashboard CI/typecheck stability, provider runtime clarity, fleet idle recovery false positives, and stale TLA/spec-line references.
 
 ### Changed
 
@@ -842,7 +842,7 @@ Aggregate of 254 commits since v0.18.8 (109 feat / 33 fix / 37 docs+spec / 36 ch
 The headline thread for this release is the autonomous **Cycle 24-44 spec ↔ code identity series** (20 PRs, all spec/docs only, behavior-change 0). The series closes the discoverability gap users observed as "lifecycle 30-40% black-box": OCaml subsystems whose specs already cited them but had no reverse anchor. Two patterns:
 
 1. **Anchor addition** (Cycle 24-39, 16 PRs) — adds a `(* Spec navigation (OCaml -> TLA+) ... *)` block plus inline anchors to OCaml modules so code search lands on the authoritative spec module.
-2. **Citation refresh** (Cycle 40-43, 4 PRs) — verifies and corrects stale OCaml line citations in 5 specs (`KeeperTurnCycle`, `KeeperCascadeLifecycle`, `KeeperDecisionPipeline`, `KeeperHeartbeat`, `KeeperSocialModelMagenticLedger`, `KeeperEmptyToolUniverse`) and adds a forward-stability disclaimer ("function names are stable identifiers; lines drift across edits") that converts future drift into metadata-only refreshes.
+2. **Citation refresh** (Cycle 40-43, 4 PRs) — verifies and corrects stale OCaml line citations in 5 specs (`KeeperTurnCycle`, `KeeperRuntimeLifecycle`, `KeeperDecisionPipeline`, `KeeperHeartbeat`, `KeeperSocialModelMagenticLedger`, `KeeperEmptyToolUniverse`) and adds a forward-stability disclaimer ("function names are stable identifiers; lines drift across edits") that converts future drift into metadata-only refreshes.
 
 ### Added (spec ↔ code navigation infrastructure — autonomous Cycle 24-44)
 
@@ -862,7 +862,7 @@ The headline thread for this release is the autonomous **Cycle 24-44 spec ↔ co
 ### Changed (spec citation refresh — autonomous Cycle 40-43)
 
 - `#11641` `KeeperTurnCycle.tla` — 22 stale line citations across 4 OCaml files refreshed to current main; forward-stability disclaimer added.
-- `#11645` `KeeperCascadeLifecycle.tla` + `KeeperDecisionPipeline.tla` — sibling refresh of the same `keeper_registry.ml` setter family (`mark_turn_started` 386→493, `mark_turn_finished` 472→614, etc.; 8 setters total).
+- `#11645` `KeeperRuntimeLifecycle.tla` + `KeeperDecisionPipeline.tla` — sibling refresh of the same `keeper_registry.ml` setter family (`mark_turn_started` 386→493, `mark_turn_finished` 472→614, etc.; 8 setters total).
 - `#11647` `KeeperHeartbeat.tla` — 3 stale `keeper_keepalive.ml` citations refreshed (uniform +13 drift; matches Cycle 27 anchor's inline drift note).
 - `#11649` `KeeperSocialModelMagenticLedger.tla` + `KeeperEmptyToolUniverse.tla` — narrow batch (2 specs, 1 line each + adjacent anchors).
 
@@ -877,7 +877,7 @@ This release also rolls up substantial operational and infrastructure work merge
 - **Path leak removal** (`#11403`) — relative paths or hashes in `keeper_alerting_path.ml` error strings (Tier A3).
 - **Heartbeat / TaskAcquisition / ApprovalQueue specs** (`#11408`, `#11412`, `#11417`) — 3 new spec modules with bug-action contracts (Tier B1/B2/B3).
 - **`tools/tlc_test_gen/`** (`#11525`, `#11539`, `#11553`, `#11563`) — TLC counterexample → OCaml regression test scaffold + nested record fixture + PPX-free test runner + multi-spec self-validation (Tier C2).
-- **234 other operational commits** across feat/fix/refactor/chore — feature work in cascade routing, dashboard, MCP transport, design-system token migration, PPX adoption, type SSOT extractions, OAS pin bumps, etc.
+- **234 other operational commits** across feat/fix/refactor/chore — feature work in runtime routing, dashboard, MCP transport, design-system token migration, PPX adoption, type SSOT extractions, OAS pin bumps, etc.
 
 ### Notes
 
@@ -910,7 +910,7 @@ Keeper fleet reliability release: empty `active_goal_ids` now auto-repairs via p
 
 Aggregate of 17 commits since v0.18.6 (11 feat / 4 fix / 1 test / 1 chore). No breaking API changes.
 
-Operational keeper-contract correctness release: `require_tool_use` contract now accepts `keeper_stay_silent` as a satisfied turn (decisive no-op), eliminating a contract-vs-prompt mismatch that rejected ~40% of post-cascade-fix turns. Plus dashboard StatCard retirement (3-sweep migration into KpiStrip) and observability surface emissions for substrate visibility.
+Operational keeper-contract correctness release: `require_tool_use` contract now accepts `keeper_stay_silent` as a satisfied turn (decisive no-op), eliminating a contract-vs-prompt mismatch that rejected ~40% of post-runtime-fix turns. Plus dashboard StatCard retirement (3-sweep migration into KpiStrip) and observability surface emissions for substrate visibility.
 
 ### Added (observability + structural)
 - `#11125` observability — emit `[substrate:tool_surface]` log + SSE on TurnReady (per-turn tool surface visibility)
@@ -941,7 +941,7 @@ Operational keeper-contract correctness release: `require_tool_use` contract now
 
 Aggregate of 37 commits since v0.18.5 (15 fix / 13 feat / 7 i18n / 1 perf / 1 chore). No breaking API changes.
 
-Operational hardening release: keeper recovery surfaces (oas_timeout retry guard relax, watchdog auto-pause on stale termination storm, zombie detection seed, cascade-filter dedup) plus continuation of canonical SPEC token wave (status/border/bg-hover/bg-surface/accent-soft/CSS-files) and 7 localization rounds.
+Operational hardening release: keeper recovery surfaces (oas_timeout retry guard relax, watchdog auto-pause on stale termination storm, zombie detection seed, runtime-filter dedup) plus continuation of canonical SPEC token wave (status/border/bg-hover/bg-surface/accent-soft/CSS-files) and 7 localization rounds.
 
 ### Added
 - `#11070` dashboard — Heartbeat + LifelineBar primitives (cb-group-a)
@@ -964,7 +964,7 @@ Operational hardening release: keeper recovery surfaces (oas_timeout retry guard
 - `#11057` keeper — relax `oas_timeout` retry guard 30→15 (cycle6 band-aid)
 - `#11055` keeper-watchdog — Phase 2 auto-pause on stale termination storm (closes #10765)
 - `#11062` keeper — seed `last_turn_ts` to bootstrap time so watchdog can detect zombies
-- `#11084` cascade-filter — dedupe `all-providers-rejected` WARN, promote first to ERROR (#11060)
+- `#11084` runtime-filter — dedupe `all-providers-rejected` WARN, promote first to ERROR (#11060)
 - `#11080` keeper — stop leaking host playground paths to LLM tool responses
 - `#11099` keeper — surface 5 P2 silent failures (telemetry gaps)
 - `#11074` keeper — surface 2 P1 silent failures in registry
@@ -984,7 +984,7 @@ Operational hardening release: keeper recovery surfaces (oas_timeout retry guard
 - `#11091` localize 10 api/ thrown Error payloads (round-100)
 - `#11086` localize 3 keeper API thrown errors (round-99)
 - `#11082` finish fsm-hub-lane-analysis (round-98)
-- `#11071` localize turn/decision/cascade/compaction lane meanings (round-97)
+- `#11071` localize turn/decision/runtime/compaction lane meanings (round-97)
 - `#11069` localize 9 'phase' lane meaning fields (round-96)
 - `#11063` localize 'vs env' delta suffix (round-95)
 
@@ -1014,7 +1014,7 @@ Continuation of the design-system unification wave — converts 10 dashboard sur
 - `#11031` color tokens in autoresearch
 - `#11028` color tokens in keeper-config-panel
 - `#11027` color tokens in telemetry-unified
-- `#11023` cascade-config-panel tokens (CS89)
+- `#11023` runtime-config-panel tokens (CS89)
 
 ### Fixed
 - `#11056` dashboard — update test assertions for i18n localized strings
@@ -1131,15 +1131,15 @@ Follow-up to v0.18.2 stability hardening. This release closes two long-standing 
 
 Aggregate of 66 commits since v0.18.1 (18 fix / 8 feat / 14 refactor / 6 perf / 9 i18n / 8 squash / 2 chore / 1 test). No breaking API changes.
 
-Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of keeper-watchdog / cascade rotation / autoboot / sandbox-docker fixes that landed after a focused diagnostic cycle, plus dashboard-side observability and dev-tooling SSOT cleanup. All `feat` entries are additive (env knobs, lint detector, telemetry semantic refinement, dev scripts, design-system sync) — no behavioural defaults changed for runtime keepers.
+Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of keeper-watchdog / runtime rotation / autoboot / sandbox-docker fixes that landed after a focused diagnostic cycle, plus dashboard-side observability and dev-tooling SSOT cleanup. All `feat` entries are additive (env knobs, lint detector, telemetry semantic refinement, dev scripts, design-system sync) — no behavioural defaults changed for runtime keepers.
 
 ### Fixed (keeper / fleet hot path)
 - `keeper-watchdog`: suppress idle-stale events during an active turn; add a separate turn-timeout (default 600s) so watchdog stops misclassifying mid-turn LLM waits as stalls (#10940).
-- `keeper`: cap cascade rotation at 1 for `required_tool_contract_violation` so a single proactive contract miss can't cycle through every provider (#10851).
+- `keeper`: cap runtime rotation at 1 for `required_tool_contract_violation` so a single proactive contract miss can't cycle through every provider (#10851).
 - `coord/task`: emit warn when a task crosses the 5-cycle oscillation threshold so operators see escalation candidates (#10719, #10920).
 - `server/autoboot`: per-task boot guard so a single hung lazy task can't block keeper boot — restore_sessions now degrades gracefully instead of hanging the boot pipeline (#10857).
-- `boot`: start `Cascade_legacy_runner` actor consumer fiber that was dropped in a refactor and left the cascade actor without a reader (#10895).
-- `cascade-filter`: per-provider rejection diagnostics for #10681 so cascade-skip reasons are visible per provider, not aggregate (#10852).
+- `boot`: start `Runtime_legacy_runner` actor consumer fiber that was dropped in a refactor and left the runtime actor without a reader (#10895).
+- `runtime-filter`: per-provider rejection diagnostics for #10681 so runtime-skip reasons are visible per provider, not aggregate (#10852).
 - `keeper-shell-docker`: detect `gh --repo X api Y` LLM-hallucinated form and self-correct (108 events / day pre-fix, #10855, #10900).
 - `keeper-shell-docker`: replace `List.hd` with pattern match (Health ratchet, #10905).
 - `auth`: stop classifying `keeper-<id>-agent` as a transient alias so per-keeper credentials don't churn (#10867).
@@ -1163,7 +1163,7 @@ Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of ke
 - `scripts`: add `cleanup-autoresearch.sh` — TTL-based quarantine for stale autoresearch dirs (#10913).
 - `telemetry`: mark `Goal_event` as `optional_when_missing` — show `not_yet` instead of `missing` for keepers that haven't emitted yet (#10921).
 - `design-system`: sync v0.4.3 — extract `semantic.css` + 6 preview pages (#10898).
-- `dashboard`: localize Cascade profile tooltip + reveal aria (round-52, #10811).
+- `dashboard`: localize Runtime profile tooltip + reveal aria (round-52, #10811).
 
 ### Changed (perf — dashboard re-render reduction)
 - `dashboard/fsm-hub`: drop 1 Hz tick to 5 s for re-render reduction (#10894).
@@ -1179,7 +1179,7 @@ Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of ke
 - 8 squash merges (autocoder dedup + small-PR rollups).
 
 ### Notes
-- Diagnostic chain that drove this batch: `#10474` cascade dead → `#10745` fd leak (separate fix wave, partially captured) → `#10765` keeper stale watchdog terminating fleet → `#10872`/`#10940` keeper-watchdog suppress + turn timeout. Diagnostic comments → autocoder fix loop closed end-to-end within 6 hours.
+- Diagnostic chain that drove this batch: `#10474` runtime dead → `#10745` fd leak (separate fix wave, partially captured) → `#10765` keeper stale watchdog terminating fleet → `#10872`/`#10940` keeper-watchdog suppress + turn timeout. Diagnostic comments → autocoder fix loop closed end-to-end within 6 hours.
 - Out of scope (deferred to follow-up release): `#10828` no process-level supervisor (awaiting operator policy decision; conflicts with `<launchd>` guidance), `#10887` keeper self_preservation `ratio=1.00` permanent lock (FSM circuit-breaker design review needed), `#10719` task-049 cycle=20 hard-stop escalation (this release adds the warn signal at threshold 5; threshold ≥15 hard-stop is a separate proposal).
 
 ## [0.18.1] - 2026-04-26 — patch: rescue v0.18.0 release (ProviderTerminal partial-match fix-forward)
@@ -1195,7 +1195,7 @@ The v0.18.0 tag exists but its GitHub release workflow failed: the OAS pin bump 
 ### Fixed
 - Watchdog: extract to standalone module, cover autoboot path (#10698).
 - Coord: resolve `git_clone` policy at canonical `.masc/config/` path (#10693).
-- Keeper: auto-pause on `cascade_exhausted` to break supervisor restart loop (task-074, #10691).
+- Keeper: auto-pause on `runtime_exhausted` to break supervisor restart loop (task-074, #10691).
 - Keeper: use container path for `default_cwd` / `private_workspace_root` in `masc_keeper_status` (#10650, #10686).
 - Deploy: build dashboard SPA in Dockerfile multi-stage build (#10684).
 - Dune: exclude misplaced `worktrees/` (no-dot) from dune scan (#10688).
@@ -1209,7 +1209,7 @@ The v0.18.0 tag exists but its GitHub release workflow failed: the OAS pin bump 
 
 ### Changed (refactor)
 - Design system PR-CS5 → PR-CS12: ActionButton/Select migration across runtime-monitor (#10722), connector-quick-bind (#10717), governance-monitor (#10715), agent-profile (#10705), memory-post-detail (#10702), tool-picker (#10694), error-panel (#10687), autoresearch (#10683).
-- Rename `Oas_sse_bridge` → `Cascade_event_bridge` (transport-agnostic, #10711).
+- Rename `Oas_sse_bridge` → `Runtime_event_bridge` (transport-agnostic, #10711).
 
 ### Chore
 - OAS pin: bump SHA to `97b8a603` (OAS #1201 TurnReady event, #10704, #10709).
@@ -1236,8 +1236,8 @@ Aggregate of 50 commits since v0.17.0 (18 feat / 11 fix / 9 refactor / 5 perf / 
 - Keeper proactive scheduler: `Claim_context` excluded from noop cycle (#10672) — unblocks 8x cooldown trap that was pinning `ollama-local` and `qa-king` keepers.
 - Keeper sandbox prompt: `/workspace` negative anchor + `workspace` word replaced (#10647) — addresses LLM training-time prior hallucination.
 - Keeper concurrency: `Stdlib.Mutex` migrated to `Eio.Mutex` in single-domain hot paths (#10649).
-- Cascade: judge profiles ordered gemini-first to skip codex 30s timeout cycle (#10642).
-- Observability: `[max_turns]` / `[hard_quota]` class label prepended to cascade-fallback log (#10641, addresses #10629).
+- Runtime: judge profiles ordered gemini-first to skip codex 30s timeout cycle (#10642).
+- Observability: `[max_turns]` / `[hard_quota]` class label prepended to runtime-fallback log (#10641, addresses #10629).
 - Dashboard tests: `successClass` / `statusChipClass` aligned with semantic aliases (#10662); telemetry / overview tests aligned with current source (#10654).
 
 ### Performance
@@ -1251,7 +1251,7 @@ Aggregate of 50 commits since v0.17.0 (18 feat / 11 fix / 9 refactor / 5 perf / 
 
 ## [0.17.0] - 2026-04-26
 
-Aggregate of 103 commits since v0.16.0 (42 feat / 24 fix / 15 perf / 15 refactor / 4 chore / 2 docs). No breaking API changes. Headline: design-system semantic alias migration completes its bulk of CSS/JSX surface; cascade unblock series resolves repeated `agent_sdk` cap drift; keeper stability gains stale watchdog fiber restart and stream-idle gap-detection.
+Aggregate of 103 commits since v0.16.0 (42 feat / 24 fix / 15 perf / 15 refactor / 4 chore / 2 docs). No breaking API changes. Headline: design-system semantic alias migration completes its bulk of CSS/JSX surface; runtime unblock series resolves repeated `agent_sdk` cap drift; keeper stability gains stale watchdog fiber restart and stream-idle gap-detection.
 
 ### Added (feat)
 - Design-system semantic alias migration (35 PRs, batches PR-M14 through PR-M26 + S3e–S3h). SPEC §3 alias introduced to both products at Stage 1 (#10611), then sweeps over `layout.css` (#10586), `sidebar.css` (#10587), `drawer.css` (#10588), `swimlanes.css` (#10589), `primitives.css` (#10590), `deck.css` (#10591), `code.css` (#10595), `cockpit.css` (#10597), `preview/*.html` (#10600), `preview/*.jsx` (#10601), `ui_kits/cockpit/*.jsx` (#10602), `_preview.css` (#10621). Bonsai shadow-ring rename + SPEC §6.2 escape hatch (#10620). Bonsai paper colors + scrollbar absorbed (#10556).
@@ -1263,11 +1263,11 @@ Aggregate of 103 commits since v0.16.0 (42 feat / 24 fix / 15 perf / 15 refactor
 - Bumped `agent_sdk` floor to 0.177.0 (#10608) after raising cap to <0.178.0 to align with pinned SHA v0.177.0 (#10592).
 
 ### Fixed
-- Cascade unblock series: accept `weight=0` in toml materializer (#10571 / #10610) after the codex_cli weight=0 sweep (#10554) was reverted (#10613). Pin agent_sdk upper bound to <0.177.0 (#10497 / #10529), then raised to <0.178.0 (#10592). `check-oas-pin` regex accepts capped-floor pattern (#10596). Keeper supervisor handles `Stale_turn_timeout` in cohort_key (#10572 / #10574).
+- Runtime unblock series: accept `weight=0` in toml materializer (#10571 / #10610) after the codex_cli weight=0 sweep (#10554) was reverted (#10613). Pin agent_sdk upper bound to <0.177.0 (#10497 / #10529), then raised to <0.178.0 (#10592). `check-oas-pin` regex accepts capped-floor pattern (#10596). Keeper supervisor handles `Stale_turn_timeout` in cohort_key (#10572 / #10574).
 - Keeper stability: stale watchdog triggers fiber restart instead of cosmetic broadcast (#10540); `stream_idle_timeout` set to gap-detection value 120s (#10604); `Stdlib.Lazy` replaced with Atomic+Mutex memo in keeper memory bank (#10399 / #10407); personality re-sync loop stopped via symmetric compare (#10479); turn_timeout_sec_live aligned with SSOT (#10456 / #10469); pause directive persist + duplicate cohort key drop (#10593).
 - Sandbox: accept legacy 3-field `docker inspect` without `ttl_sec` (#10488 / #10513 / #10514); preserve trailing tab; scrub `roots=` leak from path-rejection errors (#10349 / #10383); `gh-validation` inlines allowed command list in blocked error (#10561 / #10566).
 - Auth: write short-form alias for every keeper at bootstrap (#10440 / #10525). Auth bridge SSOT routing (#10400 follow-through).
-- Observability: inline rejection context in `cascade-no-callable-models` ERROR (#10528 / #10541); align `system_log` filename to UTC (#10392 / #10401); duplicate `InferenceTelemetry` emit dropped (#10489 / #10490 / #10511).
+- Observability: inline rejection context in `runtime-no-callable-models` ERROR (#10528 / #10541); align `system_log` filename to UTC (#10392 / #10401); duplicate `InferenceTelemetry` emit dropped (#10489 / #10490 / #10511).
 - TLA+: `OperatorPauseBroadcast` spec wired into `tla-check.sh` (#10516 / #10521).
 - Dashboard: cb-group-a.jsx de-duplication after squash union (#10437 + #10451 → #10467).
 
@@ -1283,10 +1283,10 @@ Aggregate of 103 commits since v0.16.0 (42 feat / 24 fix / 15 perf / 15 refactor
 
 ## [0.16.0] - 2026-04-26
 
-Aggregate of 206 commits since v0.15.0 (95 fix / 38 perf / 21 feat / 13 chore / 10 refactor / 9 diag / 5 test / 3 obs / 2 docs). No breaking API changes. Headline: stability-heavy release — 95-fix sweep across keeper/sandbox/cascade/auth + 38 hot-path performance reductions + Trust system Phase 0a–1.
+Aggregate of 206 commits since v0.15.0 (95 fix / 38 perf / 21 feat / 13 chore / 10 refactor / 9 diag / 5 test / 3 obs / 2 docs). No breaking API changes. Headline: stability-heavy release — 95-fix sweep across keeper/sandbox/runtime/auth + 38 hot-path performance reductions + Trust system Phase 0a–1.
 
 ### Added (feat)
-- Cascade trust system: fingerprint counter for trust observability (Phase 0a, #10292), JSONL snapshot of trust state every minute (Phase 0b, #10331), `trust_score` auto-rotation on persistent failures (Phase 1, #10365).
+- Runtime trust system: fingerprint counter for trust observability (Phase 0a, #10292), JSONL snapshot of trust state every minute (Phase 0b, #10331), `trust_score` auto-rotation on persistent failures (Phase 1, #10365).
 - Keeper identity: `normalize_all_names` SSOT (P1, #10417); silent identity-fallback paths surfaced (PR-I scope 1, #10351).
 - Governance: destructive vs evasion-only payload severity split (#10355); routine matcher preflight + `keeper_shell git_clone` allowlist (PR-E, #10396).
 - Transport: identity headers preserved on Codex CLI runtime MCP (#10359).
@@ -1298,7 +1298,7 @@ Aggregate of 206 commits since v0.15.0 (95 fix / 38 perf / 21 feat / 13 chore / 
 - 10 refactor + 13 chore commits — see PR refs.
 
 ### Fixed
-- Build / cascade unblock: main build unblocked after Phase-1 trust revert orphans (#10441 / #10445); `discover_keepers_toml` per-cycle WARN spam dedup (#10259 / #10380); `cascade_name` with `keeper_assignable=false` rejected (#10388 / #10406); degraded TOML-section fallback for keeper-name validator (#10259 / #10274); attribute and cool down Kimi resumable failures (#10285 / #10300); scheduler-safe RNG mutex (#10413).
+- Build / runtime unblock: main build unblocked after Phase-1 trust revert orphans (#10441 / #10445); `discover_keepers_toml` per-cycle WARN spam dedup (#10259 / #10380); `runtime_id` with `keeper_assignable=false` rejected (#10388 / #10406); degraded TOML-section fallback for keeper-name validator (#10259 / #10274); attribute and cool down Kimi resumable failures (#10285 / #10300); scheduler-safe RNG mutex (#10413).
 - Keeper / sandbox: keepers taught to chdir before git in sandbox (#10424 / #10435); fall back to gh CLI keychain for sandbox `GH_TOKEN` (#10378); price cache usage in turn cost (#10379); register sandbox cleanup in server background loop (#10366); raise `git status` timeout default (#10360); consensus regex cache guard (#10377).
 - Auth / dispatcher: ctx identity enforced on board author/voter (#10297 / #10305); keeper bearer tokens split at bootstrap (#10304 / #10313).
 - Telemetry: tolerate nullable `Tool_assigned` preset (#10450); recover tool and task lifecycle diagnostics (#10358 / #10369); time-based flush makes sub-cap heuristic-metrics emit visible (#10348 / #10363); per-failure learning tags emitted instead of boilerplate (#10325 / #10330).
@@ -1323,16 +1323,16 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 
 ### Added (feat)
 - Keeper observability counters: per-keeper turn-latency buckets (#10124), livelock observer (#10123), context_max drift (#10122), require_tool_use violations (#10099), proactive skip-reason (#10060), compaction outcome (#10011), usage-trust Prometheus (#10021), Hebbian per-outcome edge (#10048), metric-emit drops (#10053).
-- Keeper runtime: affordance-tool intersection at `Require_tool_use` gate (#10141), Ollama `keep_alive`/`num_ctx` forwarding from cascade.toml (#9985), wire `Gh_exit_class` into docker sandbox (#9974), persona authoring wizard (#9940).
+- Keeper runtime: affordance-tool intersection at `Require_tool_use` gate (#10141), Ollama `keep_alive`/`num_ctx` forwarding from keeper_runtime.toml (#9985), wire `Gh_exit_class` into docker sandbox (#9974), persona authoring wizard (#9940).
 - Coord/FSM: per-agent FSM drift counter (#10152), Prometheus task FSM drift (#10082).
 - Dashboard: gRPC `events_dropped` strip (#10114), WS delivery counters (#10106, #10107), WS-only cutover flag (#10102), websocket route slice expansion (#9963), a11y high-contrast + forced-colors support (#10080).
-- OAS/cascade: per-kind `masc_oas_error` counter (#10039), resolved_model_id metric label (#9962), context_overflow_imminent action signal (#9954).
+- OAS/runtime: per-kind `masc_oas_error` counter (#10039), resolved_model_id metric label (#9962), context_overflow_imminent action signal (#9954).
 - Keeper CLI: auto-construct Claude Code / Kimi CLI MCP config behind flag (#10059).
 
 ### Fixed
 - Keeper: backlog gating on claimable tasks (#10159), supervisor sweep startup (#10161), max_restart loud alert (#10147), Ollama saturation skip (#10150), runtime MCP trajectory record (#10154), failed-turn episode persist (#10144), Hebbian first consolidation on fork (#10137), per-model telemetry empty-response defense (#10090), `keeper_msg` merged-CAS retry (#10135), Anthropic cache silent-disable flag (#10128), smart-heartbeat starvation (#10078), per_turn multiplier removed in favor of wall-clock cap (#10074), unified turn write_meta CAS retry (#10145).
 - OAS: API fingerprint metadata drift detection (#10156), oas-bridge timeout SSOT (#10108), oas-bridge typed contract (#10153), `codex_cli` MCP omission WARN dedup (#10100), suppress repeated omission warnings (#10109).
-- Cascade: declarative `fallback_cascade` for single-provider profiles (life-support escalation) (#10157).
+- Runtime: declarative `fallback_runtime` for single-provider profiles (life-support escalation) (#10157).
 - Telemetry: dedupe websocket delivery schema (#10151), legacy degenerate row scrub at init (#10095), heuristic-theatre Prometheus migration follow-up (#10044).
 - Governance: auto-approve `masc_transition` + `keeper_board_post` for autonomous flow (#10148), default judge timeout raised to 180s (#10132), anti-rationalization gate-2 demoted to LLM advisory (#10116).
 - Filesystem: `save_file_atomic` orphan boot sweep (#10131), test-executable HOME guard (#10085).
@@ -1380,9 +1380,9 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 ## [0.12.3] - 2026-04-21
 
 ### Added
-- `config/cascade.toml` is now the supported human-authored cascade catalog
-  source. When present, the runtime materializes sibling `config/cascade.json`
-  on load and continues serving the existing JSON-backed cascade path without a
+- `config/keeper_runtime.toml` is now the supported human-authored runtime catalog
+  source. When present, the runtime materializes sibling `config/runtime.json`
+  on load and continues serving the existing JSON-backed runtime path without a
   consumer-facing schema change.
 
 ### Changed
@@ -1393,16 +1393,16 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 - `Otel_spans` now ships an explicit `.mli` interface that hides mutable
   internal refs and publishes the supported tracing API surface
   (`init`, exporter setup, `shutdown`, span helpers, and trace state accessors).
-- TOML-backed cascade catalogs now fail closed: invalid `cascade.toml` blocks
-  cascade resolution instead of silently falling back to stale generated JSON.
-- Dashboard cascade surfaces now make the authoring/runtime split explicit.
-  The cascade panel shows the active authoring source, raw `cascade.json`
+- TOML-backed runtime catalogs now fail closed: invalid `keeper_runtime.toml` blocks
+  runtime resolution instead of silently falling back to stale generated JSON.
+- Dashboard runtime surfaces now make the authoring/runtime split explicit.
+  The runtime panel shows the active authoring source, raw `runtime.json`
   editing becomes read-only when TOML-backed, and keeper config surfaces now
-  show both the selected `cascade_name` and the paths that control selection
+  show both the selected `runtime_id` and the paths that control selection
   versus generated runtime catalog state.
 - Regression coverage now locks the TOML materialization contract, resolver
   behavior for TOML-only config roots, dashboard raw-config read-only behavior,
-  and keeper-config source/cascade provenance.
+  and keeper-config source/runtime provenance.
 
 ### Deprecated
 - None.
@@ -1474,11 +1474,11 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   warns and maps (`legacy_local→local`, `docker_hardened|docker_with_git→docker`);
   the compat arm is removable once state JSON/TOML files are migrated. See
   RFC-0006 §8 Addendum.
-- **OAS pin bump → `main@3dabe7a8` (`v0.164.0`).** `scripts/oas-agent-sdk-pin.sh` now follows `jeong-sik/oas` `main` instead of the older retired cascade branch, and the dependency floor in `dune-project` / `masc_mcp.opam` is raised to `agent_sdk >= 0.164.0`. This matches the upstream version-boundary fix where current OAS `main` advertises `0.164.0` after post-`0.163.0` public API growth, so downstream pin metadata no longer conflates branch head with the older `0.163.0` line.
+- **OAS pin bump → `main@3dabe7a8` (`v0.164.0`).** `scripts/oas-agent-sdk-pin.sh` now follows `jeong-sik/oas` `main` instead of the older retired runtime branch, and the dependency floor in `dune-project` / `masc_mcp.opam` is raised to `agent_sdk >= 0.164.0`. This matches the upstream version-boundary fix where current OAS `main` advertises `0.164.0` after post-`0.163.0` public API growth, so downstream pin metadata no longer conflates branch head with the older `0.163.0` line.
 
 ### Added
 
-- **CLI auto-model rotation for cascade specs.** `gemini_cli:auto` now
+- **CLI auto-model rotation for runtime specs.** `gemini_cli:auto` now
   expands into a quota-aware concrete Gemini CLI candidate list
   (Flash/Lite first, Pro last), and `codex_cli:auto` expands through a
   light-to-heavy supported Codex order from `gpt-5.2` up to `gpt-5.4`,
@@ -1488,7 +1488,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   unsupported-model errors; operators can still re-add them explicitly
   through `MASC_CODEX_CLI_AUTO_MODELS`.
   `claude_code:auto` remains single-entry by default but can be expanded via
-  `MASC_CLAUDE_CODE_AUTO_MODELS`. This lets existing cascade
+  `MASC_CLAUDE_CODE_AUTO_MODELS`. This lets existing runtime
   failover/round-robin/cooldown machinery rotate CLI models without
   relying on interactive `/model` state.
 
@@ -1587,10 +1587,10 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   failure lines (`Tests  2 failed | 3 passed (5)` →
   `Test_fail {count=2}`).  Banner-required behaviour is covered
   by a dedicated negative test (`test_jest_vitest_banner_
-  required`).  Verifier cascade now covers dune + cargo + pytest
+  required`).  Verifier runtime now covers dune + cargo + pytest
   + go test + jest + vitest, bringing JavaScript-ecosystem
   runner output (Kidsnote FE repos, most npm projects) into the
-  same typed-marker surface the rest of the cascade consumes.
+  same typed-marker surface the rest of the runtime consumes.
 
 ## [0.12.0] - 2026-04-20
 
@@ -1644,7 +1644,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   false-positive. Count is obtained by counting `--- PASS:` /
   `--- FAIL:` occurrences — one per completed subtest. Banner-
   required behavior is covered by a dedicated negative test
-  (`test_go_test_banner_required`). Verifier cascade now covers
+  (`test_go_test_banner_required`). Verifier runtime now covers
   dune + cargo + pytest + go test.
 
 - **Legendary Bash shadow-counters HTTP endpoint.**  New
@@ -1678,7 +1678,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   summary banner so that bare "N passed" prose elsewhere in stdout
   cannot false-positive.  Banner-required behavior is covered by a
   dedicated negative test
-  (`test_pytest_banner_required`).  Lifts the verifier cascade out
+  (`test_pytest_banner_required`).  Lifts the verifier runtime out
   of OCaml-only coverage so Python-test keepers get the same typed
   marker stream as dune keepers.
 
@@ -1788,7 +1788,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
     translates `(semantic, stdout, stderr)` into a typed marker
     list (`Test_pass {count}`, `Build_ok`, `Lint_clean`,
     `Git_clean`, …) with `Exact | Heuristic` confidence, so the
-    verifier cascade can consume structured proofs instead of regex
+    verifier runtime can consume structured proofs instead of regex
     scraping.  Emitted when `MASC_BASH_VERIFIABLE_MARKERS` is set.
 
   All six phases land behind flags so operators can soak each axis
@@ -1932,7 +1932,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   introduced a Policy Engine that rejects empty `--allowed-mcp-server-names`
   entries, which crashed every keeper turn that set
   `OAS_GEMINI_NO_MCP=1` (i.e. all 4 built-in keepers — scholar / analyst
-  / executor / verifier — and any cascade vendoring Gemini). OAS now
+  / executor / verifier — and any runtime vendoring Gemini). OAS now
   passes the sentinel name `__oas_no_mcp__`. Dependency floor and
   declared base version remain `0.162.0`.
 - **OAS pin bump → `v0.162.0`.** Raises the `agent_sdk` dependency floor
@@ -1963,7 +1963,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   `f70fd95e79bbe5f53ddd6687d3438e39f7b2c59f`). Picks up OAS #1001's
   `completion_contract` fix: `validate_response` now accepts no-ToolUse
   responses when `stop_reason` is `MaxTokens` or `Unknown "pause_turn"`
-  (resumable), unblocking Haiku 4.5 vendor_mix_balanced cascades that
+  (resumable), unblocking Haiku 4.5 vendor_mix_balanced runtimes that
   exhaust the 8192-token output budget during extended thinking before a
   ToolUse block emits. `EndTurn` / `StopToolUse` / `StopSequence` /
   other `Unknown` reasons continue to reject no-ToolUse responses.
@@ -2025,9 +2025,9 @@ observation and fix — silent cost of the pre-fix contract shape.
     or whitespace-only env values as unset; optional `?getenv` injection
     seam for tests (#8190).
 
-- **Cascade + verification.**
-  - Hard-quota-aware immediate cooldown in cascade (#8249).
-  - `/api/v1/cascade/health` exposes `hard_quota_cooldown_sec` (#8277).
+- **Runtime + verification.**
+  - Hard-quota-aware immediate cooldown in runtime (#8249).
+  - `/api/v1/runtime/health` exposes `hard_quota_cooldown_sec` (#8277).
   - Verification-protocol warns on missing-contract submit (#8276).
   - Verification-panel exposes `task_title` + pending-0 hint (#8259).
   - Dashboard surfaces live `pending_ruling` count instead of hardcoded 0 (#8268).
@@ -2141,7 +2141,7 @@ Post-0.9.10 bulk merge cycle (admin override). Corrects the four entries
 belong to this release.
 
 - **Dashboard UX.**
-  - Cascade Profiles + Keeper Mapping merged into one Cascade Routing card (#7986).
+  - Runtime Profiles + Keeper Mapping merged into one Runtime Routing card (#7986).
   - Visible toast cap at 5 + test coverage 0 → 9 (#7985).
   - Text filter on harness-health compaction/handoff lists (#7981).
   - Text filter on agent-detail owned-tasks + histories (#7982).
@@ -2149,9 +2149,9 @@ belong to this release.
   - `ActionButton` prop whitelist expanded (aria-busy/id/title/testId) + tests 0 → 16 (#7995).
   - `TextInput` / `TextArea` now forward `id` — fixes orphan `<label for>` a11y regression (#7987).
 
-- **Keeper / cascade / server.**
-  - Raw `cascade_name` preserved on keeper side; canonicalization pushed to point-of-use (#7978).
-  - `Accept_rejected` split from success in cascade evaluator; added `evict_idle` + `rejected_in_window` metrics (#7996).
+- **Keeper / runtime / server.**
+  - Raw `runtime_id` preserved on keeper side; canonicalization pushed to point-of-use (#7978).
+  - `Accept_rejected` split from success in runtime evaluator; added `evict_idle` + `rejected_in_window` metrics (#7996).
 
 - **Performance.**
   - Autoresearch pagination: in-memory mtime cache removes O(N) file I/O bottleneck (#7988).
@@ -2417,8 +2417,8 @@ No code changes. Bump captures the documentation/hygiene cycle as a tagged relea
   duplicated lines across Slack/iMessage/Telegram sidecars.
 - **Env-var aliases** for Slack + Telegram timeout/path config fields
   (#7506).
-- **Cascade `weighted_entry.supports_tool_choice`** (#7493). Per-entry
-  capability override parsed from cascade.json; `sangsu` profile's
+- **Runtime `weighted_entry.supports_tool_choice`** (#7493). Per-entry
+  capability override parsed from runtime.json; `sangsu` profile's
   Ollama entry declares `"supports_tool_choice": true`.
 
 ### Changed
@@ -2528,7 +2528,7 @@ had the full Phase 2 release to migrate.
   on transition trail (#7397); time-windowed observatory telemetry (#7390).
 - **Keeper features**: social transition reasons exposed + cross-turn state
   (#7399, #7395); magentic ledger social model + TLA+ spec (#7426, #7430);
-  campaign FSM harness (#7385); `sangsu` cascade profile — local-first Ollama +
+  campaign FSM harness (#7385); `sangsu` runtime profile — local-first Ollama +
   GLM fallback (#7404); pipe support in command execution (#7393).
 
 ### Changed
@@ -2547,11 +2547,11 @@ had the full Phase 2 release to migrate.
 - **Pulse library extraction** (#7452 B1b): the beat engine moved to
   `lib/pulse/` as the `masc_pulse` sub-library. Unblocks Gate's dependency on
   Pulse without routing the arrow back through `masc_mcp`.
-- **OAS pin → v0.148.0** (from v0.141.0) (#7394 + prior pins). Legacy cascade
+- **OAS pin → v0.148.0** (from v0.141.0) (#7394 + prior pins). Legacy runtime
   API removed from OAS across v0.142.0–v0.148.0 — `Judge.judge` and
   `Tool_selector.default_rerank_fn` now take a single `Provider_config.t`, and
-  `Cascade_executor` was deleted (839 LOC). Cascade orchestration is now
-  entirely a MASC concern; `keeper_agent_run` resolves the cascade locally,
+  `Runtime_executor` was deleted (839 LOC). Runtime orchestration is now
+  entirely a MASC concern; `keeper_agent_run` resolves the runtime locally,
   picks the first healthy provider, and passes a single provider to the
   single-provider SDK. Falls back to `core+prefilter+discovered` on
   no-healthy-provider (same as before).
@@ -2643,7 +2643,7 @@ had the full Phase 2 release to migrate.
 - Agent + Transport metric categories — recategorize `masc_agent_*`,
   `masc_grpc_*`, `masc_ws_*` that previously fell into Other (#7017).
 - RFC-0003 Keeper Composite Lifecycle docs + TLA+ spec with buggy variants
-  (cascade, compaction, recovery) for regression-style verification (#7020).
+  (runtime, compaction, recovery) for regression-style verification (#7020).
 
 ### Fixed
 - UTF-8 sanitization on outbound telemetry writers. `keeper_tool_call_log`
@@ -2684,7 +2684,7 @@ had the full Phase 2 release to migrate.
 
 ### Changed
 - Replace all `Eio.traceln` in `lib/` with structured `Log` module
-  calls (cascade_inference, autoresearch_codegen, dashboard judges,
+  calls (runtime_inference, autoresearch_codegen, dashboard judges,
   opentelemetry_client). Zero ad-hoc traceln calls remain.
 - Add relay calibration drift metric: warn on correction_factor
   outside [0.5, 1.5], debug on shift > 0.1.
@@ -2692,18 +2692,18 @@ had the full Phase 2 release to migrate.
 ## [0.5.10] - 2026-04-13
 
 ### Added
-- MASC-driven cascade FSM Phase 2: direct provider failover from MASC (#6776)
+- MASC-driven runtime FSM Phase 2: direct provider failover from MASC (#6776)
 - Event_bus envelope API adoption: correlation_id + run_id metadata (#6777)
-- Groq cascade fallback restored (#6566)
+- Groq runtime fallback restored (#6566)
 - OAS log bridge to masc-mcp structured logging (#6618)
-- Keeper cascade provider allowlist env knob (#6478)
+- Keeper runtime provider allowlist env knob (#6478)
 - Cross-model enforcement rate on dashboard (#6565)
 - Keeper FSM dashboard exposure + TLA+ bug model (#6556)
 - Prometheus llm_provider_http_status metrics (#6514)
 
 ### Fixed
 - OAS pin v0.124.2: GLM auth passthrough (static_token) + intra-turn truncation (#6781, #6790)
-- Cascade: add default_api_key_env for GLM providers (#6784)
+- Runtime: add default_api_key_env for GLM providers (#6784)
 - Admission queue: size to actual decode parallelism (#6768), passthrough mode (#6788)
 - Keeper: context compaction in reducer (#6731), unified prompt CI alignment (#6700, #6783)
 - Test: prevent integration tests from leaking real PRs to GitHub (#6756)
@@ -2746,10 +2746,10 @@ had the full Phase 2 release to migrate.
 - RNG: guard module-level Random.State with Eio.Mutex in 3 modules (#6652)
 - Repair loop: gate working_dir on caller playground (#6651)
 - Local runtime pool: drop dead select_runtime, re-check fingerprint after env load (#6650)
-- Cascade: remove coding_first profile, cap max_tokens to 32768 (#6687)
-- Cascade: clamp keeper_unified + coding_first max_tokens to 32768 (Groq limit) (#6686)
+- Runtime: remove coding_first profile, cap max_tokens to 32768 (#6687)
+- Runtime: clamp keeper_unified + coding_first max_tokens to 32768 (Groq limit) (#6686)
 - Build identity: probe exe_dir before cwd for git commit (#6688)
-- Keeper: masc_* boundary-exempt gap + cascade.json prune (#6681)
+- Keeper: masc_* boundary-exempt gap + runtime.json prune (#6681)
 - Worker OAS: stop sending min_p=0.0 to cloud providers (#6672)
 - Keeper checkpoint store: classify Eio.Io Fs Not_found as Not_found (#6655)
 
@@ -2775,7 +2775,7 @@ had the full Phase 2 release to migrate.
 ## [0.5.6] - 2026-04-12
 
 ### Added
-- Restore Groq cascade fallback, confirmed by OAS 0.121.0 (#6566)
+- Restore Groq runtime fallback, confirmed by OAS 0.121.0 (#6566)
 - Bridge Agent_sdk.Log to masc-mcp structured log (#6618)
 
 ### Fixed
@@ -2818,15 +2818,15 @@ had the full Phase 2 release to migrate.
 ## [0.5.4] - 2026-04-11
 
 ### Added
-- `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` env knob for runtime cascade narrowing (#6478)
+- `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` env knob for runtime runtime narrowing (#6478)
 - `Config_dir_resolver.log_resolution` startup log with shadow hint (#6478)
-- `test_cascade_config_validity` alcotest suite for cascade.json profiles (#6478)
+- `test_runtime_config_validity` alcotest suite for runtime.json profiles (#6478)
 - `scripts/sync-version-truth.sh` dry-run version sync helper (#6478)
 - `scripts/opam-pin-external-deps.sh --install` flag (#6478)
 
 ### Changed
 - Keeper: remove scope_kind gating (#6544)
-- Cascade: drop unsupported groq labels (#6558)
+- Runtime: drop unsupported groq labels (#6558)
 - Dashboard: remove dead SSE route entries (#6557)
 
 ### Fixed
@@ -2907,7 +2907,7 @@ had the full Phase 2 release to migrate.
 
 ### Fixed
 - Restore keeper reset surface and typed tool expectations (#6477)
-- Use glm-coding (Coding Plan) before glm (pay-per-use) in cascade (#6475)
+- Use glm-coding (Coding Plan) before glm (pay-per-use) in runtime (#6475)
 - Align 4 tests with post-#6433 main state (#6460)
 
 ## [0.5.0] - 2026-04-11
@@ -2925,7 +2925,7 @@ had the full Phase 2 release to migrate.
 - Decision Pipeline FSM diagram in keeper detail dashboard (#6405)
 - masc_keeper_reset command for stale runtime state (#6428)
 - rate_limit.mli — hide bucket internals behind abstract type (#6431)
-- coding_first cascade profile — glm-5.1 first for PR-capable keepers (#6430)
+- coding_first runtime profile — glm-5.1 first for PR-capable keepers (#6430)
 - Voice tools for sangsu (ElevenLabs Roger) (#6247)
 - Keeper Failing → recovery minimum shards + .masc/ whitelist (Phase B2) (#6325)
 
@@ -2957,7 +2957,7 @@ had the full Phase 2 release to migrate.
 
 ### Added
 - Startup TOML cross-validation for tool registration (#6093)
-- Keeper cascade config API + dashboard selector + TOML hot-reload (#6100)
+- Keeper runtime config API + dashboard selector + TOML hot-reload (#6100)
 - MASC store diagnosis cards in telemetry view (#6105)
 - OAS runtime diagnosis surfaces (#6061)
 - Prompt fingerprint telemetry (#6075)
@@ -2986,7 +2986,7 @@ had the full Phase 2 release to migrate.
 - Dashboard error prefix stripping before JSON categorization (#6057)
 - Removed fake no-op Dashboard_cache.set_clock/set_sw (#6081, #6074)
 - Dead OAS proof bridge panels removed from telemetry view (#6106)
-- Sangsu keeper switched to local_only cascade (#6088)
+- Sangsu keeper switched to local_only runtime (#6088)
 - CI semantic version comparison in OAS pin check (#6111)
 
 ## [0.2.0] - 2026-04-09
@@ -3012,7 +3012,7 @@ had the full Phase 2 release to migrate.
 
 ### Changed
 - Adaptive OAS timeout — context-based (180s + 1.5s/1K tokens), max_turns 200→5 (#5987)
-- GLM cascade simplified — removed redundant glm:glm-5-turbo, OAS glm:auto handles expansion (#5985)
+- GLM runtime simplified — removed redundant glm:glm-5-turbo, OAS glm:auto handles expansion (#5985)
 - Time constants extracted to Masc_time_constants SSOT module (#5993)
 - Network defaults centralized — SearXNG, OTel, allowed_origins (#5994)
 - Output cap and min context constants deduplicated (#5995)
@@ -3020,7 +3020,7 @@ had the full Phase 2 release to migrate.
 ### Fixed
 - Dashboard null-status crash — assoc_member wrapper tolerates null nested JSON (#5985)
 - Keeper ambiguous-partial-commit reclassification for read-only tools (#5983, #5973)
-- OAS cascade model timeout derived from keeper OAS budget (#5985)
+- OAS runtime model timeout derived from keeper OAS budget (#5985)
 - Cheolsu keeper set to ollama-only for slot queuing test (#5986)
 - TLA+ spec: separated timeout from fairness, use Filename.concat (#5979)
 - Version truth sync across ROADMAP, SPEC-INDEX, PRODUCT-OPERATING-PLAN (#5982)
@@ -3042,7 +3042,7 @@ had the full Phase 2 release to migrate.
 - Hardcoded port 8085 removal — env-driven LLM endpoint discovery (#5962)
 - Keeper name and MCP prefix boundary resolution (#5967)
 - Dashboard null-agent patch guard (#5971)
-- GLM-5-turbo cascade fallback for outage resilience (#5956)
+- GLM-5-turbo runtime fallback for outage resilience (#5956)
 - Read path validation with bounded suffix resolution and symlink escape prevention (#5930)
 - Approval queue fiber cancellation cleanup — no orphan entries (#5955)
 

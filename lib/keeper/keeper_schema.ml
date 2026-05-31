@@ -119,7 +119,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("runtime_id", `Assoc [
           ("type", `String "string");
-          ("default", `String Persona_contract.default_generation_cascade_name);
+          ("default", `String Persona_contract.default_generation_runtime_id);
           ("description", `String "Runtime id used to draft the persona.");
         ]);
         ("temperature", `Assoc [
@@ -552,7 +552,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("timeout_sec", `Assoc [
           ("type", `String "number");
-          ("description", `String "Optional: overall timeout (sec) for this async keeper message request and its cascade turn");
+          ("description", `String "Optional: overall timeout (sec) for this async keeper message request and its runtime turn");
         ]);
         ("required_tools", `Assoc [
           ("type", `String "array");

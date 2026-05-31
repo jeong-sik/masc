@@ -52,7 +52,7 @@ implementation_prs: [15906, 15922, 15926, 15928, 15936, 15949]
 
 핵심 인사이트: **Tier-1 도 Tier-2 도 손상이 발생했다**. 이는 다음을 의미한다:
 
-1. `Fs_compat.append_file_unix` 의 코멘트(`lib/fs_compat/fs_compat.ml:152-156`)가 명시한 *"single-domain assumption holds"* 가 이미 깨졌다. masc-mcp는 cascade dispatch / dashboard 등에서 Eio domain 을 분기시키며, `Stdlib.Mutex` 는 도메인 간 동기화가 보장되지만 같은 도메인에서 fiber preemption이 발생할 때 OCaml channel buffer의 atomicity 가 깨진다.
+1. `Fs_compat.append_file_unix` 의 코멘트(`lib/fs_compat/fs_compat.ml:152-156`)가 명시한 *"single-domain assumption holds"* 가 이미 깨졌다. masc-mcp는 runtime dispatch / dashboard 등에서 Eio domain 을 분기시키며, `Stdlib.Mutex` 는 도메인 간 동기화가 보장되지만 같은 도메인에서 fiber preemption이 발생할 때 OCaml channel buffer의 atomicity 가 깨진다.
 2. `Eio.Mutex` 를 써도 내부에서 `Fs_compat.append_jsonl → Stdlib.output_string + flush` 두 단계로 호출하면, large record (PIPE_BUF=512B macOS / 4KB Linux 초과)가 multiple `write(2)` 로 쪼개진다. POSIX는 `O_APPEND` 의 atomicity를 PIPE_BUF 이하만 보장하므로, 같은 path 에 다른 도메인 writer가 있으면 interleave 가능.
 3. trajectories record는 prompt 전체 dump 라 routine 하게 1KB ~ 8KB 범위. PIPE_BUF 초과는 *예외가 아니라 기본 케이스*.
 
@@ -143,7 +143,7 @@ val close : t -> unit
 | `lib/masc_log/log.ml:286-294` | `output_string + output_char + flush` 3-syscall → `Jsonl_atomic.append` 1 호출. mutex 추가가 사이드 이펙트. |
 | `lib/trajectory/trajectory.ml:229-269` | 3 함수 (`append_entry`, `append_thinking`, `append_summary`) 가 `Fs_compat.append_file` → `Jsonl_atomic.append` 로 swap. Stdlib.Mutex 간접 의존 제거. |
 | `lib/dated_jsonl/dated_jsonl.ml:256-272` | `Fs_compat.append_jsonl` → `Jsonl_atomic.append`. 외부 시그니처 변경 없음. |
-| `lib/cascade/cascade_event_bridge.ml:992` | (변경 없음 — `Dated_jsonl.append` 경유, 자동 fix) |
+| `lib/runtime/runtime_event_bridge.ml:992` | (변경 없음 — `Dated_jsonl.append` 경유, 자동 fix) |
 | `lib/keeper/keeper_reaction_ledger.ml:135-137` | (변경 없음 — `Dated_jsonl.append` 경유, 자동 fix) |
 
 ### 4.2 기존 Helper 처리

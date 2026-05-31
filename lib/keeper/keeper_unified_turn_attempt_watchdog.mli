@@ -1,6 +1,6 @@
 (** RFC-0136 PR-4-c: wrap [Eio.Time.with_timeout_exn] + the
     [Eio.Cancel.Cancelled] / [Eio.Time.Timeout] handling for a single
-    keeper turn cascade attempt.  Extracted from
+    keeper turn runtime attempt.  Extracted from
     [keeper_unified_turn.ml] do_run closure (L490-L577).
 
     Three outcomes:

@@ -232,7 +232,7 @@ describe('keeperRuntimeBlockerHint', () => {
         runtime_blocker_class: 'provider_runtime_error',
         runtime_blocker_summary: 'provider_runtime_error',
       })),
-    ).toBe('Provider, adapter, or cascade가 keeper 진행 전에 실패했습니다.')
+    ).toBe('Provider, adapter, or runtime가 keeper 진행 전에 실패했습니다.')
   })
 
   it('explains unsatisfied required tool terminal failures when no summary is available', () => {

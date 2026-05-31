@@ -161,7 +161,7 @@ let cost_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ("request_latency_ms", `Int latency_ms);
   ] @ provider_fields @ tok_fields)
 
-let error_entry ~cascade_name ~ts ?provider () =
+let error_entry ~runtime_id ~ts ?provider () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
@@ -171,7 +171,7 @@ let error_entry ~cascade_name ~ts ?provider () =
         match provider with
         | Some v -> `String v
         | None -> `Null);
-      ("runtime_id", `String cascade_name);
+      ("runtime_id", `String runtime_id);
       ("candidate_models", `List [`String "model-a"; `String "model-b"]);
       ("error_category", `String "timeout");
       ("outcome", `String "error");
@@ -216,7 +216,7 @@ let success_entry_without_usage ~model ~ts ?provider
     ] @ extra_fields @ diag_fields));
   ]
 
-let success_entry_without_model ~cascade_name ~ts ?(tool_count = 1) () =
+let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int tool_count);
@@ -225,7 +225,7 @@ let success_entry_without_model ~cascade_name ~ts ?(tool_count = 1) () =
       `Assoc [
         ("model_used", `Null);
         ("selected_model", `Null);
-        ("runtime_id", `String cascade_name);
+        ("runtime_id", `String runtime_id);
         ("outcome", `String "success");
         ("stop_reason", `String "completed");
         ("usage_reported", `Bool false);
@@ -236,7 +236,7 @@ let success_entry_without_model ~cascade_name ~ts ?(tool_count = 1) () =
       ] );
   ]
 
-let sparse_provider_context_entry ~outcome ~cascade_name ~ts () =
+let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("outcome", `String outcome);
@@ -244,7 +244,7 @@ let sparse_provider_context_entry ~outcome ~cascade_name ~ts () =
     ("tools_used", `List []);
     ( "provider_context",
       `Assoc [
-        ("runtime_id", `String cascade_name);
+        ("runtime_id", `String runtime_id);
         ("selected_model", `Null);
         ("candidate_models", `List []);
       ] );
@@ -374,7 +374,7 @@ let test_error_turns_counted () =
     let ts = now_unix () in
     write_decisions path [
       success_entry ~model:"provider_h-35b" ~ts:(ts -. 20.0) ();
-      error_entry ~cascade_name:"local_only" ~ts:(ts -. 10.0) ();
+      error_entry ~runtime_id:"local_only" ~ts:(ts -. 10.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
@@ -636,21 +636,21 @@ let test_coverage_diagnostics_survive_aggregation () =
     check string "recent json stage" "oas"
       (recent_json |> member "coverage_stage" |> to_string))
 
-let test_success_without_model_uses_cascade_attribution () =
+let test_success_without_model_uses_runtime_attribution () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "null_model" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_model ~cascade_name:"cascade.provider_k-coding-with-spark"
+      success_entry_without_model ~runtime_id:"runtime.provider_k-coding-with-spark"
         ~ts:(ts -. 5.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "null-model row retained" 1 agg.total_entries;
     check int "one attributed bucket" 1 (List.length agg.models);
     let s = List.hd agg.models in
-    check string "cascade attribution"
-      "cascade.provider_k-coding-with-spark (cascade)"
+    check string "runtime attribution"
+      "runtime.provider_k-coding-with-spark (runtime)"
       s.model_id;
     check int "success count" 1 s.success_count;
     check int "tool calls preserved" 1 s.total_tool_calls;
@@ -665,10 +665,10 @@ let test_provider_context_attribution_survives_sparse_telemetry () =
     let ts = now_unix () in
     write_decisions path [
       sparse_provider_context_entry ~outcome:"success"
-        ~cascade_name:"cascade.coding_plan"
+        ~runtime_id:"runtime.coding_plan"
         ~ts:(ts -. 5.0) ();
       sparse_provider_context_entry ~outcome:"error"
-        ~cascade_name:"cascade.coding_plan"
+        ~runtime_id:"runtime.coding_plan"
         ~ts:(ts -. 10.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -676,8 +676,8 @@ let test_provider_context_attribution_survives_sparse_telemetry () =
     check int "error row counted" 1 agg.total_error_entries;
     check int "one attributed bucket" 1 (List.length agg.models);
     let s = List.hd agg.models in
-    check string "provider_context cascade attribution"
-      "cascade.coding_plan (cascade)"
+    check string "provider_context runtime attribution"
+      "runtime.coding_plan (runtime)"
       s.model_id;
     check int "success count" 1 s.success_count;
     check int "error count" 1 s.error_count)
@@ -1321,8 +1321,8 @@ let () =
       test_case "prompt tps and peak memory aggregates" `Quick test_prompt_tps_and_peak_memory_aggregates;
       test_case "missing usage serializes unknowns" `Quick test_missing_usage_serializes_unknowns;
       test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
-      test_case "success without model uses cascade attribution" `Quick
-        test_success_without_model_uses_cascade_attribution;
+      test_case "success without model uses runtime attribution" `Quick
+        test_success_without_model_uses_runtime_attribution;
       test_case "provider_context attribution survives sparse telemetry" `Quick
         test_provider_context_attribution_survives_sparse_telemetry;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;

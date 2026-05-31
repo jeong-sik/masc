@@ -116,7 +116,7 @@ let record_success
 
     Mapping rationale:
     - provider-timeout families → [Provider_timeout].
-    - admission/cascade/provider capacity families → [Capacity_pressure].
+    - admission/runtime/provider capacity families → [Capacity_pressure].
     - stale turn, heartbeat, and fiber liveness families → [Turn_liveness].
     - generic [*_timeout] / [*_timeout_*] remains [Timeout] only when owner
       evidence is unavailable.

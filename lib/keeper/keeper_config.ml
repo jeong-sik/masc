@@ -2,7 +2,6 @@
 
 open Tool_args
 include Keeper_config_rp_helpers
-open Keeper_runtime_profile
 
 (** Upper bound for keeper time configs expressed in seconds.  Repeated
     seven times as the bare literal [172800] across this file before
@@ -16,7 +15,7 @@ let two_days_seconds_int = Masc_time_constants.day_int * 2
     naming the "1 day" intent at the call site. *)
 let one_day_seconds_int = Masc_time_constants.day_int
 
-(* cascade→Runtime 숙청: per-phase cascade name 구분 제거. cascade 세계의
+(* runtime→Runtime 숙청: per-phase runtime name 구분 제거. runtime 세계의
    phase_recovery / phase_buffer / tool_required / routing 은 서로 다른 route
    였으나, Runtime 모델에서는 모든 phase 가 동일한 default Runtime 을 쓴다 —
    넷 다 default_runtime_id () 으로 수렴하는 죽은 구분이었다. 단일 함수로
@@ -459,9 +458,9 @@ let keeper_llm_rerank_enabled_rp =
 let keeper_llm_rerank_enabled () : bool =
   Runtime_params.get keeper_llm_rerank_enabled_rp
 
-(** Named cascade profile for the LLM reranker.
+(** Named runtime profile for the LLM reranker.
     Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: same global model. *)
-let keeper_llm_rerank_cascade () : string =
+let keeper_llm_rerank_runtime () : string =
   match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_CASCADE" with
   | Some v when String.trim v <> "" -> String.trim v
   | _ -> default_runtime_id ()
@@ -490,7 +489,7 @@ let keeper_unified_max_tokens_rp =
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_UNIFIED_MAX_TOKENS"
                           ~default:65536 ~min_v:256 ~max_v:262144)
     ~min_v:256 ~max_v:262144
-    ~description:"Keeper turn max output tokens fallback (cascade.toml may override in production)" ()
+    ~description:"Keeper turn max output tokens fallback (keeper_runtime.toml may override in production)" ()
 let keeper_unified_max_tokens () : int =
   Runtime_params.get keeper_unified_max_tokens_rp
 

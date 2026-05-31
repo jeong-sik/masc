@@ -78,7 +78,7 @@ counters first.
 
 `dashboard/src/components/` has **321 .ts files** totalling **82,086 LoC**.
 Eleven files exceed 1000 LoC each. The larger ones (connector-status
-1689, cost-dashboard 1442, cascade-config-panel 1386, keeper-detail
+1689, cost-dashboard 1442, runtime-config-panel 1386, keeper-detail
 1263, fleet-fsm-matrix 1250) cluster around the surfaces this RFC
 considers. **Component decomposition is RFC-0050 scope.** RFC-0048
 treats only IA — section list, ordering, default surface, redirects.

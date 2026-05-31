@@ -75,10 +75,10 @@ val metric_llm_provider_tool_calls : string
 val metric_llm_provider_circuit_state : string
 
 (** Section 7.3.2 Zero Silent Failure measurement: aggregate counter for
-    every fallback event across the cascade pipeline. Labels: [kind]
-    enumerates the fallback class (cascade_empty, capability_drop,
+    every fallback event across the runtime pipeline. Labels: [kind]
+    enumerates the fallback class (runtime_empty, capability_drop,
     cli_unsupported, ...); [detail] carries the specific reason within the
-    kind (e.g. for cascade_empty: rejection_reason_label). This counter exists
+    kind (e.g. for runtime_empty: rejection_reason_label). This counter exists
     so the "Zero Silent Failure" dashboard panel has a single numerator across
     all fallback classes. *)
 val metric_fallback_triggered : string

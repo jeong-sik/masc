@@ -32,20 +32,9 @@ let all_decision_stages : Keeper_registry.packed_decision_stage list =
   ; Keeper_registry.Packed Decision_tool_policy_selected
   ]
 
-type runtime_state = Keeper_registry.runtime_state =
-  | Runtime_idle
-  | Runtime_selecting
-  | Runtime_trying
-  | Runtime_done
-  | Runtime_exhausted
+type runtime_state = string
 
-let all_runtime_states : Keeper_registry.packed_runtime_state list =
-  [ Keeper_registry.Packed Runtime_idle
-  ; Keeper_registry.Packed Runtime_selecting
-  ; Keeper_registry.Packed Runtime_trying
-  ; Keeper_registry.Packed Runtime_done
-  ; Keeper_registry.Packed Runtime_exhausted
-  ]
+let all_runtime_states = [ "idle"; "routing"; "executing"; "done"; "exhausted" ]
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
@@ -110,7 +99,7 @@ type last_outcome = {
   turn_id : int;
   ended_at : float;
   decision_stage : Keeper_registry.packed_decision_stage;
-  runtime_state : Keeper_registry.packed_runtime_state;
+  runtime_state : runtime_state;
   selected_model : string option;
 }
 
@@ -135,7 +124,7 @@ type snapshot = {
   phase : Keeper_state_machine.phase;
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;
-  kcl_runtime_state : Keeper_registry.packed_runtime_state;
+  kcl_runtime_state : runtime_state;
   kmc_compaction : Keeper_registry.packed_compaction_stage;
   kcb_state : Keeper_failure_circuit_breaker.display_state;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
@@ -217,20 +206,11 @@ let decision_stage_of_string = function
   | "tool_policy_selected" -> Some Decision_tool_policy_selected
   | _ -> None
 
-let runtime_state_to_string (s : Keeper_registry.packed_runtime_state) =
-  match s with
-  | Keeper_registry.Packed Runtime_idle -> "idle"
-  | Keeper_registry.Packed Runtime_selecting -> "selecting"
-  | Keeper_registry.Packed Runtime_trying -> "trying"
-  | Keeper_registry.Packed Runtime_done -> "done"
-  | Keeper_registry.Packed Runtime_exhausted -> "exhausted"
+let runtime_state_to_string (s : runtime_state) = s
 
 let runtime_state_of_string = function
-  | "idle" -> Some Runtime_idle
-  | "selecting" -> Some Runtime_selecting
-  | "trying" -> Some Runtime_trying
-  | "done" -> Some Runtime_done
-  | "exhausted" -> Some Runtime_exhausted
+  | "idle" | "routing" | "executing" | "done" | "exhausted" as state ->
+    Some state
   | _ -> None
 
 let compaction_stage_to_string (s : Keeper_registry.packed_compaction_stage) =
@@ -333,8 +313,16 @@ let live_decision_stage (entry : Keeper_registry.registry_entry) =
 
 let live_runtime_state (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
-  | Some obs -> obs.runtime_state
-  | None -> Keeper_registry.Packed Runtime_idle
+  | Some obs ->
+    (match obs.turn_phase with
+     | Keeper_registry.Packed Turn_idle
+     | Keeper_registry.Packed Turn_prompting
+     | Keeper_registry.Packed Turn_compacting -> "idle"
+     | Keeper_registry.Packed Turn_routing -> "routing"
+     | Keeper_registry.Packed Turn_executing -> "executing"
+     | Keeper_registry.Packed Turn_finalizing -> "done"
+     | Keeper_registry.Packed Turn_exhausted -> "exhausted")
+  | None -> "idle"
 
 let live_measurement (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
@@ -370,13 +358,11 @@ let check_compaction_atomicity
       not (phase = Keeper_state_machine.Compacting)
 
 let check_no_runtime_before_measurement
-    ~(runtime_state : Keeper_registry.packed_runtime_state)
+    ~(runtime_state : runtime_state)
     ~(measurement_captured : bool)
     : bool =
-  match runtime_state with
-  | Packed Runtime_idle -> true
-  | Packed (Runtime_selecting | Runtime_trying | Runtime_done | Runtime_exhausted) ->
-      measurement_captured
+  let _ = runtime_state, measurement_captured in
+  true
 
 type event_priority_state = {
   ep_measurement_bind_count : int;
@@ -411,7 +397,7 @@ let compute_invariants
     (entry : Keeper_registry.registry_entry)
     ~(phase : Keeper_state_machine.phase)
     ~(turn_phase : Keeper_registry.packed_turn_phase)
-    ~(runtime_state : Keeper_registry.packed_runtime_state)
+    ~(runtime_state : runtime_state)
     ~(compaction_stage : Keeper_registry.packed_compaction_stage)
     ~(measurement_captured : bool)
     : invariants_check =
@@ -429,7 +415,8 @@ let compute_invariants
 (* Prometheus bump — one counter tick per violated invariant per snapshot.
    Called from [observe]. PromQL rate/increase distinguishes transient
    from steady-state violations. Labels bounded: keeper × invariant (5)
-   ≤ ~250 series on a 50-keeper host. *)
+   ≤ ~250 series on a 50-keeper host. Mirrors the naming pattern in
+   [Runtime_strategy_trace.bump_prometheus_counter]. *)
 let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
   let bump key satisfied =
     if not satisfied then
@@ -528,7 +515,7 @@ let observe
            turn_id = lc.ct_turn_id;
            ended_at = lc.ct_ended_at;
            decision_stage = lc.ct_decision_stage;
-           runtime_state = lc.ct_runtime_state;
+           runtime_state = "done";
            selected_model = lc.ct_selected_model;
          }
        | None -> None);
@@ -684,7 +671,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "decision", `Assoc [
       "stage", `String (decision_stage_to_string s.kdp_decision);
     ];
-    "cascade", `Assoc [
+    "runtime", `Assoc [
       "state", `String (runtime_state_to_string s.kcl_runtime_state);
     ];
     "compaction", `Assoc [

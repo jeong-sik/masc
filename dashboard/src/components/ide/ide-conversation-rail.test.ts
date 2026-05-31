@@ -32,7 +32,7 @@ function stubEmptyConversationFetch(): void {
         headers: { 'Content-Type': 'application/json' },
       })
     }
-    if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+    if (url.startsWith('/api/v1/runtime/strategy_trace')) {
       return new Response(JSON.stringify({ updated_at: null, total_events: 0, events: [] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -174,7 +174,7 @@ describe('IdeConversationRail', () => {
     expect(postsToAnchoredThreads(posts)).toEqual([])
   })
 
-  it('orders thread, decision, and cascade replay items on one timeline', () => {
+  it('orders thread, decision, and runtime replay items on one timeline', () => {
     const items = replayRailItems(
       [{
         id: 'thread-old',
@@ -210,7 +210,7 @@ describe('IdeConversationRail', () => {
       }],
       [{
         ts: Date.UTC(2026, 4, 5, 10, 2, 0) / 1000,
-        cascade_name: 'primary',
+        runtime_id: 'primary',
         strategy: 'ranked',
         cycle: 1,
         candidates_in: 3,
@@ -220,10 +220,10 @@ describe('IdeConversationRail', () => {
       }],
     )
 
-    expect(items.map(item => item.source)).toEqual(['cascade', 'decision', 'thread'])
+    expect(items.map(item => item.source)).toEqual(['runtime', 'decision', 'thread'])
   })
 
-  it('uses one replay cursor for thread, decision, and cascade rail items', async () => {
+  it('uses one replay cursor for thread, decision, and runtime rail items', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.startsWith('/api/v1/board')) {
         return new Response(JSON.stringify({ posts: [
@@ -268,13 +268,13 @@ describe('IdeConversationRail', () => {
           generated_at: null,
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+      if (url.startsWith('/api/v1/runtime/strategy_trace')) {
         return new Response(JSON.stringify({
           updated_at: '2026-05-05T10:04:00Z',
           total_events: 1,
           events: [{
             ts: Date.UTC(2026, 4, 5, 10, 2, 0) / 1000,
-            cascade_name: 'primary',
+            runtime_id: 'primary',
             strategy: 'ranked',
             cycle: 1,
             candidates_in: 3,
@@ -305,7 +305,7 @@ describe('IdeConversationRail', () => {
       expect(container.textContent).toContain('old thread body')
       expect(container.textContent).toContain('1/2 threads')
       expect(container.textContent).toContain('0/1 decisions')
-      expect(container.textContent).toContain('0/1 cascade')
+      expect(container.textContent).toContain('0/1 runtime')
     })
     expect(container.textContent).not.toContain('new thread body')
     expect(container.textContent).not.toContain('turn_completed')
@@ -314,9 +314,9 @@ describe('IdeConversationRail', () => {
     render(null, container)
   })
 
-  it('renders route links for keeper decision and cascade replay entries', async () => {
+  it('renders route links for keeper decision and runtime replay entries', async () => {
     const decisionTs = Date.UTC(2026, 4, 5, 10, 1, 0) / 1000
-    const cascadeTs = Date.UTC(2026, 4, 5, 10, 2, 0) / 1000
+    const runtimeTs = Date.UTC(2026, 4, 5, 10, 2, 0) / 1000
     cursorOverlaySignal.value = {
       cursors: new Map([[
         'scholar',
@@ -359,13 +359,13 @@ describe('IdeConversationRail', () => {
           generated_at: null,
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+      if (url.startsWith('/api/v1/runtime/strategy_trace')) {
         return new Response(JSON.stringify({
           updated_at: '2026-05-05T10:04:00Z',
           total_events: 1,
           events: [{
-            ts: cascadeTs,
-            cascade_name: 'primary',
+            ts: runtimeTs,
+            runtime_id: 'primary',
             strategy: 'ranked',
             cycle: 1,
             candidates_in: 3,
@@ -407,17 +407,17 @@ describe('IdeConversationRail', () => {
     fireEvent.click(decisionLinks.find(link => link.textContent === 'Keeper')!)
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
 
-    const cascadeCard = container.querySelector<HTMLElement>('[data-replay-source="cascade"]')
-    expect(cascadeCard).not.toBeNull()
-    expect(cascadeCard?.querySelector('.ide-conversation-context-badge')?.textContent).toBe('CTX 1')
-    expect(cascadeCard?.querySelector('.ide-conversation-context-badge')?.getAttribute('title'))
+    const runtimeCard = container.querySelector<HTMLElement>('[data-replay-source="runtime"]')
+    expect(runtimeCard).not.toBeNull()
+    expect(runtimeCard?.querySelector('.ide-conversation-context-badge')?.textContent).toBe('CTX 1')
+    expect(runtimeCard?.querySelector('.ide-conversation-context-badge')?.getAttribute('title'))
       .toBe('Linked context: Telemetry')
-    const cascadeLinks = [...cascadeCard!.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
-    expect(cascadeLinks.map(link => link.textContent)).toEqual(['Telemetry'])
+    const runtimeLinks = [...runtimeCard!.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
+    expect(runtimeLinks.map(link => link.textContent)).toEqual(['Telemetry'])
 
-    fireEvent.click(cascadeLinks[0]!)
+    fireEvent.click(runtimeLinks[0]!)
     expect(routeHashParams().get('q')).toBe(
-      `cascade primary strategy:ranked cycle:1 kind:ordered ts:${cascadeTs}`,
+      `runtime primary strategy:ranked cycle:1 kind:ordered ts:${runtimeTs}`,
     )
 
     render(null, container)
@@ -443,7 +443,7 @@ describe('IdeConversationRail', () => {
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+      if (url.startsWith('/api/v1/runtime/strategy_trace')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       return new Response('{}', { status: 404 })
@@ -500,7 +500,7 @@ describe('IdeConversationRail', () => {
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+      if (url.startsWith('/api/v1/runtime/strategy_trace')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       return new Response('{}', { status: 404 })

@@ -37,7 +37,7 @@ export interface FleetRow {
   activity_label: string
   activity_source: KeeperActivitySource
   model: string
-  cascade_label: string | null
+  runtime_label: string | null
   provider_label: string | null
   fallback_label: string | null
   tool_calls: number
@@ -105,7 +105,7 @@ export function emptyState(): FleetTelemetryState {
 }
 
 // Error -> message conversion with a literal 'unknown error' fallback for
-// non-Error inputs. Distinct from errorToString (cascade-config) which uses
+// non-Error inputs. Distinct from errorToString (runtime-config) which uses
 // String(reason) instead, and from errorMessageOr (keeper-detail-hooks)
 // which takes a caller-supplied fallback.
 export function errorMessageOrUnknown(reason: unknown): string {
@@ -145,16 +145,16 @@ function keeperModel(_keeper: Keeper): string {
   return 'runtime'
 }
 
-function latestCascadeMetric(keeper: Keeper) {
+function latestRuntimeMetric(keeper: Keeper) {
   const series = keeper.metrics_series ?? []
   for (let index = series.length - 1; index >= 0; index -= 1) {
     const point = series[index]
     if (!point) continue
     if (
-      normalizeText(point.cascade_name)
+      normalizeText(point.runtime_id)
       || normalizeText(point.runtime_selected_model)
-      || normalizeText(point.cascade_outcome)
-      || typeof point.cascade_attempt_count === 'number'
+      || normalizeText(point.runtime_outcome)
+      || typeof point.runtime_attempt_count === 'number'
       || point.fallback_applied
       || normalizeText(point.fallback_from)
       || normalizeText(point.fallback_to)
@@ -165,18 +165,18 @@ function latestCascadeMetric(keeper: Keeper) {
   return null
 }
 
-function keeperCascadeLabel(keeper: Keeper): string | null {
-  const raw = normalizeText(keeper.cascade_name)
-  const canonical = normalizeText(keeper.cascade_canonical ?? keeper.selected_cascade_canonical)
+function keeperRuntimeLabel(keeper: Keeper): string | null {
+  const raw = normalizeText(keeper.runtime_id)
+  const canonical = normalizeText(keeper.runtime_canonical ?? keeper.selected_runtime_canonical)
   if (raw && canonical && raw !== canonical) return `${raw} -> ${canonical}`
   return raw ?? canonical
 }
 
 function keeperProviderLabel(keeper: Keeper): string | null {
   const summary = keeper.trust?.execution_summary ?? null
-  const latest = latestCascadeMetric(keeper)
-  const outcome = normalizeText(summary?.cascade_outcome) ?? normalizeText(latest?.cascade_outcome)
-  const attempts = summary?.provider_attempt_count ?? latest?.cascade_attempt_count ?? null
+  const latest = latestRuntimeMetric(keeper)
+  const outcome = normalizeText(summary?.runtime_outcome) ?? normalizeText(latest?.runtime_outcome)
+  const attempts = summary?.provider_attempt_count ?? latest?.runtime_attempt_count ?? null
   const fallback = summary?.provider_fallback_applied ?? latest?.fallback_applied ?? null
   const parts = [
     outcome,
@@ -187,7 +187,7 @@ function keeperProviderLabel(keeper: Keeper): string | null {
 }
 
 function keeperFallbackLabel(keeper: Keeper): string | null {
-  const latest = latestCascadeMetric(keeper)
+  const latest = latestRuntimeMetric(keeper)
   if (!latest || latest.fallback_applied !== true) return null
   const reason = normalizeText(latest.fallback_reason)
   const hops =
@@ -430,7 +430,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             activity_label: activity.label,
             activity_source: activity.source,
             model: keeperModel(keeper),
-            cascade_label: keeperCascadeLabel(keeper),
+            runtime_label: keeperRuntimeLabel(keeper),
             provider_label: keeperProviderLabel(keeper),
             fallback_label: keeperFallbackLabel(keeper),
             tool_calls: toolCalls,
@@ -736,7 +736,7 @@ export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
   // These are alive-but-blocked keepers that
   // the live/stale gauges miss — fiber is up, but the next turn cannot
   // start.  Pairs with the `Semaphore_wait_timeout` typing fix
-  // (#12855) and the cascade fallback-cycle detector (#12866) so
+  // (#12855) and the runtime fallback-cycle detector (#12866) so
   // operators have a single panel that surfaces "alive but stuck".
   const blocked = rows.filter(row =>
     row.keepalive_running

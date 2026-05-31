@@ -51,15 +51,15 @@ read, (3) 관련 `.mli`/문서/RFC 인용, (4) `git log`로 최근 활동 확인
 ### §3 Admission Queue
 
 > Audit의 "가장 심각" 분류와 정반대로, **passthrough는 의도적 architectural rollback**.
-> RFC-0026이 admission router를 OAS cascade 레이어로 이동시키는 것이 결정된 상태.
+> RFC-0026이 admission router를 OAS runtime 레이어로 이동시키는 것이 결정된 상태.
 > MEMORY `feedback_semaphore_tier_is_architectural_anti_pattern.md`(2026-05-05)와도
 > 일치 — MASC-layer Semaphore tier는 silent skip 안티패턴이었음.
 
 | 클레임 | 분류 | 근거 | 해소 |
 |--------|------|------|------|
-| §3.1 `with_permit` 100% passthrough | **B** | `lib/admission_queue.ml:139-148` 코멘트가 "provider-level throttling belongs in OAS (cascade), not in MASC. ... cannot express per-provider capacity" 명시. RFC-0026 PR-E-1.6/1.7가 cascade-layer router로 이동. **Audit이 file path를 잘못 적음**(`dashboard_bonsai/src/admission_queue.ml` ≠ 실제 `lib/admission_queue.ml`) — stale snapshot 신호. | 코드 코멘트에 RFC-0026 reference + audit-response 링크 추가 (PR-B). |
-| §3.2 `snapshot()` 항상 `0/0/max`, `insert_sorted`/`waiter`/`global.waiters` dead code | **C** | 코드는 클레임대로 동작. 그러나 dead code는 **의도된 RFC-0026 admission router 관측 scaffolding** — 삭제하면 cascade-layer router 도입 시 재구현 비용. | 코드 코멘트에 "observability scaffolding; do not delete" 추가 (PR-B). |
-| §3.3 metric `inflight` ↔ 실제 concurrency 불일치 (`wait_ms:0` 항상) | B | passthrough 의도이므로 wait_ms:0이 정확한 표현. 단 Prometheus histogram의 외부 관찰자가 "passthrough mode" label을 못 보기 때문에 misread 위험. | follow-up: dashboard label + RFC-0026 cascade router 도입 시 같이 정리. |
+| §3.1 `with_permit` 100% passthrough | **B** | `lib/admission_queue.ml:139-148` 코멘트가 "provider-level throttling belongs in OAS (runtime), not in MASC. ... cannot express per-provider capacity" 명시. RFC-0026 PR-E-1.6/1.7가 runtime-layer router로 이동. **Audit이 file path를 잘못 적음**(`dashboard_bonsai/src/admission_queue.ml` ≠ 실제 `lib/admission_queue.ml`) — stale snapshot 신호. | 코드 코멘트에 RFC-0026 reference + audit-response 링크 추가 (PR-B). |
+| §3.2 `snapshot()` 항상 `0/0/max`, `insert_sorted`/`waiter`/`global.waiters` dead code | **C** | 코드는 클레임대로 동작. 그러나 dead code는 **의도된 RFC-0026 admission router 관측 scaffolding** — 삭제하면 runtime-layer router 도입 시 재구현 비용. | 코드 코멘트에 "observability scaffolding; do not delete" 추가 (PR-B). |
+| §3.3 metric `inflight` ↔ 실제 concurrency 불일치 (`wait_ms:0` 항상) | B | passthrough 의도이므로 wait_ms:0이 정확한 표현. 단 Prometheus histogram의 외부 관찰자가 "passthrough mode" label을 못 보기 때문에 misread 위험. | follow-up: dashboard label + RFC-0026 runtime router 도입 시 같이 정리. |
 
 > **2026-05-05 보충 (PR #13219, post-audit)**: §3.1 분류는 *release-side passthrough*에 한해 정확하지만, audit이 보지 못한 별도의 **acquire-side cancel race** 가 존재했음. 적용 범위는 admission_queue 가 아니라 sister 모듈 `lib/keeper/keeper_turn_slot.ml` 의 `acquire_bounded` 였지만, "B intentional passthrough" 라는 광범위 분류가 같은 keeper-turn 영역의 acquire path 점검을 가렸다는 점에서 본 매트릭스의 sibling 항목이다.
 >

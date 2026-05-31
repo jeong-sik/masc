@@ -29,7 +29,7 @@ background task lifecycle are not part of the callable surface.
 - Covers: `Execute`, typed semantic exit, output truncation, Shell IR command
   gating, verification contract markers, and shell-gate counters.
 - `Grep` owns file/content search. Execute owns typed command execution.
-- Does not cover: the cascade verifier itself or the approval layer for MCP
+- Does not cover: the runtime verifier itself or the approval layer for MCP
   tools.
 
 ## Current Rollout State

@@ -26,13 +26,13 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
     phase: 'running',
     turn_phase: 'idle',
     decision: { stage: 'idle' },
-    cascade: { state: 'idle' },
+    runtime: { state: 'idle' },
     compaction: { stage: 'idle' },
     circuit_breaker: { state: 'closed' },
     measurement: { captured: true },
     invariants: {
       phase_turn_alignment: true,
-      no_cascade_before_measurement: true,
+      no_runtime_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
@@ -79,7 +79,7 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
       tool_contract_result: 'satisfied_execution',
       duration_ms: 1000,
       error: null,
-      cascade: null,
+      runtime: null,
       tool_surface: null,
     },
     runtime_attention: {
@@ -146,7 +146,7 @@ describe('deriveKeeperRuntimeProjection', () => {
         phase: 'failing',
         turn_phase: 'executing',
         decision: { stage: 'tool_required' },
-        cascade: { state: 'degraded_retry' },
+        runtime: { state: 'degraded_retry' },
         compaction: { stage: 'idle' },
         circuit_breaker: { state: 'closed' },
         execution: {

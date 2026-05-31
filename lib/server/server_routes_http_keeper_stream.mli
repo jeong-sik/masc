@@ -65,7 +65,7 @@ val parse_keeper_chat_stream_request :
     [Error reason] on JSON shape mismatches, missing
     [name] / [message], partial connector context, or
     presence of legacy keeper model args removed by the
-    cascade rewrite. *)
+    runtime rewrite. *)
 
 (** {1 Error envelope} *)
 

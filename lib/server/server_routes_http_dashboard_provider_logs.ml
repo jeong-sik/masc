@@ -1,6 +1,6 @@
 (** Provider log projections for dashboard HTTP routes.
 
-    After cascade purge, provider log configuration was removed from
+    After runtime purge, provider log configuration was removed from
     Runtime_schema.provider. The endpoint returns an empty provider list
     until provider log config is re-introduced in the runtime model. *)
 

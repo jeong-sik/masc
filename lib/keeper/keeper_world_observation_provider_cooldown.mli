@@ -1,6 +1,6 @@
 val fallback_runtime_for_provider_cooldown :
-  base_runtime_id:string ->
-  effective_runtime_id:string ->
+  base_runtime:string ->
+  effective_runtime:string ->
   string option
 
 val provider_cooldown_remaining_sec_for_runtime :

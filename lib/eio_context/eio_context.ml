@@ -89,7 +89,7 @@ let get_env_opt () : Eio_unix.Stdenv.base option =
 
    Distinct from [set_switch] which writes the global atomic: this one is
    fiber-local and *propagates with fork* (Eio.Fiber.with_binding contract),
-   so cascade attempts forked from inside [f] inherit [sw] automatically.
+   so runtime attempts forked from inside [f] inherit [sw] automatically.
 
    Caller contract: invoke from *inside* the body of an outer
    [Eio.Switch.run] whose switch is [sw], so resources opened during [f]

@@ -29,8 +29,8 @@ PR에서 줄여나간다.
 | 4 | `lib/repo_manager/keeper_repo_mapping.ml` | scope-out (repo URL prefix) |
 | 4 | `lib/keeper_skill_routing/keeper_skill_routing.ml` | **scope-in (G5 pending)** |
 | 4 | `lib/ide/ide_region_tracker.ml` | scope-out (file path classifier) |
-| 4 | `lib/cascade/cascade_declarative_adapter.ml` | scope-out (TOML key matching) |
-| 4 | `lib/cascade/cascade_config.ml` | scope-out (TOML key matching) |
+| 4 | `lib/runtime/runtime_declarative_adapter.ml` | scope-out (TOML key matching) |
+| 4 | `lib/runtime/runtime_config.ml` | scope-out (TOML key matching) |
 | 4 | `lib/board_core_classify.ml` | scope-out (round-trip `*_to_string`/`*_of_string`) |
 | 3 | `lib/server/server_h2_gateway.ml` | scope-out (HTTP/2 protocol) |
 | 3 | `lib/server/server_dashboard_http_runtime_info.ml` | scope-out (header matching) |
@@ -49,7 +49,7 @@ PR에서 줄여나간다.
 | CLI argv tokenizer | keeper remote command_command_parse, sandbox Execute runner | 15 | producer is gh/docker CLI; flag prefix `-`/`--` is shell convention |
 | URL scheme + HTTP path classifier | server_auth, server_dashboard_http_link_preview, graphql_endpoint, repo_manager/keeper_repo_mapping | 25 | producer is HTTP request; scheme/path is protocol literal |
 | Git porcelain output | server_routes_http_routes_workspace | 9 | producer is `git status --porcelain`; format is git stable wire |
-| TOML key matching | cascade_config, cascade_declarative_adapter | 8 | user-authored config; key string is the protocol |
+| TOML key matching | runtime_config, runtime_declarative_adapter | 8 | user-authored config; key string is the protocol |
 | Env var name prefix | repo_cli_credentials | 6 | OS env namespace |
 | HTTP/2 + MCP protocol marker | server_h2_gateway, mcp_server_eio_protocol, server_dashboard_http_runtime_info | 9 | wire protocol literals |
 | Worker dev tools shell parser | worker_dev_tools, agent_tool_execute_runtime | 19 | shell command string parser; deleted by **RFC-0091 PR-2** |

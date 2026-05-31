@@ -277,7 +277,7 @@ export type ToolQualityResponse = TelemetryFreshnessMetadata & {
   success_rate: number
   by_tool: ToolQualityToolStat[]
   by_keeper: ToolQualityKeeperStat[]
-  by_cascade?: ToolQualityKeeperStat[]
+  by_runtime?: ToolQualityKeeperStat[]
   failure_categories: ToolQualityFailureCategory[]
   hourly_trend?: ToolQualityHourlyPoint[]
 }
@@ -1492,7 +1492,7 @@ function decodeGoalKeeperTrustExecutionSummary(raw: unknown): GoalKeeperTrustExe
         ? raw.provider_fallback_applied
         : null,
     provider_selected_model: asNullableString(raw.provider_selected_model),
-    cascade_outcome: asNullableString(raw.cascade_outcome),
+    runtime_outcome: asNullableString(raw.runtime_outcome),
     sandbox_summary: asNullableString(raw.sandbox_summary),
     sandbox_root: asNullableString(raw.sandbox_root),
     mutation_guard_summary: asNullableString(raw.mutation_guard_summary),
@@ -1736,8 +1736,8 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
   const agentName = asString(raw.agent_name)
   const sandboxProfile = asString(raw.sandbox_profile)
   const networkMode = asString(raw.network_mode)
-  const cascadeName = asString(raw.cascade_name)
-  if (!name || !agentName || !sandboxProfile || !networkMode || !cascadeName) return null
+  const runtimeName = asString(raw.runtime_id)
+  if (!name || !agentName || !sandboxProfile || !networkMode || !runtimeName) return null
   return {
     name,
     agent_name: agentName,
@@ -1745,9 +1745,9 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
     active_goal_ids: asStringArray(raw.active_goal_ids),
     sandbox_profile: sandboxProfile,
     network_mode: networkMode,
-    cascade_name: cascadeName,
+    runtime_id: runtimeName,
     approval_profile: asNullableString(raw.approval_profile),
-    cascade_outcome: asNullableString(raw.cascade_outcome),
+    runtime_outcome: asNullableString(raw.runtime_outcome),
     latest_execution_outcome: asNullableString(raw.latest_execution_outcome),
     latest_execution_at: asNullableString(raw.latest_execution_at),
     latest_receipt: isRecord(raw.latest_receipt) ? raw.latest_receipt : null,
@@ -2231,15 +2231,10 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
             ? 'override'
             : 'turn_budget_heuristic'),
       verify: asLooseBoolean(execution.verify),
-      selected_runtime_id:
-        asNullableString(execution.selected_runtime_id)
-        ?? asNullableString(execution.selected_cascade_name)
-        ?? '',
+      selected_runtime_id: asNullableString(execution.selected_runtime_id) ?? '',
       selected_runtime_canonical:
         asNullableString(execution.selected_runtime_canonical)
-        ?? asNullableString(execution.selected_cascade_canonical)
         ?? asNullableString(execution.selected_runtime_id)
-        ?? asNullableString(execution.selected_cascade_name)
         ?? '',
     },
     compaction: {

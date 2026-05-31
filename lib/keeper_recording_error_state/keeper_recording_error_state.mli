@@ -58,7 +58,7 @@ type error_kind =
   | State_machine_guard
       (** ["state machine guard violation"] / FSM transition rejected. *)
   | Expected_version_mismatch (** CAS expected_version mismatch. *)
-  | Cascade_resolution_failure (** Cascade tier/strategy resolution failure. *)
+  | Runtime_resolution_failure (** Runtime tier/strategy resolution failure. *)
   | Unknown_phase_transition (** FSM unknown phase transition. *)
   | Auth_token_mismatch (** Auth/token mismatch family. *)
   | Shutdown_artifact (** Shutdown artifact from supervisor. *)

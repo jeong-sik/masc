@@ -3,7 +3,7 @@
     Included by {!Prometheus} so existing callers keep using
     [Prometheus.metric_*] bindings unchanged. *)
 
-(** Aggregate counter for every fallback event across the cascade pipeline.
+(** Aggregate counter for every fallback event across the runtime pipeline.
     Labels: [kind] enumerates the fallback class and [detail] carries the
     specific reason within the kind. *)
 val metric_board_truncated_posts : string

@@ -220,7 +220,7 @@
 .cb-pmatrix .row .tps { color: var(--color-fg-primary); text-align:right; }
 .cb-pmatrix .row .cas { color: var(--color-fg-disabled); text-align:right; }
 
-/* ───── Rail (activity feed + cascade) ───── */
+/* ───── Rail (activity feed + runtime) ───── */
 .cb-rail { width:100%; height:100%; background: var(--color-bg-surface); display:flex; flex-direction:column; border-left: 1px solid var(--color-border-default); font-size: var(--fs-12); }
 .cb-rail .sec { border-bottom: 1px solid var(--color-border-strong); }
 .cb-rail .sec-h { display:flex; align-items:center; height:26px; padding: 0 10px; font: var(--type-label); text-transform: uppercase; color: var(--color-fg-muted); letter-spacing:.08em; font-weight: var(--fw-semi); background: var(--color-bg-surface); border-bottom:1px solid var(--color-border-default); }
@@ -237,19 +237,19 @@
 .cb-rail .ev.flag .text { color: var(--err-fg); }
 .cb-rail .ev.claim .text { color: var(--color-accent-fg); }
 
-/* cascade trace */
-.cb-cascade { padding: 10px; display:flex; flex-direction:column; gap: var(--sp-2); }
-.cb-cascade .id { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-disabled); letter-spacing: .04em; }
-.cb-cascade .step { display:grid; grid-template-columns: 14px 1fr auto; gap: var(--sp-2); align-items:center; height: 22px; font-family: var(--font-mono); font-size: var(--fs-11); border-bottom: 1px dashed var(--color-border-default); }
-.cb-cascade .step .ix { color: var(--color-fg-disabled); text-align:center; }
-.cb-cascade .step .name { color: var(--color-fg-primary); }
-.cb-cascade .step .ms { color: var(--color-fg-muted); font-size: var(--fs-10); }
-.cb-cascade .step.hit .name { color: var(--ok-fg); }
-.cb-cascade .step.hit .ix { color: var(--ok); }
-.cb-cascade .step.miss .name { color: var(--color-fg-muted); text-decoration: line-through; }
-.cb-cascade .step.skip .name { color: var(--color-fg-disabled); }
-.cb-cascade .total { display:flex; align-items:center; gap:6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-secondary); padding-top: 2px; }
-.cb-cascade .total .n { color: var(--color-accent-fg); }
+/* runtime trace */
+.cb-runtime { padding: 10px; display:flex; flex-direction:column; gap: var(--sp-2); }
+.cb-runtime .id { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-disabled); letter-spacing: .04em; }
+.cb-runtime .step { display:grid; grid-template-columns: 14px 1fr auto; gap: var(--sp-2); align-items:center; height: 22px; font-family: var(--font-mono); font-size: var(--fs-11); border-bottom: 1px dashed var(--color-border-default); }
+.cb-runtime .step .ix { color: var(--color-fg-disabled); text-align:center; }
+.cb-runtime .step .name { color: var(--color-fg-primary); }
+.cb-runtime .step .ms { color: var(--color-fg-muted); font-size: var(--fs-10); }
+.cb-runtime .step.hit .name { color: var(--ok-fg); }
+.cb-runtime .step.hit .ix { color: var(--ok); }
+.cb-runtime .step.miss .name { color: var(--color-fg-muted); text-decoration: line-through; }
+.cb-runtime .step.skip .name { color: var(--color-fg-disabled); }
+.cb-runtime .total { display:flex; align-items:center; gap:6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-secondary); padding-top: 2px; }
+.cb-runtime .total .n { color: var(--color-accent-fg); }
 
 /* ───── Composer ───── */
 .cb-composer { background: var(--color-bg-surface); border-top:1px solid var(--color-border-strong); padding: var(--sp-2) 10px; display:flex; flex-direction:column; gap:6px; flex-shrink:0; font-family: var(--font-mono); }
@@ -570,7 +570,7 @@
 
 
 /* ═══════════════════════════════════════════════════════════════════
-   Track 3 · OBSERVABILITY (O1 Cascade · O2 Audit · O3 SafeAuto · O4 Cost · O5 Heuristic)
+   Track 3 · OBSERVABILITY (O1 Runtime · O2 Audit · O3 SafeAuto · O4 Cost · O5 Heuristic)
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ═════ O1 · CASCADE INSPECTOR ═════ */
@@ -612,7 +612,7 @@
 .aud-row .kn.tool       { color: var(--info-fg); }
 .aud-row .kn.suite      { color: var(--err-fg); border-color: var(--err-border); background: var(--err-soft); }
 .aud-row .kn.verdict    { color: var(--ok-fg); border-color: var(--ok); background: var(--ok-soft); }
-.aud-row .kn.cascade    { color: var(--color-accent-fg); border-color: var(--brass-2); }
+.aud-row .kn.runtime    { color: var(--color-accent-fg); border-color: var(--brass-2); }
 .aud-row .kn.task       { color: var(--color-fg-primary); }
 .aud-row .kn.board      { color: var(--color-fg-muted); }
 .aud-row .kn.message    { color: var(--info-fg); }
@@ -691,7 +691,7 @@
 
 .st-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
 .st-grid .scard { padding: 7px 9px; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-left: 3px solid var(--warn); display:flex; flex-direction:column; gap: var(--sp-1); }
-.st-grid .scard.cascade_burn { border-left-color: var(--err); }
+.st-grid .scard.runtime_burn { border-left-color: var(--err); }
 .st-grid .scard.failure_streak { border-left-color: var(--err); }
 .st-grid .scard.stale_claim { border-left-color: var(--warn); }
 .st-grid .scard .h { display:flex; gap: 6px; align-items: baseline; }

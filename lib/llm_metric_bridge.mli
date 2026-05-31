@@ -3,7 +3,7 @@
 
     See the implementation docstring for the rationale; briefly,
     this module installs a process-wide sink via
-    [Llm_provider.Metrics.set_global] so that keeper cascade calls
+    [Llm_provider.Metrics.set_global] so that keeper runtime calls
     — which do not thread [~metrics] explicitly through
     [Agent.run] — can still observe HTTP responses per provider.
 
@@ -16,7 +16,7 @@ val http_status_metric : string
 (** Emit a single HTTP status observation to the Prometheus counter.
     Called by both the global sink built in {!make_sink} and any
     per-call OAS [Metrics.t] literal that wants to forward
-    [on_http_status] (e.g. cascade observation captures).  Single
+    [on_http_status] (e.g. runtime observation captures).  Single
     source of truth for the label shape. *)
 val emit_http_status :
   provider:string -> model_id:string -> status:int -> unit
@@ -32,7 +32,7 @@ val emit_http_status :
 
     Called by both the global sink built in {!make_sink} and any
     per-call OAS [Metrics.t] literal that wants to forward
-    [on_request_end] (e.g. cascade observation captures).  Single
+    [on_request_end] (e.g. runtime observation captures).  Single
     source of truth for the label shape. *)
 val emit_request_latency :
   ?provider:string -> model_id:string -> latency_ms:int -> unit -> unit
@@ -81,7 +81,7 @@ val emit_streaming_chunk :
 val fallback_triggered_metric : string
 
 (** Emit a fallback observation to the unified counter.
-    [kind] enumerates the fallback class (cascade_empty | capability_drop |
+    [kind] enumerates the fallback class (runtime_empty | capability_drop |
     cli_unsupported | provider_error_fallback | …); [detail] carries the
     specific reason within the kind. This is the single numerator across all
     fallback classes. *)

@@ -22,7 +22,7 @@ let string_contains_substring = String_util.string_contains_substring
       cross-provider retry (2 attempts after all OAS per-provider retries
       exhaust), error reclassification for ambiguous outcomes.
     - OAS owns: per-provider retry (3 attempts), HTTP backoff, timeout
-      handling, provider failover within a single cascade call.
+      handling, provider failover within a single runtime call.
     - Neither may: retry silently after a mutating tool succeeded (integrity
       over availability); duplicate OAS per-provider retry counts. *)
 
@@ -48,7 +48,7 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
   (* Cloudflare 52x timeout family — origin server unreachable or
      slow to respond. Both are transient: a different provider may succeed
-     where one origin timed out, so the cascade should advance. *)
+     where one origin timed out, so the runtime should advance. *)
   | Agent_sdk.Error.Api (ServerError { status = 522; _ }) -> true
   | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> true
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
@@ -230,7 +230,7 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | None ->
       false
 
-let is_auto_recoverable_cascade_fail_open_error
+let is_auto_recoverable_runtime_fail_open_error
     (err : Agent_sdk.Error.sdk_error) : bool =
   Keeper_turn_driver.sdk_error_is_hard_quota err
   || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
@@ -239,7 +239,7 @@ let is_auto_recoverable_cascade_fail_open_error
 
 (* Classification of why a degraded retry is being attempted.  Closed set
    covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
-   and [recoverable_cascade_failure_reason] (broader set including raw
+   and [recoverable_runtime_failure_reason] (broader set including raw
    provider API failures).  Wire form is the lowercase string via
    [degraded_retry_reason_to_string]. *)
 type degraded_retry_reason =
@@ -249,7 +249,7 @@ type degraded_retry_reason =
   | Admission_queue_timeout
   | Provider_timeout
   | Turn_timeout
-  | Cascade_candidates_filtered
+  | Runtime_candidates_filtered
   | Required_tool_contract_violation
   | Runtime_exhausted
   | Capacity_backpressure
@@ -264,7 +264,7 @@ let degraded_retry_reason_to_string = function
   | Admission_queue_timeout -> "admission_queue_timeout"
   | Provider_timeout -> "provider_timeout"
   | Turn_timeout -> "turn_timeout"
-  | Cascade_candidates_filtered -> "cascade_candidates_filtered"
+  | Runtime_candidates_filtered -> "runtime_candidates_filtered"
   | Required_tool_contract_violation -> "required_tool_contract_violation"
   | Runtime_exhausted -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
@@ -273,7 +273,7 @@ let degraded_retry_reason_to_string = function
   | Auth_error -> "auth_error"
 
 type degraded_retry =
-  { next_runtime_id : string
+  { next_runtime : string
   ; fallback_reason : degraded_retry_reason
   }
 
@@ -281,13 +281,13 @@ let is_declared_phase_alias raw phase_name =
   String.equal (String.trim raw) phase_name
 
 let fallback_runtime_for_unavailable_profile
-    ~(base_runtime_id : string)
-    ~(effective_runtime_id : string) : string option =
+    ~(base_runtime : string)
+    ~(effective_runtime : string) : string option =
   let normalized_base =
-    String.trim base_runtime_id
+    String.trim base_runtime
   in
   let normalized_effective =
-    String.trim effective_runtime_id
+    String.trim effective_runtime
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
@@ -298,24 +298,24 @@ let fallback_runtime_for_unavailable_profile
   else Some (Keeper_config.default_runtime_id ())
 
 let degraded_retry_after_recoverable_error
-    ~(effective_runtime_id : string)
+    ~(effective_runtime : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   let normalized_effective =
-    String.trim effective_runtime_id
+    String.trim effective_runtime
   in
   let effective_is_declared_phase_buffer =
-    is_declared_phase_alias effective_runtime_id (Keeper_config.default_runtime_id ())
+    is_declared_phase_alias effective_runtime (Keeper_config.default_runtime_id ())
   in
   let effective_is_declared_phase_recovery =
     is_declared_phase_alias
-      effective_runtime_id
+      effective_runtime
       (Keeper_config.default_runtime_id ())
   in
   let phase_recovery_retry fallback_reason =
     Some
       {
-        next_runtime_id = (Keeper_config.default_runtime_id ());
+        next_runtime = (Keeper_config.default_runtime_id ());
         fallback_reason;
       }
   in
@@ -348,7 +348,7 @@ let degraded_retry_after_recoverable_error
     | Some
         (Keeper_turn_driver.Runtime_exhausted
            { reason = Keeper_meta_contract.Candidates_filtered_after_cycles; _ }) ->
-        phase_recovery_retry Cascade_candidates_filtered
+        phase_recovery_retry Runtime_candidates_filtered
     | Some
         (Keeper_turn_driver.Runtime_exhausted
            { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
@@ -359,7 +359,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     (* RFC-0158: admission denial has no local-recovery retry — budget
-       exhaustion is not resolved by cascade rotation. *)
+       exhaustion is not resolved by runtime rotation. *)
     | Some (Keeper_turn_driver.Retry_admission_denied _)
     (* RFC-0159 Phase A: opaque internal failures have no
        local-recovery retry mapping. *)
@@ -369,7 +369,7 @@ let degraded_retry_after_recoverable_error
     | None ->
         None
 
-let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
+let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
   if is_required_tool_contract_violation err then
     Some Required_tool_contract_violation
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
@@ -395,7 +395,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some
         (Keeper_turn_driver.Runtime_exhausted
            { reason = Keeper_meta_contract.Candidates_filtered_after_cycles; _ }) ->
-        Some Cascade_candidates_filtered
+        Some Runtime_candidates_filtered
     | Some
         (Keeper_turn_driver.Runtime_exhausted
            { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) ->
@@ -403,7 +403,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Runtime_exhausted _) ->
         (* Generic runtime exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative
-           [fallback_runtime] hints declared in runtime config actually
+           [fallback_runtime] hints declared in keeper_runtime.toml actually
            escalate. Receipt-derived data on 2026-04-25 showed 31/39
            silent turns ended with [(null)] fallback_reason because this
            arm previously returned [None]. Other arms below remain
@@ -413,28 +413,28 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-    (* RFC-0158: admission denial is not a cascade-rotation reason. *)
+    (* RFC-0158: admission denial is not a runtime-rotation reason. *)
     | Some (Keeper_turn_driver.Retry_admission_denied _)
-    (* RFC-0159 Phase A: typed [Internal_*] variants are not cascade-rotation
+    (* RFC-0159 Phase A: typed [Internal_*] variants are not runtime-rotation
        reasons; they expose previously-opaque raw exception payloads.  *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
     | Some (Keeper_turn_driver.Internal_bridge_exception _)
     | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
         None
     | None ->
-        (* Status-code-aware cascade rotation: raw provider API errors that are
-           not wrapped in a MASC internal error (e.g. single-provider cascades
+        (* Status-code-aware runtime rotation: raw provider API errors that are
+           not wrapped in a MASC internal error (e.g. single-provider runtimes
            where OAS surfaces the error directly) should still trigger rotation
-           when a different cascade may succeed.
+           when a different runtime may succeed.
 
            429 rate-limit (non-hard-quota): the current provider is throttled;
-           a different cascade/provider may have capacity.
+           a different runtime/provider may have capacity.
 
            5xx server errors: the provider is unhealthy or overloaded; a
-           different cascade may be healthy.
+           different runtime may be healthy.
 
-           401/403 auth errors: the credential for this cascade is invalid; a
-           different cascade with different credentials may succeed.
+           401/403 auth errors: the credential for this runtime is invalid; a
+           different runtime with different credentials may succeed.
 
            Hard-quota 429s are already handled above by sdk_error_is_hard_quota,
            so only soft (non-hard-quota) rate limits reach this arm. *)
@@ -481,7 +481,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              | Llm_provider.Error.ProviderTerminal _) ->
              None
          (* Sub-500 server errors (4xx already handled above for AuthError /
-            RateLimited) are not classified as recoverable cascade failures. *)
+            RateLimited) are not classified as recoverable runtime failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
@@ -532,7 +532,7 @@ let required_tool_rotation_candidate
   && (allow_phase_recovery
       || not
            (String.equal normalized (Keeper_config.default_runtime_id ())))
-  && not (Runtime_capability_profile.is_system_cascade_name normalized)
+  && not (String.equal normalized "")
 
 let tool_required_rotation_runtime_id () =
   try
@@ -541,23 +541,23 @@ let tool_required_rotation_runtime_id () =
 
 let default_degraded_rotation_candidates
     ~catalog_names
-    ~(base_runtime_id : string)
+    ~(base_runtime : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
-  let normalized_base = normalized_runtime_id ~catalog_names base_runtime_id in
-  let default_cascade =
+  let normalized_base = normalized_runtime_id ~catalog_names base_runtime in
+  let default_runtime =
     normalized_runtime_id ~catalog_names (Keeper_config.default_runtime_id ())
   in
-  let tool_required_cascade =
+  let tool_required_runtime =
     normalized_runtime_id ~catalog_names (tool_required_rotation_runtime_id ())
   in
-  let phase_recovery_cascade =
+  let phase_recovery_runtime =
     normalized_runtime_id ~catalog_names
       (Runtime.get_default_runtime_id ())
   in
   match tool_requirement with
-  | Required -> [ normalized_base; tool_required_cascade ]
+  | Required -> [ normalized_base; tool_required_runtime ]
   | Optional | No_tools ->
-    [ normalized_base; default_cascade; phase_recovery_cascade ]
+    [ normalized_base; default_runtime; phase_recovery_runtime ]
 
 let normalize_rotation_candidates ~catalog_names candidates =
   candidates
@@ -570,14 +570,14 @@ let normalize_rotation_candidates ~catalog_names candidates =
 let degraded_rotation_candidates
     ~catalog_names
     ~(fallback_hint : string option)
-    ~(base_runtime_id : string)
-    ~(effective_runtime_id : string)
+    ~(base_runtime : string)
+    ~(effective_runtime : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
   let normalized_effective =
-    normalized_runtime_id ~catalog_names effective_runtime_id
+    normalized_runtime_id ~catalog_names effective_runtime
   in
   let raw_candidates =
-    default_degraded_rotation_candidates ~catalog_names ~base_runtime_id
+    default_degraded_rotation_candidates ~catalog_names ~base_runtime
       ~tool_requirement
   in
   let fallback_hint_candidate =
@@ -612,30 +612,30 @@ let degraded_rotation_candidates
 
 let degraded_rotation_after_recoverable_error
     ?fallback_hint
-    ~(base_runtime_id : string)
-    ~(effective_runtime_id : string)
+    ~(base_runtime : string)
+    ~(effective_runtime : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
-    ~(attempted_runtime_ids : string list)
+    ~(attempted_runtimes : string list)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
-  match recoverable_cascade_failure_reason err with
+  match recoverable_runtime_failure_reason err with
   | None -> None
   | Some fallback_reason ->
       (* Load the live catalog once at the degraded-rotation boundary and pass
          the snapshot through normalization/filter helpers.  This preserves
          concrete profile names without adding per-candidate catalog I/O. *)
-      let catalog_names = Keeper_runtime_profile.catalog_lookup_names () in
+      let catalog_names = [ Keeper_config.default_runtime_id () ] in
       let attempted =
-        attempted_runtime_ids
+        attempted_runtimes
         |> List.map (normalized_runtime_id ~catalog_names)
         |> dedupe_keep_order
       in
       degraded_rotation_candidates
         ~catalog_names
         ~fallback_hint
-        ~base_runtime_id ~effective_runtime_id ~tool_requirement
+        ~base_runtime ~effective_runtime ~tool_requirement
       |> List.find_opt (fun candidate ->
              not (List.exists (String.equal candidate) attempted))
-      |> Option.map (fun next_runtime_id -> { next_runtime_id; fallback_reason })
+      |> Option.map (fun next_runtime -> { next_runtime; fallback_reason })
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
@@ -788,18 +788,18 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
 (** [true] when the rotation-cap fast-fail should fire for a
     [required_tool_contract_violation] error.  The cap prevents runaway
     rotation chains where the LLM calls no keeper tools: we allow at most one
-    rotation (so [attempted_runtime_ids] must have at least 2 entries before the
-    cap fires), unless a fresh fallback cascade is still available
+    rotation (so [attempted_runtimes] must have at least 2 entries before the
+    cap fires), unless a fresh fallback runtime is still available
     ([fallback_not_yet_tried = true]).
 
-    The list is seeded with the initial cascade name before the first turn
+    The list is seeded with the initial runtime name before the first turn
     attempt, so:
     - length = 1  ⇒ no rotation has been attempted yet → do not cap
     - length ≥ 2  ⇒ at least one rotation was tried → cap (unless fallback available) *)
 let should_cap_rotation_for_contract_violation
-    ~(attempted_runtime_ids : string list)
+    ~(attempted_runtimes : string list)
     ~(fallback_not_yet_tried : bool)
     (err : Agent_sdk.Error.sdk_error) : bool =
   is_required_tool_contract_violation err
-  && List.length attempted_runtime_ids >= 2
+  && List.length attempted_runtimes >= 2
   && not fallback_not_yet_tried

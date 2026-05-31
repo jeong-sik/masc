@@ -173,7 +173,7 @@ let cleanup_zombies
                  if not (List.mem assignee !release_failed_agents) then
                    release_failed_agents := assignee :: !release_failed_agents;
                  log_event config (`Assoc [
-                   ("type", `String "zombie_cascade_error");
+                   ("type", `String "zombie_runtime_error");
                    ("task_id", `String task.id);
                    ("agent", `String assignee);
                    ("error", `String (Masc_domain.masc_error_to_string e));

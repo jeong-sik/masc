@@ -4,13 +4,13 @@ import {
   type AnchoredThread,
 } from './anchored-thread-rail-store'
 
-const file = 'runtime/cascade/router.ts'
+const file = 'runtime/runtime/router.ts'
 
 const thread = (patch: Partial<AnchoredThread>): AnchoredThread => ({
   id: 'thread-1',
   kind: 'flag',
   author_keeper_id: 'nick0cave',
-  anchor: { file_path: file, line_start: 10, line_end: 12, symbol_hint: 'fn:resolveCascade' },
+  anchor: { file_path: file, line_start: 10, line_end: 12, symbol_hint: 'fn:resolveRuntime' },
   body: 'Check this branch before merge.',
   created_ms: 1000,
   resolved: false,

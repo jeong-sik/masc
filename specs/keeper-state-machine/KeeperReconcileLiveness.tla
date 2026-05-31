@@ -6,7 +6,7 @@
 \*   - KeeperCompositeLifecycle.tla
 \*   - KeeperTurnCycle.tla
 \*   - KeeperDecisionPipeline.tla
-\*   - KeeperCascadeLifecycle.tla
+\*   - KeeperRuntimeLifecycle.tla
 \*   - KeeperCompactionLifecycle.tla
 \*   - boundary/KeeperContinueGate.tla
 \*
@@ -22,7 +22,7 @@
 \*
 \* Background (masc-mcp#6841+):
 \*   manual_reconcile_required was set to TRUE by OAS bridge failures
-\*   (committed external side effects during cascade errors), but the
+\*   (committed external side effects during runtime errors), but the
 \*   heartbeat recovery path only dispatched Turn_succeeded without
 \*   dispatching Manual_reconcile_cleared.  Since Turn_succeeded does
 \*   NOT clear manual_reconcile_required in the OCaml FSM (only

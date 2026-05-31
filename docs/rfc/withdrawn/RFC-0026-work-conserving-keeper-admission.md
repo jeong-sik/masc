@@ -12,7 +12,7 @@ withdrawn_reason: "Body self-declares 'retired' — MASC-side provider/model adm
 Status: retired.
 
 The MASC-side provider/model admission router has been removed. Provider and
-model choice now belongs to OAS/cascade; MASC keeps only neutral runtime-lane
+model choice now belongs to OAS/runtime; MASC keeps only neutral runtime-lane
 observability plus the existing keeper turn semaphore path.
 
 Retired implementation artifacts:
@@ -27,5 +27,5 @@ Retired implementation artifacts:
 - `KeeperAdmissionLiveness.tla`
 
 Do not add new MASC-side provider/model admission policy. New provider capacity,
-fallback, or model-selection work should land in the OAS/cascade layer and expose
+fallback, or model-selection work should land in the OAS/runtime layer and expose
 only redacted runtime-lane summaries to MASC dashboards.

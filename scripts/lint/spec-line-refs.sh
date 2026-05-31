@@ -5,7 +5,7 @@
 #
 # The specs/ tree carries pointers into the OCaml codebase of the form:
 #
-#   (* lib/cascade/cascade_fsm.mli:37  accept_on_exhaustion:bool -> *)
+#   (* lib/runtime/runtime_fsm.mli:37  accept_on_exhaustion:bool -> *)
 #
 # When upstream shifts line 37, the reference drifts silently. This gate
 # parses those tuples, reads the target source, and checks that the
@@ -17,7 +17,7 @@
 #   2 — at least one dangling path (file missing, or line out of range)
 #
 # `path:SYMBOL` style references (where `:` is followed by a non-numeric
-# identifier, e.g. `cascade_fsm.ml:decide`) are symbol-anchored by design
+# identifier, e.g. `runtime_fsm.ml:decide`) are symbol-anchored by design
 # and are resolved via `grep`, not line number. They are included in the
 # check but never trigger drift — only dangling-path.
 #

@@ -26,7 +26,7 @@ let register
       "acquire_flock_retry* wall-clock excluding openfile. Labels: caller, outcome \
        (acquired|timeout)."
     ();
-  (* Duplicate keeper turn / cascade / persistence-failure registrations were
+  (* Duplicate keeper turn / runtime / persistence-failure registrations were
      removed; the authoritative help text lives at the earlier init() sites. *)
   add
     Keeper_metrics.(to_string StaleTerminationTotal)
@@ -59,10 +59,10 @@ let register
   add
     Keeper_metrics.(to_string OasRunTimeout)
     "Total Agent.run / run_stream invocations that returned Llm_provider.Retry.Timeout. \
-     Pairs with #13923 (max_execution_time wire) and #13933 (cascade activation): \
+     Pairs with #13923 (max_execution_time wire) and #13933 (runtime activation): \
      dashboards can attribute hangs to root cause via the source label \
      (max_execution_time = our wrapper fired; provider = transport-level deadline). \
-     Labels: cascade, provider, source."
+     Labels: runtime, provider, source."
     `Counter;
   add
     Keeper_metrics.(to_string ToolUseFailure)
@@ -181,7 +181,7 @@ let register
     `Gauge;
   add
     Keeper_metrics.(to_string ProviderCooldownSkip)
-    "Provider cooldown skips (fallback cascade used while cooling). Labels: keeper, \
+    "Provider cooldown skips (fallback runtime used while cooling). Labels: keeper, \
      provider."
     `Counter;
   add

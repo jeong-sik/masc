@@ -107,7 +107,7 @@ let handle
     ~config
     ~meta
     ~generation
-    ~cascade_name:initial_execution.cascade_name
+    ~runtime_id:initial_execution.runtime_id
     (* "blocked" is not in the outcome_kind quad-state, so this maps to error.
        The specific reason is retained in terminal_reason_code. *)
     ~outcome:`Error

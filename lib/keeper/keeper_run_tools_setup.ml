@@ -25,7 +25,7 @@ let prepare_agent_setup
       ~(start_turn_count : int)
       ~(generation : int)
       ~(max_turns : int)
-      ~(cascade_name : string)
+      ~(runtime_id : string)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
       ~(required_tool_names : string list)
@@ -43,7 +43,7 @@ let prepare_agent_setup
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
   =
-  let cascade_name_string = cascade_name in
+  let runtime_id_string = runtime_id in
   let manifest_keeper_turn_id =
     match runtime_manifest_context with
     | Some ctx -> ctx.Keeper_runtime_manifest.manifest_keeper_turn_id
@@ -600,52 +600,38 @@ let prepare_agent_setup
       then (
         match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
         | Some sw, Some net ->
-          let rerank_cascade = Keeper_config.keeper_llm_rerank_cascade () in
+          let rerank_runtime = Keeper_config.keeper_llm_rerank_runtime () in
           (match
-             Runtime_catalog.resolve_named_providers_strict
-               ~sw
-               ~net
-               ~cascade_name:rerank_cascade
+             Runtime_oas_runner.resolve_runtime_providers
+               ~runtime_id:rerank_runtime
                ()
            with
            | Error detail ->
              Prometheus.inc_counter
                Keeper_metrics.(to_string ToolSelectionFailures)
-               ~labels:[ "keeper", meta.name; "phase", "cascade_resolve" ]
+               ~labels:[ "keeper", meta.name; "phase", "runtime_resolve" ]
                ();
              Log.Keeper.warn
-               "keeper:%s TopK_llm: strict cascade resolution failed for '%s' (%s), \
+               "keeper:%s TopK_llm: strict runtime resolution failed for '%s' (%s), \
                 falling back to core+prefilter+discovered"
                meta.name
-               rerank_cascade
+               rerank_runtime
                detail;
              []
            | Ok providers ->
-             (match Cascade_config.filter_healthy_strict ~sw ~net providers with
-              | Error rejection ->
+             (match providers with
+              | [] ->
                 Prometheus.inc_counter
                   Keeper_metrics.(to_string ToolSelectionFailures)
-                  ~labels:[ "keeper", meta.name; "phase", "cascade_health" ]
+                  ~labels:[ "keeper", meta.name; "phase", "runtime_no_provider" ]
                   ();
                 Log.Keeper.warn
-                  "keeper:%s TopK_llm: strict health filter rejected cascade '%s' (%s), \
-                   falling back to core+prefilter+discovered"
-                  meta.name
-                  rerank_cascade
-                  (Cascade_config.health_filter_rejection_to_string rejection);
-                []
-              | Ok [] ->
-                Prometheus.inc_counter
-                  Keeper_metrics.(to_string ToolSelectionFailures)
-                  ~labels:[ "keeper", meta.name; "phase", "cascade_no_provider" ]
-                  ();
-                Log.Keeper.warn
-                  "keeper:%s TopK_llm: no healthy provider for cascade '%s', falling \
+                  "keeper:%s TopK_llm: no healthy provider for runtime '%s', falling \
                    back to core+prefilter+discovered"
                   meta.name
-                  rerank_cascade;
+                  rerank_runtime;
                 []
-              | Ok (first_provider :: _) ->
+              | first_provider :: _ ->
                 let rerank_fn =
                   Agent_sdk.Tool_selector.default_rerank_fn
                     ~sw
@@ -959,7 +945,7 @@ let prepare_agent_setup
     ~ctx ~session ~user_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context
     ~start_turn_count ~generation ~max_turns
-    ~cascade_name_string ~is_retry ~turn_affordances
+    ~runtime_id_string ~is_retry ~turn_affordances
     ~required_tool_names ~config_root ~runtime_config_path
     ~gemini_mcp_disabled ~approval_mode_effective
     ~approval_mode_derived ~actionable_signal

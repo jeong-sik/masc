@@ -193,8 +193,8 @@ type parse_error =
   | Out_of_window                  (* ts_unix older than [since_unix] *)
   | No_telemetry_object            (* decisions.jsonl entry without telemetry { ... } *)
   | Missing_outcome                (* telemetry.outcome absent on success-branch row *)
-  | Missing_success_model          (* no selected_model / model_used / cascade_name *)
-  | Missing_error_model_attribution (* no candidate_models / cascade_name on error turn *)
+  | Missing_success_model          (* no selected_model / model_used / runtime_id *)
+  | Missing_error_model_attribution (* no candidate_models / runtime_id on error turn *)
   | Missing_cost_model             (* costs.jsonl row without "model" field *)
 
 let parse_error_label = function

@@ -12,7 +12,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
-  match Keeper_error_classify.recoverable_cascade_failure_reason err with
+  match Keeper_error_classify.recoverable_runtime_failure_reason err with
   | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
   | _ ->
   match Keeper_turn_driver.classify_masc_internal_error err with
@@ -31,7 +31,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
     Some
       (if is_timeout then Ambiguous_post_commit_timeout else Ambiguous_post_commit_failure)
   (* RFC-0158: admission denial — budget too low for any provider attempt.
-     Not a cascade-exhaustion or provider-failure blocker; the turn budget
+     Not a runtime-exhaustion or provider-failure blocker; the turn budget
      was simply insufficient. *)
   | Some (Keeper_turn_driver.Retry_admission_denied _) -> None
   (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
@@ -63,7 +63,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
      | Agent_sdk.Error.Agent (ExitConditionMet _) -> Some Sdk_exit_condition_met
      | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
-     (* Provider-level [Api] errors are surfaced via OAS retry / cascade
+     (* Provider-level [Api] errors are surfaced via OAS retry / runtime
          layers and do not map to a typed blocker_class by themselves. *)
      | Agent_sdk.Error.Api _
      | Agent_sdk.Error.Provider _
@@ -146,7 +146,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Oas_agent_execution_timeout ->
       if summary = ""
       then
-        "OAS Agent.run or the enclosing cascade-attempt watchdog hit its execution timeout; this is not a provider HTTP timeout."
+        "OAS Agent.run or the enclosing runtime-attempt watchdog hit its execution timeout; this is not a provider HTTP timeout."
       else summary
     | Completion_contract_violation ->
       (* TEL-OK: string literal in blocker classification summary, not an action handler *)
@@ -265,7 +265,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                window; keeper was auto-paused before restart loop."
               distinct_count)
          Stale_fleet_batch)
-  | Keeper_registry.Provider_runtime_error { code; detail; cascade_name }
+  | Keeper_registry.Provider_runtime_error { code; detail; runtime_id }
     when code = "no_tool_capable_provider" ->
     Some
       (runtime_blocker_surface_of_typed_class

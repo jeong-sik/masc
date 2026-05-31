@@ -50,7 +50,7 @@ rg "metric_fn|read_keeper_metric_records" lib/dashboard/
 | `briefing_*` | 8 | 0/8 |
 | `dashboard_http_*` | ~10 | 0/10 (autoresearch is a false-positive grep hit) |
 | `dashboard_oas_*` | ~5 | 0/5 |
-| `dashboard_cascade*`, `dashboard_governance_judge`, `dashboard_operator_judge` | ~10 | 1/10 (governance_judge) |
+| `dashboard_runtime*`, `dashboard_governance_judge`, `dashboard_operator_judge` | ~10 | 1/10 (governance_judge) |
 | `dashboard_cache`, `dashboard_harness_health`, `dashboard_attention`, `dashboard_safe_autonomy` | ~7 | 1/7 (cache) |
 
 The HTTP route handlers (`dashboard_http_*`) are the largest unhooked subgroup. Each handler has natural metric candidates: request count, latency histogram, error counter.

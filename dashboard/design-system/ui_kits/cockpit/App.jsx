@@ -74,7 +74,7 @@ function App() {
       return (
         <div className="center">
           <Swimlanes keepers={D.keepers} laneEvents={D.laneEvents} />
-          <Deck tasks={D.tasks} goals={D.goals} providers={D.providers} cascade={D.cascade} />
+          <Deck tasks={D.tasks} goals={D.goals} providers={D.providers} runtime={D.runtime} />
         </div>
       );
     }
@@ -102,7 +102,7 @@ function App() {
                selGoal={selGoal} setSelGoal={setSelGoal}
                selectedKeepers={selectedKeepers} toggleKeeper={toggleKeeper} />
       {renderCenter()}
-      <Rail events={D.events} cascade={D.cascade} />
+      <Rail events={D.events} runtime={D.runtime} />
       {window.Drawer ? <window.Drawer/> : null}
       <Composer selKeeper={selKeeper} />
       <StatusBar providers={D.providers} />

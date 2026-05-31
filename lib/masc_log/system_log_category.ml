@@ -7,7 +7,7 @@ type t =
   | Docker_start_pressure
   | Keeper_stale_watchdog_lifecycle
   | Provider_timeout
-  | Provider_cascade_exhaustion
+  | Provider_runtime_exhaustion
   | Required_tool_contract_mismatch
   | Task_state_probe_misuse
   | Verifier_action_guard
@@ -25,7 +25,7 @@ let to_string = function
   | Docker_start_pressure -> "docker_start_pressure"
   | Keeper_stale_watchdog_lifecycle -> "keeper_stale_watchdog_lifecycle"
   | Provider_timeout -> "provider_timeout"
-  | Provider_cascade_exhaustion -> "provider_cascade_exhaustion"
+  | Provider_runtime_exhaustion -> "provider_runtime_exhaustion"
   | Required_tool_contract_mismatch -> "required_tool_contract_mismatch"
   | Task_state_probe_misuse -> "task_state_probe_misuse"
   | Verifier_action_guard -> "verifier_action_guard"
@@ -42,7 +42,7 @@ let all =
     Docker_start_pressure;
     Keeper_stale_watchdog_lifecycle;
     Provider_timeout;
-    Provider_cascade_exhaustion;
+    Provider_runtime_exhaustion;
     Required_tool_contract_mismatch;
     Task_state_probe_misuse;
     Verifier_action_guard;
@@ -61,7 +61,7 @@ let of_string_opt raw =
   | "docker_start_pressure" -> Some Docker_start_pressure
   | "keeper_stale_watchdog_lifecycle" -> Some Keeper_stale_watchdog_lifecycle
   | "provider_timeout" -> Some Provider_timeout
-  | "provider_cascade_exhaustion" -> Some Provider_cascade_exhaustion
+  | "provider_runtime_exhaustion" -> Some Provider_runtime_exhaustion
   | "required_tool_contract_mismatch" -> Some Required_tool_contract_mismatch
   | "task_state_probe_misuse" -> Some Task_state_probe_misuse
   | "verifier_action_guard" -> Some Verifier_action_guard

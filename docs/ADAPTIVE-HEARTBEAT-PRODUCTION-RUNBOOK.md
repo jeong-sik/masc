@@ -25,7 +25,7 @@ code_refs:
 ## Scope
 
 - 포함: `work-as-heartbeat`, `self-preservation`, `Crashed/Dead` keeper state
-- 제외: gRPC heartbeat, phi-accrual, cascade scheduler
+- 제외: gRPC heartbeat, phi-accrual, runtime scheduler
 
 기본 transport posture:
 

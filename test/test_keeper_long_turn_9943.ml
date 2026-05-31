@@ -188,7 +188,7 @@ let test_record_by_model_bucket () =
        ~runtime_profile:"primary"
        ~bucket:"over_1200s");
   Alcotest.(check (float 0.0001))
-    "different cascade unchanged"
+    "different runtime unchanged"
     0.0
     (model_bucket_count
        ~keeper
@@ -225,7 +225,7 @@ let () =
         ] );
       ( "provider-model",
         [
-          Alcotest.test_case "records by model/cascade bucket" `Quick
+          Alcotest.test_case "records by model/runtime bucket" `Quick
             test_record_by_model_bucket;
         ] );
     ]

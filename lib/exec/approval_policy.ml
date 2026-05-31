@@ -1,6 +1,6 @@
 (* A3 approval_policy — pure decide (Capability.t list -> Verdict.t).
 
-   Fail-closed: the rule cascade never produces [Allow] on an unknown
+   Fail-closed: the rule runtime never produces [Allow] on an unknown
    construct.  [Ask] is always the default bucket when no explicit
    rule has fired. *)
 

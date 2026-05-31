@@ -96,7 +96,7 @@ canWake: isStuck || (isRunning && !isPaused)
 | **C1 Phase casing 3-맵 중복** | `keeper-store-normalize.ts:35-69` `BACKEND_PHASE_MAP` / `keeper-state-diagram.ts:42-69` `PHASE_ID_MAP` / `monitoring-runtime.ts:159-180` `normalizePhase()` | 같은 의미의 phase casing map 이 3 곳에 *cross-reference 없이* 존재 |
 | **C2 Status refinement fork** | `keeper-runtime-display.ts:124-166` `refineOfflineStatus()` 호출 / `monitoring-runtime.ts:214-235` `keeperBand()` 직접 read | 같은 keeper 가 fleet 에서 `offline`, detail 에서 `unbooted` 로 표시 |
 | **C3 Paused AND/OR 4 중 chain** | `keeper-action-panel.ts:112-113` / `dashboard-shell.ts:168-173` `keeperLooksPaused()` / `monitoring-runtime.ts:214-215` `keeperBand()` / `keeper-reactivity-monitor.ts:191-192` `isKeeperPaused` | 4 함수가 각자 `paused | phase==='Paused' | stage==='paused' | status==='paused'` OR 분기 |
-| **C4 Runtime blocker class enum 직접 read** | `keeper-action-panel.ts:117-119` / `keeper-detail-alert-strip.ts:335` / `keeper-runtime-display.ts:235-318` | 3 곳이 `cascade_exhausted/oas_timeout_budget/turn_timeout` 를 inline check, 통일된 predicate 부재 |
+| **C4 Runtime blocker class enum 직접 read** | `keeper-action-panel.ts:117-119` / `keeper-detail-alert-strip.ts:335` / `keeper-runtime-display.ts:235-318` | 3 곳이 `runtime_exhausted/oas_timeout_budget/turn_timeout` 를 inline check, 통일된 predicate 부재 |
 | **C5 Composite vs keeper field fallback** | `keeper-detail-runtime.ts:180-194` (`composite.phase ?? keeper.phase ?? keeper.status`) / `keeper-state-diagram.ts` (composite 무시) | RFC-0046 의도 (`composite` = SSOT) 가 fallback 으로 우회 |
 
 #### §1.5.2 Noun/verb label collision matrix
@@ -107,7 +107,7 @@ canWake: isStuck || (isRunning && !isPaused)
 | **종료** | `keeper-phase-indicator.ts:55,60` (Dead/Draining: `종료`/`종료중`) | `keeper-action-panel.ts:56,210` (shutdown) + `keeper-detail-lifecycle.ts:43,62` | ✓ | CRITICAL |
 | **기동** | `keeper-lifecycle-timeline.ts:60` (lifecycle event `기동됨`) | `keeper-action-panel.ts:55,174` (boot button) | ✓ | HIGH |
 | **재개** | `keeper-lifecycle-timeline.ts:72` (`자동 재개됨`) | `keeper-action-panel.ts:53,192` (resume button) | ✓ | HIGH |
-| **차단됨** | `status-label.ts:39` (blocked) + `keeper-detail-alert-strip.ts:373,382` | `keeper-detail-runtime.ts:295` (row label) + `cascade-config-panel.ts:917` | adjacent | MEDIUM |
+| **차단됨** | `status-label.ts:39` (blocked) + `keeper-detail-alert-strip.ts:373,382` | `keeper-detail-runtime.ts:295` (row label) + `runtime-config-panel.ts:917` | adjacent | MEDIUM |
 | **깨우기** | — | `keeper-action-panel.ts:54,201` (wakeup button) | — | LOW |
 
 PR #16562 vocab outlier alignment (`정지`/`일시 중지` → `일시정지`) 가 *state 명사 alignment* 만 처리. *state↔verb 분리* 는 본 RFC §3 의 작업.
@@ -130,7 +130,7 @@ PR #16562 vocab outlier alignment (`정지`/`일시 중지` → `일시정지`) 
 ```ts
 type BlockerReason =
   | 'synthetic_stall'
-  | 'cascade_exhausted'
+  | 'runtime_exhausted'
   | 'oas_timeout_budget'
   | 'turn_timeout'
   | 'heartbeat_failures'
@@ -242,7 +242,7 @@ PR-1 머지 후 PR-2~7 은 모두 같은 SSOT 호출자이므로 **동시 진행
 ## §8 Related work / cross-reference
 
 - **PR #16552** (`fix(dashboard): split statusLabel collisions + unify displayStatus`, MERGED 2026-05-19) — body 의 "Out of scope" §에 사용자가 *RFC-0135 Keeper/Agent Status Vocabulary SSOT (가칭)* 으로 reserve. 본 RFC 가 그 가칭 scope (`'정지'` 124 occurrences inline 라벨링, 컴포넌트별 inline 라벨, `statusLabel ↔ monitoring-runtime ↔ fsm-hub-types` 3곳 분산) 을 *확장된 scope* (typed sum + derive 함수 + wire conditioning + label noun/verb 분리) 로 정착시킨다.
-- **PR #16555** (typed verdict + cascade scope tagging for keeper detail alert strip) — 본 RFC 의 § 5 PR-5 가 직접 확장.
+- **PR #16555** (typed verdict + runtime scope tagging for keeper detail alert strip) — 본 RFC 의 § 5 PR-5 가 직접 확장.
 - **PR #16562** (vocab outlier alignment `정지`/`일시 중지` → `일시정지`) — 본 RFC §3 의 *선행 작업*. label SSOT 첫 step.
 - **RFC-0133** (keeper phase casing SSOT consolidation) — backend↔frontend phase casing 정렬. 본 RFC §4 와 같은 패밀리 (wire normalization).
 - **RFC-0088** (Counter-as-Fix 워크어라운드 거부) — 본 RFC §9 의 거부 기준이 0088 의 시그니처 #2 (String/Substring 분류기 보강) 와 직결.

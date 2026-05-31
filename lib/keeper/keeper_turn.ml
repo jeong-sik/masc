@@ -144,13 +144,6 @@ let preflight_keeper_msg ctx args : (unit, string) result =
       match resolve_turn_runtime_id meta with
       | Error e -> Error e
       | Ok turn_runtime_id ->
-        (match
-           Keeper_runtime_resilience.runtime_resilience_error_message
-             (Keeper_runtime_resilience.runtime_resilience_of_name
-                (turn_runtime_id))
-         with
-         | Some e -> Error e
-         | None ->
         let effective_models =
           if direct_reply then
             Provider_runtime_projection.default_execution_model_strings
@@ -161,7 +154,7 @@ let preflight_keeper_msg ctx args : (unit, string) result =
         match Keeper_types_support.ensure_api_keys_for_labels effective_models with
         | Error e -> Error e
         | Ok () ->
-          Keeper_turn_helpers.ensure_local_discovery_ready effective_models))))
+          Keeper_turn_helpers.ensure_local_discovery_ready effective_models)))
 
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
@@ -223,15 +216,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
         Progress.stop_tracking turn_task_id;
         tool_result_error ("" ^ e)
       | Ok turn_runtime_id ->
-      (match
-         Keeper_runtime_resilience.runtime_resilience_error_message
-           (Keeper_runtime_resilience.runtime_resilience_of_name
-              (turn_runtime_id))
-       with
-       | Some e ->
-         Progress.stop_tracking turn_task_id;
-         tool_result_error e
-       | None ->
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
          slots, starving the synchronous run_turn call (Issue #2610). *)
@@ -264,7 +248,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             Progress.stop_tracking turn_task_id;
             tool_result_error ("" ^ e)
           | Ok () ->
-         let max_cascade_context =
+         let max_runtime_context =
            let resolution =
              Keeper_context_runtime.resolve_max_context_resolution
                ~requested_override:meta.max_context_override effective_models
@@ -489,16 +473,16 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               Keeper_context_runtime.timed (fun () ->
                   Keeper_agent_run.run_turn
                     ~config:ctx.config ~meta ~base_dir
-                    ~max_context:max_cascade_context
+                    ~max_context:max_runtime_context
                     ~build_turn_prompt
                     ~user_message:message
-                    ~cascade_name:
+                    ~runtime_id:
                       (                         (turn_runtime_id))
                     ~world_observation
                     ~turn_affordances
                     ~required_tool_names
                     ?oas_timeout_s:keeper_msg_oas_timeout_s
-                    ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
+                    ?provider_filter:(Env_config_keeper.KeeperRuntimeProviderFilter.provider_allowlist ())
                     ~generation:meta.runtime.generation
                     ?on_event
                     ~trajectory_acc
@@ -552,7 +536,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       Keeper_state_machine.Handoff_started)
                   ~meta
                   ~model:result.model_used
-                  ~primary_model_max_tokens:max_cascade_context
+                  ~primary_model_max_tokens:max_runtime_context
                   ~current_turn_blocker_info:None
                   ~checkpoint:result.checkpoint
                 |> resilience_handles.sync_lifecycle_meta
@@ -719,4 +703,4 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               in
               tool_result_ok (Yojson.Safe.to_string reply_json)
 
-)))))))
+))))))

@@ -619,7 +619,11 @@ let of_json = function
             | None -> Error (Printf.sprintf "unknown event: %S" event_string)
             | Some event -> Ok event)
             >>= fun event ->
-            optional_string "runtime_id" fields >>= fun runtime_id ->
+            (match optional_string "runtime_id" fields with
+             | Ok (Some runtime_id) -> Ok (Some runtime_id)
+             | Ok None -> optional_string "runtime_id" fields
+             | Error _ as error -> error)
+            >>= fun runtime_id ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
             field "links" fields >>= fun links_json ->

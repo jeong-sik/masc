@@ -9,7 +9,7 @@
     When the LLM reviewer is unavailable, falls back to local pattern matching
     only. Liveness takes priority over correctness.
 
-    Cross-model evaluation (#3067): use [~evaluator_cascade] to force
+    Cross-model evaluation (#3067): use [~evaluator_runtime] to force
     a different model family than the generator, providing genuine
     adversarial tension rather than same-model self-evaluation.
 
@@ -54,22 +54,22 @@ val gate_to_string : gate -> string
 (** Structured review result with audit metadata for cross-model tracking. *)
 type review_result = {
   verdict : verdict;
-  evaluator_cascade : string;
-  generator_cascade : string option;
+  evaluator_runtime : string;
+  generator_runtime : string option;
   gate : gate;
   fallback_reason : string option;  (** Error message when gate=Fallback *)
 }
 
 (** Review a task completion claim with optional cross-model separation.
 
-    @param evaluator_cascade Override cascade for LLM verification.
+    @param evaluator_runtime Override runtime for LLM verification.
       Default: the profile selected by [routes.cross_verifier]. Use a
-      different cascade name to force a specific evaluator profile.
-    @param generator_cascade Optional name of the generator's cascade.
+      different runtime name to force a specific evaluator profile.
+    @param generator_runtime Optional name of the generator's runtime.
       Logged for auditing; not used in verification logic. *)
 val review :
-  ?evaluator_cascade:string ->
-  ?generator_cascade:string ->
+  ?evaluator_runtime:string ->
+  ?generator_runtime:string ->
   ?completion_contract:string list ->
   ?on_verdict:(review_result -> unit) ->
   ?few_shot_block:string ->
@@ -111,7 +111,7 @@ val find_excuse_pattern : string -> (string * string) option
     [<gate2_advisory>] section that surfaces a substring-detected
     avoidance phrase to the LLM as a heuristic signal rather than
     a verdict — see #10113.  Exposed so tests can pin the prompt
-    contract without standing up an OAS cascade. *)
+    contract without standing up an OAS runtime. *)
 val build_prompt :
   ?few_shot_block:string ->
   ?excuse_advisory:string * string ->

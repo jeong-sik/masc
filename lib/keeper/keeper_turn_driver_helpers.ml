@@ -5,7 +5,7 @@
     that compute provider-attempt timeout bounds, health-key derivations,
     tool-name aggregations, etc. Lifting them out of the 1459-LOC
     [keeper_turn_driver.ml] is a foundation step toward the eventual
-    A/B/C decomposition (Agent SDK call / cascade strategy / keeper
+    A/B/C decomposition (Agent SDK call / runtime strategy / keeper
     bookkeeping) deferred from RFC-0047 Phase 4.
 
     No behavior change. Mechanical extraction.
@@ -112,7 +112,7 @@ let provider_rejection_for_required_tool_unsupported ~provider_label
          provider_label
          (String.concat ", " missing_required_tools);
    }
-    : Keeper_meta_contract.provider_rejection)
+    : Keeper_internal_error.provider_rejection)
 
 let no_tool_capable_provider_of_pre_dispatch_rejections ~runtime_id
     ~configured_labels ~runtime_manifest_required_tool_names ~runtime_mcp_policy
@@ -133,13 +133,13 @@ let no_tool_capable_provider_of_pre_dispatch_rejections ~runtime_id
         ; required_tool_names
         ; provider_rejections =
             List.map
-              (fun (r : Keeper_meta_contract.provider_rejection) ->
+              (fun (r : Keeper_internal_error.provider_rejection) ->
                  (r.provider_label, r.reason))
               rejections
         }
       in
       Some
-        (Keeper_meta_contract.Runtime_exhausted
+        (Keeper_internal_error.Runtime_exhausted
            {
              runtime_id;
              reason = Keeper_meta_contract.No_tool_capable (Some detail);
@@ -188,7 +188,7 @@ let provider_rejections_for_no_tool_error
                   Runtime_candidate.provider_label candidate;
                 reason;
               }
-               : Keeper_meta_contract.provider_rejection))
+               : Keeper_internal_error.provider_rejection))
 
 let apply_stream_idle_timeout_default = function
   | Some _ as v -> v

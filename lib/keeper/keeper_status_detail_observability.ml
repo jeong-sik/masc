@@ -32,7 +32,7 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
   match
     List.rev parsed
     |> List.find_opt (fun json ->
-      match Json_util.assoc_member_opt "cascade" json with
+      match Json_util.assoc_member_opt "runtime" json with
       | Some (`Assoc _) -> true
       | _ -> false)
   with
@@ -61,37 +61,37 @@ let lightweight_runtime_contract_json ~runtime_blocker_class =
     ; "note", `String proof_note
     ]
 
-let attempt_summary_json latest_cascade =
-  match latest_cascade with
+let attempt_summary_json latest_runtime =
+  match latest_runtime with
   | None ->
       `Assoc
         [ ( "summary"
-          , `String "No recent cascade observation for current keeper config." )
+          , `String "No recent runtime observation for current keeper config." )
         ; "attempts_observed", `Null
         ; "selected_index", `Null
         ; "fallback_hops", `Null
         ; "fallback_applied", `Bool false
         ]
-  | Some cascade ->
+  | Some runtime ->
       let attempts_observed =
-        match Json_util.assoc_member_opt "attempts" cascade with
+        match Json_util.assoc_member_opt "attempts" runtime with
         | Some (`List attempts) -> List.length attempts
         | _ -> 0
       in
       let selected_index =
-        match Json_util.assoc_member_opt "selected_index" cascade with
+        match Json_util.assoc_member_opt "selected_index" runtime with
         | Some (`Int value) -> Some value
         | Some (`Intlit value) -> int_of_string_opt value
         | _ -> None
       in
       let fallback_hops =
-        match Json_util.assoc_member_opt "fallback_hops" cascade with
+        match Json_util.assoc_member_opt "fallback_hops" runtime with
         | Some (`Int value) -> Some value
         | Some (`Intlit value) -> int_of_string_opt value
         | _ -> None
       in
       let fallback_applied =
-        match Json_util.assoc_member_opt "fallback_applied" cascade with
+        match Json_util.assoc_member_opt "fallback_applied" runtime with
         | Some (`Bool value) -> value
         | _ -> false
       in
@@ -113,7 +113,7 @@ let attempt_summary_json latest_cascade =
               "%d attempt(s); selected candidate index %d without fallback."
               attempts_observed
               pos
-        | _ -> "Cascade observation is present but incomplete."
+        | _ -> "Runtime observation is present but incomplete."
       in
       `Assoc
         [ "summary", `String summary
@@ -123,48 +123,48 @@ let attempt_summary_json latest_cascade =
         ; "fallback_applied", `Bool fallback_applied
         ]
 
-let latest_cascade_for_current_config ~current_cascade_name latest_metrics =
-  let latest_cascade =
+let latest_runtime_for_current_config ~current_runtime_id latest_metrics =
+  let latest_runtime =
     match latest_metrics with
     | Some metrics ->
-        (match Json_util.assoc_member_opt "cascade" metrics with
-         | Some (`Assoc _ as cascade) -> Some cascade
+        (match Json_util.assoc_member_opt "runtime" metrics with
+         | Some (`Assoc _ as runtime) -> Some runtime
          | _ -> None)
     | None -> None
   in
-  match latest_cascade with
+  match latest_runtime with
   | None -> None
-  | Some cascade ->
-      let cascade_name_matches =
+  | Some runtime ->
+      let runtime_id_matches =
         let observed_runtime_id =
-          match Json_util.assoc_string_opt "runtime_id" cascade with
+          match Json_util.assoc_string_opt "runtime_id" runtime with
           | Some value -> Some value
-          | None -> Json_util.assoc_string_opt "cascade_name" cascade
+          | None -> Json_util.assoc_string_opt "runtime_id" runtime
         in
         match observed_runtime_id with
-        | Some observed_name -> String.equal observed_name current_cascade_name
+        | Some observed_name -> String.equal observed_name current_runtime_id
         | None -> true
       in
-      if cascade_name_matches then Some cascade else None
+      if runtime_id_matches then Some runtime else None
 
-let model_observability_json ~current_cascade_name ~runtime_blocker_fields latest_metrics =
-  let latest_cascade =
-    latest_cascade_for_current_config ~current_cascade_name latest_metrics
+let model_observability_json ~current_runtime_id ~runtime_blocker_fields latest_metrics =
+  let latest_runtime =
+    latest_runtime_for_current_config ~current_runtime_id latest_metrics
   in
   let runtime_blocker_class =
     assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
   in
   let runtime_id =
-    Option.value ~default:"" (nonempty_trimmed current_cascade_name)
+    Option.value ~default:"" (nonempty_trimmed current_runtime_id)
   in
   `Assoc
     [ ( "runtime_id"
       , if runtime_id = "" then `Null else `String runtime_id )
-    ; "recent_turn_observation", `Bool (Option.is_some latest_cascade)
+    ; "recent_turn_observation", `Bool (Option.is_some latest_runtime)
     ; "configured_labels", `List []
     ; "resolved_candidates", `List []
     ; "selected_model", `Null
-    ; "attempt_summary", attempt_summary_json latest_cascade
+    ; "attempt_summary", attempt_summary_json latest_runtime
     ; ( "runtime_contract"
       , lightweight_runtime_contract_json ~runtime_blocker_class )
     ]

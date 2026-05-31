@@ -46,7 +46,7 @@ type reason =
 
 (** Fingerprint of a single skip event. *)
 type fingerprint = {
-  runtime_id : string;  (** Runtime id (e.g. ["strict_tool_candidates"]). *)
+  runtime_id : string;  (** Runtime name (e.g. ["strict_tool_candidates"]). *)
   provider : string;  (** Provider key or endpoint URL. *)
   reason : reason;
 }

@@ -386,7 +386,7 @@
         <a href="#mcp-flow">MCP Tool Call</a>
         <a href="#keeper-flow">Keeper Turn</a>
         <a href="#coord-flow">Task / Goal</a>
-        <a href="#cascade-flow">Cascade / OAS</a>
+        <a href="#runtime-flow">Runtime / OAS</a>
         <a href="#dashboard-flow">Dashboard</a>
         <a href="#truth-flow">Persistence Truth</a>
         <a href="#matrix">기능 매핑</a>
@@ -448,7 +448,7 @@
               <span class="chip">HTTP/MCP server</span>
               <span class="chip">Dashboard read models</span>
               <span class="chip">Keeper lifecycle/FSM</span>
-              <span class="chip">Cascade/OAS execution</span>
+              <span class="chip">Runtime/OAS execution</span>
               <span class="chip">Task/Goal coordination</span>
             </div>
           </div>
@@ -502,13 +502,13 @@
           </div>
           <div class="node keeper">
             <h4>State surfaces</h4>
-            <p>Coord, Keeper, Board, Goal, Cascade, Dashboard projections.</p>
+            <p>Coord, Keeper, Board, Goal, Runtime, Dashboard projections.</p>
           </div>
         </div>
         <div class="sequence">
           <div class="step"><div><strong>Server bootstraps runtime state.</strong><span><code>Server_runtime_bootstrap.run</code> initializes Eio resources, server state, startup tasks, keepers, and the HTTP accept loop.</span><span class="ref">lib/server/server_runtime_bootstrap.mli:1, :38, :130</span></div></div>
           <div class="step"><div><strong>Base path is normalized before runtime assembly.</strong><span><code>bin/main_eio.ml</code> validates explicit base path, prevents source repo runtime-root misuse, creates <code>&lt;base&gt;/.masc</code>, locks port/base path, then exports <code>MASC_BASE_PATH</code>.</span><span class="ref">bin/main_eio.ml:521, :577, :606</span></div></div>
-          <div class="step"><div><strong>Route table is composed once.</strong><span><code>Server_routes_http.make_routes</code> wires frontend, room, dashboard, provider, cascade, activity, sidecar, repositories, workspace, IDE, credentials, keeper repos.</span><span class="ref">lib/server/server_routes_http.ml:9-41</span></div></div>
+          <div class="step"><div><strong>Route table is composed once.</strong><span><code>Server_routes_http.make_routes</code> wires frontend, room, dashboard, provider, runtime, activity, sidecar, repositories, workspace, IDE, credentials, keeper repos.</span><span class="ref">lib/server/server_routes_http.ml:9-41</span></div></div>
           <div class="step"><div><strong>HTTP auth wraps route handlers.</strong><span><code>Server_auth</code> centralizes token extraction, role/permission checks, public-read rules, CORS, and admin/tool auth combinators.</span><span class="ref">lib/server/server_auth.mli:1, :56, :237, :283</span></div></div>
           <div class="step"><div><strong>Command Plane compatibility must not become a front door again.</strong><span>H2 gateway responds to <code>/api/v1/command-plane*</code> with removed-surface response.</span><span class="ref">lib/server/server_h2_gateway.ml:984-985, :1023-1024</span></div></div>
         </div>
@@ -521,7 +521,7 @@
           <div class="node server"><h4>JSON-RPC dispatch</h4><p><code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>, resources, prompts.</p></div>
           <div class="node common"><h4>Tool envelope</h4><p>Timeout, read-only retry, telemetry, runtime-MCP keeper trace.</p></div>
           <div class="node coord"><h4>Tool_dispatch</h4><p>Token + tag registry + pre hooks + dispatch observers.</p></div>
-          <div class="node keeper"><h4>Handler module</h4><p>Coord, task, keeper, board, cascade, operator, code, local runtime.</p></div>
+          <div class="node keeper"><h4>Handler module</h4><p>Coord, task, keeper, board, runtime, operator, code, local runtime.</p></div>
         </div>
         <div class="grid two">
           <div class="card">
@@ -557,8 +557,8 @@
           <div class="step"><div><strong>Keepalive fiber reads current keeper meta and syncs registry.</strong><span>Disk meta mtime gate avoids reparse storms; registry remains dashboard live source.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1706-1748</span></div></div>
           <div class="step"><div><strong>Heartbeat freshness and failure thresholds are checked.</strong><span>Consecutive heartbeat failures set structured failure reason and crash the fiber for supervisor restart.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1761-1781</span></div></div>
           <div class="step"><div><strong>Board events are collected before dispatch.</strong><span>Warmup controls whether keeper can act on events; pending events feed the unified turn.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1801-1810</span></div></div>
-          <div class="step"><div><strong><code>run_keeper_cycle</code> brackets the turn.</strong><span>Phase/cascade gates, event-bus tracking, OAS timeout/retry, post-turn lifecycle, and task acquisition live here.</span><span class="ref">lib/keeper/keeper_unified_turn.ml:122, :198, :611, :893, :2360, :2464</span></div></div>
-          <div class="step"><div><strong><code>Keeper_turn_driver.run_named</code> enters the OAS cascade loop.</strong><span>Resolves providers, enforces tool support and admission queue, then calls OAS Agent.run.</span><span class="ref">lib/keeper/keeper_turn_driver.mli:145-210</span></div></div>
+          <div class="step"><div><strong><code>run_keeper_cycle</code> brackets the turn.</strong><span>Phase/runtime gates, event-bus tracking, OAS timeout/retry, post-turn lifecycle, and task acquisition live here.</span><span class="ref">lib/keeper/keeper_unified_turn.ml:122, :198, :611, :893, :2360, :2464</span></div></div>
+          <div class="step"><div><strong><code>Keeper_turn_driver.run_named</code> enters the OAS runtime loop.</strong><span>Resolves providers, enforces tool support and admission queue, then calls OAS Agent.run.</span><span class="ref">lib/keeper/keeper_turn_driver.mli:145-210</span></div></div>
           <div class="step"><div><strong>Receipt and FSM audit close the turn.</strong><span>Receipt outcome is typed and checked against TLA receipt vocabulary; registry turn state is reset on finish.</span><span class="ref">lib/keeper/keeper_execution_receipt.mli:1-40, lib/keeper/keeper_registry.mli:222-227</span></div></div>
         </div>
         <div class="callout">
@@ -591,11 +591,11 @@
         </div>
       </section>
 
-      <section id="cascade-flow">
-        <h2>Cascade / OAS Boundary 순서도</h2>
+      <section id="runtime-flow">
+        <h2>Runtime / OAS Boundary 순서도</h2>
         <div class="flow row">
           <div class="node coord"><h4>MASC decision</h4><p>task, goal, keeper profile, tool requirements.</p></div>
-          <div class="node common"><h4>Cascade runtime</h4><p>named cascade -> model labels -> provider configs.</p></div>
+          <div class="node common"><h4>Runtime runtime</h4><p>named runtime -> model labels -> provider configs.</p></div>
           <div class="node keeper"><h4>Tool lane filter</h4><p>runtime MCP policy, required tool support.</p></div>
           <div class="node common"><h4>OAS execution</h4><p>Agent.run, context, checkpoint, provider stream.</p></div>
           <div class="node coord"><h4>MASC projection</h4><p>receipt, manifest, dashboard redacted runtime lane.</p></div>
@@ -608,8 +608,8 @@
           </div>
           <div class="card">
             <h3>Code seams</h3>
-            <p><code>Cascade_runtime</code> is MASC's SSOT for named cascade resolution. <code>Cascade_runner</code> is the facade over OAS config/run/checkpoint. <code>Keeper_turn_driver</code> is the keeper-facing named cascade execution entry.</p>
-            <span class="ref">lib/cascade/cascade_runtime.mli:1-11, lib/cascade/cascade_runner.mli:1-14, lib/keeper/keeper_turn_driver.mli:1-10</span>
+            <p><code>Runtime_runtime</code> is MASC's SSOT for named runtime resolution. <code>Runtime_runner</code> is the facade over OAS config/run/checkpoint. <code>Keeper_turn_driver</code> is the keeper-facing named runtime execution entry.</p>
+            <span class="ref">lib/runtime/runtime_runtime.mli:1-11, lib/runtime/runtime_runner.mli:1-14, lib/keeper/keeper_turn_driver.mli:1-10</span>
           </div>
         </div>
       </section>
@@ -648,12 +648,12 @@
             <tr><td><code>.masc/goals.json</code></td><td><code>Goal_store</code></td><td>Versioned JSON with phase/status bridge; raw writes require external locking.</td></tr>
             <tr><td>Task backlog</td><td><code>Coord</code> via <code>Task_dispatch.Jsonl</code></td><td>Single JSONL/file backend today; future backend pivot is explicit.</td></tr>
             <tr><td>Keeper runtime</td><td><code>Keeper_registry</code> + keeper meta stores</td><td>In-memory live state plus disk meta; registry is dashboard live truth.</td></tr>
-            <tr><td>Execution receipts</td><td><code>Keeper_execution_receipt</code></td><td>Typed terminal outcome, TLA receipt mapping, tool/cascade/sandbox evidence.</td></tr>
+            <tr><td>Execution receipts</td><td><code>Keeper_execution_receipt</code></td><td>Typed terminal outcome, TLA receipt mapping, tool/runtime/sandbox evidence.</td></tr>
             <tr><td>Append logs</td><td><code>Jsonl_atomic</code>, <code>Dated_jsonl</code></td><td>In-process mutex serialization; cross-process race protection is not in scope.</td></tr>
             <tr><td>Config root</td><td><code>Config_dir_resolver</code></td><td><code>MASC_CONFIG_DIR</code> wins; checked-in repo config is seed, not active fallback.</td></tr>
             <tr><td>Bearer auth</td><td><code>Auth</code> + <code>Server_auth</code></td><td>Raw tokens live under <code>&lt;base&gt;/.masc/auth</code>; credentials are hashed and role/permission-gated.</td></tr>
             <tr><td>Keeper GitHub credentials</td><td><code>Credential_materializer</code> + <code>Keeper_host_config_provider</code></td><td>Materialized <code>hosts.yml</code> with <code>oauth_token</code> is required for Docker portability; host keyring-only auth is stale.</td></tr>
-            <tr><td>Metrics</td><td><code>Prometheus</code> + domain metric modules</td><td>In-process metrics endpoint, with some transitional split ownership such as cascade metric names.</td></tr>
+            <tr><td>Metrics</td><td><code>Prometheus</code> + domain metric modules</td><td>In-process metrics endpoint, with some transitional split ownership such as runtime metric names.</td></tr>
           </tbody>
         </table>
       </section>
@@ -683,14 +683,14 @@
               <td><code>Keeper_heartbeat_loop</code>, <code>Keeper_unified_turn</code>, <code>Keeper_registry</code></td>
               <td><code>Keeper_post_turn</code>, <code>Keeper_turn_driver</code>, <code>Keeper_execution_receipt</code></td>
               <td><code>Keeper_turn_fsm</code>, <code>Keeper_state_machine</code>, TLA specs</td>
-              <td>heartbeat -> event triage -> phase/cascade gate -> OAS run -> receipt -> registry/task update</td>
+              <td>heartbeat -> event triage -> phase/runtime gate -> OAS run -> receipt -> registry/task update</td>
             </tr>
             <tr>
-              <td>Cascade execution</td>
-              <td><code>Cascade_runner</code>, <code>Keeper_turn_driver</code></td>
-              <td><code>Cascade_runtime</code>, <code>Cascade_oas_runner</code>, <code>Cascade_fsm</code></td>
+              <td>Runtime execution</td>
+              <td><code>Runtime_runner</code>, <code>Keeper_turn_driver</code></td>
+              <td><code>Runtime_runtime</code>, <code>Runtime_oas_runner</code>, <code>Runtime_fsm</code></td>
               <td>OAS compat, provider registry, runtime MCP policy</td>
-              <td>cascade name -> provider configs -> tool lane filter -> Agent.run -> redacted MASC projection</td>
+              <td>runtime name -> provider configs -> tool lane filter -> Agent.run -> redacted MASC projection</td>
             </tr>
             <tr>
               <td>Dashboard/operator</td>
@@ -778,7 +778,7 @@
             </tr>
             <tr>
               <td>Metrics SSOT is transitional.</td>
-              <td><code>Cascade_metrics</code> owns cascade names while <code>Prometheus.ml</code> still mirrors registration for <code>/metrics</code>.</td>
+              <td><code>Runtime_metrics</code> owns runtime names while <code>Prometheus.ml</code> still mirrors registration for <code>/metrics</code>.</td>
               <td>Move metric definitions to domain modules and keep Prometheus as registry/exporter only.</td>
               <td><span class="heat med">Medium</span></td>
             </tr>
@@ -853,7 +853,7 @@
               <td>large registry</td>
               <td>metric declaration, registration, exporter, domain labels</td>
               <td>domain-owned metric descriptors, exporter-only Prometheus registry</td>
-              <td>metrics endpoint snapshot + cascade metric tests</td>
+              <td>metrics endpoint snapshot + runtime metric tests</td>
             </tr>
           </tbody>
         </table>
@@ -956,7 +956,7 @@
           </article>
 
           <article class="logic-card">
-            <h3><span class="tag big">Keeper</span>Heartbeat / Unified Turn / Cascade</h3>
+            <h3><span class="tag big">Keeper</span>Heartbeat / Unified Turn / Runtime</h3>
             <ol class="logic-steps">
               <li>
                 <strong>Keepalive launch passes spawn admission before fork</strong>
@@ -1019,14 +1019,14 @@
                 <code>lib/keeper/keeper_unified_turn.ml:893-970</code>
               </li>
               <li>
-                <strong>Cascade runtime resolves providers and runtime MCP policy</strong>
+                <strong>Runtime runtime resolves providers and runtime MCP policy</strong>
                 <span>Keeper-internal tools force materialized runtime tool support; provider configs are filtered before attempts.</span>
-                <code>lib/keeper/keeper_turn_driver.ml:153-246, lib/cascade/cascade_oas_runner.ml:65-117, :384-430</code>
+                <code>lib/keeper/keeper_turn_driver.ml:153-246, lib/runtime/runtime_oas_runner.ml:65-117, :384-430</code>
               </li>
               <li>
                 <strong>OAS Agent.run is the concrete execution boundary</strong>
                 <span>MASC builds or resumes an OAS agent, then runs streaming or non-streaming Agent.run and captures proof when a contract exists.</span>
-                <code>lib/cascade/cascade_runner.ml:494-540</code>
+                <code>lib/runtime/runtime_runner.ml:494-540</code>
               </li>
               <li>
                 <strong>Receipt is authoritative turn evidence</strong>
@@ -1034,7 +1034,7 @@
                 <code>lib/keeper/keeper_agent_run.ml:1867-2087, :2149-2189</code>
               </li>
               <li>
-                <strong>Cascade loop is guarded by admission queue permit</strong>
+                <strong>Runtime loop is guarded by admission queue permit</strong>
                 <span>Provider cycles, filtered-empty retries, and exhausted fallbacks all run inside host-resource admission control.</span>
                 <code>lib/keeper/keeper_turn_driver.ml:1360-1398</code>
               </li>
@@ -1055,7 +1055,7 @@
               </div>
               <div>
                 <h4>검증</h4>
-                <p><code>test_keeper_unified.ml</code>, keeper FSM correspondence tests, event queue tests, receipt authoritative tests, <code>KeeperTaskAcquisition.tla</code>, cascade runtime MCP tests.</p>
+                <p><code>test_keeper_unified.ml</code>, keeper FSM correspondence tests, event queue tests, receipt authoritative tests, <code>KeeperTaskAcquisition.tla</code>, runtime runtime MCP tests.</p>
               </div>
             </div>
           </article>
@@ -1065,7 +1065,7 @@
             <ol class="logic-steps">
               <li>
                 <strong>Tool layer parses transition intent and gates verifier agents</strong>
-                <span><code>tool_task</code> validates action, notes, completion contract, evaluator cascade, handoff context, expected version, and force.</span>
+                <span><code>tool_task</code> validates action, notes, completion contract, evaluator runtime, handoff context, expected version, and force.</span>
                 <code>lib/tool_task.ml:1020-1057</code>
               </li>
               <li>
@@ -1344,7 +1344,7 @@
               <td>Keeper turn</td>
               <td><code>keeper_heartbeat_loop.ml</code>, <code>keeper_unified_turn.ml</code>, <code>keeper_turn_driver.ml</code></td>
               <td>Turn pipeline modules with typed step records</td>
-              <td>spawn admission, event queue payload, manifest rows, event ordering, cascade admission, receipt authority, post-turn lifecycle, task acquisition guard</td>
+              <td>spawn admission, event queue payload, manifest rows, event ordering, runtime admission, receipt authority, post-turn lifecycle, task acquisition guard</td>
             </tr>
             <tr>
               <td>Task/goal lifecycle</td>
@@ -1443,7 +1443,7 @@
               <td>JSONL writer contract를 하나로 수렴하되 파일 경로와 row schema는 보존한다.</td>
               <td><code>goal-refactor-jsonl-substrate-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16082">GitHub #16082</a></td>
               <td><code>task-381</code> store inventory<br><code>task-382</code> writer fixtures<br><code>task-383</code> shared adapter<br><code>task-384</code> audit/read fixtures</td>
-              <td>audit, telemetry, board, cascade, receipts, goal events, trajectory store를 인벤토리화하고 per-path append contract를 테스트로 잠근다.</td>
+              <td>audit, telemetry, board, runtime, receipts, goal events, trajectory store를 인벤토리화하고 per-path append contract를 테스트로 잠근다.</td>
             </tr>
             <tr>
               <td>LSP 기반 역공학 lane을 만들어 다음 설계도 갱신을 자동화한다.</td>
@@ -1581,7 +1581,7 @@
             <tr>
               <td><code>task-381</code></td>
               <td>JSONL store shapes와 path contract를 inventory한다.</td>
-              <td>audit, telemetry, board, cascade, receipt, goal, trajectory paths와 row schema를 표로 만든다.</td>
+              <td>audit, telemetry, board, runtime, receipt, goal, trajectory paths와 row schema를 표로 만든다.</td>
               <td>inventory table and path existence check.</td>
             </tr>
             <tr>

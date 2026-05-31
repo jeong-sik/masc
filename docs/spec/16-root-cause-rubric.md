@@ -103,7 +103,7 @@ The Model-Agnostic MASC Epic (`#6715`, 2026-04-12) and the 2026-04-09 tool-failu
 | Inference parameter hardcoding | SSOT + BND |
 | Spawn CLI hardcoding | SSOT |
 | Vendor-specific branching | STR + DET |
-| Cascade-specific fallbacks | SIL + VAR |
+| Runtime-specific fallbacks | SIL + VAR |
 | Guard false positives (`#6166`) | SIL |
 | Read-path mismatch (`#6167`) | DET |
 | Readonly bash crash (`#6168`) | STR |

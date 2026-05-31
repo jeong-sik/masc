@@ -3,7 +3,7 @@
 **Status**: Draft (Meta-RFC, code = 0)
 **Date**: 2026-05-27
 **Sub-RFCs**: RFC-0193 (substring classifier sunset, Issue #19032) / RFC-0195 (workflow_rejection descriptor enrichment) / RFC-0196 (dispatch layer clarity)
-**Memory anchors**: `feedback-surgical-workaround-rejected-for-tool-surface`, `feedback-cascade-budget-no-hard-gates`
+**Memory anchors**: `feedback-surgical-workaround-rejected-for-tool-surface`, `feedback-runtime-budget-no-hard-gates`
 
 ## Context
 
@@ -164,6 +164,6 @@ Cluster 화 (RFC-0182 패턴, ~170 → ~12-15 cluster) 로 human-reviewable 표�
 
 - CLAUDE.md §워크어라운드 거부 기준 §1 / §2 / §3
 - 메모: `feedback-surgical-workaround-rejected-for-tool-surface` (2026-05-27, PR #19035 reframe)
-- 메모: `feedback-cascade-budget-no-hard-gates` (2026-05-27, math composition 강제)
+- 메모: `feedback-runtime-budget-no-hard-gates` (2026-05-27, math composition 강제)
 - RFC-0182 (descriptor projection cluster taxonomy 패턴 차용)
 - RFC-0189 (typed failure_class — workflow_rejection 분류는 이미 typed)

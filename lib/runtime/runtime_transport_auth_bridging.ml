@@ -1,5 +1,5 @@
 (** Per-keeper authorization bridging for runtime MCP policies.
-    Extracted from [cascade_transport.ml] (godfile decomp). Two
+    Extracted from [runtime_transport.ml] (godfile decomp). Two
     helpers:
 
     - [cli_tool_a_can_auth_keeper_bound_runtime_mcp] — predicate that

@@ -53,18 +53,18 @@ export const FLEET_HISTORY_LEN = 30
 // Axis order is fixed by the TLA+ joint spec
 // (KeeperCompositeLifecycle.tla): KSM → KTC → KDP → KCL → KMC.
 // Keep it identical to TRANSITION_FIELDS so an operator scanning
-// left-to-right sees "lifecycle → turn → decision → cascade →
+// left-to-right sees "lifecycle → turn → decision → runtime →
 // compaction" — the natural causal order of a turn.
 // 6 axes (LT-16-KCB Phase 3 added KCB). Causal order: lifecycle →
-// turn → decision → cascade → compaction → circuit-breaker. KCB sits
+// turn → decision → runtime → compaction → circuit-breaker. KCB sits
 // at the tail because its state is derived from the *outcome* of the
-// cascade's tool calls (failure streak counter), so it is temporally
+// runtime's tool calls (failure streak counter), so it is temporally
 // downstream of the other five for any given turn.
 const AXES: Array<{ key: LaneKey; label: string; acronym: string }> = [
   { key: 'phase',      label: '생명주기',   acronym: 'KSM' },
   { key: 'turn',       label: '턴',        acronym: 'KTC' },
   { key: 'decision',   label: '결정',      acronym: 'KDP' },
-  { key: 'cascade',    label: 'Cascade',   acronym: 'KCL' },
+  { key: 'runtime',    label: 'Runtime',   acronym: 'KCL' },
   { key: 'compaction', label: '압축',      acronym: 'KMC' },
   { key: 'breaker',    label: '차단기',    acronym: 'KCB' },
 ]
@@ -142,7 +142,7 @@ export function sparkClassFor(value: string): string {
 /** Per-axis observation ring keyed by keeper name. */
 export type KeeperFleetHistory = Record<string, Record<LaneKey, string[]>>
 
-const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'cascade', 'compaction', 'breaker']
+const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'runtime', 'compaction', 'breaker']
 
 export type FleetRuntimeAttentionLevel = 'ok' | 'stale' | 'idle' | 'blocked'
 
@@ -261,7 +261,7 @@ function formatAge(seconds: number | null): string {
 function isIdleComposite(snapshot: KeeperCompositeSnapshot): boolean {
   return snapshot.turn_phase === 'idle'
     && snapshot.decision.stage === 'undecided'
-    && snapshot.cascade.state === 'idle'
+    && snapshot.runtime.state === 'idle'
     && snapshot.compaction.stage === 'accumulating'
     && (snapshot.circuit_breaker?.state ?? 'clean') === 'clean'
 }
@@ -465,7 +465,7 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
     return 'provider auth/model/config receipt 확인'
   }
   if (execution.terminal_reason_code === 'api_error_timeout') {
-    return 'provider timeout budget/cascade lane 확인'
+    return 'provider timeout budget/runtime lane 확인'
   }
   if (execution.operator_disposition === 'pause_human') {
     return 'blocker gate/approval 상태와 최신 receipt 확인'
@@ -535,7 +535,7 @@ export function buildRuntimeAssistPrompt(
     `next_hint=${attention.nextStep}`,
     `evidence=${attention.reason}`,
     `is_live=${String(snapshot.is_live)}`,
-    `KSM=${snapshot.phase} KTC=${snapshot.turn_phase} KDP=${snapshot.decision.stage} KCL=${snapshot.cascade.state} KMC=${snapshot.compaction.stage} KCB=${breaker}`,
+    `KSM=${snapshot.phase} KTC=${snapshot.turn_phase} KDP=${snapshot.decision.stage} KCL=${snapshot.runtime.state} KMC=${snapshot.compaction.stage} KCB=${breaker}`,
     `last_receipt=${receipt}`,
     '',
     '응답 형식:',
@@ -742,7 +742,7 @@ export function pushObservation(
       phase:      prev?.phase      ? prev.phase.slice()      : [],
       turn:       prev?.turn       ? prev.turn.slice()       : [],
       decision:   prev?.decision   ? prev.decision.slice()   : [],
-      cascade:    prev?.cascade    ? prev.cascade.slice()    : [],
+      runtime:    prev?.runtime    ? prev.runtime.slice()    : [],
       compaction: prev?.compaction ? prev.compaction.slice() : [],
       breaker:    prev?.breaker    ? prev.breaker.slice()    : [],
     }
@@ -801,7 +801,7 @@ export function tallyInvariantViolations(
 ): Record<keyof typeof INVARIANT_LABELS, number> {
   const counts = {
     phase_turn_alignment: 0,
-    no_cascade_before_measurement: 0,
+    no_runtime_before_measurement: 0,
     compaction_atomicity: 0,
     event_priority_monotone: 0,
     phase_derivation_agreement: 0,
@@ -1106,7 +1106,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 <span
                   data-testid="idle-composite-chip"
                   class="rounded-[var(--r-1)] border bg-[var(--ok-10)] px-2 py-0.5 text-xs text-[var(--color-status-ok)] border-[var(--ok-20)]"
-                  title="모든 sub-FSM이 idle인 keeper 수 (turn=idle, decision=undecided, cascade=idle, compaction=accumulating, circuit=clean)"
+                  title="모든 sub-FSM이 idle인 keeper 수 (turn=idle, decision=undecided, runtime=idle, compaction=accumulating, circuit=clean)"
                 >
                   Composite idle: ${idleCompositeCount}
                 </span>

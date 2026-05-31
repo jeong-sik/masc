@@ -40,7 +40,7 @@ let prepare_run_context
       ~(meta : keeper_meta)
       ~(base_dir : string)
       ~(max_context : int)
-      ~(cascade_name : string)
+      ~(runtime_id : string)
       ?temperature
       ?max_tokens
       ?shared_context
@@ -56,18 +56,18 @@ let prepare_run_context
     | Some t -> t
     | None ->
       Runtime_inference.resolve_temperature
-        ~cascade_name ~fallback:(fun () -> 0.3)
+        ~runtime_id ~fallback:(fun () -> 0.3)
   in
   let max_tokens =
     match max_tokens with
     | Some t ->
-      Runtime_inference.cap_max_tokens_to_runtime_id_ceiling
-        ~cascade_name
+      Runtime_inference.cap_max_tokens_to_runtime_ceiling
+        ~runtime_id
         ~source:"caller_override"
         t
     | None ->
       Runtime_inference.resolve_max_tokens
-        ~cascade_name
+        ~runtime_id
           (* 8192 allows complex multi-tool reasoning per turn.
            Cloudflare tunnel 100s is no longer a constraint with
            streaming responses. *)

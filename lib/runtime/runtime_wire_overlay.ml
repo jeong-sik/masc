@@ -1,7 +1,7 @@
 (** Wire-layer overlays that MASC applies after OAS resolves a provider config.
 
     This module owns transport-shape repairs, not provider/model identity.
-    Provider and model truth remains in OAS plus cascade.toml. *)
+    Provider and model truth remains in OAS plus keeper_runtime.toml. *)
 
 let auth_header_authorization = "Authorization"
 
@@ -94,12 +94,12 @@ let register_capability_overlay_provider
     ; build_body =
         (fun ~config:_ ~messages:_ ?tools:_ () ->
            invalid_arg
-             "MASC cascade capability overlay providers require an injected \
+             "MASC runtime capability overlay providers require an injected \
               Llm_transport")
     ; parse_response =
         (fun _ ->
            invalid_arg
-             "MASC cascade capability overlay providers require an injected \
+             "MASC runtime capability overlay providers require an injected \
               Llm_transport")
     ; resolve =
         (fun provider ->

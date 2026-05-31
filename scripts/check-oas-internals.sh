@@ -18,7 +18,7 @@
 #       annotations, local-module aliases, and comments).
 #     - `Llm_provider.Constants` qualified access outside
 #       lib/oas_compat/ and lib/provider_kind_resolver.{ml,mli}
-#       (informational; cascade subsystem currently legitimately
+#       (informational; runtime subsystem currently legitimately
 #       reads default inference params).
 #
 #   strict-internals (--strict-internals):

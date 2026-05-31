@@ -34,7 +34,7 @@ type t =
           provide input or decline. *)
   | Turn_wall_clock_timeout (** Turn exceeded its wall-clock budget. *)
   | Runtime_attempts_exhausted
-  (** Cascade aggregate outcome: all candidate attempts were exhausted.
+  (** Runtime aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating
           this as the root cause. *)
   | Required_tool_use_no_tool_call

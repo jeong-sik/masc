@@ -1,7 +1,7 @@
 (** Types_auth — authentication, authorization, and rate-limit
     types.
 
-    {b Include cascade:} starts with [include Masc_error] so the
+    {b Include runtime:} starts with [include Masc_error] so the
     error type / serialisation surface flows through into
     {!Types}.  Adds:
 

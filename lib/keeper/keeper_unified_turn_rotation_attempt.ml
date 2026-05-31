@@ -3,16 +3,16 @@ let build
       ?slot_release_at_phase
       ?productive_phase_elapsed_ms
       ?retry_phase_elapsed_ms
-      ~(from_runtime_id : string)
+      ~(from_runtime : string)
       ~(retry : Keeper_error_classify.degraded_retry)
       ~(outcome : Keeper_execution_receipt.runtime_rotation_outcome)
       (err : Agent_sdk.Error.sdk_error)
   : Keeper_execution_receipt.runtime_rotation_attempt
   =
-  { from_runtime_id
-  ; (* RFC-0206: cascade-name validation moved to the TOML load boundary; a
+  { from_runtime
+  ; (* RFC-0206: runtime-name validation moved to the TOML load boundary; a
        runtime id is a raw string accepted as-is (no prefix check here). *)
-    to_runtime_id = retry.next_runtime_id
+    to_runtime = retry.next_runtime
   ; reason = retry.fallback_reason
   ; outcome
   ; slot_release_at_phase

@@ -18,7 +18,7 @@
 // Per-view dispatch:
 //   default      — Signal strip + collapsed diagnostic/raw accordions
 //   providers    — OAS health chip + runtime monitor only
-//   inspector    — cascade strategy trace / provider health drill-down
+//   inspector    — runtime strategy trace / provider health drill-down
 //   cost / audit / heuristics / stress — TelemetryPanel → CostDashboard
 //   prometheus   — raw Prometheus metrics only
 //   verification — formal specs only
@@ -67,8 +67,8 @@ const activeView = computed<RuntimeView>(() => {
 })
 
 // Primary chips answer the keeper-facing question "can my tools run through
-// which cascade, and why did the routing decision come out this way?"
-// Default, providers (runtime health), and inspector (cascade decisions) are
+// which runtime, and why did the routing decision come out this way?"
+// Default, providers (runtime health), and inspector (runtime decisions) are
 // the views an operator opens during normal use.
 const PRIMARY_VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'default', label: '전체' },

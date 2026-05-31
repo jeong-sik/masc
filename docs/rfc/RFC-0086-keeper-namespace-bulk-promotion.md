@@ -80,7 +80,7 @@ with `xargs rg -oI '\bKeeper_[a-z_]+'`):
 |------:|---|---|
 | 292 | `Keeper_types` | facade |
 | 290 | `Keeper_metrics` | Prometheus metric names |
-| 110 | `Keeper_cascade_profile` | cascade runtime name type |
+| 110 | `Keeper_runtime_profile` | runtime runtime name type |
 | 105 | `Keeper_registry` | godfile, 3034 LoC |
 | 98 | `Keeper_runtime_manifest` | per-keeper config |
 | 44 | `Keeper_internal` | internal helpers |
@@ -106,7 +106,7 @@ Of 250 `.ml` files in `lib/keeper/`, **38 lack the `keeper_` prefix**:
 alert_persist_kind.ml                    chat_store_operation.ml
 approval_queue_failure_site.ml           checkpoint_failure_operation.ml
 bookkeeping_failure_kind.ml              checkpoint_store_failure_site.ml
-cascade_sync_failure_site.ml             compact_audit_failure_site.ml
+runtime_sync_failure_site.ml             compact_audit_failure_site.ml
 crash_persistence_failure_site.ml        credential_provider.ml
 docker_client.ml                         docker_client_mock.ml
 docker_client_real.ml                    docker_response.ml

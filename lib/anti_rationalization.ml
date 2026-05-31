@@ -6,7 +6,7 @@
     Gate ordering:
     1. Empty/trivially-short notes  → immediate Reject (no LLM needed)
     2. Known excuse pattern match   → Reject with pattern name
-    3. LLM review (cascade:verifier) → APPROVE / REJECT
+    3. LLM review (runtime:verifier) → APPROVE / REJECT
     4. LLM unavailable              → Approve (liveness > correctness)
 
     @since v2.145.0 *)
@@ -62,8 +62,8 @@ let gate_to_string = function
 
 type review_result =
   { verdict : verdict
-  ; evaluator_cascade : string
-  ; generator_cascade : string option
+  ; evaluator_runtime : string
+  ; generator_runtime : string option
   ; gate : gate
   ; fallback_reason : string option
   }
@@ -485,17 +485,17 @@ let parse_verdict (text : string) : (verdict, string) result =
 ;;
 
 (* ================================================================ *)
-(* Cross-model cascade selection (#3067)                             *)
+(* Cross-model runtime selection (#3067)                             *)
 (* ================================================================ *)
 
-(** Default evaluator cascade name. Override via [~evaluator_cascade]
+(** Default evaluator runtime name. Override via [~evaluator_runtime]
     to force a specific evaluator profile. Without an override, the
     concrete profile comes from [routes.cross_verifier].
 
     Cross-model evaluation is more effective than same-model different-role
     because different model architectures have different blindspots.
     See: Anthropic "Harness Design" blog analysis. *)
-let default_evaluator_cascade =
+let default_evaluator_runtime =
   Runtime.get_default_runtime_id ()
 ;;
 
@@ -505,11 +505,11 @@ let default_evaluator_cascade =
 
 (** Review completion notes for avoidance patterns and substance.
 
-    @param evaluator_cascade Override the cascade used for LLM verification.
+    @param evaluator_runtime Override the runtime used for LLM verification.
       Default: the profile selected by [routes.cross_verifier]. Set to a
-      cascade that uses a different model family than the generator for genuine
+      runtime that uses a different model family than the generator for genuine
       cross-model evaluation.
-    @param generator_cascade Optional name of the cascade the generator used.
+    @param generator_runtime Optional name of the runtime the generator used.
       Logged for auditing model separation. Not used in verification logic. *)
 (* ================================================================ *)
 (* Contract verification (#3071)                                     *)
@@ -529,8 +529,8 @@ let check_contract ~(notes : string) ~(contract : string list) : string list =
 ;;
 
 let review
-      ?(evaluator_cascade = default_evaluator_cascade)
-      ?generator_cascade
+      ?(evaluator_runtime = default_evaluator_runtime)
+      ?generator_runtime
       ?(completion_contract : string list option)
       ?(on_verdict : (review_result -> unit) option)
       ?(few_shot_block = "")
@@ -555,8 +555,8 @@ let review
                "completion notes too short (%d chars, minimum %d)"
                (String.length notes_trimmed)
                min_notes_length)
-      ; evaluator_cascade
-      ; generator_cascade
+      ; evaluator_runtime
+      ; generator_runtime
       ; gate = Length
       ; fallback_reason = None
       }
@@ -595,8 +595,8 @@ let review
                   actual completed work."
                  pattern
                  reason)
-        ; evaluator_cascade
-        ; generator_cascade
+        ; evaluator_runtime
+        ; generator_runtime
         ; gate = Excuse
         ; fallback_reason = None
         }
@@ -649,22 +649,22 @@ let review
        | Some reason ->
          emit
            { verdict = Reject reason
-           ; evaluator_cascade
-           ; generator_cascade
+           ; evaluator_runtime
+           ; generator_runtime
            ; gate = Contract
            ; fallback_reason = None
            }
        | None ->
-         (* Gate 3: LLM review via evaluator cascade (structured tool output, ADR D3) *)
+         (* Gate 3: LLM review via evaluator runtime (structured tool output, ADR D3) *)
          let prompt = build_prompt ~few_shot_block ?excuse_advisory req in
-         (match generator_cascade with
-          | Some gc when gc = evaluator_cascade ->
+         (match generator_runtime with
+          | Some gc when gc = evaluator_runtime ->
             Log.Task.warn
         ~keeper_name:req.task_id
-              "[anti-rationalization] same cascade for generator (%s) and evaluator (%s) \
+              "[anti-rationalization] same runtime for generator (%s) and evaluator (%s) \
                — cross-model separation not active"
               gc
-              evaluator_cascade
+              evaluator_runtime
           | None | Some _ -> ());
          let verdict_ref = ref None in
          let dispatch ~name ~args =
@@ -693,7 +693,7 @@ let review
               ~caller:Env_config_oas_bridge.Anti_rationalization
               (fun () ->
                  Keeper_turn_driver_wrappers.run_named_with_masc_tools
-                   ~cascade_name:evaluator_cascade
+                   ~runtime_id:evaluator_runtime
                    ~goal:prompt
                    ~masc_tools:[ report_review_verdict_schema ]
                    ~dispatch
@@ -744,21 +744,21 @@ let review
              | Reject reason ->
                Log.Task.info
         ~keeper_name:req.task_id
-                 "[anti-rationalization] LLM rejected: agent=%s task=%s cascade=%s \
+                 "[anti-rationalization] LLM rejected: agent=%s task=%s runtime=%s \
                   reason=%s"
                  req.agent_name
                  req.task_title
-                 evaluator_cascade
+                 evaluator_runtime
                  reason
              | Approve ->
                Log.Task.info
         ~keeper_name:req.task_id
-                 "[anti-rationalization] LLM approved: agent=%s task=%s cascade=%s"
+                 "[anti-rationalization] LLM approved: agent=%s task=%s runtime=%s"
                  req.agent_name
                  req.task_title
-                 evaluator_cascade);
+                 evaluator_runtime);
             emit
-              { verdict = v; evaluator_cascade; generator_cascade; gate; fallback_reason }
+              { verdict = v; evaluator_runtime; generator_runtime; gate; fallback_reason }
           | Error err ->
             (* #9794: when the verifier LLM is unavailable, the operator picks
           between liveness (Open: approve, original behavior) and safety
@@ -767,28 +767,28 @@ let review
           same Prometheus counter so monitoring sees the fallback rate
           regardless of the chosen policy. *)
             let msg = Agent_sdk.Error.to_string err in
-            (* #10474: discriminate "permanent cascade configuration issue"
+            (* #10474: discriminate "permanent runtime configuration issue"
           from "transient verifier failure".  [No_tool_capable_provider]
-          means every provider in the [evaluator_cascade] failed the
+          means every provider in the [evaluator_runtime] failed the
           tool-use gate at filter time — there are zero callable
-          models, and there will not be any until the cascade config
+          models, and there will not be any until the runtime config
           (or provider capabilities) changes.  Treating that as a
           fail-closed safety-net reject blocks every keeper trying to
           finish a task with a perfectly legitimate "out of scope"
-          phrase, which is the cascade's bug, not the keeper's
+          phrase, which is the runtime's bug, not the keeper's
           purview.  Promote to operator-actionable ERROR and approve
-          by liveness — the operator must fix the cascade definition
+          by liveness — the operator must fix the runtime definition
           before the safety net can do useful work. *)
-            let cascade_permanently_dead =
+            let runtime_permanently_dead =
               (* Enumerate every [masc_internal_error] variant plus [None]
                  so the compiler flags any new constructor here. Same
                  reasoning as [degraded_retry_bypasses_slot_phase_guard]
                  (closed in PR #14716): a guard whose default direction
                  is [false] must not absorb new error classes silently. *)
               match Keeper_turn_driver.classify_masc_internal_error err with
-              | Some (Keeper_turn_driver.Cascade_exhausted { reason = Keeper_meta_contract.No_tool_capable _; _ }) -> true
+              | Some (Keeper_turn_driver.Runtime_exhausted { reason = Keeper_meta_contract.No_tool_capable _; _ }) -> true
               | Some
-                  ( Keeper_turn_driver.Cascade_exhausted _
+                  ( Keeper_turn_driver.Runtime_exhausted _
                   | Keeper_turn_driver.Capacity_backpressure _
                   | Keeper_turn_driver.Resumable_cli_session _
                   | Keeper_turn_driver.Accept_rejected _
@@ -811,22 +811,22 @@ let review
             let mode_str = Env_config.AntiRationalization.fail_mode_to_string mode in
             Prometheus.inc_counter
               Prometheus.metric_anti_rationalization_fallback
-              ~labels:[ "mode", mode_str; "cascade", evaluator_cascade ]
+              ~labels:[ "mode", mode_str; "runtime", evaluator_runtime ]
               ();
-            if cascade_permanently_dead
+            if runtime_permanently_dead
             then
-              (* 2026-05-27: cascade-dead liveness approve previously fired
+              (* 2026-05-27: runtime-dead liveness approve previously fired
                  unconditionally, so an active gate-2 substring advisory
                  (a phrase that the LLM evaluator was supposed to judge
                  in context) was silently laundered through.  The sibling
                  branch below (lines 812-837) already applies an
                  advisory-driven safety-net reject when the LLM is
-                 transiently unavailable; cascade-dead is just a
+                 transiently unavailable; runtime-dead is just a
                  longer-lived form of the same condition, so the two
                  branches must agree on the excuse-advisory case.
 
                  The original liveness rationale (#10474: do not block
-                 every keeper waiting for a cascade fix) is preserved for
+                 every keeper waiting for a runtime fix) is preserved for
                  the [None] case — the vast majority of tasks have no
                  active substring advisory and continue to approve. *)
               match excuse_advisory with
@@ -835,58 +835,58 @@ let review
                   Prometheus.metric_anti_rationalization_excuse_pattern
                   ~labels:
                     [ "pattern", pattern
-                    ; "decision", "advisory_safety_net_reject_cascade_dead"
+                    ; "decision", "advisory_safety_net_reject_runtime_dead"
                     ]
                   ();
                 Log.Task.error
         ~keeper_name:req.task_id
-                  "[anti-rationalization] cascade %s permanently dead AND gate-2 \
+                  "[anti-rationalization] runtime %s permanently dead AND gate-2 \
                    advisory pattern=%s active: rejecting (safety net) rather than \
                    laundering excuse phrase through liveness.  OPERATOR ACTION \
-                   REQUIRED: fix the cascade definition.  See #10474.  err=%s"
-                  evaluator_cascade
+                   REQUIRED: fix the runtime definition.  See #10474.  err=%s"
+                  evaluator_runtime
                   pattern
                   msg;
                 emit
                   { verdict =
                       Reject
                         (sprintf
-                           "cascade %s has no callable providers AND avoidance \
+                           "runtime %s has no callable providers AND avoidance \
                             pattern \"%s\" detected (%s); rejecting as fail-closed \
-                            safety net (#10474). Revise notes or wait for cascade \
+                            safety net (#10474). Revise notes or wait for runtime \
                             repair."
-                           evaluator_cascade
+                           evaluator_runtime
                            pattern
                            reason)
-                  ; evaluator_cascade
-                  ; generator_cascade
+                  ; evaluator_runtime
+                  ; generator_runtime
                   ; gate = Fallback
                   ; fallback_reason =
                       Some
                         (sprintf
-                           "cascade %s has no callable providers (#10474)"
-                           evaluator_cascade)
+                           "runtime %s has no callable providers (#10474)"
+                           evaluator_runtime)
                   }
               | None ->
                 Log.Task.error
         ~keeper_name:req.task_id
-                  "[anti-rationalization] cascade %s has zero callable providers — \
+                  "[anti-rationalization] runtime %s has zero callable providers — \
                    ALL keepers using this evaluator are blocked from task \
                    completion.  Approving by liveness; OPERATOR ACTION REQUIRED: \
-                   fix the cascade definition (provider capabilities, MCP policy, \
+                   fix the runtime definition (provider capabilities, MCP policy, \
                    or tool requirements).  See #10474.  err=%s"
-                  evaluator_cascade
+                  evaluator_runtime
                   msg;
                 emit
                   { verdict = Approve
-                  ; evaluator_cascade
-                  ; generator_cascade
+                  ; evaluator_runtime
+                  ; generator_runtime
                   ; gate = Fallback
                   ; fallback_reason =
                       Some
                         (sprintf
-                           "cascade %s has no callable providers (#10474)"
-                           evaluator_cascade)
+                           "runtime %s has no callable providers (#10474)"
+                           evaluator_runtime)
                   }
             else (
               (* #10113: when an excuse pattern was detected at gate 2 AND
@@ -908,9 +908,9 @@ let review
                 Log.Task.warn
         ~keeper_name:req.task_id
                   "[anti-rationalization] LLM unavailable + gate-2 advisory pattern=%s \
-                   active: rejecting (safety net) (cascade=%s err=%s)"
+                   active: rejecting (safety net) (runtime=%s err=%s)"
                   pattern
-                  evaluator_cascade
+                  evaluator_runtime
                   msg;
                 emit
                   { verdict =
@@ -921,8 +921,8 @@ let review
                             wait for evaluator availability."
                            pattern
                            reason)
-                  ; evaluator_cascade
-                  ; generator_cascade
+                  ; evaluator_runtime
+                  ; generator_runtime
                   ; gate = Fallback
                   ; fallback_reason = Some msg
                   }
@@ -934,8 +934,8 @@ let review
                   msg;
                 emit
                   { verdict = Approve
-                  ; evaluator_cascade
-                  ; generator_cascade
+                  ; evaluator_runtime
+                  ; generator_runtime
                   ; gate = Fallback
                   ; fallback_reason = Some msg
                   }
@@ -948,8 +948,8 @@ let review
                 emit
                   { verdict =
                       Reject (sprintf "verifier unavailable (fail-closed): %s" msg)
-                  ; evaluator_cascade
-                  ; generator_cascade
+                  ; evaluator_runtime
+                  ; generator_runtime
                   ; gate = Fallback
                   ; fallback_reason = Some msg
                   }))))

@@ -2,10 +2,10 @@
 
     Pure functions that map user-facing [auto] selectors through the OAS
     provider runtime binding projection. Provider-specific alias/catalog truth
-    belongs upstream in OAS, not in MASC cascade code.
+    belongs upstream in OAS, not in MASC runtime code.
     No side effects beyond reading environment variables.
 
-    @since 0.92.0 extracted from Cascade_config *)
+    @since 0.92.0 extracted from Runtime_config *)
 
 type model_selector =
   | Concrete of string
@@ -55,7 +55,7 @@ let binding_default requested_model_id resolved_model_id =
 
 let default_resolution ?getenv provider_name ~requested_model_id =
   match
-    Provider_runtime_projection.default_model_candidate_for_cascade_prefix
+    Provider_runtime_projection.default_model_candidate_for_runtime_prefix
       ?getenv
       provider_name
   with
@@ -97,7 +97,7 @@ let default_auto_models_for_profile (profile : Provider_runtime_projection.provi
 ;;
 
 let auto_models_for_runtime_prefix ?getenv provider_name =
-  match Provider_runtime_projection.provider_profile_for_cascade_prefix provider_name with
+  match Provider_runtime_projection.provider_profile_for_runtime_prefix provider_name with
   | None -> None
   | Some profile ->
     let defaults = default_auto_models_for_profile profile in
@@ -129,7 +129,7 @@ let resolve_auto_model
     | Concrete s -> s
     | Auto -> "auto"
   in
-  match Provider_runtime_projection.provider_profile_for_cascade_prefix provider_name with
+  match Provider_runtime_projection.provider_profile_for_runtime_prefix provider_name with
   | Some { runtime_kind = Provider_runtime_projection.Local; _ } ->
     (match selector with
      | Auto ->

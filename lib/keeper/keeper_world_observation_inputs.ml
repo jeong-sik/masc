@@ -143,12 +143,12 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
 (** Read context ratio from checkpoint if available. *)
 let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
   try
-    let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
+    let runtime_models = Keeper_model_labels.configured_model_labels_of_meta meta in
     let primary_max_context =
       let resolution =
         Keeper_context_runtime.resolve_max_context_resolution
           ~requested_override:meta.max_context_override
-          cascade_models
+          runtime_models
       in
       resolution.effective_budget
     in

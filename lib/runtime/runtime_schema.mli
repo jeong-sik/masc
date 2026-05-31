@@ -1,7 +1,7 @@
-(** Self-standing Runtime configuration types (RFC-0206, cascade→Runtime rebirth).
+(** Self-standing Runtime configuration types (RFC-0206, runtime→Runtime rebirth).
 
     Provider × Model × Binding declarative schema (RFC-0058 layers 1-3),
-    re-homed from the deleted [Cascade_declarative_types] as types owned by
+    re-homed from the deleted [Runtime_declarative_types] as types owned by
     [lib/runtime/]. Routing layers (aliases/routes/profiles/strategy) are
     intentionally dropped: a Runtime is a single pre-selected binding. *)
 

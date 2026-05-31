@@ -55,17 +55,17 @@
     [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
 
 (** #9933: per-keeper turn latency distribution split by effective
-    model/cascade surface.  Labels:
+    model/runtime surface.  Labels:
     [keeper, channel, provider_kind, model_used, resolved_model_id,
-    cascade_profile, bucket]. *)
+    runtime_profile, bucket]. *)
 
 (** P-DASH-01: provider cooldown skip counter.  Incremented when a
-    cascade is in provider cooldown and the keeper fail-opens to a
-    fallback cascade.  Labels: [keeper, from_cascade, to_cascade]. *)
+    runtime is in provider cooldown and the keeper fail-opens to a
+    fallback runtime.  Labels: [keeper, from_runtime, to_runtime]. *)
 
 (** P-DASH-01: provider cooldown remaining seconds gauge.
     Exposes the current cooldown duration so operators can see
-    which cascade is blocked and for how long.  Labels: [keeper, cascade]. *)
+    which runtime is blocked and for how long.  Labels: [keeper, runtime]. *)
 
 (** P-DASH-13: provider block duration histogram.
     Records the duration (in seconds) for which a provider is placed
@@ -172,10 +172,10 @@ val metric_tool_keeper_cache_ttl_parse_failures : string
     kind in [cancelled | exception]. *)
 
 (** Cumulative keeper turn-slot semaphore wait seconds. Labels:
-    [keeper_name, cascade_profile, channel]. *)
+    [keeper_name, runtime_profile, channel]. *)
 
 (** Cumulative bucket counter for keeper turn-slot semaphore wait seconds.
-    Labels: [keeper_name, cascade_profile, channel, le]. *)
+    Labels: [keeper_name, runtime_profile, channel, le]. *)
 
 (** P-DASH-02: gauge for keeper turn wait queue depth.
     Labels: [channel] with [autonomous_queue] for the explicit autonomous
@@ -242,22 +242,22 @@ val metric_tool_policy_init_failed : string
 val metric_cache_desync_cleared : string
 val metric_egress_audit_missing : string
 
-(** Cascade state synchronization failures: pause/resume/auto-pause paths
+(** Runtime state synchronization failures: pause/resume/auto-pause paths
     only. Local discovery refresh failures use
     [metric_keeper_local_discovery_failures] so dashboards can attribute
     distinct failure classes. *)
 val metric_egress_audit_stale_orphan : string
 
 (** Local discovery readiness failures observed during create/turn paths.
-    Separated from [metric_keeper_cascade_sync_failures] so dashboards do
-    not conflate cascade-state sync with discovery-refresh incompleteness. *)
+    Separated from [metric_keeper_runtime_sync_failures] so dashboards do
+    not conflate runtime-state sync with discovery-refresh incompleteness. *)
 
 (** #10091: labelled [keeper, has_current_task, contract_status]
     so fleet histograms can distinguish the active-task strict
     path from the no-task path covered by #10031. *)
 
-(** #10474: counter incremented when a keeper's cascade has zero
-    tool-capable providers.  Labels: keeper, cascade. *)
+(** #10474: counter incremented when a keeper's runtime has zero
+    tool-capable providers.  Labels: keeper, runtime. *)
 
 (** #10474: counter classifying each scheduled autonomous cycle outcome.
     Labels: keeper, outcome=[tool_called|noop|error]. *)
@@ -291,10 +291,10 @@ val metric_egress_audit_stale_orphan : string
     keeper has produced anything in this process.  Labels: [keeper]. *)
 
 (** PR-B: counter incremented when [run_keeper_cycle] skips a turn
-    because the keeper's resolved cascade is ollama-only and the
+    because the keeper's resolved runtime is ollama-only and the
     [/api/ps] probe reports zero process_available slots.  Labelled
-    by [keeper] and [cascade] so dashboards can attribute starvation
-    to specific cascade profiles. *)
+    by [keeper] and [runtime] so dashboards can attribute starvation
+    to specific runtime profiles. *)
 val metric_persistence_read_drops : string
 
 (** Goal-loop Observe counter for persistence UTF-8 repairs. No labels. *)

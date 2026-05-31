@@ -54,9 +54,9 @@ OAS  ──does not know──→ MASC
 
 ## Config Ownership
 
-- `config/cascade.toml`은 **MASC runtime contract**다. On-disk
-  `cascade.json`은 retired compatibility input이며 더 이상 생성/소비하지 않는다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
-- MASC owns keeper-facing logical runtime policy: named cascade/profile,
+- `config/keeper_runtime.toml`은 **MASC runtime contract**다. On-disk
+  `runtime.json`은 retired compatibility input이며 더 이상 생성/소비하지 않는다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
+- MASC owns keeper-facing logical runtime policy: named runtime/profile,
   required capabilities, tool visibility, health/capacity gates, and
   operator-facing lane/status projections.
 - OAS owns concrete provider/model identity and execution. MASC must not branch
@@ -66,7 +66,7 @@ OAS  ──does not know──→ MASC
 - OAS provider catalog / capability manifest / pricing override는 generic
   provider runtime contract다. MASC may pass logical runtime intent and
   capability requirements into those OAS contracts, but OAS must not learn MASC routes,
-  keeper phases, cascades, board/governance semantics, or dashboard policy.
+  keeper phases, runtimes, board/governance semantics, or dashboard policy.
 - `provider/model-free` in MASC means MASC policy code routes by logical use,
   declared capability, profile order, health, capacity, and receipt state; it
   does not branch on vendor/model literals. Provider/model ids remain
@@ -114,15 +114,15 @@ OAS  ──does not know──→ MASC
   runtime/social status surfaces should keep legacy model-label keys null
   rather than resolving provider/model display labels. Runtime trust,
   composite execution, keeper status detail, and keeper FSM helper projections
-  should preserve only non-identifying cascade/tool/sandbox signals and return
+  should preserve only non-identifying runtime/tool/sandbox signals and return
   null or empty collections for selected model/provider identity fields. Keeper
   execution receipt JSON and operator-broadcast payloads should preserve legacy
   compatibility keys but keep provider/model identity values null. Keeper
   decision-log and metrics snapshot JSONL projections should preserve
-  non-identifying cascade/tool/usage/timing evidence while keeping model,
+  non-identifying runtime/tool/usage/timing evidence while keeping model,
   provider, configured-label, and candidate-model fields null or empty.
   Dashboard normalizers and product UI should not resurrect concrete
-  model/provider labels from older payloads; they should show cascade lane,
+  model/provider labels from older payloads; they should show runtime lane,
   outcome, attempt, fallback, tool, sandbox, and runtime-trust evidence instead.
   Governance/board dashboard adapters should likewise keep judge/approval
   runtime evidence while nulling or hiding `model_used` and `selected_model`.
@@ -167,50 +167,50 @@ OAS  ──does not know──→ MASC
   reasons in the MASC structured error type; legacy payloads with
   provider/model-shaped fields still parse, but those identities are not
   re-emitted.
-  Cascade attempt-liveness observer metrics keep the historical `provider`
+  Runtime attempt-liveness observer metrics keep the historical `provider`
   label key for dashboard compatibility but emit the neutral `runtime` lane;
   liveness budget history also uses a single neutral runtime candidate key
   instead of retaining concrete provider/model keys.
   Provider-error and OAS-run-timeout Prometheus counters follow the same
-  projection rule: they retain error kind, cascade, capacity scope, and timeout
+  projection rule: they retain error kind, runtime, capacity scope, and timeout
   source, but the historical `provider` label value is the neutral `runtime`
   lane rather than a concrete provider/model identity.
   The typed `Provider_error` contract itself is also runtime-lane scoped:
   variants no longer store provider/model identifiers, and legacy JSON keys
   such as `provider`, `affected`, and `model_name` emit neutral `runtime`
   values only.
-  Cascade catalog runtime probe JSON and provider-health probe metric labels
+  Runtime catalog runtime probe JSON and provider-health probe metric labels
   keep status/error/profile evidence but redact provider kind, model id,
   model string, endpoint, and metric provider/model labels to neutral runtime
   values.
-  Cascade legacy observations and attempt/fallback audit rows now store
+  Runtime legacy observations and attempt/fallback audit rows now store
   runtime-lane candidate identities, and keeper turn-driver fallback/cooldown
   logs use runtime labels instead of concrete provider/model labels.
-  Keeper cascade bookkeeping uses `Cascade_runtime_candidate` for health,
+  Keeper runtime bookkeeping uses `Runtime_runtime_candidate` for health,
   capacity, probe, ordering, and timeout decisions so `Keeper_turn_driver` no
   longer exposes public `Provider_config.t` timeout helpers or directly
   inspects provider kind, endpoint, or model id in the keeper loop.
   Keeper liveness/pre-skip helpers now accept only neutral label-to-runtime-URL
   resolvers; label parsing and provider config access stay behind
-  `Cascade_runtime_candidate`.
+  `Runtime_runtime_candidate`.
   Keeper usage-trust classification now accepts the OAS-derived cache
   capability signal instead of a provider-kind value; provider kind remains
   confined to the OAS telemetry bridge and provider resolver.
   Keeper turn-context label filtering no longer parses configured labels into
   `Provider_config.t`; model-id compatibility checks are delegated to
-  `Cascade_runtime_candidate`.
+  `Runtime_runtime_candidate`.
   Keeper OAS hook public helpers no longer accept provider-kind arguments;
   typed provider evidence is consumed only inside telemetry bridge helpers.
   `Keeper_turn_driver.mli` also no longer re-exports the full
-  `Cascade_oas_runner`, provider-attempt FSM APIs, or config/preflight helpers
-  from `Cascade_error_classify`; provider/model-shaped helpers stay behind
+  `Runtime_oas_runner`, provider-attempt FSM APIs, or config/preflight helpers
+  from `Runtime_error_classify`; provider/model-shaped helpers stay behind
   lower-level OAS boundary modules instead of the keeper facade.
   The stricter OAS-owned provider/model migration is tracked in
   <https://github.com/jeong-sik/masc-mcp/issues/15028>.
 
 ## Delivery-Contract Split
 
-- MASC owns the delivery contract itself: `contract_id`, acceptance checks, required artifacts, repair budget, evaluator role/cascade, proof/report surfaces.
+- MASC owns the delivery contract itself: `contract_id`, acceptance checks, required artifacts, repair budget, evaluator role/runtime, proof/report surfaces.
 - OAS should stay generic and receive only reusable harness/runtime primitives.
 - Current local implementation keeps the contract in MASC coordination state (board posts, keeper FSM, governance queues) and feeds it into worker verification and proof artifacts without teaching OAS about MASC session semantics.
 
@@ -261,9 +261,9 @@ Use this checklist when reviewing boundary-touching PRs:
    - model ID, vendor, token/cost detail은 config 또는 OAS-facing adapter/bridge에 머물러야 한다.
    - routing/policy code가 vendor/model literal로 분기하면 provider/model-free 위반이다.
 3. **문서 truth가 코드 truth와 일치하는가?**
-   - 특히 cascade labels, runtime-health semantics, boundary-audit snapshot은 구현과 SSOT 문서가 함께 갱신되어야 한다.
-4. **Checked-in cascade labels are explicit enough for stable review**
-   - repository-default `config/cascade.toml` entries should pin explicit provider/model labels when review stability depends on an exact model. `provider:auto` is acceptable only when the adapter-level default is itself the intended checked-in contract.
+   - 특히 runtime labels, runtime-health semantics, boundary-audit snapshot은 구현과 SSOT 문서가 함께 갱신되어야 한다.
+4. **Checked-in runtime labels are explicit enough for stable review**
+   - repository-default `config/keeper_runtime.toml` entries should pin explicit provider/model labels when review stability depends on an exact model. `provider:auto` is acceptable only when the adapter-level default is itself the intended checked-in contract.
 
 ## Boundary Rules for Future Work
 

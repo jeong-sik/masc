@@ -466,7 +466,7 @@ let track_task_completed ?fs config ~task_id ~duration_ms ~success =
   track ?fs config (Task_completed { task_id; duration_ms; success })
 
 (* [track_handoff] removed: 0 production callers as of #10358 (c2)
-   audit (2026-05-05). masc-mcp has no cascade-routing handoff
+   audit (2026-05-05). masc-mcp has no runtime-routing handoff
    concept; the [Handoff_triggered] event variant is retained for
    wire-schema compatibility and exhaustive-match coverage in
    [dashboard_http_monitoring],

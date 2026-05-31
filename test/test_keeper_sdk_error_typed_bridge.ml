@@ -43,7 +43,7 @@ let api_cases : (string * SdkE.api_error * string) list =
     , "api_error_network" )
   ; "Timeout", Retry.Timeout { message = "60s" }, "api_error_timeout"
   ; ( "StructuralTimeout"
-    , Retry.Timeout { message = "Turn wall-clock budget exhausted during cascade attempt (budget=554.9s)" }
+    , Retry.Timeout { message = "Turn wall-clock budget exhausted during runtime attempt (budget=554.9s)" }
     , "api_error_oas_agent_execution_timeout" )
   ]
 ;;

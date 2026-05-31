@@ -50,8 +50,8 @@ val build_claim_observation_payload :
   now:float -> agent_name:string -> task_id:string -> Yojson.Safe.t
 
 (** [is_cross_model_verdict result] is [true] iff [result] has both
-    [generator_cascade = Some g] and [evaluator_cascade] non-empty,
-    and [g <> evaluator_cascade].
+    [generator_runtime = Some g] and [evaluator_runtime] non-empty,
+    and [g <> evaluator_runtime].
 
     Inclusion criteria align exactly with
     {!Eval_calibration.calibration_stats} so the live SSE event and

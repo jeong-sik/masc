@@ -28,7 +28,7 @@
 (*                                                                     *)
 (* Authoritative spec mirror is                                        *)
 (*   specs/keeper-state-machine/KeeperTurnCycle.tla                    *)
-(* (3-axis composite — turn_phase x decision_stage x cascade_state).   *)
+(* (3-axis composite — turn_phase x decision_stage x runtime_state).   *)
 (*                                                                     *)
 (* This module is one of FOUR cooperating write points; siblings are   *)
 (* keeper_registry.ml (raw setters), keeper_unified_turn.ml (top-level *)
@@ -39,7 +39,7 @@
 (*     pre_tool_use override / approval_required short-circuit.        *)
 (*     turn_phase: executing -> finalizing                             *)
 (*     decision_stage: tool_policy_selected -> gate_rejected           *)
-(*     cascade_state preserved at "trying" (UNCHANGED in spec).        *)
+(*     runtime_state preserved at "trying" (UNCHANGED in spec).        *)
 (*                                                                     *)
 (* Spec inline citation at KeeperTurnCycle.tla:58 says "line 120" —    *)
 (* current actual call site of                                         *)
@@ -52,12 +52,12 @@
 (* to this file:                                                       *)
 (*   - GateRejectedRequiresFinalizing                                  *)
 (*       (decision_stage = "gate_rejected" => turn_phase = "finalizing")*)
-(*   - TerminalCascadeRequiresFinalizing                               *)
+(*   - TerminalRuntimeRequiresFinalizing                               *)
 (*                                                                     *)
 (* These cross-axis invariants are why KeeperTurnCycle exists          *)
 (* alongside the single-axis siblings (KeeperDecisionPipeline,         *)
-(* KeeperCascadeLifecycle, KeeperConditionsGovernPhase): no single     *)
-(* axis can express the conjunction across phase x decision x cascade. *)
+(* KeeperRuntimeLifecycle, KeeperConditionsGovernPhase): no single     *)
+(* axis can express the conjunction across phase x decision x runtime. *)
 (* ─────────────────────────────────────────────────────────────────── *)
 
 (* -------------------------------------------------------------- *)
@@ -310,15 +310,15 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
    the Event_bus Custom event below.
 
    Cycle 49 observability addition: when the gate rejects, the turn
-   becomes terminal WITHOUT any cascade tier ever being attempted.  A
+   becomes terminal WITHOUT any runtime tier ever being attempted.  A
    dashboard reading only the final outcome ("Turn_gate_rejected") cannot
-   distinguish "all gates rejected, cascade=none" from "all cascades
+   distinguish "all gates rejected, runtime=none" from "all runtimes
    exhausted" — both surface as terminal failure.  We add a Prometheus
    counter, an INFO log line, and a [runtime_attempted] payload field so
    the narrative is observable. *)
 
 (** Prometheus metric: turns terminated by a pre_tool_use gate rejection
-    (Override or ApprovalRequired) without ever attempting a cascade
+    (Override or ApprovalRequired) without ever attempting a runtime
     tier.  See [emit_gate_event] for the firing site.
 
     Labels stay bounded:
@@ -335,10 +335,10 @@ let () =
     ~help:
       "Total turns terminated by a pre_tool_use gate rejection \
        (Override or ApprovalRequired) without ever attempting a \
-       cascade tier.  A non-zero rate on a keeper indicates \
-       pre_tool_use guards short-circuit before the cascade ever \
+       runtime tier.  A non-zero rate on a keeper indicates \
+       pre_tool_use guards short-circuit before the runtime ever \
        runs — useful for distinguishing 'all gates rejected, \
-       cascade=none' from 'all cascades exhausted' in the keeper \
+       runtime=none' from 'all runtimes exhausted' in the keeper \
        terminal taxonomy.  Emitted with labels: keeper, tool, reason, \
        decision."
     ()
@@ -360,8 +360,8 @@ let emit_gate_event
         ("decision", decision_label);
       ] ();
     Log.Keeper.info
-      "keeper:%s tool:%s decision=%s reason_code=%s cascade=none \
-       (gate rejected before cascade attempt)"
+      "keeper:%s tool:%s decision=%s reason_code=%s runtime=none \
+       (gate rejected before runtime attempt)"
       agent_name tool_name decision_label reason_code
   end;
   match Masc_event_bus.get () with

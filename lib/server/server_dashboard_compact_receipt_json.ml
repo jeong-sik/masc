@@ -1,7 +1,7 @@
 (* Compact-receipt JSON builders for the dashboard composite endpoint.
 
    The dashboard composite surface ships a *summary* of the most recent
-   keeper receipt (error / cascade / tool-surface blocks) rather than
+   keeper receipt (error / runtime / tool-surface blocks) rather than
    the raw receipt JSON.  These helpers do the field projection +
    truncation so the wire payload stays bounded.
 
@@ -41,22 +41,22 @@ let compact_receipt_error_json receipt =
   | _ -> `Null
 ;;
 
-let compact_receipt_cascade_json receipt =
-  match json_member "cascade" receipt with
-  | `Assoc _ as cascade ->
+let compact_receipt_runtime_json receipt =
+  match json_member "runtime" receipt with
+  | `Assoc _ as runtime ->
     `Assoc
-      [ "name", Json_util.string_opt_to_json (json_string "name" cascade)
+      [ "name", Json_util.string_opt_to_json (json_string "name" runtime)
       ; "selected_model", `Null
-      ; "attempt_count", Json_util.int_opt_to_json (json_int "attempt_count" cascade)
+      ; "attempt_count", Json_util.int_opt_to_json (json_int "attempt_count" runtime)
       ; ( "fallback_applied"
-        , Json_util.bool_opt_to_json (json_bool "fallback_applied" cascade) )
-      ; "outcome", Json_util.string_opt_to_json (json_string "outcome" cascade)
+        , Json_util.bool_opt_to_json (json_bool "fallback_applied" runtime) )
+      ; "outcome", Json_util.string_opt_to_json (json_string "outcome" runtime)
       ; ( "degraded_retry_applied"
-        , Json_util.bool_opt_to_json (json_bool "degraded_retry_applied" cascade) )
-      ; ( "degraded_retry_cascade"
-        , Json_util.string_opt_to_json (json_string "degraded_retry_cascade" cascade) )
+        , Json_util.bool_opt_to_json (json_bool "degraded_retry_applied" runtime) )
+      ; ( "degraded_retry_runtime"
+        , Json_util.string_opt_to_json (json_string "degraded_retry_runtime" runtime) )
       ; ( "fallback_reason"
-        , Json_util.string_opt_to_json (json_string "fallback_reason" cascade) )
+        , Json_util.string_opt_to_json (json_string "fallback_reason" runtime) )
       ]
   | _ -> `Null
 ;;

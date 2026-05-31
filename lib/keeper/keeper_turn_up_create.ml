@@ -311,7 +311,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 match p.max_context_override_opt with
                 | Some v -> v
                 (* RFC-0206 single-binding: context budget = default runtime's
-                   model window (cascade label scan removed). *)
+                   model window (runtime label scan removed). *)
                 | None -> Runtime.default_max_context ()
               in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();

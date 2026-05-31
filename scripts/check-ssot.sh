@@ -85,7 +85,7 @@ check_rule "R2-loopback-literal" 1 \
 # No exclusion — every site should eventually route through the helper.
 check_rule "R4-config-filename" 11 \
   "Config_filenames.<name> (add helper per #8414)" \
-  '"(cascade\.json|keeper_runtime\.toml|tool_policy\.toml)"' \
+  '"(runtime\.json|keeper_runtime\.toml|tool_policy\.toml)"' \
   '' \
   lib
 

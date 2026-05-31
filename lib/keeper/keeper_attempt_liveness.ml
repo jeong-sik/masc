@@ -1,7 +1,7 @@
-(** Cascade attempt-level streaming liveness gate (RFC-0022 PR-1/4).
+(** Runtime attempt-level streaming liveness gate (RFC-0022 PR-1/4).
 
     Implementation of the decision table in
-    [docs/rfc/RFC-0022-cascade-attempt-liveness.md] §4.5.
+    [docs/rfc/RFC-0022-runtime-attempt-liveness.md] §4.5.
 
     Pure FSM. No IO, no clock read, no fiber. Caller (PR-2) supplies
     monotonic timestamps via {!event} and consumes {!output} for
@@ -88,7 +88,7 @@ let null_recorder = {
    - S2: Done in Streaming → Success terminal; no further state moves.
    - T1: Heartbeat / Thinking_delta both count as motion.
    - L2: TTFT and inter-chunk checks fire before wall when both expire
-         on the same tick (caller of cascade_fsm gets the most specific
+         on the same tick (caller of runtime_fsm gets the most specific
          kill class; matches §1 invariant L2 "no double kill"). Wall still
          applies in Awaiting, so a shorter attempt wall can kill a no-first-byte
          attempt before the TTFT ceiling. *)

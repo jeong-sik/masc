@@ -43,7 +43,7 @@ Track A 의 Phase A0.1 sprint (atd-based typed SSE envelope) 완료. 5 sub-PR + 
 | Sub-PR | PR # | 결과 |
 |---|---|---|
 | PR-1 | #15807 | atd schema + leaf lib + agent_started constructor + byte-equal PoC |
-| PR-2 | #15811 | AgentStarted cascade arm typed-routed |
+| PR-2 | #15811 | AgentStarted runtime arm typed-routed |
 | PR-3 | #15824 | 5 simple-record arms (tool/turn) |
 | PR-4 | #15830 | 8 simple-record arms (handoff/context/replacement/slot) |
 | PR-3b | #15835 | agent_completed/agent_failed — variable-shape addendum 패턴 |

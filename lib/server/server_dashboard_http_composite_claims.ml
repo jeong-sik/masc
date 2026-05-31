@@ -15,7 +15,7 @@ let json_float key json = Json_util.get_float json key
 let json_bool key json = Json_util.get_bool json key
 
 let compact_receipt_error_json = Server_dashboard_compact_receipt_json.compact_receipt_error_json
-let compact_receipt_cascade_json = Server_dashboard_compact_receipt_json.compact_receipt_cascade_json
+let compact_receipt_runtime_json = Server_dashboard_compact_receipt_json.compact_receipt_runtime_json
 
 let compact_receipt_tool_surface_json =
   Server_dashboard_compact_receipt_json.compact_receipt_tool_surface_json
@@ -193,7 +193,7 @@ let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
       ; "tool_contract_result", `Null
       ; "duration_ms", `Null
       ; "error", `Null
-      ; "cascade", `Null
+      ; "runtime", `Null
       ; "tool_surface", `Null
       ; "claim_scope", claim_scope
       ; "config_drift", config_drift
@@ -222,7 +222,7 @@ let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
       ; ( "duration_ms"
         , Json_util.float_opt_to_json (json_float "duration_ms" action_radius) )
       ; "error", compact_receipt_error_json receipt
-      ; "cascade", compact_receipt_cascade_json receipt
+      ; "runtime", compact_receipt_runtime_json receipt
       ; "tool_surface", compact_receipt_tool_surface_json receipt
       ; "claim_scope", claim_scope
       ; "config_drift", config_drift
@@ -276,7 +276,7 @@ let composite_latest_activity_epoch snapshot execution =
 
 let composite_snapshot_is_idle snapshot =
   let decision = json_member "decision" snapshot in
-  let cascade = json_member "cascade" snapshot in
+  let runtime = json_member "runtime" snapshot in
   let compaction = json_member "compaction" snapshot in
   let breaker_state =
     match json_member "circuit_breaker" snapshot with
@@ -285,7 +285,7 @@ let composite_snapshot_is_idle snapshot =
   in
   json_string_eq "turn_phase" snapshot "idle"
   && json_string_eq "stage" decision "undecided"
-  && json_string_eq "state" cascade "idle"
+  && json_string_eq "state" runtime "idle"
   && json_string_eq "stage" compaction "accumulating"
   && Option.value ~default:"clean" breaker_state = "clean"
 ;;

@@ -13,7 +13,7 @@ let run
   ~state_snapshot
   ~post_turn_t0
   ?provider_filter
-  ~cascade_name
+  ~runtime_id
   ~inference_telemetry
   ()
   =
@@ -88,7 +88,7 @@ let run
      let memory_summarizer =
        Keeper_memory_llm_summary.make
          ?provider_filter
-         ~cascade_name
+         ~runtime_id
          ~keeper_name:meta.name
          ()
      in
@@ -114,7 +114,7 @@ let run
        ~labels:[ "keeper", meta.name; "site", "memory_bank_compaction" ]
        ();
      Log.Keeper.warn
-       "keeper:%s cascade=%s compaction failed: %s"
+       "keeper:%s runtime=%s compaction failed: %s"
        meta.name
        (Keeper_meta_contract.runtime_id_of_meta meta)
        (Printexc.to_string exn));

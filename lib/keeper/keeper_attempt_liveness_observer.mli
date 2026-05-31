@@ -1,4 +1,4 @@
-(** Cascade attempt-liveness observer (RFC-0022 PR-2/4 §4-5).
+(** Runtime attempt-liveness observer (RFC-0022 PR-2/4 §4-5).
 
     Glue layer between {!Keeper_attempt_liveness} (pure FSM) and the
     streaming attempt loop in [oas_worker_named.ml]. Owns:
@@ -48,7 +48,7 @@ type t
 val create :
   mode:Keeper_attempt_liveness_config.mode ->
   budget:Keeper_attempt_liveness.budget ->
-  cascade_label:string ->
+  runtime_label:string ->
   ?provider_label:string ->
   ?external_wait:(unit -> bool) ->
   ?candidate_key:string ->

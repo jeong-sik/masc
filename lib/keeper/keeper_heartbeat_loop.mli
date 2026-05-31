@@ -100,7 +100,7 @@ type keepalive_scheduling_decision = {
 }
 
 val decide_keepalive_scheduling :
-  ?runtime_resilience_of_name:(string -> Keeper_runtime_resilience.runtime_resilience) ->
+  ?runtime_resilience_of_name:(string -> string option) ->
   ?runtime_status_of_name:
     (runtime_id:string -> Keeper_health_probe.health_status) ->
   stop:bool Atomic.t ->
@@ -109,7 +109,7 @@ val decide_keepalive_scheduling :
   keepalive_scheduling_decision
 
 val runtime_backpressure_decision :
-  runtime_resilience:Keeper_runtime_resilience.runtime_resilience option ->
+  runtime_resilience:string option ->
   should_run_turn:bool ->
   runtime_id:string ->
   runtime_status:Keeper_health_probe.health_status ->

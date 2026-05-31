@@ -9,7 +9,7 @@
     Re-exports {!Keeper_meta_tool_access} via [include] for the
     [tool_access] ADT — callers can reach it via
     {!Keeper_meta_contract.tool_access} (type identity preserved
-    through the cascade).
+    through the runtime).
 
     Internal: ~3 helpers stay private —
     \[blocker_class_of_serialized_string] (deserializer used
@@ -19,9 +19,9 @@
     {!map_runtime} / {!map_usage}), \[keeper_legacy_model_arg_names]
     (data table consumed by the legacy-arg rejector in
     {!Keeper_types}).  All consumed only via the include
-    cascade or the JSON pipeline. *)
+    runtime or the JSON pipeline. *)
 
-(** {1 Tool-access cascade re-export} *)
+(** {1 Tool-access runtime re-export} *)
 
 include module type of Keeper_meta_tool_access
 
@@ -143,7 +143,7 @@ type runtime_exhaustion_reason =
           Closes the dominant Other_detail share (50% live on 5/21,
           "failed to resolve hostname: ...") by mapping the existing
           [Llm_provider.Http_client.network_error_kind.Dns_failure] kind
-          directly to a typed cascade reason instead of routing through
+          directly to a typed runtime reason instead of routing through
           the substring SSOT. *)
   | No_providers_available
   | All_providers_failed
@@ -162,7 +162,7 @@ type runtime_exhaustion_reason =
   | No_tool_capable of no_tool_capable_detail option
       (** Runtime exhausted because no configured provider can satisfy the
           required tool set.  Previously a standalone [blocker_class] variant;
-          reclassified here because the cascade rotation filtered all candidates
+          reclassified here because the runtime rotation filtered all candidates
           before dispatch — a semantic subset of runtime exhaustion.
           The optional detail carries telemetry from the former
           [No_tool_capable_provider] variant of [masc_internal_error]. *)
@@ -383,6 +383,12 @@ val runtime_id_of_meta : keeper_meta -> string
     Ignores [m] because keeper-level provider/model selection has been
     collapsed to the single default Runtime binding. *)
 
+(** {1 Legacy runtime compatibility} *)
+
+val runtime_id_of_meta : keeper_meta -> string
+(** Compatibility alias for {!runtime_id_of_meta}.
+    Kept while older JSON fields and call sites still use [runtime_id]. *)
+
 (** {1 Outcome <-> string} *)
 
 val proactive_cycle_outcome_to_string :
@@ -445,7 +451,7 @@ val map_proactive_rt :
 
 val keeper_legacy_model_arg_names : string list
 (** Names of legacy keeper-creation tool arguments that have
-    been retired in favour of the [cascade_name] field
+    been retired in favour of the [runtime_id] field
     (["models"], ["allowed_models"], ["active_model"]).
     Consumed by {!reject_legacy_model_args} which
     surfaces operator-readable rejection messages instead of

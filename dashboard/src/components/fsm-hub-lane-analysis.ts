@@ -32,7 +32,7 @@ export function isObservedStall(
     if (value === 'finalizing') return observedForSec >= 30
     return false
   }
-  if (key === 'cascade') {
+  if (key === 'runtime') {
     if (value === 'selecting') return observedForSec >= 30
     if (value === 'trying') return observedForSec >= 45
     return false
@@ -104,7 +104,7 @@ function laneMeaning(
         default:
           return { tone: 'info', meaning: 'decision state 관측됨' }
       }
-    case 'cascade':
+    case 'runtime':
       switch (value) {
         case 'idle':
           return { tone: 'ok', meaning: 'provider failover work 비활성' }
@@ -113,11 +113,11 @@ function laneMeaning(
         case 'trying':
           return { tone: 'info', meaning: 'provider execution 진행 중' }
         case 'done':
-          return { tone: 'ok', meaning: 'cascade 가 이번 turn 의 provider 결과 수락' }
+          return { tone: 'ok', meaning: 'runtime 가 이번 turn 의 provider 결과 수락' }
         case 'exhausted':
-          return { tone: 'error', meaning: 'cascade 옵션 모두 소진 — 사용 가능한 path 없음' }
+          return { tone: 'error', meaning: 'runtime 옵션 모두 소진 — 사용 가능한 path 없음' }
         default:
-          return { tone: 'info', meaning: 'cascade state 관측됨' }
+          return { tone: 'info', meaning: 'runtime state 관측됨' }
       }
     case 'compaction':
       switch (value) {

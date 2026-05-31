@@ -78,7 +78,7 @@ def check_pr_axis_stale(pr_number: int, repo: str) -> List[AxisRisk]:
 |------|-------------|---------|
 | `SUPERSEDED` | Merged PR's fix makes this PR's change unnecessary | PR A fixes bug X, PR B (merged) also fixes bug X |
 | `BUILD_DEP_BREAK` | Merged PR changed dune deps, this PR's build may fail | cdal_runtime migration adds new library |
-| `TYPE_CONFLICT` | Merged PR changed type definitions this PR uses | `Cascade_ref.cascade_item` field change |
+| `TYPE_CONFLICT` | Merged PR changed type definitions this PR uses | `Runtime_ref.runtime_item` field change |
 | `API_SIGNATURE_CHANGE` | Merged PR changed function signature this PR calls | `run_keeper_cycle` added `unit` param |
 
 #### Output
@@ -93,7 +93,7 @@ Recent merges that may affect this PR:
 | Merged PR | Risk Type | Overlap Files | Confidence |
 |-----------|-----------|---------------|------------|
 | #14241 | `BUILD_DEP_BREAK` | `lib/cdal_runtime/dune` | HIGH |
-| #14255 | `TYPE_CONFLICT` | `lib/cascade/cascade_ref.mli` | MEDIUM |
+| #14255 | `TYPE_CONFLICT` | `lib/runtime/runtime_ref.mli` | MEDIUM |
 
 **Recommended action**: Rebase on latest main and run `dune build @check`.
 ```

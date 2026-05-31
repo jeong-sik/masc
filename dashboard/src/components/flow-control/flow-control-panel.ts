@@ -36,8 +36,8 @@ export function FlowControlPanel() {
   const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const admission = operatorSnapshot.value?.admission_queue ?? null
   const admissionMode = admission?.mode ?? 'unknown'
-  const admissionOwner = admission?.throttle_owner === 'oas_cascade'
-    ? 'OAS cascade'
+  const admissionOwner = admission?.throttle_owner === 'oas_runtime'
+    ? 'OAS runtime'
     : admission?.throttle_owner ?? 'unknown'
   return html`
     <${SurfaceCard} variant="compact" class="mb-4">

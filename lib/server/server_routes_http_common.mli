@@ -1,11 +1,11 @@
 (** Server_routes_http_common — HTTP routing prelude
     consumed by every routes module via
     [open Server_routes_http_common] +
-    cascade-include through {!Server_routes_http}.
+    runtime-include through {!Server_routes_http}.
 
     External surface: 36 module aliases + 32 helpers.
 
-    Cascade chain (cycle 224 indirect cascade pattern):
+    Runtime chain (cycle 224 indirect runtime pattern):
     Server_routes_http_common
       ↓ include Server_routes_http_common (in
         Server_routes_http)
@@ -25,7 +25,7 @@
     Pinned because the routes prelude pattern threads
     these aliases unqualified to every consumer through
     the [open Server_routes_http_common] +
-    [open Server_routes_http] cascade.  Without these
+    [open Server_routes_http] runtime.  Without these
     aliases the consumers would have to import each
     underlying module explicitly. *)
 

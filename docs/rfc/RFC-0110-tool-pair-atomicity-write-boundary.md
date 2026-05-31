@@ -108,7 +108,7 @@ P3 가 핵심 — fabrication 대신 Result.Error 반환 시 caller (post_turn /
 
 ## §5 Non-goals
 
-- **메시지 외 source 의 fabrication** (예: cascade transport, oas event) — 본 RFC 는 `Agent_sdk.Types.message` 안의 tool-pair 만.
+- **메시지 외 source 의 fabrication** (예: runtime transport, oas event) — 본 RFC 는 `Agent_sdk.Types.message` 안의 tool-pair 만.
 - **fabrication 메타데이터 schema 변경** — PR #15888 의 `was_fabricated` / `fabrication_source` / `masc.tool_pair_repair` 메타 schema 는 유지. P5 에서 신규 fabrication 만 0 으로.
 - **Provider-side tool API 변경** — Provider-A / Provider-D / Provider-K 의 tool API contract 는 unchanged. atomicity 는 *내부 history 모델* 의 invariant.
 

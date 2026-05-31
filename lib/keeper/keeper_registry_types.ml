@@ -21,7 +21,7 @@ include Keeper_registry_types_decision
 
 (* Compaction-stage (KMC) FSM types, witnesses, transitions, and spec
    violations re-homed to [Keeper_registry_types_compaction] (RFC-0206). The
-   cascade selection FSM that shared the deleted [Keeper_registry_types_cascade]
+   runtime selection FSM that shared the deleted [Keeper_registry_types_runtime]
    module is removed — single-binding Runtime has no Selecting/Trying loop; turn
    lifecycle is the surviving [turn_phase] FSM. *)
 include Keeper_registry_types_compaction
@@ -112,7 +112,7 @@ let registry_key ~base_path name =
 let completed_turn_outcome_of_observation (obs : turn_observation)
   : Keeper_transition_audit.completed_turn_outcome
   =
-  (* RFC-0206: the cascade selection FSM was removed; turn substantiveness is
+  (* RFC-0206: the runtime selection FSM was removed; turn substantiveness is
      now read off the surviving [turn_phase] projection. Terminal
      [Turn_finalizing] (the phase the deleted [turn_phase_of_runtime_state]
      mapped [Runtime_done] onto) = substantive; every other phase = failed.

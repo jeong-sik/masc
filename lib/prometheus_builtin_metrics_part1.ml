@@ -202,7 +202,7 @@ let register
     Keeper_metrics.(to_string TurnLatencyByModelBucket)
     "Total keeper turn completions, bucketed by latency and effective model surface \
      (labels: keeper, channel, provider_kind, model_used, resolved_model_id, \
-     cascade_profile, bucket=under_60s|60-300s|300-600s|600-1200s|over_1200s)"
+     runtime_profile, bucket=under_60s|60-300s|300-600s|600-1200s|over_1200s)"
     `Counter;
   (* #10125: supervisor sweep liveness.  `Counter increments on
      each [start_supervisor_sweep] that actually creates a Pulse;
@@ -268,7 +268,7 @@ let register
     ~name:Keeper_metrics.(to_string SemaphoreWaitSeconds)
     ~help:
       "Seconds spent waiting to acquire keeper turn semaphores (labels: keeper_name, \
-       cascade_profile, channel)."
+       runtime_profile, channel)."
     ();
   register_histogram
     ~name:Keeper_metrics.(to_string TurnPhaseDuration)

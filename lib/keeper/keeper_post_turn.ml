@@ -419,7 +419,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
            Keeper_compact_policy treats this as an attempted reflection;
            otherwise keepers that never emit [STATE] would bypass the
            cooldown every turn while only emergency ratio (0.8) acts as a
-           safety net.  Record a counter so prompt / cascade drift becomes
+           safety net.  Record a counter so prompt / runtime drift becomes
            observable. *)
         Prometheus.inc_counter
           Keeper_metrics.(to_string StateSnapshotSkippedNoState)

@@ -1,7 +1,7 @@
 (** Model-label string → [Provider_config.t] resolution (RFC-0206).
-    Re-homed from deleted [Cascade_config_parser.parse_model_string]; resolves
+    Re-homed from deleted [Runtime_config_parser.parse_model_string]; resolves
     a ["provider:model"] / ["custom:model@url"] label via Provider_registry
-    (SSOT). No cascade routing/weighted-entry machinery. *)
+    (SSOT). No runtime routing/weighted-entry machinery. *)
 
 val split_provider_model : string -> (string * string) option
 (** Split ["provider:model_id"] at the first colon; [None] if missing/leading/

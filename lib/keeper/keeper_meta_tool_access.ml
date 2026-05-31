@@ -102,10 +102,10 @@ let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
 
 let default_tool_access_of_meta_json () =
   (* Full Keeper_internal surface: keepers without explicit tool_access get the
-     complete tool set so cascade filtering can find providers with required tools
+     complete tool set so runtime filtering can find providers with required tools
      like masc_transition. Write-intent restrictions are handled by task contract
      gating, not by default tool access exclusion.
-     See fleet deadlock Layer 2 analysis (2026-05-30) + cascade provider
+     See fleet deadlock Layer 2 analysis (2026-05-30) + runtime provider
      gap analysis (2026-05-30). *)
   normalize_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal)
 ;;

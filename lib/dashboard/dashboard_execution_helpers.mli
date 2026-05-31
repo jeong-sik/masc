@@ -3,7 +3,7 @@
     and tone/severity utilities for the execution
     dashboard pipeline.
 
-    {b Cascade chain}: 3 sister modules
+    {b Runtime chain}: 3 sister modules
     ({!Dashboard_execution_fixture},
     {!Dashboard_execution_sessions},
     {!Dashboard_execution}) do
@@ -43,7 +43,7 @@ type tone = Dashboard_utils.tone =
   | Tone_warn
   | Tone_bad
 (** Severity tone re-export from {!Dashboard_utils.tone}.
-    Type-equality preserves so every cascade consumer
+    Type-equality preserves so every runtime consumer
     (Dashboard_briefing_assembly, etc.) can use the same
     constructors regardless of which alias they reach
     them through. *)

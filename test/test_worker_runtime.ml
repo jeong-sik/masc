@@ -44,7 +44,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "cascade.toml") "";
+  write_file (Filename.concat config "keeper_runtime.toml") "";
   config
 
 (* OCaml stdlib lacks Unix.unsetenv; putenv name "" is only an

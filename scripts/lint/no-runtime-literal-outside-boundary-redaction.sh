@@ -2,7 +2,7 @@
 # RFC-0132 PR-3: Boundary_redaction SSOT enforcement.
 #
 # After RFC-0132 PR-2 (#16536) routed 24 "runtime" public-surface labels
-# through Boundary_redaction in cascade/ and keeper/ subsystems, this lint
+# through Boundary_redaction in runtime/ and keeper/ subsystems, this lint
 # blocks regression: any *new* inline "runtime" literal in those files
 # must go through the SSOT module.
 #
@@ -46,13 +46,13 @@ done
 
 # Files routed through Boundary_redaction SSOT by RFC-0132 PR-2 (#16536).
 SCAN_FILES=(
-  "lib/cascade/cascade_attempt_fsm.ml"
-  "lib/cascade/cascade_attempt_liveness_config.ml"
-  "lib/cascade/cascade_attempt_liveness_observer.ml"
-  "lib/cascade/cascade_catalog_runtime_probe.ml"
-  "lib/cascade/cascade_event_bridge.ml"
-  "lib/cascade/cascade_observation.ml"
-  "lib/cascade/cascade_runner.ml"
+  "lib/runtime/runtime_attempt_fsm.ml"
+  "lib/runtime/runtime_attempt_liveness_config.ml"
+  "lib/runtime/runtime_attempt_liveness_observer.ml"
+  "lib/runtime/runtime_catalog_runtime_probe.ml"
+  "lib/runtime/runtime_event_bridge.ml"
+  "lib/runtime/runtime_observation.ml"
+  "lib/runtime/runtime_runner.ml"
   "lib/keeper/keeper_agent_result.ml"
   "lib/keeper/keeper_agent_run.ml"
   "lib/keeper/keeper_status_runtime.ml"

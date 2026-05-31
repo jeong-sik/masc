@@ -3,7 +3,7 @@
 
   Verifies that the atdts-generated readAgentStartedPayload accepts
   the JSON shape that the OCaml-side Sse_event.agent_started emits
-  (verified byte-equal against cascade_event_bridge.wrap_event in
+  (verified byte-equal against runtime_event_bridge.wrap_event in
   test/sse_event/test_sse_event.ml).
 
   Scope: agent_started payload only.  Subsequent PRs verify the

@@ -264,7 +264,7 @@ let test_legacy_surfaces_removed_from_readiness_inventory () =
       "monitoring.activity";
       "monitoring.live";
       "monitoring.git-graph";
-      "monitoring.cascade-inspector";
+      "monitoring.runtime-inspector";
       "monitoring.cost";
       "monitoring.attribution";
       "command.intervene";

@@ -67,7 +67,7 @@ OAS PR #1737 introduced the post-purge `agent_sdk` floor, and OAS PR #1743 relea
 
 ## 3. Out of scope
 
-- **masc-mcp 자체 vendor-coupled enum** (`Phonebook.Zai_glm`, `Phonebook.Qwen`, `cascade_phonebook_types.Anthropic_http`, dashboard string `"provider_a-cli"`, etc.) — separate RFC. These are internal classifications that map *to* the SDK; the mapping is updated here (e.g., `Zai_glm -> Llm_provider.Provider_config.Provider_k`), but the masc-mcp side identifiers are preserved pending a future audit.
+- **masc-mcp 자체 vendor-coupled enum** (`Phonebook.Zai_glm`, `Phonebook.Qwen`, `runtime_phonebook_types.Anthropic_http`, dashboard string `"provider_a-cli"`, etc.) — separate RFC. These are internal classifications that map *to* the SDK; the mapping is updated here (e.g., `Zai_glm -> Llm_provider.Provider_config.Provider_k`), but the masc-mcp side identifiers are preserved pending a future audit.
 - **opam state cleanup** for local development — operator responsibility (`opam pin remove agent_sdk && opam pin add agent_sdk git+https://github.com/jeong-sik/oas.git --yes` after #1743 merges).
 
 ## 4. Verification plan

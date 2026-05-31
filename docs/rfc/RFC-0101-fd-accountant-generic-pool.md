@@ -26,7 +26,7 @@ PR [[#15727]] (merged 2026-05-17) introduced `lib/docker_spawn_throttle.ml(i)` �
 
 ### 1.1 Provider HTTP clients open new TCP+TLS connections per call
 
-`oas/lib/llm_provider/backend_provider-a.ml`, `backend_openai.ml`, etc. open a fresh `Eio.Net.with_tcp_connect` per LLM call. Each call = 1 TCP socket + TLS state. Under cascade-failure-storm (12+ keepers retrying simultaneously), this fan-out competes with docker for the same `kern.maxfiles` ceiling — the docker throttle alone doesn't bound it.
+`oas/lib/llm_provider/backend_provider-a.ml`, `backend_openai.ml`, etc. open a fresh `Eio.Net.with_tcp_connect` per LLM call. Each call = 1 TCP socket + TLS state. Under runtime-failure-storm (12+ keepers retrying simultaneously), this fan-out competes with docker for the same `kern.maxfiles` ceiling — the docker throttle alone doesn't bound it.
 
 ### 1.2 Sandbox / keeper bash exec spawns popen pipes
 
@@ -166,7 +166,7 @@ This couples FD pressure → session shedding. The 5-second debounce avoids flap
 |----|-------|-----------|
 | PR-1 (this) | RFC body | review + merge |
 | PR-2 | `lib/server/fd_accountant.ml(i)` + multi-kind Eio.Pool + `Docker_spawn_throttle` delegation. Inert: docker behavior unchanged. | `test_fd_accountant.ml` 256-connection round-trip; existing docker spawn tests unchanged |
-| PR-3 | Provider HTTP wrap in `oas/lib/llm_provider/backend_*.ml` (small cross-repo PR pair) | benchmark: pressure-during-cascade-storm holds `Provider_http` count ≤ 16 |
+| PR-3 | Provider HTTP wrap in `oas/lib/llm_provider/backend_*.ml` (small cross-repo PR pair) | benchmark: pressure-during-runtime-storm holds `Provider_http` count ≤ 16 |
 | PR-4 | Sandbox exec wrap (agent Execute runtime / sandbox runner) + log writer wrap (largest writers only). | `Sandbox_exec` and `Log_writer` series visible in Prometheus dashboard |
 | PR-5 | `/metrics` exposure + dashboard panel + startup nofile log | operator can see snapshot via `curl /metrics \| grep masc_fd_` |
 | PR-6 | RFC-0099 Backpressure evict signal compose | pressure → evict observable in `Session_lifecycle_event` stream |

@@ -30,7 +30,7 @@ type runtime_backpressure_decision =
 val runtime_backpressure_observation_reasons : reason:string -> string list
 
 val runtime_backpressure_decision
-  :  runtime_resilience:Keeper_runtime_resilience.runtime_resilience option
+  :  runtime_resilience:string option
   -> should_run_turn:bool
   -> runtime_id:string
   -> runtime_status:Keeper_health_probe.health_status

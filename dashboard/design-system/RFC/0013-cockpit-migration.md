@@ -63,7 +63,7 @@ context.
 
 `dashboard/design-system/ui_kits/cockpit/components/KpiStrip.jsx`:
 
-- 8 cells: Tokens/sec, Pass Rate, Fails, Cascade Hits, Open PRs,
+- 8 cells: Tokens/sec, Pass Rate, Fails, Runtime Hits, Open PRs,
   Active Keepers, Stalled, Goal Progress.
 - Each cell renders as `--type-display` (36 px mono) value + small
   `--type-meta` (10 px) label.

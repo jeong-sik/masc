@@ -630,12 +630,7 @@ let record_keeper_crashed
   let reason = Keeper_registry.failure_reason_to_string failure_reason in
   if resolve_registry_done entry (`Crashed reason)
   then (
-    let outcome =
-      Keeper_registry_runtime_attempt.enrich_fiber_unresolved_outcome
-        ~base_path
-        ~keeper_name
-        reason
-    in
+    let outcome = reason in
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
     Keeper_registry.dispatch_event_unit
       ~base_path

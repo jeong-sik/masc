@@ -20,7 +20,7 @@ let ensure_dir (path : string) : string =
      then re-raise after release. Escaping an exception from
      Eio.Mutex.use_rw poisons the mutex and breaks all subsequent
      ensure_dir calls in the same process (Issue #8475: fleet-test
-     isolation cascade failures). *)
+     isolation runtime failures). *)
   let deferred_exn = ref None in
   Eio_guard.with_mutex dir_mu (fun () ->
     if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin

@@ -7,7 +7,7 @@
     - Legacy migration heuristics ({!legacy_migrate_post_kind}) +
       classification reason rendering ({!post_classification_reason}).
 
-    {b Include cascade:} this module starts with
+    {b Include runtime:} this module starts with
     [include Board_types], so consumers using
     [include Board_core_classify] (notably {!Board_core}) inherit
     every {!Board_types} surface entry.  Internal helpers
@@ -37,7 +37,7 @@ val legacy_migrate_post_kind_metric : string
     operators can see which legacy authors still drive the migration
     path.  See {!legacy_migrate_post_kind} for the call site. *)
 
-(** {1 List utility (include cascade)} *)
+(** {1 List utility (include runtime)} *)
 
 val take : int -> 'a list -> 'a list
 (** [take n lst] returns the first [n] elements of [lst] (or all of

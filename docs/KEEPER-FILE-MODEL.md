@@ -105,7 +105,7 @@ These may still be parsed today, but they are **not** the preferred place to enc
 | Field | Status | Preferred owner |
 | --- | --- | --- |
 | `allowed_paths` | Ignored by design | nowhere in persona |
-| `cascade_name` | Compatibility-only | `keeper.toml` |
+| `runtime_id` | Compatibility-only | `keeper.toml` |
 | `telemetry_feedback_*` | Compatibility-only | `keeper.toml` or runtime policy |
 | `max_turns_per_call*` | Compatibility-only | `keeper.toml` |
 
@@ -138,7 +138,7 @@ persona_name = "analyst"
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
 | `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container; the basic-mode git/gh dispatcher can upgrade network+credential mounts per-command. Hard mode requires `docker`. |
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (basic-mode git/gh dispatcher can promote to `inherit`); `local` defaults to `inherit`. Hard mode requires `none`. |
-| `cascade_name` | Optional | Deployment-specific cascade override | Only when not using the default cascade. |
+| `runtime_id` | Optional | Deployment-specific runtime override | Only when not using the default runtime. |
 | `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
 | `repo_cli_identity` | Optional | Bound repo CLI identity bundle | Resolves to `.masc/repo-cli-identities/<identity>/gh` for keeper-scoped `gh` auth. Required when `MASC_KEEPER_SANDBOX_HARD_MODE=true`. |
 | `git_identity_mode` | Optional | Commit identity policy | `keeper_alias` keeps git author separate from GitHub auth; `repo_cli_identity` is reserved for future explicit coupling. |
@@ -177,7 +177,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | `git_identity_mode` | `keeper_alias`, `repo_cli_identity` |
 | `tool_preset` | `minimal`, `social`, `messaging`, `research`, `delivery`, `full` |
 | `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
-| `cascade_name` | keeper-assignable declarative cascade profiles exposed by the active catalog: route targets, tier names, or cascade names that are not marked `keeper-assignable = false` |
+| `runtime_id` | keeper-assignable declarative runtime profiles exposed by the active catalog: route targets, tier names, or runtime names that are not marked `keeper-assignable = false` |
 
 ### Sandbox Example
 
@@ -204,8 +204,8 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 | Field | Replacement / rationale |
 | --- | --- |
 | `also_allow` | Renamed to `tool_also_allow` in `keeper.toml`. Use `tool_access.also_allow` only inside the JSON `tool_access` object. |
-| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `cascade_name` → `cascade.toml`. Do not pin per-keeper. |
-| `allowed_providers` | Provider/model ownership lives in `cascade.toml` and OAS runtime receipts. Do not pin providers per keeper. |
+| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `runtime_id` → `keeper_runtime.toml`. Do not pin per-keeper. |
+| `allowed_providers` | Provider/model ownership lives in `keeper_runtime.toml` and OAS runtime receipts. Do not pin providers per keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |
 | `trigger_mode`, `policy_action_budget` | Removed with the legacy policy engine. |
 | `initiative_scope`, `initiative_enabled`, `initiative_idle_sec`, `initiative_cooldown_sec` | Renamed to `proactive_*` (see above). |

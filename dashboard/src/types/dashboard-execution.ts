@@ -65,6 +65,8 @@ export interface DashboardConfigResolution {
   status: 'ready' | 'warn' | 'invalid_env' | 'missing'
   warnings: string[]
   config_root: DashboardConfigResolutionItem
+  runtime_authoring: DashboardConfigResolutionItem
+  runtime: DashboardConfigResolutionItem
   prompts: DashboardConfigResolutionItem
   keepers: DashboardConfigResolutionItem
   personas: DashboardConfigResolutionItem
@@ -869,7 +871,7 @@ export interface GoalKeeperTrustExecutionSummary {
   provider_attempt_count?: number | null
   provider_fallback_applied?: boolean | null
   provider_selected_model?: string | null
-  cascade_outcome?: string | null
+  runtime_outcome?: string | null
   sandbox_summary?: string | null
   sandbox_root?: string | null
   mutation_guard_summary?: string | null
@@ -995,9 +997,9 @@ export interface GoalDetailKeeper {
   active_goal_ids: string[]
   sandbox_profile: string
   network_mode: string
-  cascade_name: string
+  runtime_id: string
   approval_profile: string | null
-  cascade_outcome: string | null
+  runtime_outcome: string | null
   latest_execution_outcome: string | null
   latest_execution_at: string | null
   latest_receipt: Record<string, unknown> | null

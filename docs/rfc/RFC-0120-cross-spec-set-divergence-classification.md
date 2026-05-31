@@ -21,22 +21,22 @@ implementation_prs: []
 
 ```
 ── TurnPhaseSet (5 specs, 3 unique signatures) ──
-  KCascadeL:        5 (compacting executing finalizing idle prompting)
+  KRuntimeL:        5 (compacting executing finalizing idle prompting)
   KMC:              4 (compacting executing idle prompting)
   KCompositeL:      7 (... + exhausted + routing)              ← canonical
   KDP:              5 (compacting executing finalizing idle prompting)
   KTC:              7 (... + exhausted + routing)              ← canonical
 
 ── DecisionSet (6 specs, 3 unique signatures) ──
-  KCascadeL:        4 (gate_rejected guard_ok tool_policy_selected undecided)  ← canonical
+  KRuntimeL:        4 (gate_rejected guard_ok tool_policy_selected undecided)  ← canonical
   KMC:              3 (without gate_rejected)
   KCompositeL:      4 ← canonical
   KDP:              4 ← canonical
   KEQ:              3 (emit skip tick)                          ← NAME COLLISION
   KTC:              4 ← canonical
 
-── CascadeSet (5 specs, 2 unique signatures) ──
-  KCascadeL:        5 (done exhausted idle selecting trying)   ← canonical
+── RuntimeSet (5 specs, 2 unique signatures) ──
+  KRuntimeL:        5 (done exhausted idle selecting trying)   ← canonical
   KMC:              2 (idle trying)
   KCompositeL:      5 ← canonical
   KDP:              5 ← canonical
@@ -76,11 +76,11 @@ implementation_prs: []
 
 | Instance | Class | Action |
 |---|---|---|
-| KCascadeL.TurnPhaseSet (5) | STALE | widen to 7 |
+| KRuntimeL.TurnPhaseSet (5) | STALE | widen to 7 |
 | KDP.TurnPhaseSet (5) | STALE | widen to 7 |
 | KMC.TurnPhaseSet (4) | DELIBERATE | rename `KMC_TurnPhaseSet` |
 | KMC.DecisionSet (3) | DELIBERATE | rename `KMC_DecisionSet` |
-| KMC.CascadeSet (2) | DELIBERATE | rename `KMC_CascadeSet` |
+| KMC.RuntimeSet (2) | DELIBERATE | rename `KMC_RuntimeSet` |
 | KEQ.DecisionSet (3 = emit/skip/tick) | NAME COLLISION | rename `SmartHeartbeatDecisionSet` |
 | (다른 5 spec 의 `DecisionSet` 4) | canonical | unchanged |
 
@@ -105,8 +105,8 @@ jobs:
 | Phase | Deliverable | Acceptance |
 |---|---|---|
 | P1 (this PR) | RFC body | Draft → main |
-| P2 | spec PR: 2 STALE sync (KCascadeL.TurnPhaseSet + KDP.TurnPhaseSet widen to 7) | TLC re-verify PASS clean for both |
-| P3 | spec PR: 3 KMC DELIBERATE rename (TurnPhase/Decision/Cascade) — `KMC_*` prefix + header note | TLC PASS, sibling spec reference 정정 |
+| P2 | spec PR: 2 STALE sync (KRuntimeL.TurnPhaseSet + KDP.TurnPhaseSet widen to 7) | TLC re-verify PASS clean for both |
+| P3 | spec PR: 3 KMC DELIBERATE rename (TurnPhase/Decision/Runtime) — `KMC_*` prefix + header note | TLC PASS, sibling spec reference 정정 |
 | P4 | spec PR: 1 KEQ NAME COLLISION rename (`DecisionSet` → `SmartHeartbeatDecisionSet`) + KEQ header documentation | TLC PASS, downstream tooling regex 정정 |
 | P5 | `scripts/audit-tla-annotation-drift.sh --check-cross-spec --strict` activation. CI workflow `.github/workflows/cross-spec-divergence.yml` | 7 fix 후 0 divergence — new PR 가 0 유지 |
 | P6 | `docs/spec/cross-spec-divergence-policy.md` — 3-class framework + 새 spec 추가 정책 | 새 observer spec PR template 가 classification 강제 |
@@ -125,7 +125,7 @@ P2/P3/P4 가 spec-only fix. P5 가 enforce. P6 가 policy 문서.
 
 ## §5 Non-goals
 
-- **새 cross-spec set name 추가**: 본 RFC 는 *기존* 3 set name (`TurnPhaseSet` / `DecisionSet` / `CascadeSet`) 의 divergence. 새 cross-spec set name 도 같은 framework 적용.
+- **새 cross-spec set name 추가**: 본 RFC 는 *기존* 3 set name (`TurnPhaseSet` / `DecisionSet` / `RuntimeSet`) 의 divergence. 새 cross-spec set name 도 같은 framework 적용.
 - **spec body 의 invariant 변경**: 본 RFC 는 *set name level* 만. invariant 보강 별도.
 - **OCaml side 변경**: 본 RFC 는 *spec only*. OCaml ↔ spec drift 는 RFC-0114~0118 family 담당.
 
@@ -141,7 +141,7 @@ Rollback: P5 lint 비활성. P2/P3/P4 spec 변경 revert 가능 (TLC 재검증).
 ## §7 Acceptance
 
 - [ ] P1: RFC body merge.
-- [ ] P2: 2 STALE spec sync (KCascadeL + KDP) — TLC PASS.
+- [ ] P2: 2 STALE spec sync (KRuntimeL + KDP) — TLC PASS.
 - [ ] P3: 3 KMC DELIBERATE rename — TLC PASS.
 - [ ] P4: 1 KEQ NAME COLLISION rename — TLC PASS + downstream tooling 정정.
 - [ ] P5: `--strict` CI workflow active — 0 divergence.

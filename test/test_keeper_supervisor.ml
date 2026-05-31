@@ -1017,7 +1017,7 @@ let test_sweep_and_recover_swallows_failing_tombstone_hook () =
 (* ── Phase 2 (#10765): stale-termination storm auto-pause ──────── *)
 
 (* Reproduces the Mode A failure pattern from 2026-04-27 fleet observation:
-   keeper proactive turn fails (cascade dead / provider_timeout) → stale
+   keeper proactive turn fails (runtime dead / provider_timeout) → stale
    watchdog kills fiber → supervisor restarts → 30 min later same stale →
    restart loop with no operator-actionable signal beyond log ERROR.
 
@@ -1376,7 +1376,7 @@ let test_storm_pause_requires_manual_resume () =
       in
       Sup.sweep_and_recover ctx;
       (* Stale storms are operator-owned pauses: no timer should re-enter
-         the same failed cascade/tool loop automatically. *)
+         the same failed runtime/tool loop automatically. *)
       (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true" true m.paused;

@@ -159,7 +159,7 @@ function IxGraphDag({ branch = "main" }) {
     { x: 200, y: 74, keeper: "masc-improver", hash: "918fd2", label: "feat/keeper-clarity" },
     { x: 280, y: 74, keeper: "masc-improver", hash: "1c5fb3", label: "" },
     { x: 360, y: 118, keeper: "sangsu", hash: "e45f2e", label: "oas-label" },
-    { x: 440, y: 118, keeper: "rama", hash: "44a1b9", label: "research/cascade-step2" },
+    { x: 440, y: 118, keeper: "rama", hash: "44a1b9", label: "research/runtime-step2" },
     { x: 520, y: 32, keeper: "qa-king", hash: "717da6", label: "merge" },
     { x: 600, y: 32, keeper: "nick0cave", hash: "da11b0", label: "tag v0.42" },
   ];
@@ -254,10 +254,10 @@ function IxGraphStashes({ branch = "main" }) {
 // ═════════════════════════════════════════════════════════════════
 
 function IxTerm({ branch = "main" }) {
-  const cascade = (P2K.cascadeAudit && P2K.cascadeAudit[1]) || null;
+  const runtime = (P2K.runtimeAudit && P2K.runtimeAudit[1]) || null;
   return (
-    <div className="ix-term" role="region" aria-label={`Cascade-aware terminal in worktree ${branch}`}>
-      <K3Header title="E5-A · cascade-aware terminal" meta={`${branch} · PWD .worktrees/${branch}`} right="history 8 · cascade trace inline" />
+    <div className="ix-term" role="region" aria-label={`Runtime-aware terminal in worktree ${branch}`}>
+      <K3Header title="E5-A · runtime-aware terminal" meta={`${branch} · PWD .worktrees/${branch}`} right="history 8 · runtime trace inline" />
       <div className="ix-term-body" role="log" aria-live="polite" aria-label="Terminal output" tabIndex={0}>
         {[
           "$ git status --short",
@@ -265,15 +265,15 @@ function IxTerm({ branch = "main" }) {
           "$ masc keeper claim task-4012 --keeper sangsu",
           "claim accepted · task-4012 · branch=agent-code/design-system-phase3-ide-v2",
         ].map((line, i) => <div key={i} className={`ix-term-line ${line.startsWith("$") ? "prompt" : ""}`}>{line}</div>)}
-        {cascade && (
-          <div className="cb-cascade" role="group" aria-label={`Cascade trace ${cascade.id}: ${cascade.cascade}, outcome ${cascade.outcome}, total ${cascade.total_ms}ms`}>
-            <div className="id">{cascade.id} · {cascade.cascade} · {cascade.trigger}</div>
-            {cascade.hops.map(h => (
+        {runtime && (
+          <div className="cb-runtime" role="group" aria-label={`Runtime trace ${runtime.id}: ${runtime.runtime}, outcome ${runtime.outcome}, total ${runtime.total_ms}ms`}>
+            <div className="id">{runtime.id} · {runtime.runtime} · {runtime.trigger}</div>
+            {runtime.hops.map(h => (
               <div key={h.i} className={`step ${h.status}`}>
                 <span className="ix" aria-hidden="true">{h.i}</span><span className="name">{h.model}</span><span className="ms">{h.ms}ms</span>
               </div>
             ))}
-            <div className="total">total <span className="n">{cascade.total_ms}ms</span> · {cascade.outcome}</div>
+            <div className="total">total <span className="n">{runtime.total_ms}ms</span> · {runtime.outcome}</div>
           </div>
         )}
         {[

@@ -27,7 +27,7 @@ val interpret :
 
     {2 Salience priority order (pinned)}
 
-    The signal cascade evaluates four predicates in order, returning
+    The signal runtime evaluates four predicates in order, returning
     the {b first} matching salience as primary; the rest become
     secondary.  When none match, {!Meta_cognition_types.Stable} is
     returned.

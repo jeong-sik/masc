@@ -39,7 +39,7 @@ code_refs:
 │ Layer 4: Env_config_keeper      (Keeper 부트/알림/감독)  │
 │ Layer 5: Level2/Level4_config   (메트릭, 학습, RNG)     │
 │ Layer 6: Runtime_params         (런타임 오버라이드)       │
-│ Layer 7: config/cascade.toml    (Cascade 모델 순서)     │
+│ Layer 7: config/keeper_runtime.toml    (Runtime 모델 순서)     │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -56,7 +56,7 @@ code_refs:
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
 | `MASC_BASE_PATH` | string | `.` | `.masc` 데이터 디렉토리의 기준 경로 |
-| `MASC_CONFIG_DIR` | string | 자동 탐색 | resolved config root override. 하위 항목: `cascade.toml`, `prompts/`, `keepers/`, `personas/` |
+| `MASC_CONFIG_DIR` | string | 자동 탐색 | resolved config root override. 하위 항목: `keeper_runtime.toml`, `prompts/`, `keepers/`, `personas/` |
 | `MASC_PERSONAS_DIR` | string | unset | persona root override. 설정 시 resolved config root의 `personas/` 대신 이 디렉토리를 사용 |
 | `MASC_HTTP_PORT` | string | `"8935"` | HTTP 서버 포트 |
 | `MASC_HTTP_BASE_URL` | string | - | 전체 base URL (설정 시 host/port 무시) |
@@ -160,7 +160,7 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `OPENAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `provider-d` provider `auto` 기본 모델로 사용. |
 | `OLLAMA_DEFAULT_MODEL` | string | `""` | `ollama` provider `auto` 기본 모델 (lib/config/env_config_runtime.ml:181) |
 | `LLAMA_DEFAULT_MODEL` | string | `"explicit-model-required"` | `llama` provider legacy local runtime 기본 모델 (lib/config/env_config_runtime.ml:150) |
-| `OPENROUTER_DEFAULT_MODEL` | string | (없음) | `openrouter` provider `auto` 기본 모델 (lib/cascade/cascade_model_resolve.ml:76) |
+| `OPENROUTER_DEFAULT_MODEL` | string | (없음) | `openrouter` provider `auto` 기본 모델 (lib/runtime/runtime_model_resolve.ml:76) |
 
 **Keeper Autonomy (자율 에이전트)**: `MASC_AUTONOMY_*` prefix.
 
@@ -305,11 +305,11 @@ Tier는 mode/category와 독립적으로 적용되는 추가 필터 레이어다
 
 ---
 
-## 7. Cascade Configuration
+## 7. Runtime Configuration
 
-### 7.1 config/cascade.toml 구조
+### 7.1 config/keeper_runtime.toml 구조
 
-`cascade.toml`은 RFC-0058 선언형 cascade catalog의 유일한 런타임
+`keeper_runtime.toml`은 RFC-0058 선언형 runtime catalog의 유일한 런타임
 소스다. Catalog discovery는 TOML의 선언형 namespace를 materialize한
 검증 결과에서 수행하며, legacy flat JSON catalog 키는 사용하지 않는다.
 
@@ -321,7 +321,7 @@ Tier는 mode/category와 독립적으로 적용되는 추가 필터 레이어다
 | Model | `[models.<id>]` | provider-neutral model metadata/capability 정의 |
 | Binding | `[<provider>.<model>]` | provider-model 결합, capacity, pricing |
 | Alias | `[<provider>.<model>.<alias>]` | 호출 목적별 temperature/max-output override |
-| Tier/Route | `[tier.*]`, `[cascade.*]`, `[routes.*]` | 실행 후보 묶음, fallback chain, logical route |
+| Tier/Route | `[tier.*]`, `[runtime.*]`, `[routes.*]` | 실행 후보 묶음, fallback chain, logical route |
 
 ```toml
 [providers.cli-tool-a]
@@ -343,13 +343,13 @@ max-concurrent = 1
 members = ["cli-tool-a.agent-code-spark"]
 strategy = "failover"
 
-[cascade.primary]
+[runtime.primary]
 tiers = ["primary"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "cascade.primary"
+target = "runtime.primary"
 ```
 
 ### 7.2 모델 식별자 형식
@@ -360,7 +360,7 @@ Tier member는 `<provider_id>.<model_id>` 또는
 변환한다.
 
 - checked-in repo defaults는 explicit label을 사용한다.
-- `auto`는 provider-specific runtime convenience일 수 있지만, repo에 커밋되는 cascade 기본값으로는 권장하지 않는다.
+- `auto`는 provider-specific runtime convenience일 수 있지만, repo에 커밋되는 runtime 기본값으로는 권장하지 않는다.
 
 | Provider | Env Config 모듈 | 기본 모델 |
 |----------|----------------|----------|
@@ -376,7 +376,7 @@ Tier member는 `<provider_id>.<model_id>` 또는
 | `provider-d` | `Provider-D` | `OPENAI_DEFAULT_MODEL` |
 | `openrouter` | `OpenRouter` | `OPENROUTER_DEFAULT_MODEL` |
 
-### 7.3 Per-cascade 추론 파라미터
+### 7.3 Per-runtime 추론 파라미터
 
 Temperature/max-output 같은 호출 목적별 override는 alias 레이어에 둔다.
 미설정 시 호출자 기본값 또는 provider/model capability 기본값을 사용한다.
@@ -389,17 +389,17 @@ max-output = 1024
 
 ### 7.3.1 Keeper assignability metadata
 
-`keeper-assignable`은 dashboard/cascade manager가 keeper에 할당 가능한
-profile인지 명시하는 bool metadata다. `tier` 또는 `cascade`에 선언할
+`keeper-assignable`은 dashboard/runtime manager가 keeper에 할당 가능한
+profile인지 명시하는 bool metadata다. `tier` 또는 `runtime`에 선언할
 수 있으며 기본값은 `true`.
 
 - `true` 또는 미설정: keeper assignment dropdown에 노출 가능
-- `false`: system-only profile. cascade manager에는 보이지만 keeper에는 할당 불가
+- `false`: system-only profile. runtime manager에는 보이지만 keeper에는 할당 불가
 
 예:
 
 ```toml
-[cascade.scoring]
+[runtime.scoring]
 tiers = ["scoring", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
@@ -408,26 +408,26 @@ keeper-assignable = false
 
 ### 7.4 Pluggable Strategy
 
-각 `tier` 또는 `cascade`은 `strategy` 키로 provider 선택 전략을
+각 `tier` 또는 `runtime`은 `strategy` 키로 provider 선택 전략을
 지정한다. 미설정 시 `failover`로 동작한다. Operator config에서
 지원되는 strategy 값은 현재 `failover`, `priority_tier` 두 개뿐이다.
 
 | 전략 | 키 값 | 설명 |
 |------|-------|------|
 | S1 Failover | `failover` | members 입력 순서 유지 |
-| S5 Priority tier | `priority_tier` | cascade의 `tiers` 순서대로 fallback |
+| S5 Priority tier | `priority_tier` | runtime의 `tiers` 순서대로 fallback |
 
-Retired experimental strategy 값은 더 이상 `Cascade_strategy.kind`에 남기지 않는다.
-오래된 `cascade.toml`이 해당 값을 지정하면 parser 단계에서 실패한다.
+Retired experimental strategy 값은 더 이상 `Runtime_strategy.kind`에 남기지 않는다.
+오래된 `keeper_runtime.toml`이 해당 값을 지정하면 parser 단계에서 실패한다.
 
 관련 선언형 키:
 
 | 키 | 타입 | 기본값 | 적용 전략 |
 |-----|------|--------|-----------|
 | `members` | string list | `[]` | tier 후보 binding/alias 목록 |
-| `tiers` | string list | `[]` | cascade fallback chain |
-| `fallback` | bool | `false` | cascade fallback hint 노출 |
-| `strategy` | string | `failover` | tier/cascade provider 선택 |
+| `tiers` | string list | `[]` | runtime fallback chain |
+| `fallback` | bool | `false` | runtime fallback hint 노출 |
+| `strategy` | string | `failover` | tier/runtime provider 선택 |
 | `keeper-assignable` | bool | `true` | keeper 할당 가능 여부 |
 
 Unknown strategy 값은 catalog validation error로 취급한다.
@@ -453,9 +453,9 @@ max-concurrent = 1
 
 ### 7.6 HTTP Probe Capacity (Phase C2, #7619)
 
-등록된 HTTP probe provider는 provider별 probe endpoint를 가진다. MASC는 cycle 시작마다 등록된 URL들을 순차적으로 조회하여 (`Cascade_capacity_probe.refresh_many` → registered probe 내부 `refresh_many`) 실제 활성 모델 수를 capacity로 변환한다. 캐시 TTL 2초. 응답 실패 시 silent fail → Phase A client-capacity semaphore로 fallback. 병렬 fan-out이 필요해지면 probe adapter의 `refresh_many`에서 `Eio.Fiber.both` 로 전환.
+등록된 HTTP probe provider는 provider별 probe endpoint를 가진다. MASC는 cycle 시작마다 등록된 URL들을 순차적으로 조회하여 (`Runtime_capacity_probe.refresh_many` → registered probe 내부 `refresh_many`) 실제 활성 모델 수를 capacity로 변환한다. 캐시 TTL 2초. 응답 실패 시 silent fail → Phase A client-capacity semaphore로 fallback. 병렬 fan-out이 필요해지면 probe adapter의 `refresh_many`에서 `Eio.Fiber.both` 로 전환.
 
-capacity 조회 순서: `Cascade_throttle` (llama-server /slots 기반) → `Cascade_capacity_probe` (discovered via registered probes, e.g. `/api/ps`) → `Cascade_client_capacity` (declared semaphore).
+capacity 조회 순서: `Runtime_throttle` (llama-server /slots 기반) → `Runtime_capacity_probe` (discovered via registered probes, e.g. `/api/ps`) → `Runtime_client_capacity` (declared semaphore).
 
 ### 7.7 예시
 
@@ -472,13 +472,13 @@ max-concurrent = 1
 members = ["provider-k-coding.provider-k-flashx", "cli-tool-b.provider-f-flash"]
 strategy = "failover"
 
-[cascade.tier_medium]
+[runtime.tier_medium]
 tiers = ["tier_medium", "primary"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.moderate_task]
-target = "cascade.tier_medium"
+target = "runtime.tier_medium"
 ```
 
 ---
@@ -529,7 +529,7 @@ masc_set_param(key, value)
 - **INV-C2**: `Runtime_params.set`은 반드시 `validate`를 통과해야 한다. 검증 실패 시 `Error`를 반환하고 값은 변경되지 않는다.
 - **INV-C3**: `Unknown` category에 매핑된 도구는 어떤 mode preset에서도 노출되지 않는다.
 - **INV-C4**: `tool_catalog.is_visible`이 false를 반환하는 도구는 `allow_direct_call_when_hidden=true`가 아닌 한 MCP 클라이언트에 노출되지 않는다.
-- **INV-C5**: Cascade JSON의 모델 목록은 순서대로 시도되며, 전부 실패 시 skip한다 (error propagation, fallback 없음).
+- **INV-C5**: Runtime JSON의 모델 목록은 순서대로 시도되며, 전부 실패 시 skip한다 (error propagation, fallback 없음).
 - **INV-C6**: `Normalized.t` 값은 항상 [0.0, 1.0] 범위이다. `of_float`는 NaN/Inf/범위 밖에 `None`을 반환한다.
 
 ---
@@ -591,7 +591,7 @@ $MASC_PERSONAS_DIR
 ```
 
 암묵적 secondary search(운영자 home personas, base-path root personas)는 사용하지 않는다.
-Persona, keeper TOML, prompt markdown, cascade, tool_policy는 모두 같은 resolved config root를 기준으로 해석한다.
+Persona, keeper TOML, prompt markdown, runtime, tool_policy는 모두 같은 resolved config root를 기준으로 해석한다.
 
 ### 12.4 Template 변경 반영
 
@@ -610,4 +610,4 @@ dir-local local-dev에서는 `.masc/`가 target 디렉토리 내부를 가리키
 
 ### 12.6 모델 실행
 
-모델 선택은 `cascade.toml`이 유일한 권위다. keeper_meta의 `runtime_id` (기본 `"primary"`)가 keeper-assignable runtime을 지정하고, runtime resolver가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.
+모델 선택은 `keeper_runtime.toml`이 유일한 권위다. keeper_meta의 `runtime_id` (기본 `"primary"`)가 keeper-assignable runtime을 지정하고, runtime resolver가 실행 모델을 결정한다. keeper 설정에 모델 필드를 직접 지정하지 않는다.

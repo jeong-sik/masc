@@ -282,7 +282,7 @@ const runtimeBlockerLabels = {
   turn_timeout: '턴 응답 만료',
   turn_livelock_blocked: '턴 livelock 차단',
   completion_contract_violation: '완료 계약 위반',
-  cascade_exhausted: '캐스케이드 소진',
+  runtime_exhausted: '캐스케이드 소진',
   no_tool_capable_provider: '도구 실행 Provider 없음',
   provider_runtime_error: 'Provider 런타임 오류',
   tool_required_unsatisfied: '필수 도구 미충족',
@@ -346,14 +346,14 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (blockerClass === 'completion_contract_violation') {
     return '완료 계약 조건을 만족하지 못해 재확인이 필요합니다.'
   }
-  if (blockerClass === 'cascade_exhausted') {
+  if (blockerClass === 'runtime_exhausted') {
     return '캐스케이드 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
   }
   if (blockerClass === 'no_tool_capable_provider') {
     return '요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.'
   }
   if (blockerClass === 'provider_runtime_error') {
-    return 'Provider, adapter, or cascade가 keeper 진행 전에 실패했습니다.'
+    return 'Provider, adapter, or runtime가 keeper 진행 전에 실패했습니다.'
   }
   if (blockerClass === 'tool_required_unsatisfied') {
     return '액션 가능한 신호에 필요한 keeper 도구 호출이 충족되지 않았습니다.'

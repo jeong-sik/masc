@@ -367,7 +367,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 ("trace_id", `String "trace-paused-runtime-trust");
                 ("goal", `String "Expose paused keeper failure in summary");
                 ("short_goal", `String "Expose paused keeper failure in summary");
-                ("runtime_id", `String "cascade.primary");
+                ("runtime_id", `String "runtime.primary");
               ])
         with
         | Ok meta ->
@@ -422,7 +422,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                   ("sandbox_root", `String base_dir);
                   ("network_mode", `String "inherit");
                 ] );
-            ( "cascade",
+            ( "runtime",
               `Assoc
                 [
                   ("name", `String "primary");
@@ -647,7 +647,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
             ("tool_contract_result", `String "satisfied");
             ("tools_used", `List [ `String "keeper_status" ]);
             ("requested_tools", `List [ `String "keeper_status" ]);
-            ( "cascade",
+            ( "runtime",
               `Assoc
                 [
                   ("name", `String "primary");
@@ -728,7 +728,7 @@ let test_snapshot_has_expected_sections () =
         (admission <> `Null);
       Alcotest.(check string) "admission mode" "passthrough"
         Yojson.Safe.Util.(admission |> member "mode" |> to_string);
-      Alcotest.(check string) "admission throttle owner" "oas_cascade"
+      Alcotest.(check string) "admission throttle owner" "oas_runtime"
         Yojson.Safe.Util.(admission |> member "throttle_owner" |> to_string);
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with

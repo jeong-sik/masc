@@ -9,7 +9,7 @@
   <style>
     /*
      * Pixel-avatar preview — design-system mirror of production
-     * dashboard/src/styles/pixel-avatar.css (cascade chain:
+     * dashboard/src/styles/pixel-avatar.css (runtime chain:
      * src/styles/global.css @import "./pixel-avatar.css" → bundled
      * with tailwindcss in the live cockpit).
      *
@@ -37,8 +37,8 @@
       --fs-2xs: 10px;
     }
 
-    /* Cascade chain banner (read-only, top of page) */
-    .pv-cascade {
+    /* Runtime chain banner (read-only, top of page) */
+    .pv-runtime {
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
       font-family: var(--font-mono);
       font-size: var(--fs-11);
@@ -48,9 +48,9 @@
       border: 1px solid var(--color-border-default);
       border-radius: var(--r-1);
     }
-    .pv-cascade .arrow { color: var(--color-fg-disabled); }
-    .pv-cascade .term { color: var(--color-fg-secondary); }
-    .pv-cascade .pin { color: var(--color-accent-fg); font-weight: var(--fw-semi); }
+    .pv-runtime .arrow { color: var(--color-fg-disabled); }
+    .pv-runtime .term { color: var(--color-fg-secondary); }
+    .pv-runtime .pin { color: var(--color-accent-fg); font-weight: var(--fw-semi); }
 
     /* Source-line pointer chip (mirrors `tk` primitive shape) */
     .pv-ref {
@@ -244,12 +244,12 @@
       </div>
     </div>
 
-    <div class="pv-cascade" aria-label="cascade chain">
+    <div class="pv-runtime" aria-label="runtime chain">
       <span class="term">global.css</span>
       <span class="arrow">→</span>
       <span class="term">@import "./pixel-avatar.css"</span>
       <span class="arrow">→</span>
-      <span class="pin">production cascade (LIVE)</span>
+      <span class="pin">production runtime (LIVE)</span>
       <span class="arrow">·</span>
       <span class="term">orphan-triage cleared (#11317)</span>
     </div>

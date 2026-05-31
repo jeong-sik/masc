@@ -1,9 +1,9 @@
-(** Provider identity helpers shared across {!Cascade_config} submodules.
+(** Provider identity helpers shared across {!Runtime_config} submodules.
 
     All functions are pure with respect to the runtime binding registry and
     {!Llm_provider} SSOTs. No I/O. Intentionally kept stdlib-light: the
-    callers in {!Cascade_config_parser}, {!Cascade_config_selection},
-    {!Cascade_config_resolve}, and {!Cascade_config_strategy_resolve} pick up
+    callers in {!Runtime_config_parser}, {!Runtime_config_selection},
+    {!Runtime_config_resolve}, and {!Runtime_config_strategy_resolve} pick up
     these helpers as their lowest layer.
 
     @stability Internal *)
@@ -21,13 +21,13 @@ val runtime_binding_of_label : string -> Runtime_binding.t option
 val provider_name_of_kind :
   Llm_provider.Provider_config.provider_kind -> string
 
-val cascade_prefix_of_provider_kind :
+val runtime_prefix_of_provider_kind :
   Llm_provider.Provider_config.provider_kind -> string
 
 val provider_label_of_config : Llm_provider.Provider_config.t -> string
 
 val provider_health_key_of_config : Llm_provider.Provider_config.t -> string
-(** Key used by {!Cascade_health_tracker}. For OpenAI-compatible configs
+(** Key used by {!Runtime_health_tracker}. For OpenAI-compatible configs
     the model and base URL are appended so each endpoint is tracked
     independently. *)
 

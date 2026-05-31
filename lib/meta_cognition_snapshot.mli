@@ -9,7 +9,7 @@
     completes the .mli surface for the cluster.
 
     Only the 2 JSON-builder entries leak through the
-    [include Meta_cognition_snapshot] cascade in
+    [include Meta_cognition_snapshot] runtime in
     [meta_cognition.ml] to satisfy {!Meta_cognition.snapshot_json}
     / {!Meta_cognition.summary_json}.  Everything else is
     internal data-loading + signal-extraction machinery.

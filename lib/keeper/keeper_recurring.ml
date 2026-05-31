@@ -139,7 +139,7 @@ let dispatch_due ~keeper_name ~now_ts ~dispatch =
    tasks auto-disabled by [dispatch_due]'s [max_failures] guard
    never return to [enabled = true] within the process lifetime,
    permanently silencing the keeper's heartbeat broadcasts and
-   eventually triggering stale-kill cascades across dependent
+   eventually triggering stale-kill runtimes across dependent
    keepers. *)
 let reenable_due_tasks ~keeper_name ~now_ts =
   let count = ref 0 in

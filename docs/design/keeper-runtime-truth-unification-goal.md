@@ -14,7 +14,7 @@ Implemented in this branch:
 - JSONL destination convention:
   `.masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl`.
 - Runtime hooks for:
-  `turn_started`, `phase_gate_decided`, `cascade_routed`,
+  `turn_started`, `phase_gate_decided`, `runtime_routed`,
   `pre_dispatch_blocked`, `tool_surface_selected`,
   `provider_lane_resolved`, `provider_attempt_started`,
   `provider_attempt_finished`, `context_injected`, `context_compacted`,
@@ -37,13 +37,13 @@ Implemented in this branch:
   `state_snapshot_sidecar_saved` row links the structured state snapshot
   sidecars after the provider run, and `working_state_sidecar_saved` links the
   compact working-state vessel sidecars.
-- `Keeper_cascade_engine` now encodes the keeper cascade boundary as a typed
-  value: MASC owns named-cascade provider iteration and hands OAS a
+- `Keeper_runtime_engine` now encodes the keeper runtime boundary as a typed
+  value: MASC owns named-runtime provider iteration and hands OAS a
   single-provider agent run per attempt.
-- Runtime manifest decision rows now include `cascade_engine`,
-  `oas_dispatch_mode`, and `oas_internal_cascade_allowed`.
+- Runtime manifest decision rows now include `runtime_engine`,
+  `oas_dispatch_mode`, and `oas_internal_runtime_allowed`.
 - A focused guard still checks that the keeper hot path does not call OAS
-  `Complete_cascade`, but the primary invariant is now typed and runtime
+  `Complete_runtime`, but the primary invariant is now typed and runtime
   visible.
 - Keeper manifest/FSM turn ids now use the next keeper turn id
   (`total_turns + 1`) consistently across pre-dispatch, provider-attempt, and
@@ -107,23 +107,23 @@ Implemented in this branch:
     requested/required/materialized/missing tools, required-tool lane gaps are
     code-shaped as `required_tool_not_materialized`, and context/memory rows
     are grouped into the `memory_context` swimlane.
-  - a typed cascade-engine boundary fixture proving keeper runtime dispatch
-    uses `single_provider_agent_run` and disables OAS-internal cascade fallback.
+  - a typed runtime-engine boundary fixture proving keeper runtime dispatch
+    uses `single_provider_agent_run` and disables OAS-internal runtime fallback.
 - `test/test_memory_hooks.ml` now covers runtime manifest rows from the
   hook-first memory path: `memory_injected` and `memory_flushed`.
 - Direct model-string keeper runs now use direct-call defaults for
-  strategy/concurrency knobs when no active cascade catalog exists. Named
-  cascades still fail closed on catalog resolution errors.
+  strategy/concurrency knobs when no active runtime catalog exists. Named
+  runtimes still fail closed on catalog resolution errors.
 - `test/test_keeper_unified.ml` no longer depends on the deleted
-  `config/cascade.json` fixture; it now copies `config/cascade.toml` for its
+  `config/runtime.json` fixture; it now copies `config/keeper_runtime.toml` for its
   temp config root. Its livelock priming uses the same next-turn id convention
   as the runtime.
-- Declarative cascade validation now accepts 5-layer `tier.*` and
-  `cascade.*` profiles from the declarative snapshot, instead of requiring
+- Declarative runtime validation now accepts 5-layer `tier.*` and
+  `runtime.*` profiles from the declarative snapshot, instead of requiring
   legacy `<profile>_models` materialization for every route target.
 - `routes.*.target` values are preserved while the live catalog is not yet
   validated, instead of collapsing to a legacy alias that may not exist in the
-  declarative `cascade.toml`.
+  declarative `keeper_runtime.toml`.
 - Degraded retry now distinguishes phase aliases (`local_only`,
   `local_recovery`) from concrete fallback profiles with the same historical
   names. Generic fail-open follows the configured phase-recovery route; concrete
@@ -131,9 +131,9 @@ Implemented in this branch:
 - Required-tool degraded retries prepend the default route when catalog-owned
   rotation is present, so filtering recovery/control lanes does not leave a
   required-tool turn with no valid same-turn recovery path.
-- `masc_keeper_up` now accepts and validates a public `cascade_name` argument,
+- `masc_keeper_up` now accepts and validates a public `runtime_id` argument,
   matching the legacy-model removal error text and schema. Invalid or
-  system-only cascades fail before keeper creation.
+  system-only runtimes fail before keeper creation.
 - `save_private_text_file` now uses `Fun.protect` for channel cleanup inside
   blocking/systhread auth I/O, avoiding an Eio cancellation-context effect
   outside a fiber while still guaranteeing `close_out_noerr`.
@@ -167,7 +167,7 @@ Implemented in this branch:
 - `no_tool_capable_provider` now remains a structured terminal reason instead
   of collapsing to `internal_error`. The runtime manifest also records a
   `pre_dispatch_blocked` row with the configured labels, required tool names,
-  provider rejections, and MASC/OAS cascade-boundary fields.
+  provider rejections, and MASC/OAS runtime-boundary fields.
 - `masc-mcp doctor config` now checks the live validated
   `keeper_turn`/`tool_required` routes for forced required-tool capability.
   Routes that resolve only to providers without inline `tool_choice` or runtime
@@ -183,8 +183,8 @@ Latest verification:
 - `git fetch origin main` in `../oas`
 - `./scripts/check-oas-pin.sh`
 - `opam list --installed agent_sdk` -> `agent_sdk 0.193.9`
-- `scripts/dune-local.sh build test/test_cascade_attempt_liveness_observer.exe test/test_ci_hardening_source.exe test/test_keeper_runtime_manifest.exe test/test_keeper_terminal_reason.exe test/test_keeper_sdk_error_typed_bridge.exe test/test_keeper_unified.exe bin/main_eio.exe`
-- `./_build/default/test/test_cascade_attempt_liveness_observer.exe` (11 tests; tick-fiber pending-stop regression now completes in 0.003s)
+- `scripts/dune-local.sh build test/test_runtime_attempt_liveness_observer.exe test/test_ci_hardening_source.exe test/test_keeper_runtime_manifest.exe test/test_keeper_terminal_reason.exe test/test_keeper_sdk_error_typed_bridge.exe test/test_keeper_unified.exe bin/main_eio.exe`
+- `./_build/default/test/test_runtime_attempt_liveness_observer.exe` (11 tests; tick-fiber pending-stop regression now completes in 0.003s)
 - `./_build/default/test/test_ci_hardening_source.exe test source_guard 37`
 - `./_build/default/test/test_keeper_runtime_manifest.exe` (22 tests)
 - `./_build/default/test/test_keeper_terminal_reason.exe` (34 tests)
@@ -195,7 +195,7 @@ Latest verification:
 - `opam exec -- ocamlformat --check lib/config_doctor.ml lib/config_doctor.mli test/test_config_doctor.ml`
 - `MASC_CONFIG_DIR=/Users/dancer/me/.masc/config MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false ./_build/default/bin/main_eio.exe doctor config --base-path /Users/dancer/me --json`
   (expected exit 1: live `keeper_turn` and `tool_required` both target
-  `cascade.provider-k-coding-with-spark`, whose single candidate lacks the required tool
+  `runtime.provider-k-coding-with-spark`, whose single candidate lacks the required tool
   lane; doctor now reports `no_tool_capable_provider` risk before runtime
   dispatch)
 - `scripts/keeper-runtime-truth-gate.sh --self-test` (success fixture plus
@@ -253,7 +253,7 @@ Latest-main live evidence:
   `terminal_reason_code = no_tool_capable_provider`.
 - Current live `masc-mcp doctor config --base-path /Users/dancer/me --json`
   also reports `status = error` for the same route capability gap:
-  both `keeper_turn` and `tool_required` target `cascade.provider-k-coding-with-spark`, and
+  both `keeper_turn` and `tool_required` target `runtime.provider-k-coding-with-spark`, and
   its single candidate is rejected for forced required-tool use with
   `runtime_mcp_caps_missing`.
 
@@ -269,7 +269,7 @@ Mapping:
   `/runtime-trace.runtime_lens.axes`: lifecycle, tool surface, provider lane,
   provider attempt, context, and memory.
 - HTML item 4, "simultaneous swimlanes", is represented by
-  `/runtime-trace.runtime_lens.swimlanes`: keeper, MASC policy/cascade, OAS,
+  `/runtime-trace.runtime_lens.swimlanes`: keeper, MASC policy/runtime, OAS,
   provider, tool runtime, and memory/context.
 - Tool visibility mismatch is not left as prose. It is emitted as gap code
   `required_tool_not_materialized` with the missing required tool names in
@@ -301,26 +301,26 @@ Mapping:
 - Keeper status detail, runtime trust, composite execution, and keeper FSM
   helper projections keep legacy keys such as `active_model`, `selected_model`,
   `model_used`, `provider_selected_model`, `models_resolved`,
-  `cascade_models`, and `last_provider_result` for compatibility but return
+  `runtime_models`, and `last_provider_result` for compatibility but return
   `null` or empty lists for provider/model identity. They still expose
-  non-identifying cascade outcome, attempt count, fallback state, tool
+  non-identifying runtime outcome, attempt count, fallback state, tool
   contract, sandbox, and runtime blocker signals.
 - Keeper execution receipt JSON and the derived operator-broadcast payload keep
-  compatibility keys such as `model_used` and `cascade.selected_model`, but
+  compatibility keys such as `model_used` and `runtime.selected_model`, but
   set them to `null`. Receipt runtime contracts no longer pass a concrete
   provider/model label from MASC into the public contract JSON.
 - Keeper decision-log rows and metrics snapshot JSONL rows now treat
   provider/model fields as compatibility-only projection keys. They keep
-  cascade name, strategy, selected index, fallback state, attempt count, timing,
+  runtime name, strategy, selected index, fallback state, attempt count, timing,
   errors, usage, and tool evidence, but set `model_used`, `resolved_model_id`,
-  `provider_context.selected_model`, `cascade.selected_model`,
-  `cascade.primary_model`, `cascade.selected_model_raw`, configured labels, and
+  `provider_context.selected_model`, `runtime.selected_model`,
+  `runtime.primary_model`, `runtime.selected_model_raw`, configured labels, and
   candidate model lists to `null` or `[]`.
 - Dashboard legacy normalizers and fleet/detail display helpers now treat
   model/provider fields as non-product data even when older payloads still
   contain them. `keeper-store-normalize`, fleet telemetry rows, Runtime Alert
   Strip, KPI cards, metrics charts, FsmHub receipt labels, and Turn FSM detail
-  keep cascade lane/outcome/attempt/fallback evidence but no longer render
+  keep runtime lane/outcome/attempt/fallback evidence but no longer render
   concrete model/provider labels or model-switch timelines.
 - Governance and board dashboard adapters follow the same rule for human-facing
   product surfaces: judge/approval cards preserve keeper name, status, action,
@@ -341,7 +341,7 @@ Mapping:
   as `model_used`, `primary_model`, `handoff_to_model`, and `to_model` as
   compatibility fields, but public projection values are `null` or the neutral
   `runtime` bucket.
-- Operator control snapshots preserve keeper phase, cascade name, trust, and
+- Operator control snapshots preserve keeper phase, runtime name, trust, and
   context evidence, but redact `primary_model`, `active_model`,
   `last_model_used`, and model hint/label fields from operator-facing rows.
 - Keeper approval queue projections, audit rows, and resolution broadcasts keep
@@ -374,26 +374,26 @@ Mapping:
   reasons in the MASC structured error type. Legacy payloads with
   provider/model-shaped fields still parse, but those identities are not
   re-emitted.
-- Cascade attempt-liveness observer metrics keep the historical `provider`
+- Runtime attempt-liveness observer metrics keep the historical `provider`
   label key for dashboard compatibility but emit the neutral `runtime` lane.
   Liveness budget history also uses a single neutral runtime candidate key
   instead of retaining concrete provider/model keys.
 - Provider-error and OAS-run-timeout Prometheus counters also retain their
   historical `provider` label key for compatibility, but the value is the
-  neutral `runtime` lane. Error kind, cascade, capacity scope, and timeout
+  neutral `runtime` lane. Error kind, runtime, capacity scope, and timeout
   source remain visible.
 - The typed `Provider_error` contract itself is runtime-lane scoped: variants
   no longer store provider/model identifiers, and legacy JSON keys such as
   `provider`, `affected`, and `model_name` emit neutral `runtime` values only.
-- Cascade catalog runtime probe JSON and provider-health probe metric labels
+- Runtime catalog runtime probe JSON and provider-health probe metric labels
   keep status/error/profile evidence but redact provider kind, model id,
   model string, endpoint, and metric provider/model labels to neutral runtime
   values.
-- Cascade legacy observations and attempt/fallback audit rows now store
+- Runtime legacy observations and attempt/fallback audit rows now store
   runtime-lane candidate identities. Keeper turn-driver fallback, cooldown,
   preflight, and retry logs also use runtime labels instead of concrete
   provider/model labels.
-- Keeper cascade bookkeeping now routes through `Cascade_runtime_candidate` for
+- Keeper runtime bookkeeping now routes through `Runtime_runtime_candidate` for
   health keys, capacity keys, HTTP probe registration, strategy ordering, and
   per-attempt timeout bounds. `Keeper_turn_driver` no longer exposes a public
   `Provider_config.t` timeout helper or directly inspects provider kind,
@@ -401,21 +401,21 @@ Mapping:
   unwrapped only at the OAS dispatch adapter.
 - Keeper liveness/pre-skip helpers no longer expose
   `Provider_config.t`-returning label resolvers. They operate on neutral
-  label-to-runtime-URL resolution from `Cascade_runtime_candidate`, keeping
+  label-to-runtime-URL resolution from `Runtime_runtime_candidate`, keeping
   provider config parsing outside the keeper liveness API.
 - Keeper usage-trust classification no longer exposes provider-kind arguments.
   The OAS hook derives a cache-capability boolean from telemetry, and the
   trust classifier consumes only that capability plus usage/context evidence.
 - Keeper turn-context label filtering no longer parses configured labels into
   `Provider_config.t` locally; model-id compatibility checks go through
-  `Cascade_runtime_candidate`.
+  `Runtime_runtime_candidate`.
 - Keeper OAS hook public helpers no longer accept provider-kind arguments.
   Typed provider evidence is consumed inside telemetry bridge helpers, while
   bare keeper-facing model labels remain unknown unless explicitly
   provider-qualified.
-- `Keeper_turn_driver.mli` no longer re-exports the full `Cascade_oas_runner`
+- `Keeper_turn_driver.mli` no longer re-exports the full `Runtime_oas_runner`
   or provider-attempt FSM surfaces, and it now exposes an explicit structured
-  error surface instead of all `Cascade_error_classify` helpers. Provider/model
+  error surface instead of all `Runtime_error_classify` helpers. Provider/model
   shaped helpers such as tool-filter classification, default model-string
   lookup, label-to-config construction, Agent-Code preflight, and provider-specific
   error enrichment must be reached through lower-level OAS boundary modules,
@@ -439,11 +439,11 @@ Boundary follow-up:
   those details", is not fully complete in this branch. This branch removes
   provider/model identity from the new keeper runtime manifest/API/dashboard
   contract plus selected legacy status/trust projections, and moves keeper
-  cascade bookkeeping and keeper-facade API boundaries behind opaque/runtime
+  runtime bookkeeping and keeper-facade API boundaries behind opaque/runtime
   adapters. The latest cleanup also moves direct keeper use of
   `Llm_provider.Provider_config`, `Llm_provider.Model_meta`,
-  `Cascade_config.parse_model_strings`, and provider health-key derivation
-  behind `Cascade_runtime_candidate` for liveness, cooldown/recovery,
+  `Runtime_config.parse_model_strings`, and provider health-key derivation
+  behind `Runtime_runtime_candidate` for liveness, cooldown/recovery,
   context-window, and memory-threshold decisions. The after-turn
   `response.model` resolver, keeper OAS hook cost/tool metrics, tool-call
   handler model labels, and runtime-contract provider/model compatibility
@@ -453,10 +453,10 @@ Boundary follow-up:
   emit the neutral runtime lane instead of concrete `model_used` /
   `resolved_model_id` values. Legacy keeper `models` inputs are now rejected
   or ignored at parse/reconcile boundaries; runtime label selection must flow
-  through the named TOML cascade.
+  through the named TOML runtime.
 - Residual work remains: pricing/telemetry labels, auth/display helpers,
   runtime-MCP quirks, local-default labels, dashboard debug fixtures, and
-  broader cascade config/catalog/transport surfaces still know concrete
+  broader runtime config/catalog/transport surfaces still know concrete
   providers/models by design or history.
 - Follow-up issue: <https://github.com/jeong-sik/masc-mcp/issues/15028>
 
@@ -468,7 +468,7 @@ Focused verification:
 - `./_build/default/test/test_keeper_memory.exe` (70 tests)
 - `pnpm exec vitest run --config vitest.config.ts src/api/keeper.test.ts src/components/keeper-detail-runtime.test.ts --no-file-parallelism --maxWorkers=1`
 - `pnpm typecheck`
-- `opam exec -- ocamlformat --check lib/cascade/cascade_runtime_candidate.mli lib/cascade/cascade_runtime_candidate.ml lib/keeper/keeper_memory_recall.mli lib/keeper/keeper_memory_recall.ml lib/keeper/keeper_unified_metrics.ml test/test_keeper_runtime_manifest.ml`
+- `opam exec -- ocamlformat --check lib/runtime/runtime_runtime_candidate.mli lib/runtime/runtime_runtime_candidate.ml lib/keeper/keeper_memory_recall.mli lib/keeper/keeper_memory_recall.ml lib/keeper/keeper_unified_metrics.ml test/test_keeper_runtime_manifest.ml`
 - `git diff --check`
 
 ## Goal
@@ -478,7 +478,7 @@ Make every keeper turn explainable from one evidence chain:
 ```
 keeper stimulus
 -> phase gate
--> cascade route
+-> runtime route
 -> provider attempts
 -> tool surface and provider lane
 -> OAS SDK turns
@@ -507,13 +507,13 @@ Healthy parts:
 - Keeper pre-dispatch skips/errors are receipt-backed.
 - Tool selection has explicit policy gates, required-tool checks, and
   reported/observed/canonical reconciliation.
-- MASC owns logical cascade/runtime-lane routing and non-identifying attempt
+- MASC owns logical runtime/runtime-lane routing and non-identifying attempt
   observations.
 - OAS owns the generic single-agent loop, tool execution loop, context reducer,
   memory primitive, checkpoint primitive, and compaction machinery.
 - Boundary documentation already states that OAS must stay generic while MASC
   owns world/task/board/governance semantics.
-- The current declarative cascade route target (`cascade.primary`) is now
+- The current declarative runtime route target (`runtime.primary`) is now
   accepted by the active catalog validator and broad keeper lifecycle tests.
 - The latest live-like run no longer hides queued `masc_keeper_msg` responses
   as successful turns; the harness waits for actual turn state.
@@ -521,16 +521,16 @@ Healthy parts:
 Fragile parts:
 
 - A single human concept, "turn", is split across MASC keeper turn,
-  MASC cascade attempt, and OAS SDK turn counters.
+  MASC runtime attempt, and OAS SDK turn counters.
 - Tool surface selection happens before the final provider lane is known.
   The current branch now detects impossible required-tool lanes before provider
   dispatch and has a successful provider/OAS fixture proving manifest rows and
   receipts line up in one actual turn. The remaining gap is provider-lane
   E2E breadth, not the pure lane contract or the existence of the causal
   chain.
-- The keeper hot path uses MASC cascade, while OAS also has a generic
-  `Complete_cascade`; both are valid but must not be mixed accidentally. This
-  branch now adds a typed `Keeper_cascade_engine` boundary, records the dispatch
+- The keeper hot path uses MASC runtime, while OAS also has a generic
+  `Complete_runtime`; both are valid but must not be mixed accidentally. This
+  branch now adds a typed `Keeper_runtime_engine` boundary, records the dispatch
   mode in runtime manifests, and keeps a source guard as a secondary alarm.
 - Runtime context is split across MASC `working_context`, OAS checkpoint,
   raw `[STATE]` text, memory hooks, memory bank, and receipts.
@@ -546,7 +546,7 @@ Fragile parts:
   `memory_injected` and `memory_flushed` rows. Remaining context risk is
   broader live evidence and deeper quality metrics for what memory/compaction
   preserved or dropped.
-- Cascade alias semantics are now encoded in tests, but the long-term shape
+- Runtime alias semantics are now encoded in tests, but the long-term shape
   should still remove module-init route constants in favor of explicit dynamic
   route resolution or literal phase sentinels. The current slice closes the
   observed failures, not the whole historical naming ambiguity.
@@ -575,7 +575,7 @@ It is acceptable to ship behind an operator-facing experimental gate if the
 goal is observability hardening. It is not yet acceptable as a final product
 runtime guarantee because the strongest live-like evidence on latest main now
 fails at route capability: the keeper message queues, but the active
-`cascade.provider-k-coding-with-spark` route has no tool-capable provider for the keeper's
+`runtime.provider-k-coding-with-spark` route has no tool-capable provider for the keeper's
 materialized internal tool surface.
 
 Highest-risk gaps:
@@ -585,7 +585,7 @@ Highest-risk gaps:
    `no_tool_capable_provider`. The manifest now records
    `pre_dispatch_blocked`, and the receipt/turn terminal reason stays
    structured. `masc-mcp doctor config` now fails with the same diagnosis
-   before dispatch. Still open: configure `cascade.provider-k-coding-with-spark` with a
+   before dispatch. Still open: configure `runtime.provider-k-coding-with-spark` with a
    concrete tool-capable provider for keeper-internal tools, or route these
    keeper turns to a provider lane that can materialize runtime MCP/inline
    tools.
@@ -616,14 +616,14 @@ Highest-risk gaps:
    chips for that endpoint, including provider terminal status. Remaining
    risk is collecting/publishing live long-running keeper evidence under
    production-like config and improving drill-down beyond the compact summary.
-7. Cascade plane gap: the keeper/OAS cascade-plane invariant is now typed and
+7. Runtime plane gap: the keeper/OAS runtime-plane invariant is now typed and
    visible in manifests. Remaining risk is that future non-keeper entry points
    may need the same explicit engine classification if they reuse parts of the
    driver.
-8. Cascade naming gap: `test/test_keeper_unified.exe` is now green under
-   `config/cascade.toml`, but the codebase still carries historical
+8. Runtime naming gap: `test/test_keeper_unified.exe` is now green under
+   `config/keeper_runtime.toml`, but the codebase still carries historical
    `default`/`local_only`/`local_recovery` aliases beside declarative
-   `tier.*` and `cascade.*` profiles. This should be simplified before
+   `tier.*` and `runtime.*` profiles. This should be simplified before
    treating route semantics as final.
 
 ## Done Criteria
@@ -632,15 +632,15 @@ This goal is complete only when all of the following are true:
 
 1. Each keeper turn has a durable runtime decision manifest.
 2. The manifest links keeper turn id, trace id, generation, OAS SDK turn count,
-   cascade name, provider attempt count, checkpoint ids, and receipt path/id.
-3. The manifest records phase-gate, cascade-route, provider-attempt,
+   runtime name, provider attempt count, checkpoint ids, and receipt path/id.
+3. The manifest records phase-gate, runtime-route, provider-attempt,
    tool-surface, provider-lane, context-injection, compaction, checkpoint, and
    receipt decisions, plus the OAS Event_bus correlation/run ids and memory
    injection/flush decisions observed for the turn.
 4. Required-tool decisions prove whether the tool was available inline,
    through runtime MCP, or unavailable for the actual provider lane.
-5. Keeper hot path has a documented/tested invariant: MASC cascade owns keeper
-   provider iteration; OAS `Complete_cascade` is not silently used there.
+5. Keeper hot path has a documented/tested invariant: MASC runtime owns keeper
+   provider iteration; OAS `Complete_runtime` is not silently used there.
 6. Context/checkpoint ownership has a documented migration path and at least one
    code slice reducing MASC `working_context` dependence or moving continuity
    to structured sidecars.
@@ -652,7 +652,7 @@ This goal is complete only when all of the following are true:
 ## Completion Audit (2026-05-12)
 
 Objective restated: produce a code-level and flowchart-level audit of Keeper,
-tools, provider/model/cascade, external agent turn loops, and
+tools, provider/model/runtime, external agent turn loops, and
 compaction/memory/context behavior; then merge the most important improvement
 into the product so runtime readiness can be judged from evidence.
 
@@ -661,15 +661,15 @@ Prompt-to-artifact checklist:
 1. Keeper lifecycle: covered by
    `docs/audit/2026-05-12-keeper-oas-agent-runtime-flow-comparison.md` section
    1 and runtime-manifest rows for `turn_started`, `phase_gate_decided`,
-   `cascade_routed`, `pre_dispatch_blocked`, provider attempts, receipts, and
+   `runtime_routed`, `pre_dispatch_blocked`, provider attempts, receipts, and
    terminal turn events.
 2. Tool search/use flow: covered by audit section 2 and manifest/test coverage
    for `tool_surface_selected`, `provider_lane_resolved`, required-tool lane
    mismatches, and inline/runtime-MCP/no-tool matrices.
-3. Provider/model/cascade flow: covered by audit section 3, the typed
-   `Keeper_cascade_engine` boundary, manifest fields
-   `cascade_engine`, `oas_dispatch_mode`, and
-   `oas_internal_cascade_allowed`, plus route/cascade regression tests.
+3. Provider/model/runtime flow: covered by audit section 3, the typed
+   `Keeper_runtime_engine` boundary, manifest fields
+   `runtime_engine`, `oas_dispatch_mode`, and
+   `oas_internal_runtime_allowed`, plus route/runtime regression tests.
 4. External Agent SDK comparison: covered by the audit's Agent-LLM-A Agent SDK,
    Google ADK, Provider-D Agents SDK, OpenClaw, and Hermes sections using the
    checked primary-source links recorded in the audit.
@@ -681,7 +681,7 @@ Prompt-to-artifact checklist:
    observability/reliability improvement. It is not yet a final product
   runtime guarantee because the latest-main live-like run failed with a
   structured route-capability error:
-   `no_tool_capable_provider` for `cascade.provider-k-coding-with-spark` with no candidate
+   `no_tool_capable_provider` for `runtime.provider-k-coding-with-spark` with no candidate
    that materializes the required keeper tool support.
 
 Completion status: not complete as a full product-readiness goal. The immediate
@@ -696,8 +696,8 @@ config.
 
 - Do not replace `Keeper_execution_receipt`; the manifest links and explains it.
 - Do not move MASC world/task/governance concepts into OAS.
-- Do not migrate to OAS `Complete_cascade` as part of the MVP.
-- Do not build adaptive cascade ranking before the manifest proves current
+- Do not migrate to OAS `Complete_runtime` as part of the MVP.
+- Do not build adaptive runtime ranking before the manifest proves current
   decisions.
 - Do not rewrite compaction. First make compaction decisions observable as one
   stream.
@@ -708,7 +708,7 @@ config.
 |---|---|---|
 | P0 | Runtime decision manifest MVP | One keeper turn produces one causality spine. |
 | P1 | Provider-lane/tool-surface contract | Required tools are checked against actual provider lane. |
-| P1 | Cascade plane invariant | Keeper path cannot accidentally switch to OAS cascade semantics. |
+| P1 | Runtime plane invariant | Keeper path cannot accidentally switch to OAS runtime semantics. |
 | P1 | Context/checkpoint SSOT cleanup | OAS checkpoint moves closer to runtime transcript SSOT. |
 | P2 | Compaction/memory event unification | Add/remove/inject decisions are visible in one stream. |
 | P2 | Product/operator upgrades | CLI/dashboard/replay/eval use the manifest. |
@@ -740,7 +740,7 @@ Suggested event kinds:
 
 - `turn_started`
 - `phase_gate_decided`
-- `cascade_routed`
+- `runtime_routed`
 - `pre_dispatch_blocked`
 - `tool_surface_selected`
 - `provider_lane_resolved`
@@ -768,7 +768,7 @@ Minimal fields:
   "keeper_turn_id": 42,
   "oas_turn_count": 3,
   "event": "tool_surface_selected",
-  "cascade_name": "tier_medium",
+  "runtime_id": "tier_medium",
   "status": "ok",
   "decision": {},
   "links": {
@@ -795,7 +795,7 @@ Minimal fields:
 7. Emit `provider_attempt_started/finished` around
    `Keeper_turn_driver_try_provider.run_try_provider`.
 8. Emit `provider_lane_resolved` immediately after
-   `Cascade_runner.resolve_tool_lane_for_oas_tools`.
+   `Runtime_runner.resolve_tool_lane_for_oas_tools`.
 9. Emit `checkpoint_saved` and `receipt_appended` from `Keeper_agent_run`.
 10. Add a minimal CLI/read helper or dashboard endpoint that prints the chain by
     `keeper + trace_id` or `keeper + keeper_turn_id`.
@@ -849,21 +849,21 @@ For every tool-required turn, the product must show:
    provider.
 5. Add one regression test for required tool + provider without tool support.
 
-## P1: Cascade Plane Invariant
+## P1: Runtime Plane Invariant
 
 ### Problem
 
-MASC and OAS both have cascade concepts. Keeper runtime must not silently drift
-from MASC cascade semantics into OAS `Complete_cascade`.
+MASC and OAS both have runtime concepts. Keeper runtime must not silently drift
+from MASC runtime semantics into OAS `Complete_runtime`.
 
 ### Implementation Order
 
-1. Add a typed `Keeper_cascade_engine` value near
+1. Add a typed `Keeper_runtime_engine` value near
    `Keeper_turn_driver.run_named`.
 2. Record the engine id and OAS dispatch mode in runtime-manifest decision
    rows.
 3. Add a test/grep guard that keeper hot path does not call
-   `Llm_provider.Complete_cascade.complete_cascade`.
+   `Llm_provider.Complete_runtime.complete_runtime`.
 4. Document migration requirements if this invariant is ever intentionally
    changed:
    - health tracker,
@@ -948,10 +948,10 @@ The operator should be able to answer:
 Only after the manifest exists:
 
 - CLI replay: `masc trace-runtime <keeper> <turn_id|trace_id>`.
-- Dashboard turn inspector: phase/cascade/tool/context/checkpoint/receipt tabs.
+- Dashboard turn inspector: phase/runtime/tool/context/checkpoint/receipt tabs.
 - Offline eval for tool selection quality.
 - Compaction quality benchmark.
-- Adaptive cascade ranking using observed latency/cost/health, not static theory.
+- Adaptive runtime ranking using observed latency/cost/health, not static theory.
 
 ## First Concrete PR Sequence
 
@@ -960,12 +960,12 @@ Only after the manifest exists:
 2. `feat(keeper): add runtime manifest schema and JSONL append`
    - pure module, tests, no behavior change.
 3. `feat(keeper): emit manifest for pre-dispatch and receipt paths`
-   - phase gate/cascade blocked/success terminal links.
+   - phase gate/runtime blocked/success terminal links.
 4. `feat(keeper): record provider lane and tool surface in manifest`
    - no new fail-loud yet; observe first.
 5. `fix(keeper): fail required-tool turns when provider lane cannot materialize`
    - behavior change after observation proves shape.
-6. `feat(keeper): type and expose the keeper/OAS cascade boundary`
+6. `feat(keeper): type and expose the keeper/OAS runtime boundary`
    - invariant hardening plus manifest-visible dispatch mode.
 7. `feat(keeper): context/compaction decision events`
    - unify context evidence.
@@ -978,10 +978,10 @@ Before marking this goal complete, verify real evidence for each row:
 |---|---|
 | Goal recorded | This file exists in repo and is linked from the parent audit or follow-up PR. |
 | Manifest schema implemented | `keeper_runtime_manifest.mli/ml` and tests exist. |
-| Manifest rows emitted | Fixture/live run contains JSONL rows for start, phase, cascade, tool, provider, checkpoint, receipt, finish. |
+| Manifest rows emitted | Fixture/live run contains JSONL rows for start, phase, runtime, tool, provider, checkpoint, receipt, finish. |
 | Provider lane captured | Manifest row proves requested vs materialized required tools. |
 | Required-tool impossible lane fails | Focused regression test fails before fix and passes after fix. |
-| Cascade invariant guarded | `Keeper_cascade_engine` fixture and secondary source guard prove keeper hot path uses MASC provider iteration plus OAS single-provider dispatch. |
+| Runtime invariant guarded | `Keeper_runtime_engine` fixture and secondary source guard prove keeper hot path uses MASC provider iteration plus OAS single-provider dispatch. |
 | Context/checkpoint SSOT improved | At least one code path uses structured sidecar/checkpoint truth instead of raw `[STATE]` only. |
 | Operator surface exists | CLI, endpoint, and read-only gate can print/validate the evidence chain and turn identity from one id. |
 | Verification commands run | Focused `scripts/dune-local.sh build ...` commands or CI checks are attached to the PR. |

@@ -56,12 +56,12 @@ function KeeperBDIPanel() {
   );
 }
 
-// K1-B · Tool access + cascade config
+// K1-B · Tool access + runtime config
 function KeeperToolAccess() {
   const [sel, setSel] = useState('sangsu');
   const k = P2h.keepersFull.find(kp => kp.id === sel);
   const rows = [
-    { lbl: 'cascade',         v: k.cascade },
+    { lbl: 'runtime',         v: k.runtime },
     { lbl: 'tools_preset',    v: k.tools_preset },
     { lbl: 'sandbox',         v: k.sandbox },
     { lbl: 'network',         v: k.network },
@@ -71,7 +71,7 @@ function KeeperToolAccess() {
     { lbl: 'mention targets', v: null, mentions: k.mention },
   ];
   return (
-    <section aria-label="Keeper tool access and cascade config" style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+    <section aria-label="Keeper tool access and runtime config" style={{display:'flex',flexDirection:'column',gap:'6px'}}>
       <KeeperTabs keepers={P2h.keepersFull} sel={sel} onSelect={setSel} label="Select keeper for tool access" />
       <dl className="ki-access" role="tabpanel" aria-label={`Tool access for ${k.id}`}>
         {rows.map(r => (

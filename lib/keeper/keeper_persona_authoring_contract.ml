@@ -20,7 +20,7 @@ type archetype_axis =
   }
 
 let default_generation_language = "ko"
-let default_generation_cascade_name =
+let default_generation_runtime_id =
   Runtime.get_default_runtime_id ()
 let default_temperature = 0.7
 let default_max_tokens = 2500

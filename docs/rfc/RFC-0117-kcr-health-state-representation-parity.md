@@ -15,7 +15,7 @@ implementation_prs: [15957]
 
 ## §1 Problem (caller-context)
 
-`docs/tla-audit/kcr-c2-health-state-representation-gap-2026-05-12.md` 가 KCR (KeeperCascadeRouting) spec 의 item-health 모델과 OCaml runtime 의 health 모델이 *같은 의도* 를 *다른 representation* 으로 encode 함을 문서화. RFC-0116 의 *fallback cap* drift 와 sibling. C-1 이 *cap mechanism*, **C-2 (본 RFC) 가 *state representation***.
+`docs/tla-audit/kcr-c2-health-state-representation-gap-2026-05-12.md` 가 KCR (KeeperRuntimeRouting) spec 의 item-health 모델과 OCaml runtime 의 health 모델이 *같은 의도* 를 *다른 representation* 으로 encode 함을 문서화. RFC-0116 의 *fallback cap* drift 와 sibling. C-1 이 *cap mechanism*, **C-2 (본 RFC) 가 *state representation***.
 
 ### Spec health model
 
@@ -49,7 +49,7 @@ type health_status =
 
 > "Success -> Healthy immediately. Failure -> Unhealthy (no Degraded intermediate for now)."
 
-`lib/cascade/cascade_health_tracker.ml:297, 509, 524-555`:
+`lib/runtime/runtime_health_tracker.ml:297, 509, 524-555`:
 
 ```ocaml
 mutable consecutive_failures: int;
@@ -76,9 +76,9 @@ OCaml 의 *Degraded equivalent* 는 implicit predicate: `0 < consecutive_failure
 
 2. **Cooldown 이 Unhealthy 를 `cf` 와 decouple**: Spec `cf ≥ MaxConsecutive ⇔ Unhealthy`. OCaml `cf ≥ threshold OR cooldown_until > now`. Cooldown 만료 후 `cf` 그대로면 OCaml 효과적으로 Degraded — spec 는 *time-elapsed re-Degradation* 모름.
 
-3. **Per-item-per-keeper vs per-provider-key**: Spec key `<<keeper, item>>`. OCaml `cascade_health_tracker` keys `provider_key` (single string, *keeper 간 공유*). 같은 provider 쓰는 두 keeper 가 cooldown 공유 — `PerKeeperIsolation == TRUE` *spec lie* (실제 production 미준수).
+3. **Per-item-per-keeper vs per-provider-key**: Spec key `<<keeper, item>>`. OCaml `runtime_health_tracker` keys `provider_key` (single string, *keeper 간 공유*). 같은 provider 쓰는 두 keeper 가 cooldown 공유 — `PerKeeperIsolation == TRUE` *spec lie* (실제 production 미준수).
 
-4. **2-state OCaml `health_status` 는 cascade health 용 아님**: probe type 일 뿐, selector 의 per-item decision 은 boolean 기반. spec 의 3-state typing 이 OCaml 어디에도 없음 — `cf int + cooldown float + bool predicate` 산재.
+4. **2-state OCaml `health_status` 는 runtime health 용 아님**: probe type 일 뿐, selector 의 per-item decision 은 boolean 기반. spec 의 3-state typing 이 OCaml 어디에도 없음 — `cf int + cooldown float + bool predicate` 산재.
 
 ### Why this needs an RFC
 
@@ -95,7 +95,7 @@ OCaml 의 *Degraded equivalent* 는 implicit predicate: `0 < consecutive_failure
 
 **Layer A — OCaml typed `item_health_state` (R-C-2.a)**
 
-`Keeper_cascade_selector` 또는 `cascade_health_tracker` 에 typed variant:
+`Keeper_runtime_selector` 또는 `runtime_health_tracker` 에 typed variant:
 
 ```ocaml
 module Item_health : sig
@@ -123,7 +123,7 @@ Smart constructor `of_tracker_state` 가 4 dimension 을 typed state 로 collaps
 
 **Layer B — Spec extension (R-C-2.b)**
 
-`KeeperCascadeRouting.tla` 에 `cooldown_until` 변수 + `SoftRateLimit` action 추가:
+`KeeperRuntimeRouting.tla` 에 `cooldown_until` 변수 + `SoftRateLimit` action 추가:
 
 ```tla
 VARIABLES
@@ -150,7 +150,7 @@ Spec 본문 line ~?: `PerKeeperIsolation == TRUE` placeholder 제거. 대신 *ho
 
 ```tla
 \* PerProviderCooldownSharing - keepers using the same provider share cooldown.
-\* This is intentional per cascade_health_tracker keying by provider_key,
+\* This is intentional per runtime_health_tracker keying by provider_key,
 \* not a violation. Spec is honest about non-isolation along the cooldown axis.
 PerProviderCooldownSharing ==
     \A k1, k2 \in Keepers, i \in Items :
@@ -175,7 +175,7 @@ P2 가 OCaml-only (safe), P4/P5 가 spec PR. P3 가 caller wiring — production
 
 ## §4 Open questions
 
-1. **Q1**: `Item_health.t` 와 `Keeper_health_probe.health_status` 의 관계? probe 가 별도 type 유지 vs delegate to `Item_health`? **잠정**: 별도 유지 — probe 는 *cascade ratio observability*, selector 는 *per-item decision*. 두 type 가 명시적 변환 함수.
+1. **Q1**: `Item_health.t` 와 `Keeper_health_probe.health_status` 의 관계? probe 가 별도 type 유지 vs delegate to `Item_health`? **잠정**: 별도 유지 — probe 는 *runtime ratio observability*, selector 는 *per-item decision*. 두 type 가 명시적 변환 함수.
 
 2. **Q2**: spec 의 `cooldown_until` 가 logical time (Nat) — OCaml 의 float time 과 어떻게 mapping? **잠정**: P4 의 spec 는 abstract step 만 모델 (`now + dur` 의 dur 가 CONSTANT), OCaml 는 wall clock. Spec model 가 *순서* 만 capture, 정량 수치 별도.
 

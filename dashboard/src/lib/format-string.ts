@@ -82,7 +82,7 @@ export function firstNonEmptyString(
  * test, etc.
  *
  * Two file-internal copies (`components/ide/ide-editor.ts` needle
- * highlighting, `styles/cockpit-token-cascade.test.ts` CSS literal
+ * highlighting, `styles/cockpit-token-runtime.test.ts` CSS literal
  * assertions) shipped this exact body before centralising here.
  */
 export function escapeRegExp(value: string): string {
@@ -103,8 +103,8 @@ export function escapeRegExp(value: string): string {
  *
  * ~45 call sites currently inline this exact ternary across
  * `dashboard-ws`, `lib/async-state` (file-internal helper),
- * `api/mcp`, `components/cascade-config-panel`,
- * `components/cascade-inspector`, `components/cascade-waterfall`,
+ * `api/mcp`, `components/runtime-config-panel`,
+ * `components/runtime-inspector`, `components/runtime-waterfall`,
  * `components/excuse-patterns`, `components/git-graph-view`,
  * `components/goal-loop-panel`, `components/goals/goal-tree`,
  * `components/handoff-timeline`, `components/ide/execute-output-drawer`,

@@ -163,6 +163,6 @@ let transition_known_args =
     "agent_name";
     "force";
     "completion_contract";
-    "evaluator_cascade";
+    "evaluator_runtime";
     "handoff_context";
   ]

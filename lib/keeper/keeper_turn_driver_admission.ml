@@ -1,4 +1,4 @@
-(** Keeper cascade provider candidate mapping utilities.
+(** Keeper runtime provider candidate mapping utilities.
     Extracted from keeper_turn_driver.ml — sibling pattern (same flat
     masc_mcp library, no sub-library).
 
@@ -29,13 +29,13 @@ let runtime_candidates_of_providers provider_cfgs =
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
 (* ================================================================ *)
 
-(** Run a single Agent.run() call with MASC-driven cascade model fallback.
+(** Run a single Agent.run() call with MASC-driven runtime model fallback.
 
     MASC drives the runtime FSM directly:
-    - Resolves cascade providers from cascade.toml
+    - Resolves runtime providers from keeper_runtime.toml
     - For each provider, runs OAS with a single provider
     - Uses Runtime_fsm.decide to determine next action on failure
-    - Cascade loop runs inside Admission_queue permit
+    - Runtime loop runs inside Admission_queue permit
 
     @param accept Optional response validator. Default accepts all.
     @since Phase 2 — MASC-driven runtime FSM *)

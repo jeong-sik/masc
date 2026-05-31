@@ -10,7 +10,7 @@ val goal_health_reason :
   child_blocked:bool ->
   pending_approvals:int ->
   sandbox_risk:bool ->
-  cascade_risk:bool ->
+  runtime_risk:bool ->
   fsm_risk:bool ->
   stalled:bool ->
   stagnation_seconds:int ->
@@ -30,7 +30,7 @@ val tree_health :
 val tree_badges :
   pending_approvals:int ->
   sandbox_risk:bool ->
-  cascade_risk:bool ->
+  runtime_risk:bool ->
   fsm_risk:bool ->
   stalled:bool ->
   activity_unobserved:bool ->

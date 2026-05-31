@@ -77,7 +77,7 @@ val compact :
 
     Logs the resolved strategy names + observation summary at
     INFO via {!Log.Compact.info} on every call — used to debug
-    "why is keeper context not shrinking" cascades. *)
+    "why is keeper context not shrinking" runtimes. *)
 
 val resolve_strategies :
   obs:observation_context option ->

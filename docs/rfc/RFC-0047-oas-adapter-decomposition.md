@@ -18,10 +18,10 @@ Closed across 10 PRs:
 | RFC body | #14230 | Layering principle + 7-phase plan |
 | 1. Inventory baseline | #14231 | 807-line caller inventory + 25-edge module graph |
 | 2. Clean rename (3 files) | #14239 | `oas_response/log_bridge/bus_instrument` → `agent_sdk_*` |
-| 3a. Cascade leaves (3 files) | #14281 | `_named_fsm/_named_error/_exec_transport` → `lib/cascade/` |
-| 3b. Cascade entry (2 files) | #14288 | `_named_cascade/_cascade` → `lib/cascade/` |
-| 3c. Cascade capstone | #14291 | `_exec` → `cascade_runner`; `oas_model_resolve` deleted (was 6-line facade) |
-| 5. Events | #14298 | `_event_bridge/_events` → `lib/cascade/cascade_events*` |
+| 3a. Runtime leaves (3 files) | #14281 | `_named_fsm/_named_error/_exec_transport` → `lib/runtime/` |
+| 3b. Runtime entry (2 files) | #14288 | `_named_runtime/_runtime` → `lib/runtime/` |
+| 3c. Runtime capstone | #14291 | `_exec` → `runtime_runner`; `oas_model_resolve` deleted (was 6-line facade) |
+| 5. Events | #14298 | `_event_bridge/_events` → `lib/runtime/runtime_events*` |
 | 6. Keeper residue (2 files) | #14299 | `_exec_agent/_exec_checkpoint` → `lib/keeper/` |
 | 4. Hotspot rename | #14301 | `oas_worker_named.ml` (1459 LOC) → `keeper/keeper_turn_driver.ml` |
 | 4b. Facade dissolution | #14311 | `oas_worker.ml` deleted, 39 callers redirected to source modules |
@@ -32,7 +32,7 @@ Closed across 10 PRs:
 ## Deferred (not blocking RFC closure)
 
 - **A/B/C split inside `keeper_turn_driver.ml` (1459 LOC)**: original RFC §6
-  Phase 4 proposed splitting interleaved Agent SDK / cascade / keeper
+  Phase 4 proposed splitting interleaved Agent SDK / runtime / keeper
   bookkeeping into 3 files. Implementation found the concerns are
   interleaved within single function bodies; mechanical split is not
   possible. The rename to `keeper_turn_driver` aligns the file name
@@ -51,7 +51,7 @@ Closed across 10 PRs:
 - The **real OAS** is a separate repository at
   `~/me/workspace/yousleepwhen/oas`, exposed as the `agent_sdk` opam
   library (310 source files, library name `agent_sdk`). It has zero
-  references to `Keeper_*`, `Cascade_*`, `Masc_*`, `Dashboard_*`,
+  references to `Keeper_*`, `Runtime_*`, `Masc_*`, `Dashboard_*`,
   `Briefing_*`, `Board_*`. The repo boundary already enforces "OAS knows
   nothing about MASC".
 
@@ -63,7 +63,7 @@ Closed across 10 PRs:
   | Concern | Belongs in |
   |---|---|
   | A. Pure `agent_sdk` invocation (build prompt, run loop, parse response) | `agent_sdk` library or thin wrapper in masc-mcp |
-  | B. Cascade strategy (provider rotation, retry decision, exhaustion classification) | `lib/cascade/` |
+  | B. Runtime strategy (provider rotation, retry decision, exhaustion classification) | `lib/runtime/` |
   | C. Keeper bookkeeping (status updates, observation lifecycle, FSM transitions) | `lib/keeper/` |
 
 - Concrete cross-domain reference count (rg measured 2026-05-08):
@@ -71,13 +71,13 @@ Closed across 10 PRs:
   | File | Cross-domain refs | LOC |
   |---|---|---|
   | `oas_worker_named.ml` | 103 | 1459 |
-  | `oas_worker_named_cascade.ml` | 25 | (in 153 mli + ml) |
+  | `oas_worker_named_runtime.ml` | 25 | (in 153 mli + ml) |
   | `oas_worker_named_fsm.ml` | 19 | 653 |
   | `oas_worker_exec.ml` | 16 | (300 mli) |
   | `oas_worker_exec_transport.ml` | 16 | (318 mli) |
   | `oas_events.ml` | 15 | (198 mli) |
   | `oas_worker_named_error.ml` | 13 | (163 mli) |
-  | `oas_worker_cascade.ml` | 6 | (238 mli) |
+  | `oas_worker_runtime.ml` | 6 | (238 mli) |
   | `oas_worker_exec_agent.ml` | 4 | (133 mli) |
   | `oas_event_bridge.ml` | 4 | (63 mli) |
   | `oas_model_resolve.ml` | 3 | (18 mli) |
@@ -89,11 +89,11 @@ Closed across 10 PRs:
   | **Total** | **234** | **~11,249** |
 
   Top three modules referenced from `oas_worker_named.ml`:
-  `Cascade_fsm` (26), `Keeper_types` (17), `Cascade_health_tracker` (11).
+  `Runtime_fsm` (26), `Keeper_types` (17), `Runtime_health_tracker` (11).
   These are **strategy and bookkeeping**, not Agent SDK calls.
 
-- Caller surface: `rg -l 'Keeper_turn_driver\.|Cascade_runner\.|Oas_worker\.'` reports
-  **49 files in `lib/`** (20 keeper-side, 2 cascade-side, 27 elsewhere) plus
+- Caller surface: `rg -l 'Keeper_turn_driver\.|Runtime_runner\.|Oas_worker\.'` reports
+  **49 files in `lib/`** (20 keeper-side, 2 runtime-side, 27 elsewhere) plus
   test/bin = **504 total references**. Any rename or extraction must
   preserve these call sites or migrate them in lockstep.
 
@@ -102,30 +102,30 @@ Closed across 10 PRs:
 1. **Production assert fan-out crosses three layers.** RFC-0045 root cause
    was a `Turn_finalizing → Turn_prompting` validator failure inside a
    hook closure executed by `Agent_sdk__Agent.run_loop.(fun).loop`. The
-   stack trace traversed `Cascade_runner.run` → `Memory_hooks` → keeper
+   stack trace traversed `Runtime_runner.run` → `Memory_hooks` → keeper
    `update_current_turn`. A 4-layer interleave (SDK loop ↔ adapter ↔
    hooks ↔ keeper bookkeeping) made root-causing slow because the layer
    responsible for the bookkeeping invariant was hidden inside an
    `Oas_*`-named file.
 
-2. **Cascade RFCs are forced to edit `oas_*` files.** RFC-0041 (cascade
-   routing group hierarchy) modified `oas_worker_named_cascade.ml` even
-   though the change was purely cascade strategy. Cascade authors must
+2. **Runtime RFCs are forced to edit `oas_*` files.** RFC-0041 (runtime
+   routing group hierarchy) modified `oas_worker_named_runtime.ml` even
+   though the change was purely runtime strategy. Runtime authors must
    either learn the OAS-named adapter idiom or risk wrong-layer change.
 
 3. **Aspirational naming creates anti-learning.** AI agents (Agent-LLM-A /
    Agent-Code / Provider-F) trained on this codebase will infer that "OAS knows
-   about Cascade" is an accepted pattern, since 26+ Cascade refs live in
+   about Runtime" is an accepted pattern, since 26+ Runtime refs live in
    an `oas_*`-named file. Future code generation reproduces the pattern.
    This is exactly the workaround-as-precedent mechanism documented in
    `instructions/software-development.md` §"워크어라운드 거부 기준".
 
-4. **Sub-library extraction (keeper) blocked by undefined cascade
+4. **Sub-library extraction (keeper) blocked by undefined runtime
    boundary.** The keeper sub-lib extraction analysis (memory
    `project_keeper_sublib_extraction_analysis.md`) found 189 keeper ↔ 118
    external refs and concluded "shared types library + dependency
-   inversion" is needed first. The cascade boundary is a prerequisite for
-   that inversion — but cascade is currently entangled with `oas_*`.
+   inversion" is needed first. The runtime boundary is a prerequisite for
+   that inversion — but runtime is currently entangled with `oas_*`.
 
 ## 3. Constraints
 
@@ -140,7 +140,7 @@ Closed across 10 PRs:
   graph.
 - **Concurrent activity.** Keeper sub-library extraction work (memory
   `project_keeper_sublib_extraction_analysis.md`) and FsmHub SSOT
-  (RFC-0046, in flight) MUST be coordinated. Cascade extraction (this
+  (RFC-0046, in flight) MUST be coordinated. Runtime extraction (this
   RFC's phase 3) and keeper extraction touch overlapping files.
   Recommendation: serialize. This RFC lands first.
 - **`include_subdirs unqualified` retained.** The single-library flat
@@ -157,15 +157,15 @@ agent_sdk            (~/me/workspace/yousleepwhen/oas, separate repo)
    ↑ direct call only
 lib/agent_sdk_call/  (thin invocation wrapper, no domain logic)
    ↑
-lib/cascade/         (provider rotation, retry, exhaustion)
+lib/runtime/         (provider rotation, retry, exhaustion)
    ↑
 lib/keeper/          (lifecycle, state, observation, status)
    ↑
 server, dashboard, ag_ui, briefing
 ```
 
-Single direction. Cascade does not know keeper. agent_sdk_call does not
-know cascade. agent_sdk (external repo) knows none of it (already true).
+Single direction. Runtime does not know keeper. agent_sdk_call does not
+know runtime. agent_sdk (external repo) knows none of it (already true).
 
 ### 4.1 The `oas_*` prefix is retired
 
@@ -185,9 +185,9 @@ prefix removes the gravity well.
   `agent_sdk_log_bridge.ml`, `agent_sdk_metrics_bridge.ml`. Pure
   agent_sdk wrapping. Zero MASC domain refs (already the case today).
 
-- **`lib/cascade/`** — receives the cascade-execution files: rotation,
+- **`lib/runtime/`** — receives the runtime-execution files: rotation,
   retry FSM, exhaustion classifier, model resolve, transport
-  construction, cascade events.
+  construction, runtime events.
 
 - **`lib/keeper/`** — receives the keeper-bookkeeping files: turn driver
   (the keeper-facing entry point that owns observation updates),
@@ -201,18 +201,18 @@ prefix removes the gravity well.
 | `oas_response.ml` | rename | `lib/agent_sdk_response.ml` | 2 |
 | `oas_log_bridge.ml` | rename | `lib/agent_sdk_log_bridge.ml` | 2 |
 | `oas_bus_instrument.ml` | rename | `lib/agent_sdk_metrics_bridge.ml` | 2 |
-| `oas_event_bridge.ml` | move (already bridge-shaped) | `lib/cascade/cascade_event_bridge.ml` | 5 |
-| `oas_events.ml` | move + invert push→subscribe | `lib/cascade/cascade_events.ml` | 5 |
-| `oas_model_resolve.ml` | move | `lib/cascade/cascade_model_resolve.ml` | 3 |
-| `oas_worker_cascade.ml` | move (cascade observation entry) | `lib/cascade/cascade_observation.ml` | 3 |
-| `oas_worker_named_cascade.ml` | move | `lib/cascade/cascade_oas_runner.ml` | 3 |
-| `oas_worker_named_fsm.ml` | move | `lib/cascade/cascade_attempt_fsm.ml` | 3 |
-| `oas_worker_named_error.ml` | move | `lib/cascade/cascade_error_classify.ml` | 3 |
-| `oas_worker_exec_transport.ml` | move | `lib/cascade/cascade_transport.ml` | 3 |
-| `oas_worker_exec.ml` | move (cascade entrypoint) | `lib/cascade/cascade_runner.ml` | 3 |
+| `oas_event_bridge.ml` | move (already bridge-shaped) | `lib/runtime/runtime_event_bridge.ml` | 5 |
+| `oas_events.ml` | move + invert push→subscribe | `lib/runtime/runtime_events.ml` | 5 |
+| `oas_model_resolve.ml` | move | `lib/runtime/runtime_model_resolve.ml` | 3 |
+| `oas_worker_runtime.ml` | move (runtime observation entry) | `lib/runtime/runtime_observation.ml` | 3 |
+| `oas_worker_named_runtime.ml` | move | `lib/runtime/runtime_oas_runner.ml` | 3 |
+| `oas_worker_named_fsm.ml` | move | `lib/runtime/runtime_attempt_fsm.ml` | 3 |
+| `oas_worker_named_error.ml` | move | `lib/runtime/runtime_error_classify.ml` | 3 |
+| `oas_worker_exec_transport.ml` | move | `lib/runtime/runtime_transport.ml` | 3 |
+| `oas_worker_exec.ml` | move (runtime entrypoint) | `lib/runtime/runtime_runner.ml` | 3 |
 | `oas_worker_exec_agent.ml` | move | `lib/keeper/keeper_agent_context.ml` | 6 |
 | `oas_worker_exec_checkpoint.ml` | move | `lib/keeper/keeper_oas_checkpoint.ml` | 6 |
-| `oas_worker_named.ml` (1459 LOC) | **split** A/B/C | A→`lib/agent_sdk_call.ml` augment, B→`lib/cascade/cascade_runner.ml` augment, C→`lib/keeper/keeper_turn_driver.ml` (new) | 4 |
+| `oas_worker_named.ml` (1459 LOC) | **split** A/B/C | A→`lib/agent_sdk_call.ml` augment, B→`lib/runtime/runtime_runner.ml` augment, C→`lib/keeper/keeper_turn_driver.ml` (new) | 4 |
 
 After phase 6: zero `oas_*.ml` files. `lib/oas_*` glob returns empty.
 Lint rule added in Phase 7 (CI grep) to prevent reintroduction.
@@ -238,7 +238,7 @@ Build-green hard gate at every PR.
     `lib/oas_worker_named.ml` (40 — intra-family coupling).
   - Most-referenced module: `Keeper_turn_driver` (131 external refs)
     confirms the Phase 4 hotspot.
-  - Module graph: 25 cross-domain edges. `oas_worker_named → Cascade_*`
+  - Module graph: 25 cross-domain edges. `oas_worker_named → Runtime_*`
     weighs 77 (largest single edge), `oas_worker_exec → Dashboard_*`
     weighs 8 (push-style violation per Phase 5).
 - No code change beyond script + baseline files. Establishes the
@@ -249,7 +249,7 @@ Build-green hard gate at every PR.
 
 **Scope correction (during Phase 2 PR, 2026-05-08).** The original RFC
 listed 4 files. Inspection found `lib/oas_worker.ml` is structurally a
-**facade** — `include Cascade_runner`, `include Cascade_observation`,
+**facade** — `include Runtime_runner`, `include Runtime_observation`,
 `include Keeper_turn_driver` — over three modules that are NOT clean
 (Phase 3 / Phase 4 targets). Renaming the facade alone produces an
 `Agent_sdk_call` module that still re-exports `Keeper_turn_driver.run_named`,
@@ -271,9 +271,9 @@ to Phase 4, when its dependents are dissolved.
   drop from `lib/oas_*` enumeration; their refs disappear from the
   caller inventory.
 
-### Phase 3 — Cascade extraction (7 files → `lib/cascade/`)
+### Phase 3 — Runtime extraction (7 files → `lib/runtime/`)
 
-- Files: `oas_worker_cascade.ml`, `oas_worker_named_cascade.ml`,
+- Files: `oas_worker_runtime.ml`, `oas_worker_named_runtime.ml`,
   `oas_worker_named_fsm.ml`, `oas_worker_named_error.ml`,
   `oas_worker_exec_transport.ml`, `oas_worker_exec.ml`,
   `oas_model_resolve.ml`.
@@ -282,12 +282,12 @@ to Phase 4, when its dependents are dissolved.
   diffsize under ~600 LOC.
   - PR-3a: 3 leaf files (`*_fsm`, `*_error`, `*_transport`) — no internal
     cross-deps among `oas_*`.
-  - PR-3b: 2 entry files (`oas_worker_named_cascade`, `oas_worker_cascade`).
+  - PR-3b: 2 entry files (`oas_worker_named_runtime`, `oas_worker_runtime`).
   - PR-3c: 2 capstone files (`oas_worker_exec`, `oas_model_resolve`).
 - Risk: medium. ~1500 LOC churn. Existing keeper callers (20 files) must
   follow rename in lockstep.
 - Verification: per PR — build, runtest, plus an *additional* check that
-  no `lib/cascade/cascade_*.ml` imports `Keeper_*` or `Masc_domain` (the
+  no `lib/runtime/runtime_*.ml` imports `Keeper_*` or `Masc_domain` (the
   new home should not introduce new reverse edges). Where existing
   imports exist, mark with `(* RFC-0047 phase 4: invert *)` for
   follow-up.
@@ -300,9 +300,9 @@ to Phase 4, when its dependents are dissolved.
   - **A. agent_sdk call sites.** Pure `Agent_sdk.run_loop` invocation
     with prompt + tools + transport. Lands as additions to
     `lib/agent_sdk_call.ml` (Phase 2 rename target).
-  - **B. cascade orchestration loop.** Provider rotation, retry,
+  - **B. runtime orchestration loop.** Provider rotation, retry,
     exhaustion classification, response acceptance. Lands as
-    `lib/cascade/cascade_runner.ml` (extends Phase 3 capstone).
+    `lib/runtime/runtime_runner.ml` (extends Phase 3 capstone).
   - **C. keeper turn driver.** Owns `current_turn_observation` updates,
     blocker class stamping, status bridge calls. Lands as new file
     `lib/keeper/keeper_turn_driver.ml`. Existing keeper callers (20
@@ -313,7 +313,7 @@ to Phase 4, when its dependents are dissolved.
   release.
 - Risk: high. This is the production-touching path. Mitigation:
   - Pre-PR draft for review by user before merge (no auto-merge).
-  - Production canary via cascade `retired_tool_profile` for 24h after
+  - Production canary via runtime `retired_tool_profile` for 24h after
     merge.
   - Regression test: replay the RFC-0045 production stack trace fixture
     against the new structure to verify the assert is still caught.
@@ -322,17 +322,17 @@ to Phase 4, when its dependents are dissolved.
 
 - Files: `oas_events.ml`, `oas_event_bridge.ml`.
 - Currently `oas_events.ml` *pushes* into `Dashboard_oas_bridge`. After
-  move to `lib/cascade/cascade_events.ml`, the direction is inverted:
-  cascade emits to a typed event stream and dashboard subscribes.
-- Action: introduce `Cascade_events.t` typed event variant, add
+  move to `lib/runtime/runtime_events.ml`, the direction is inverted:
+  runtime emits to a typed event stream and dashboard subscribes.
+- Action: introduce `Runtime_events.t` typed event variant, add
   subscriber registration in dashboard side
-  (`lib/dashboard_*/dashboard_cascade_subscriber.ml`), remove direct
+  (`lib/dashboard_*/dashboard_runtime_subscriber.ml`), remove direct
   `Dashboard_oas_bridge.publish_*` calls from the new
-  `cascade_events.ml`.
+  `runtime_events.ml`.
 - Risk: medium. Dashboard render must not silently drop events.
 - Verification: existing dashboard E2E (if any) + new test
-  `test_cascade_event_subscriber_receives_all_variants` with exhaustive
-  match on `Cascade_events.t`.
+  `test_runtime_event_subscriber_receives_all_variants` with exhaustive
+  match on `Runtime_events.t`.
 
 ### Phase 6 — Keeper-localized residue (2 files)
 
@@ -354,7 +354,7 @@ to Phase 4, when its dependents are dissolved.
   AI 코드 생성 안티패턴 #5: "OAS prefix in masc-mcp consumer code".
   Reference RFC-0047.
 - Update `agent_delegation` subsystem list in `~/me/AGENT-LLM-A.md` to
-  include cascade/agent_sdk_call as RFC-required scopes.
+  include runtime/agent_sdk_call as RFC-required scopes.
 
 ## 7. Test plan
 
@@ -363,9 +363,9 @@ to Phase 4, when its dependents are dissolved.
   re-run on every PR; diff against frozen `RFC-0047-caller-inventory.txt`
   must show only expected rename/move changes (no behavior-touching
   diffs). Per-phase delta committed alongside.
-- **Module graph regression**: `lib/cascade/*.ml` may not import any
+- **Module graph regression**: `lib/runtime/*.ml` may not import any
   symbol matching `Keeper_*` or `Masc_*` after Phase 4. Verified by
-  `rg '\bKeeper_|\bMasc_' lib/cascade/*.ml | wc -l` returning 0 (or a
+  `rg '\bKeeper_|\bMasc_' lib/runtime/*.ml | wc -l` returning 0 (or a
   documented per-file allowlist).
 - **Production canary**: after Phase 4 merge, run a single
   `retired_tool_profile` for 24h and confirm zero new asserts/regressions
@@ -383,7 +383,7 @@ to Phase 4, when its dependents are dissolved.
 | Concurrent keeper sub-lib extraction creates merge conflict storm | High | Medium (rebase pain) | Serialize: this RFC's Phase 4 lands BEFORE keeper sub-lib work resumes |
 | Phase 3 rename breaks downstream consumers (test/bin) | Medium | Low (caught by CI) | Codemod script + per-PR caller inventory diff |
 | Aspirational naming reintroduced by future PR | High | Medium (anti-learning) | Phase 7 CI lint + RFC reference in PR template |
-| Phase 5 dashboard event subscriber misses a variant | Low | Medium (silent drop) | Exhaustive match test against `Cascade_events.t` |
+| Phase 5 dashboard event subscriber misses a variant | Low | Medium (silent drop) | Exhaustive match test against `Runtime_events.t` |
 | Total LOC churn (~4400) saturates review bandwidth | High | Medium | 9-11 PRs across multiple weeks; no single PR > 600 LOC except Phase 4 hotspot split |
 
 ## 9. Open questions
@@ -397,8 +397,8 @@ to Phase 4, when its dependents are dissolved.
    file at the same time.
 3. Phase 5 inversion (push→subscribe). Is there an existing event bus
    (`Masc_event_bus`) we should reuse, or do we want a typed
-   cascade-only stream? — *Recommendation*: typed cascade-only stream
-   (`Cascade_events.t`), with a thin adapter to `Masc_event_bus` for
+   runtime-only stream? — *Recommendation*: typed runtime-only stream
+   (`Runtime_events.t`), with a thin adapter to `Masc_event_bus` for
    legacy consumers.
 4. Should the RFC-0046 FsmHub work resume before Phase 4? — Both touch
    keeper observation. *Recommendation*: let RFC-0046 finish current
@@ -415,15 +415,15 @@ follow-up RFC:
 - Phase 4 production canary surfaces any new assert or unexplained
   status drift in 24h window.
 - A reverse-direction import emerges that cannot be resolved by
-  dependency inversion (e.g. cascade fundamentally needs keeper
+  dependency inversion (e.g. runtime fundamentally needs keeper
   identity). At that point the layering model itself is wrong and
   needs revision.
 
 ## 11. Migration completion criteria
 
 - `ls lib/oas_*.ml` returns empty.
-- `lib/cascade/*.ml` does not import `Keeper_*` or `Masc_domain`.
-- `lib/agent_sdk_call.ml` does not import `Keeper_*`, `Cascade_*`,
+- `lib/runtime/*.ml` does not import `Keeper_*` or `Masc_domain`.
+- `lib/agent_sdk_call.ml` does not import `Keeper_*`, `Runtime_*`,
   `Masc_*`, `Dashboard_*`.
 - CI lint rules from Phase 7 active.
 - All 504 references migrated (verified by inventory).

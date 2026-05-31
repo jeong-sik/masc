@@ -122,7 +122,7 @@ type runtime_exhaustion_reason =
   | No_tool_capable of no_tool_capable_detail option
     (** Runtime exhausted because no configured provider can satisfy the
         required tool set.  Previously a standalone [blocker_class] variant;
-        reclassified here because the cascade rotation filtered all candidates
+        reclassified here because the runtime rotation filtered all candidates
         before dispatch — a semantic subset of runtime exhaustion.
         The optional detail carries telemetry from the former
         [No_tool_capable_provider] variant of [masc_internal_error]. *)
@@ -253,7 +253,7 @@ let runtime_exhaustion_summary = function
   | No_tool_capable _ ->
     "Runtime exhausted; no configured provider can satisfy the required tool set."
   | Other_detail _ ->
-    "Runtime exhausted; inspect cascade attempts for the dominant root cause."
+    "Runtime exhausted; inspect runtime attempts for the dominant root cause."
 ;;
 
 let blocker_class_continue_gate = function
@@ -611,6 +611,10 @@ type keeper_meta =
 
 let runtime_id_of_meta (_m : keeper_meta) : string =
   Runtime.get_default_runtime_id ()
+;;
+
+let runtime_id_of_meta (m : keeper_meta) : string =
+  runtime_id_of_meta m
 ;;
 
 

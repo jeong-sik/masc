@@ -119,14 +119,14 @@ val probe :
 
 | variant | Trigger | Evidence ref |
 |---|---|---|
-| `Lane_unavailable` | sangsu keeper (active+keepalive) 의 cascade=cascade.provider-k-coding-with-spark 이 lane=runtime_mcp 로 진입할 때 *materialize 단계*에서 sandbox-요구 도구가 LLM 표면에서 제거. dashboard `resolved_allowlist` 는 통과했으나 materialize 단계 silent strip 으로 `tool_execute` 미존재 → `required_tool_lane_unavailable` error. | board `p-6502d7dbfaaf89ae24e6ff749a06f914` |
-| `Tool_naming_inconsistency` | tech_glutton keeper 의 cascade 가 lane=runtime_mcp 가 아니라 *local Agent-LLM-A SDK pass-through* 로 routing. `visible_tools` 가 `[Bash, Edit, Grep, WebSearch, Write]` 같은 CLI-Tool-A 내장 이름이라 `masc_web_search` 같은 MCP-native 이름과 매칭 실패. 같은 의미, 다른 surface naming. | board `p-15634a8257cd0c1db8092677de5a3ee2` |
+| `Lane_unavailable` | sangsu keeper (active+keepalive) 의 runtime=runtime.provider-k-coding-with-spark 이 lane=runtime_mcp 로 진입할 때 *materialize 단계*에서 sandbox-요구 도구가 LLM 표면에서 제거. dashboard `resolved_allowlist` 는 통과했으나 materialize 단계 silent strip 으로 `tool_execute` 미존재 → `required_tool_lane_unavailable` error. | board `p-6502d7dbfaaf89ae24e6ff749a06f914` |
+| `Tool_naming_inconsistency` | tech_glutton keeper 의 runtime 가 lane=runtime_mcp 가 아니라 *local Agent-LLM-A SDK pass-through* 로 routing. `visible_tools` 가 `[Bash, Edit, Grep, WebSearch, Write]` 같은 CLI-Tool-A 내장 이름이라 `masc_web_search` 같은 MCP-native 이름과 매칭 실패. 같은 의미, 다른 surface naming. | board `p-15634a8257cd0c1db8092677de5a3ee2` |
 | `Verifier_blocked_no_open_request` | verifier keeper 가 *자율적으로* 발견. goal phase=executing 에서 `active_verification_request_id=null` 이면 verifier 가 reject 조차 vote 불가 — `conflict: goal has no active verification request`. RFC-0074 의 paused-blocked variant 와 *직교*. | board `p-38c3289abd46b765bee74ca765c9c2ea` (verifier 가 직접 post) |
 
 이 variant 들은 *RFC body 변경 자체가 그것의 acceptance test*: probe 가 실패하면서 variant 가 *드러났고*, 그 발견이 본문에 정식화되며, 이후 구현이 *컴파일러로 강제* 된다. 이는 RFC-0073 의 *probe-driven discovery* 패턴이 자기 자신을 검증한 첫 사례.
 
 추가 가능한 후속 variant (직접 probe 없이도 fleet inference 로 예측):
-- `Persona_profile_missing of string` — cascade 시작 자체 실패 (missing persona JSON), masc-improver / nick0cave / qa-king / janitor 의 audit 결과.
+- `Persona_profile_missing of string` — runtime 시작 자체 실패 (missing persona JSON), masc-improver / nick0cave / qa-king / janitor 의 audit 결과.
 - `Registry_not_present` — keeper toml + persona 는 있으나 runtime registry 에 등록 안 됨 (autoboot 비활성 또는 boot 자체 실패), audit 결과 16/18 keeper 가 해당.
 
 ## 4. Code Changes

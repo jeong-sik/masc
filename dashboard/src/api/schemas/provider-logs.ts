@@ -1,7 +1,8 @@
 // Provider logs schema — schema-at-boundary for
 // `GET /api/v1/dashboard/provider-logs` and `/provider-logs/tail`.
 //
-// The tail endpoint never accepts an arbitrary path from the browser.
+// Paths come from keeper_runtime.toml only. The tail endpoint never accepts an
+// arbitrary path from the browser.
 
 import {
   array,
@@ -28,6 +29,7 @@ const ProviderLogCatalogEntrySchema = object({
   resolved_path: optional(nullable(string())),
   default_lines: optional(nullable(number())),
   max_bytes: optional(nullable(number())),
+  runtime_config_path: optional(string()),
 })
 
 const ProviderLogsCatalogResponseSchema = object({

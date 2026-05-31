@@ -26,11 +26,11 @@ For each zone:
 | **K3 Institution Episodes** | zero-surface | **full coverage** | `memory-subsystems.ts:EpisodeCard` + `MemorySubsystemsEpisode` data already match all spec fields |
 | **C2 Messages** | zero-surface | **partial coverage** | `keeper-chat-panel.ts` covers chat surface; mention inbox + state-block message variants are not separate UI but data exists |
 | **K2 Decisions/Memory** | zero-surface | backend-blocked | no `decisions.jsonl` / `memory.jsonl` cross-keeper API; only per-keeper `Keeper.last_speech_act` |
-| **O2 Audit Ledger** | zero-surface | backend-blocked | `/api/v1/audit` endpoint absent; closest is `cascade/strategy_trace` which is a different schema |
+| **O2 Audit Ledger** | zero-surface | backend-blocked | `/api/v1/audit` endpoint absent; closest is `runtime/strategy_trace` which is a different schema |
 | **O3 Trend variant** | partial (Phase F-C) | backend-blocked | `SafeAutonomyData.history[]` field absent (verified in `safe-autonomy.ts:80`) |
 | **O5 Heuristic + Stress** | zero-surface | backend-blocked | no `heuristics.jsonl` / `agent_stress.jsonl` API in `dashboard/src/api/` |
 | **G1-C Snapshot diff** | partial | backend-blocked | `goal_snapshots` API absent; product decision required |
-| **O1 Cascade Inspector** | partial | Large + backend-partial | `StrategyTraceTable` rows exist but spec's per-run hop card model needs new endpoint shape |
+| **O1 Runtime Inspector** | partial | Large + backend-partial | `StrategyTraceTable` rows exist but spec's per-run hop card model needs new endpoint shape |
 | **C3 Composer v2** | zero-surface | use-site-missing | composer requires C2 chat surface to be a zone; current chat lives inside per-keeper detail |
 | **G3 Error boundary** | zero-surface | full coverage | reconciled in #11543 (severity prop + reload) |
 | **G4 Pagination / G5 Breadcrumb** | not in original audit | partial coverage | `dashboard-shell.ts` already renders breadcrumb trail; pagination is per-feature inline (board, etc.) |
@@ -74,7 +74,7 @@ The data plumbing is partly there (broadcast tool call works), but a "rooms" abs
 For each, the path was: search for the data type, the API endpoint, the SSE event type. None found:
 
 - **K2** `decisions.jsonl` / `memory.jsonl` — no decision/memory stream API. `Keeper.last_speech_act` is the only per-keeper field, not a cross-keeper log.
-- **O2** `audit.jsonl` — no `/api/v1/audit`. `cascade/strategy_trace` is a different (cascade-internal) audit, not the global event ledger the spec describes.
+- **O2** `audit.jsonl` — no `/api/v1/audit`. `runtime/strategy_trace` is a different (runtime-internal) audit, not the global event ledger the spec describes.
 - **O3** `SafeAutonomyData.history[]` — verified absent in `safe-autonomy.ts:80`.
 - **O5** `heuristics.jsonl` / `agent_stress.jsonl` — no matching API surface.
 - **G1-C** `goal_snapshots` — no snapshot API.
@@ -103,7 +103,7 @@ Phase F (Reconciliation) backlog as it actually stands after this audit:
 | ✅ Already covered (close as no-op) | C1, K3, G3 |
 | 🟡 Partial — frontend extension possible | C2 (reconciliation requires backend room API), G4/G5 (optional primitives) |
 | 🔴 Backend-blocked | K2, O2, O3, O5, G1-C |
-| 🔴 Large (multi-PR) | O1 Cascade Inspector |
+| 🔴 Large (multi-PR) | O1 Runtime Inspector |
 | 🟡 Use-site missing | C3 (depends on C2) |
 | ⏸ User-deferred | E1-E5, Phase B (I0 IDE Backbone) |
 

@@ -12,7 +12,7 @@ exception Liveness_kill of L.failure
 type t = {
   mode : Cfg.mode;
   budget : L.budget;
-  cascade_label : string;
+  runtime_label : string;
   provider_label : string;
   candidate_key : string option;
   external_wait : (unit -> bool) option;
@@ -70,7 +70,7 @@ let public_provider_label_of_raw raw =
 let create
       ~mode
       ~budget
-      ~cascade_label
+      ~runtime_label
       ?(provider_label = public_runtime_provider_label)
       ?external_wait
       ?candidate_key
@@ -81,7 +81,7 @@ let create
   {
     mode;
     budget;
-    cascade_label;
+    runtime_label;
     provider_label = public_provider_label_of_raw provider_label;
     candidate_key;
     external_wait;
@@ -106,19 +106,19 @@ let kill_labels (t : t) (failure : L.failure) =
   [
     ("mode", Cfg.mode_label t.mode);
     ("kind", L.failure_kind_label failure);
-    ("cascade", t.cascade_label);
+    ("runtime", t.runtime_label);
     ("provider", t.provider_label);
   ]
 
 let observed_labels (t : t) ~outcome =
   [
-    ("cascade", t.cascade_label);
+    ("runtime", t.runtime_label);
     ("provider", t.provider_label);
     ("outcome", outcome);
   ]
 
 let emit_kill_counter (t : t) (_failure : L.failure) =
-  ()  (* cascade metric removed *)
+  ()  (* runtime metric removed *)
 
 (* -- Event translation -------------------------------------------- *)
 
@@ -188,7 +188,7 @@ let react_to_output (t : t) (output : L.output) : unit =
                Log.Misc.warn
                  "runtime_attempt_liveness: enforce mode but no switch \
                   registered (runtime=%s provider=%s); shadowing kill"
-                 t.cascade_label t.provider_label))
+                 t.runtime_label t.provider_label))
 
 (* -- on_event wrapper --------------------------------------------- *)
 
@@ -207,7 +207,7 @@ let observe_chunk_clock (t : t) ~(at : float) : unit =
   t.last_chunk_at := Some at
 
 let prometheus_recorder (t : t) : L.recorder =
-  let _labels = [ ("cascade", t.cascade_label); ("provider", t.provider_label) ] in
+  let _labels = [ ("runtime", t.runtime_label); ("provider", t.provider_label) ] in
   {
     L.record_ttft = (fun _seconds -> ());
     record_inter_chunk = (fun _seconds -> ());
@@ -253,7 +253,7 @@ let external_wait_active (t : t) : bool =
        Log.Misc.warn
          "runtime_attempt_liveness: external_wait predicate raised \
           (runtime=%s provider=runtime): %s"
-         t.cascade_label
+         t.runtime_label
          (Printexc.to_string exn);
        false)
 
@@ -277,7 +277,7 @@ let wrap_on_event (t : t)
                  Log.Misc.warn
                    "runtime_attempt_liveness: original on_event raised \
                     (runtime=%s provider=runtime): %s"
-                   t.cascade_label
+                   t.runtime_label
                    (Printexc.to_string exn)));
         Eio_guard.check_if_ready ();
         try step_with_event t evt with
@@ -287,7 +287,7 @@ let wrap_on_event (t : t)
             Log.Misc.warn
               "runtime_attempt_liveness: step raised (runtime=%s \
                provider=runtime): %s"
-              t.cascade_label (Printexc.to_string exn)
+              t.runtime_label (Printexc.to_string exn)
       in
       Some wrapped
 
@@ -363,7 +363,7 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
               Log.Misc.warn
                 "runtime_attempt_liveness tick fiber crashed (runtime=%s \
                  provider=%s): %s"
-                t.cascade_label t.provider_label (Printexc.to_string exn))
+                t.runtime_label t.provider_label (Printexc.to_string exn))
 
 (* -- Finalize ----------------------------------------------------- *)
 
@@ -382,7 +382,6 @@ let finalize (t : t) : unit =
     match t.mode with
     | Cfg.Off -> ()
     | Cfg.Observe | Cfg.Enforce ->
-        let outcome = outcome_of_state !(t.state) in
         (match !(t.state), t.candidate_key, !(t.first_chunk_at), !(t.last_chunk_at) with
          | L.Success, Some candidate_key, Some first_chunk_at, Some last_chunk_at ->
            t.success_sample :=

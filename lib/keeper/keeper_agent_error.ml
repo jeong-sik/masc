@@ -318,8 +318,8 @@ let terminal_reason_code_of_sdk_error = function
   | Agent_sdk.Error.Orchestration _ -> "orchestration_error"
   | Agent_sdk.Error.A2a _ -> "a2a_error"
   | Agent_sdk.Error.Internal msg -> (
-    match Keeper_meta_contract.classify_masc_internal_error_of_string msg with
-    | Some err -> Keeper_meta_contract.kind_of_masc_internal_error err
+    match Keeper_internal_error.classify_masc_internal_error_of_string msg with
+    | Some err -> Keeper_internal_error.kind_of_masc_internal_error err
     | None -> "internal_error")
 ;;
 

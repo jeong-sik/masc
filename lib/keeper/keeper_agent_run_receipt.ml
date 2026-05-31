@@ -10,7 +10,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-let degraded_retry_runtime_id_of_wire ?(log_invalid = true) ~keeper_name raw =
+let degraded_retry_runtime_of_wire ?(log_invalid = true) ~keeper_name raw =
   let trimmed = String.trim raw in
   if String.equal trimmed "" then None
   else
@@ -37,7 +37,7 @@ let degraded_retry_runtime_id_of_wire ?(log_invalid = true) ~keeper_name raw =
     | None ->
       if log_invalid then
         Log.Keeper.warn
-          "keeper:%s execution_receipt degraded_retry_runtime_id %S is not a \
+          "keeper:%s execution_receipt degraded_retry_runtime %S is not a \
            qualified or re-qualifiable runtime name; dropping receipt field"
           keeper_name
           raw;
@@ -60,7 +60,7 @@ let finalize
     ~pre_dispatch_compaction_before_tokens
     ~pre_dispatch_compaction_after_tokens
     ~degraded_retry_applied
-    ~degraded_retry_runtime_id
+    ~degraded_retry_runtime
     ~fallback_reason
     ~runtime_rotation_attempts
     ~turn_result
@@ -217,9 +217,9 @@ let finalize
          | Some obs -> obs.oas_internal_runtime_allowed
          | None -> false)
     ; degraded_retry_applied
-    ; degraded_retry_runtime_id =
-        Option.bind degraded_retry_runtime_id
-          (degraded_retry_runtime_id_of_wire ~keeper_name:meta.name)
+    ; degraded_retry_runtime =
+        Option.bind degraded_retry_runtime
+          (degraded_retry_runtime_of_wire ~keeper_name:meta.name)
     ; fallback_reason
     ; runtime_rotation_attempts
     ; stop_reason = !receipt_stop_reason_ref

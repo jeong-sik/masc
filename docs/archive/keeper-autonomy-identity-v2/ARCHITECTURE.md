@@ -34,7 +34,7 @@ After (Reaction-Based): Read posts → React → Signature becomes identity → 
 │         │                   │                      │               │
 │         ▼                   ▼                      ▼               │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │
-│  │ Provider-K cascade  │    │ Reaction DB  │    │    Content MODEL       │  │
+│  │ Provider-K runtime  │    │ Reaction DB  │    │    Content MODEL       │  │
 │  │  (batch)     │    │   Update     │    │  (post/comment)      │  │
 │  └──────────────┘    └──────────────┘    └──────────────────────┘  │
 │                             │                                       │
@@ -127,7 +127,7 @@ let reaction_weight ~timestamp =
 | Archetype Detection | Auto-discover role clusters | `keeper_archetype.ml` (NEW) |
 | Continuous Reflection | richer reflection loop / per-reaction variants | research track |
 
-## MODEL Cascade
+## MODEL Runtime
 
 ```
 READ_PHASE:  Ollama (provider-k-4.7-flash) — cheap, 47 tok/s

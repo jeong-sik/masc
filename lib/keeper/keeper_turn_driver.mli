@@ -12,16 +12,16 @@
 
 (** {1 MASC/OAS structured errors}
 
-    Re-exported from {!Runtime_error_classify}. Using [include module type of]
+    Re-exported from {!Keeper_internal_error}. Using [include module type of]
     instead of a manual type copy so the interface stays structurally identical
-    to the implementation's [include Runtime_error_classify]. *)
+    to the implementation's [include Keeper_internal_error]. *)
 
-include module type of Runtime_error_classify
+include module type of Keeper_internal_error
 
 (** {1 Runtime error helpers} *)
 
-val sdk_error_to_runtime_id_outcome :
-  Agent_sdk.Error.sdk_error -> Runtime_fsm.provider_outcome option
+val sdk_error_to_runtime_outcome :
+  Agent_sdk.Error.sdk_error -> Runtime_attempt_fsm.provider_outcome option
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 
@@ -63,7 +63,7 @@ type provider_attempt_provenance =
   ; resolved_model_source : string
   ; capability_source : string
   ; fallback_authority : string
-  ; provider_source_cascade : string option
+  ; provider_source_runtime : string option
   }
 
 type provider_attempt_started_record =
@@ -152,10 +152,10 @@ val run_named :
   ?per_provider_timeout_s:float ->
   unit ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
-(** Run a single [Agent.run] call with MASC-driven cascade model fallback.
-    MASC drives the runtime FSM directly: resolves cascade providers,
+(** Run a single [Agent.run] call with MASC-driven runtime model fallback.
+    MASC drives the runtime FSM directly: resolves runtime providers,
     tries each with OAS, and uses [Runtime_fsm.decide] on failure.
-    The cascade loop runs inside a capacity-managed queue permit. *)
+    The runtime loop runs inside a capacity-managed queue permit. *)
 
 module For_testing : sig
   val checkpoint_after_attempt :

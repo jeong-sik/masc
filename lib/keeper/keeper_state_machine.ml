@@ -12,7 +12,7 @@ include Keeper_state_machine_types
 
 (* Spec navigation (OCaml priority -> TLA+ line) — plan §3 Tier C1 Phase 0
    anchor. Authoritative spec mirror is KeeperReconcileLiveness.tla:88-101
-   (DerivePhase operator). The priority cascade below is preserved
+   (DerivePhase operator). The priority runtime below is preserved
    verbatim; this block adds OCaml -> spec citations so drift is
    grep-discoverable from this side too.
 

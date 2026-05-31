@@ -35,7 +35,7 @@ type failure_reason =
   | Provider_timeout_loop of { count : int; }
   | Provider_runtime_error of { code : string; detail : string;
       provider_id : string option; http_status : int option;
-      cascade_name : string option;
+      runtime_id : string option;
     }
   | Tool_required_unsatisfied of { code : string; detail : string; }
   | Ambiguous_partial_commit of ambiguous_partial_commit

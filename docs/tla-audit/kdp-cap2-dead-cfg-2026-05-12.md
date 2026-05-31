@@ -40,16 +40,16 @@ PROPERTIES
 $ rg -n "CONSTANT|ToolSetNeverEmpty|RecoveryFloorMaintained|FailingEventuallyRecovers|MaxAlpha|MaxBeta|PenaltyCapPerCycle|TotalRemovableShards|RecoveryFloorSize" specs/keeper-state-machine/KeeperDecisionPipeline.tla
 (no output)
 
-$ rg -n "DecisionBoundary|NonIdleCascade" specs/keeper-state-machine/KeeperDecisionPipeline.tla
+$ rg -n "DecisionBoundary|NonIdleRuntime" specs/keeper-state-machine/KeeperDecisionPipeline.tla
 92:    "DecisionBoundaryRequiresMeasurement",
-94:    "NonIdleCascadeRequiresDecisionBoundary",
+94:    "NonIdleRuntimeRequiresDecisionBoundary",
 219:DecisionBoundaryRequiresMeasurement ==
-229:NonIdleCascadeRequiresDecisionBoundary ==
+229:NonIdleRuntimeRequiresDecisionBoundary ==
 244:    /\ DecisionBoundaryRequiresMeasurement
-246:    /\ NonIdleCascadeRequiresDecisionBoundary
+246:    /\ NonIdleRuntimeRequiresDecisionBoundary
 ```
 
-**Zero matches** for any of the cap2.cfg's CONSTANTS / INVARIANTS / PROPERTIES in the parent spec. The spec defines `Safety` (line 244-246) which composes `DecisionBoundaryRequiresMeasurement` + `NonIdleCascadeRequiresDecisionBoundary`. Nothing about tools, recovery floors, penalty caps, removable shards, or alpha/beta bounds.
+**Zero matches** for any of the cap2.cfg's CONSTANTS / INVARIANTS / PROPERTIES in the parent spec. The spec defines `Safety` (line 244-246) which composes `DecisionBoundaryRequiresMeasurement` + `NonIdleRuntimeRequiresDecisionBoundary`. Nothing about tools, recovery floors, penalty caps, removable shards, or alpha/beta bounds.
 
 ## TLC reproduction (iter 42 finding)
 

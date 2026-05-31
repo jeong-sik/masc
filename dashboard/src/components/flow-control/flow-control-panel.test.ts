@@ -109,7 +109,7 @@ describe('FlowControlPanel', () => {
     operatorSnapshot.value = {
       admission_queue: {
         mode: 'passthrough',
-        throttle_owner: 'oas_cascade',
+        throttle_owner: 'oas_runtime',
         max_concurrent: 3,
         active: 1,
         available: 2,
@@ -123,7 +123,7 @@ describe('FlowControlPanel', () => {
     const status = container.querySelector('[data-testid="flow-admission-mode"]')
     expect(status).not.toBeNull()
     expect(status!.textContent).toContain('passthrough')
-    expect(status!.textContent).toContain('OAS cascade')
+    expect(status!.textContent).toContain('OAS runtime')
     expect(status!.textContent).toContain('1/3')
   })
 })

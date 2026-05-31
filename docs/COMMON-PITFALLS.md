@@ -429,7 +429,7 @@ cd dashboard && pnpm run build  # TypeScript type check
 
 ### 14.1. Pure Function 불변량
 
-`Keeper_state_machine.apply_event`와 `Keeper_cascade_routing.select_cascade`는 mli에 "Pure function — no I/O" 명시. 안에 `Prometheus.inc_counter` 추가하면:
+`Keeper_state_machine.apply_event`와 `Keeper_runtime_routing.select_runtime`는 mli에 "Pure function — no I/O" 명시. 안에 `Prometheus.inc_counter` 추가하면:
 - property test의 idempotency 가 false로 깨짐
 - counter label 결정이 함수 내부로 들어가 caller-context를 잃음 (edge label 결정 사이트가 흩어짐)
 
@@ -439,13 +439,13 @@ cd dashboard && pnpm run build  # TypeScript type check
 
 **PR 체크:**
 ```bash
-rg -nP 'inc_counter' lib/keeper/keeper_state_machine.ml lib/keeper/keeper_cascade_routing.ml
+rg -nP 'inc_counter' lib/keeper/keeper_state_machine.ml lib/keeper/keeper_runtime_routing.ml
 # 기대: 0 매치
 ```
 
 ### 14.2. Variant 추가 시 Sweep 강제
 
-ADT variant 추가 PR이 모든 매치 사이트를 sweep 안 하면 strict mode partial-match로 cascade. 실제 사례: masc-mcp #10574 (Stale_turn_timeout), #10510/#10511 (InferenceTelemetry), #10516/#10521 (OperatorPauseBroadcast).
+ADT variant 추가 PR이 모든 매치 사이트를 sweep 안 하면 strict mode partial-match로 runtime. 실제 사례: masc-mcp #10574 (Stale_turn_timeout), #10510/#10511 (InferenceTelemetry), #10516/#10521 (OperatorPauseBroadcast).
 
 **규칙:** variant 정의 변경 commit과 같은 PR에 모든 match arm 업데이트.
 
@@ -469,7 +469,7 @@ SafetyInvariant 추가 시 같은 spec에 `BugAction`도 짝으로 추가, clean
 **PR 체크:**
 ```bash
 # specs/<topic>/<Name>.tla 와 sibling -buggy*.cfg 짝 매핑 확인
-# (variant cfg 지원: -buggy.cfg, -buggy-cascade.cfg, -buggy-compaction.cfg 모두 매치)
+# (variant cfg 지원: -buggy.cfg, -buggy-runtime.cfg, -buggy-compaction.cfg 모두 매치)
 comm -23 \
   <(find specs -name "*.tla" | sed 's|.tla$||' | sort) \
   <(find specs -name "*-buggy*.cfg" | sed -E 's|-buggy[^.]*\.cfg$||' | sort -u)
@@ -532,7 +532,7 @@ bash scripts/validate-keeper-fsm-graph.sh
 - [ ] Config 추가/변경했는가? → Section #9 체크
 - [ ] Partial function 사용했는가? → Section #12 체크
 - [ ] Registry-like file 수정했는가? → Section #13 체크
-- [ ] `keeper_state_machine` 또는 `keeper_cascade_routing` 수정했는가? → Section #14.1 체크
+- [ ] `keeper_state_machine` 또는 `keeper_runtime_routing` 수정했는가? → Section #14.1 체크
 - [ ] ADT variant 추가했는가? → Section #14.2 체크
 - [ ] `*.tla` 추가/수정했는가? → Section #14.3 체크
 - [ ] FSM edge counter 추가/제거했는가? → Section #14.4 체크

@@ -72,7 +72,7 @@ let run_safe ~caller ~timeout_s fn =
         ("timeout_s", Printf.sprintf "%.1f" timeout_s);
       ] ();
     (* #18476: wall-clock overshoot detection. Eio cancel propagation
-       through the cascade runner's nested Switch layers can take
+       through the runtime runner's nested Switch layers can take
        significant time after the budget fires.  Log the overshoot
        ratio so operators can distinguish "timeout fired at 45s" from
        "timeout fired but cleanup took 121s". *)
@@ -80,7 +80,7 @@ let run_safe ~caller ~timeout_s fn =
     if overshoot_ratio > 2.0 then
       Log.Misc.warn
         "masc_oas_bridge: timeout overshoot — budget=%.1fs wall=%.1fs \
-         (ratio=%.1fx, caller=%s). Cancel propagation through cascade \
+         (ratio=%.1fx, caller=%s). Cancel propagation through runtime \
          runner Switch hierarchy is delayed."
         timeout_s wall overshoot_ratio caller
     else
@@ -94,7 +94,7 @@ let run_safe ~caller ~timeout_s fn =
        Bucket boundaries are kept identical so PromQL can union the two
        sources into one bimodal view (fast/short_tail/mid_tail/long_mid/
        long_tail). [inner=...] surfaces the parent fiber's exception payload
-       so [Eio.Cancel.Cancel_hook] vs supervisor-pause vs cascade-rotation
+       so [Eio.Cancel.Cancel_hook] vs supervisor-pause vs runtime-rotation
        can be told apart at the WARN line. *)
     let bt = Printexc.get_raw_backtrace () in
     let wall = elapsed () in
@@ -133,8 +133,8 @@ let run_safe ~caller ~timeout_s fn =
        classifier can route bridge-boundary failures off the
        [Reason_internal_error] catch-all. *)
     Error
-      (Keeper_meta_contract.sdk_error_of_masc_internal_error
-         (Keeper_meta_contract.Internal_bridge_exception
+      (Keeper_internal_error.sdk_error_of_masc_internal_error
+         (Keeper_internal_error.Internal_bridge_exception
             { caller; exn_repr = Printexc.to_string exn }))
 
 (** [run_with_caller ~caller fn] — single entry point that resolves

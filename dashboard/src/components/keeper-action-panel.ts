@@ -207,7 +207,7 @@ export function KeeperActionButtons({
             size=${size}
             disabled=${busy.value}
             onClick=${(e: Event) => handle(e, 'wakeup')}
-            title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 cascade/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
+            title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 runtime/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
           >${text('wakeup')}<//>`
         : null}
       ${vis.canShutdown

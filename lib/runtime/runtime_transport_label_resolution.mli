@@ -1,4 +1,4 @@
-(** Model-label resolution for runtime transport. *)
+(** Model-label resolution for runtime runtime transport. *)
 
 type label_resolution_error = Invalid_model_label of string
 

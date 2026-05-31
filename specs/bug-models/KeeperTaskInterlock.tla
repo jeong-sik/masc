@@ -30,7 +30,7 @@
 \*                   (Running, Paused-and-resumable).
 \*   Dead          — terminal tombstone (Dead, Crashed).
 \*   Draining      — transient phase in which a clean shutdown
-\*                   cascade fires: any claimed task owned by this
+\*                   runtime fires: any claimed task owned by this
 \*                   keeper must be released before entering Dead.
 \* The collapse is sound for the NoDeadKeeperHoldsTask invariant
 \* because the real FSM's Failing/Compacting/HandingOff/etc.
@@ -43,7 +43,7 @@
 \*
 \*   1. Keeper_registry.mark_dead (keeper_registry.ml:237) sets
 \*      entry.phase = Dead but never touches the task FSM. No
-\*      task cascade fires on this call.
+\*      task runtime fires on this call.
 \*   2. cleanup_dead_tombstone (keeper_supervisor.ml:380, called from
 \*      :545) writes paused=true and unregisters the keeper; task FSM
 \*      untouched. Verified 2026-04-20 (line 225 was a stale anchor
@@ -67,9 +67,9 @@
 \* Implication for this spec:
 \*
 \*   This file formalizes an UPGRADE TARGET, not a proof of current
-\*   correctness. A synchronous cascade from mark_dead into the task
+\*   correctness. A synchronous runtime from mark_dead into the task
 \*   FSM would be the code change that makes the invariant hold
-\*   without the GC window. Until that cascade exists, a Dead keeper
+\*   without the GC window. Until that runtime exists, a Dead keeper
 \*   can hold a Claimed task for up to ~keeper_threshold_seconds —
 \*   the transient window is visible on the dashboard Keepers section
 \*   (#6556) and is safe because Coord_task.claim_task_r rejects any
@@ -260,7 +260,7 @@ CrashToDead(k) ==
     /\ keeper_phase' = [keeper_phase EXCEPT ![k] = "dead"]
     /\ UNCHANGED <<task_status, task_claimer>>
 
-\* Also model a bug in the drain cascade: FinishDrain forgets the
+\* Also model a bug in the drain runtime: FinishDrain forgets the
 \* held-task check and goes to Dead regardless.
 SloppyFinishDrain(k) ==
     /\ keeper_phase[k] = "draining"
@@ -325,7 +325,7 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \* it against the TLC runner in tla-check.sh / specs/Makefile.
 
 \* Zombie GC reconciliation: release an orphaned task whose claimer
-\* is dead. Mirrors lib/coord/coord_gc.ml:cleanup_zombies Phase 3 cascade.
+\* is dead. Mirrors lib/coord/coord_gc.ml:cleanup_zombies Phase 3 runtime.
 ReconcileByGC(t) ==
     /\ Held(t)
     /\ keeper_phase[task_claimer[t]] = "dead"

@@ -86,7 +86,7 @@ include module type of Prometheus_core_metric_names
 
 include module type of Prometheus_policy_metric_names
 
-(* Inlined from deleted Prometheus_cascade_metric_names (cascade purge). *)
+(* Inlined from deleted Prometheus_runtime_metric_names (runtime purge). *)
 (** Total keepers auto-resumed by the self-healing circuit breaker in
     [Keeper_supervisor.sweep_and_recover] after the per-keeper back-off
     timer elapsed.  Labeled by [keeper].  A positive rate indicates the
@@ -95,10 +95,10 @@ include module type of Prometheus_policy_metric_names
     set in meta files indicates a sweep or meta-write regression. *)
 
 (** Total keepers whose auto-resume was blocked in
-    [Keeper_supervisor.sweep_and_recover] because the cascade health probe
+    [Keeper_supervisor.sweep_and_recover] because the runtime health probe
     reported unhealthy (failure ratio >= threshold).  Labeled by [keeper]
-    and [cascade].  A positive rate means the health gate is protecting
-    the fleet from resuming into a still-failing cascade. *)
+    and [runtime].  A positive rate means the health gate is protecting
+    the fleet from resuming into a still-failing runtime. *)
 
 (** RFC-0020 Rule 2 evidence — incremented every time
     [run_smart_heartbeat_gate] overrides a [Skip_busy] / [Skip_idle]
@@ -158,7 +158,7 @@ include module type of Prometheus_policy_metric_names
     - [outcome=warn]: strike below [provider_timeout_strike_limit];
       cycle continues.
     - [outcome=soft_backoff]: strike at or above limit; keeper fiber
-      remains alive while provider/cascade cooldown and retry backoff
+      remains alive while provider/runtime cooldown and retry backoff
       throttle later turns.
     - [outcome=promote]: policy allowed keeper death because separate
       liveness evidence exists. Counter reset on any successful turn. *)
@@ -176,7 +176,7 @@ val metric_oas_bus_capacity : string
     as a fraction of capacity. *)
 
 (** Counter: OAS [Agent_sdk.Event_bus.payload] variants that the
-    cascade event bridge did not have an explicit arm for and
+    runtime event bridge did not have an explicit arm for and
     degraded to a kind-only SSE payload via the catch-all in
     [Keeper_event_bridge.native_event_to_json].  Labels: [kind]
     carries [Agent_sdk.Event_bus.payload_kind other] (snake_case,
@@ -190,7 +190,7 @@ val metric_oas_bus_capacity : string
     but degrades SSE subscribers to a kind-only payload, so this
     counter is the per-process signal that an explicit arm needs
     to be added.  Fix: extend the explicit match in
-    [lib/cascade/cascade_event_bridge.ml] for the offending [kind].
+    [lib/runtime/runtime_event_bridge.ml] for the offending [kind].
 
     Pairs with the per-occurrence WARN log
     ["oas_event_bridge: kind-only fallback ..."]. *)
@@ -259,12 +259,12 @@ include module type of Prometheus_identity_metric_names
 include module type of Prometheus_transport_metric_names
 
 (** [masc_keeper_oas_run_timeout_total] counter incremented in the
-    cascade FSM each time an [Agent.run] / [run_stream] returns
+    runtime FSM each time an [Agent.run] / [run_stream] returns
     [Llm_provider.Retry.Timeout]. The [source] label is typed provider
     timeout phase when OAS exposes one, otherwise [provider]. Free-form
     timeout messages are not reparsed into [max_execution_time] labels.
 
-    Labels: cascade, provider, source. *)
+    Labels: runtime, provider, source. *)
 (* Centralized metric constants for inline string replacement. *)
 
 (** #13xxx: counter incremented every time the keeper dispatch layer

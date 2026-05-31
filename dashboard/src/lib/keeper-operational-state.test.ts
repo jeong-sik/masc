@@ -33,7 +33,7 @@ function makeComposite(
     phase: 'Stable',
     turn_phase: 'idle',
     decision: { stage: 'idle' },
-    cascade: { state: 'idle' },
+    runtime: { state: 'idle' },
     compaction: { stage: 'idle' },
     measurement: {} as KeeperCompositeSnapshot['measurement'],
     invariants: {} as KeeperCompositeSnapshot['invariants'],
@@ -212,7 +212,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     // attention=blocked here because runtime_attention.blocked=true (kind/
     // attention orthogonality covered in the §13 axis-extension suite).
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ runtime_blocker_class: 'cascade_exhausted' }),
+      keeper: makeKeeper({ runtime_blocker_class: 'runtime_exhausted' }),
       composite: makeComposite({
         runtime_attention: attention({ execution_current: true, blocked: true }),
       }),
@@ -220,7 +220,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     expect(state).toMatchObject({
       kind: 'stuck',
       attention: 'blocked',
-      reason: 'cascade_exhausted',
+      reason: 'runtime_exhausted',
     })
   })
 
@@ -372,7 +372,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         phase: 'Crashed',
-        runtime_blocker_class: 'cascade_exhausted',
+        runtime_blocker_class: 'runtime_exhausted',
       }),
       composite: null,
     })

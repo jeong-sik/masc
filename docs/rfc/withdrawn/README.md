@@ -67,8 +67,8 @@ narrowed to 4 because body inspection revealed:
 |-----|-------|---------------|--------------------------|
 | 0039 | Keeper Turn FSM streaming escape | RFC-0072 | Absorbed by 5-axis composite sub-FSM observer (KSM/KTC/KDP/KMC/KCL) |
 | 0048 | Dashboard IA Phase 2 | RFC-0135 | Typed snapshot architecture supplanted IA approach (25+ commits) |
-| 0055 | Cascade Fallback Chain Capability-Tier Routing | RFC-0058 | Self-declared superseded; §1 Supersedes ledger absorbed concern |
-| 0066 | Legacy *_models Catalog Purge | RFC-0058 | Self-positioned as closeout phase of RFC-0058 declarative cascade |
+| 0055 | Runtime Fallback Chain Capability-Tier Routing | RFC-0058 | Self-declared superseded; §1 Supersedes ledger absorbed concern |
+| 0066 | Legacy *_models Catalog Purge | RFC-0058 | Self-positioned as closeout phase of RFC-0058 declarative runtime |
 
 Future batches will continue the same criteria + body inspection requirement.
 The active RFC count continues to shrink as ghost specs are honestly retired.

@@ -2,14 +2,14 @@
 
 **Iteration**: 22 (/loop FSM/TLA+/OCaml drift hunt — first KCR entry)
 **Date**: 2026-05-12
-**Spec**: `specs/keeper-state-machine/KeeperCascadeRouting.tla` (366 LOC)
-**OCaml**: `lib/keeper/keeper_cascade_selector.ml` (`select_item_for_turn`)
+**Spec**: `specs/keeper-state-machine/KeeperRuntimeRouting.tla` (366 LOC)
+**OCaml**: `lib/keeper/keeper_runtime_selector.ml` (`select_item_for_turn`)
 **Risk**: MID — both mechanisms terminate fallback in *practice*, but they cap by different metrics, so TLA+ `FallbackCountBounded` is enforced by a side-effect, not by a faithful OCaml counterpart.
 **Type**: Audit-only (no code change in this PR).
 
 ## Spec context
 
-`KeeperCascadeRouting.tla` models cascade fallback with an explicit
+`KeeperRuntimeRouting.tla` models runtime fallback with an explicit
 counter:
 
 ```tla
@@ -45,14 +45,14 @@ spec-side tightening.
 
 ## OCaml mechanism
 
-`lib/keeper/keeper_cascade_selector.ml:5-72`:
+`lib/keeper/keeper_runtime_selector.ml:5-72`:
 
 ```ocaml
 let rec try_group group_name visited =
   if List.mem group_name visited then
     Error `No_available_item    (* cycle detection only *)
   else
-    match find_group cascade_profile group_name with
+    match find_group runtime_profile group_name with
     | None -> Error `No_available_item
     | Some group ->
         match find_healthy items with
@@ -66,7 +66,7 @@ let rec try_group group_name visited =
 The OCaml caps fallback *implicitly* via:
 1. The `visited` list prevents revisiting a group.
 2. Therefore the recursion depth is bounded by `O(profile.groups)` — the
-   number of distinct groups in the cascade profile.
+   number of distinct groups in the runtime profile.
 
 There is **no explicit `fallback_count` counter** and **no
 `MaxFallbacks`-equivalent configuration**.
@@ -89,7 +89,7 @@ Consider a profile with 5 groups and `MaxFallbacks = 3`:
   all groups.
 
 This is a real semantic gap.  The spec `FallbackCountBounded` invariant
-is enforced *in production* only because real cascade profiles
+is enforced *in production* only because real runtime profiles
 typically have fewer groups than the spec's `MaxFallbacks` setting.
 Change either side independently — increase `MaxFallbacks` in cfg, or
 add a 6th group to a profile — and the gap surfaces.
@@ -102,7 +102,7 @@ add a 6th group to a profile — and the gap surfaces.
    Spec coverage > production coverage; the spec catches no extra bugs.
 
 2. **Profile expansion in production**:
-   Operator extends a cascade profile to 8 groups while `MaxFallbacks`
+   Operator extends a runtime profile to 8 groups while `MaxFallbacks`
    in cfg stays 5.  OCaml allows 8 fallbacks per turn, spec catches
    only 5.  Real OCaml behavior is *outside* the spec's reachable
    state space.
@@ -117,7 +117,7 @@ add a 6th group to a profile — and the gap surfaces.
 
 | ID | Scope | Action | Risk |
 |---|---|---|---|
-| R-C-1.a | OCaml-side parity | Add explicit `fallback_count` parameter to `try_group`, threading `~max_fallbacks` from a config source.  Pin the count alongside `visited` so cycle + counter both bound recursion. | MID — touches `select_item_for_turn` signature + caller (`keeper_cascade_routing.ml`?) + 1+ test files. |
+| R-C-1.a | OCaml-side parity | Add explicit `fallback_count` parameter to `try_group`, threading `~max_fallbacks` from a config source.  Pin the count alongside `visited` so cycle + counter both bound recursion. | MID — touches `select_item_for_turn` signature + caller (`keeper_runtime_routing.ml`?) + 1+ test files. |
 | R-C-1.b | Spec-side relaxation | Drop `MaxFallbacks` from spec and rely on `NoGroupCycle` invariant alone.  TLC re-verify confirms cycle detection is sufficient.  Simpler spec; documents that the production mechanism is the SSOT. | LOW — spec change, TLC re-verify (5-15 min). |
 | R-C-1.c | Both, with shared CONSTANT | Pin `MaxFallbacks` value identically in OCaml config and TLA+ cfg.  Add audit script to verify equivalence (R-B-1.c pattern). | MID — requires both implementations and a cross-check tool. |
 
@@ -132,7 +132,7 @@ check.
 - `lib/model_inference_metrics.ml` (LLM inference fallback metric — different domain)
 - `lib/eval_calibration.ml`, `lib/dashboard/*` — telemetry/UI
 
-None of these track the cascade-router-level fallback count the spec
+None of these track the runtime-router-level fallback count the spec
 models.  The mechanism mismatch isn't just about cap value — *the
 counter itself is absent* on the OCaml side, only the *effect* of
 bounded fallback is present (via cycle detection).
@@ -152,7 +152,7 @@ OCaml dashboard/log surface exposes the same count.
 ## References
 
 - KCR spec line 33-42 (CONSTANTS), 55-65 (VARIABLES), 144-184 (ItemDegrade + GroupFallback), 259-260 (FallbackCountBounded invariant).
-- OCaml `keeper_cascade_selector.ml:5-72` (`select_item_for_turn`).
-- PR #14668: `fix(specs): cap fallback_count in ItemDegrade — KeeperCascadeRouting TypeOK clean fix` (merged 2026-05-11) — the spec-side tightening that exposed this OCaml gap.
+- OCaml `keeper_runtime_selector.ml:5-72` (`select_item_for_turn`).
+- PR #14668: `fix(specs): cap fallback_count in ItemDegrade — KeeperRuntimeRouting TypeOK clean fix` (merged 2026-05-11) — the spec-side tightening that exposed this OCaml gap.
 - Adjacent pattern: KSM A-1 audit (`ksm-init-mapping-2026-05-12.md`) — same shape "OCaml ahead of spec on representation, spec stricter on contract".
 - KTC B-1 audit (`ktc-b1-turn-phase-spec-gap-2026-05-12.md`) — sibling drift class.

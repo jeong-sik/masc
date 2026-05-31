@@ -341,7 +341,7 @@ export interface OperatorSessionSnapshot {
   team_health?: Record<string, unknown>
   communication_metrics?: Record<string, unknown>
   orchestration_state?: Record<string, unknown>
-  cascade_metrics?: Record<string, unknown>
+  runtime_metrics?: Record<string, unknown>
   report_paths?: Record<string, string>
   session?: Record<string, unknown>
   recent_events?: Record<string, unknown>[]

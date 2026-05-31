@@ -1,21 +1,21 @@
 (** Keeper Composite Lifecycle Observer — pure projection.
 
     Projects a [Keeper_registry.registry_entry] into a composite snapshot
-    spanning Decision / Cascade / Memory / Compaction sub-FSMs as
+    spanning Decision / Runtime / Memory / Compaction sub-FSMs as
     specified in RFC-0003 and
     [specs/keeper-state-machine/KeeperCompositeLifecycle.tla].
 
     Contract:
     - Pure read. No mutation, no I/O, no event emission.
     - Never calls [Keeper_state_machine.apply_event],
-      runtime selection, or any routine that would
+      [Keeper_runtime_routing.select_runtime], or any routine that would
       shift keeper lifecycle state.
     - Does not read provider names, token counts, or context bytes —
       those belong to OAS (see [feedback_masc-oas-layer-boundary]).
 
     Current scope: all projected sub-FSM live states are written directly
     into [Keeper_registry.registry_entry]. The observer no longer infers
-    decision/cascade/compaction state from coarse parent conditions.
+    decision/runtime/compaction state from coarse parent conditions.
 
     @since RFC-0003 — Composite observer v0. *)
 
@@ -38,14 +38,9 @@ type decision_stage = Keeper_registry.decision_stage =
 
 val all_decision_stages : Keeper_registry.packed_decision_stage list
 
-type runtime_state = Keeper_registry.runtime_state =
-  | Runtime_idle
-  | Runtime_selecting
-  | Runtime_trying
-  | Runtime_done
-  | Runtime_exhausted
+type runtime_state = string
 
-val all_runtime_states : Keeper_registry.packed_runtime_state list
+val all_runtime_states : runtime_state list
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
@@ -109,8 +104,9 @@ val bump_invariant_violations :
 
     The [check_*] functions below mirror the composite TLA+
     [SafetyInvariant] conjuncts and the runtime phase-derivation
-    agreement check. They are exposed so focused tests can drive
-    realistic state combinations through the same predicates that production
+    agreement check. They are exposed so cross-FSM joint tests
+    ([test/test_keeper_fsm_joints.ml]) can drive realistic state
+    combinations through the same predicates that production
     [compute_invariants] uses, without having to construct a full
     {!Keeper_registry.registry_entry} value.
 
@@ -130,7 +126,7 @@ val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.p
     (KeeperCompositeLifecycle.tla:361): runtime selection past [idle]
     requires a captured measurement. *)
 val check_no_runtime_before_measurement :
-  runtime_state:Keeper_registry.packed_runtime_state -> measurement_captured:bool -> bool
+  runtime_state:runtime_state -> measurement_captured:bool -> bool
 
 val check_phase_derivation_agreement :
   Keeper_registry.registry_entry -> bool
@@ -161,7 +157,7 @@ type last_outcome = {
   turn_id : int;
   ended_at : float;
   decision_stage : Keeper_registry.packed_decision_stage;
-  runtime_state : Keeper_registry.packed_runtime_state;
+  runtime_state : runtime_state;
   selected_model : string option;
 }
 
@@ -206,7 +202,7 @@ type snapshot = {
           [specs/keeper-state-machine/KeeperStateMachine.tla] exactly. *)
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;
-  kcl_runtime_state : Keeper_registry.packed_runtime_state;
+  kcl_runtime_state : runtime_state;
   kmc_compaction : Keeper_registry.packed_compaction_stage;
   kcb_state : Keeper_failure_circuit_breaker.display_state;
       (** 6th axis (LT-16-KCB). Observable circuit-breaker state —
@@ -298,8 +294,8 @@ val turn_phase_of_string : string -> turn_phase option
 val decision_stage_to_string : Keeper_registry.packed_decision_stage -> string
 val decision_stage_of_string : string -> decision_stage option
 
-(** Stringify [runtime_state]. Mirrors KeeperCascadeLifecycle.tla. *)
-val runtime_state_to_string : Keeper_registry.packed_runtime_state -> string
+(** Stringify the runtime-state compatibility field. *)
+val runtime_state_to_string : runtime_state -> string
 val runtime_state_of_string : string -> runtime_state option
 
 (** Stringify [compaction_stage]. Mirrors KeeperCompactionLifecycle.tla. *)

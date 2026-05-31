@@ -142,7 +142,7 @@
   for the strict blocker; it records the 12 prompt documents checked, 19
   strict itemized IDs, 187 missing rows, 72 broader uncataloged structured IDs,
   260 broader source occurrences, duplicate checked 47-issue audit artifacts
-  that do not contain the missing 206-row corpus, and an independent cascade
+  that do not contain the missing 206-row corpus, and an independent runtime
   completion report that keeps #13265 open because the corpus is not
   replayable. A design research note with aggregate 206/STILL_PRESENT claims
   and a single `R-FATAL-1` example was also checked and does not contain the
@@ -563,7 +563,7 @@ decisions.
 | Decision | Finding | ACT status | Evidence |
 |----------|---------|------------|----------|
 | `D-EMERGENCY-1` | `NF-2` credential archived starvation | **LINKED** | #13218 credential auto-recovery, #13231 slot forced-reclaim regression, #13246 crash-path force release. |
-| `D-EMERGENCY-2` | `NF-1` provider health skipped | **LINKED** | #13124 `fix: probe local providers in cascade catalog`. |
+| `D-EMERGENCY-2` | `NF-1` provider health skipped | **LINKED** | #13124 `fix: probe local providers in runtime catalog`. |
 | `D-P1-1` | `NF-3`, `R-FATAL-1` recovery/fallback | **LINKED** | #13123 recovery side effect, #13126 timeout phase diagnostics. |
 | `D-P1-2` | `CF-1` pricing catalog miss | **NOT QUEUED IN FIXTURE** | `CF-1` is `EVIDENCE_ABSENT` in `orient.startup.json`; needs live-pricing audit if seen again. |
 | `D-P2-1` | `NF-6` unknown keeper TOML keys | **LINKED** | #13138 health visibility. |
@@ -672,7 +672,7 @@ No convergence claim is valid yet. The only safe current statement is:
    reconciled at 1/1, so the remaining catalog gap is row-level completeness,
    not whether the aggregate numbers appear in the supplied documents. The
    checked row-corpus discovery manifest records that the known 47-issue audit
-   artifacts and duplicates are not the missing corpus, and that the cascade
+   artifacts and duplicates are not the missing corpus, and that the runtime
    completion report still lists #13265 as open. It also records broader
    Downloads, runtime, temp, GitHub, local-history, full Downloads CLI,
    source-doc-only CLI, tar/gzip compressed-container discovery sweeps, and

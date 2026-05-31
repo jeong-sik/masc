@@ -455,7 +455,7 @@ describe('normalizeOperatorSnapshot', () => {
     const result = normalizeOperatorSnapshot({
       admission_queue: {
         mode: 'passthrough',
-        throttle_owner: 'oas_cascade',
+        throttle_owner: 'oas_runtime',
         max_concurrent: 3,
         active: 1,
         available: 2,
@@ -464,7 +464,7 @@ describe('normalizeOperatorSnapshot', () => {
     })
     expect(result.admission_queue).toEqual({
       mode: 'passthrough',
-      throttle_owner: 'oas_cascade',
+      throttle_owner: 'oas_runtime',
       max_concurrent: 3,
       active: 1,
       available: 2,

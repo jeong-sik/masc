@@ -6,7 +6,7 @@
     [Keeper_registry_types] resolvers / state machine helpers — no
     registry state read or written.
 
-    Companion to [Keeper_registry_fsm_validators] (cascade /
+    Companion to [Keeper_registry_fsm_validators] (runtime /
     turn_phase) which carries the GADT-resolver wrappers. *)
 
 open Keeper_registry_types

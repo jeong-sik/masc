@@ -1,5 +1,5 @@
 (* lib/keeper/keeper_llm_bridge.ml *)
-(* OAS Adapter bridging Eio structured concurrency, multi-turn cascade rollbacks,
+(* OAS Adapter bridging Eio structured concurrency, multi-turn runtime rollbacks,
    and strict global stop preemptions as formally verified in KeeperOASAdvanced.tla. *)
 
 let json_field name value = Some (name, value)
@@ -294,7 +294,7 @@ let run_with_timeout_and_fallback
           instead of entering the retry loop.
 
           #10716: bimodal distribution observed in production — 21 events in
-          [60, 300)s (short-tail, routine cancel: supervisor pause / cascade
+          [60, 300)s (short-tail, routine cancel: supervisor pause / runtime
           rotation) plus 8 events ≥1800s (long-tail, LLM provider hung). Same
           opaque message for both made root-cause attribution impossible.
           Categorize wall duration into a discrete bucket and surface the

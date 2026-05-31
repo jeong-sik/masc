@@ -618,7 +618,7 @@ function traceSourceColor(source: KeeperTraceSource): string {
       return 'var(--color-status-info)'
     case 'activity-event':
       return 'var(--color-status-info)'
-    case 'cascade-hop':
+    case 'runtime-hop':
       return 'var(--color-accent-fg)'
     case 'bdi-snapshot':
       return 'var(--color-status-ok)'
@@ -633,8 +633,8 @@ function traceSourceLabel(source: KeeperTraceSource): string {
       return 'thread'
     case 'activity-event':
       return 'activity'
-    case 'cascade-hop':
-      return 'cascade'
+    case 'runtime-hop':
+      return 'runtime'
     case 'bdi-snapshot':
       return 'BDI'
     case 'decision-log':
@@ -646,7 +646,7 @@ function traceEventFilePath(event: KeeperTraceEvent): string | null {
   if (event.source === 'anchored-thread') return event.filePath ?? null
   if (event.source === 'activity-event') return event.filePath
   if (
-    event.source === 'cascade-hop'
+    event.source === 'runtime-hop'
     || event.source === 'bdi-snapshot'
     || event.source === 'decision-log'
   ) return event.filePath ?? null
@@ -661,7 +661,7 @@ function traceEventLine(event: KeeperTraceEvent): number | null {
     return isPositiveSafeInteger(event.line) ? event.line : null
   }
   if (
-    event.source === 'cascade-hop'
+    event.source === 'runtime-hop'
     || event.source === 'bdi-snapshot'
     || event.source === 'decision-log'
   ) {
@@ -680,7 +680,7 @@ function traceEventSurface(event: KeeperTraceEvent): string | undefined {
 function traceEventContextFields(event: KeeperTraceEvent): KeeperTraceContextFields {
   if (
     event.source === 'activity-event'
-    || event.source === 'cascade-hop'
+    || event.source === 'runtime-hop'
     || event.source === 'bdi-snapshot'
     || event.source === 'decision-log'
   ) return event
@@ -729,7 +729,7 @@ function traceLineChipAriaLabel(traceLine: EditorKeeperTraceLine): string {
 function traceLineChipSurface(event: EditorKeeperTraceLineEvent): string {
   if (event.source === 'activity-event') return event.surface?.trim() || 'Activity'
   if (event.source === 'anchored-thread') return 'Thread'
-  if (event.source === 'cascade-hop') return 'Cascade'
+  if (event.source === 'runtime-hop') return 'Runtime'
   if (event.source === 'bdi-snapshot') return 'BDI'
   return 'Decision'
 }

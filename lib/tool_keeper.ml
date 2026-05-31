@@ -306,7 +306,7 @@ let handle_keeper_reset ctx args : tool_result =
 
 (** Resolve the primary model max context for a keeper.
 
-    Returns the resolved primary provider/cascade budget, separate from any
+    Returns the resolved primary provider/runtime budget, separate from any
     requested [max_context_override] turn-budget widening.
     Returns [min_keeper_context_tokens] when meta is unavailable. *)
 let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option) : int =

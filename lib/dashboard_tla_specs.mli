@@ -16,8 +16,8 @@
     @since 0.9.6 *)
 
 type spec_entry = {
-  name : string;          (** File stem without extension (e.g. ["CascadeStrategy"]). *)
-  path : string;          (** Path relative to [specs_dir] (e.g. ["boundary/CascadeStrategy.tla"]). *)
+  name : string;          (** File stem without extension (e.g. ["RuntimeStrategy"]). *)
+  path : string;          (** Path relative to [specs_dir] (e.g. ["boundary/RuntimeStrategy.tla"]). *)
   category : string;      (** ["boundary"] | ["bug-models"] | ["other"]. *)
   has_clean_cfg : bool;   (** [<name>.cfg] is present next to the [.tla]. *)
   has_buggy_cfg : bool;   (** [<name>-buggy.cfg] is present next to the [.tla]. *)
@@ -42,8 +42,8 @@ val specs_json : unit -> Yojson.Safe.t
         "specs_dir": "/abs/path/to/specs" | null,
         "count": 12,
         "entries": [
-          { "name": "CascadeStrategy",
-            "path": "boundary/CascadeStrategy.tla",
+          { "name": "RuntimeStrategy",
+            "path": "boundary/RuntimeStrategy.tla",
             "category": "boundary",
             "has_clean_cfg": true,
             "has_buggy_cfg": true,

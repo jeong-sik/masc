@@ -214,7 +214,7 @@ function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
     team_health: isRecord(raw.team_health) ? raw.team_health : isRecord(statusBlock?.team_health) ? statusBlock.team_health : undefined,
     communication_metrics: isRecord(raw.communication_metrics) ? raw.communication_metrics : isRecord(statusBlock?.communication_metrics) ? statusBlock.communication_metrics : undefined,
     orchestration_state: isRecord(raw.orchestration_state) ? raw.orchestration_state : isRecord(statusBlock?.orchestration_state) ? statusBlock.orchestration_state : undefined,
-    cascade_metrics: isRecord(raw.cascade_metrics) ? raw.cascade_metrics : isRecord(statusBlock?.cascade_metrics) ? statusBlock.cascade_metrics : undefined,
+    runtime_metrics: isRecord(raw.runtime_metrics) ? raw.runtime_metrics : isRecord(statusBlock?.runtime_metrics) ? statusBlock.runtime_metrics : undefined,
     report_paths: reportPaths,
     session,
     recent_events: recentEvents,

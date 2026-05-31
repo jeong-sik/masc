@@ -17,7 +17,7 @@
        fix-hint.
 
     All of step 2-4 are wired through this module's hidden helpers
-    so the .mli surfaces the cascade explicitly. *)
+    so the .mli surfaces the runtime explicitly. *)
 
 (** {1 State snapshot} *)
 

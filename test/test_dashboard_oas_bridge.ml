@@ -306,12 +306,12 @@ let test_summary_json_contains_aggregate () =
 
 (* --- provider-error counts --- *)
 
-let provider_error_count ~provider ~cascade ~kind ~capacity_scope counts =
+let provider_error_count ~provider ~runtime ~kind ~capacity_scope counts =
   match
     List.find_opt
       (fun (count : DOB.provider_error_count) ->
          String.equal count.provider_id provider
-         && String.equal count.cascade_name cascade
+         && String.equal count.runtime_id runtime
          && String.equal count.kind kind
          && String.equal count.capacity_scope capacity_scope)
       counts
@@ -321,7 +321,7 @@ let provider_error_count ~provider ~cascade ~kind ~capacity_scope counts =
     Alcotest.failf
       "missing provider_error_count %s/%s/%s/%s"
       provider
-      cascade
+      runtime
       kind
       capacity_scope
 ;;
@@ -330,16 +330,16 @@ let test_provider_error_counts_group_and_filter () =
   setup ();
   let rate_limit = P.RateLimit { retry_after = Some 2.0 } in
   let capacity = P.CapacityBackpressure { scope = `Model } in
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"provider_a" rate_limit;
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"provider_a" rate_limit;
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" rate_limit;
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" capacity;
+  DOB.record_provider_error ~runtime_id:"primary" ~provider_id:"provider_a" rate_limit;
+  DOB.record_provider_error ~runtime_id:"primary" ~provider_id:"provider_a" rate_limit;
+  DOB.record_provider_error ~runtime_id:"primary" ~provider_id:"ollama" rate_limit;
+  DOB.record_provider_error ~runtime_id:"primary" ~provider_id:"ollama" capacity;
   let all = DOB.provider_error_counts () in
   Alcotest.(check int) "two groups" 2 (List.length all);
   let rate_limit_count =
     provider_error_count
       ~provider:"runtime"
-      ~cascade:"primary"
+      ~runtime:"primary"
       ~kind:"rate_limit"
       ~capacity_scope:"none"
       all
@@ -348,7 +348,7 @@ let test_provider_error_counts_group_and_filter () =
   let capacity_count =
     provider_error_count
       ~provider:"runtime"
-      ~cascade:"primary"
+      ~runtime:"primary"
       ~kind:"capacity_backpressure"
       ~capacity_scope:"model"
       all
@@ -359,7 +359,7 @@ let test_provider_error_counts_group_and_filter () =
   let filtered_rate_limit =
     provider_error_count
       ~provider:"runtime"
-      ~cascade:"primary"
+      ~runtime:"primary"
       ~kind:"rate_limit"
       ~capacity_scope:"none"
       filtered
@@ -370,7 +370,7 @@ let test_provider_error_counts_group_and_filter () =
 let test_summary_json_contains_provider_error_counts () =
   setup ();
   DOB.record_provider_error
-    ~cascade_name:"primary"
+    ~runtime_id:"primary"
     ~provider_id:"provider_a"
     P.AuthError;
   let json = DOB.summary_json ~provider:"provider_a" ~limit:10 () in
@@ -420,11 +420,11 @@ let test_clear_provider () =
 let test_clear_provider_error_counts () =
   setup ();
   DOB.record_provider_error
-    ~cascade_name:"primary"
+    ~runtime_id:"primary"
     ~provider_id:"provider_a"
     (P.RateLimit { retry_after = None });
   DOB.record_provider_error
-    ~cascade_name:"primary"
+    ~runtime_id:"primary"
     ~provider_id:"ollama"
     (P.ServerError { code = 503; transient = true });
   DOB.clear ~provider:"provider_a" ();

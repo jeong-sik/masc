@@ -387,11 +387,11 @@ export interface KeeperMetricPoint {
   total_tokens: number | null
   wall_tokens_per_second: number | null
   inference_telemetry: InferenceTelemetry | null
-  cascade_name?: string | null
-  cascade_outcome?: string | null
+  runtime_id?: string | null
+  runtime_outcome?: string | null
   runtime_selected_model?: string | null
-  cascade_attempt_count?: number | null
-  cascade_strategy?: string | null
+  runtime_attempt_count?: number | null
+  runtime_strategy?: string | null
   fallback_applied: boolean
   fallback_hops: number
   fallback_from: string | null
@@ -422,7 +422,7 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   // omission caused silent string-fallback narrowing on the wire.
   'turn_livelock_blocked',
   'completion_contract_violation',
-  'cascade_exhausted',
+  'runtime_exhausted',
   'no_tool_capable_provider',
   'provider_runtime_error',
   'tool_required_unsatisfied',
@@ -523,7 +523,7 @@ export interface KeeperTrustExecutionSummary {
   provider_attempt_count?: number | null
   provider_fallback_applied?: boolean | null
   provider_selected_model?: string | null
-  cascade_outcome?: string | null
+  runtime_outcome?: string | null
   sandbox_summary?: string | null
   sandbox_root?: string | null
   mutation_guard_summary?: string | null
@@ -928,9 +928,9 @@ export interface Keeper {
   last_model_used?: string
   last_model_used_label?: string | null
   next_model_hint?: string | null
-  cascade_name?: string | null
-  cascade_ref?: CascadeRef | null
-  cascade_canonical?: string | null
+  runtime_id?: string | null
+  runtime_ref?: RuntimeRef | null
+  runtime_canonical?: string | null
   selected_runtime_canonical?: string | null
   status: string
   presence_keepalive?: boolean
@@ -1214,7 +1214,7 @@ interface KeeperConfigExecution {
   verify: boolean
   selected_runtime_id: string
   selected_runtime_canonical: string
-  cascade_ref?: CascadeRef | null
+  runtime_ref?: RuntimeRef | null
 }
 
 interface KeeperConfigCompaction {
@@ -1231,7 +1231,7 @@ interface KeeperConfigProactive {
   cooldown_sec: number
 }
 
-export interface CascadeRef {
+export interface RuntimeRef {
   group: string
   item: string | null
 }

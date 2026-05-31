@@ -1,4 +1,4 @@
-(** Sum-typed provider-kind resolver for cascade model specs.
+(** Sum-typed provider-kind resolver for runtime model specs.
 
     Resolves a ["provider:model"] spec to a {!Provider_config.provider_kind}
     via the {!Provider_registry}.

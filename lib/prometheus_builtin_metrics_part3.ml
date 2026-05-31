@@ -81,7 +81,7 @@ let register
     `Counter;
   add
     Keeper_metrics.(to_string NoToolProvider)
-    "Total no_tool_capable_provider errors. Labeled by keeper and cascade."
+    "Total no_tool_capable_provider errors. Labeled by keeper and runtime."
     `Counter;
   add
     Keeper_metrics.(to_string ProactiveOutcome)
@@ -90,8 +90,8 @@ let register
     `Counter;
   add
     Keeper_metrics.(to_string OllamaSaturationSkip)
-    "Total keeper turns skipped because the resolved cascade is ollama-only and the \
-     /api/ps probe reported zero available slots. Labeled by keeper and cascade."
+    "Total keeper turns skipped because the resolved runtime is ollama-only and the \
+     /api/ps probe reported zero available slots. Labeled by keeper and runtime."
     `Counter;
   add
     Keeper_metrics.(to_string TaskLoadFailures)
@@ -262,8 +262,8 @@ let register
     "Total provider errors after committed mutating tool calls. Labeled by keeper."
     `Counter;
   add
-    Keeper_metrics.(to_string CascadeSyncFailures)
-    "Total cascade state synchronization failures (pause/resume/auto-pause). Labeled by \
+    Keeper_metrics.(to_string RuntimeSyncFailures)
+    "Total runtime state synchronization failures (pause/resume/auto-pause). Labeled by \
      keeper and site."
     `Counter;
   add
@@ -367,7 +367,7 @@ let register
   add
     metric_anti_rationalization_fallback
     "Total anti-rationalization fallbacks fired (verifier LLM unavailable), labeled by \
-     mode and cascade"
+     mode and runtime"
     `Counter;
   add
     metric_anti_rationalization_excuse_pattern

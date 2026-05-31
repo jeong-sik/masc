@@ -21,7 +21,7 @@
 #     `\b(\d{1,2})[ -]phase(s)?\b` inside comment lines (`(*`/`(**` or
 #     continuation lines of a comment block).
 #   - Range filter [SSOT-3 .. SSOT+5]: out-of-range numbers refer to
-#     sibling FSMs (cascade=6, decision=5, turn-phase=7, etc.) and
+#     sibling FSMs (runtime=6, decision=5, turn-phase=7, etc.) and
 #     are intentionally not flagged.
 #   - Qualifier whitelist: if the line contains `non-`, `fragment`,
 #     `projection`, `subset`, `relevant`, `out of scope`, `models`,
@@ -279,7 +279,7 @@ while IFS= read -r entry; do
     continue
   fi
 
-  # Range filter — sibling FSMs (cascade=6, decision=5, turn=7, etc.)
+  # Range filter — sibling FSMs (runtime=6, decision=5, turn=7, etc.)
   # use the same "N-state" / "N-phase" idiom and are intentionally not
   # the keeper-count drift class.
   range_lo=$((SSOT_COUNT - 3))

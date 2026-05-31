@@ -24,7 +24,7 @@ type record_outcome =
 let default_threshold = 5
 
 (** TTL in seconds after which a disabled provider is automatically
-    re-enabled. Prevents permanent cascade death-spiral when the
+    re-enabled. Prevents permanent runtime death-spiral when the
     underlying issue (network blip, cold start, rate-limit window)
     resolves itself (GitHub #18502). *)
 let disabled_ttl_seconds = 600.0
@@ -114,7 +114,7 @@ let record ?(clock = Time_compat.now) t ~runtime_id ~provider ~reason : record_o
        skip volume (independent of disable transitions). *)
     Prometheus.inc_counter metric_preflight_unhealthy_skip
       ~labels:
-        [ ("runtime_id", runtime_id)
+        [ ("runtime", runtime_id)
         ; ("provider", provider)
         ; ("reason", reason_slug reason)
         ]
@@ -132,7 +132,7 @@ let record ?(clock = Time_compat.now) t ~runtime_id ~provider ~reason : record_o
         StrTbl.replace t.disabled provider (clock (), runtime_id);
         Prometheus.inc_counter metric_provider_disabled
           ~labels:
-            [ ("runtime_id", runtime_id)
+            [ ("runtime", runtime_id)
             ; ("provider", provider)
             ; ("reason", reason_slug reason)
             ]

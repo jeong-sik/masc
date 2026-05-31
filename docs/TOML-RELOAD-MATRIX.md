@@ -33,7 +33,7 @@ The key distinction is:
 | `<base_path>/.masc/config/keeper_runtime.toml` | startup env seeding for `MASC_KEEPER_*` knobs | server bootstrap before `Env_config_keeper` consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
 | `<resolved-config-root>/tool_policy.toml` | keeper tool preset/group policy | server bootstrap via `init_policy_config` | none | `boot_static` | presets are stored in process memory once loaded |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
-| `<resolved-config-root>/cascade.toml` | cascade catalog source | model resolve path in OAS/MASC (rendered in memory) | next resolve / next turn | `request_dynamic` | invalid TOML blocks cascade load; `cascade.json` is retired |
+| `<resolved-config-root>/keeper_runtime.toml` | runtime catalog source | model resolve path in OAS/MASC (rendered in memory) | next resolve / next turn | `request_dynamic` | invalid TOML blocks runtime load; `runtime.json` is retired |
 
 ## Current Behavior by File
 
@@ -80,19 +80,19 @@ Operational meaning:
 - They are applied on the next sweep for running keepers, or on the next
   `keeper_up`/create path for inactive keepers.
 
-### `cascade.toml`
+### `keeper_runtime.toml`
 
 - TOML source resolution/materialization lives in
-  [`Cascade_toml_materializer`](../lib/cascade/cascade_toml_materializer.ml)
+  [`Runtime_toml_materializer`](../lib/runtime/runtime_toml_materializer.ml)
 - Resolved via
-  [`Cascade_runtime.models_of_cascade_name`](../lib/cascade/cascade_runtime.ml)
+  [`Runtime_runtime.models_of_runtime_id`](../lib/runtime/runtime_runtime.ml)
 - The code renders TOML to an in-memory JSON-shaped view and caches by
   source-path mtime
-  ([`cascade_runtime.ml`](../lib/cascade/cascade_runtime.ml))
+  ([`runtime_runtime.ml`](../lib/runtime/runtime_runtime.ml))
 
 Operational meaning:
 
-- If `cascade.toml` exists, it is the authoring SSOT and invalid edits fail
+- If `keeper_runtime.toml` exists, it is the authoring SSOT and invalid edits fail
   closed instead of falling back to stale JSON.
 - Path selection is still tied to cached config-root resolution.
 - Content changes are observed on the next resolve/turn, not by a dedicated

@@ -95,7 +95,7 @@ let test_adaptive_thinking_cognitive () =
       ~current_budget:(Some 4096)
       ~intent:(Some Masc_mcp.Keeper_turn_intent.Cognitive)
   in
-  check (option int) "cognitive intent preserves cascade seed" (Some 4096) result
+  check (option int) "cognitive intent preserves runtime seed" (Some 4096) result
 ;;
 
 let test_adaptive_thinking_cognitive_no_seed () =

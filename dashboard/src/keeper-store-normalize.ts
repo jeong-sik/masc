@@ -21,10 +21,10 @@ import {
 import { normalizeStopCause } from './lib/stop-cause'
 import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
-import type { CascadeRef } from './types'
+import type { RuntimeRef } from './types'
 
-/** Normalize a raw cascade_ref JSON object into a typed CascadeRef. */
-function normalizeCascadeRef(raw: unknown): CascadeRef | null {
+/** Normalize a raw runtime_ref JSON object into a typed RuntimeRef. */
+function normalizeRuntimeRef(raw: unknown): RuntimeRef | null {
   if (!isRecord(raw)) return null
   const group = asString(raw.group)
   if (!group) return null
@@ -339,7 +339,7 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
           provider_fallback_applied:
             asBoolean(executionRaw.provider_fallback_applied) ?? null,
           provider_selected_model: asString(executionRaw.provider_selected_model) ?? null,
-          cascade_outcome: asString(executionRaw.cascade_outcome) ?? null,
+          runtime_outcome: asString(executionRaw.runtime_outcome) ?? null,
           sandbox_summary: asString(executionRaw.sandbox_summary) ?? null,
           sandbox_root: asString(executionRaw.sandbox_root) ?? null,
           mutation_guard_summary:
@@ -460,8 +460,8 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         ttfrc_ms: asNumber(rawTel.ttfrc_ms) ?? null,
         prefill_ms: asNumber(rawTel.prefill_ms) ?? null,
       } : null
-      const cascadeObj = isRecord(item.cascade) ? item.cascade : null
-      const fallbackEvents = cascadeObj && Array.isArray(cascadeObj.fallback_events) ? cascadeObj.fallback_events : []
+      const runtimeObj = isRecord(item.runtime) ? item.runtime : null
+      const fallbackEvents = runtimeObj && Array.isArray(runtimeObj.fallback_events) ? runtimeObj.fallback_events : []
       const firstFallback = fallbackEvents.length > 0 && isRecord(fallbackEvents[0]) ? fallbackEvents[0] : null
       return {
         ts,
@@ -488,13 +488,13 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         total_tokens: totalTokens,
         wall_tokens_per_second: wallTokensPerSecond,
         inference_telemetry,
-        cascade_name: cascadeObj ? (asString(cascadeObj.cascade_name) ?? asString(cascadeObj.name) ?? null) : null,
-        cascade_outcome: cascadeObj ? (asString(cascadeObj.outcome) ?? null) : null,
+        runtime_id: runtimeObj ? (asString(runtimeObj.runtime_id) ?? asString(runtimeObj.name) ?? null) : null,
+        runtime_outcome: runtimeObj ? (asString(runtimeObj.outcome) ?? null) : null,
         runtime_selected_model: null,
-        cascade_attempt_count: cascadeObj ? (asNumber(cascadeObj.attempt_count) ?? null) : null,
-        cascade_strategy: cascadeObj && typeof cascadeObj.strategy === 'string' ? cascadeObj.strategy : null,
-        fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
-        fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,
+        runtime_attempt_count: runtimeObj ? (asNumber(runtimeObj.attempt_count) ?? null) : null,
+        runtime_strategy: runtimeObj && typeof runtimeObj.strategy === 'string' ? runtimeObj.strategy : null,
+        fallback_applied: runtimeObj ? runtimeObj.fallback_applied === true : false,
+        fallback_hops: runtimeObj ? (asNumber(runtimeObj.fallback_hops) ?? 0) : 0,
         fallback_from: null,
         fallback_to: null,
         fallback_reason: firstFallback && typeof firstFallback.reason === 'string' ? firstFallback.reason : null,
@@ -647,10 +647,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_model_used: undefined,
         last_model_used_label: null,
         next_model_hint: null,
-        cascade_name: asString(row.cascade_name) ?? null,
-        cascade_ref: normalizeCascadeRef(row.cascade_ref),
-        cascade_canonical: asString(row.cascade_canonical) ?? asString(row.selected_cascade_canonical) ?? null,
-        selected_cascade_canonical: asString(row.selected_cascade_canonical) ?? null,
+        runtime_id: asString(row.runtime_id) ?? null,
+        runtime_ref: normalizeRuntimeRef(row.runtime_ref),
+        runtime_canonical: asString(row.runtime_canonical) ?? asString(row.selected_runtime_canonical) ?? null,
+        selected_runtime_canonical: asString(row.selected_runtime_canonical) ?? null,
         status: normalizeKeeperAgentStatus(statusRaw),
         presence_keepalive:
           typeof row.presence_keepalive === 'boolean' ? row.presence_keepalive : undefined,

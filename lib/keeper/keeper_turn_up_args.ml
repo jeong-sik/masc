@@ -128,7 +128,19 @@ let parse_runtime_id_field_opt args key =
             Error (Printf.sprintf "invalid %s '%s': %s" key raw detail)
 
 let parse_runtime_id_opt args =
-  parse_runtime_id_field_opt args "runtime_id"
+  match
+    parse_runtime_id_field_opt args "runtime_id",
+    parse_runtime_id_field_opt args "runtime_id"
+  with
+  | Error msg, _ | _, Error msg -> Error msg
+  | Ok (Some runtime_id), Ok (Some legacy_runtime_id)
+    when runtime_id <> legacy_runtime_id ->
+      Error
+        (Printf.sprintf
+           "runtime_id (%s) and legacy runtime_id (%s) must match"
+           runtime_id legacy_runtime_id)
+  | Ok (Some runtime_id), _ -> Ok (Some runtime_id)
+  | Ok None, Ok legacy_runtime_id_opt -> Ok legacy_runtime_id_opt
 
 let resolve_tool_name_list ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback

@@ -27,7 +27,7 @@
 
 Phase 5.1–5.6 erased the closed `provider_id` variant from dispatch sites
 and removed `match provider_cfg.kind` from the keeper layer. The §1
-inventory in the parent Phase-5 RFC focused on cascade/dispatch leakage
+inventory in the parent Phase-5 RFC focused on runtime/dispatch leakage
 and did not cover three modules that grew product-specific by accretion:
 
 | File | LoC | `agent-code` hits | Other product hits | Shape |
@@ -102,7 +102,7 @@ Phased so each PR keeps `main` green.
   `file,line,product_name,leak_class,target_replacement`.
   `leak_class` is one of: `filename`, `function_name`, `tom_key_literal`,
   `header_value_literal`, `path_template`, `branch_condition`.
-- Extend `config/cascade.toml` schema:
+- Extend `config/keeper_runtime.toml` schema:
   - `[providers.<id>.mcp_client_config]` with fields `config_path_template`,
     `config_format` (toml | json | yaml), `mcp_table_key`,
     `header_keys_to_sync = [...]`.
@@ -111,7 +111,7 @@ Phased so each PR keeps `main` green.
     `env_vars_to_check = [...]`.
 - Parser + R-rule validator coverage for both sub-tables (RFC-0058 §G4).
 - Existing Agent-Code behaviour ships as a `[providers.cli-tool-a.*]` entry
-  in `config/cascade.toml`. Byte-equivalent migration; no runtime
+  in `config/keeper_runtime.toml`. Byte-equivalent migration; no runtime
   behaviour change.
 
 ### Phase 5.7.2 — Generic MCP config doctor
@@ -184,7 +184,7 @@ For each Phase 5.7.N PR:
   Sequence so that the new API ships before the old API removal, with
   one intermediate PR exposing both (one deprecated). Avoids
   breaking downstream callers in a single PR.
-- **TOML schema drift**: extending `cascade.toml` with two new
+- **TOML schema drift**: extending `keeper_runtime.toml` with two new
   sub-tables grows the contract. Mitigation: the new sub-tables are
   optional. Providers without them retain "no doctor capability"
   behaviour rather than crashing.

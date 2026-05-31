@@ -95,18 +95,18 @@ function CommsPlane({ branch, keepers }) {
 }
 
 // ═════════════════════════════════════════════════════════════
-// OBSERVE PLANE — O1 Cascade · O2 Audit · O3 Safe Auto · O4 Cost · O5 Heuristic
+// OBSERVE PLANE — O1 Runtime · O2 Audit · O3 Safe Auto · O4 Cost · O5 Heuristic
 // ═════════════════════════════════════════════════════════════
 function ObservePlane({ branch, keepers }) {
   return (
     <PlaneShell
-      title="Observability" subtitle="Cascade · Audit · Safe Autonomy · Cost · Heuristic"
+      title="Observability" subtitle="Runtime · Audit · Safe Autonomy · Cost · Heuristic"
       popoutId="plane-observe"
       branch={branch} keepers={keepers}
       tabs={[
-        { id:"cs-list", label:"Cascade · List",       render: () => <window.CascadeList/> },
-        { id:"cs-deep", label:"Cascade · Deep dive",  render: () => <window.CascadeDeepDive/> },
-        { id:"cs-cmp",  label:"Cascade · Compare",    render: () => <window.CascadeCompare/> },
+        { id:"cs-list", label:"Runtime · List",       render: () => <window.RuntimeList/> },
+        { id:"cs-deep", label:"Runtime · Deep dive",  render: () => <window.RuntimeDeepDive/> },
+        { id:"cs-cmp",  label:"Runtime · Compare",    render: () => <window.RuntimeCompare/> },
         { id:"au-led",  label:"Audit · Ledger",       render: () => <window.AuditLedger/> },
         { id:"au-act",  label:"Audit · By actor",     render: () => <window.AuditByActor/> },
         { id:"au-sum",  label:"Audit · Summary",      render: () => <window.AuditSummary/> },
@@ -203,7 +203,7 @@ function IdePlane({ branch, keepers }) {
         <button type="button"
                 className="ide-v3-drawer-hint"
                 onClick={openTerminal}
-                title="open shared bottom drawer (Terminal/Output/Cascade/Audit/Cost)">
+                title="open shared bottom drawer (Terminal/Output/Runtime/Audit/Cost)">
           ⌃` drawer
         </button>
       </div>

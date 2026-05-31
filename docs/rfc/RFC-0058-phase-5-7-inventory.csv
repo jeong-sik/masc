@@ -123,7 +123,7 @@ lib/auth_doctor.ml,494,agent-code,user_msg_string,"               ""Agent-Code M
 lib/auth_doctor.ml,497,agent-code,user_msg_string,"               ""Agent-Code MCP bearer env var MASC_MCP_TOKEN is set, but it does not resolve to a live credential in this base path."""
 lib/auth_doctor.ml,507,agent-code,module_reference,         @ Codex_mcp_config_doctor.warnings codex_mcp.config)
 lib/auth_doctor.ml,527,agent-code,symbol_reference,          && (match codex_mcp_client with
-lib/auth_doctor.ml,531,agent-code,header_or_env_literal,"           ""Use dashboard-dev or another admin bearer for POST /api/v1/cascade/config/raw; the agent-code-mcp-client worker bearer cannot satisfy"
+lib/auth_doctor.ml,531,agent-code,header_or_env_literal,"           ""Use dashboard-dev or another admin bearer for POST /api/v1/runtime/config/raw; the agent-code-mcp-client worker bearer cannot satisfy"
 lib/auth_doctor.ml,547,agent-code,symbol_reference,"          && not (String.equal codex_mcp.token_status ""live"") then"
 lib/auth_doctor.ml,549,agent-code,header_or_env_literal,"           ""For Agent-Code MCP, run `masc-mcp login --agent agent-code-mcp-client --role worker --shell` and export MASC_MCP_TOKEN; do not run `agent-code "
 lib/auth_doctor.ml,552,agent-code,user_msg_string,"      Some ""For Agent-Code MCP pipeline drift, inspect the codex_mcp.config.stages section from `masc-mcp doctor auth --json`."";"

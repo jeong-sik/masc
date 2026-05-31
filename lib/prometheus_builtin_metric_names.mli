@@ -95,10 +95,10 @@ include module type of Prometheus_policy_metric_names
     set in meta files indicates a sweep or meta-write regression. *)
 
 (** Total keepers whose auto-resume was blocked in
-    [Keeper_supervisor.sweep_and_recover] because the cascade health probe
+    [Keeper_supervisor.sweep_and_recover] because the runtime health probe
     reported unhealthy (failure ratio >= threshold).  Labeled by [keeper]
-    and [cascade].  A positive rate means the health gate is protecting
-    the fleet from resuming into a still-failing cascade. *)
+    and [runtime].  A positive rate means the health gate is protecting
+    the fleet from resuming into a still-failing runtime. *)
 
 (** RFC-0020 Rule 2 evidence — incremented every time
     [run_smart_heartbeat_gate] overrides a [Skip_busy] / [Skip_idle]
@@ -215,12 +215,12 @@ include module type of Prometheus_identity_metric_names
 include module type of Prometheus_transport_metric_names
 
 (** [masc_keeper_oas_run_timeout_total] counter incremented in the
-    cascade FSM each time an [Agent.run] / [run_stream] returns
+    runtime FSM each time an [Agent.run] / [run_stream] returns
     [Llm_provider.Retry.Timeout]. The [source] label is typed provider
     timeout phase when OAS exposes one, otherwise [provider]. Free-form
     timeout messages are not reparsed into [max_execution_time] labels.
 
-    Labels: cascade, provider, source. *)
+    Labels: runtime, provider, source. *)
 (* Centralized metric constants for inline string replacement. *)
 
 (** #13xxx: counter incremented every time the keeper dispatch layer

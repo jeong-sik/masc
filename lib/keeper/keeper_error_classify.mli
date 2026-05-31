@@ -69,12 +69,12 @@ val extract_input_required
 val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the rotation-cap fast-fail should fire: the error is a
-    [required_tool_contract_violation], at least one cascade rotation has
-    already been attempted ([List.length attempted_runtime_ids >= 2]; the list is
-    seeded with the initial cascade name so length=1 means no rotations yet),
-    and no untried fallback cascade remains. *)
+    [required_tool_contract_violation], at least one runtime rotation has
+    already been attempted ([List.length attempted_runtimes >= 2]; the list is
+    seeded with the initial runtime name so length=1 means no rotations yet),
+    and no untried fallback runtime remains. *)
 val should_cap_rotation_for_contract_violation :
-  attempted_runtime_ids:string list ->
+  attempted_runtimes:string list ->
   fallback_not_yet_tried:bool ->
   Agent_sdk.Error.sdk_error ->
   bool
@@ -89,7 +89,7 @@ type degraded_retry_reason =
   | Admission_queue_timeout
   | Provider_timeout
   | Turn_timeout
-  | Cascade_candidates_filtered
+  | Runtime_candidates_filtered
   | Required_tool_contract_violation
   | Runtime_exhausted
   | Capacity_backpressure
@@ -100,20 +100,20 @@ type degraded_retry_reason =
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 
 val normalized_runtime_id : catalog_names:string list -> string -> string
-(** Normalize a cascade name for rotation matching.
-    All cascade names are plain provider:model strings. *)
+(** Normalize a runtime name for rotation matching.
+    All runtime names are plain provider:model strings. *)
 
 type degraded_retry =
-  { next_runtime_id : string
+  { next_runtime : string
   ; fallback_reason : degraded_retry_reason
   }
 
-(** Opportunistically fail open to a broader cascade when the current
-    effective cascade is temporarily unavailable (for example cooldown /
+(** Opportunistically fail open to a broader runtime when the current
+    effective runtime is temporarily unavailable (for example cooldown /
     phase-buffer bootstrap fallback). *)
 val fallback_runtime_for_unavailable_profile :
-  base_runtime_id:string ->
-  effective_runtime_id:string ->
+  base_runtime:string ->
+  effective_runtime:string ->
   string option
 
 (** Classifies an SDK error into a fallback reason label when the runtime
@@ -131,14 +131,14 @@ val fallback_runtime_for_unavailable_profile :
     Exposed for unit tests; production callers go through
     [degraded_retry_after_recoverable_error] or
     [degraded_rotation_after_recoverable_error]. *)
-val recoverable_cascade_failure_reason :
+val recoverable_runtime_failure_reason :
   Agent_sdk.Error.sdk_error -> degraded_retry_reason option
 
 (** Returns the one-shot degraded retry lane for recoverable whole-runtime
     failures. Required-tool turns stay terminal, and already-degraded lanes
     do not broaden further. *)
 val degraded_retry_after_recoverable_error :
-  effective_runtime_id:string ->
+  effective_runtime:string ->
   tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
@@ -151,16 +151,16 @@ val degraded_retry_after_recoverable_error :
 
     [fallback_hint], when provided, is prepended to the candidate list so
     that single-provider profiles can declare an immediate escalation
-    target via runtime config. The hint is normalized and deduplicated like
+    target via [keeper_runtime.toml]. The hint is normalized and deduplicated like
     any other candidate; if it duplicates the effective runtime or has
     already been attempted, the next legal candidate is returned.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?fallback_hint:string ->
-  base_runtime_id:string ->
-  effective_runtime_id:string ->
+  base_runtime:string ->
+  effective_runtime:string ->
   tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
-  attempted_runtime_ids:string list ->
+  attempted_runtimes:string list ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
 
@@ -185,7 +185,7 @@ val summarize_post_commit_failure :
 
 val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
 (** True when [err] is a provider-timeout class failure (deadline,
-    cascade timeout, budget retry). Live caller:
+    runtime timeout, budget retry). Live caller:
     [keeper_unified_turn.ml] degraded-retry classification. *)
 
 val is_receipt_lost_error : Agent_sdk.Error.sdk_error -> bool

@@ -17,7 +17,7 @@
 
 MASC is a **single-pane-of-glass cockpit** where a human operator (or agent) can watch multiple AI keepers work in parallel across codebases, tasks, goals, and providers. It fuses two modes into one view:
 
-- **Dashboard mode** — fleet ticker, KPI strip, lifeline heartbeat, swimlane timeline, ops rail, and a multi-tab "deck" (Board / Tasks / Goals / Verified / Providers / Sandbox / Cascade).
+- **Dashboard mode** — fleet ticker, KPI strip, lifeline heartbeat, swimlane timeline, ops rail, and a multi-tab "deck" (Board / Tasks / Goals / Verified / Providers / Sandbox / Runtime).
 - **Code mode** — a 4-column IDE layer (tree · editor · review · activity) with stacked **observational overlays** (time · parallel · tools · approve · notes) that can explode into a 3D z-axis view.
 
 The two modes can cohabit in **split mode**, sharing the topbar/ticker/KPI chrome.
@@ -34,7 +34,7 @@ Keeper attribution runs on a **12-slot palette** (infrastructure capability — 
 | **qa-king** | QA | Red `#c46a5a` |
 | **rama** (ramarama) | Researcher | Purple `#8a6aa0` |
 
-There are also supporting roles (scholar, janitor, issue_king, taskmaster, verifier, executor, velvet-hammer, ollama-local) and providers (Provider-A, Provider-B, Provider-D, Provider-E) that appear in the cascade chain and provider matrix. Unnamed keepers hash onto the remaining slots via `kSlot(id)` (FNV-1a mod 12).
+There are also supporting roles (scholar, janitor, issue_king, taskmaster, verifier, executor, velvet-hammer, ollama-local) and providers (Provider-A, Provider-B, Provider-D, Provider-E) that appear in the runtime chain and provider matrix. Unnamed keepers hash onto the remaining slots via `kSlot(id)` (FNV-1a mod 12).
 
 ### Goals seen in the system (Korean + English mixed)
 
@@ -72,7 +72,7 @@ MASC is **bilingual Korean/English** under the hood — titles, goals and some c
 - **Timestamps are relative-first, absolute on hover.** `3m ago` · `2026-04-24 16:31:27Z`.
 - **Bilingual on purpose.** Korean appears in goal titles, feature names, and some log lines; chrome labels stay English. Don't "translate everything."
 - **No emoji. No exclamation marks.** The only affordance for attention is color (brass glow, err pulse) — never punctuation.
-- **Second-person is rare; "you" barely appears.** The voice is third-person factual: "nick0cave claimed t-abc12" · "cascade hit at step 3."
+- **Second-person is rare; "you" barely appears.** The voice is third-person factual: "nick0cave claimed t-abc12" · "runtime hit at step 3."
 - **No marketing words.** Never "delightful," "powerful," "beautiful." Say what happened: `STALLED 12m` · `3 FAIL / 47 PASS` · `TPS 1.24s (+0.1)`.
 - **Status language is terminal-flavored.** `OK · FAIL · NOOP · ACTIVE · BLOCKED · STALLED · PENDING · DONE · RUNNING · IDLE`.
 - **Keeper names are always lowercase mono.** `nick0cave`, never `Nick0Cave`.

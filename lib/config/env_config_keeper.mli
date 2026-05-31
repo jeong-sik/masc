@@ -184,9 +184,9 @@ module KeeperKeepalive : sig
 
   val body_timeout_sec_override : float option
   (** Total HTTP body-consumption deadline for one OAS streaming call.
-      [None] (env unset) leaves the cascade builder wire untouched.
+      [None] (env unset) leaves the runtime builder wire untouched.
       [Some s] forwards to [Builder.with_body_timeout]; on expiry
-      [Retry.Timeout] surfaces at the attempt boundary so cascade falls
+      [Retry.Timeout] surfaces at the attempt boundary so runtime falls
       forward to the next provider. Complements {!stream_idle_timeout_sec}
       (inter-line silence cap) and [max_execution_time_s] (turn-total cap).
 
@@ -261,25 +261,25 @@ module KeeperTelemetry : sig
   val payload_telemetry_enabled : unit -> bool
 end
 
-(** {1 Cascade Saturation Signal (RFC-0153 Phase A.2)} *)
+(** {1 Runtime Saturation Signal (RFC-0153 Phase A.2)} *)
 
-module CascadeSaturationSignal : sig
+module RuntimeSaturationSignal : sig
   val enabled : unit -> bool
   (** [MASC_CASCADE_SATURATION_SIGNAL_ENABLED] flag. Default false.
 
-      When true, {!Cascade_attempt_fsm} emits a Prometheus counter
-      ([masc_keeper_cascade_saturation_signal_total]) with a typed
+      When true, {!Runtime_attempt_fsm} emits a Prometheus counter
+      ([masc_keeper_runtime_saturation_signal_total]) with a typed
       [kind] label whenever a saturation event matching
-      {!Cascade_saturation_signal.t} is observed. Used to feed
+      {!Runtime_saturation_signal.t} is observed. Used to feed
       Phase B (tier admission semaphore) and Phase C (adaptive
       throttling) without altering any existing wire format,
       string label, or control-flow path. *)
 end
 
 
-(** {1 Cascade runtime overrides} *)
+(** {1 Runtime runtime overrides} *)
 
-module KeeperCascade : sig
+module KeeperRuntimeProviderFilter : sig
   val provider_allowlist : unit -> string list option
 end
 

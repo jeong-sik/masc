@@ -3,14 +3,14 @@
     Re-exports {!Activity_graph_types}, {!Activity_graph_registry},
     and {!Activity_graph_reducer} so callers can reach the full
     type / registry / reducer surface via [Activity_graph.X].
-    Type identity is preserved end-to-end across the cascade
+    Type identity is preserved end-to-end across the runtime
     via the [include module type of struct include M end] form
     (cycle 187 [coord_utils.mli] rationale): the [event],
     [entity_ref], [client], and [agent_span] types reachable
     via {!Activity_graph} are the same nominal types as those
     reachable via the source modules.
 
-    On top of the cascade, six locally-defined helpers
+    On top of the runtime, six locally-defined helpers
     persist event JSONL files under [Coord_utils.masc_dir]
     and project the log into JSON views consumed by the SSE
     activity stream and the dashboard graph endpoint:

@@ -19,14 +19,14 @@ val rejection_reason_label : rejection_reason -> string
 
 val on_acquire :
   keeper_name:string ->
-  cascade_name:string ->
+  runtime_id:string ->
   wait_ms:int ->
   unit
 (** Called after successful acquire. Increments inflight gauge,
     records wait time histogram. *)
 
 val on_release :
-  keeper_name:string -> cascade_name:string -> unit
+  keeper_name:string -> runtime_id:string -> unit
 (** Called on release. Decrements inflight gauge. *)
 
 val on_reject : surface:rejection_surface -> reason:rejection_reason -> unit

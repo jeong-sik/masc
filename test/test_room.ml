@@ -1907,7 +1907,7 @@ let () =
         "audit orphan awaiting verification tasks"
         `Quick
         test_audit_orphan_awaiting_verification_tasks;
-      Alcotest.test_case "cleanup zombies cascade" `Quick test_cleanup_zombies_releases_tasks;
+      Alcotest.test_case "cleanup zombies runtime" `Quick test_cleanup_zombies_releases_tasks;
     ];
 
     (* === Lifecycle Bug Fix Tests (#1655) === *)

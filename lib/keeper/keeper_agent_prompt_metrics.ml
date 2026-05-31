@@ -17,7 +17,7 @@ let adaptive_thinking_budget
         (* Mechanical turns do not benefit from structured thinking. *)
         Some 0
     | Some Keeper_turn_intent.Cognitive ->
-        (* Cognitive turns use the full cascade seed budget. *)
+        (* Cognitive turns use the full runtime seed budget. *)
         current_budget
     | None ->
         (* 1) Structured tool errors in last tools -> High thinking *)

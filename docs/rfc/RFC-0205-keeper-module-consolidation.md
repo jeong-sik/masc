@@ -107,7 +107,7 @@ zero or near-zero own type definitions — pure re-export:
 |------|-------------------|-----------|--------|
 | `keeper_types.mli` | 16+ | 6 | Delete re-exports; keep own types in-place or move to owner |
 | `registry_types.mli` | 40+ | ~7 | Same |
-| `registry_types_cascade.mli` | ~17 | ~0 | Delete entirely |
+| `registry_types_runtime.mli` | ~17 | ~0 | Delete entirely |
 | `registry_types_decision.mli` | ~8 | ~0 | Delete entirely |
 | `registry_types_turn_phase.mli` | ~8 | ~0 | Delete entirely |
 | `dashboard_goals_types.mli` | — | — | Same pattern (PR #19274) |
@@ -259,7 +259,7 @@ migration. No hidden include chains. Grep reveals true ownership.
 ## 7. Open Questions
 
 1. ** keeper_registry_types_*.ml split** — The 6-file split was intentional
-   (separate concerns: cascade, decision, turn_phase). Should we merge all
+   (separate concerns: runtime, decision, turn_phase). Should we merge all
    6 back into one `keeper_registry_types.ml`, or keep 2-3?
 
 2. **`type t` convention** — 73 modules use `type t`. Should we enforce

@@ -9,8 +9,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-module KCP = Keeper_runtime_profile
-
 let resolve_unified_max_tokens_fallback
       ~(meta_name : string)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
@@ -27,7 +25,7 @@ let resolve_unified_max_tokens_fallback
 let build_runtime_execution
       ~(meta : keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
-      ~(cascade_name : string)
+      ~(runtime_id : string)
   : ( Keeper_turn_runtime_budget.runtime_execution
     , Agent_sdk.Error.sdk_error )
     result
@@ -55,12 +53,12 @@ let build_runtime_execution
        in
        let temperature =
          Runtime_inference.resolve_temperature
-           ~cascade_name
+           ~runtime_id
            ~fallback:Keeper_config.keeper_unified_temperature
        in
        let raw_max_tokens =
          Runtime_inference.resolve_max_tokens
-           ~cascade_name
+           ~runtime_id
            ~fallback:
              (resolve_unified_max_tokens_fallback
                 ~meta_name:meta.name
@@ -71,16 +69,16 @@ let build_runtime_execution
        in
        (match
           Runtime_inference.validate_max_tokens_within_ceiling
-            ~cascade_name
+            ~runtime_id
             ~provider_ceiling:max_output_ceiling
             raw_max_tokens
         with
         | Error err ->
           Error
-            (Keeper_meta_contract.sdk_error_of_masc_internal_error err)
+            (Keeper_internal_error.sdk_error_of_masc_internal_error err)
         | Ok max_tokens ->
           Ok
-            { Keeper_turn_runtime_budget.cascade_name
+            { Keeper_turn_runtime_budget.runtime_id
             ; max_context_resolution
             ; max_context
             ; temperature

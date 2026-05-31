@@ -18,17 +18,12 @@ open Keeper_types_profile
     [Keeper_registry.packed_turn_phase] etc. unchanged. *)
 include module type of Keeper_registry_types
 
-(** [validate_turn_phase_transition] and [validate_runtime_transition]
-    stay in Keeper_registry because their implementations depend on
-    [Keeper_fsm_guard_runtime], not a pure type-level dependency. *)
+(** [validate_turn_phase_transition] stays in Keeper_registry because its
+    implementation depends on [Keeper_fsm_guard_runtime], not a pure type-level
+    dependency. *)
 val validate_turn_phase_transition
   :  from:packed_turn_phase
   -> to_:packed_turn_phase
-  -> unit
-
-val validate_runtime_transition
-  :  from:packed_runtime_state
-  -> to_:packed_runtime_state
   -> unit
 
 
@@ -118,15 +113,14 @@ val record_turn_progress :
     The Agent SDK [run_loop] iterates N SDK turns inside a single MASC
     keeper-turn window. Each SDK turn fires [before_turn_params] which
     leads to [prepare_agent_setup] writing
-    [Runtime_selecting]/[Decision_tool_policy_selected]/[Turn_prompting].
+    [Decision_tool_policy_selected]/[Turn_prompting].
     Without this boundary signal, the second-and-later SDK turn writes
     transition from the previous SDK turn's terminal phase
-    ([Turn_finalizing] after [Runtime_done]/[Runtime_exhausted]), which
-    [validate_turn_phase_transition] rejects with
+    ([Turn_finalizing]), which [validate_turn_phase_transition] rejects with
     [Turn_phase_transition_violation].
 
     This function resets the in-turn FSM fields ([turn_phase],
-    [runtime_state], [decision_stage]) on the existing observation, the
+    [decision_stage]) on the existing observation, the
     same way [mark_turn_started] bypasses the validator with a fresh
     install. [turn_id], [started_at], [selected_model], [measurement],
     [measurement_bind_count], and progress timestamp are preserved across
@@ -150,37 +144,17 @@ val mark_turn_measurement : base_path:string -> string -> unit
 val set_turn_decision_stage :
   base_path:string -> string -> decision_stage_active -> unit
 
-(** Advance the live turn's projected cascade state. No-op if idle.
-    Sets [turn_phase] to [Turn_executing] for [Runtime_trying] and to
-    [Turn_finalizing] for terminal cascade states. *)
-val set_turn_runtime_state :
-  base_path:string -> string -> packed_runtime_state -> unit
-
-(** Mark runtime exhaustion on the live turn.
-
-    When provider selection fails before the tool-disclosure hook runs, the
-    live runtime axis can still be [Runtime_idle]. This helper materializes the
-    spec-valid pre-terminal path ([idle -> selecting -> trying -> exhausted])
-    instead of allowing callers to jump directly to [Runtime_exhausted]. No-op
-    when no turn is active. *)
+(** Mark runtime exhaustion on the live turn. *)
 val mark_turn_runtime_exhausted : base_path:string -> string -> unit
 
-(** Mark cascade success on the live turn.
-
-    When provider execution returns before the tool-disclosure hook advances the
-    registry projection, the live runtime axis can still be [Runtime_idle]. This
-    helper materializes the spec-valid pre-terminal path ([idle -> selecting ->
-    trying -> done]) instead of allowing callers to jump directly to
-    [Runtime_done]. No-op when no turn is active. *)
+(** Mark runtime success on the live turn. *)
 val mark_turn_runtime_done : base_path:string -> string -> unit
 
 (** Mark that the live turn has entered a provider attempt.
 
     This materializes the registry-side projection that corresponds to
-    [Keeper_turn_fsm.Streaming]: [Runtime_idle] advances through
-    [Runtime_selecting] into [Runtime_trying], and [turn_phase] follows to
-    [Turn_executing]. No-op when no turn is active or the cascade is already
-    trying/terminal. *)
+    [Keeper_turn_fsm.Streaming]: [turn_phase] advances to [Turn_executing].
+    No-op when no turn is active. *)
 val mark_turn_provider_attempt_started : base_path:string -> string -> unit
 
 (** Update the live turn's phase directly. No-op if idle. *)
@@ -209,7 +183,7 @@ val set_turn_selected_model :
 
 (** Reset a live turn into the post-compaction retry posture used by
     overflow recovery. Preserves the bound measurement, but clears the
-    previous cascade attempt and selected model so the next retry starts
+    previous runtime attempt and selected model so the next retry starts
     from [Prompting + Guard_ok + Runtime_idle]. *)
 val prepare_turn_retry_after_compaction :
   base_path:string -> string -> unit

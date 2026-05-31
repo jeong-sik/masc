@@ -24,10 +24,10 @@ let keeper_trust_json ?(include_receipt = false)
     | Some receipt -> Option.value ~default:`Null (Json_util.assoc_member_opt "approval" receipt)
     | None -> `Assoc [ ("profile", `Null); ("derived", `Bool false) ]
   in
-  let cascade_json =
+  let runtime_json =
     match latest_receipt with
     | Some receipt -> (
-        match Json_util.assoc_member_opt "cascade" receipt with
+        match Json_util.assoc_member_opt "runtime" receipt with
         | Some json -> json
         | None -> `Null)
     | None ->
@@ -97,7 +97,7 @@ let keeper_trust_json ?(include_receipt = false)
       ("unexpected_tool_count", `Int (List.length unexpected_tools));
       ("sandbox", sandbox_json);
       ("approval", approval_json);
-      ("cascade", cascade_json);
+      ("runtime", runtime_json);
       ("disposition", Option.value ~default:`Null (Json_util.assoc_member_opt "disposition" runtime_trust));
       ("disposition_reason", Option.value ~default:`Null (Json_util.assoc_member_opt "disposition_reason" runtime_trust));
       ("needs_attention", Option.value ~default:`Null (Json_util.assoc_member_opt "needs_attention" runtime_trust));

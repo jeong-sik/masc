@@ -33,7 +33,7 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 | 12 | lib/keeper/keeper_types_profile.ml | 1,937 | Move into keeper sub-lib |
 | 13 | lib/keeper/keeper_heartbeat_loop.ml | 1,851 | Move into keeper sub-lib |
 | 14 | lib/keeper/keeper_unified_metrics.ml | 1,781 | Move into keeper sub-lib |
-| 15 | lib/cascade/cascade_transport.ml | 1,772 | Extract lib/cascade/ sub-lib |
+| 15 | lib/runtime/runtime_transport.ml | 1,772 | Extract lib/runtime/ sub-lib |
 | 16 | lib/keeper/keeper_run_tools.ml | 1,725 | Move into keeper sub-lib |
 | 17 | lib/operator/operator_control_snapshot.ml | 1,714 | Extract lib/operator/ sub-lib |
 | 18 | lib/tool_keeper.ml | 1,696 | Split into sub-lib |
@@ -63,7 +63,7 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 - [ ] lib/keeper/ (500 files) → masc_mcp.keeper sub-lib
 - [ ] lib/server/ (142 files) → masc_mcp.server sub-lib
 - [ ] lib/dashboard/ (104 files) → masc_mcp.dashboard sub-lib
-- [ ] lib/cascade/ (83 files) → masc_mcp.cascade sub-lib
+- [ ] lib/runtime/ (83 files) → masc_mcp.runtime sub-lib
 
 ### Phase 3: Remaining directories
 - [ ] lib/operator/ (18 files) → sub-lib

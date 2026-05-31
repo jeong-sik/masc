@@ -501,35 +501,31 @@ let handle_keeper_get_subroutes state req request reqd =
           ~recovery_floor_count
           ()
       in
-      let cascade_fsm_mermaid =
+      let runtime_fsm_mermaid =
         match meta with
         | Ok (Some m) ->
-          let routing =
-            Keeper_cascade_routing.select_cascade
-              ~base_cascade:(Keeper_meta_contract.runtime_id_of_meta m) ~phase:current
-          in
           let models = [ "candidate" ] in
           let provider_health = [] in
           (* Slot occupancy from the local runtime pool. The runtime FSM
              shares these slots across all keepers, so rendering the
              fleet-global (used, capacity) is the honest value — a
-             per-cascade split would claim an isolation the runtime does
+             per-runtime split would claim an isolation the runtime does
              not actually provide. *)
           let slot_state =
             let used = Local_runtime_pool.allocated_slots () in
             let max = Local_runtime_pool.configured_capacity () in
             if max > 0 then Some (used, max) else None
           in
-          Keeper_decision_audit.cascade_fsm_to_mermaid
+          Keeper_decision_audit.runtime_fsm_to_mermaid
             ~provider_health
             ?slot_state
-            ~effective_cascade_reason:routing.reason
+            ~effective_runtime_reason:"runtime"
             ~models ~last_provider_result:None ()
         | _ ->
-          Keeper_decision_audit.cascade_fsm_to_mermaid
+          Keeper_decision_audit.runtime_fsm_to_mermaid
             ~models:[] ~last_provider_result:None ()
       in
-      let cascade_models = [] in
+      let runtime_models = [] in
       let last_provider = `Null in
       (* Memory tier usage: join kind_caps (policy) with kind_counts (bank
          summary). Each kind reports used / cap so the dashboard tier
@@ -597,13 +593,13 @@ let handle_keeper_get_subroutes state req request reqd =
         "current_phase", `String phase_str;
         "mermaid", `String mermaid;
         "decision_pipeline_mermaid", `String decision_pipeline_mermaid;
-        "cascade_fsm_mermaid", `String cascade_fsm_mermaid;
+        "runtime_fsm_mermaid", `String runtime_fsm_mermaid;
         "compaction_submachine_mermaid", compaction_submachine_mermaid;
         "thompson_alpha", `Float stats.alpha;
         "thompson_beta", `Float stats.beta;
         "tool_count", `Int tool_count;
         "recovery_floor_count", `Int recovery_floor_count;
-        "cascade_models", `List (List.map (fun s -> `String s) cascade_models);
+        "runtime_models", `List (List.map (fun s -> `String s) runtime_models);
         "last_provider_result", last_provider;
         "memory_kind_usage", memory_kind_usage;
         "memory_kind_usage_error_class", memory_kind_usage_error_class_json;

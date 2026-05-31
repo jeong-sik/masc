@@ -525,13 +525,13 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
-  it('preserves cascade lane evidence while redacting model/provider identity', () => {
+  it('preserves runtime lane evidence while redacting model/provider identity', () => {
     const [keeper] = normalizeKeepers([
       {
-        name: 'cascade-keeper',
+        name: 'runtime-keeper',
         status: 'active',
-        cascade_name: 'oas-keeper_unified',
-        selected_cascade_canonical: 'primary',
+        runtime_id: 'oas-keeper_unified',
+        selected_runtime_canonical: 'primary',
         primary_model: 'provider-d:gpt-5.4',
         active_model: 'gpt-5.4',
         active_model_label: 'provider-d:gpt-5.4',
@@ -547,8 +547,8 @@ describe('normalizeKeepers lifecycle metrics', () => {
             generation: 1,
             channel: 'turn',
             model_used: 'provider-a:model-a-sonnet',
-            cascade: {
-              cascade_name: 'primary',
+            runtime: {
+              runtime_id: 'primary',
               selected_model: 'provider-a:model-a-sonnet',
               attempt_count: 2,
               outcome: 'passed_to_next_model',
@@ -569,9 +569,9 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper).toMatchObject({
-      cascade_name: 'oas-keeper_unified',
-      cascade_canonical: 'primary',
-      selected_cascade_canonical: 'primary',
+      runtime_id: 'oas-keeper_unified',
+      runtime_canonical: 'primary',
+      selected_runtime_canonical: 'primary',
       active_model_label: null,
       last_model_used_label: null,
     })
@@ -579,11 +579,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.active_model).toBeUndefined()
     expect(keeper?.last_model_used).toBeUndefined()
     expect(keeper?.metrics_series?.[0]).toMatchObject({
-      cascade_name: 'primary',
+      runtime_id: 'primary',
       runtime_selected_model: null,
-      cascade_attempt_count: 2,
-      cascade_outcome: 'passed_to_next_model',
-      cascade_strategy: 'round_robin',
+      runtime_attempt_count: 2,
+      runtime_outcome: 'passed_to_next_model',
+      runtime_strategy: 'round_robin',
       fallback_applied: true,
       fallback_hops: 1,
       fallback_from: null,

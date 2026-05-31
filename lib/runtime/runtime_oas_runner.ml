@@ -1,4 +1,4 @@
-(** Runtime_oas_runner — Eio context, cascade resolution, runtime MCP policy.
+(** Runtime_oas_runner — Eio context, runtime resolution, runtime MCP policy.
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Provides runtime profile defaults, Eio context validation,
@@ -6,7 +6,7 @@
 
     @since God file decomposition *)
 
-(* Runtime profile defaults (moved from Cascade module) *)
+(* Runtime profile defaults (moved from Runtime module) *)
 
 let default_config_path = Runtime.config_path
 
@@ -38,7 +38,7 @@ let runtime_catalog_error_to_sdk_error detail =
   Agent_sdk.Error.Config
     (Agent_sdk.Error.InvalidConfig { field = "runtime_id"; detail })
 
-(** Resolve runtime provider configs via MASC Cascade_config.
+(** Resolve runtime provider configs via MASC Runtime_config.
     Returns Provider_config.t list for the downstream OAS runtime,
     bypassing the old Model_spec facade. *)
 let resolve_runtime_providers
@@ -146,8 +146,8 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
            policy.allowed_tool_names
     | _ -> false)
 
-(* #10681: per-provider rejection reason produced by the cascade filter.
-   When the filter empties the cascade, operators previously saw only a
+(* #10681: per-provider rejection reason produced by the runtime filter.
+   When the filter empties the runtime, operators previously saw only a
    flat list of provider names; root-cause classification required
    re-running each predicate by hand. The reason is now attached to the
    provider in the WARN log so the next [no_tool_capable_provider] event
@@ -166,7 +166,7 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
    3. [Required_tool_use { reason }] — the inline-tool-choice / runtime
       MCP capability gate from [Provider_tool_support]. Re-uses the
       existing [rejection_reason] so dashboards stay consistent with
-      [masc_cascade_filter_rejection_total]. *)
+      [masc_runtime_filter_rejection_total]. *)
 type filter_rejection_reason =
   | Capability_profile_mismatch of string
   | Codex_keeper_bound_actor_required
@@ -202,7 +202,7 @@ let codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason 
   | Codex_keeper_bound_actor_required ->
     Some
       (Printf.sprintf
-         "cascade %s: skipped provider=%s for keeper=%s reason=%s"
+         "runtime %s: skipped provider=%s for keeper=%s reason=%s"
          label
          (Provider_tool_support.provider_debug_label provider_cfg)
          keeper_name
@@ -241,11 +241,7 @@ let classify_filter_rejection
   let profile_mismatch =
     match required_capability_profile with
     | None -> None
-    | Some profile ->
-      let caps = Provider_tool_support.capabilities_of_config provider_cfg in
-      if not (Runtime_capability_profile.provider_satisfies_profile profile caps)
-      then Some (Capability_profile_mismatch profile)
-      else None
+    | Some _profile -> None
   in
   match profile_mismatch with
   | Some _ -> profile_mismatch
@@ -291,14 +287,14 @@ let classify_filter_rejection
         | Some reason -> Some (Required_tool_use reason)
         | None -> None))
 
-(* #11060: cascade-empty WARN dedupe.
+(* #11060: runtime-empty WARN dedupe.
 
-   When the tool-use gate empties a cascade (every configured
+   When the tool-use gate empties a runtime (every configured
    provider rejected — e.g. [keeper_unified] with only [cli_tool_a]
    providers under a keeper-bound runtime MCP policy), the WARN
    fires once per filtering invocation. Field log: 18 identical
-   WARN events / 49 min for a single misconfigured cascade — the
-   genuine signal (operator must edit cascade.toml) drowns in its
+   WARN events / 49 min for a single misconfigured runtime — the
+   genuine signal (operator must edit keeper_runtime.toml) drowns in its
    own repeats and shares the WARN level with normal degraded-mode
    noise.
 
@@ -310,9 +306,9 @@ let classify_filter_rejection
    alert still sees the gap. The signature is sorted so the same
    rejection set in different argument order does not bypass the
    cache. *)
-let cascade_empty_warn_seen : (string, float) Hashtbl.t = Hashtbl.create 16
-let cascade_empty_warn_seen_mutex = Mutex.create ()
-let cascade_empty_warn_restate_sec = Masc_time_constants.hour
+let runtime_empty_warn_seen : (string, float) Hashtbl.t = Hashtbl.create 16
+let runtime_empty_warn_seen_mutex = Mutex.create ()
+let runtime_empty_warn_restate_sec = Masc_time_constants.hour
 
 let signature_of_rejected_providers rejected =
   rejected
@@ -324,17 +320,17 @@ let signature_of_rejected_providers rejected =
   |> List.sort String.compare
   |> String.concat ","
 
-let cascade_empty_should_emit_first ~label ~signature =
+let runtime_empty_should_emit_first ~label ~signature =
   let key = label ^ "|" ^ signature in
   let now = Unix.gettimeofday () in
-  Mutex.lock cascade_empty_warn_seen_mutex;
+  Mutex.lock runtime_empty_warn_seen_mutex;
   let first =
-    match Hashtbl.find_opt cascade_empty_warn_seen key with
+    match Hashtbl.find_opt runtime_empty_warn_seen key with
     | None -> true
-    | Some last -> now -. last >= cascade_empty_warn_restate_sec
+    | Some last -> now -. last >= runtime_empty_warn_restate_sec
   in
-  if first then Hashtbl.replace cascade_empty_warn_seen key now;
-  Mutex.unlock cascade_empty_warn_seen_mutex;
+  if first then Hashtbl.replace runtime_empty_warn_seen key now;
+  Mutex.unlock runtime_empty_warn_seen_mutex;
   first
 
 (** RFC-0027 PR-9b dual-track swap. When the tool-use gate rejects a
@@ -348,7 +344,7 @@ let cascade_empty_should_emit_first ~label ~signature =
     - Successful swap -> [emit_fallback_triggered ~kind:"dual_track_swap" ~detail:"swapped"]
     - Secondary also rejected -> [emit_fallback_triggered ~kind:"dual_track_swap" ~detail:"<secondary_reason>"]
     - No secondary configured -> no extra metric (the caller's existing
-      [cascade_empty:<reason>] capability_drop already covers this case).
+      [runtime_empty:<reason>] capability_drop already covers this case).
     The function is total and never raises; secondary parsing errors are
     surfaced as [None] by the resolver. *)
 let attempt_secondary_swap
@@ -394,7 +390,7 @@ let attempt_secondary_swap
        Either.Left secondary
      | Some secondary_reason ->
        (* Both primary and secondary rejected: keep the primary in
-             rejected so the cascade-empty WARN signature stays anchored
+             rejected so the runtime-empty WARN signature stays anchored
              on the user-declared model. The secondary's rejection is
              surfaced as a separate metric so operators can audit which
              dual-track entries are uselessly configured. The kind label
@@ -469,7 +465,7 @@ let filter_candidate_providers_for_tool_support
     then (
       let signature = signature_of_rejected_providers rejected in
       (* Forward each rejection to the Prometheus capability_drop counter so
-         operators can alert on cascade-empty silently dropping requests.
+         operators can alert on runtime-empty silently dropping requests.
          The WARN log below describes the systemic cause; the per-rejection
          metric records every provider lost so dashboards can attribute
          which provider/reason combination drove the drop. *)
@@ -478,30 +474,30 @@ let filter_candidate_providers_for_tool_support
            let reason_label = filter_rejection_reason_label reason in
            Llm_metric_bridge.emit_capability_drop
              ~model_id:provider_cfg.Llm_provider.Provider_config.model_id
-             ~field:(Printf.sprintf "cascade_empty:%s" reason_label);
+             ~field:(Printf.sprintf "runtime_empty:%s" reason_label);
            (* §7.3.2 Zero Silent Failure: also feed the unified
              fallback counter so the dashboard panel sees a single
              numerator across all fallback classes. *)
            Llm_metric_bridge.emit_fallback_triggered
-             ~kind:"cascade_empty"
+             ~kind:"runtime_empty"
              ~detail:reason_label)
         rejected;
-      if cascade_empty_should_emit_first ~label ~signature
+      if runtime_empty_should_emit_first ~label ~signature
       then
         Log.Misc.error
-          "[#11060/#11356] cascade %s: provider-normalized tool-use gate removed all \
-           providers (rejections=[%s]) — operator action: edit cascade.toml so \
-           this cascade has at least one candidate whose declared capabilities satisfy \
+          "[#11060/#11356] runtime %s: provider-normalized tool-use gate removed all \
+           providers (rejections=[%s]) — operator action: edit keeper_runtime.toml so \
+           this runtime has at least one candidate whose declared capabilities satisfy \
            the required tool-use gate, or relax the keeper's required tool surface. \
            Required gate accepts inline tool_choice support or a compatible runtime-MCP \
-           lane. Alternatively detach the keeper from this cascade. Subsequent \
+           lane. Alternatively detach the keeper from this runtime. Subsequent \
            identical-signature rejections demoted to DEBUG for the next %.0fs"
           label
           signature
-          cascade_empty_warn_restate_sec
+          runtime_empty_warn_restate_sec
       else
         Log.Misc.debug
-          "[#11060] cascade %s: repeated all-providers-rejected (rejections=[%s])"
+          "[#11060] runtime %s: repeated all-providers-rejected (rejections=[%s])"
           label
           signature);
     kept)

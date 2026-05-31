@@ -10,7 +10,7 @@ val handle
   -> latency_ms:int
   -> semaphore_wait_ms:int
   -> degraded_retry_applied:bool
-  -> degraded_retry_runtime_id:string option
+  -> degraded_retry_runtime:string option
   -> fallback_reason:Keeper_error_classify.degraded_retry_reason option
   -> last_provider_timeout_budget:
        Keeper_turn_runtime_budget.provider_timeout_budget option

@@ -115,11 +115,11 @@ let runtime_exhaustion_reason_code
 ;;
 
 let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
-  match Keeper_meta_contract.classify_masc_internal_error_of_string raw_error with
+  match Keeper_internal_error.classify_masc_internal_error_of_string raw_error with
   (* No_tool_capable specific cases first — more specific than generic Runtime_exhausted *)
   | Some
-      (Keeper_meta_contract.Runtime_exhausted
-         { cascade_name = ntcp_cascade_name
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = ntcp_runtime_id
          ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
          ; _
          }) ->
@@ -142,19 +142,19 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          { code = "no_tool_capable_provider"
          ; detail =
              Printf.sprintf
-               "no tool-capable provider found (cascade=%s labels=[%s] \
+               "no tool-capable provider found (runtime=%s labels=[%s] \
                 required_tools=[%s]%s)"
-               (ntcp_cascade_name)
+               (ntcp_runtime_id)
                (String.concat ", " detail.configured_labels)
                (String.concat ", " detail.required_tool_names)
                rejection_summary
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (ntcp_cascade_name)
+         ; runtime_id = Some (ntcp_runtime_id)
          })
   | Some
-      (Keeper_meta_contract.Runtime_exhausted
-         { cascade_name = ntcp_cascade_name
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = ntcp_runtime_id
          ; reason = Keeper_meta_contract.No_tool_capable None
          ; _
          }) ->
@@ -164,45 +164,45 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; detail = "no tool-capable provider found"
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (ntcp_cascade_name)
+         ; runtime_id = Some (ntcp_runtime_id)
          })
   (* Generic Runtime_exhausted catch-all — after No_tool_capable specifics *)
-  | Some (Keeper_meta_contract.Runtime_exhausted { reason; cascade_name }) ->
+  | Some (Keeper_internal_error.Runtime_exhausted { reason; runtime_id }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = runtime_exhaustion_reason_code reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (cascade_name)
+         ; runtime_id = Some (runtime_id)
          })
-  | Some (Keeper_meta_contract.Capacity_backpressure { detail = capacity_detail; _ }) ->
+  | Some (Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = "capacity_backpressure"
          ; detail = capacity_detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
          })
   | Some
-      ( Keeper_meta_contract.Resumable_cli_session _
-      | Keeper_meta_contract.Accept_rejected _
-      | Keeper_meta_contract.Admission_queue_timeout _
-      | Keeper_meta_contract.Admission_queue_rejected _
-      | Keeper_meta_contract.Turn_timeout _
-      | Keeper_meta_contract.Provider_timeout _
-      | Keeper_meta_contract.Max_tokens_ceiling_violation _
-      | Keeper_meta_contract.Ambiguous_post_commit _
-      (* RFC-0158: pre-dispatch admission denial is not a cascade-exhaustion
+      ( Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Accept_rejected _
+      | Keeper_internal_error.Admission_queue_timeout _
+      | Keeper_internal_error.Admission_queue_rejected _
+      | Keeper_internal_error.Turn_timeout _
+      | Keeper_internal_error.Provider_timeout _
+      | Keeper_internal_error.Max_tokens_ceiling_violation _
+      | Keeper_internal_error.Ambiguous_post_commit _
+      (* RFC-0158: pre-dispatch admission denial is not a runtime-exhaustion
          reason; the keeper decided not to attempt a provider call. *)
-      | Keeper_meta_contract.Retry_admission_denied _
+      | Keeper_internal_error.Retry_admission_denied _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
-         cascade-exhaustion reasons; they map to opaque
+         runtime-exhaustion reasons; they map to opaque
          internal-error events upstream. *)
-      | Keeper_meta_contract.Internal_unhandled_exception _
-      | Keeper_meta_contract.Internal_bridge_exception _
-      | Keeper_meta_contract.Internal_contract_rejected _ )
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _ )
   | None -> None
 ;;
 
@@ -239,7 +239,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
          })
   | Keeper_turn_disposition.Runtime_attempts_exhausted ->
     Some
@@ -248,7 +248,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
          })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
@@ -380,7 +380,7 @@ let record_streaming_cancelled_observation
       ~(config : Coord.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
-      ~(cascade_name : string)
+      ~(runtime_id : string)
       ~(keeper_turn_id : int)
       ()
   : unit
@@ -406,7 +406,7 @@ let record_streaming_cancelled_observation
     ~config
     ~meta:run_meta
     ~generation:run_generation
-    ~cascade_name
+    ~runtime_id
     ~outcome:`Cancelled
     ~terminal_reason_code
     ~activity_kind:"keeper.turn_cancelled"

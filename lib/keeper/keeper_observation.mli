@@ -9,7 +9,7 @@
       {!runtime_observation_with_metrics} pair.
     - {b Runtime audit actor}: a single-fiber consumer
       ({!start_actor_if_needed}) that drains an
-      [Eio.Stream] of {!record_cascade} /
+      [Eio.Stream] of {!record_runtime} /
       {!record_fallback_event} requests so concurrent
       callers do not contend on the in-memory counter
       maps.
@@ -23,18 +23,18 @@
     [attempts] / [fallback_events] fields with their full
     record shape),
     [runtime_counter] type, [StringMap],
-    [cascade_max_keys], [create_runtime_counter],
+    [runtime_max_keys], [create_runtime_counter],
     [runtime_eviction] type, [find_runtime_eviction_candidate],
     [display_provider_name_of_config], [strip_latest_suffix],
     [runtime_observation_of_candidates],
     [runtime_attempt_to_json], [runtime_fallback_event_to_json],
     [update_first_attempt_if], [record_attempt_start],
     [ensure_terminal_attempt],
-    [runtime_observation_to_json], [get_cascade_audit_store],
+    [runtime_observation_to_json], [get_runtime_audit_store],
     [runtime_outcome_to_string],
     [top_level_reason_of_observation],
-    [keeper_name_to_json], [cascade_audit_json],
-    [record_cascade_audit], [increment_counter],
+    [keeper_name_to_json], [runtime_audit_json],
+    [record_runtime_audit], [increment_counter],
     [distribution_json], [attempt_model_display],
     [msg], [state] types, the [stream] queue,
     [handle_record], [handle_get_metrics], [run_actor],
@@ -191,7 +191,7 @@ val start_actor_if_needed : sw:Eio.Switch.t -> unit
     Idempotent — a second call is a no-op so the bootstrap
     paths can call it from multiple entry points. *)
 
-val record_cascade :
+val record_runtime :
   ?keeper_name:string ->
   observation:runtime_observation option ->
   runtime_id:string ->
@@ -201,7 +201,7 @@ val record_cascade :
 (** Posts a record-runtime message onto the audit stream.
     The actor consumes it asynchronously, bumping the
     per-runtime counters and persisting the audit JSON
-    via {!record_cascade_audit}.  Non-blocking — the
+    via {!record_runtime_audit}.  Non-blocking — the
     caller does not wait for the actor to drain. *)
 
 val reset_runtime_counters_for_test : unit -> unit

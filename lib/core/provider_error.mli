@@ -1,4 +1,4 @@
-(** Closed provider error contract for cascade / telemetry handoff.
+(** Closed provider error contract for runtime / telemetry handoff.
 
     This module is additive: callers can emit it beside existing string
     error labels while later sweeps remove stringly-typed decisions. The
@@ -23,7 +23,7 @@ type provider_error =
       reason : string;
     }
   (* RFC-0057 Phase 0: CLI-specific error variants that were previously
-     reconstructed through string matching in cascade_attempt_fsm.ml.
+     reconstructed through string matching in runtime_attempt_fsm.ml.
      These carry the structured information lost when the CLI adapter
      compressed them into InvalidRequest { message }. *)
   | CliWrappedHardQuota of {

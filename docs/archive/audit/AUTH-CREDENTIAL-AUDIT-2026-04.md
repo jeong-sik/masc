@@ -10,7 +10,7 @@
 
 **Core auth (9 pairs)**:
 - `lib/auth.{ml,mli}` — orchestrator
-- `lib/auth_resolve.{ml,mli}` — token resolution (cascade dispatch)
+- `lib/auth_resolve.{ml,mli}` — token resolution (runtime dispatch)
 - `lib/auth_login.{ml,mli}` — bearer token lifecycle
 - `lib/auth_doctor.{ml,mli}` — validation + health check
 - `lib/auth_error_kind.{ml,mli}` — error taxonomy
@@ -59,7 +59,7 @@ Conservative candidates flagged for Phase 2 verification:
 
 - **C4 = High**: host-path leak risk. `credential_provider.ml` exposes `live_admin_token_file_source` and `ro_mount.host` fields. If these flow into structured logs or error messages without redaction, host topology is disclosed. Past `feedback_b1_host_path_leak_keeper_status_detail` precedent shows this is a real recurring class — leak in `keeper_status_detail` was caught and fixed at PR #11080.
 - **C3 = Medium-High**: governance gate. Allowlist-composition bugs can silently bypass auto-approval rules. Past `feedback_a1_allowlist_empty_semantics_split` precedent (#11096) shows allowlist precedence is a known footgun.
-- **C2 = Medium**: silent identity failures hide cascade-resolution bugs. Past `feedback_silent-auth-token-internal-vs-per-keeper` precedent shows untracked drift between per-keeper and internal credentials.
+- **C2 = Medium**: silent identity failures hide runtime-resolution bugs. Past `feedback_silent-auth-token-internal-vs-per-keeper` precedent shows untracked drift between per-keeper and internal credentials.
 - **C1 = Medium**: lifecycle is foundational; gaps silently age credentials. Lower urgency than C3/C4 because the symptom is observable (auth failure → re-login) rather than silent.
 
 ## 4. Recommended ratchets (Phase 1 — descriptive, not enforced)

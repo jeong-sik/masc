@@ -35,7 +35,7 @@ type keeper_profile_defaults = {
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   per_provider_timeout_state : per_provider_timeout_state;
-  (* Per-provider timeout for cascade fallback. None = use turn budget heuristic. *)
+  (* Per-provider timeout for runtime fallback. None = use turn budget heuristic. *)
   per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;

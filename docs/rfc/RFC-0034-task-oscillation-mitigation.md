@@ -157,7 +157,7 @@ In `coord_task.ml`, after the existing oscillation WARN block (line 392-417):
 
 ### Configuration
 
-Three env knobs (default values are conservative; tunable via cascade or
+Three env knobs (default values are conservative; tunable via runtime or
 operator config):
 
 | Env var | Default | Purpose |

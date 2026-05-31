@@ -15,7 +15,7 @@
       surface/source/retention metadata.
     - {!dashboard_namespace_truth_focus_json} consumed by
       {!Server_dashboard_http} as a one-line
-      pass-through (no cascade-include re-export — the
+      pass-through (no runtime-include re-export — the
       facade uses an explicit [let .. = ...] binding).
 
     Internal helpers stay private at this boundary

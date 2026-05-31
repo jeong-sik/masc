@@ -562,16 +562,16 @@ jobs:
         run: |
           opam exec -- dune build
 
-      - name: Cascade TOML validity gate
-        # RFC-0058 §9: config/cascade.toml is the authoring SSOT.
-        # cascade.json is no longer generated or committed, so the old
-        # cascade_materialize CLI is retired. This focused test renders
+      - name: Runtime TOML validity gate
+        # RFC-0058 §9: config/keeper_runtime.toml is the authoring SSOT.
+        # runtime.json is no longer generated or committed, so the old
+        # runtime_materialize CLI is retired. This focused test renders
         # the TOML in memory, validates the declarative catalog, and
-        # proves config/cascade.json has not reappeared as a tracked
+        # proves config/runtime.json has not reappeared as a tracked
         # second source of truth.
-        # See: test/test_cascade_config_validity.ml.
+        # See: test/test_runtime_config_validity.ml.
         run: |
-          opam exec -- dune build @test/runtest-test_cascade_config_validity
+          opam exec -- dune build @test/runtest-test_runtime_config_validity
 
       - name: Env knob catalog drift gate
         # Detects when lib/config/env_config_*.ml has been edited
@@ -1264,7 +1264,7 @@ jobs:
           # mode=required (default): fail → block merge
           # mode=advisory: fail → log a WARN line, do not block
           #
-          # Build job policy (revised 2026-04-29 after PR #11709 → #11721 cascade):
+          # Build job policy (revised 2026-04-29 after PR #11709 → #11721 runtime):
           #   - dune build (compile-only) is HARD REQUIRED — Build step now lacks
           #     continue-on-error, so a compile failure makes the job result =
           #     failure → check "build" required = block merge. This catches

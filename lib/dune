@@ -210,6 +210,7 @@
   keeper_turn_driver
   keeper_turn_driver_helpers
   keeper_turn_driver_try_provider
+  keeper_turn_driver_try_runtime
   keeper_turn_driver_wrappers
   keeper_unified_metrics_json_support
   keeper_unified_metrics_support
@@ -395,7 +396,7 @@
    masc_mcp.tool_types
    ;; RFC-0132 PR-1 — Boundary_redaction SSOT for external-surface
    ;; provider/model label redaction. Codemod in PR-2 routes "runtime"
-   ;; literals in lib/cascade and lib/keeper through this leaf.
+   ;; literals in lib/runtime and lib/keeper through this leaf.
    masc_mcp.types_boundary
    masc_mcp.cdal_runtime
    ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/
@@ -429,9 +430,9 @@
    masc_mcp.dashboard_eval_feed
    ;; RFC-0004 Phase A0.1 PR-1 — Typed SSE event lib (lib/sse_event/).
    ;; atdgen-generated payload types + hand-rolled envelope wrap that
-   ;; mirrors cascade_event_bridge.wrap_event and
-   ;; cascade_event_bridge_inference.json_string_opt
-   ;; semantics.  PR-2 onwards: cascade_event_bridge arms call into
+   ;; mirrors runtime_event_bridge.wrap_event and
+   ;; runtime_event_bridge_inference.json_string_opt
+   ;; semantics.  PR-2 onwards: runtime_event_bridge arms call into
    ;; Sse_event.<event>_constructor instead of inline `Assoc.
    masc_mcp.sse_event
    ;; RFC-0056 Phase 1F — Memory_jsonl leaf module extracted to
@@ -508,10 +509,10 @@
    ;; masc_mcp.config (Env_config_core) + masc_mcp.host_config + masc_log + yojson.
    ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.
    masc_mcp.config_dir_resolver
-   ;; RFC-0058 Phase 1 — Declarative cascade TOML config. Separate sub-library
+   ;; RFC-0058 Phase 1 — Declarative runtime TOML config. Separate sub-library
    ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
    ;; with identically-named types in the main library.
-   ;; RFC-0163 Phase D1 — Cascade_name leaf extraction (lib/cascade_name/).
+   ;; RFC-0163 Phase D1 — Runtime_name leaf extraction (lib/runtime_id/).
    ;; Pure canonical-name validation, stdlib-only.
 
    uri

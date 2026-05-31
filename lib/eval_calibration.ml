@@ -64,8 +64,8 @@ type verdict_record = {
   agent_name : string;
   verdict : Anti_rationalization.verdict;
   gate : Anti_rationalization.gate;  (** Typed gate — was stringly-typed *)
-  evaluator_cascade : string;
-  generator_cascade : string option;
+  evaluator_runtime : string;
+  generator_runtime : string option;
   fallback_reason : string option; (** Error message when gate=Fallback *)
   timestamp : float;
 }
@@ -138,8 +138,8 @@ let verdict_record_to_json (r : verdict_record) : Yojson.Safe.t =
     ("agent_name", `String r.agent_name);
     ("verdict", `String (verdict_to_string r.verdict));
     ("gate", `String (Anti_rationalization.gate_to_string r.gate));
-    ("evaluator_cascade", `String r.evaluator_cascade);
-    ("generator_cascade", Json_util.string_opt_to_json r.generator_cascade);
+    ("evaluator_runtime", `String r.evaluator_runtime);
+    ("generator_runtime", Json_util.string_opt_to_json r.generator_runtime);
     ("timestamp", `Float r.timestamp);
   ] in
   let extra = match r.fallback_reason with
@@ -174,7 +174,7 @@ let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
   let score = if passed then Some 1.0 else Some 0.0 in
   let evidence = [
     Printf.sprintf "gate=%s" (Anti_rationalization.gate_to_string r.gate);
-    Printf.sprintf "evaluator=%s" r.evaluator_cascade;
+    Printf.sprintf "evaluator=%s" r.evaluator_runtime;
     Printf.sprintf "task_id=%s" r.task_id;
   ] in
   let detail =
@@ -207,8 +207,8 @@ let record_verdict
     agent_name = req.agent_name;
     verdict = result.verdict;
     gate = result.gate;
-    evaluator_cascade = result.evaluator_cascade;
-    generator_cascade = result.generator_cascade;
+    evaluator_runtime = result.evaluator_runtime;
+    generator_runtime = result.generator_runtime;
     fallback_reason = result.fallback_reason;
     timestamp = Unix.gettimeofday ();
   } in
@@ -370,12 +370,12 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
               let prev = Option.value ~default:0 (StringMap.find_opt gate gc) in
               let gc' = StringMap.add gate (prev + 1) gc in
               let vh' = StringMap.add hash v vh in
-              let ev_cascade = string_field json "evaluator_cascade" in
-              let gen_cascade = string_field json "generator_cascade" in
+              let ev_runtime = string_field json "evaluator_runtime" in
+              let gen_runtime = string_field json "generator_runtime" in
               let vwg', cmm' =
-                if gen_cascade <> "" && ev_cascade <> "" then
+                if gen_runtime <> "" && ev_runtime <> "" then
                   vwg + 1,
-                  (if not (String.equal gen_cascade ev_cascade) then cmm + 1 else cmm)
+                  (if not (String.equal gen_runtime ev_runtime) then cmm + 1 else cmm)
                 else
                   vwg, cmm
               in
@@ -440,7 +440,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
     ("false_negative_count", `Int false_neg);
     ("agreement_rate", `Float agreement_rate);
     ("fallback_count", `Int fallback_count);
-    ("verdicts_with_generator_cascade", `Int verdicts_with_generator);
+    ("verdicts_with_generator_runtime", `Int verdicts_with_generator);
     ("cross_model_match_count", `Int cross_model_match);
     ("cross_model_rate", `Float cross_model_rate);
     ("recent_fallback_reasons",

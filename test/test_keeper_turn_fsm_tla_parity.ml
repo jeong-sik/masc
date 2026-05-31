@@ -77,7 +77,7 @@ let test_to_tla_symbol_for_each_constructor () =
   in
   probe_nullary "idle" Masc_mcp.Keeper_turn_fsm.Idle;
   probe_nullary "phase_gating" Masc_mcp.Keeper_turn_fsm.Phase_gating;
-  probe_nullary "cascade_routing" Masc_mcp.Keeper_turn_fsm.Cascade_routing;
+  probe_nullary "runtime_routing" Masc_mcp.Keeper_turn_fsm.Runtime_routing;
   probe_nullary "awaiting_provider" Masc_mcp.Keeper_turn_fsm.Awaiting_provider;
   probe_nullary "streaming" Masc_mcp.Keeper_turn_fsm.Streaming;
   (* [@tla.symbol "awaiting_tool"] override exercised here. *)
@@ -106,7 +106,7 @@ let test_classification_predicates () =
   assert (not (is_active Idle));
   assert (not (is_terminal Idle));
   assert (is_active Phase_gating);
-  assert (is_active Cascade_routing);
+  assert (is_active Runtime_routing);
   assert (is_active Awaiting_provider);
   assert (is_active Streaming);
   assert (is_active Awaiting_tool_result);

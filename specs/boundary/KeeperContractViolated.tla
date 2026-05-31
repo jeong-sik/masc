@@ -4,7 +4,7 @@
 \* Production reality (24h, 2026-04-26 fleet log measurement):
 \*   `Completion contract [require_tool_use] violated: actionable signal
 \*    present, model only used passive read-only tools (masc_status x2,
-\*    keeper_tasks_list x4)` — 43 events, exceeding even the cascade
+\*    keeper_tasks_list x4)` — 43 events, exceeding even the runtime
 \*   exhaustion volume.  See memory entry
 \*   feedback_proactive_turn_contract_violation_dominant.md.
 \*

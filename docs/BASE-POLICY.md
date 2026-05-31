@@ -21,12 +21,12 @@
 | `lib/exec/`          |  0 |   0 |  0 |
 | `lib/server/`        |  0 |   0 |  0 |
 | `lib/dashboard_utils/` | 0 |   0 |  0 |
-| `lib/cascade/`       |  0 |   0 |  0 |
+| `lib/runtime/`       |  0 |   0 |  0 |
 | `lib/shared_audit/`  |  0 |   0 |  0 |
 | `lib/types/`         |  0 |   0 |  0 |
 
 **Key observation**: Sub-packages (`config`, `goal`, `coord`, `keeper`,
-`exec`, `server`, `cascade`, `shared_audit`, `types`) are already
+`exec`, `server`, `runtime`, `shared_audit`, `types`) are already
 Base-free.  The concentration is in the top-level `lib/` tool and
 dashboard modules.
 

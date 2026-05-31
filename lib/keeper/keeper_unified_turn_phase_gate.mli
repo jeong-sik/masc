@@ -36,7 +36,7 @@ val decide_and_record
     On [Phase_gate_proceed], the gate has already transitioned the
     keeper FSM from [Phase_gating] to [Runtime_routing] and appended
     its decision via [append_phase_gate_decision]. The caller resumes
-    with main-path cascade resolution.
+    with main-path runtime resolution.
 
     On either terminal outcome, the gate has recorded a
     pre-dispatch terminal observation, emitted the appropriate FSM

@@ -9,7 +9,7 @@
 #
 # Allowlisted files fall into three categories:
 #   1. SSOT definition itself (tool_args.ml).
-#   2. T27 alias backstop for sibling-include cascade
+#   2. T27 alias backstop for sibling-include runtime
 #      (tool_local_runtime_core.ml).
 #   3. Tier B/C intentional inline sites where wire format reordering
 #      would break external consumers. Adding to this list requires a

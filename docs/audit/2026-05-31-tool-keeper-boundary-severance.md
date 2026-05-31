@@ -22,7 +22,7 @@ the real set is **12 tool-surface files that call a `Keeper_<module>`**:
 |------|-------------------------|--------|-----------|
 | `lib/tool_usage_log.ml` | `Keeper_fd_pressure`, `Keeper_disk_pressure` | infra-leak | **DONE** — `~on_io_failure` injected at install boundary |
 | `lib/multimodal/tool_emission.ml` | `Keeper_emitter` (+`Multimodal_keeper_bridge`) | infra-leak | pass emit fn / move to keeper-bridge domain |
-| `lib/tool_unified.ml` | `Keeper_observation.cascade_metrics_json` | infra-leak | ⚠️ cascade-demolition zone — re-eval after main green (field may be deleted) |
+| `lib/tool_unified.ml` | `Keeper_observation.runtime_metrics_json` | infra-leak | Runtime-demolition zone — re-eval after main green (field may be deleted) |
 | `lib/tool_task_payloads.ml` | `Keeper_tools_oas_workflow.workflow_rejection_*` | infra-leak | relocate pure payload builders to neutral module (RFC-0195 territory) |
 | `lib/tool_resource_axis.ml` | `Keeper_tool_alias.*` | misplaced | relocate `keeper_tool_alias` → `tool_alias` (surface concern). ⚠️ collides with #19290 |
 | `lib/tool_registration_check.ml` | `Keeper_tool_policy`, `Keeper_tool_policy_config` | infra-leak | ⚠️ collides with #19290/#19282; sequence after they land |
@@ -60,11 +60,11 @@ proving the ratchet drives toward zero. Removal target: empty baseline / sub-lib
   `tool_control`, `tool_coord`, `tool_deep_review`, `tool_task_handlers`, `tool_task_payloads`.
 - Contended — sequence AFTER they land: `tool_registration_check`, `tool_resource_axis`
   (#19290 / #19282 typed-predicate pair touches these + `keeper_tool_policy`).
-- Hold: `tool_unified` (cascade demolition in-flight; `cascade_metrics_json` may be removed).
+- Hold: `tool_unified` (Runtime demolition in-flight; `runtime_metrics_json` may be removed).
 
 ## 5. Status
 
-main is currently red from the in-flight cascade→Runtime demolition (25 `Cascade_*`
+main is currently red from the in-flight Runtime demolition (25 `Runtime_*`
 unbound-module errors, identical set on pristine main — this PR adds none). Verification is
 asymmetric because a flat library stops typechecking at the first broken module:
 

@@ -12,7 +12,7 @@ KOAS models the OAS Bridge timeout/error boundary with eight state variables, el
 |--------------|------------------------|----------|
 | `sys_stop_requested` / `fiber_state` | Eio.Switch + Eio.Cancel.Cancelled idioms scattered | Indirect; no single owner |
 | `oas_api_state` (Idle/Fetching/Success/Error) | `lib/oas_compat/` (compat shim) + ad-hoc call sites | Partial |
-| `cascade_turn` | cascade modules (lib/cascade/) | Partial |
+| `runtime_turn` | runtime modules (lib/runtime/) | Partial |
 | `keeper_decision` (Unknown/ExecuteSelf/AutonomyFallback/Delegate/NeedsContinueGate) | none | Missing |
 | `context_polluted` | none | Missing |
 | `external_side_effect_committed` | none | Missing |

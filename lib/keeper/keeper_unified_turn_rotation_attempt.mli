@@ -1,4 +1,4 @@
-(** Pure reducer for cascade rotation attempt receipt rows.
+(** Pure reducer for runtime rotation attempt receipt rows.
 
     The keeper turn driver owns impure timing and mutable accumulation. This
     module owns the deterministic projection from a degraded retry decision plus
@@ -9,7 +9,7 @@ val build
   -> ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
   -> ?productive_phase_elapsed_ms:int
   -> ?retry_phase_elapsed_ms:int
-  -> from_runtime_id:string
+  -> from_runtime:string
   -> retry:Keeper_error_classify.degraded_retry
   -> outcome:Keeper_execution_receipt.runtime_rotation_outcome
   -> Agent_sdk.Error.sdk_error

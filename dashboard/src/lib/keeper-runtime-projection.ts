@@ -377,7 +377,7 @@ function deriveFsmLanes(
     { axis: 'KSM', source: 'composite.phase', value: phase, contributesToAttention: phaseNeedsAttention(opState.phase ?? phase) },
     { axis: 'KTC', source: 'composite.turn_phase', value: compactToken(composite?.turn_phase ?? null, 'turn_phase unknown'), contributesToAttention: false },
     { axis: 'KDP', source: 'composite.decision.stage', value: compactToken(composite?.decision?.stage ?? null, 'decision unknown'), contributesToAttention: false },
-    { axis: 'KCL', source: 'composite.cascade.state', value: compactToken(composite?.cascade?.state ?? null, 'cascade unknown'), contributesToAttention: false },
+    { axis: 'KCL', source: 'composite.runtime.state', value: compactToken(composite?.runtime?.state ?? null, 'runtime unknown'), contributesToAttention: false },
     { axis: 'KMC', source: 'composite.compaction.stage', value: compactToken(composite?.compaction?.stage ?? null, 'compaction unknown'), contributesToAttention: false },
     { axis: 'KCB', source: 'composite.circuit_breaker.state', value: compactToken(composite?.circuit_breaker?.state ?? null, 'breaker unknown'), contributesToAttention: false },
   ]

@@ -23,7 +23,7 @@ let with_base_path f =
   Unix.mkdir dir 0o755;
   Unix.mkdir (Filename.concat dir Common.masc_dirname) 0o755;
   Unix.mkdir (Filename.concat dir ".masc/config") 0o755;
-  let oc = open_out (Filename.concat dir ".masc/config/cascade.toml") in
+  let oc = open_out (Filename.concat dir ".masc/config/keeper_runtime.toml") in
   output_string oc "";
   close_out oc;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
@@ -177,7 +177,7 @@ let test_applies_turn_execution_overrides () =
      tool_cost_max_usd = 1.25\n\
      max_tools_per_turn = 64\n\
      llm_rerank = true\n\
-     llm_rerank_cascade = \"tool_rerank_fast\"\n\
+     llm_rerank_runtime = \"tool_rerank_fast\"\n\
      temperature = 0.65\n\
      max_output_tokens = 8192\n\
      stream_idle_timeout_sec = 90\n"
@@ -195,7 +195,7 @@ let test_applies_turn_execution_overrides () =
   check (option string) "llm rerank"
     (Some "true")
     (List.assoc_opt "MASC_KEEPER_LLM_RERANK" overrides);
-  check (option string) "llm rerank cascade"
+  check (option string) "llm rerank runtime"
     (Some "tool_rerank_fast")
     (List.assoc_opt "MASC_KEEPER_LLM_RERANK_CASCADE" overrides);
   check (option string) "temperature"
@@ -559,9 +559,9 @@ let test_resolved_cli_subprocess_idle_from_toml () =
     45.0 (Keeper_runtime_resolved.cli_subprocess_idle_sec ())
 
 (* Step 2 (PR #13861 / RFC-0012/0022): the hard ceiling for
-   turn_timeout_sec is lifted from 600 s to 900 s so cascades that
+   turn_timeout_sec is lifted from 600 s to 900 s so runtimes that
    legitimately run 27 B local-LLM turns can opt in via env override.
-   The default stays at 600 s so existing remote cascades keep their
+   The default stays at 600 s so existing remote runtimes keep their
    budget unchanged. *)
 
 let test_resolved_turn_timeout_default_stays_600s () =

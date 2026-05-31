@@ -1,5 +1,5 @@
 (** Model-label resolution errors + resolver, extracted from
-    cascade_transport.ml.
+    runtime_transport.ml.
 
     Maps a string label to a {!Llm_provider.Provider_config.t} via
     {!Runtime_model_string.parse_model_string}; unresolved labels become

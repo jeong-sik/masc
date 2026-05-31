@@ -53,7 +53,7 @@ val desire_rules : Meta_cognition_types.desire_rule list
     {!Meta_cognition_interpret.operator_actionability}'s
     permitted set (cycle 89) so the snapshot pipeline can
     route these into the dashboard's
-    [Operator_desire] cascade. *)
+    [Operator_desire] runtime. *)
 
 (** {1 Source predicates}
 
@@ -82,7 +82,7 @@ val operator_need_support :
     matches one of the operator-need keywords (English +
     Korean).  Used by {!Meta_cognition_snapshot} to pre-filter
     operator-need-tagged sources before running the desire
-    cascade. *)
+    runtime. *)
 
 val classify_interaction_text : string -> string option
 (** [classify_interaction_text text] returns the canonical

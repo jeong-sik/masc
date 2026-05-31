@@ -20,7 +20,7 @@ implementation_prs: [15933]
 | PR | Site | 패치 |
 |---|---|---|
 | #15820 | `mcp-ws` incoming frames | warn+counter on silent JSON parse drop |
-| #15840 | `cascade-http-probe` | warn+counter on silent JSON parse drop |
+| #15840 | `runtime-http-probe` | warn+counter on silent JSON parse drop |
 | #15866 | `sidecar.schema_field_types` | warn+counter on silent JSON parse drop |
 | #15781 | `keeper-memory-bank` load-history | emit warn+counter on swallowed load-history exceptions |
 

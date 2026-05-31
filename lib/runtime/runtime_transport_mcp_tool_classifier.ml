@@ -1,6 +1,6 @@
 (* MCP tool surface classification.
 
-   Pulled out of [cascade_transport.ml] to shrink the godfile. Pure
+   Pulled out of [runtime_transport.ml] to shrink the godfile. Pure
    functions over Tool_catalog membership predicates - no shared state,
    no I/O. *)
 

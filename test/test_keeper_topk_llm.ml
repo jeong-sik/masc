@@ -560,10 +560,10 @@ let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
     false (Keeper_config.keeper_llm_rerank_enabled ());
-  (* Default cascade name *)
-  let cascade = Keeper_config.keeper_llm_rerank_cascade () in
-  Alcotest.(check string) "default cascade name"
-    "route.llm_rerank" cascade
+  (* Default runtime name *)
+  let runtime = Keeper_config.keeper_llm_rerank_runtime () in
+  Alcotest.(check string) "default runtime name"
+    "route.llm_rerank" runtime
 
 (* ── Suite ───────────────────────────────────────────────── *)
 

@@ -58,7 +58,7 @@ The following direct registry mutation helpers update fields that the composite 
 - `mark_turn_started`
 - `mark_turn_measurement`
 - `set_turn_decision_stage`
-- `set_turn_cascade_state`
+- `set_turn_runtime_state`
 - `set_turn_phase`
 - `set_turn_selected_model`
 - `mark_turn_finished`
@@ -71,9 +71,9 @@ Current code cross-check: `keeper_unified_turn.ml` still calls these helpers dir
 | `mark_turn_started` | live turn entry | installs `current_turn_observation`, initializes `turn_phase=prompting`, resets compaction stage | Yes |
 | `mark_turn_measurement` | live turn measurement bind | binds pending measurement into the current turn snapshot | Yes, when a pending measurement exists |
 | `set_turn_decision_stage` | live turn decision path | updates `decision_stage` to `guard_ok` when measurement is present | Yes, when a live turn exists |
-| `set_turn_cascade_state` | cascade attempt path | updates `cascade_state`, and via `turn_phase_of_cascade_state` also changes `turn_phase` | Yes, when a live turn exists |
+| `set_turn_runtime_state` | runtime attempt path | updates `runtime_state`, and via `turn_phase_of_runtime_state` also changes `turn_phase` | Yes, when a live turn exists |
 | `set_turn_phase` | terminal/compaction/error paths | forces `turn_phase` during terminal/compaction/error paths | Yes, when a live turn exists |
-| `set_turn_selected_model` | successful cascade attempt path | stores `selected_model` after a successful cascade attempt | Yes, when a live turn exists |
+| `set_turn_selected_model` | successful runtime attempt path | stores `selected_model` after a successful runtime attempt | Yes, when a live turn exists |
 | `mark_turn_finished` | turn finally block | clears `current_turn_observation`, ending the live turn snapshot and freezing `last_completed_turn` | Yes, when a live turn exists |
 
 By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retry path

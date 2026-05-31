@@ -18,9 +18,9 @@ window.MASC_P3 = (function () {
     { path: "docs/COMMAND-PLANE-RUNBOOK.md", kind: "file", ext: ".md", owners: ["nick0cave", "rama", "sangsu"], status: "modified", adds: 31, dels: 8, recent: true, pinned: false, touched: "27m", branch: "main" },
     { path: "scripts/harness_trpg_agent_env.sh", kind: "file", ext: ".sh", owners: ["qa-king"], status: "deleted", adds: 0, dels: 77, recent: false, pinned: false, touched: "41m", branch: "wt/sangsu-smoke" },
     { path: "test/test_goal_fsm.ml", kind: "file", ext: ".ml", owners: ["qa-king", "sangsu"], status: "modified", adds: 64, dels: 21, recent: true, pinned: true, touched: "53m", branch: "main" },
-    { path: "memory/handoff-2026-04-25-fsm.md", kind: "file", ext: ".md", owners: ["rama"], status: "added", adds: 22, dels: 0, recent: false, pinned: false, touched: "1h", branch: "research/cascade-step2" },
+    { path: "memory/handoff-2026-04-25-fsm.md", kind: "file", ext: ".md", owners: ["rama"], status: "added", adds: 22, dels: 0, recent: false, pinned: false, touched: "1h", branch: "research/runtime-step2" },
     { path: ".github/workflows/ci.yml", kind: "file", ext: ".yml", owners: ["nick0cave", "qa-king"], status: "modified", adds: 9, dels: 3, recent: false, pinned: false, touched: "2h", branch: "main" },
-    { path: "lib/cascade/cascade_profile.ml", kind: "file", ext: ".ml", owners: ["sangsu", "rama"], status: "unchanged", adds: 0, dels: 0, recent: false, pinned: false, touched: "3h", branch: "research/latency-tail" },
+    { path: "lib/runtime/runtime_profile.ml", kind: "file", ext: ".ml", owners: ["sangsu", "rama"], status: "unchanged", adds: 0, dels: 0, recent: false, pinned: false, touched: "3h", branch: "research/latency-tail" },
   ];
 
   const editorLines = [
@@ -76,7 +76,7 @@ window.MASC_P3 = (function () {
       { name: "SafeAuto", status: "fail", duration: "41s", details: ["runtime cause evidence lacks source path", "one stale FSM fixture missing timestamp", "review thread unresolved at L183"] },
       { name: "keeper-test-suite", status: "pass", duration: "8m 22s" },
       { name: "merge-blocker tests", status: "pass", duration: "3m 18s" },
-      { name: "cascade-replay", status: "running", duration: "1m 04s" },
+      { name: "runtime-replay", status: "running", duration: "1m 04s" },
       { name: "type-check", status: "pass", duration: "2m 11s" },
       { name: "lint", status: "pass", duration: "46s" },
     ],
@@ -100,30 +100,30 @@ window.MASC_P3 = (function () {
   const commits = [
     { hash: "1014c9", keeper: "nick0cave", branch: "main", subject: "fix(dashboard): surface fleet FSM runtime causes", age: "2m", adds: 112, dels: 21 },
     { hash: "7afa7d", keeper: "masc-improver", branch: "feat/keeper-clarity", subject: "refactor keeper claim decision tree", age: "14m", adds: 88, dels: 43 },
-    { hash: "e45f2e", keeper: "sangsu", branch: "feat/oas-error-cascade-name-label-10285", subject: "label cascade mismatch errors", age: "24m", adds: 31, dels: 6 },
+    { hash: "e45f2e", keeper: "sangsu", branch: "feat/oas-error-runtime-name-label-10285", subject: "label runtime mismatch errors", age: "24m", adds: 31, dels: 6 },
     { hash: "35e89b", keeper: "rama", branch: "diag/personality-resync-fields-10269", subject: "trace resync fields through keeper manifest", age: "38m", adds: 42, dels: 10 },
     { hash: "717da6", keeper: "qa-king", branch: "feat/auth-rotate-shared-tokens-10304", subject: "add auth rotation regression case", age: "41m", adds: 53, dels: 18 },
     { hash: "5c89fb", keeper: "sangsu", branch: "agent-code/git-access-risk-policy-20260424", subject: "tighten git access risk policy", age: "1h", adds: 21, dels: 8 },
     { hash: "1c5fb3", keeper: "masc-improver", branch: "chore/tool-access-policy-immutable-dedupe", subject: "dedupe immutable tool access policy", age: "2h", adds: 64, dels: 55 },
-    { hash: "b61067", keeper: "nick0cave", branch: "feat/cascade-trust-observability", subject: "surface cascade trust receipts", age: "2h", adds: 119, dels: 44 },
+    { hash: "b61067", keeper: "nick0cave", branch: "feat/runtime-trust-observability", subject: "surface runtime trust receipts", age: "2h", adds: 119, dels: 44 },
     { hash: "c5ad9c", keeper: "qa-king", branch: "auto-provision-sandbox", subject: "sandbox provisioning smoke", age: "3h", adds: 27, dels: 12 },
-    { hash: "44a1b9", keeper: "rama", branch: "research/cascade-step2", subject: "record cascade conclusion", age: "4h", adds: 18, dels: 2 },
+    { hash: "44a1b9", keeper: "rama", branch: "research/runtime-step2", subject: "record runtime conclusion", age: "4h", adds: 18, dels: 2 },
     { hash: "918fd2", keeper: "masc-improver", branch: "feat/keeper-clarity", subject: "split invocation from candidacy scoring", age: "4h", adds: 80, dels: 34 },
     { hash: "da11b0", keeper: "nick0cave", branch: "main", subject: "merge PR 9712 follow-up", age: "5h", adds: 12, dels: 1 },
   ];
 
   const worktrees = [
     { path: ".worktrees/design-system-phase3-ide-v2", branch: "agent-code/design-system-phase3-ide-v2", keepers: ["nick0cave", "sangsu"], status: "dirty", touched: "now" },
-    { path: ".worktrees/feat/oas-error-cascade-name-label-10285", branch: "feat/oas-error-cascade-name-label-10285", keepers: ["sangsu"], status: "clean", touched: "24m" },
+    { path: ".worktrees/feat/oas-error-runtime-name-label-10285", branch: "feat/oas-error-runtime-name-label-10285", keepers: ["sangsu"], status: "clean", touched: "24m" },
     { path: ".worktrees/worktree-sangsu-smoke", branch: "wt/sangsu-smoke", keepers: ["sangsu", "qa-king"], status: "dirty", touched: "53m" },
-    { path: ".worktrees/research-cascade-step2", branch: "research/cascade-step2", keepers: ["rama"], status: "stale", touched: "4h" },
+    { path: ".worktrees/research-runtime-step2", branch: "research/runtime-step2", keepers: ["rama"], status: "stale", touched: "4h" },
   ];
 
   const stashes = [
     { id: "stash@{0}", branch: "feat/keeper-clarity", keeper: "masc-improver", summary: "WIP keeper.claim() split", age: "18m", files: 4, adds: 44, dels: 19 },
-    { id: "stash@{1}", branch: "wt/sangsu-smoke", keeper: "sangsu", summary: "debug cascade auth payload", age: "1h", files: 7, adds: 72, dels: 12 },
+    { id: "stash@{1}", branch: "wt/sangsu-smoke", keeper: "sangsu", summary: "debug runtime auth payload", age: "1h", files: 7, adds: 72, dels: 12 },
     { id: "stash@{2}", branch: "fix/dashboard-9712", keeper: "nick0cave", summary: "temporary dashboard fixture", age: "3h", files: 2, adds: 18, dels: 4 },
-    { id: "stash@{3}", branch: "research/cascade-step2", keeper: "rama", summary: "research note + trace digest", age: "6h", files: 3, adds: 29, dels: 0 },
+    { id: "stash@{3}", branch: "research/runtime-step2", keeper: "rama", summary: "research note + trace digest", age: "6h", files: 3, adds: 29, dels: 0 },
   ];
 
   const searchResults = [

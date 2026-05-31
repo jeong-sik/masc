@@ -5,7 +5,7 @@
 //   GET /api/v1/verification/requests?task_id=&limit=
 //   POST /api/v1/verification/resolve
 //
-// Pattern mirrors CascadeConfigPanel: managed async resource + manual
+// Pattern mirrors RuntimeConfigPanel: managed async resource + manual
 // refresh + 15s auto-tick. Row expansion uses <details> so we avoid
 // component-local state plumbing for a read-only table. Pending rows
 // expose approve/reject action buttons that call the resolve endpoint;

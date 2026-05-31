@@ -1,12 +1,12 @@
 (** Runtime = Provider + Model + Spec(binding).
 
-    cascade→Runtime 전환 (RFC-0206). cascade 의 routes/cascade_name/tier/profile
+    runtime→Runtime 전환 (RFC-0206). runtime 의 routes/runtime_id/tier/profile
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
 
-    타입은 자립 모듈 {!Runtime_schema} 소유 (삭제된 [Cascade_declarative_types]
+    타입은 자립 모듈 {!Runtime_schema} 소유 (삭제된 [Runtime_declarative_types]
     대체). parse 는 {!Runtime_toml}, hot-path materialize 는 {!Runtime_adapter}
-    가 담당한다 — 셋 다 [Cascade_*] 코드 의존 0. *)
+    가 담당한다 — 셋 다 [Runtime_*] 코드 의존 0. *)
 
 open Runtime_schema
 
@@ -41,7 +41,7 @@ let of_binding (cfg : config) (b : binding) : t option =
 (** TOML 에서 Runtime 목록과 default Runtime 을 로드한다.
 
     fail-fast: [\[runtime\] default] 가 없거나 그 id 가 목록에 없으면 [Error].
-    silent fallback 일절 없음 (cascade→Runtime 비전: TOML 에 default 없으면
+    silent fallback 일절 없음 (runtime→Runtime 비전: TOML 에 default 없으면
     프로그램 실행 불가). *)
 let load_list ~(config_path : string) : (t list * t, string) result =
   match Runtime_toml.parse_file config_path with
@@ -112,8 +112,8 @@ let config_path () : string option =
   | Invalid_env | Missing -> None
 ;;
 
-(* RFC-0206 single-binding: the deleted [Cascade_runtime.resolve_*_max_context]
-   scanned model labels across a cascade's candidates and folded the max. Under
+(* RFC-0206 single-binding: the deleted [Runtime_runtime.resolve_*_max_context]
+   scanned model labels across a runtime's candidates and folded the max. Under
    single-binding every keeper uses the default runtime, so the context budget
    is that runtime's [model.max_context]. Falls back to
    [Runtime_constants.fallback_context_window] when the default is not yet
@@ -125,7 +125,7 @@ let default_max_context () : int =
 ;;
 
 (* RFC-0206 single-binding: the deleted
-   [Cascade_runtime.default_local_model_label_and_id] scanned configured/available
+   [Runtime_runtime.default_local_model_label_and_id] scanned configured/available
    labels and returned the model-id substring. Under single-binding the model
    name sent to the runtime endpoint is the default runtime's [model.api_name].
    Falls back to ["auto"] before {!init_default} runs. *)

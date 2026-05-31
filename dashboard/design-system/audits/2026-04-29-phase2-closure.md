@@ -43,7 +43,7 @@ from scratch.
 | **C1 Board Zone** | `cb-group-c.jsx` | ✅ covered | `memory.ts` (audit #11552) |
 | **C2 Messages** | `cb-group-e.jsx` | 🔴 backend partial | issue #11575 (`/api/v1/rooms` + mention inbox) |
 | **C3 Composer v2** | `cb-group-e.jsx` | 🟡 use-site-blocked | issue #11576 (depends on #11575) |
-| **O1 Cascade Inspector** | `cb-group-f.jsx` | 🔴 backend (Large) | issue #11574 (per-run hop trace API) |
+| **O1 Runtime Inspector** | `cb-group-f.jsx` | 🔴 backend (Large) | issue #11574 (per-run hop trace API) |
 | **O2 Audit Ledger** | `cb-group-f.jsx` | 🔴 backend (High) | issue #11569 (`/api/v1/audit`) |
 | **O3-A Dashboard** | `cb-group-f.jsx` | ✅ shipped | `safe-autonomy.ts:SafeAutonomyPanel` |
 | **O3-B ByKeeper** | `cb-group-f.jsx` | ✅ shipped (merged into KeeperCard) | `safe-autonomy.ts:KeeperCard` |
@@ -99,7 +99,7 @@ from scratch.
 | #11571 | O4 Cost & Latency aggregator | Mid |
 | #11572 | O5 Heuristic + Stress | Mid |
 | #11573 | G1-C Snapshot diff (+ product call) | Mid |
-| #11574 | O1 Cascade Inspector (Large) | High |
+| #11574 | O1 Runtime Inspector (Large) | High |
 | #11575 | C2 Messages rooms API | Mid |
 | #11576 | C3 Composer v2 (use-site on #11575) | Low post-#11575 |
 | #11577 | I0-A Branch selector | Mid |

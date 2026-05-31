@@ -3,7 +3,7 @@
     Tracks per-runtime call counts, model selection distribution, fallback
     hops, and per-attempt latency/error detail. Aggregate counters stay
     in-process (mutable Hashtbl), while per-call observations are also
-    appended to a dated JSONL audit log under [.masc/cascade_audit].
+    appended to a dated JSONL audit log under [.masc/runtime_audit].
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
@@ -72,7 +72,7 @@ type runtime_counter = {
   errored_models : int StringMap.t;
 }
 
-let cascade_max_keys = 256
+let runtime_max_keys = 256
 
 let create_runtime_counter ~now () =
   {
@@ -156,7 +156,7 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     ?(attempts = [])
     ?(fallback_events = [])
     ?(attempt_details_available = false)
-    ?(attempt_details_source = "opaque_named_cascade")
+    ?(attempt_details_source = "opaque_named_runtime")
     ?(oas_internal_runtime_allowed = false)
     () : runtime_observation =
   let candidate_models =
@@ -209,7 +209,7 @@ type runtime_metrics_capture = {
 }
 
 (* Non-redacted JSON encoders for the internal audit log
-   (runtime_observation_to_json → record_cascade_audit). Sibling fields
+   (runtime_observation_to_json → record_runtime_audit). Sibling fields
    in the same observation envelope (selected_model, primary_model,
    candidate_models) are already emitted as real strings; the per-attempt
    and per-fallback model_id were the only fields collapsed to the
@@ -447,7 +447,7 @@ let runtime_observation_to_json (obs : runtime_observation) : Yojson.Safe.t =
       ("oas_internal_runtime_allowed", `Bool obs.oas_internal_runtime_allowed);
     ]
 
-let get_cascade_audit_store store_opt =
+let get_runtime_audit_store store_opt =
   match store_opt with
   | Some store -> Some store
   | None ->
@@ -455,7 +455,7 @@ let get_cascade_audit_store store_opt =
       let dir =
         Filename.concat
           (Common.masc_dir_from_base_path ~base_path)
-          "cascade_audit"
+          "runtime_audit"
       in
       (match Dated_jsonl.create ~base_dir:dir () with
       | store -> Some store
@@ -464,7 +464,7 @@ let get_cascade_audit_store store_opt =
           (* Iter 47: tick counter so audit-subsystem health is
              observable.  Audit failure here disables the subsystem
              for the process lifetime — operators need to know. *)
-          Runtime_metrics.on_cascade_audit_failure ~stage:"store_creation";
+          Runtime_metrics.on_runtime_audit_failure ~stage:"store_creation";
           Log.Misc.warn "runtime audit store creation failed: %s"
             (Printexc.to_string exn);
           None)
@@ -492,7 +492,7 @@ let keeper_name_to_json keeper_name =
   | Some name when String.trim name <> "" -> `String name
   | _ -> `Null
 
-let cascade_audit_json ~now ~keeper_name ~runtime_id ~observation ~outcome =
+let runtime_audit_json ~now ~keeper_name ~runtime_id ~observation ~outcome =
   let runtime_id =
     runtime_id
   in
@@ -509,7 +509,7 @@ let cascade_audit_json ~now ~keeper_name ~runtime_id ~observation ~outcome =
         | None -> `Null );
     ]
 
-let record_cascade_audit store_opt ~now ~keeper_name ~runtime_id ~observation
+let record_runtime_audit store_opt ~now ~keeper_name ~runtime_id ~observation
     ~outcome =
   let runtime_id_string =
     runtime_id
@@ -519,7 +519,7 @@ let record_cascade_audit store_opt ~now ~keeper_name ~runtime_id ~observation
   | Some store ->
       (try
          Dated_jsonl.append store
-           (cascade_audit_json ~now ~keeper_name ~runtime_id ~observation
+           (runtime_audit_json ~now ~keeper_name ~runtime_id ~observation
               ~outcome)
        with
       | Eio.Cancel.Cancelled _ as e -> raise e
@@ -527,7 +527,7 @@ let record_cascade_audit store_opt ~now ~keeper_name ~runtime_id ~observation
           (* Iter 47: tick counter per-record append failure rate
              alertable.  Single-event audit loss compounds over
              time for post-incident analysis. *)
-          Runtime_metrics.on_cascade_audit_failure ~stage:"append";
+          Runtime_metrics.on_runtime_audit_failure ~stage:"append";
           Log.Misc.warn "runtime audit append failed runtime=%s error=%s"
             runtime_id_string (Printexc.to_string exn))
 
@@ -560,7 +560,7 @@ let attempt_model_display (attempt : runtime_attempt) =
   | _ -> attempt.model_id
 
 type msg =
-  | Record_cascade of {
+  | Record_runtime of {
       keeper_name : string option;
       runtime_id : string;
       observation : runtime_observation option;
@@ -587,7 +587,7 @@ let handle_record state ~now ~keeper_name ~runtime_id ~observation ~outcome =
     | Some c -> (c, counters, None)
     | None ->
         let (counters_after_evict, evicted) =
-          if StringMap.cardinal counters >= cascade_max_keys then
+          if StringMap.cardinal counters >= runtime_max_keys then
             match find_runtime_eviction_candidate counters with
             | Some candidate -> (StringMap.remove candidate.name counters, Some candidate)
             | None -> (counters, None)
@@ -643,10 +643,10 @@ let handle_record state ~now ~keeper_name ~runtime_id ~observation ~outcome =
       Log.Misc.warn
         "runtime metrics evicted key=%s calls=%d last_used_at=%.3f to admit %s (limit=%d)"
         candidate.name candidate.calls candidate.last_used_at runtime_id_string
-        cascade_max_keys)
+        runtime_max_keys)
     evicted;
-  let audit_store_next = get_cascade_audit_store state.audit_store in
-  record_cascade_audit audit_store_next ~now ~keeper_name ~runtime_id
+  let audit_store_next = get_runtime_audit_store state.audit_store in
+  record_runtime_audit audit_store_next ~now ~keeper_name ~runtime_id
     ~observation ~outcome;
   {
     counters = StringMap.add runtime_id_string counter counters;
@@ -706,7 +706,7 @@ let handle_get_metrics state p =
 let run_actor () =
   let rec loop state =
     match Eio.Stream.take stream with
-    | Record_cascade { keeper_name; runtime_id; observation; outcome; now } ->
+    | Record_runtime { keeper_name; runtime_id; observation; outcome; now } ->
         loop
           (handle_record state ~now ~keeper_name ~runtime_id ~observation
              ~outcome)
@@ -721,10 +721,10 @@ let run_actor () =
 let start_actor_if_needed ~sw =
   Eio.Fiber.fork_daemon ~sw run_actor
 
-let record_cascade ?keeper_name ~observation ~runtime_id ~outcome () =
+let record_runtime ?keeper_name ~observation ~runtime_id ~outcome () =
   let now = Time_compat.now () in
   Eio.Stream.add stream
-    (Record_cascade { keeper_name; runtime_id; observation; outcome; now })
+    (Record_runtime { keeper_name; runtime_id; observation; outcome; now })
 
 let runtime_metrics_json () =
   let p, u = Eio.Promise.create () in

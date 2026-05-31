@@ -39,5 +39,5 @@ Live findings:
 ## 적용범위
 
 - 영향 받는 영역: Keeper prompt generation, dynamic preferred-tool hints, repository workflow guidance, unified prompt fallback strings, and focused prompt regression tests.
-- 제약/배제: Does not change Bash parser/safety gates, GitHub credential bundles, cascade capacity, OAS provider behavior, or OAS pin state.
+- 제약/배제: Does not change Bash parser/safety gates, GitHub credential bundles, runtime capacity, OAS provider behavior, or OAS pin state.
 - 롤백 조건: Roll back if focused prompt tests fail, public alias routing is not active in the deployed OAS tool schema, or runtime policy intentionally exposes internal `tool_execute` as the only callable schema name.

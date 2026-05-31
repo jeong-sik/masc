@@ -1,7 +1,7 @@
 (** Dashboard_execution_fixture — synthetic execution-dashboard
     JSON for smoke tests and dev preview.
 
-    {b Cascade chain}: starts with
+    {b Runtime chain}: starts with
     [include Dashboard_execution_helpers].
     {!Dashboard_execution} does
     [include Dashboard_execution_fixture] to make the fixture

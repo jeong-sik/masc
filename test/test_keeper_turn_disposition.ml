@@ -249,7 +249,7 @@ let test_projection () =
     runtime_codes_to_projection
 ;;
 
-let check_cascade_failure_reason raw_error expected_code =
+let check_runtime_failure_reason raw_error expected_code =
   let terminal = Legacy.of_code raw_error in
   match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error with
   | Some (Registry.Provider_runtime_error { code; detail }) ->
@@ -262,28 +262,28 @@ let check_cascade_failure_reason raw_error expected_code =
     Alcotest.failf
       "expected Provider_runtime_error, got %s"
       (Registry.failure_reason_to_string other)
-  | None -> Alcotest.fail "expected structured cascade failure reason"
+  | None -> Alcotest.fail "expected structured runtime failure reason"
 ;;
 
-let test_registry_failure_reason_preserves_no_provider_cascade_reason () =
+let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
   let raw_error =
     "Internal error: [masc_oas_error] \
-     {\"kind\":\"runtime_exhausted\",\"cascade_name\":\"cascade.strict_tool_candidates\",\
+     {\"kind\":\"runtime_exhausted\",\"runtime_id\":\"runtime.strict_tool_candidates\",\
      \"reason\":\"no_providers_available\"}"
   in
-  check_cascade_failure_reason
+  check_runtime_failure_reason
     raw_error
     "runtime_exhausted_no_providers_available"
 ;;
 
-let test_registry_failure_reason_buckets_cascade_liveness_reason () =
+let test_registry_failure_reason_buckets_runtime_liveness_reason () =
   let raw_error =
     "Internal error: [masc_oas_error] \
-     {\"kind\":\"runtime_exhausted\",\"cascade_name\":\"cascade.ollama_cloud_stable\",\
-     \"reason\":{\"tag\":\"other_detail\",\"message\":\"Cascade attempt liveness guard \
-     killed runtime lane cascade.ollama_cloud_stable: inter_chunk_idle\"}}"
+     {\"kind\":\"runtime_exhausted\",\"runtime_id\":\"runtime.ollama_cloud_stable\",\
+     \"reason\":{\"tag\":\"other_detail\",\"message\":\"Runtime attempt liveness guard \
+     killed runtime lane runtime.ollama_cloud_stable: inter_chunk_idle\"}}"
   in
-  check_cascade_failure_reason raw_error "runtime_exhausted_inter_chunk_idle"
+  check_runtime_failure_reason raw_error "runtime_exhausted_inter_chunk_idle"
 ;;
 
 let () =
@@ -327,13 +327,13 @@ let () =
         ] )
     ; ( "registry failure reason"
       , [ Alcotest.test_case
-            "structured cascade no-provider reason is preserved"
+            "structured runtime no-provider reason is preserved"
             `Quick
-            test_registry_failure_reason_preserves_no_provider_cascade_reason
+            test_registry_failure_reason_preserves_no_provider_runtime_reason
         ; Alcotest.test_case
-            "structured cascade liveness reason is bucketed"
+            "structured runtime liveness reason is bucketed"
             `Quick
-            test_registry_failure_reason_buckets_cascade_liveness_reason
+            test_registry_failure_reason_buckets_runtime_liveness_reason
         ] )
     ]
 ;;

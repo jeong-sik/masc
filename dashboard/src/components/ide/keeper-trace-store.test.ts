@@ -71,7 +71,7 @@ describe('keeper-trace-store', () => {
       id: 'a-1',
       tsMs: 1000,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -79,7 +79,7 @@ describe('keeper-trace-store', () => {
       id: 'a-2',
       tsMs: 1000 + COALESCE_WINDOW_MS,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-2',
       provider: 'provider-k',
     })
@@ -96,7 +96,7 @@ describe('keeper-trace-store', () => {
       id: 'a-1',
       tsMs: 1000,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -104,7 +104,7 @@ describe('keeper-trace-store', () => {
       id: 'a-2',
       tsMs: 1000 + COALESCE_WINDOW_MS + 1,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-2',
       provider: 'provider-k',
     })
@@ -117,7 +117,7 @@ describe('keeper-trace-store', () => {
       id: 'a-1',
       tsMs: 1000,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -129,7 +129,7 @@ describe('keeper-trace-store', () => {
       intention: 'inspect',
     })
     expect(keeperTraceState.value.events).toHaveLength(2)
-    expect(keeperTraceState.value.events.map(e => e.source)).toEqual(['cascade-hop', 'bdi-snapshot'])
+    expect(keeperTraceState.value.events.map(e => e.source)).toEqual(['runtime-hop', 'bdi-snapshot'])
   })
 
   it('does NOT coalesce same-source events for different keepers within the window', () => {
@@ -137,7 +137,7 @@ describe('keeper-trace-store', () => {
       id: 'a-1',
       tsMs: 1000,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -145,7 +145,7 @@ describe('keeper-trace-store', () => {
       id: 'a-2',
       tsMs: 1010,
       keeperName: 'moth',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-2',
       provider: 'provider-k',
     })
@@ -338,7 +338,7 @@ describe('keeper-trace-store', () => {
       id: 'old-2',
       tsMs: 200,
       keeperName: 'moth',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-old',
       provider: 'provider-k',
     })
@@ -359,7 +359,7 @@ describe('keeper-trace-store', () => {
       id: 'survivor',
       tsMs: 5_000,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -388,7 +388,7 @@ describe('keeper-trace-store', () => {
       id: 'fresh',
       tsMs: RETENTION_MS,
       keeperName: 'moth',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -401,7 +401,7 @@ describe('keeper-trace-store', () => {
       id: 'a-1',
       tsMs: 1000,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -420,7 +420,7 @@ describe('keeper-trace-store', () => {
       id: 'a-1',
       tsMs: 1000,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -428,7 +428,7 @@ describe('keeper-trace-store', () => {
       id: 'a-2',
       tsMs: 1100,
       keeperName: 'moth',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-2',
       provider: 'provider-k',
     })
@@ -442,7 +442,7 @@ describe('keeper-trace-store', () => {
       id: 'a-1',
       tsMs: 1000,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -460,7 +460,7 @@ describe('keeper-trace-store', () => {
       source: 'bdi-snapshot',
       intention: 'review',
     })
-    expect(tracesBySource('cascade-hop').map(e => e.id)).toEqual(['a-1'])
+    expect(tracesBySource('runtime-hop').map(e => e.id)).toEqual(['a-1'])
     expect(tracesBySource('bdi-snapshot').map(e => e.id)).toEqual(['a-2', 'a-3'])
     expect(tracesBySource('decision-log')).toEqual([])
   })
@@ -478,7 +478,7 @@ describe('keeper-trace-store', () => {
       id: 'b-1',
       tsMs: 1100,
       keeperName: 'scholar',
-      source: 'cascade-hop',
+      source: 'runtime-hop',
       hopId: 'h-1',
       provider: 'provider-k',
     })
@@ -515,7 +515,7 @@ describe('keeper-trace-store', () => {
           expect(event.threadId).toBe('th-1')
           expect(event.line).toBe(12)
           break
-        case 'cascade-hop':
+        case 'runtime-hop':
           expect(event.hopId).toBe('h-1')
           expect(event.provider).toBe('provider-k')
           break

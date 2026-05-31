@@ -72,7 +72,7 @@ type sample = {
       (** Prefix or implicit cache hit detected by the provider. *)
   status : status;  (** Outcome of the call. *)
   retry_count : int;
-      (** Number of cascade retries attempted before this sample (0 for the
+      (** Number of runtime retries attempted before this sample (0 for the
           first attempt). *)
 }
 
@@ -129,7 +129,7 @@ val record_response :
 
 type provider_error_count = {
   provider_id : string;
-  cascade_name : string;
+  runtime_id : string;
   kind : string;
   capacity_scope : string;
   count : int;
@@ -139,8 +139,8 @@ type provider_error_count = {
     [capacity_scope] is ["none"] for non-capacity errors. *)
 
 val record_provider_error :
-  cascade_name:string -> provider_id:string -> Provider_error.t -> unit
-(** [record_provider_error ~cascade_name ~provider_id error] increments the
+  runtime_id:string -> provider_id:string -> Provider_error.t -> unit
+(** [record_provider_error ~runtime_id ~provider_id error] increments the
     dashboard count for a typed provider-error event. [provider_id] is accepted
     for source compatibility but normalized to the runtime lane before
     storage. *)

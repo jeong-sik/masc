@@ -10,7 +10,7 @@
 
    The fix demoted gate 2 to an advisory hint by default.  This
    test pins the resulting state machine WITHOUT calling the LLM
-   evaluator (Gate 3 needs an OAS cascade we don't stand up here),
+   evaluator (Gate 3 needs an OAS runtime we don't stand up here),
    so the assertions focus on:
 
      1. The Prometheus counter labels are correct for each

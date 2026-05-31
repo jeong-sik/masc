@@ -1,6 +1,6 @@
 (** Server_dashboard_http — Dashboard HTTP handlers (facade).
 
-    Cascade-includes 5 sub-modules so callers reach the
+    Runtime-includes 5 sub-modules so callers reach the
     dashboard surface through a single namespace:
     - {!Server_dashboard_http_core}
     - {!Server_dashboard_http_runtime_info}

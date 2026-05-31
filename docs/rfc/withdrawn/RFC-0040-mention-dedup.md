@@ -21,7 +21,7 @@ withdrawn_reason: "Sender-side dedup approach abandoned. Receive-side dedup (RFC
 
 ---
 
-## 1. iter-6/7 sketch correction (Narrative cascade)
+## 1. iter-6/7 sketch correction (Narrative runtime)
 
 Earlier iter-6 sketch + iter-7 *correction* both assumed:
 > "Mention dispatch happens at broadcast time; resolve_targets filters recipient set."
@@ -224,7 +224,7 @@ eio variant + grpc는 별도 stack — 본 RFC의 dedup이 *coord_broadcast.ml:6
 - iter-2 §2.P5 (initial framing)
 - iter-5 §2 (P4↔P5 통합)
 - iter-6 §3 (sketch — *틀린 design 방향*)
-- iter-7 §3 (sketch 보강 — *부분 정정만 한 narrative cascade*)
+- iter-7 §3 (sketch 보강 — *부분 정정만 한 narrative runtime*)
 - iter-8 §1 (본 RFC — pull model 발견 후 정정)
 - 코드: `lib/coord/coord_broadcast.ml:64,122`, `lib/coord/mention.ml:121` (`resolve_targets`, 0 callers), `lib/keeper/keeper_prompt.ml:16`, `lib/keeper/keeper_context_runtime.ml:418`, `lib/keeper/keeper_memory_policy.ml:83`
-- Memory: `feedback_keeper_hallucinated_audit_cascade`, `feedback_rfc_section_1_4_caller_context_unverified`
+- Memory: `feedback_keeper_hallucinated_audit_runtime`, `feedback_rfc_section_1_4_caller_context_unverified`

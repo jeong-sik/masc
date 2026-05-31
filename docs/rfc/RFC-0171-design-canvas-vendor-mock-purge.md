@@ -9,13 +9,13 @@
 
 ## 1. Problem
 
-The RFC-0165~0170 family removed MCP-client coupling, upstream-LLM-provider name dispatch, and the provider color palette from production code and one comment surface. The remaining vendor name occurrences in the dashboard live in the **design canvas** — preview HTML mockups, JSX design canvas scenes, and ui_kits cockpit mock data files. These are not RFC bodies (whose citations stay) nor production fixtures (which mirror external SDK variant constructors); they are 32 mock data files where designers seeded vendor names into UI illustration text (cascade chip labels, status bar mocks, log line examples, fake configuration entries).
+The RFC-0165~0170 family removed MCP-client coupling, upstream-LLM-provider name dispatch, and the provider color palette from production code and one comment surface. The remaining vendor name occurrences in the dashboard live in the **design canvas** — preview HTML mockups, JSX design canvas scenes, and ui_kits cockpit mock data files. These are not RFC bodies (whose citations stay) nor production fixtures (which mirror external SDK variant constructors); they are 32 mock data files where designers seeded vendor names into UI illustration text (runtime chip labels, status bar mocks, log line examples, fake configuration entries).
 
 `rg -i 'provider-a|provider-c|agent-llm-a|provider-f|agent-code|provider-b|...' dashboard/design-system/{preview,ui_kits,headless-core}/` returned 32 files. None of these files are imported by production code; they are static design illustrations.
 
 ## 2. Decision
 
-Apply a consistent vendor-agnostic mapping across the 32 files. The mapping preserves the *multi-provider* design intent (chip color slots, cascade fan-out illustration, status diversity) while removing every specific vendor identity.
+Apply a consistent vendor-agnostic mapping across the 32 files. The mapping preserves the *multi-provider* design intent (chip color slots, runtime fan-out illustration, status diversity) while removing every specific vendor identity.
 
 | Original | Replacement |
 |----------|-------------|
@@ -83,4 +83,4 @@ All 7 rejection signatures: NO.
 
 ## 6. Trade-off acknowledgement
 
-Per `software-development.md` and operator memory `feedback-big-bang-refactor-preference`: vendor name removal is preferred over preserving the visual fidelity of design illustrations that advertise a closed roster of LLM vendors. The design canvas retains its illustrative purpose (multi-provider cascade fan-out, status diversity, mock log lines) with generic names; the only thing lost is the specific brand association in the mock.
+Per `software-development.md` and operator memory `feedback-big-bang-refactor-preference`: vendor name removal is preferred over preserving the visual fidelity of design illustrations that advertise a closed roster of LLM vendors. The design canvas retains its illustrative purpose (multi-provider runtime fan-out, status diversity, mock log lines) with generic names; the only thing lost is the specific brand association in the mock.

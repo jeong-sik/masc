@@ -1,6 +1,6 @@
-(** Runtime numeric constants (RFC-0206 cascade→Runtime rebirth).
+(** Runtime numeric constants (RFC-0206 runtime→Runtime rebirth).
 
-    Re-homes the constants that lived on the deleted [Cascade_runtime] module
+    Re-homes the constants that lived on the deleted [Runtime_runtime] module
     and were referenced by surviving consumers (relay, dashboard health,
     context compaction). No routing/catalog state — pure named values. *)
 

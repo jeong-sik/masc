@@ -9,7 +9,7 @@
 \* turn as Done.
 \*
 \* Sibling specs cover orthogonal angles:
-\*   - KeeperTurnCycle (3-axis: turn_phase / decision_stage / cascade_state)
+\*   - KeeperTurnCycle (3-axis: turn_phase / decision_stage / runtime_state)
 \*     models cross-axis synchronization for the *live* observation record.
 \*   - KeeperOASAdvanced models the OAS bridge cancel/error boundary.
 \*
@@ -26,7 +26,7 @@
 \*   ---------------------+--------------------------------------------+-------
 \*   "idle"               | Keeper_turn_fsm.Idle                       | keeper_turn_fsm.mli
 \*   "phase_gating"       | Keeper_turn_fsm.Phase_gating               |
-\*   "cascade_routing"    | Keeper_turn_fsm.Cascade_routing            |
+\*   "runtime_routing"    | Keeper_turn_fsm.Runtime_routing            |
 \*   "awaiting_provider"  | Keeper_turn_fsm.Awaiting_provider          |
 \*   "streaming"          | Keeper_turn_fsm.Streaming                  |
 \*   "awaiting_tool"      | Keeper_turn_fsm.Awaiting_tool_result       |
@@ -48,7 +48,7 @@
 \* Out-of-scope:
 \*   - failure_reason / cancel_reason carriers (the OCaml record fields
 \*     don't change the FSM shape, only the label).
-\*   - phase gate cascade selection internals (covered by KeeperTurnCycle).
+\*   - phase gate runtime selection internals (covered by KeeperTurnCycle).
 \*   - tool dispatch graph below the turn-facing projection.
 
 EXTENDS TLC
@@ -63,7 +63,7 @@ vars == << turn_state, receipt_outcome, stop_signaled >>
 TurnStateSet ==
     { "idle",
       "phase_gating",
-      "cascade_routing",
+      "runtime_routing",
       "awaiting_provider",
       "streaming",
       "awaiting_tool",
@@ -75,7 +75,7 @@ TurnStateSet ==
 \* Active (non-terminal) states from which cancellation is observable.
 ActiveStateSet ==
     { "phase_gating",
-      "cascade_routing",
+      "runtime_routing",
       "awaiting_provider",
       "streaming",
       "awaiting_tool",
@@ -122,27 +122,27 @@ PhaseGateSkip ==
     /\ receipt_outcome' = "receipt_skipped"
     /\ UNCHANGED stop_signaled
 
-\* Phase gate allows turn → cascade routing.
+\* Phase gate allows turn → runtime routing.
 \* Forward edges only fire when no stop signal is in flight; once stop
 \* is raised, HonorStopSignal is the only legal transition out of an
 \* active state.
 PhaseGateOk ==
     /\ turn_state = "phase_gating"
     /\ ~stop_signaled
-    /\ turn_state' = "cascade_routing"
+    /\ turn_state' = "runtime_routing"
     /\ UNCHANGED << receipt_outcome, stop_signaled >>
 
-\* Cascade chose a provider, dispatch begins.
-CascadeRouted ==
-    /\ turn_state = "cascade_routing"
+\* Runtime chose a provider, dispatch begins.
+RuntimeRouted ==
+    /\ turn_state = "runtime_routing"
     /\ ~stop_signaled
     /\ turn_state' = "awaiting_provider"
     /\ UNCHANGED << receipt_outcome, stop_signaled >>
 
-\* All cascade attempts exhausted (no provider can serve this turn).
-\* Receipt outcome = failed (failure_reason = Cascade_unavailable).
-CascadeUnavailable ==
-    /\ turn_state = "cascade_routing"
+\* All runtime attempts exhausted (no provider can serve this turn).
+\* Receipt outcome = failed (failure_reason = Runtime_unavailable).
+RuntimeUnavailable ==
+    /\ turn_state = "runtime_routing"
     /\ ~stop_signaled
     /\ turn_state' = "failed"
     /\ receipt_outcome' = "receipt_failed"
@@ -266,8 +266,8 @@ Next ==
     \/ StartTurn
     \/ PhaseGateSkip
     \/ PhaseGateOk
-    \/ CascadeRouted
-    \/ CascadeUnavailable
+    \/ RuntimeRouted
+    \/ RuntimeUnavailable
     \/ ProviderResponded
     \/ ProviderTimeout
     \/ StreamYieldsTool
@@ -295,7 +295,7 @@ Fairness ==
     \* *infinitely often* enabled, which the cycle satisfies.
     /\ WF_vars(StartTurn)
     /\ WF_vars(PhaseGateOk \/ PhaseGateSkip)
-    /\ WF_vars(CascadeRouted \/ CascadeUnavailable)
+    /\ WF_vars(RuntimeRouted \/ RuntimeUnavailable)
     /\ WF_vars(ProviderResponded \/ ProviderTimeout)
     /\ SF_vars(StreamComplete)
     /\ WF_vars(ToolReturned)

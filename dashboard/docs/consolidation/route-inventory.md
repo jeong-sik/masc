@@ -26,7 +26,7 @@
 |---------|----------|
 | `cockpit` | none; hidden surface |
 | `overview` | none |
-| `monitoring` | `runtime`, `cascade-config`, `agents`, `fleet-health`, `doctor`, `transport-health`, `feature-health`, `observatory`, `cognition`; hidden diagnostics: `journey` |
+| `monitoring` | `runtime`, `runtime-config`, `agents`, `fleet-health`, `doctor`, `transport-health`, `feature-health`, `observatory`, `cognition`; hidden diagnostics: `journey` |
 | `command` | `operations` |
 | `connectors` | `connector-status` |
 | `workspace` | `board`, `sub-boards`, `moderation`, `planning`, `repositories`, `verification` |

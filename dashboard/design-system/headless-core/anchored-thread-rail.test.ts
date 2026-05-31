@@ -4,7 +4,7 @@ import {
   type AnchoredThread,
 } from './anchored-thread-rail'
 
-const file = 'runtime/cascade/router.ts'
+const file = 'runtime/runtime/router.ts'
 
 const thread = (patch: Partial<AnchoredThread>): AnchoredThread => ({
   id: 'thread-1',
@@ -16,7 +16,7 @@ const thread = (patch: Partial<AnchoredThread>): AnchoredThread => ({
     line_end: 35,
     symbol_hint: 'if:provider-b-tool-choice',
   },
-  body: 'Schema failure matches the live cascade logs.',
+  body: 'Schema failure matches the live runtime logs.',
   created_ms: 1000,
   resolved: false,
   reply_count: 0,

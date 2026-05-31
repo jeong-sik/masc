@@ -74,7 +74,6 @@ type try_provider_ctx =
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
-  ; runtime_engine : Keeper_runtime_engine.t
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
   ; runtime_manifest_required_tool_names : string list
@@ -92,16 +91,9 @@ let emit_runtime_manifest
   | Some manifest_ctx, Some append ->
     let decision =
       match decision with
-      | None -> Some (`Assoc (Keeper_runtime_engine.manifest_fields ctx.runtime_engine))
-      | Some (`Assoc fields) ->
-          Some
-            (`Assoc
-              (Keeper_runtime_engine.manifest_fields ctx.runtime_engine @ fields))
-      | Some other ->
-          Some
-            (`Assoc
-              (Keeper_runtime_engine.manifest_fields ctx.runtime_engine
-               @ [ ("decision", other) ]))
+      | None -> Some (`Assoc [])
+      | Some (`Assoc _ as assoc) -> Some assoc
+      | Some other -> Some (`Assoc [ ("decision", other) ])
     in
     ctx.seq_ref := !(ctx.seq_ref) + 1;
     let elapsed_ms =
@@ -175,7 +167,7 @@ let max_execution_time_for_attempt ?per_provider_timeout_s () =
   | Some timeout_s -> Some timeout_s
   | None -> Some (Keeper_runtime_resolved.oas_call_timeout_sec ())
 
-(** Run a single provider attempt within the cascade.
+(** Run a single provider attempt within the runtime.
 
     This is the extracted body of the [try_provider] closure that was
     defined inside [Keeper_turn_driver.run_named]. The [ctx] record
@@ -186,7 +178,7 @@ let max_execution_time_for_attempt ?per_provider_timeout_s () =
     @param per_provider_timeout_s Per-provider wall-clock timeout.
     @param candidate The opaque runtime candidate to attempt.
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
-    sample is not recorded here; the caller records it only after the cascade
+    sample is not recorded here; the caller records it only after the runtime
     accept predicate accepts the response. *)
 let run_try_provider
       (ctx : try_provider_ctx)
@@ -308,7 +300,7 @@ let run_try_provider
                  (default), fall back to the per-attempt
                  max_execution_time so this wire matches the PR #16071
                  baseline. When set, the body-callback wall-clock fires
-                 before the turn cap, surfacing Retry.Timeout so cascade
+                 before the turn cap, surfacing Retry.Timeout so runtime
                  falls forward at the attempt boundary. *)
               (match Keeper_runtime_resolved.body_timeout_override_sec () with
                | Some _ as s -> s
@@ -389,7 +381,7 @@ let run_try_provider
           Keeper_attempt_liveness_observer.create
             ~mode:liveness_mode
             ~budget:resolved_budget.budget
-            ~cascade_label:ctx.runtime_id
+            ~runtime_label:ctx.runtime_id
             ~provider_label
             ~external_wait:(fun () ->
               Keeper_approval_queue.has_pending_for_keeper
@@ -474,12 +466,7 @@ let run_try_provider
         Printexc.raise_with_backtrace exn bt
     in
     (match
-       Runtime_config_builder.with_cli_preflight
-         ~scope:(Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
-         ~config
-         ~goal:ctx.goal
-         (fun () ->
-            let result =
+       (let result =
               with_liveness_attempt (fun ~attempt_sw ~liveness_on_event ->
                 let effective_checkpoint =
                   match resume_checkpoint with
@@ -522,7 +509,7 @@ let run_try_provider
                      (try Eio.Time.with_timeout_exn clock t run_fn with
                       | Eio.Time.Timeout ->
                         Log.Misc.info
-                          "[cascade-fallback] cascade %s: runtime lane per-provider \
+                          "[runtime-fallback] runtime %s: runtime lane per-provider \
                            timeout after %.1fs, falling back"
                           ctx.runtime_id
                           t;
@@ -533,8 +520,8 @@ let run_try_provider
                                     Printf.sprintf "Per-provider timeout after %.1fs" t
                                 })))
                    | None -> run_fn ()))
-            in
-            Ok result)
+        in
+        Ok result)
      with
      | Error err ->
        finalize_liveness ();

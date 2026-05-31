@@ -28,7 +28,7 @@ type sample = {
 
 type provider_error_count = {
   provider_id : string;
-  cascade_name : string;
+  runtime_id : string;
   kind : string;
   capacity_scope : string;
   count : int;
@@ -121,7 +121,7 @@ let provider_error_count_to_yojson (c : provider_error_count) =
   `Assoc
     [
       ("provider_id", `String public_runtime_provider_label);
-      ("runtime_id", `String c.cascade_name);
+      ("runtime_id", `String c.runtime_id);
       ("kind", `String c.kind);
       ("capacity_scope", `String c.capacity_scope);
       ("count", `Int c.count);
@@ -298,11 +298,11 @@ let provider_error_capacity_scope_label = function
   | Provider_error.ModelNotFound ->
       "none"
 
-let record_provider_error ~cascade_name ~provider_id:_ error =
+let record_provider_error ~runtime_id ~provider_id:_ error =
   let kind = Provider_error.to_error_kind error in
   let capacity_scope = provider_error_capacity_scope_label error in
   let provider_id = public_runtime_provider_label in
-  let key = (provider_id, cascade_name, kind, capacity_scope) in
+  let key = (provider_id, runtime_id, kind, capacity_scope) in
   with_lock (fun () ->
       let count =
         match Hashtbl.find_opt provider_error_table key with
@@ -316,7 +316,7 @@ let compare_provider_error_count a b =
   | 0 -> (
       match String.compare a.provider_id b.provider_id with
       | 0 -> (
-          match String.compare a.cascade_name b.cascade_name with
+          match String.compare a.runtime_id b.runtime_id with
           | 0 -> (
               match String.compare a.kind b.kind with
               | 0 -> String.compare a.capacity_scope b.capacity_scope
@@ -330,13 +330,13 @@ let provider_error_counts ?provider () =
   let counts =
     with_lock (fun () ->
         Hashtbl.fold
-          (fun (provider_id, cascade_name, kind, capacity_scope) count acc ->
+          (fun (provider_id, runtime_id, kind, capacity_scope) count acc ->
             match provider with
             | Some provider when not (String.equal provider provider_id) -> acc
             | _ ->
                 {
                   provider_id;
-                  cascade_name;
+                  runtime_id;
                   kind;
                   capacity_scope;
                   count;
@@ -526,9 +526,9 @@ let clear ?provider () =
           Hashtbl.remove table p;
           let keys =
             Hashtbl.fold
-              (fun (provider_id, cascade_name, kind, capacity_scope) _ acc ->
+              (fun (provider_id, runtime_id, kind, capacity_scope) _ acc ->
                 if String.equal provider_id p then
-                  (provider_id, cascade_name, kind, capacity_scope) :: acc
+                  (provider_id, runtime_id, kind, capacity_scope) :: acc
                 else acc)
               provider_error_table []
           in

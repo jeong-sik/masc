@@ -10,9 +10,9 @@ open Masc_domain
 
 type activity_entity = { kind: string; id: string }
 type agent_lifecycle_event =
-  | Lifecycle_join
-  | Lifecycle_rejoin
-  | Lifecycle_leave
+  | Session_bound
+  | Session_rebound
+  | Session_ended
 
 val force_release_task_fn : (Coord_utils_backend_setup.config ->
             agent_name:string ->

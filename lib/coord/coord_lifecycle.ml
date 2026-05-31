@@ -1,4 +1,4 @@
-(** Coord Lifecycle - Agent join/leave operations.
+(** Coord Lifecycle - Agent session binding operations.
 
     Extracted from Coord module. Handles agent entry, re-entry, and departure
     including nickname resolution, dedup, metadata, and relation materialization. *)
@@ -31,12 +31,12 @@ let agent_parse_error_snapshot ~agent_name ~agent_file =
   ]
 
 (** Bind agent session - with auto-generated nickname and metadata *)
-let join config ~agent_name ?(agent_type_override=None) ~capabilities
+let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None)
     ?(parent_task=None) ?(keeper_name=None) ?(keeper_id=None) () =
   ensure_initialized config;
 
-  (* Determine if this is a legacy call (agent_name = type) or new style *)
+  (* Determine whether [agent_name] is a stable nickname or an agent type. *)
   let agent_type = match agent_type_override with
     | Some t -> t
     | None ->
@@ -47,9 +47,9 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
           agent_name  (* Legacy: agent_name is the type *)
   in
 
-  (* Reuse existing nickname for same agent_type if already joined,
+  (* Reuse existing nickname for same agent_type if already bound,
      otherwise generate a new one. This prevents identity drift when
-     the same agent_name joins multiple times within a session. *)
+     the same agent_name binds multiple times within a session. *)
   let nickname =
     if Nickname.is_generated_nickname agent_name then
       agent_name  (* Already a nickname, use as-is *)
@@ -72,7 +72,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     end
   in
 
-  (* Dedup: if agent already joined, update last_seen and return early *)
+  (* Dedup: if agent already has a session, update last_seen and return early *)
   let agent_file_dedup = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
   let already_joined = Sys.file_exists agent_file_dedup in
   if already_joined then begin
@@ -100,32 +100,32 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
        } in
        write_json config agent_file_dedup (agent_to_yojson updated);
        if is_inactive then begin
-         (* Restore to active_agents on rejoin *)
+         (* Restore to active_agents on session rebound *)
          let _state = update_state config (fun s ->
            let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
            { s with active_agents = agents }
          ) in
          let _ =
            broadcast config ~from_agent:nickname
-             ~msg_type:"lifecycle_rejoin"
-             ~content:(Printf.sprintf "👋 %s rejoined the namespace" nickname)
+             ~msg_type:"session_rebound"
+             ~content:(Printf.sprintf "%s rebound the namespace session" nickname)
          in
          log_event config (`Assoc [
-           ("type", `String "agent_join");
+           ("type", `String "agent_session_bound");
            ("agent", `String nickname);
            ("agent_type", `String agent_type);
            ("session_id", `String new_session_id);
-           ("rejoin", `Bool true);
+           ("session_rebound", `Bool true);
            ("ts", `String (now_iso ()));
          ]);
          (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:nickname
-           ~event:Coord_hooks.Lifecycle_rejoin
+           ~event:Coord_hooks.Session_rebound
            ~details:
              (`Assoc
                [
                  ("agent_type", `String agent_type);
                  ("session_id", `String new_session_id);
-                 ("rejoin", `Bool true);
+                 ("session_rebound", `Bool true);
                ]);
        end
      | Error e ->
@@ -134,9 +134,9 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
              ~agent_file:agent_file_dedup
          in
          Log.Coord.warn
-           "agent rejoin: invalid agent JSON for %s: %s | snapshot=%s"
+           "agent session rebound: invalid agent JSON for %s: %s | snapshot=%s"
            nickname e (Yojson.Safe.to_string snapshot));
-    Printf.sprintf "%s already in the namespace (last_seen updated)" nickname
+    Printf.sprintf "%s already bound in the namespace (last_seen updated)" nickname
   end else begin
     (* Collect metadata *)
   let session_id = generate_session_id () in
@@ -173,16 +173,16 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     { s with active_agents = agents }
   ) in
 
-  (* Broadcast join *)
+  (* Broadcast session binding *)
   let _ =
     broadcast config ~from_agent:nickname
-      ~msg_type:"lifecycle_join"
-      ~content:(Printf.sprintf "👋 %s joined the namespace" nickname)
+      ~msg_type:"session_bound"
+      ~content:(Printf.sprintf "%s bound the namespace session" nickname)
   in
 
   (* Log event with metadata *)
   log_event config (`Assoc [
-    ("type", `String "agent_join");
+    ("type", `String "agent_session_bound");
     ("agent", `String nickname);
     ("agent_type", `String agent_type);
     ("session_id", `String session_id);
@@ -190,7 +190,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     ("ts", `String (now_iso ()));
   ]);
   (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:nickname
-    ~event:Coord_hooks.Lifecycle_join
+    ~event:Coord_hooks.Session_bound
     ~details:
       (`Assoc
         [
@@ -200,15 +200,12 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
             `List (List.map (fun s -> `String s) capabilities) );
         ]);
 
-  Printf.sprintf "%s joined\n  Nickname: %s\n  Type: %s\n  Session: %s"
+  Printf.sprintf "%s session bound\n  Nickname: %s\n  Type: %s\n  Session: %s"
     nickname nickname agent_type session_id
   end
 
-(* join_in_room removed — namespace concept retired (#unify-namespace).
-   Use [join] directly. *)
-
 (** End agent session *)
-let leave ?(stop_heartbeats = true) config ~agent_name =
+let end_session ?(stop_heartbeats = true) config ~agent_name =
   ensure_initialized config;
 
   (* Support both exact nickname match and agent_type prefix match *)
@@ -222,8 +219,8 @@ let leave ?(stop_heartbeats = true) config ~agent_name =
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
   let in_fs = Sys.file_exists agent_file in
   if in_fs then begin
-    (* Mark agent as Inactive instead of deleting, so re-join can restore identity.
-       This prevents orphan state when the same agent_type re-joins later. *)
+    (* Mark agent as Inactive instead of deleting, so a future session can restore
+       identity without orphan state. *)
     (match read_agent_with_repair config agent_file with
      | Ok existing_agent ->
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
@@ -233,7 +230,7 @@ let leave ?(stop_heartbeats = true) config ~agent_name =
            agent_parse_error_snapshot ~agent_name:actual_name ~agent_file
          in
          Log.Coord.warn
-           "agent leave: invalid agent JSON for %s: %s | snapshot=%s"
+           "agent session end: invalid agent JSON for %s: %s | snapshot=%s"
            actual_name e (Yojson.Safe.to_string snapshot));
 
     (* Capture active agents before removal for relationship materialization *)
@@ -245,25 +242,25 @@ let leave ?(stop_heartbeats = true) config ~agent_name =
 
     let _ =
       broadcast config ~from_agent:"system"
-        ~msg_type:"lifecycle_leave"
-        ~content:(Printf.sprintf "👋 %s left the namespace" actual_name)
+        ~msg_type:"session_ended"
+        ~content:(Printf.sprintf "%s ended the namespace session" actual_name)
     in
 
     (* Log event *)
     log_event config (`Assoc [
-      ("type", `String "agent_leave");
+      ("type", `String "agent_session_ended");
       ("agent", `String actual_name);
       ("ts", `String (now_iso ()));
     ]);
     (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:actual_name
-      ~event:Coord_hooks.Lifecycle_leave
+      ~event:Coord_hooks.Session_ended
       ~details:`Null;
 
     (* Record co-presence relationships via hook (async, non-blocking) *)
     (try (Atomic.get Coord_hooks.relation_on_leave_fn)
            ~leaving_agent:actual_name ~active_agents:peers_before_leave
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-       Log.Coord.error "relation-materializer leave hook error: %s"
+       Log.Coord.error "relation-materializer session-end hook error: %s"
          (Printexc.to_string exn));
 
     Printf.sprintf "%s left the namespace" actual_name

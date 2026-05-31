@@ -1,4 +1,4 @@
-(** Coord lifecycle — agent join / leave and registry parse-error
+(** Coord lifecycle — agent session binding and registry parse-error
     diagnostics. *)
 
 open Masc_domain
@@ -6,7 +6,7 @@ open Coord_utils
 open Coord_state
 open Coord_broadcast
 
-val join :
+val bind_session :
   Coord_utils_backend_setup.config ->
   agent_name:string ->
   ?agent_type_override:string option ->
@@ -20,7 +20,7 @@ val join :
   unit ->
   string
 
-val leave :
+val end_session :
   ?stop_heartbeats:bool ->
   Coord_utils_backend_setup.config ->
   agent_name:string ->

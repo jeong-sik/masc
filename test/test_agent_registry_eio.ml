@@ -18,11 +18,9 @@ let test_get_or_create_new () =
   let params = `Assoc [
     ("_agent_name", `String "test-new-agent");
     ("_channel", `String "telegram");
-    ("room", `String "test-room");
   ] in
   let identity = Agent_registry_eio.get_or_create_identity params in
-  check string "agent_name" "test-new-agent" identity.agent_name;
-  check (option string) "room_id" (Some "test-room") identity.room_id
+  check string "agent_name" "test-new-agent" identity.agent_name
 
 let test_get_or_create_existing () =
   Eio_main.run @@ fun env ->

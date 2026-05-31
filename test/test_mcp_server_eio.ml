@@ -68,7 +68,6 @@ let test_agent_identity ~uuid ~session_key : Masc_mcp.Agent_identity.t =
     agent_name = "";
     channel = None;
     user_id = None;
-    room_id = None;
     capabilities = [];
     registered_at = 0.;
     last_seen = 0.;

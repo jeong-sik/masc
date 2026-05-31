@@ -20,7 +20,6 @@ let test_null_values () =
   Agent_registry_eio.reset_for_testing ();
   let params = `Assoc [
     ("_agent_name", `Null);
-    ("room", `Null);
   ] in
   let identity = Agent_registry_eio.get_or_create_identity params in
   check bool "generated name" true (String.length identity.agent_name > 0)

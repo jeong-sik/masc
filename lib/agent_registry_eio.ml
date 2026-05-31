@@ -118,11 +118,6 @@ let get_registry_locked s = s.registry
     @return Agent identity for this request
 *)
 let get_or_create_identity ?mcp_session_id params =
-  let room_id =
-    match Json_util.assoc_member_opt "room" params with
-    | Some (`String r) -> Some r
-    | _ -> None
-  in
   with_state_rw (fun s ->
     let reg = get_registry_locked !s in
     let find_from_cache sid =
@@ -138,7 +133,7 @@ let get_or_create_identity ?mcp_session_id params =
     match existing with
     | Some identity ->
         Agent_identity.Registry.touch reg identity.Agent_identity.session_key
-          ?room_id ();
+          ();
         (match Agent_identity.Registry.find_by_session reg identity.session_key with
          | Some updated -> updated
          | None -> identity)

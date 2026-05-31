@@ -263,7 +263,7 @@ let append_decision_record
                       co.cascade_name
                     in
                     [
-                      ("cascade_name", `String cascade_name);
+                      ("runtime_id", `String cascade_name);
                       ("strategy", Json_util.string_opt_to_json co.strategy);
                       ("primary_model", `Null);
                       ("selected_model", `Null);
@@ -392,7 +392,7 @@ let append_decision_record
                 error_category_of_no_result_outcome ~outcome ~error
               in
               `Assoc [
-                ("cascade_name", `String (cascade_name_of_meta meta));
+                ("runtime_id", `String (cascade_name_of_meta meta));
                 ("candidate_models", `List []);
                 ( "error_category", Json_util.string_opt_to_json error_category );
                 ("outcome", `String outcome);

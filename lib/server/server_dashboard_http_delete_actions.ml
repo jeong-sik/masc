@@ -237,7 +237,7 @@ let purge_agent_filesystem_artifacts config agent_names =
        in
        let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
        let coord_leave_result =
-         Coord.leave ~stop_heartbeats:false config ~agent_name
+         Coord.end_session ~stop_heartbeats:false config ~agent_name
        in
        let aliases_label = String.concat "," aliases in
        Log.Misc.info

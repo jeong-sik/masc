@@ -2,16 +2,16 @@
    telemetry drop counter [Prometheus.metric_coord_telemetry_drop].
 
    See [.mli] for the public contract. The wire strings are chosen to be
-   byte-for-byte compatible with the legacy free-string call sites in
-   [lib/coord.ml] (lifecycle: "agent_lifecycle/{join,rejoin,leave}",
+   explicit names owned by the typed call sites in
+   [lib/coord.ml] (lifecycle: "agent_lifecycle/{session_bound,session_rebound,session_ended}",
    task transition: "task_transition/<task_action>", accountability:
    "accountability/<task_action>") so the Grafana / alerting rules
    filtering on the existing label values keep matching. *)
 
 type lifecycle_kind =
-  | Lifecycle_join
-  | Lifecycle_rejoin
-  | Lifecycle_leave
+  | Session_bound
+  | Session_rebound
+  | Session_ended
 
 type t =
   | Agent_lifecycle of lifecycle_kind
@@ -25,9 +25,9 @@ let family_to_wire = function
 ;;
 
 let lifecycle_kind_to_wire = function
-  | Lifecycle_join -> "join"
-  | Lifecycle_rejoin -> "rejoin"
-  | Lifecycle_leave -> "leave"
+  | Session_bound -> "session_bound"
+  | Session_rebound -> "session_rebound"
+  | Session_ended -> "session_ended"
 ;;
 
 let kind_to_wire = function

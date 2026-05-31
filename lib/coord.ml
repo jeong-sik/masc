@@ -16,21 +16,21 @@ include Coord_task_id
 include Coord_backlog
 include Coord_broadcast
 
-(* Agent join/leave lifecycle *)
+(* Agent session binding lifecycle *)
 include Coord_lifecycle
 
-(* Coord initialization, reset, pause, resume (without auto-join) *)
+(* Coord initialization, reset, pause, resume *)
 include Coord_init
 
-(** Initialize MASC room with optional auto-join.
-    Wraps [Coord_init.init] and calls [join] when [agent_name] is provided. *)
+(** Initialize MASC room with optional session binding.
+    Wraps [Coord_init.init] and calls [bind_session] when [agent_name] is provided. *)
 let init config ~agent_name =
   let result = Coord_init.init config ~agent_name in
   if result = "MASC already initialized."
   then result
   else (
     match agent_name with
-    | Some name -> result ^ "\n" ^ join config ~agent_name:name ~capabilities:[] ()
+    | Some name -> result ^ "\n" ^ bind_session config ~agent_name:name ~capabilities:[] ()
     | None -> result)
 ;;
 
@@ -145,10 +145,10 @@ let task_action_of_transition : Masc_domain.task_action -> Audit_log.action = fu
 
 (* #8605 family: replaced four parallel string switches on [event_kind]
    with a single [agent_lifecycle_event] variant. The compiler now
-   forces every dispatch to cover Lifecycle_join / Lifecycle_rejoin /
-   Lifecycle_leave explicitly, so a future event variant cannot silently
-   coalesce into the catch-all "join" branch. JSON wire format is
-   preserved via [agent_lifecycle_event_to_string]. *)
+   forces every dispatch to cover each session-binding event explicitly,
+   so a future event variant cannot silently coalesce into a catch-all
+   branch. JSON wire format is centralised via
+   [agent_lifecycle_event_to_string]. *)
 let observe_agent_lifecycle
       config
       ~agent_id
@@ -166,28 +166,28 @@ let observe_agent_lifecycle
   in
   let level =
     match event with
-    | Lifecycle_join | Lifecycle_rejoin | Lifecycle_leave -> Log.Info
+    | Session_bound | Session_rebound | Session_ended -> Log.Info
   in
   let message =
     match event with
-    | Lifecycle_join -> Printf.sprintf "agent joined: %s" agent_id
-    | Lifecycle_rejoin -> Printf.sprintf "agent rejoined: %s" agent_id
-    | Lifecycle_leave -> Printf.sprintf "agent left: %s" agent_id
+    | Session_bound -> Printf.sprintf "agent session bound: %s" agent_id
+    | Session_rebound -> Printf.sprintf "agent session rebound: %s" agent_id
+    | Session_ended -> Printf.sprintf "agent session ended: %s" agent_id
   in
   Log.emit level ~module_name:"Coord" ~details message;
   (match event with
-   | Lifecycle_leave -> Prometheus.dec_gauge Prometheus.metric_active_agents ()
-   | Lifecycle_join | Lifecycle_rejoin ->
+   | Session_ended -> Prometheus.dec_gauge Prometheus.metric_active_agents ()
+   | Session_bound | Session_rebound ->
      Prometheus.inc_gauge Prometheus.metric_active_agents ());
   let audit_details =
     match event with
-    | Lifecycle_rejoin -> merge_detail_fields [ "rejoin", `Bool true ] details
-    | Lifecycle_join | Lifecycle_leave -> details
+    | Session_rebound -> merge_detail_fields [ "session_rebound", `Bool true ] details
+    | Session_bound | Session_ended -> details
   in
   let action =
     match event with
-    | Lifecycle_leave -> Audit_log.Leave
-    | Lifecycle_join | Lifecycle_rejoin -> Audit_log.Join
+    | Session_ended -> Audit_log.Custom "agent_session_ended"
+    | Session_bound | Session_rebound -> Audit_log.Custom "agent_session_bound"
   in
   (* Audit and telemetry require Eio context (Eio.Mutex).
      Skip when running outside an Eio scheduler, but emit a warn log
@@ -203,16 +203,16 @@ let observe_agent_lifecycle
     if telemetry_enabled ()
     then (
       match event with
-      | Lifecycle_leave -> Telemetry_eio.track_agent_left config ~agent_id ~reason:"leave"
-      | Lifecycle_join | Lifecycle_rejoin ->
+      | Session_ended -> Telemetry_eio.track_agent_left config ~agent_id ~reason:"session_ended"
+      | Session_bound | Session_rebound ->
         Telemetry_eio.track_agent_joined config ~agent_id ())
   with
   | Stdlib.Effect.Unhandled _ as exn ->
     let lifecycle_kind : Coord_telemetry_drop_event.lifecycle_kind =
       match event with
-      | Coord_hooks.Lifecycle_join -> Lifecycle_join
-      | Coord_hooks.Lifecycle_rejoin -> Lifecycle_rejoin
-      | Coord_hooks.Lifecycle_leave -> Lifecycle_leave
+      | Coord_hooks.Session_bound -> Session_bound
+      | Coord_hooks.Session_rebound -> Session_rebound
+      | Coord_hooks.Session_ended -> Session_ended
     in
     warn_telemetry_drop ~event:(Agent_lifecycle lifecycle_kind) exn
 ;;
@@ -653,7 +653,7 @@ let () =
     | Error msg -> Log.Misc.error "task earn failed: %s" msg)
 ;;
 
-(* Relation materializer — agent leave *)
+(* Relation materializer — agent session end *)
 let () = Atomic.set Coord_hooks.relation_on_leave_fn Relation_materializer.on_agent_leave
 
 (* Relation materializer — task done *)
@@ -754,7 +754,7 @@ let () =
          0)
 ;;
 
-(* Subscription auto-subscribe on join — wraps Subscriptions for room_eio *)
+(* Subscription auto-subscribe on session binding — wraps Subscriptions for room_eio *)
 let () =
   Atomic.set Coord_hooks.subscribe_messages_fn (fun ~subscriber ->
     let _ =

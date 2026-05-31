@@ -311,7 +311,7 @@ let register
     "Total times a Coord lifecycle/transition hook dropped its Audit_log + Telemetry \
      emit because the dispatch happened outside an Eio scheduler. Labels: event_family \
      (one of agent_lifecycle | task_transition | accountability) and event_kind (the \
-     variant). event_kind values: agent_lifecycle uses join | rejoin | leave (3 values); \
+     variant). event_kind values: agent_lifecycle uses session_bound | session_rebound | session_ended (3 values); \
      task_transition and accountability both use the 8 task_action variants claim | \
      start | done | cancel | release | submit_for_verification | approve | reject. \
      Cardinality bound: 19 series (3 + 8 + 8). Non-zero rate means a production path is \
@@ -380,7 +380,7 @@ let register
     `Counter;
   add
     metric_coord_join_normalize_outcome
-    "Total Coord.join identity normalizations by Keeper_identity.normalize_all_names \
+    "Total Coord.bind_session identity normalizations by Keeper_identity.normalize_all_names \
      (RFC P3-a). Labels: outcome (ok | empty_input | persona_not_found | \
      credential_missing | name_ambiguous | ephemeral_suffix_rejected). Non-ok outcomes \
      reject agent session binding at the fail-closed identity gate; pair with \

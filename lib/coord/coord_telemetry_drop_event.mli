@@ -32,9 +32,9 @@
     lifecycle variant in [Coord_hooks] does not silently widen the drop
     counter label set without a deliberate change here. *)
 type lifecycle_kind =
-  | Lifecycle_join
-  | Lifecycle_rejoin
-  | Lifecycle_leave
+  | Session_bound
+  | Session_rebound
+  | Session_ended
 
 (** Drop event identifies which Coord sub-path raised
     [Stdlib.Effect.Unhandled]. *)
@@ -62,7 +62,8 @@ type t =
 val family_to_wire : t -> string
 
 (** Wire label for the [event_kind] Prometheus label. For
-    [Agent_lifecycle] this is one of ["join" / "rejoin" / "leave"]
+    [Agent_lifecycle] this is one of ["session_bound" / "session_rebound" /
+    "session_ended"]
     (matching {!Coord_hooks.agent_lifecycle_event_to_string}). For
     [Task_transition] / [Accountability] it is
     {!Masc_domain.task_action_to_string} of the carried action

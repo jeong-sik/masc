@@ -55,7 +55,7 @@ let stop_keeper_fn
   : (string -> unit) Atomic.t
   = Atomic.make (fun _name -> ())
 
-(** Relation materializer: agent leave — wraps Relation_materializer.on_agent_leave. *)
+(** Relation materializer: agent session end — wraps Relation_materializer.on_agent_leave. *)
 let relation_on_leave_fn
   : (leaving_agent:string -> active_agents:string list -> unit) Atomic.t
   = Atomic.make (fun ~leaving_agent:_ ~active_agents:_ -> ())
@@ -77,23 +77,22 @@ let hebbian_on_task_cancelled_fn
      agent_name:string -> active_agents:string list -> unit) Atomic.t
   = Atomic.make (fun _config ~agent_name:_ ~active_agents:_ -> ())
 
-(** Closed enum for the agent lifecycle hook. Replaces the previous
+(** Closed enum for the agent session hook. Replaces the previous
     [event_kind:string] surface (#8605 family): the variant lets the
     compiler enforce exhaustive dispatch on every consumer, and the
     string<->variant mapping is centralised in the helpers below so the
-    JSON wire format ("join" / "rejoin" / "leave") stays exactly the
-    same. *)
+    JSON wire format is owned by this module. *)
 type agent_lifecycle_event =
-  | Lifecycle_join
-  | Lifecycle_rejoin
-  | Lifecycle_leave
+  | Session_bound
+  | Session_rebound
+  | Session_ended
 
 let agent_lifecycle_event_to_string = function
-  | Lifecycle_join -> "join"
-  | Lifecycle_rejoin -> "rejoin"
-  | Lifecycle_leave -> "leave"
+  | Session_bound -> "session_bound"
+  | Session_rebound -> "session_rebound"
+  | Session_ended -> "session_ended"
 
-(** Shared observability hook for join/rejoin/leave events.
+(** Shared observability hook for agent session binding events.
     Upper layers can mirror state transitions to audit, telemetry, and logs
     without introducing circular dependencies into room sub-modules. *)
 let observe_agent_lifecycle_fn
@@ -136,7 +135,7 @@ let on_task_mutation_fn
   = Atomic.make (fun () -> ())
 
 
-(** Auto-subscribe agent to messages on join — wraps Subscriptions.SubscriptionStore. *)
+(** Auto-subscribe agent to messages on session binding — wraps Subscriptions.SubscriptionStore. *)
 let subscribe_messages_fn
   : (subscriber:string -> unit) Atomic.t
   = Atomic.make (fun ~subscriber:_ -> ())

@@ -387,11 +387,6 @@ export interface KeeperMetricPoint {
   total_tokens: number | null
   wall_tokens_per_second: number | null
   inference_telemetry: InferenceTelemetry | null
-  cascade_name?: string | null
-  cascade_outcome?: string | null
-  cascade_selected_model?: string | null
-  cascade_attempt_count?: number | null
-  cascade_strategy?: string | null
   fallback_applied: boolean
   fallback_hops: number
   fallback_from: string | null

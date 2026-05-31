@@ -193,7 +193,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
         json
     in
     let proactive_enabled =
-    let proactive_enabled =
       Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
     in
     let proactive_idle_sec =
@@ -257,8 +256,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_tool_denylist
       ; pp_mention_targets
       ; pp_room_signal_prompt_enabled
-      ; pp_joined_room_ids
-      ; pp_last_seen_seq_by_room
       ; pp_proactive =
           { enabled = proactive_enabled
           ; idle_sec = proactive_idle_sec

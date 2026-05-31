@@ -1607,7 +1607,6 @@ let test_lazy_startup_plan_groups_independent_tasks () =
   | _ -> Alcotest.fail "unexpected lazy startup group shape"
 
 let test_startup_state_json () =
-let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
   Server_startup_state.activate_lazy ~backend_mode:"postgres-native"

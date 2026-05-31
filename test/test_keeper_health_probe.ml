@@ -1,6 +1,6 @@
 (* Tests for keeper_health_probe.  Pure synchronous tests for the
    cache and cascade ratio logic; the supervisor wiring (run_once
-   call site, get_cascade_status branch) is covered by integration
+   call site, get_runtime_status branch) is covered by integration
    tests in test_keeper_supervisor.ml. *)
 
 module H = Masc_mcp.Keeper_health_probe
@@ -25,7 +25,7 @@ let status_eq a b =
 
 let status_t = Alcotest.testable pp_status status_eq
 
-let make_meta ?cascade_name name =
+let make_meta ?runtime_id name =
   let fields =
     [
       ("name", `String name);
@@ -34,8 +34,8 @@ let make_meta ?cascade_name name =
     ]
   in
   let fields =
-    match cascade_name with
-    | Some cascade_name -> ("runtime_id", `String cascade_name) :: fields
+    match runtime_id with
+    | Some runtime_id -> ("runtime_id", `String runtime_id) :: fields
     | None -> fields
   in
   match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
@@ -49,12 +49,12 @@ let pressure_label_of_failure_reason reason =
     (H.runtime_pressure_class_of_failure_reason (Some reason))
 ;;
 
-let test_get_cascade_status_default_unknown () =
+let test_get_runtime_status_default_unknown () =
   Alcotest.check
     status_t
     "cold cascade cache = Unknown"
     H.Unknown
-    (H.get_cascade_status ~cascade_name:"never-written-cascade-xyz")
+    (H.get_runtime_status ~runtime_id:"never-written-cascade-xyz")
 ;;
 
 let test_check_cascade_health_all_healthy () =
@@ -75,7 +75,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "source=client_capacity; all client slots full"
           ; provider_id = None
           ; http_status = None
-          ; cascade_name = None
+          ; runtime_id = None
           }));
   Alcotest.check
     pressure_label_t
@@ -87,7 +87,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "inflight_capacity_full admission_key=strict_tool_candidates"
           ; provider_id = None
           ; http_status = None
-          ; cascade_name = None
+          ; runtime_id = None
           }));
   Alcotest.check
     pressure_label_t
@@ -99,7 +99,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "rate limit"
           ; provider_id = Some "provider_d"
           ; http_status = Some 429
-          ; cascade_name = None
+          ; runtime_id = None
           }));
   Alcotest.check
     pressure_label_t
@@ -111,7 +111,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "getaddrinfo ENOTFOUND api.z.ai"
           ; provider_id = Some "zai"
           ; http_status = None
-          ; cascade_name = None
+          ; runtime_id = None
           }));
   Alcotest.check
     pressure_label_t
@@ -123,7 +123,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "inter_chunk_idle timeout"
           ; provider_id = None
           ; http_status = Some 504
-          ; cascade_name = None
+          ; runtime_id = None
           }));
   Alcotest.check
     pressure_label_t
@@ -135,7 +135,7 @@ let test_runtime_pressure_classifier () =
           ; detail = "unexpected provider failure"
           ; provider_id = None
           ; http_status = Some 500
-          ; cascade_name = None
+          ; runtime_id = None
           }));
   Alcotest.check
     pressure_label_t
@@ -158,11 +158,11 @@ let test_run_once_records_specific_failure_ratio_reason () =
   R.clear ();
   let base_dir = Filename.temp_file "probe-pressure-" "" in
   Sys.remove base_dir;
-  let cascade_name =
+  let runtime_id =
     Printf.sprintf "probe-provider-dns-%d" (Unix.getpid ())
   in
   let register_crashed name reason =
-    let meta = make_meta ~cascade_name name in
+    let meta = make_meta ~runtime_id name in
     (* See: fixture setup only needs the registry side effect. *)
     ignore (R.register ~base_path:base_dir name meta);
     R.set_failure_reason ~base_path:base_dir name (Some reason);
@@ -184,7 +184,7 @@ let test_run_once_records_specific_failure_ratio_reason () =
             ; detail = "getaddrinfo ENOTFOUND api.z.ai"
             ; provider_id = Some "zai"
             ; http_status = None
-            ; cascade_name = None
+            ; runtime_id = None
             });
        register_crashed
          "provider-dns-b"
@@ -193,14 +193,14 @@ let test_run_once_records_specific_failure_ratio_reason () =
             ; detail = "getaddrinfo ENOTFOUND api.z.ai"
             ; provider_id = Some "zai"
             ; http_status = None
-            ; cascade_name = None
+            ; runtime_id = None
             });
        H.run_once ~base_path:base_dir;
        Alcotest.check
          status_t
          "unhealthy reason carries dominant runtime pressure"
          (H.Unhealthy "failure_ratio:provider_dns_failure")
-         (H.get_cascade_status ~cascade_name))
+         (H.get_runtime_status ~runtime_id))
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -254,7 +254,7 @@ let check_max_failed name ~total ~expected =
   Alcotest.(check int)
     (Printf.sprintf "max_failed_allowed N=%d %s" total name)
     expected
-    (H.max_failed_allowed_for_cascade ~total)
+    (H.max_failed_allowed_for_runtime ~total)
 ;;
 
 let test_max_failed_small_cascade_floor () =
@@ -283,7 +283,7 @@ let test_max_failed_monotone_nondecreasing () =
   let rec loop prev n =
     if n > 50 then ()
     else
-      let cur = H.max_failed_allowed_for_cascade ~total:n in
+      let cur = H.max_failed_allowed_for_runtime ~total:n in
       Alcotest.(check bool)
         (Printf.sprintf "max_failed N=%d >= N=%d" n (n - 1))
         true
@@ -300,7 +300,7 @@ let () =
       , [ Alcotest.test_case
             "default_status_is_unknown"
             `Quick
-            test_get_cascade_status_default_unknown
+            test_get_runtime_status_default_unknown
         ] )
     ; ( "cascade"
       , [ Alcotest.test_case

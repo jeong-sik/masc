@@ -52,7 +52,7 @@ let runtime_pressure_class_of_label label =
   | _ -> None
 ;;
 
-let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
+let provider_runtime_pressure_class ~code ~detail ~http_status ~runtime_id =
   let contains needle =
     String_util.contains_substring_ci code needle
     || String_util.contains_substring_ci detail needle
@@ -70,7 +70,7 @@ let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
   else if
     contains "admission_capacity"
     || contains "inflight_capacity_full"
-    || Option.is_some cascade_name
+    || Option.is_some runtime_id
     || contains "admission="
   then Cascade_admission_full
   else if
@@ -103,8 +103,8 @@ let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
 
 let runtime_pressure_class_of_failure_reason = function
   | Some (Keeper_registry.Provider_timeout_loop _) -> Some Provider_timeout
-  | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; cascade_name }) ->
-    Some (provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name)
+  | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; runtime_id }) ->
+    Some (provider_runtime_pressure_class ~code ~detail ~http_status ~runtime_id)
   | Some (Keeper_registry.Stale_turn_timeout _) -> Some Turn_stale_timeout
   | Some
       ( Keeper_registry.Heartbeat_consecutive_failures _
@@ -157,21 +157,21 @@ let record_item_result ~keeper_name ~item_id ~success =
   set_item_health ~keeper_name ~item_id status
 ;;
 
-let set_cascade_status ~cascade_name status =
+let set_runtime_status ~runtime_id status =
   Eio.Mutex.use_rw ~protect:true health_cache_mu (fun () ->
-    Hashtbl.replace health_cache (cascade_name, "") (status, Time_compat.now ()))
+    Hashtbl.replace health_cache (runtime_id, "") (status, Time_compat.now ()))
 ;;
 
-(** [get_cascade_status ~cascade_name] reads the cascade-level entry
+(** [get_runtime_status ~runtime_id] reads the runtime-level entry
     written by [run_once].  Three-valued:
       - [Healthy]    : last probe saw the cascade at < threshold ratio.
       - [Unhealthy r]: last probe saw the cascade at >= threshold ratio.
       - [Unknown]    : probe never wrote this cascade (e.g. boot before
                        first sweep, or no running keepers in the cascade
                        at the time of the last scan). *)
-let get_cascade_status ~cascade_name =
+let get_runtime_status ~runtime_id =
   Eio.Mutex.use_ro health_cache_mu (fun () ->
-    match Hashtbl.find_opt health_cache (cascade_name, "") with
+    match Hashtbl.find_opt health_cache (runtime_id, "") with
     | Some (status, _) -> status
     | None -> Unknown)
 ;;
@@ -205,7 +205,7 @@ let is_terminal_unhealthy (phase : Keeper_state_machine.phase) =
     keeper in a 3-member cascade became a permanent admission block in
     [keeper_supervisor.ml]'s auto-resume path. The floor restores the obvious
     invariant ("one keeper down out of N is recoverable") at every N. *)
-let max_failed_allowed_for_cascade ~total =
+let max_failed_allowed_for_runtime ~total =
   max 1 (total / 10)
 ;;
 
@@ -281,7 +281,7 @@ let scan_cascade_health ~base_path =
     (fun cascade acc rows ->
        let healthy =
          if acc.total <= 0 then true
-         else acc.failed <= max_failed_allowed_for_cascade ~total:acc.total
+         else acc.failed <= max_failed_allowed_for_runtime ~total:acc.total
        in
        (cascade, healthy, acc) :: rows)
     by_cascade
@@ -289,7 +289,7 @@ let scan_cascade_health ~base_path =
 ;;
 
 (** Compute health per cascade from registry entries.
-    Returns (cascade_name, is_healthy).
+    Returns (runtime_id, is_healthy).
 
     A keeper is counted as "failed" only when its phase is a terminal
     unhealthy state (Dead, Zombie, or Crashed).  Past restarts
@@ -316,14 +316,14 @@ let run_once ~base_path =
        let status =
          if healthy then Healthy else Unhealthy (cascade_failure_reason acc)
        in
-       set_cascade_status ~cascade_name:cascade status)
+       set_runtime_status ~runtime_id:runtime status)
     results
 ;;
 
 let rec probe_loop ~base_path ~interval_sec ~clock () =
   (* Cancel-aware: Safe_ops.protect re-raises Eio.Cancel.Cancelled and swallows
      other exceptions so a transient registry I/O failure cannot kill the fiber
-     and leave cascade status stale forever. *)
+     and leave runtime status stale forever. *)
   Safe_ops.protect ~default:() (fun () -> run_once ~base_path);
   Eio.Time.sleep clock interval_sec;
   probe_loop ~base_path ~interval_sec ~clock ()

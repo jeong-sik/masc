@@ -4,7 +4,7 @@ type runtime_backpressure_decision =
   Keeper_heartbeat_loop_observations.runtime_backpressure_decision =
   | Runtime_admitted
   | Runtime_backpressured of {
-      cascade_name : string;
+      runtime_id : string;
       reason : string;
     }
 
@@ -20,8 +20,8 @@ type keepalive_scheduling_decision = {
 
 val decide_keepalive_scheduling :
   ?runtime_resilience_of_name:(string -> Keeper_runtime_resilience.runtime_resilience) ->
-  ?cascade_status_of_name:
-    (cascade_name:string -> Keeper_health_probe.health_status) ->
+  ?runtime_status_of_name:
+    (runtime_id:string -> Keeper_health_probe.health_status) ->
   stop:bool Atomic.t ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->

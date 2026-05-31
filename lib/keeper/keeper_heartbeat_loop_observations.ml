@@ -69,7 +69,7 @@ let record_semaphore_wait_observation
 type runtime_backpressure_decision =
   | Runtime_admitted
   | Runtime_backpressured of {
-      cascade_name : string;
+      runtime_id : string;
       reason : string;
     }
 
@@ -101,7 +101,7 @@ let runtime_backpressure_observation_reasons ~reason =
   let category =
     if String.starts_with ~prefix:"runtime_resilience_" reason
     then "runtime_resilience"
-    else "cascade_unhealthy"
+    else "runtime_unhealthy"
   in
   let base = [ "runtime_backpressure"; category ] in
   let class_reasons =
@@ -123,18 +123,18 @@ let runtime_resilience_backpressure_reason
 let runtime_backpressure_decision
       ~runtime_resilience
       ~should_run_turn
-      ~cascade_name
-      ~cascade_status
+      ~runtime_id
+      ~runtime_status
   =
   let resilience_reason =
     match runtime_resilience with
     | None -> None
     | Some resilience -> runtime_resilience_backpressure_reason resilience
   in
-  match should_run_turn, cascade_status, resilience_reason with
+  match should_run_turn, runtime_status, resilience_reason with
   | true, Keeper_health_probe.Unhealthy reason, _ ->
-    Runtime_backpressured { cascade_name; reason }
-  | true, _, Some reason -> Runtime_backpressured { cascade_name; reason }
+    Runtime_backpressured { runtime_id; reason }
+  | true, _, Some reason -> Runtime_backpressured { runtime_id; reason }
   | false, _, _
   | true, Keeper_health_probe.Unknown, None
   | true, Keeper_health_probe.Healthy, None -> Runtime_admitted

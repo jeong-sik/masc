@@ -1,7 +1,7 @@
 (** Keepalive scheduling decision for the heartbeat loop, extracted from
     [keeper_heartbeat_loop.ml]. Holds the record type returned by
     [decide_keepalive_scheduling] and the pure decision function that
-    combines the turn verdict with cascade backpressure admission. *)
+    combines the turn verdict with runtime backpressure admission. *)
 
 open Keeper_types
 open Keeper_meta_contract

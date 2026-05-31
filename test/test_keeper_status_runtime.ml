@@ -522,13 +522,13 @@ let test_runtime_surface_derives_runtime_exhausted_from_meta () =
   KR.clear ();
   let base = make_meta ~name:"runtime-cascade-exhausted-test" () in
   let reason =
-    (* The canonical envelope written by [masc_internal_error_to_json] in
-       lib/cascade/cascade_internal_error.ml uses a typed [reason] field
+    (* The canonical envelope written by [masc_internal_error_to_json] uses
+       a typed [reason] field
        (variant serialization), not a free-form ["detail"] string.  Use
        the typed value here so the runtime_blocker_summary classifier
        (keeper_status_bridge.ml:298) can recover the variant and
        synthesize the canonical English summary. *)
-    "Internal error: [masc_oas_error] {\"kind\":\"runtime_exhausted\",\"cascade_name\":\"primary\",\"reason\":\"connection_refused\"}"
+    "Internal error: [masc_oas_error] {\"kind\":\"runtime_exhausted\",\"runtime_id\":\"primary\",\"reason\":\"connection_refused\"}"
   in
   let meta =
     {
@@ -739,7 +739,7 @@ let test_status_bridge_classifies_oas_agent_execution_timeout () =
 let test_runtime_blocker_summary_is_not_reparsed_from_masc_error_payload () =
   let summary =
     "Internal error: [masc_oas_error] \
-     {\"kind\":\"capacity_backpressure\",\"cascade_name\":\"primary\",\"source\":\"client_capacity\",\"detail\":\"slot full\",\"retry_after_sec\":null}"
+     {\"kind\":\"capacity_backpressure\",\"runtime_id\":\"primary\",\"source\":\"client_capacity\",\"detail\":\"slot full\",\"retry_after_sec\":null}"
   in
   let cascade_surface =
     KSB.runtime_blocker_surface_of_typed_class

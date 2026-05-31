@@ -1,7 +1,7 @@
-(** Cascade preflight unhealthy-skip escalation state.
+(** Runtime preflight unhealthy-skip escalation state.
 
     Tracks repeated [preflight skipped N unhealthy ...] events per
-    (cascade_name, provider, reason) fingerprint. After [threshold_disable]
+    (runtime_id, provider, reason) fingerprint. After [threshold_disable]
     consecutive skips of the same fingerprint, the provider is registered
     in an in-memory disabled list and a single ERROR-class escalation is
     emitted (instead of a WARN per skip).
@@ -15,7 +15,7 @@
     - Routing semantics are preserved: the disabled list is advisory.
       Callers may still attempt the provider; this module only changes
       the {e log-level cadence}, not routing.
-    - State is in-memory only (per-process). Survives across cascade
+    - State is in-memory only (per-process). Survives across runtime
       attempts in one keeper-server lifetime; rebuilt at restart.
     - Closed sum types only, no catch-all match.
 
@@ -46,7 +46,7 @@ type reason =
 
 (** Fingerprint of a single skip event. *)
 type fingerprint = {
-  cascade_name : string;  (** Cascade name (e.g. ["strict_tool_candidates"]). *)
+  runtime_id : string;  (** Runtime id (e.g. ["strict_tool_candidates"]). *)
   provider : string;  (** Provider key or endpoint URL. *)
   reason : reason;
 }
@@ -90,12 +90,12 @@ val global : t
 (** Record one preflight unhealthy-skip event. Returns the outcome,
     which the caller uses to decide log level and disable-list
     registration. Increments
-    [masc_cascade_preflight_unhealthy_skip_total] (always) and
-    [masc_cascade_provider_disabled_total] (on the [`Threshold_disable]
+    [masc_runtime_preflight_unhealthy_skip_total] (always) and
+    [masc_runtime_provider_disabled_total] (on the [`Threshold_disable]
     transition). *)
 val record :
   ?clock:(unit -> float) ->
-  t -> cascade_name:string -> provider:string -> reason:reason -> record_outcome
+  t -> runtime_id:string -> provider:string -> reason:reason -> record_outcome
 
 (** True iff the provider is currently in the disabled list (i.e. some
     fingerprint crossed threshold and recovery has not happened yet).

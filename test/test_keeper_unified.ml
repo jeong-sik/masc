@@ -1418,8 +1418,8 @@ let test_keepalive_scheduling_seam_preserves_reactive_run () =
   let obs = { base_observation with pending_mentions = [ "operator", "@keeper wake" ] } in
   let decision =
     KHL.decide_keepalive_scheduling
-      ~cascade_resilience_of_name:healthy_cascade_resilience
-      ~cascade_status_of_name:healthy_cascade_status
+      ~runtime_resilience_of_name:healthy_cascade_resilience
+      ~runtime_status_of_name:healthy_cascade_status
       ~stop:(Atomic.make false)
       ~meta
       obs
@@ -1441,25 +1441,25 @@ let test_keepalive_scheduling_seam_records_backpressure_reasons () =
   let obs = { base_observation with pending_mentions = [ "operator", "@keeper wake" ] } in
   let decision =
     KHL.decide_keepalive_scheduling
-      ~cascade_resilience_of_name:blocked_cascade_resilience
-      ~cascade_status_of_name:healthy_cascade_status
+      ~runtime_resilience_of_name:blocked_cascade_resilience
+      ~runtime_status_of_name:healthy_cascade_status
       ~stop:(Atomic.make false)
       ~meta
       obs
   in
   check bool "raw requested run stays visible" true decision.requested_should_run_turn;
   check bool "backpressure blocks admitted run" false decision.should_run_turn;
-  begin match decision.cascade_backpressure with
-  | KHL.Cascade_backpressured { reason; _ } ->
-    check string "backpressure reason" "cascade_resilience_test_blocker" reason
-  | KHL.Cascade_admitted -> fail "expected cascade backpressure"
+  begin match decision.runtime_backpressure with
+  | KHL.Runtime_backpressured { reason; _ } ->
+    check string "backpressure reason" "runtime_resilience_test_blocker" reason
+  | KHL.Runtime_admitted -> fail "expected runtime backpressure"
   end;
   check
     (list string)
     "admission reasons explain backpressure"
-    [ "cascade_backpressure"
-    ; "cascade_resilience"
-    ; "reason_cascade_resilience_test_blocker"
+    [ "runtime_backpressure"
+    ; "runtime_resilience"
+    ; "reason_runtime_resilience_test_blocker"
     ]
     decision.admission_reasons
 ;;
@@ -1469,8 +1469,8 @@ let test_keepalive_scheduling_seam_gates_requested_run_on_stop () =
   let obs = { base_observation with pending_mentions = [ "operator", "@keeper wake" ] } in
   let decision =
     KHL.decide_keepalive_scheduling
-      ~cascade_resilience_of_name:healthy_cascade_resilience
-      ~cascade_status_of_name:healthy_cascade_status
+      ~runtime_resilience_of_name:healthy_cascade_resilience
+      ~runtime_status_of_name:healthy_cascade_status
       ~stop:(Atomic.make true)
       ~meta
       obs

@@ -5,7 +5,7 @@
 
     @since God file decomposition *)
 
-open Cascade_internal_error
+open Keeper_meta_contract
 open Runtime_name
 
 (* Synthetic backoff default for paths where the upstream provides no
@@ -30,7 +30,7 @@ let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.ProviderFailure _ ->
     None
 
-let capacity_backpressure_of_http_error ?source ~cascade_name last_err =
+let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
   match last_err with
   | Some
       (Llm_provider.Http_client.ProviderFailure
@@ -43,7 +43,7 @@ let capacity_backpressure_of_http_error ?source ~cascade_name last_err =
     Some
       (Capacity_backpressure
          {
-           cascade_name;
+           cascade_name = runtime_id;
            source =
              Option.value source ~default:Provider_capacity;
            detail = message;
@@ -61,7 +61,7 @@ let capacity_backpressure_of_http_error ?source ~cascade_name last_err =
     Some
       (Capacity_backpressure
          {
-           cascade_name;
+           cascade_name = runtime_id;
            source = Option.value source ~default:Cascade_slot;
            detail = message;
            retry_after = Synthetic_default synthetic_retry_after_sec;
@@ -76,12 +76,12 @@ let capacity_backpressure_of_http_error ?source ~cascade_name last_err =
   | None ->
     None
 
-let capacity_backpressure_of_pending ~cascade_name = function
+let capacity_backpressure_of_pending ~runtime_id = function
   | Some (source, detail, retry_after) ->
     Some
       (Capacity_backpressure
          {
-           cascade_name;
+           cascade_name = runtime_id;
            source;
            detail;
            retry_after;
@@ -89,7 +89,7 @@ let capacity_backpressure_of_pending ~cascade_name = function
   | None -> None
 
 let capacity_backpressure_of_sdk_error
-    ~cascade_name
+    ~runtime_id
     ~message_looks_like_capacity_backpressure
     ~sdk_error_of_masc_internal_error
     sdk_err =
@@ -100,7 +100,7 @@ let capacity_backpressure_of_sdk_error
       (sdk_error_of_masc_internal_error
          (Capacity_backpressure
             {
-              cascade_name;
+              cascade_name = runtime_id;
               source = Provider_capacity;
               detail;
               retry_after =
@@ -114,7 +114,7 @@ let capacity_backpressure_of_sdk_error
       (sdk_error_of_masc_internal_error
          (Capacity_backpressure
             {
-              cascade_name;
+              cascade_name = runtime_id;
               source = Provider_capacity;
               detail = msg;
               retry_after = Synthetic_default synthetic_retry_after_sec;

@@ -74,7 +74,7 @@ let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 type runtime_backpressure_decision = Observations.runtime_backpressure_decision =
   | Runtime_admitted
   | Runtime_backpressured of {
-      cascade_name : string;
+      runtime_id : string;
       reason : string;
     }
 
@@ -233,15 +233,15 @@ let run_keepalive_unified_turn
              ~base_path:ctx.config.base_path
              meta_after_triage.name
              ~reasons:admission_reason_strs
-         | Runtime_backpressured { cascade_name; reason } ->
+         | Runtime_backpressured { runtime_id; reason } ->
            record_runtime_backpressure_observation
              ~base_path:ctx.config.base_path
              ~keeper_name:meta_after_triage.name
              ~reason;
            Log.Keeper.info
-             "keepalive turn backpressured for %s: cascade=%s reason=%s requested=[%s]"
+             "keepalive turn backpressured for %s: runtime=%s reason=%s requested=[%s]"
              meta_after_triage.name
-             cascade_name
+             runtime_id
              reason
              (String.concat "," verdict_strs));
         let paused_info =

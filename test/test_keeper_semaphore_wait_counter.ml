@@ -249,87 +249,87 @@ let test_cascade_backpressure_decision () =
     }
   in
   let unhealthy =
-    KHL.cascade_backpressure_decision
-      ~cascade_resilience:None
+    KHL.runtime_backpressure_decision
+      ~runtime_resilience:None
       ~should_run_turn:true
-      ~cascade_name:"primary"
-      ~cascade_status:(Masc_mcp.Keeper_health_probe.Unhealthy "failure_ratio")
+      ~runtime_id:"primary"
+      ~runtime_status:(Masc_mcp.Keeper_health_probe.Unhealthy "failure_ratio")
   in
   (match unhealthy with
-   | KHL.Cascade_backpressured { cascade_name; reason } ->
-     Alcotest.(check string) "cascade name" "primary" cascade_name;
+   | KHL.Runtime_backpressured { runtime_id; reason } ->
+     Alcotest.(check string) "runtime id" "primary" runtime_id;
      Alcotest.(check string) "reason" "failure_ratio" reason
-   | KHL.Cascade_admitted -> Alcotest.fail "unhealthy cascade was admitted");
+   | KHL.Runtime_admitted -> Alcotest.fail "unhealthy runtime was admitted");
   (match
-     KHL.cascade_backpressure_decision
-       ~cascade_resilience:None
+     KHL.runtime_backpressure_decision
+       ~runtime_resilience:None
        ~should_run_turn:true
-       ~cascade_name:"primary"
-       ~cascade_status:Masc_mcp.Keeper_health_probe.Healthy
+       ~runtime_id:"primary"
+       ~runtime_status:Masc_mcp.Keeper_health_probe.Healthy
    with
-   | KHL.Cascade_admitted -> ()
-   | KHL.Cascade_backpressured _ -> Alcotest.fail "healthy cascade was blocked");
+   | KHL.Runtime_admitted -> ()
+   | KHL.Runtime_backpressured _ -> Alcotest.fail "healthy runtime was blocked");
   (match
-     KHL.cascade_backpressure_decision
-       ~cascade_resilience:None
+     KHL.runtime_backpressure_decision
+       ~runtime_resilience:None
        ~should_run_turn:true
-       ~cascade_name:"primary"
-       ~cascade_status:Masc_mcp.Keeper_health_probe.Unknown
+       ~runtime_id:"primary"
+       ~runtime_status:Masc_mcp.Keeper_health_probe.Unknown
    with
-   | KHL.Cascade_admitted -> ()
-   | KHL.Cascade_backpressured _ -> Alcotest.fail "unknown cascade was blocked");
+   | KHL.Runtime_admitted -> ()
+   | KHL.Runtime_backpressured _ -> Alcotest.fail "unknown runtime was blocked");
   (match
-     KHL.cascade_backpressure_decision
-       ~cascade_resilience:(Some blocked_resilience)
+     KHL.runtime_backpressure_decision
+       ~runtime_resilience:(Some blocked_resilience)
        ~should_run_turn:true
-       ~cascade_name:"cascade.provider_k-coding-with-spark"
-       ~cascade_status:Masc_mcp.Keeper_health_probe.Healthy
+       ~runtime_id:"cascade.provider_k-coding-with-spark"
+       ~runtime_status:Masc_mcp.Keeper_health_probe.Healthy
    with
-   | KHL.Cascade_backpressured { cascade_name; reason } ->
+   | KHL.Runtime_backpressured { runtime_id; reason } ->
      Alcotest.(check string)
-       "resilience cascade name"
+       "resilience runtime id"
        "cascade.provider_k-coding-with-spark"
-       cascade_name;
+       runtime_id;
      Alcotest.(check string)
        "resilience reason"
-       "cascade_resilience_pure_local_single_provider_no_fallback"
+       "runtime_resilience_pure_local_single_provider_no_fallback"
        reason
-   | KHL.Cascade_admitted -> Alcotest.fail "bad cascade resilience was admitted");
+   | KHL.Runtime_admitted -> Alcotest.fail "bad runtime resilience was admitted");
   match
-    KHL.cascade_backpressure_decision
-      ~cascade_resilience:(Some blocked_resilience)
+    KHL.runtime_backpressure_decision
+      ~runtime_resilience:(Some blocked_resilience)
       ~should_run_turn:false
-      ~cascade_name:"primary"
-      ~cascade_status:(Masc_mcp.Keeper_health_probe.Unhealthy "failure_ratio")
+      ~runtime_id:"primary"
+      ~runtime_status:(Masc_mcp.Keeper_health_probe.Unhealthy "failure_ratio")
   with
-  | KHL.Cascade_admitted -> ()
-  | KHL.Cascade_backpressured _ ->
+  | KHL.Runtime_admitted -> ()
+  | KHL.Runtime_backpressured _ ->
     Alcotest.fail "already-skipped turn was reclassified"
 
 let test_cascade_backpressure_reason_labels () =
   Alcotest.(check (list string))
-    "cascade backpressure reasons"
-    [ "cascade_backpressure"; "cascade_unhealthy"; "reason_failure_ratio_" ]
-    (KHL.cascade_backpressure_observation_reasons ~reason:"Failure Ratio!");
+    "runtime backpressure reasons"
+    [ "runtime_backpressure"; "runtime_unhealthy"; "reason_failure_ratio_" ]
+    (KHL.runtime_backpressure_observation_reasons ~reason:"Failure Ratio!");
   Alcotest.(check (list string))
-    "provider dns cascade backpressure reasons"
+    "provider dns runtime backpressure reasons"
     [
-      "cascade_backpressure";
-      "cascade_unhealthy";
+      "runtime_backpressure";
+      "runtime_unhealthy";
       "class_provider_dns_failure";
       "reason_failure_ratio_provider_dns_failure";
     ]
-    (KHL.cascade_backpressure_observation_reasons
+    (KHL.runtime_backpressure_observation_reasons
        ~reason:"failure_ratio:provider_dns_failure");
   Alcotest.(check (list string))
-    "cascade resilience backpressure reasons"
+    "runtime resilience backpressure reasons"
     [
-      "cascade_backpressure";
-      "cascade_resilience";
-      "reason_cascade_resilience_pure_local_single_provider_no_fallback";
+      "runtime_backpressure";
+      "runtime_resilience";
+      "reason_runtime_resilience_pure_local_single_provider_no_fallback";
     ]
-    (KHL.cascade_backpressure_observation_reasons
-       ~reason:"cascade_resilience_pure_local_single_provider_no_fallback")
+    (KHL.runtime_backpressure_observation_reasons
+       ~reason:"runtime_resilience_pure_local_single_provider_no_fallback")
 
 let test_cascade_backpressure_updates_registry () =
   let base_path =
@@ -349,7 +349,7 @@ let test_cascade_backpressure_updates_registry () =
          | Some entry -> entry.meta.runtime.usage.last_turn_ts
          | None -> Alcotest.fail "registered keeper missing before observation"
        in
-       KHL.record_cascade_backpressure_observation
+       KHL.record_runtime_backpressure_observation
          ~base_path
          ~keeper_name:keeper
          ~reason:"failure_ratio";
@@ -361,7 +361,7 @@ let test_cascade_backpressure_updates_registry () =
            } ->
          Alcotest.(check (list string))
            "backpressure stamped for watchdog routing"
-           [ "cascade_backpressure"; "cascade_unhealthy"; "reason_failure_ratio" ]
+           [ "runtime_backpressure"; "runtime_unhealthy"; "reason_failure_ratio" ]
            reasons;
          Alcotest.(check bool)
            "last_turn_ts touched"
@@ -378,7 +378,7 @@ let test_queue_head_timeout_diagnostic_names_fifo_blocker () =
     "admission_queue_wait_timeout"
     (Keeper_meta_contract.blocker_class_to_string blocker_class);
   let persisted, log_diagnostic =
-    KHL.semaphore_wait_timeout_diagnostics ~cascade_name:"queue-cascade" timeout
+    KHL.semaphore_wait_timeout_diagnostics ~runtime_id:"queue-runtime" timeout
   in
   Alcotest.(check bool)
     "persisted detail names fifo blocker"
@@ -410,7 +410,7 @@ let test_autonomous_slot_timeout_keeps_holder_diagnostic () =
     "autonomous_slot_wait_timeout"
     (Keeper_meta_contract.blocker_class_to_string blocker_class);
   let _persisted, log_diagnostic =
-    KHL.semaphore_wait_timeout_diagnostics ~cascade_name:"slot-cascade" timeout
+    KHL.semaphore_wait_timeout_diagnostics ~runtime_id:"slot-runtime" timeout
   in
   Alcotest.(check bool)
     "slot diagnostic still names holders"

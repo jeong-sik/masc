@@ -422,20 +422,20 @@ let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
   | _ -> None
 ;;
 
-type cascade_attempt_record =
+type runtime_attempt_record =
   { provider_id : string
   ; http_status : int option
   ; outcome : [ `Success | `Failure of string ]
   ; timestamp : float
   }
 
-let cascade_attempt_outcome_to_json = function
+let runtime_attempt_outcome_to_json = function
   | `Success -> `Assoc [ "kind", `String "success" ]
   | `Failure message ->
     `Assoc [ "kind", `String "failure"; "message", `String message ]
 ;;
 
-let cascade_attempt_outcome_of_json = function
+let runtime_attempt_outcome_of_json = function
   | `Assoc fields ->
     (match List.assoc_opt "kind" fields with
      | Some (`String "success") -> Some `Success
@@ -451,20 +451,20 @@ let cascade_attempt_outcome_of_json = function
   | _ -> None
 ;;
 
-let cascade_attempt_record_to_json (record : cascade_attempt_record) : Yojson.Safe.t =
+let runtime_attempt_record_to_json (record : runtime_attempt_record) : Yojson.Safe.t =
   `Assoc
     [ "provider_id", `String record.provider_id
     ; ( "http_status"
       , match record.http_status with
         | Some status -> `Int status
         | None -> `Null )
-    ; "outcome", cascade_attempt_outcome_to_json record.outcome
+    ; "outcome", runtime_attempt_outcome_to_json record.outcome
     ; "timestamp", `Float record.timestamp
     ]
 ;;
 
-let cascade_attempt_record_of_json (json : Yojson.Safe.t)
-  : cascade_attempt_record option
+let runtime_attempt_record_of_json (json : Yojson.Safe.t)
+  : runtime_attempt_record option
   =
   match json with
   | `Null -> None
@@ -482,7 +482,7 @@ let cascade_attempt_record_of_json (json : Yojson.Safe.t)
     in
     let outcome =
       match List.assoc_opt "outcome" fields with
-      | Some value -> cascade_attempt_outcome_of_json value
+      | Some value -> runtime_attempt_outcome_of_json value
       | None -> None
     in
     let timestamp =
@@ -539,7 +539,7 @@ type agent_runtime_state =
   ; last_active_desire : string
   ; last_current_intention : string
   ; last_blocker : blocker_info option
-  ; last_cascade_attempt : cascade_attempt_record option
+  ; last_runtime_attempt : runtime_attempt_record option
   ; last_need : string
   ; last_turn_tool_calls : tool_call_summary list
   }

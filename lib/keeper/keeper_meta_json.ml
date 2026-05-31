@@ -70,9 +70,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match rt.last_blocker with
         | Some info -> blocker_info_to_json info
         | None -> `Null )
-    ; ( "last_cascade_attempt"
-      , match rt.last_cascade_attempt with
-        | Some record -> cascade_attempt_record_to_json record
+    ; ( "last_runtime_attempt"
+      , match rt.last_runtime_attempt with
+        | Some record -> runtime_attempt_record_to_json record
         | None -> `Null )
     ; "last_need", `String rt.last_need
     ; ( "last_turn_tool_calls"
@@ -150,7 +150,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_active_desire"
   ; "last_current_intention"
   ; "last_blocker"
-  ; "last_cascade_attempt"
+  ; "last_runtime_attempt"
   ; "last_need"
   ; "last_turn_tool_calls"
   ; "paused"

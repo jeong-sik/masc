@@ -522,7 +522,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
 	          last_active_desire = "";
 	          last_current_intention = "";
 	          last_blocker = None;
-	          last_cascade_attempt = None;
+	          last_runtime_attempt = None;
 	          last_need = "";
 	          last_turn_tool_calls = [];
 	        };

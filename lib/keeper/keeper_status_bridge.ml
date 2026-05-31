@@ -295,32 +295,32 @@ let runtime_blocker_surface_opt (config : Coord_utils.config) (meta : keeper_met
   derived
 ;;
 
-let cascade_attempt_outcome_json = function
+let runtime_attempt_outcome_json = function
   | `Success -> `Assoc [ "kind", `String "success"; "detail", `Null ]
   | `Failure detail ->
     `Assoc [ "kind", `String "failure"; "detail", `String detail ]
 ;;
 
-let cascade_attempt_record_json (attempt : cascade_attempt_record) =
+let runtime_attempt_record_json (attempt : runtime_attempt_record) =
   `Assoc
     [ "provider_id", `String attempt.provider_id
     ; "http_status", Json_util.int_opt_to_json attempt.http_status
-    ; "outcome", cascade_attempt_outcome_json attempt.outcome
+    ; "outcome", runtime_attempt_outcome_json attempt.outcome
     ; "timestamp_unix", `Float attempt.timestamp
     ]
 ;;
 
-let last_cascade_attempt_json (meta : keeper_meta) =
-  match meta.runtime.last_cascade_attempt with
+let last_runtime_attempt_json (meta : keeper_meta) =
+  match meta.runtime.last_runtime_attempt with
   | None -> `Null
-  | Some attempt -> cascade_attempt_record_json attempt
+  | Some attempt -> runtime_attempt_record_json attempt
 ;;
 
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
-    [ "source", `String "keeper_runtime.last_cascade_attempt"
+    [ "source", `String "keeper_runtime.last_runtime_attempt"
     ; "runtime_id", `String (runtime_id_of_meta meta)
-    ; "last_cascade_attempt", last_cascade_attempt_json meta
+    ; "last_runtime_attempt", last_runtime_attempt_json meta
     ]
 ;;
 
@@ -508,7 +508,7 @@ let runtime_surface_json config (meta : keeper_meta) =
      ; "keepalive_running", `Bool keepalive_running
      ; ( "phase", Json_util.string_opt_to_json phase )
      ; "fiber_health", `String (Keeper_status_runtime.string_of_fiber_health fiber_health)
-     ; "last_cascade_attempt", last_cascade_attempt_json meta
+     ; "last_runtime_attempt", last_runtime_attempt_json meta
      ]
      @ social_runtime_fields_json meta
      @ runtime_state_fields_json config meta

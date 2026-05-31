@@ -106,7 +106,7 @@ val json_response :
 (** Polling-friendly JSON envelope: [generated_at_iso],
     [dashboard_surface], [source], [retention], [query],
     [events], [count], [total_matching_events], [after_seq],
-    [next_after_seq], [limit], [room_id] (kept as ["default"]
+    [next_after_seq], [limit], [coord_id] (kept as ["default"]
     for backward-compat), [kinds], [latest_seq], and
     [latest_matching_seq].  [next_after_seq] is the seq of the
     last returned event so the caller can resume cleanly on the

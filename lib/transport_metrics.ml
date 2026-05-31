@@ -397,7 +397,7 @@ let int_field key json =
   | _ -> 0
 ;;
 
-let room_id_from_config (_config : Coord.config) = "default"
+let coord_id_from_config (_config : Coord.config) = "default"
 
 let cluster_summary_json (_config : Coord.config) =
   (* Transport health should stay metrics-only and avoid command-plane/Coord I/O. *)
@@ -573,7 +573,7 @@ let transport_health_json ~config =
   let webrtc_channels = Server_webrtc_transport.connected_channel_count () in
   let listener_mode = http_listener_mode () in
   let topology_summary = cluster_summary_json config in
-  let room_id = room_id_from_config config in
+  let coord_id = coord_id_from_config config in
   let cluster_name = Env_config_core.cluster_name () in
   (* Keep transport-health free of Coord/PG reads so proactive refresh does not
      contend with dashboard and MCP writes on the shared backend. *)
@@ -727,7 +727,7 @@ let transport_health_json ~config =
     ; ( "cluster"
       , `Assoc
           [ "cluster", `String cluster_name
-          ; "room_id", `String room_id
+          ; "coord_id", `String coord_id
           ; "topology_available", `Bool topology_available
           ; "topology_source", `String degraded_source
           ; "total_units", Json_util.int_opt_to_json (int_field_opt "total_units" topology_summary)

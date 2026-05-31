@@ -124,8 +124,8 @@ let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
 
 let reduce_event ~nodes ~edges (value : event) =
   let sw = semantic_multiplier value.kind in
-  let room_node_id = "room:" ^ value.room_id in
-  ensure_node nodes ~id:room_node_id ~kind:"room" ~label:value.room_id
+  let coord_node_id = "coord:" ^ value.coord_id in
+  ensure_node nodes ~id:coord_node_id ~kind:"coord" ~label:value.coord_id
     ~status:Coord ~ts_iso:value.ts_iso ~meta:default_meta ~sw_delta:sw;
   let actor_id =
     match value.actor with
@@ -134,7 +134,7 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_entity_node nodes actor ~fallback_status:Active
             ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
         in
-        ensure_edge edges ~source:id ~target:room_node_id ~kind:"belongs_to"
+        ensure_edge edges ~source:id ~target:coord_node_id ~kind:"belongs_to"
           ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
         Some id
     | None -> None
@@ -146,7 +146,7 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_entity_node nodes subject ~fallback_status:Observed
             ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
         in
-        ensure_edge edges ~source:id ~target:room_node_id ~kind:"belongs_to"
+        ensure_edge edges ~source:id ~target:coord_node_id ~kind:"belongs_to"
           ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
         Some id
     | None -> None
@@ -226,7 +226,7 @@ let reduce_event ~nodes ~edges (value : event) =
   | "message.broadcast" ->
       (match actor_id with
       | Some source ->
-          ensure_edge edges ~source ~target:room_node_id ~kind:"broadcasts"
+          ensure_edge edges ~source ~target:coord_node_id ~kind:"broadcasts"
             ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
       | None -> ())
   | "message.mentioned" ->

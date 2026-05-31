@@ -9,7 +9,7 @@
 
     1. {b relevant_sessions_for_briefing filtering}
        - Empty namespace → match all rooms.
-       - Project / room_id matching with live-status allow-list
+       - Project / coord_id matching with live-status allow-list
          {running, active, paused, starting, stopping, waiting},
          case-insensitive + whitespace-trimmed.
        - Recent-event window: keep if any recent_events ts_iso is
@@ -49,7 +49,7 @@ let assoc_keys_sorted j =
 (* Session JSON helper — minimal shape that the compactor
    navigates through. *)
 let session_fixture ?(session_id = "s-1") ?(project = "room-A")
-    ?(room_id = "room-A") ?(goal = "ship feature") ?(status = "active")
+    ?(coord_id = "room-A") ?(goal = "ship feature") ?(status = "active")
     ?(summary_status = "active") ?(comm_mode = "async")
     ?(broadcast = 3) ?(portal = 5) ?(recent = []) () =
   `Assoc
@@ -62,7 +62,7 @@ let session_fixture ?(session_id = "s-1") ?(project = "room-A")
               `Assoc
                 [
                   ("project", json_string project);
-                  ("room_id", json_string room_id);
+                  ("coord_id", json_string coord_id);
                   ("goal", json_string goal);
                   ("status", json_string status);
                   ("agent_names", `List [ json_string "a1" ]);
@@ -187,10 +187,10 @@ let test_relevant_namespace_mismatch_drops () =
   in
   assert (result = [])
 
-let test_relevant_room_id_fallback_when_project_blank () =
-  (* If project is blank, fall back to room_id for matching. *)
+let test_relevant_coord_id_fallback_when_project_blank () =
+  (* If project is blank, fall back to coord_id for matching. *)
   let s =
-    session_fixture ~project:"" ~room_id:"room-Z"
+    session_fixture ~project:"" ~coord_id:"room-Z"
       ~status:"active" ~summary_status:"active" ()
   in
   let result =
@@ -564,7 +564,7 @@ let () =
   test_relevant_empty_namespace_matches_all ();
   test_relevant_namespace_matching_keeps ();
   test_relevant_namespace_mismatch_drops ();
-  test_relevant_room_id_fallback_when_project_blank ();
+  test_relevant_coord_id_fallback_when_project_blank ();
   test_relevant_dead_status_drops ();
   test_relevant_live_status_case_insensitive_trim ();
   test_relevant_recent_event_within_hour_keeps_dead_session ();

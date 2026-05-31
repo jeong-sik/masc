@@ -62,7 +62,7 @@ let gen_entries ~end_ts ~spacing_sec ~count ~tool_names ~outcomes ~token_counts 
       Audit_log.timestamp;
       agent_id;
       action = Audit_log.ToolCall tool_name;
-      room_id = None;
+      coord_id = None;
       details = `Null;
       outcome;
       cost_estimate = None;

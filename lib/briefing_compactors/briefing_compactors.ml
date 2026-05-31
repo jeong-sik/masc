@@ -35,7 +35,7 @@ let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
           match String_util.option_trim (Some (string_field "project" session_json)) with
           | Some value -> value
           | None ->
-              String_util.option_trim (Some (string_field "room_id" session_json))
+              String_util.option_trim (Some (string_field "coord_id" session_json))
               |> Option.value ~default:""
         in
         String.equal project session_project
@@ -122,7 +122,7 @@ let compact_session_json session_json =
       ("goal", string_json ~default:"unassigned" ~max_len:160 (member_assoc "goal" session));
       ( "project",
         match member_assoc "project" session with
-        | `Null -> string_json ~default:"default" (member_assoc "room_id" session)
+        | `Null -> string_json ~default:"default" (member_assoc "coord_id" session)
         | value -> string_json ~default:"default" value );
       ("status", string_json ~default:"unknown" (member_assoc "status" session));
       ("agent_names", string_list_json (member_assoc "agent_names" session));

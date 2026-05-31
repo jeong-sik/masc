@@ -63,7 +63,7 @@ type audit_entry = {
   timestamp : float;
   agent_id : string;
   action : action;
-  room_id : string option;
+  coord_id : string option;
   details : Yojson.Safe.t;
   outcome : outcome;
   cost_estimate : float option;
@@ -129,7 +129,7 @@ val log_action :
   config ->
   agent_id:string ->
   action:action ->
-  ?room_id:string ->
+  ?coord_id:string ->
   ?details:Yojson.Safe.t ->
   ?cost_estimate:float ->
   ?token_count:int ->

@@ -22,7 +22,7 @@ let default_base_path () =
      When no explicit base path is set, use the current checkout/cwd rather
      than HOME so runtime artifacts stay under a visible base path. *)
   let requested_path = Config_dir_resolver.current_working_dir () in
-  Coord_utils_backend_setup.resolve_server_default_base_path requested_path
+  Workspace_utils_backend_setup.resolve_server_default_base_path requested_path
 
 let is_valid_protocol_version version =
   List.mem version mcp_protocol_versions

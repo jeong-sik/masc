@@ -9,24 +9,24 @@
 
 open Keeper_tools_oas
 
-let task_state_hint ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) : string =
+let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : string =
   match meta.current_task_id with
   | None -> "No task currently assigned. Use masc_claim_next or masc_tasks to find one."
   | Some tid ->
     let task_id = Keeper_id.Task_id.to_string tid in
-    (match Coord_backlog.read_backlog_r config with
+    (match Workspace_backlog.read_backlog_r config with
      | Error _ -> Printf.sprintf "Current task: %s (status unavailable)" task_id
      | Ok backlog ->
        (match List.find_opt (fun (t : Masc_domain.task) -> t.id = task_id) backlog.tasks with
         | None -> Printf.sprintf "Current task: %s (not found in backlog)" task_id
         | Some task ->
           let status = Masc_domain.task_status_to_string task.task_status in
-          let hint = Coord_task_classify.next_actions_hint task.task_status in
+          let hint = Workspace_task_classify.next_actions_hint task.task_status in
           Printf.sprintf "Current task: %s, status=%s%s" task_id status hint))
 ;;
 
 let make_tool_bundle
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
@@ -201,7 +201,7 @@ let make_tool_bundle
 ;;
 
 let make_tools
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn

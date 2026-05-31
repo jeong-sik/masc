@@ -38,7 +38,7 @@ val error_response :
     differentiated. *)
 
 val handle_chat_completions :
-  config:Coord.config ->
+  config:Workspace.config ->
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   string ->

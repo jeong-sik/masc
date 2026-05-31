@@ -89,7 +89,7 @@ let local_worker_contract_schemas : Masc_domain.tool_schema list =
 let local_worker_internal_schemas : Masc_domain.tool_schema list =
   List.filter
     (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "masc_heartbeat")
-    Tool_schemas_coord_core.schemas
+    Tool_schemas_workspace_core.schemas
 
 let local_worker_run_schemas : Masc_domain.tool_schema list =
   Tool_schemas_run.schemas
@@ -100,8 +100,8 @@ let select_public_local_worker_schemas () =
   let wanted_set = name_set local_worker_public_tool_names in
   dedupe_schemas
     (Tool_board.tools
-    @ Tool_schemas_coord_core.schemas
-    @ Tool_schemas_coord_extra.schemas
+    @ Tool_schemas_workspace_core.schemas
+    @ Tool_schemas_workspace_extra.schemas
     @ Tool_task_schemas.schemas
     @ Tool_schemas_agent.schemas
     @ local_worker_run_schemas)
@@ -163,12 +163,12 @@ let local_worker_tool_schemas ?names () :
 let admin_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Admin
 
-(** Role-catalog candidates for coordinators and fleet leaders.
-    SSOT: Tool_catalog_surfaces.coordination_role_tools.
+(** Role-catalog candidates for workspace_clients and fleet leaders.
+    SSOT: Tool_catalog_surfaces.workspace_role_tools.
     [build_tool_catalog] filters against surfaced tool names so stale
     entries cannot escape into prompts. *)
-let coordination_tool_names : string list =
-  Tool_catalog_surfaces.coordination_role_tools
+let workspace_tool_names : string list =
+  Tool_catalog_surfaces.workspace_role_tools
 
 (** Role-catalog candidates for worker agents.
     SSOT: Tool_catalog_surfaces.execution_role_tools. *)
@@ -184,7 +184,7 @@ let filter_catalog_to_available ~available names =
 (** Build a role-based tool catalog from the full registered tool set.
     [role] determines which subset of tools the agent sees:
     - ["worker"]: execution-focused tools
-    - ["coordinator"]: coordination and orchestration tools
+    - ["workspace_client"]: workspace and orchestration tools
     - [_]: all non-admin tools (autonomous default)
     Returns tool names (unprefixed). *)
 let build_tool_catalog ~(role : string) () : string list =
@@ -196,8 +196,8 @@ let build_tool_catalog ~(role : string) () : string list =
     match role with
     | "worker" ->
         filter_catalog_to_available ~available:all_names execution_tool_names
-    | "coordinator" | "fleet_leader" ->
-        filter_catalog_to_available ~available:all_names coordination_tool_names
+    | "workspace_client" | "fleet_leader" ->
+        filter_catalog_to_available ~available:all_names workspace_tool_names
     | _ ->
         (* autonomous: all except admin.  Replace per-name [List.mem]
            scan over [admin_tool_names] with O(1) Hashtbl lookup. *)

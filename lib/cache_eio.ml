@@ -26,8 +26,8 @@ type cache_entry =
   }
 
 (** Get cache directory *)
-let cache_dir (config : Coord_utils.config) =
-  Filename.concat (Coord_utils.masc_dir config) "cache"
+let cache_dir (config : Workspace_utils.config) =
+  Filename.concat (Workspace_utils.masc_dir config) "cache"
 ;;
 
 (** Ensure cache directory exists *)
@@ -47,7 +47,7 @@ let sanitize_key key =
   if String.length safe > 64 then String.sub safe 0 64 else safe
 ;;
 
-(** Keep a readable filename prefix while reserving room for a collision-proof hash suffix. *)
+(** Keep a readable filename prefix while reserving workspace for a collision-proof hash suffix. *)
 let key_filename_prefix key =
   let safe = sanitize_key key in
   if String.length safe > 48 then String.sub safe 0 48 else safe

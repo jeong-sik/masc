@@ -109,7 +109,7 @@ let mission_cache =
 let _mission_cache = mission_cache
 
 let start_mission_refresh_loop ~state ~sw ~clock =
-  let coord_config = state.Mcp_server.coord_config in
+  let workspace_config = state.Mcp_server.workspace_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = state_dashboard_runtime_caps state in
   let mission_refresh_timeout_s = 60.0 in
@@ -123,7 +123,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
         ?mono_clock
         ~sw
         ~clock
-        ~config:coord_config
+        ~config:workspace_config
       |> fun run_compute ->
       let result =
         run_compute (fun ~config ~sw ->
@@ -154,7 +154,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
 let dashboard_briefing_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.coord_config.base_path request
+    dashboard_actor_for_request ~base_path:state.Mcp_server.workspace_config.base_path request
   in
   let compute ?actor () =
     let started_at = Unix.gettimeofday () in
@@ -164,7 +164,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
       ?mono_clock
       ~sw
       ~clock
-      ~config:state.Mcp_server.coord_config
+      ~config:state.Mcp_server.workspace_config
       (fun ~config ~sw ->
          Dashboard_briefing.json
            ?actor
@@ -193,7 +193,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
         dashboard_cache_key
-          state.Mcp_server.coord_config
+          state.Mcp_server.workspace_config
           "mission"
           (Option.value ~default:"" actor)
       in
@@ -215,10 +215,10 @@ let dashboard_session_http_json ~state ~sw ~clock request =
        Dashboard_briefing.session_json
          ?actor:
            (dashboard_actor_for_request
-              ~base_path:state.Mcp_server.coord_config.base_path
+              ~base_path:state.Mcp_server.workspace_config.base_path
               request)
          ~session_id:trimmed_id
-         ~config:state.Mcp_server.coord_config
+         ~config:state.Mcp_server.workspace_config
          ~sw
          ~clock
          ~proc_mgr:state.Mcp_server.proc_mgr
@@ -249,14 +249,14 @@ let dashboard_session_http_json ~state ~sw ~clock request =
 
 let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.coord_config.base_path request
+    dashboard_actor_for_request ~base_path:state.Mcp_server.workspace_config.base_path request
   in
   let force = bool_query_param request "force" ~default:false in
   let compute () =
     Dashboard_briefing_sections.json
       ?actor
       ~force
-      ~config:state.Mcp_server.coord_config
+      ~config:state.Mcp_server.workspace_config
       ~sw
       ~clock
       ~proc_mgr:state.Mcp_server.proc_mgr
@@ -267,7 +267,7 @@ let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
   else (
     let cache_key =
       dashboard_cache_key
-        state.Mcp_server.coord_config
+        state.Mcp_server.workspace_config
         "mission_briefing"
         (Option.value ~default:"" actor)
     in
@@ -287,7 +287,7 @@ let dashboard_task_json = Server_dashboard_http_core_entities.dashboard_task_jso
 let dashboard_agent_json = Server_dashboard_http_core_entities.dashboard_agent_json
 let dashboard_message_json = Server_dashboard_http_core_entities.dashboard_message_json
 
-(* dashboard_current_coord_id removed — namespace retired (#unify-namespace). *)
+(* dashboard_current_workspace_id removed — namespace retired (#unify-namespace). *)
 
 let dashboard_tasks_safe = Server_dashboard_http_core_entities.dashboard_tasks_safe
 let dashboard_agents_safe = Server_dashboard_http_core_entities.dashboard_agents_safe
@@ -314,7 +314,7 @@ let provider_capacity_json = Server_dashboard_http_core_entities.provider_capaci
    light is genuinely under-scoped or has accidentally taken on full's
    work. Splitting the budget makes that distinction visible: a light
    timeout means "light path is doing too much"; a full timeout means
-   "the full path needs more headcoord or a real perf fix". *)
+   "the full path needs more headroom or a real perf fix". *)
 let dashboard_shell_timeout_s = Env_config_runtime.Dashboard.shell_timeout_sec
 let dashboard_shell_light_timeout_s = Env_config_runtime.Dashboard.shell_light_timeout_sec
 
@@ -327,7 +327,7 @@ let dashboard_shell_timeout_for ~light =
 ;;
 
 (* Meta_cognition.summary_json does a full board_posts.jsonl scan +
-   belief/tension/desire rule evaluation. On a coord with 450+ posts this
+   belief/tension/desire rule evaluation. On a workspace with 450+ posts this
    regularly exceeds 8s, which was the previous shell timeout and caused
    repeat "cache compute timeout: shell:..." + "cache bg-revalidate failed"
    noise in the log. Give it its own cache with a longer TTL, and on a cold
@@ -439,7 +439,7 @@ let shell_projection_label_to_phase : string -> Server_timing.phase = function
 let dashboard_shell_payload_json
       ?timing
       ?(light = false)
-      (config : Coord.config)
+      (config : Workspace.config)
   : Yojson.Safe.t
   =
   let cluster = Env_config_core.cluster_name () in
@@ -483,7 +483,7 @@ let dashboard_shell_payload_json
         `Null)
   in
   match
-    (* Cold workspaces lazily materialize coord/keeper state on first access.
+    (* Cold workspaces lazily materialize workspace/keeper state on first access.
        Keep those stateful reads sequential so one failing init path does not
        cancel sibling fibers and poison shared Eio mutexes. Retain parallelism
        only for projection-style reads that are safe to drop to `Null`. *)
@@ -566,7 +566,7 @@ let dashboard_shell_payload_json
          ~started_at
          ~extra:
            ([ "cluster", `String cluster
-            ; "coordination_root", `String config.base_path
+            ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
             ; "keeper_count_source", `String "runtime_keepalive"
             ; "configured_keeper_count_source", `String "keeper_meta"
@@ -591,7 +591,7 @@ let dashboard_shell_payload_json
     raise exn
 ;;
 
-let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config)
+let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.config)
   : Yojson.Safe.t
   =
   let dashboard_auth_error_code = function
@@ -722,7 +722,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     ]
 ;;
 
-let dashboard_shell_with_request_auth_json ~request (config : Coord.config) payload =
+let dashboard_shell_with_request_auth_json ~request (config : Workspace.config) payload =
   match payload with
   | `Assoc fields ->
     `Assoc
@@ -736,7 +736,7 @@ let dashboard_shell_http_json
       ?request
       ?timing
       ?(light = false)
-      (config : Coord.config)
+      (config : Workspace.config)
   : Yojson.Safe.t
   =
   let cache_key = dashboard_shell_cache_key ~light config in
@@ -747,7 +747,7 @@ let dashboard_shell_http_json
        The payload compute runs status / agents / tasks / keepers /
        meta_cognition projections (the latter scans board_posts.jsonl and
        evaluates belief/tension/desire rules — frequently 8s+ on a hot
-       coord).  Under cache miss this used to run inline on the calling
+       workspace).  Under cache miss this used to run inline on the calling
        fiber's Eio main domain, blocking every other HTTP fiber for the
        duration — the same Eio cooperative scheduling violation that
        PRs #18991 / #18993 / #18994 / #19007 / #19015 / #19023 / #19024 /

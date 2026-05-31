@@ -258,7 +258,7 @@ let load_credential_from_path config agent_name path : agent_credential option =
     cover every dynamically generated nickname in that family
     (e.g. [adversary-fair-tapir]).
 
-    Without this fallback, Coord.bind_session's nickname output caused a
+    Without this fallback, Workspace.bind_session's nickname output caused a
     chronic "No credential found for <type>-<adj>-<animal>" noise band
     at ~0.3/min on the live fleet (2026-04-20). *)
 let load_credential_from_path_raw config agent_name path : agent_credential option =

@@ -36,7 +36,7 @@ let record_continuity_summary_source ~(keeper_name : string)
     ()
 
 (** Read continuity summary from checkpoint messages or meta fallback. *)
-let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : string =
+let read_continuity_summary ~(config : Workspace.config) ~(meta : keeper_meta) : string =
   let render_bounded_snapshot snapshot =
     keeper_state_snapshot_to_summary_text snapshot
     |> Keeper_memory_policy.cap_continuity_summary_text

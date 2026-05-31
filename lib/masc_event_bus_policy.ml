@@ -36,7 +36,7 @@ let masc_domain =
     policy = Block;
     rationale =
       "Block + 256 buffer: broadcast/heartbeat/keeper/autonomy/harness/ \
-       trust events carry coordination invariants; dropping any would \
+       trust events carry workspace invariants; dropping any would \
        silently break MASC's task hand-off semantics.";
   }
 ;;

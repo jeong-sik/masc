@@ -91,7 +91,7 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.130.0" };
 
   { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
-    description = "Count successful room heartbeat after a turn as presence proof";
+    description = "Count successful workspace heartbeat after a turn as presence proof";
     default = true; category = "keeper";
     lifecycle = Active; since = "2.162.0" };
 
@@ -130,8 +130,8 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.50.0" };
 
-  { env_name = "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED";
-    description = "Global override for keeper room-signal prompt injection";
+  { env_name = "MASC_KEEPER_WORKSPACE_SIGNAL_PROMPT_ENABLED";
+    description = "Global override for keeper workspace-signal prompt injection";
     default = false; category = "keeper";
     lifecycle = Active; since = "2.214.0" };
 

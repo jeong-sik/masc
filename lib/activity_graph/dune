@@ -12,7 +12,7 @@
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
  (flags (:standard -w +4))
  (libraries
-   masc_coord
+   masc_workspace
    masc_core
    masc_types
    masc_log

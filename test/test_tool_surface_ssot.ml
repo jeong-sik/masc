@@ -80,7 +80,7 @@ let test_keeper_denied_parity () =
 let test_session_min_and_local_worker_share_core () =
   (* Session_min (worker container fallback) and Local_worker (mission
      execution bridge) serve different purposes and are NOT in a subset
-     relationship.  Instead we verify they share the expected coordination
+     relationship.  Instead we verify they share the expected workspace
      core. *)
   let min_set = set_of (Tool_catalog.tools_for_surface Tool_catalog.Session_min) in
   let worker_set = set_of (Tool_catalog.tools_for_surface Tool_catalog.Local_worker) in
@@ -446,15 +446,15 @@ let test_role_catalogs_only_expose_available_tools () =
     ) tools
   in
   check_all "worker" Agent_tool_surfaces.execution_tool_names;
-  check_all "coordinator" Agent_tool_surfaces.coordination_tool_names
+  check_all "workspace_client" Agent_tool_surfaces.workspace_tool_names
 
 let test_role_catalogs_drop_stale_entries_when_built () =
   let worker_tools = Agent_tool_surfaces.build_tool_catalog ~role:"worker" () in
-  let coordinator_tools = Agent_tool_surfaces.build_tool_catalog ~role:"coordinator" () in
+  let workspace_client_tools = Agent_tool_surfaces.build_tool_catalog ~role:"workspace_client" () in
   Alcotest.(check bool) "worker role excludes portal_open" false
     (List.mem "masc_portal_open" worker_tools);
-  Alcotest.(check bool) "coordinator role excludes portal_open" false
-    (List.mem "masc_portal_open" coordinator_tools)
+  Alcotest.(check bool) "workspace_client role excludes portal_open" false
+    (List.mem "masc_portal_open" workspace_client_tools)
 
 let () =
   Alcotest.run "tool_surface_ssot"

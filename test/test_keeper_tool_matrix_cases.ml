@@ -24,7 +24,7 @@ type keeper_case = {
 
 and fixture = {
   generic : Generic.fixture;
-  config : Masc_mcp.Coord.config;
+  config : Masc_mcp.Workspace.config;
   meta : Masc_mcp.Keeper_meta_contract.keeper_meta;
   ctx_snapshot : Masc_mcp.Keeper_types.working_context;
   tools : Agent_sdk.Tool.t list;
@@ -117,7 +117,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let generic =
     Generic.make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode
   in
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let ctx =
     Masc_mcp.Keeper_context_runtime.create ~system_prompt:"keeper tool matrix"
       ~max_tokens:4000
@@ -135,10 +135,10 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
           tools resolve the agent through the prefixed alias while
           dispatched masc tools use the raw meta identity. *)
        ignore
-         (Masc_mcp.Coord.bind_session config ~agent_name:meta.name
+         (Masc_mcp.Workspace.bind_session config ~agent_name:meta.name
             ~capabilities:[] ());
        ignore
-         (Masc_mcp.Coord.bind_session config ~agent_name:("keeper-" ^ meta.name)
+         (Masc_mcp.Workspace.bind_session config ~agent_name:("keeper-" ^ meta.name)
             ~capabilities:[] ())
    | Fresh | Init_only -> ());
   { generic; config; meta; ctx_snapshot; tools }
@@ -165,7 +165,7 @@ let ensure_sample_file fixture =
 let ensure_keeper_claim fixture =
   ignore (Generic.ensure_task fixture.generic);
   ignore
-    (Masc_mcp.Coord.claim_next fixture.config
+    (Masc_mcp.Workspace.claim_next fixture.config
        ~agent_name:fixture.meta.agent_name)
 
 let ensure_voice_session fixture =

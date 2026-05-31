@@ -61,7 +61,7 @@ val current : unit -> t option
 (** [Atomic.get] from the live slot.  Returns [None] until the first
     successful publish.  Wait-free; total. *)
 
-val current_or_bootstrap : config:Coord.config -> t
+val current_or_bootstrap : config:Workspace.config -> t
 (** [current ()] if populated; otherwise a single bootstrap value
     computed synchronously on the calling fiber.  The bootstrap path is
     taken at most once per process lifetime (first request before the
@@ -70,7 +70,7 @@ val current_or_bootstrap : config:Coord.config -> t
 val refresh_loop :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  config:Coord.config ->
+  config:Workspace.config ->
   ?state:Mcp_server.server_state ->
   interval_sec:float ->
   unit ->

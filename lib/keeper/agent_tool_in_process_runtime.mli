@@ -1,4 +1,4 @@
-(** In-process runtime handlers for descriptor-backed coordination tools.
+(** In-process runtime handlers for descriptor-backed workspace tools.
 
     RFC-0179. Hosts handlers for descriptors whose executor is [In_process] —
     pure OCaml-runtime functions with no sandbox, no host process spawn, no
@@ -26,21 +26,21 @@ val handle_tool_search
   -> string
 
 val handle_context_status
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> ctx_work:working_context
   -> args:Yojson.Safe.t
   -> string
 
 val handle_memory_search
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> ctx_work:working_context
   -> args:Yojson.Safe.t
   -> string
 
 val handle_memory_write
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> args:Yojson.Safe.t
   -> string
@@ -49,7 +49,7 @@ val handle_library_search : meta:keeper_meta -> args:Yojson.Safe.t -> string
 val handle_library_read : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
 val handle_ide_annotate
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> args:Yojson.Safe.t
   -> string
@@ -65,7 +65,7 @@ val handle_voice
 (** [handle_task] dispatches to [Agent_tool_task_runtime.handle_keeper_task_tool]
     by [name]. Caller must pass a name in the task / broadcast cluster. *)
 val handle_task
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
@@ -91,7 +91,7 @@ val handle_masc_board : name:string -> args:Yojson.Safe.t -> string
     Constructs a [Tool_task_handlers.context] from
     [config + meta.name + sw=None] and calls [Tool_task.dispatch]. *)
 val handle_masc_task
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
@@ -102,7 +102,7 @@ val handle_masc_task
     tools. Constructs a [Tool_plan.context] from [config] and calls
     [Tool_plan.dispatch]. *)
 val handle_masc_plan
-  :  config:Coord.config
+  :  config:Workspace.config
   -> name:string
   -> args:Yojson.Safe.t
   -> string
@@ -112,7 +112,7 @@ val handle_masc_plan
     list / log / plan). Constructs a [Tool_run.context] from [config] and
     calls [Tool_run.dispatch]. *)
 val handle_masc_run
-  :  config:Coord.config
+  :  config:Workspace.config
   -> name:string
   -> args:Yojson.Safe.t
   -> string
@@ -123,18 +123,18 @@ val handle_masc_run
     Constructs a [Tool_agent.context] from [config + meta.name] and calls
     [Tool_agent.dispatch]. *)
 val handle_masc_agent
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
   -> string
 
-(** RFC-0182 §3.1 — [handle_masc_coord] is the descriptor-projection
+(** RFC-0182 §3.1 — [handle_masc_workspace] is the descriptor-projection
     cluster handler for [masc_status] / [masc_heartbeat] / [masc_check] /
-    [masc_reset] / [masc_goal_*]. Constructs a [Tool_coord.context] from
-    [config + meta.name] and calls [Tool_coord.dispatch]. *)
-val handle_masc_coord
-  :  config:Coord.config
+    [masc_reset] / [masc_goal_*]. Constructs a [Tool_workspace.context] from
+    [config + meta.name] and calls [Tool_workspace.dispatch]. *)
+val handle_masc_workspace
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
@@ -147,7 +147,7 @@ val handle_masc_coord
     Constructs a [Tool_misc.context] from [config + meta.name] and calls
     [Tool_misc.dispatch]. *)
 val handle_masc_misc
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
@@ -158,7 +158,7 @@ val handle_masc_misc
     [Tool_control.context] from [config + meta.name] and calls
     [Tool_control.dispatch]. *)
 val handle_masc_control
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
@@ -169,7 +169,7 @@ val handle_masc_control
     Constructs a [Tool_agent_timeline.context] from [config + meta.name]
     and calls [Tool_agent_timeline.dispatch]. *)
 val handle_masc_agent_timeline
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
@@ -186,7 +186,7 @@ val handle_masc_local_runtime
 
 (** RFC-0182 §3.1 — [handle_masc_tool_shard] is the descriptor-projection
     cluster handler for [masc_tool_list] / [masc_tool_grant] /
-    [masc_tool_revoke].  [Tool_shard.execute] is pure (no Keeper/Coord
+    [masc_tool_revoke].  [Tool_shard.execute] is pure (no Keeper/Workspace
     deps) and returns a [(bool * Yojson.Safe.t)] tuple. *)
 val handle_masc_tool_shard
   :  name:string
@@ -223,7 +223,7 @@ val handle_masc_keeper
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?mcp_session_id:string
-  -> config:Coord.config
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> name:string
   -> args:Yojson.Safe.t

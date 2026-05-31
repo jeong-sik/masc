@@ -45,7 +45,7 @@ let recovery_hint (message : string) : string option =
     Some "Call masc_add_task to create a new task."
   else if contains msg "rate limit" || contains msg "too many" then
     Some "Wait briefly and retry. This is a transient error."
-  else if contains msg "coord" && contains msg "set" then
+  else if contains msg "workspace" && contains msg "set" then
     Some "Call masc_start(path=...) to set the project scope and join in one step."
   else if contains msg "current_task" || contains msg "no current task" then
     Some "Call masc_plan_set_task(task_id=...) after claiming a task."

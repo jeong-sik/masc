@@ -3,7 +3,7 @@ module StringMap = Set_util.StringMap
 (** Meta_cognition_snapshot — Data loading, JSON builders, and snapshot generation.
 
     Loads board posts/comments/votes/governance cases and produces
-    deterministic JSON snapshots of coord-level beliefs, tensions, desires,
+    deterministic JSON snapshots of workspace-level beliefs, tensions, desires,
     and social edges.
 
     @since God file decomposition — extracted from meta_cognition.ml *)
@@ -33,17 +33,17 @@ let load_jsonl_safe path =
         []
 
 let load_board_posts config =
-  let path = Filename.concat (Coord.masc_dir config) "board_posts.jsonl" in
+  let path = Filename.concat (Workspace.masc_dir config) "board_posts.jsonl" in
   load_jsonl_safe path
   |> List.filter_map Board.post_of_yojson
 
 let load_board_comments config =
-  let path = Filename.concat (Coord.masc_dir config) "board_comments.jsonl" in
+  let path = Filename.concat (Workspace.masc_dir config) "board_comments.jsonl" in
   load_jsonl_safe path
   |> List.filter_map Board.comment_of_yojson
 
 let load_board_vote_count config =
-  let path = Filename.concat (Coord.masc_dir config) "board_votes.jsonl" in
+  let path = Filename.concat (Workspace.masc_dir config) "board_votes.jsonl" in
   List.length (load_jsonl_safe path)
 
 let load_governance_cases config =
@@ -60,7 +60,7 @@ let load_governance_cases config =
       ~path
       ~detail
   in
-  let dir = Filename.concat (Coord.masc_dir config) "governance_v2/cases" in
+  let dir = Filename.concat (Workspace.masc_dir config) "governance_v2/cases" in
   if not (Sys.file_exists dir) then
     []
   else
@@ -501,8 +501,8 @@ let snapshot_json ?hearth ~limit config =
     |> take limit
   in
   let social_edges = social_edges_json ~limit sources in
-  let tasks = Coord.get_tasks_raw config in
-  let agents = Coord.get_agents_raw config in
+  let tasks = Workspace.get_tasks_raw config in
+  let agents = Workspace.get_agents_raw config in
   let idle_signal_count =
     sources
     |> List.filter (fun source ->
@@ -521,7 +521,7 @@ let snapshot_json ?hearth ~limit config =
   `Assoc
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
-      ( "coord_state",
+      ( "workspace_state",
         `Assoc
           [
             ("active_agent_count", `Int (List.length agents));

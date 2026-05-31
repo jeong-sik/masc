@@ -828,7 +828,7 @@ let has_boot_entries config =
    spinning up an Eio + Pulse runtime.  See [maybe_start_supervisor_sweep]
    for the WHY. *)
 let should_start_supervisor_sweep
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(stats : keeper_bootstrap_stats) : bool =
   stats.started > 0
   || Keeper_registry.count_running ~base_path:config.base_path () > 0

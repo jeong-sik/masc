@@ -24,7 +24,7 @@ let run_git ~timeout_sec ~clone_path args =
   let argv = [ "git"; "-C"; clone_path; "--no-optional-locks" ] @ args in
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:`Coord_git
+      ~actor:`Workspace_git
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper repo readiness git probe"
       ~timeout_sec argv
@@ -65,7 +65,7 @@ let repo_name_of_repo_arg ~project_root repo =
       String.sub base 0 (String.length base - 4)
     else base
 
-let clone_path ~(config : Coord.config) ~(meta : keeper_meta) ~repo_name =
+let clone_path ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name =
   Filename.concat
     (Keeper_sandbox.host_root_abs_of_meta ~config meta)
     (Filename.concat "repos" repo_name)
@@ -96,7 +96,7 @@ let int_opt_field name = function
   | Some value -> [ name, `Int value ]
 
 let inspect
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ?repo_name
     ?(repo = "")
@@ -244,14 +244,14 @@ let inspect
 (* ── Sandbox repo auto-repair ─────────────────────────────────── *)
 
 (** Look up the repository URL from [repositories.toml] by repo name. *)
-let find_repo_url ~(config : Coord.config) ~repo_name =
-  Repo_store.find_url_by_id ~base_path:config.Coord.base_path repo_name
+let find_repo_url ~(config : Workspace.config) ~repo_name =
+  Repo_store.find_url_by_id ~base_path:config.Workspace.base_path repo_name
 
 (** Resolve the keeper's mapped credential from [keeper_repo_mappings.toml]. *)
-let resolve_keeper_credential ~(config : Coord.config) ~(meta : keeper_meta) =
+let resolve_keeper_credential ~(config : Workspace.config) ~(meta : keeper_meta) =
   match
     Keeper_repo_mapping.credentials_for_keeper
-      ~base_path:config.Coord.base_path ~keeper_id:meta.name
+      ~base_path:config.Workspace.base_path ~keeper_id:meta.name
   with
   | Error reason ->
     Error (Printf.sprintf "credential mapping error for keeper %s: %s" meta.name reason)
@@ -264,7 +264,7 @@ let resolve_keeper_credential ~(config : Coord.config) ~(meta : keeper_meta) =
 
 (** Clone a sandbox repo using the keeper's mapped credential.
     Constructs a minimal [repository] record and delegates to [Repo_git.clone]. *)
-let clone_sandbox_repo ~(config : Coord.config) ~(meta : keeper_meta)
+let clone_sandbox_repo ~(config : Workspace.config) ~(meta : keeper_meta)
     ~repo_name ~url ~clone_path ~(credential : Repo_manager_types.credential) =
   let open Repo_manager_types in
   let repo = {
@@ -290,7 +290,7 @@ let clone_sandbox_repo ~(config : Coord.config) ~(meta : keeper_meta)
     attempts to clone it from the configured repository URL using the
     keeper's mapped credential. Returns [Ok ()] when the repo is ready,
     or [Error msg] if repair failed or was not possible. *)
-let ensure_ready ~(config : Coord.config) ~(meta : keeper_meta) ~repo_name () :
+let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name () :
     (unit, string) result =
   if not (safe_repo_component repo_name) then
     Error (Printf.sprintf "invalid repo_name: %s" repo_name)
@@ -311,7 +311,7 @@ let ensure_ready ~(config : Coord.config) ~(meta : keeper_meta) ~repo_name () :
         if state = "not_git_repo" && safe_is_dir path then (
           let _ =
             Masc_exec.Exec_gate.run_argv_with_status
-              ~actor:`Coord_git
+              ~actor:`Workspace_git
               ~raw_source:(Printf.sprintf "rm -rf %s" (Filename.quote path))
               ~summary:"remove corrupt sandbox repo before reclone"
               ~timeout_sec:read_only_probe_timeout_sec

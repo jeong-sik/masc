@@ -199,8 +199,12 @@ let rec evidence_preview_strings json =
       fields |> List.map snd |> List.concat_map evidence_preview_strings |> dedup_strings |> take 4
   | _ -> []
 
+(* Issue #8395: root-level attention uses [target_type="workspace"].  This
+   predicate previously compared only to the literal "workspace", so the
+   canonical form fell through to the public queue.  Delegate to the
+   shared canonical target check used by [Dashboard_briefing_assembly]. *)
 let is_internal_attention incident =
-  Operator_digest_types.is_omitted_target_type (string_field "target_type" incident)
+  Operator_digest_types.is_root_target_type (string_field "target_type" incident)
 
 let related_sessions_for_attention incident sessions =
   let direct_session =
@@ -356,7 +360,11 @@ let build_projection ?actor ~config ~sw ~clock
                 ("error", `String message);
               ])
   in
-  let namespace_json = snapshot_json in
+  let namespace_json =
+    match member_assoc "workspace" snapshot_json with
+    | `Assoc _ as value -> value
+    | _ -> member_assoc "workspace" snapshot_json
+  in
   let incidents =
     list_field "attention_items" digest_json
     |> List.sort (fun left right ->
@@ -446,7 +454,7 @@ let session_json ?actor ~session_id ~config ~sw
       ~clock ~proc_mgr ()
   in
   let tasks =
-    if Coord.is_initialized config then Coord.get_tasks_safe config else []
+    if Workspace.is_initialized config then Workspace.get_tasks_safe config else []
   in
   let operation_contexts =
     Dashboard_briefing_assembly.build_operation_contexts ~tasks

@@ -27,7 +27,7 @@ let dedupe_sorted_strings values =
 
 let take = List.take
 
-let requested_names ~(config : Coord.config) args =
+let requested_names ~(config : Workspace.config) args =
   let explicit_names =
     let names = get_string_list args "names" in
     (match get_string_opt args "name" with
@@ -44,7 +44,7 @@ let requested_names ~(config : Coord.config) args =
     registry_names @ configured_keeper_names config @ keeper_names config
     |> dedupe_sorted_strings
 
-let status ~(config : Coord.config) (meta : keeper_meta) =
+let status ~(config : Workspace.config) (meta : keeper_meta) =
   let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
   let agent_status =
     Keeper_status_runtime.parse_agent_status config ~agent_name:meta.agent_name
@@ -70,12 +70,12 @@ type active_goal_scope_audit = {
   stale : bool;
 }
 
-let active_goal_scope_audit ~(config : Coord.config) (meta : keeper_meta) =
+let active_goal_scope_audit ~(config : Workspace.config) (meta : keeper_meta) =
   let active_goal_ids = meta.active_goal_ids in
   let task_is_open (task : Masc_domain.task) =
     not (Masc_domain.task_status_is_terminal task.task_status)
   in
-  let tasks = Coord.get_tasks_safe config in
+  let tasks = Workspace.get_tasks_safe config in
   let count_open tasks =
     List.fold_left
       (fun acc task -> if task_is_open task then acc + 1 else acc)
@@ -129,7 +129,7 @@ let profile_candidates persona_name =
   |> List.map (fun root ->
          Filename.concat (Filename.concat root persona_name) "profile.json")
 
-let item ~(config : Coord.config) requested_name =
+let item ~(config : Workspace.config) requested_name =
   let meta_result = read_meta_resolved config requested_name in
   let resolved_name, runtime_meta, runtime_meta_error =
     match meta_result with
@@ -373,7 +373,7 @@ let summary items =
       ("stale_active_goal_ids", `Int (count_issue "stale_active_goal_ids"));
     ]
 
-let handle ~(config : Coord.config) args : tool_result =
+let handle ~(config : Workspace.config) args : tool_result =
   let names = requested_names ~config args in
   let invalid_names = List.filter (fun name -> not (validate_name name)) names in
   if Stdlib.List.length invalid_names > 0 then
@@ -409,7 +409,7 @@ let handle ~(config : Coord.config) args : tool_result =
       `Assoc
         [
           ("base_path", `String config.base_path);
-          ("masc_root", `String (Coord.masc_root_dir config));
+          ("masc_root", `String (Workspace.masc_root_dir config));
           ("config_resolution", Config_dir_resolver.to_json resolution);
           ( "personas_dirs",
             `List

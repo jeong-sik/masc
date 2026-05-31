@@ -2,7 +2,7 @@
     separated to break the [Config] dependency cycle.
 
     All 4 entries are SSOT mirrors of producer-side string
-    lists.  Adding / removing values requires coordinated
+    lists.  Adding / removing values requires synchronized
     updates at the SSOT (which lives in a downstream module
     that cannot be referenced here without re-introducing the
     cycle).  Three test invariants keep the mirrors aligned:

@@ -9,8 +9,8 @@
 
     Internal helpers ([log_err], [build_batch_mutation],
     [record_collaborations_async]) are hidden — callers consume
-    only the two lifecycle hooks below, which {!Coord_hooks} wires
-    in via [Atomic.set] in [Coord]'s init.
+    only the two lifecycle hooks below, which {!Workspace_hooks} wires
+    in via [Atomic.set] in [Workspace]'s init.
 
     @since 2.112.0 *)
 

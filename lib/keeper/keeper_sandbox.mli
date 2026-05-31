@@ -37,21 +37,21 @@ val backend_to_string : backend -> string
     need sandbox shape should depend on this contract instead of reading
     keeper TOML or Docker path details directly. *)
 val backend_of_config_agent :
-  config:Coord.config ->
+  config:Workspace.config ->
   agent_name:string ->
   backend
 
 (** [host_root_rel_of_config_agent ~config ~agent_name] returns the
     backend-scoped relative sandbox root for [agent_name]. *)
 val host_root_rel_of_config_agent :
-  config:Coord.config ->
+  config:Workspace.config ->
   agent_name:string ->
   string
 
 (** [host_root_abs_of_config_agent ~config ~agent_name] returns the
     backend-scoped absolute host-side sandbox root for [agent_name]. *)
 val host_root_abs_of_config_agent :
-  config:Coord.config ->
+  config:Workspace.config ->
   agent_name:string ->
   string
 
@@ -71,7 +71,7 @@ val host_root_rel_of_meta :
 (** [host_root_abs_of_meta ~config meta] returns the absolute
     backend-scoped sandbox root for [meta]. *)
 val host_root_abs_of_meta :
-  config:Coord.config ->
+  config:Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   string
 
@@ -84,7 +84,7 @@ val container_root : string -> string
     backend-scoped host path used for validation. Non-matching absolute
     paths and relative paths are returned unchanged. *)
 val host_path_of_visible_path :
-  config:Coord.config ->
+  config:Workspace.config ->
   agent_name:string ->
   string ->
   string
@@ -100,7 +100,7 @@ val host_path_of_visible_path :
     inside the container, which fails because that path does not
     exist there. *)
 val keeper_visible_root_abs_of_meta :
-  config:Coord.config ->
+  config:Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   string
 
@@ -109,7 +109,7 @@ val keeper_visible_root_abs_of_meta :
 (** [of_meta ~config ~meta] derives the full sandbox record from a
     keeper meta entry. Backend is chosen from [meta.sandbox_profile]. *)
 val of_meta :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   t
 

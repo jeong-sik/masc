@@ -20,7 +20,7 @@
     The {!institution} record is kept abstract at this
     boundary because external callers
     ([mcp_server_eio_resource.ml],
-    [tool_inline_dispatch_coord.ml]) only round-trip it
+    [tool_inline_dispatch_workspace.ml]) only round-trip it
     through {!institution_of_json} → {!format_for_injection}
     without touching its fields.  The {!episode} record stays
     concrete because [.id] / [.summary] / [.participants] are
@@ -87,7 +87,7 @@ type institution
 (** Held abstract because callers do not pattern-match on its
     fields — the only consumers
     ([mcp_server_eio_resource.ml],
-    [tool_inline_dispatch_coord.ml]) round-trip through
+    [tool_inline_dispatch_workspace.ml]) round-trip through
     {!institution_of_json} → {!format_for_injection}.  The
     .ml retains the concrete record (with [identity],
     [memory], [culture], [succession], [current_agents],
@@ -117,7 +117,7 @@ val format_for_injection :
 val episodes_jsonl_path : unit -> string
 (** [{!Common.masc_dir_from_base_path} ~base_path / "institution_episodes.jsonl"].
     Append-only path — readers can mmap or stream-parse
-    safely without coordinating with writers. *)
+    safely without synchronizing with writers. *)
 
 val record_episode_jsonl :
   event_type:string ->
@@ -152,7 +152,7 @@ val cap_episodes_jsonl : ?max_lines:int -> unit -> int
 (** {1 Welcome / spawn injection} *)
 
 val load_and_format_for_welcome :
-  fs:'fs -> Coord_utils.config -> string
+  fs:'fs -> Workspace_utils.config -> string
 (** Loads the structured [institution.json] and returns a
     welcome-banner Markdown block (different surface than
     {!format_for_injection} — narrower, used by the

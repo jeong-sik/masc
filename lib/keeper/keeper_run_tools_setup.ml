@@ -10,7 +10,7 @@ open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
 let prepare_agent_setup
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_work : working_context)
       ~(session : Keeper_types.session_context)
@@ -110,7 +110,7 @@ let prepare_agent_setup
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
   if affinity_k > 0
   then (
-    let masc_root = Coord.masc_root_dir config in
+    let masc_root = Workspace.masc_root_dir config in
     let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let core = Keeper_tool_registry.core_discovery_tools in
     let entries =
@@ -429,7 +429,7 @@ let prepare_agent_setup
     | Some task_id ->
       let task_id = Keeper_id.Task_id.to_string task_id in
       let tasks =
-        try Coord.get_tasks_raw config with
+        try Workspace.get_tasks_raw config with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Prometheus.inc_counter

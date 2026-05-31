@@ -234,12 +234,12 @@ let keepalive_interval_sec_ =
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
 module WorkAsHeartbeat = struct
-  (** Master switch. When true, successful Coord.heartbeat after a
+  (** Master switch. When true, successful Workspace.heartbeat after a
       unified turn counts as presence proof, allowing the next cycle to skip
-      the full ensure_keeper_room_presence call. *)
+      the full ensure_keeper_workspace_presence call. *)
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
 
-  (** Maximum seconds since last successful room heartbeat before presence
+  (** Maximum seconds since last successful workspace heartbeat before presence
       sync is required again. Floor = keepalive interval (dynamic). *)
   let max_silence_sec =
     let floor = Float.of_int keepalive_interval_sec_ in
@@ -311,7 +311,7 @@ module KeeperKeepalive = struct
       keeper_tool_search with different queries). *)
 
   (** Max idle turns for scheduled autonomous keeper turns.
-      With tool_choice=Any and max_turns=50, keepers have room to
+      With tool_choice=Any and max_turns=50, keepers have workspace to
       explore.  10 idle turns × ~5K tokens = ~50K budget.
       Env: [MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS]. Default: 10. *)
   let max_idle_turns_autonomous =

@@ -112,7 +112,7 @@ val set_agent_lookup : (string -> bool) -> unit
 (** Wires the [is_agent_session_bound] check used by the
     auto-classifier to decide whether a [system_*] author
     name resolves to a live agent.  Installed once at
-    server bootstrap from [server_state.coord_config]. *)
+    server bootstrap from [server_state.workspace_config]. *)
 
 val set_agent_lookup_none : unit -> unit
 (** Clears the previously-installed callback.  Used by

@@ -114,7 +114,7 @@ val private_workspace_root_rel :
 
 (** Private workspace root path (absolute, normalized). *)
 val private_workspace_root_abs :
-  config:Coord.config ->
+  config:Workspace.config ->
   sandbox_profile:sandbox_profile ->
   string ->
   string
@@ -126,7 +126,7 @@ val sandbox_allowed_path_has_forbidden_segments : string -> bool
 (** [true] iff [path] resolves to a location within the keeper's
     private workspace root (after normalization + traversal check). *)
 val sandbox_allowed_path_within_private_root :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   sandbox_profile:sandbox_profile ->
   string ->
@@ -136,7 +136,7 @@ val sandbox_allowed_path_within_private_root :
     [Local | Docker] profile constraints. Returns [Error msg] with
     a remediation hint when settings are inconsistent. *)
 val validate_sandbox_settings :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   repo_cli_identity:'a option ->
   sandbox_profile:sandbox_profile ->

@@ -21,7 +21,7 @@ module Random = Stdlib.Random
     OpenClaw-inspired session tracking for multi-agent environments.
     Provides consistent agent identification across:
     - MCP tool calls
-    - Coord coordination
+    - Workspace workspace
     - Task assignments
     - Federation/portal messages
 
@@ -333,7 +333,7 @@ let same_agent a b =
 type archetype =
   | Melchior   (** 🔬 Scientist - technical analysis, implementation *)
   | Balthasar  (** 🪞 Mirror - ethics, value alignment, review *)
-  | Casper     (** ♟️ Strategist - planning, coordination *)
+  | Casper     (** ♟️ Strategist - planning, workspace *)
   | Athena     (** Reasoner - logic, math, deep thinking *)
   | Generalist (** 🌐 No specialization *)
 

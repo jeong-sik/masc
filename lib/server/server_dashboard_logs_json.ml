@@ -18,7 +18,7 @@ let store_path ~masc_root =
 ;;
 
 let build
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~limit
       ~level_filter
       ~applied_level
@@ -28,7 +28,7 @@ let build
       (entries : Log.Ring.entry list)
   : Yojson.Safe.t
   =
-  let masc_root = Coord.masc_root_dir config in
+  let masc_root = Workspace.masc_root_dir config in
   let newest =
     match entries with
     | [] -> None
@@ -46,7 +46,7 @@ let build
        ; ( "retention"
          , `Assoc
              [ "scope", `String "dashboard_logs"
-             ; "coordination_root", `String masc_root
+             ; "workspace_root", `String masc_root
              ; "buffer", `String "Log.Ring"
              ; "capacity", `Int Log.Ring.capacity
              ; "durable_store", `String (store_path ~masc_root)

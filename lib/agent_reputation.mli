@@ -73,7 +73,7 @@ val agent_reputation_of_yojson :
 val default_reputation : agent_name:string -> agent_reputation
 (** A zero-valued reputation for a given agent. *)
 
-val compute_reputation : Coord.config -> agent_name:string -> agent_reputation
+val compute_reputation : Workspace.config -> agent_name:string -> agent_reputation
 (** Compute reputation by reading tasks, mentions, and board data. *)
 
 val count_board_activity_in_dir :

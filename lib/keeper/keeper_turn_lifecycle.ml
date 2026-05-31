@@ -11,7 +11,7 @@ open Keeper_keepalive
 
 type tool_result = Keeper_types_profile.tool_result
 
-let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
+let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
     tool_result_error

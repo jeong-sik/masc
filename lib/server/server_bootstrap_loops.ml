@@ -4,7 +4,7 @@
     subsystem-spawning functions into a focused module. *)
 
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
-  Governance_pipeline.install ~config:state.coord_config ~governance_level
+  Governance_pipeline.install ~config:state.workspace_config ~governance_level
 ;;
 
 (* Stable djb2-style hash for the autoboot warmup jitter.
@@ -130,7 +130,7 @@ let start_keeper_loops
   =
   Progress.set_sse_callback Sse.broadcast;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
-  Atomic.set Coord_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
+  Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
      buffer-size/policy choice is auditable in source rather than implicit in
@@ -270,8 +270,8 @@ let start_keeper_loops
   in
   Masc_event_bus.set masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
-  Keeper_event_bridge.start ~sw ~clock ~config:state.coord_config ~bus:event_bus;
-  Keeper_event_bridge.start ~sw ~clock ~config:state.coord_config ~bus:masc_event_bus;
+  Keeper_event_bridge.start ~sw ~clock ~config:state.workspace_config ~bus:event_bus;
+  Keeper_event_bridge.start ~sw ~clock ~config:state.workspace_config ~bus:masc_event_bus;
   (* Compaction audit: subscribe to ContextCompactStarted/ContextCompacted and
      persist paired rows to [base_path/data/harness-compact/YYYY-MM/DD.jsonl]
      with rolling 14-day retention (override via
@@ -364,7 +364,7 @@ let start_keeper_loops
   Keeper_keepalive.set_bus event_bus;
   Board_dispatch.set_keeper_board_signal_hook (fun signal ->
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
-      ~config:state.coord_config
+      ~config:state.workspace_config
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
@@ -455,7 +455,7 @@ let start_keeper_loops
     try
       ignore
         (Activity_graph.emit
-           state.coord_config
+           state.workspace_config
            ~actor:activity_actor
            ?subject:activity_subject
            ~kind:activity_kind
@@ -470,23 +470,23 @@ let start_keeper_loops
         activity_kind
         (Printexc.to_string exn));
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
-     can react to new tasks, mentions, or coord activity immediately.
-     SSOT: Coord_broadcast.on_broadcast_mention is the single ref wired here. *)
+     can react to new tasks, mentions, or workspace activity immediately.
+     SSOT: Workspace_broadcast.on_broadcast_mention is the single ref wired here. *)
   let broadcast_mention_handler =
     fun mention ->
     match mention with
     | Some target ->
-      Keeper_keepalive.wakeup_keeper ~base_path:state.coord_config.base_path target;
+      Keeper_keepalive.wakeup_keeper ~base_path:state.workspace_config.base_path target;
       Log.Keeper.info "broadcast mention → wakeup keeper %s" target
     | None ->
-      Keeper_keepalive.wakeup_all_keepers ~base_path:state.coord_config.base_path ();
+      Keeper_keepalive.wakeup_all_keepers ~base_path:state.workspace_config.base_path ();
       Log.Keeper.info "broadcast → wakeup all keepers (reactive push)"
   in
-  Coord_broadcast.on_broadcast_mention := broadcast_mention_handler;
+  Workspace_broadcast.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
      let cancel_orchestrator =
-       Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.coord_config
+       Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.workspace_config
      in
      Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator
    with
@@ -512,14 +512,14 @@ let start_keeper_loops
   in
   let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t) : Tool_result.result =
     let start_time = Time_compat.now () in
-    let config = state.coord_config in
+    let config = state.workspace_config in
     let agent_name = actor in
-    let ctx_coord : Tool_coord.context = { config; agent_name } in
+    let ctx_workspace : Tool_workspace.context = { config; agent_name } in
     let ctx_task : Tool_task.context = { config; agent_name; sw = Some sw } in
     let ctx_agent : Tool_agent.context = { config; agent_name } in
     match name with
     | "masc_status" ->
-      (match Tool_coord.dispatch ctx_coord ~name ~args with
+      (match Tool_workspace.dispatch ctx_workspace ~name ~args with
        | Some result -> result
        | None ->
          (* RFC-0189: [Tool_*.dispatch] returning [None] when the
@@ -562,7 +562,7 @@ let start_keeper_loops
       ~sw
       ~clock
       ~net
-      ~base_path:state.coord_config.base_path
+      ~base_path:state.workspace_config.base_path
       ~masc_tools:judge_masc_tools
       ~dispatch:governance_judge_dispatch
       ~build_facts:(fun () ->
@@ -573,12 +573,12 @@ let start_keeper_loops
             ; "activity", `List []
             ]
         in
-        let agents = Coord.get_agents_status state.coord_config in
+        let agents = Workspace.get_agents_status state.workspace_config in
         Operator_control_snapshot.merge_json_objects base (`Assoc [ "agents", agents ]))
       ());
   fork_subsystem "operator_judge" (fun () ->
     let operator_judge_ctx : _ Operator_control.context =
-      { config = state.coord_config
+      { config = state.workspace_config
       ; agent_name = "operator-judge"
       ; sw
       ; clock
@@ -591,7 +591,7 @@ let start_keeper_loops
       ~sw
       ~clock
       ~net
-      ~config:state.coord_config
+      ~config:state.workspace_config
       ~masc_tools:judge_masc_tools
       ~dispatch:operator_judge_dispatch
       ~build_facts:(fun () ->
@@ -608,7 +608,7 @@ let start_keeper_loops
     let interval = Env_config_runtime.Verification.timeout_check_interval_seconds in
     let rec loop () =
       Eio.Time.sleep clock interval;
-      Verification_protocol.check_timeouts ~config:state.coord_config;
+      Verification_protocol.check_timeouts ~config:state.workspace_config;
       loop ()
     in
     loop ());
@@ -629,7 +629,7 @@ let start_keeper_loops
         Eio.Time.sleep clock interval;
         (try
            let config = Goal_janitor.runtime_config () in
-           let _result = Goal_janitor.run ~config state.coord_config in
+           let _result = Goal_janitor.run ~config state.workspace_config in
            ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -688,8 +688,8 @@ let start_keeper_loops
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
-      let config = state.coord_config in
-      let masc_root = Coord.masc_root_dir config in
+      let config = state.workspace_config in
+      let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
       let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in

@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** Test keeper masc_* tool bridge under preset/custom tool policy. *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module KET = Masc_mcp.Agent_tool_dispatch_runtime
 
 let init_keeper_tool_registry () =
@@ -137,7 +137,7 @@ let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
   | Error e -> failwith e
 
 let with_registered_keeper ~config (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) f =
-  let base_path = config.Coord.base_path in
+  let base_path = config.Workspace.base_path in
   Masc_mcp.Keeper_registry.unregister ~base_path meta.name;
   ignore (Masc_mcp.Keeper_registry.register ~base_path meta.name meta);
   Fun.protect
@@ -559,7 +559,7 @@ let test_approval_pending_bridge_uses_keeper_safe_inline_dispatch () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let meta =
         make_meta
           ~tool_access:([ "masc_approval_pending" ])
@@ -593,8 +593,8 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
       ensure_dir (Filename.dirname file_path);
       write_text_file file_path "let alpha = 0.1\nlet beta = 0.2\n";
       run_with_fs (fun () ->
-        let config = Coord.default_config dir in
-        ignore (Coord.init config ~agent_name:(Some "masc-improver"));
+        let config = Workspace.default_config dir in
+        ignore (Workspace.init config ~agent_name:(Some "masc-improver"));
         let meta =
           make_meta
             ~name:"masc-improver"
@@ -646,14 +646,14 @@ let test_write_preflight_accepts_docker_container_repo_path () =
       write_text_file keeper_toml "[keeper]\nsandbox_profile = \"docker\"\n";
       let file_path =
         Filename.concat dir
-          ".masc/playground/docker/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-210/lib/coord/coord_orphan_daemon.ml"
+          ".masc/playground/docker/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-210/lib/workspace/workspace_orphan_daemon.ml"
       in
       ensure_dir (Filename.dirname file_path);
       write_text_file file_path "let before = 1\n";
       run_with_fs (fun () ->
         prime_keeper_bridge ();
-        let config = Coord.default_config dir in
-        ignore (Coord.init config ~agent_name:(Some "sangsu"));
+        let config = Workspace.default_config dir in
+        ignore (Workspace.init config ~agent_name:(Some "sangsu"));
         let meta =
           make_meta
             ~name:"sangsu"
@@ -672,7 +672,7 @@ let test_write_preflight_accepts_docker_container_repo_path () =
                   [
                     ( "path",
                       `String
-                        "/home/keeper/playground/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-210/lib/coord/coord_orphan_daemon.ml"
+                        "/home/keeper/playground/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-210/lib/workspace/workspace_orphan_daemon.ml"
                     );
                     ("old_string", `String "let before = 1");
                     ("new_string", `String "let before = 2");
@@ -720,7 +720,7 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
       ensure_dir (Filename.dirname file_path);
       write_text_file file_path "let x = 1\n";
       run_with_fs (fun () ->
-        let config = Coord.default_config dir in
+        let config = Workspace.default_config dir in
         let meta =
           make_meta
             ~name:keeper_name

@@ -90,7 +90,7 @@ val maybe_emit_resource_notifications :
   success:bool -> tool_name:string -> unit
 (** Inspects the tool name + outcome and, when the call
     is known to mutate persisted state (board /
-    activity / room / task / agent), emits
+    activity / workspace / task / agent), emits
     [resources/updated] notifications for the affected
     resource ids.  No-op on [success = false] so a
     failed call does not invalidate caches. *)

@@ -4,7 +4,7 @@
     Holds the data model + persistence + workflow for "this
     goal needs N approvals from these principals before it
     can move to [Goal_phase.Completed]".  The state file
-    lives at {!requests_path} under [Coord.masc_dir]; an
+    lives at {!requests_path} under [Workspace.masc_dir]; an
     append-only audit trail goes to {!events_path}.
 
     The yojson [_to_yojson] / [_of_yojson] pairs are written
@@ -17,7 +17,7 @@
 
     {b Pinning rationale}: every type is exposed concretely
     because external callers
-    ([lib/goal/goal_store.ml], [lib/coord_goals.ml],
+    ([lib/goal/goal_store.ml], [lib/workspace_goals.ml],
     [lib/tool_goal_*]) pattern-match on the variants
     ([Approve] / [Reject] / [Open] / [Approved] / [Rejected]
     / [Cancelled] / [Operator] / [Keeper] / [Extend] /
@@ -211,18 +211,18 @@ type quorum_result =
 
 (** {1 Persistence paths} *)
 
-val requests_path : Coord.config -> string
-(** [{!Coord.masc_dir} config / "goal_verifications.json"].
-    The single state file the coord backend persists. *)
+val requests_path : Workspace.config -> string
+(** [{!Workspace.masc_dir} config / "goal_verifications.json"].
+    The single state file the workspace backend persists. *)
 
-val events_path : Coord.config -> string
-(** [{!Coord.masc_dir} config / "goal_events.jsonl"].
+val events_path : Workspace.config -> string
+(** [{!Workspace.masc_dir} config / "goal_events.jsonl"].
     Append-only audit trail; each line is the JSON written by
     {!emit_event}. *)
 
 (** {1 State I/O} *)
 
-val read_state : Coord.config -> state
+val read_state : Workspace.config -> state
 (** Reads {!requests_path}; returns the empty default state
     if the file does not exist or fails to parse.  Parse
     errors are silently absorbed — the JSONL events file is
@@ -255,7 +255,7 @@ val exclude_requester :
 (** {1 Audit trail} *)
 
 val emit_event :
-  Coord.config ->
+  Workspace.config ->
   goal_id:string ->
   event_type:string ->
   payload:Yojson.Safe.t ->
@@ -267,7 +267,7 @@ val emit_event :
 (** {1 Workflow} *)
 
 val create_request :
-  Coord.config ->
+  Workspace.config ->
   goal_id:string ->
   requested_by:goal_principal ->
   policy_snapshot:policy_snapshot ->
@@ -277,7 +277,7 @@ val create_request :
     duration so concurrent creates serialize cleanly. *)
 
 val find_request :
-  Coord.config -> request_id:string -> goal_verification_request option
+  Workspace.config -> request_id:string -> goal_verification_request option
 (** Lock-free lookup.  Caller is expected to treat the result
     as a snapshot; for mutation use {!submit_vote} or
     {!cancel_request}. *)
@@ -292,7 +292,7 @@ val remaining_possible_votes : goal_verification_request -> int
     [Approve]s are reachable. *)
 
 val cancel_request :
-  Coord.config ->
+  Workspace.config ->
   request_id:string ->
   (goal_verification_request, string) result
 (** Flips [status] from [Open] to [Cancelled] and stamps
@@ -301,7 +301,7 @@ val cancel_request :
     Errors when [request_id] is unknown. *)
 
 val submit_vote :
-  Coord.config ->
+  Workspace.config ->
   request_id:string ->
   principal:goal_principal ->
   decision:vote_decision ->

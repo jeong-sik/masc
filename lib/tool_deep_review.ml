@@ -122,7 +122,7 @@ let error_workflow_json
 let handle_deep_review
       ~tool_name
       ~start_time
-      (config : Coord.config)
+      (config : Workspace.config)
       args
   : Tool_result.result
   =

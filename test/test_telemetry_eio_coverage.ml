@@ -10,7 +10,7 @@
 open Alcotest
 
 module Telemetry_eio = Masc_mcp.Telemetry_eio
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Prometheus = Masc_mcp.Prometheus
 
 let error_kind value = Telemetry_eio.error_kind_of_string value
@@ -564,7 +564,7 @@ let test_summarize_tool_usage_reads_date_split_store_without_fs () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Coord.default_config base_dir in
+      let config = Workspace.default_config base_dir in
       Telemetry_eio.track_tool_called config ~tool_name:"masc_status"
         ~success:true ~duration_ms:42 ~agent_id:"agent_code" ();
       let summary = Telemetry_eio.summarize_tool_usage config in
@@ -583,7 +583,7 @@ let test_track_applies_default_retention_days () =
       with_temp_dir (fun base_dir ->
         Eio_main.run @@ fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        let config = Coord.default_config base_dir in
+        let config = Workspace.default_config base_dir in
         let telemetry_dir = telemetry_dir base_dir in
         let old_file =
           Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
@@ -599,7 +599,7 @@ let test_track_applies_telemetry_max_bytes () =
       with_temp_dir (fun base_dir ->
         Eio_main.run @@ fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        let config = Coord.default_config base_dir in
+        let config = Workspace.default_config base_dir in
         let telemetry_dir = telemetry_dir base_dir in
         let old_file_1 =
           Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"

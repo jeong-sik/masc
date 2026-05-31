@@ -726,9 +726,9 @@ let test_rest_generate_openapi_document () =
   let sdk_aliases =
     status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list
   in
-  check bool "status has no sdk alias masc_coord_status" false
+  check bool "status has no sdk alias masc_workspace_status" false
     (List.exists
-       (fun row -> row |> member "name" |> to_string = "masc_coord_status")
+       (fun row -> row |> member "name" |> to_string = "masc_workspace_status")
        sdk_aliases);
   let add_task_entry = operation_entry "masc_add_task" in
   check int "add_task has no fake rest binding"

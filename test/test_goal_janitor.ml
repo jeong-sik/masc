@@ -23,13 +23,13 @@ let rm_rf dir =
   in
   try rm dir with _ -> ()
 
-let with_room f =
+let with_workspace f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
-    let config = Coord.default_config dir in
-    ignore (Coord.init config ~agent_name:(Some "test"));
+    let config = Workspace.default_config dir in
+    ignore (Workspace.init config ~agent_name:(Some "test"));
     f config)
 
 let old_iso days_ago =
@@ -59,14 +59,14 @@ let make_goal ?(status = Goal_store.Active) ?(days_ago = 0) id title =
   }
 
 let set_task_created_at config ~title ~created_at =
-  let backlog = Coord.read_backlog config in
+  let backlog = Workspace.read_backlog config in
   let tasks =
     List.map
       (fun (task : Masc_domain.task) ->
          if String.equal task.title title then { task with created_at } else task)
       backlog.tasks
   in
-  Coord.write_backlog config
+  Workspace.write_backlog config
     { tasks; last_updated = Masc_domain.now_iso ();
       version = backlog.version + 1 }
 
@@ -82,7 +82,7 @@ let contains_substring haystack needle =
   loop 0
 
 let event_log_text config =
-  let events_dir = Filename.concat (Coord.masc_dir config) "events" in
+  let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
   let rec collect dir =
     if not (Sys.file_exists dir) then []
     else if Sys.is_directory dir then
@@ -111,7 +111,7 @@ let event_lines_containing config marker =
   |> String.concat "\n"
 
 let test_purge_old_dropped () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let g1 = make_goal ~status:Dropped ~days_ago:10 "g1" "Old dropped" in
   let g2 = make_goal ~status:Dropped ~days_ago:3 "g2" "Recent dropped" in
   let g3 = make_goal ~status:Active ~days_ago:1 "g3" "Active" in
@@ -129,7 +129,7 @@ let test_purge_old_dropped () =
     (List.exists (fun (g : Goal_store.goal) -> g.id = "g2") remaining)
 
 let test_stagnate_old_active () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let g1 = make_goal ~status:Active ~days_ago:35 "g1" "Stale active" in
   let g2 = make_goal ~status:Active ~days_ago:5 "g2" "Fresh active" in
   Goal_store.write_state config
@@ -147,7 +147,7 @@ let test_stagnate_old_active () =
     "active" (match g2'.status with Active -> "active" | _ -> "not active")
 
 let test_no_changes_when_clean () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let g1 = make_goal ~status:Active ~days_ago:1 "g1" "Fresh" in
   let g2 = make_goal ~status:Done ~days_ago:60 "g2" "Done long ago" in
   Goal_store.write_state config
@@ -160,17 +160,17 @@ let test_no_changes_when_clean () =
   check int "no orphan tasks" 0 result.orphan_tasks
 
 let test_escalate_stale_unclaimed_tasks_without_goal_linkage () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let goal = make_goal "g1" "Current goal" in
   Goal_store.write_state config
     { version = 1; updated_at = Masc_domain.now_iso (); goals = [ goal ] };
-  ignore (Coord.add_task config ~title:"Stale unlinked task" ~priority:1
+  ignore (Workspace.add_task config ~title:"Stale unlinked task" ~priority:1
             ~description:"missing goal linkage");
-  ignore (Coord.add_task config ~title:"Fresh unlinked task" ~priority:2
+  ignore (Workspace.add_task config ~title:"Fresh unlinked task" ~priority:2
             ~description:"fresh enough to avoid escalation");
-  ignore (Coord.add_task config ~title:"Title marker only [goal:g1]" ~priority:3
+  ignore (Workspace.add_task config ~title:"Title marker only [goal:g1]" ~priority:3
             ~description:"title tag does not create linkage");
-  ignore (Coord.add_task ~goal_id:"g1" config ~title:"Explicit linked task"
+  ignore (Workspace.add_task ~goal_id:"g1" config ~title:"Explicit linked task"
             ~priority:4 ~description:"structured linkage");
   let stale = iso_seconds_ago (31 * 60) in
   set_task_created_at config ~title:"Stale unlinked task" ~created_at:stale;
@@ -205,7 +205,7 @@ let test_is_auto_generated_goal () =
     (Goal_janitor.is_auto_generated_goal g_unnamed)
 
 let test_auto_stagnate_short_threshold () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   (* auto-goal at 10d should drop (default auto_stagnant_days=7);
      manual at 10d should NOT drop (default stagnant_days=30). *)
   let g_auto   = make_goal ~status:Active ~days_ago:10 "g-a" "do things (auto)" in
@@ -224,7 +224,7 @@ let test_auto_stagnate_short_threshold () =
     (match g_manual'.status with Active -> "active" | _ -> "not-active")
 
 let test_auto_stagnate_below_threshold () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let g_auto = make_goal ~status:Active ~days_ago:3 "g-a" "fresh purpose (auto)" in
   Goal_store.write_state config
     { version = 1; updated_at = Masc_domain.now_iso ();

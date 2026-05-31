@@ -1,4 +1,4 @@
-(** Dashboard_operator_judge — periodic LLM-driven coord judgment loop.
+(** Dashboard_operator_judge — periodic LLM-driven workspace judgment loop.
 
     Runs as an Eio daemon fiber per [base_path]: every
     [Env_config.Operator.judge_interval_sec], it asks an operator-judge
@@ -35,7 +35,7 @@ val start :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  config:Coord.config ->
+  config:Workspace.config ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   build_facts:(unit -> Yojson.Safe.t) ->

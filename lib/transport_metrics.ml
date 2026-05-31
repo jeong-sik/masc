@@ -397,10 +397,10 @@ let int_field key json =
   | _ -> 0
 ;;
 
-let coord_id_from_config (_config : Coord.config) = "default"
+let workspace_id_from_config (_config : Workspace.config) = "default"
 
-let cluster_summary_json (_config : Coord.config) =
-  (* Transport health should stay metrics-only and avoid command-plane/Coord I/O. *)
+let cluster_summary_json (_config : Workspace.config) =
+  (* Transport health should stay metrics-only and avoid command-plane/Workspace I/O. *)
   None
 ;;
 
@@ -498,11 +498,11 @@ let ws_delivery_metric_names =
 let transport_health_json ~config =
   let v name ?(labels = []) () = Prometheus.metric_value_or_zero name ~labels () in
   let sse_observer = v Prometheus.metric_sse_sessions ~labels:[ "kind", "observer" ] () in
-  let sse_coordinator =
-    v Prometheus.metric_sse_sessions ~labels:[ "kind", "coordinator" ] ()
+  let sse_workspace_client =
+    v Prometheus.metric_sse_sessions ~labels:[ "kind", "workspace_client" ] ()
   in
   let sse_presence = v Prometheus.metric_sse_sessions ~labels:[ "kind", "presence" ] () in
-  let sse_total = int_of_float (sse_observer +. sse_coordinator +. sse_presence) in
+  let sse_total = int_of_float (sse_observer +. sse_workspace_client +. sse_presence) in
   let sse_external_subscribers =
     int_of_float (v Prometheus.metric_sse_external_subscribers ())
   in
@@ -573,9 +573,9 @@ let transport_health_json ~config =
   let webrtc_channels = Server_webrtc_transport.connected_channel_count () in
   let listener_mode = http_listener_mode () in
   let topology_summary = cluster_summary_json config in
-  let coord_id = coord_id_from_config config in
+  let workspace_id = workspace_id_from_config config in
   let cluster_name = Env_config_core.cluster_name () in
-  (* Keep transport-health free of Coord/PG reads so proactive refresh does not
+  (* Keep transport-health free of Workspace/PG reads so proactive refresh does not
      contend with dashboard and MCP writes on the shared backend. *)
   let recent_messages = None in
   let recent_messages_available = Option.is_some recent_messages in
@@ -608,7 +608,7 @@ let transport_health_json ~config =
     ; ( "sse"
       , `Assoc
           [ "sessions_observer", `Int (int_of_float sse_observer)
-          ; "sessions_coordinator", `Int (int_of_float sse_coordinator)
+          ; "sessions_workspace_client", `Int (int_of_float sse_workspace_client)
           ; "sessions_presence", `Int (int_of_float sse_presence)
           ; "sessions_total", `Int sse_total
           ; "external_subscribers", `Int sse_external_subscribers
@@ -727,7 +727,7 @@ let transport_health_json ~config =
     ; ( "cluster"
       , `Assoc
           [ "cluster", `String cluster_name
-          ; "coord_id", `String coord_id
+          ; "workspace_id", `String workspace_id
           ; "topology_available", `Bool topology_available
           ; "topology_source", `String degraded_source
           ; "total_units", Json_util.int_opt_to_json (int_field_opt "total_units" topology_summary)

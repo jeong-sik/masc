@@ -32,7 +32,7 @@ val build_turn_context
   :  ctx:Keeper_run_context.run_context
   -> build_turn_prompt:(base_system_prompt:string -> messages:Agent_sdk.Types.message list -> Keeper_agent_prompt_metrics.turn_prompt)
   -> user_message:string
-  -> config:Coord.config
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> history_user_source:string
   -> is_retry:bool

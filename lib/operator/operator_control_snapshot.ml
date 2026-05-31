@@ -40,7 +40,7 @@ let operator_server_profile_json = Operator_control_snapshot_runtime_status.oper
 
 
 let recent_messages_json config =
-  Coord.get_messages_raw config ~since_seq:0 ~limit:20
+  Workspace.get_messages_raw config ~since_seq:0 ~limit:20
   |> List.map Masc_domain.message_to_yojson
   |> fun rows -> `List rows
 ;;
@@ -218,7 +218,7 @@ let keepers_json
                     in
                     let now_ts = Time_compat.now () in
                     let created_ts =
-                      Coord_resilience.Time.parse_iso8601_opt meta.created_at
+                      Workspace_resilience.Time.parse_iso8601_opt meta.created_at
                       |> Option.value ~default:0.0
                     in
                     let last_turn_ago_s =
@@ -624,6 +624,10 @@ let _snapshot_recent_completed_limit () =
   Dashboard_http_helpers.operator_snapshot_recent_completed_limit ()
 ;;
 
+(* sessions_json removed — team session cleanup. Sessions always return []. *)
+
+let workspace_json = Operator_control_snapshot_workspace.workspace_json
+
 (* snapshot_view variant + parser extracted to
    [Operator_control_snapshot_view] (godfile decomp). *)
 type snapshot_view = Operator_control_snapshot_view.snapshot_view =
@@ -642,7 +646,7 @@ let snapshot_view_of_string_opt = Operator_control_snapshot_view.snapshot_view_o
    The include flows through to [Operator_control] via the existing
    include chain ([Operator_control_action] -> ...). *)
 include Operator_control_snapshot_cache
-let namespace_scope_cache_segment (_config : Coord_utils.config) = "default"
+let namespace_scope_cache_segment (_config : Workspace_utils.config) = "default"
 
 let snapshot_json
       ?actor
@@ -782,7 +786,7 @@ let snapshot_json
       result
     in
     let config = ctx.config in
-    let initialized = Coord.is_initialized config in
+    let initialized = Workspace.is_initialized config in
     ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
     let trace_id = trace_id "ops" in
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -805,6 +809,7 @@ let snapshot_json
       | Summary | Messages | Full -> true
       | Sessions | Keepers -> false
     in
+    (* Team sessions removed — status_cache and session digests no longer needed. *)
     let status_cache : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 0 in
     let summary_fields =
       timed "summary_fields" (fun () ->
@@ -816,13 +821,13 @@ let snapshot_json
           | Summary | Full -> true
           | Sessions | Keepers | Messages -> false
         then (
-          let operator_attention =
-            build_operator_attention_items config |> List.sort compare_attention
+          let workspace_attention =
+            build_workspace_attention_items config |> List.sort compare_attention
           in
-          let operator_recommendation_items = operator_recommendations config in
-          [ "attention_summary", summary_of_attention_items operator_attention
+          let workspace_recommendation_items = workspace_recommendations config in
+          [ "attention_summary", summary_of_attention_items workspace_attention
           ; ( "recommendation_summary"
-            , summary_of_recommendations ~actor:actor_name operator_recommendation_items )
+            , summary_of_recommendations ~actor:actor_name workspace_recommendation_items )
           ])
         else [])
     in
@@ -839,10 +844,11 @@ let snapshot_json
         ([ "trace_id", `String trace_id
          ; "server_profile", operator_server_profile_json
          ; "operator_judge_runtime", operator_judge_runtime_json config
-	         ; "judgment_owner", `String "fallback_read_model"
-	         ; "authoritative_judgment_available", `Bool false
-	         ; "admission_queue", Admission_queue.snapshot_json ()
-	         ]
+         ; "judgment_owner", `String "fallback_read_model"
+         ; "authoritative_judgment_available", `Bool false
+         ; "admission_queue", Admission_queue.snapshot_json ()
+         ; "workspace", workspace_json config
+         ]
          @ ((* Parallelize independent I/O: sessions, keepers, and persistent_agents. *)
             let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in
             let sessions_ref = ref empty_section in
@@ -850,6 +856,7 @@ let snapshot_json
             let persistent_ref = ref empty_section in
             Eio.Fiber.all
               [ (fun () ->
+                  (* Team sessions removed — always empty *)
                   ignore (lightweight_summary, status_cache);
                   sessions_ref := empty_section)
               ; (fun () ->

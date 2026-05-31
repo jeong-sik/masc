@@ -84,9 +84,9 @@ let with_dashboard_timeout ~clock compute =
       ]
 ;;
 
-let cache_partition_segment (_config : Coord.config) = "default"
+let cache_partition_segment (_config : Workspace.config) = "default"
 
-let dashboard_cache_key (config : Coord.config) prefix suffix =
+let dashboard_cache_key (config : Workspace.config) prefix suffix =
   Printf.sprintf
     "%s:%s:%s:%s"
     prefix

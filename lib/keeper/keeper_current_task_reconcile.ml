@@ -5,9 +5,9 @@
     Keeper_agent_tool_surface, so lifecycle transitions can update keeper meta
     without creating a keeper tool-surface dependency cycle. *)
 
-let resolved_agent_names ~(config : Coord.config) ~(agent_name : string) =
+let resolved_agent_names ~(config : Workspace.config) ~(agent_name : string) =
   let actual_name =
-    try Coord.resolve_agent_name config agent_name
+    try Workspace.resolve_agent_name config agent_name
     with
     | Sys_error _ | Yojson.Json_error _ -> agent_name
     | exn ->
@@ -40,12 +40,12 @@ type owned_active_task =
   ; task : Masc_domain.task
   }
 
-let owned_active_tasks_for_meta ~(config : Coord.config)
+let owned_active_tasks_for_meta ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
   let names = resolved_agent_names ~config ~agent_name:meta.agent_name in
   let matches assignee = List.mem assignee names in
   try
-    Coord.get_tasks_raw config
+    Workspace.get_tasks_raw config
     |> List.filter_map (fun (task : Masc_domain.task) ->
          match task.task_status with
          | Masc_domain.Claimed { assignee; _ }
@@ -105,7 +105,7 @@ let compare_owned_active_task ~(meta : Keeper_meta_contract.keeper_meta) a b =
             (Keeper_id.Task_id.to_string a.task_id)
             (Keeper_id.Task_id.to_string b.task_id))))
 
-let owned_active_task_id_for_meta ~(config : Coord.config)
+let owned_active_task_id_for_meta ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
   match owned_active_tasks_for_meta ~config ~meta with
   | [ { task_id; _ } ] -> Some task_id
@@ -123,7 +123,7 @@ let merge_current_task_id ~(latest : Keeper_meta_contract.keeper_meta)
     updated_at = caller.updated_at;
   }
 
-let sync_current_task_id_from_backlog ~(config : Coord.config)
+let sync_current_task_id_from_backlog ~(config : Workspace.config)
     (meta : Keeper_meta_contract.keeper_meta) =
   let desired = owned_active_task_id_for_meta ~config ~meta in
   let equal =
@@ -173,12 +173,12 @@ let sync_current_task_id_from_backlog ~(config : Coord.config)
        | None -> "(cleared)");
     updated_meta
 
-let keeper_name_candidates ~(config : Coord.config) ~(agent_name : string) =
+let keeper_name_candidates ~(config : Workspace.config) ~(agent_name : string) =
   resolved_agent_names ~config ~agent_name
   |> List.filter_map Keeper_identity.canonical_keeper_name
   |> List.sort_uniq String.compare
 
-let sync_current_task_id_for_agent_name ~(config : Coord.config) ~agent_name =
+let sync_current_task_id_for_agent_name ~(config : Workspace.config) ~agent_name =
   let candidates = keeper_name_candidates ~config ~agent_name in
   let entry_from_candidates =
     candidates

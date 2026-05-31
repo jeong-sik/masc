@@ -57,7 +57,7 @@ let trim_opt = Env_config_core.trim_opt
 
 let voice_config_file_in root =
   let masc_dir =
-    Coord_utils.masc_root_dir_from
+    Workspace_utils.masc_root_dir_from
       ~base_path:root
       ~cluster_name:(Env_config_core.cluster_name ())
   in
@@ -73,7 +73,7 @@ let repo_voice_config_path_opt () =
     | Some bp -> bp
     | None ->
       let cwd = Sys.getcwd () in
-      (match Coord_utils_backend_setup.find_git_root cwd with
+      (match Workspace_utils_backend_setup.find_git_root cwd with
        | Some path -> path
        | None -> cwd)
   in

@@ -188,7 +188,7 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
       match
         Lib.Worker_runtime.run_worker_oas ~sw
           ~net:(Eio.Stdenv.net env)
-          ~coord_config:None spec ()
+          ~workspace_config:None spec ()
       with
       | Ok _ ->
           fail "expected invalid explicit model label to fail before execution"

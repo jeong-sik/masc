@@ -471,8 +471,8 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
     Reg.clear ();
     Masc_mcp.Keeper_runtime.reset_test_state base_dir;
     cleanup_dir base_dir);
-  let config = Masc_mcp.Coord.default_config base_dir in
-  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+  let config = Masc_mcp.Workspace.default_config base_dir in
+  ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
   let name = "spawn-denied-no-fork" in
   let meta = make_meta name in
   (match Keeper_meta_store.write_meta config meta with
@@ -691,8 +691,8 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      let _room = Masc_mcp.Coord.init config ~agent_name:(Some "supervisor") in
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      let _workspace = Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor") in
       let base = make_meta "paused-reconcile" in
       let meta =
         {
@@ -774,8 +774,8 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
@@ -834,8 +834,8 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let meta = make_meta name in
       let reg = Reg.register ~base_path:config.base_path name meta in
       Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
@@ -896,8 +896,8 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "dead-alert-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -957,8 +957,8 @@ let with_reap_ready_dead_keeper name f =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
@@ -1039,8 +1039,8 @@ let test_stale_storm_pause_skips_restart () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "stale-storm-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1113,8 +1113,8 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "legacy-stale-fleet-batch-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1170,8 +1170,8 @@ let test_provider_timeout_loop_pause_skips_restart () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "provider-timeout-loop-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1234,8 +1234,8 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "unresolved-watchdog-stopped" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1286,8 +1286,8 @@ let test_non_storm_crashed_restarts_normally () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "non-storm-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1348,8 +1348,8 @@ let test_storm_pause_requires_manual_resume () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "storm-manual-resume" in
       let meta = make_meta name in
       (* Ensure no prior auto_resume_after_sec. *)
@@ -1385,7 +1385,7 @@ let test_storm_pause_requires_manual_resume () =
            (* updated_at must be refreshed by the pause write so Phase 3.5
               timer (now - updated_at) is anchored to the pause time, not to
               some earlier heartbeat write. *)
-           (match Coord_resilience.Time.parse_iso8601_opt m.updated_at with
+           (match Workspace_resilience.Time.parse_iso8601_opt m.updated_at with
             | None ->
                 fail (Printf.sprintf "updated_at not parseable as ISO-8601: %s"
                         m.updated_at)
@@ -1407,8 +1407,8 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "backoff-doubles" in
       (* Simulate a keeper that was already auto-paused with 1h delay. *)
       let initial_meta =
@@ -1462,8 +1462,8 @@ let test_sweep_auto_resumes_after_backoff () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "auto-resume-keeper" in
       write_keeper_toml config_dir ~name;
       (* Simulate a keeper paused 2h ago with a 1h (3600s) auto-resume
@@ -1536,8 +1536,8 @@ let test_sweep_auto_resumes_registered_paused_entry () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "auto-resume-registered" in
       write_keeper_toml config_dir ~name;
       let two_hours_ago =
@@ -1606,8 +1606,8 @@ let test_operator_pause_not_auto_resumed () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "operator-paused-keeper" in
       write_keeper_toml config_dir ~name;
       (* Paused 2h ago with NO auto_resume_after_sec (operator pause). *)
@@ -1674,8 +1674,8 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "timeout-paused-without-resume-policy" in
       write_keeper_toml config_dir ~name;
       let two_hours_ago =
@@ -1762,8 +1762,8 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "capacity-paused-without-resume-policy" in
       write_keeper_toml config_dir ~name;
       let two_hours_ago =
@@ -1848,8 +1848,8 @@ let test_initial_auto_resume_capped_at_max () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "initial-cap-regression" in
       (* meta has no prior auto_resume_after_sec (first auto-pause). *)
       let meta = make_meta name in
@@ -1901,8 +1901,8 @@ let test_persisted_blocker_survives_unregister () =
       Masc_mcp.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "auto-pause-blocker-keeper" in
       let meta = make_meta name in
       let meta =
@@ -2156,9 +2156,9 @@ let () =
               cleanup_dir base_dir)
             (fun () ->
               Reg.clear ();
-              let config = Masc_mcp.Coord.default_config base_dir in
+              let config = Masc_mcp.Workspace.default_config base_dir in
               ignore
-                (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+                (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor"));
               let name = "keeper-credential-auto-agent" in
               let _reg = Reg.register ~base_path:base_dir name (make_meta name) in
               ignore
@@ -2336,7 +2336,7 @@ let () =
                 Reg.clear ();
                 Sup.alive_but_stuck_reset_for_test ();
                 let name = "abs-scan-recovery" in
-                let config = Masc_mcp.Coord.default_config base_dir in
+                let config = Masc_mcp.Workspace.default_config base_dir in
                 let base = make_meta name in
                 let meta =
                   {
@@ -2425,7 +2425,7 @@ let () =
                 Reg.clear ();
                 Sup.alive_but_stuck_reset_for_test ();
                 let name = "abs-scan-recovery-repeat" in
-                let config = Masc_mcp.Coord.default_config base_dir in
+                let config = Masc_mcp.Workspace.default_config base_dir in
                 let base = make_meta name in
                 let meta =
                   {

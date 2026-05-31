@@ -18,17 +18,17 @@ type result = {
 }
 
 val audit_one :
-  config:Coord.config -> meta:Keeper_meta_contract.keeper_meta -> result
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> result
 (** Audit a single keeper's egress policy file location. *)
 
 val audit_all :
-  config:Coord.config ->
+  config:Workspace.config ->
   metas:Keeper_meta_contract.keeper_meta list ->
   result list
 (** Audit every keeper meta supplied; pure mapping over [audit_one]. *)
 
 val host_direct_egress_path :
-  config:Coord.config -> meta:Keeper_meta_contract.keeper_meta -> string
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> string
 (** Pre-Leak-11 host-direct location: [playground/<name>/egress.json].
     Exposed so boot hooks and tests can construct the same path the
     audit uses for [Stale_orphan] detection. *)

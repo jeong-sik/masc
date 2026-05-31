@@ -83,14 +83,14 @@ val repair_result_to_yojson : repair_result -> Yojson.Safe.t
     [created]/[reused] split is the dashboard contract — operator
     runbooks read these field names verbatim. *)
 
-val dry_run : Coord.config -> repair_result
+val dry_run : Workspace.config -> repair_result
 (** [dry_run config] scans every keeper meta under
     [<masc_dir>/keepers/*.json] and returns the audit without
     creating any goals or writing any meta.  [actions[i].goal_id] is
     always ["(dry-run)"].  Useful for confirming the repair scope
     before committing.  Read-only on disk. *)
 
-val run : Coord.config -> repair_result
+val run : Workspace.config -> repair_result
 (** [run config] scans every keeper meta under
     [<masc_dir>/keepers/*.json] and, for each keeper with empty
     [active_goal_ids]:

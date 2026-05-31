@@ -250,7 +250,7 @@ let test_keeper_meta_deliberation_fields_default () =
 (* ---------- Triage result JSON ---------- *)
 
 let test_triage_result_skip_json () =
-  let json = D.triage_result_to_json (D.Skip "quiet room") in
+  let json = D.triage_result_to_json (D.Skip "quiet workspace") in
   let decision =
     Yojson.Safe.Util.member "decision" json |> Yojson.Safe.Util.to_string
   in

@@ -63,7 +63,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
     ; description =
         "Release a stuck task back to Todo status, removing the current assignee. \
          Applies when the assignee is offline (no heartbeat >10 min). Broadcasts the \
-         release to the coord."
+         release to the workspace."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -90,7 +90,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_task_force_done"
     ; description =
         "Mark a task Done when the assignee completed the work but did not transition it \
-         (e.g. went offline after finishing). Broadcasts completion to coord."
+         (e.g. went offline after finishing). Broadcasts completion to workspace."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -117,8 +117,8 @@ let taskboard_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_broadcast"
     ; description =
-        "Send a message visible to all agents in the MASC coord. Use for status updates, \
-         announcements, warnings, or coordination."
+        "Send a message visible to all agents in the MASC workspace. Use for status updates, \
+         announcements, warnings, or workspace."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

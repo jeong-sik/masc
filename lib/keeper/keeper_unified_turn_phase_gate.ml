@@ -16,7 +16,7 @@ type phase_gate_outcome =
   | Phase_gate_terminal_error of Agent_sdk.Error.sdk_error
 
 let decide_and_record
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(generation : int)
       ~(keeper_turn_id : int)

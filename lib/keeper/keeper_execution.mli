@@ -1,7 +1,7 @@
 (** Keeper_execution — keeper tool execution loop, prompting,
     compaction, and keepalive runtime.
 
-    Internal helpers (proactive quality checks, explicit coord replies,
+    Internal helpers (proactive quality checks, explicit workspace replies,
     autonomous execution) are hidden. Only externally-called functions
     and types are exposed.
 *)
@@ -30,7 +30,7 @@ val memory_check_default_json : unit -> Yojson.Safe.t
 
 (** {1 Keepalive Runtime} *)
 
-(* Proactive emission and explicit coord replies are now handled
+(* Proactive emission and explicit workspace replies are now handled
    by Keeper_unified_turn via the unified keeper loop. *)
 
 (** {1 Compaction} *)

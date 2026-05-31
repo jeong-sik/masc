@@ -94,7 +94,7 @@ let resolve_initial_agent_name ~identity ~cached_resolved_agent ~explicit_agent_
             generated_fallback_agent_name)
 
 let resolve_auth_fallback_agent_name
-    ~(config : Coord_utils_backend_setup.config)
+    ~(config : Workspace_utils_backend_setup.config)
     ~token ~has_explicit_agent_name
     agent_name =
   match token with
@@ -134,12 +134,12 @@ let resolve_explicit_bound_alias ~config ~workspace_initialized ~log_mcp_exn
     ~has_explicit_agent_name agent_name =
   if has_explicit_agent_name && not (Nickname.is_generated_nickname agent_name)
   then (
-    let resolved = Coord.resolve_agent_name config agent_name in
+    let resolved = Workspace.resolve_agent_name config agent_name in
     if resolved <> agent_name then (
       try
         if workspace_initialized () then (
           try
-            if Coord.is_agent_session_bound config ~agent_name:resolved then
+            if Workspace.is_agent_session_bound config ~agent_name:resolved then
               resolved
             else
               agent_name
@@ -160,7 +160,7 @@ let resolve_explicit_bound_alias ~config ~workspace_initialized ~log_mcp_exn
   else
     agent_name
 
-let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~identity
+let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~arguments ~identity
     ~cached_resolved_agent ~auth_token ~internal_keeper_runtime ~workspace_initialized
     ~log_mcp_exn =
   let explicit_agent_name = caller_agent_name_from_arguments arguments in

@@ -5,7 +5,7 @@ open Agent_tool_shared_runtime
 
 (** Runtime adapter for descriptor-backed Remote_mcp agent tools. *)
 let masc_path_blocked
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(name : string)
       ~(args : Yojson.Safe.t)
@@ -47,7 +47,7 @@ let masc_path_blocked
 ;;
 
 let handle_masc_tool
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(name : string)
       ~(args : Yojson.Safe.t)
@@ -135,7 +135,7 @@ let handle_masc_tool
 ;;
 
 let handle_registered_remote_tool
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(name : string)
       ~(args : Yojson.Safe.t)

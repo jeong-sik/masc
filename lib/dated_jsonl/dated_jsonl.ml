@@ -1,7 +1,7 @@
 (** Date-split JSONL storage.
 
     Extracts the [YYYY-MM/DD.jsonl] pattern originally used by
-    {!Coord_utils_ops.log_event} into a reusable module.
+    {!Workspace_utils_ops.log_event} into a reusable module.
 
     Layout:
     {v

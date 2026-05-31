@@ -1,6 +1,6 @@
 (** Task_dispatch — runtime backend selection for MASC tasks.
 
-    Currently routes everything to the JSONL backend (Coord.* file
+    Currently routes everything to the JSONL backend (Workspace.* file
     operations).  The variant is pinned at one constructor to keep
     the compile-time pivot point explicit: a future second backend
     (Postgres, etc.) extends {!task_backend} and forces every
@@ -18,7 +18,7 @@
 (** {1 Backend variant} *)
 
 type task_backend =
-  | Jsonl  (** JSONL backend (Coord.* file operations) *)
+  | Jsonl  (** JSONL backend (Workspace.* file operations) *)
 
 val is_initialized : unit -> bool
 (** [is_initialized ()] reports whether {!init_jsonl} or {!backend}
@@ -45,27 +45,27 @@ val backend : unit -> task_backend
 
 (** {1 Dispatch functions}
 
-    Each delegates to the {!Coord} JSONL backend.  All take a
-    {!Coord.config} as the first positional argument.  Errors are
+    Each delegates to the {!Workspace} JSONL backend.  All take a
+    {!Workspace.config} as the first positional argument.  Errors are
     returned as {!Masc_error.t} variants — the wording
     inside [TaskInvalidState] / [TaskNotFound] is operator-visible
     through the JSON-RPC error envelope, so callers must not
     reformat it. *)
 
 val add_task :
-  Coord.config ->
+  Workspace.config ->
   title:string ->
   priority:int ->
   description:string ->
   (string, Masc_error.t) result
 (** [add_task config ~title ~priority ~description] persists a new
-    task via {!Coord.add_task} and returns the freshly assigned
+    task via {!Workspace.add_task} and returns the freshly assigned
     task id.  Always [Ok _] on the JSONL backend (the variant
-    return type leaves room for backends that can fail at insert
+    return type leaves workspace for backends that can fail at insert
     time). *)
 
 val get_task :
-  Coord.config ->
+  Workspace.config ->
   task_id:string ->
   (Masc_domain.task option, Masc_error.t) result
 (** [get_task config ~task_id] reads the JSONL backlog and returns
@@ -75,7 +75,7 @@ val get_task :
     {!list_tasks} instead. *)
 
 val list_tasks :
-  Coord.config ->
+  Workspace.config ->
   ?include_done:bool ->
   ?include_cancelled:bool ->
   unit ->
@@ -101,11 +101,11 @@ val validate_transition :
     effects, suitable for use in client-side preflight checks. *)
 
 val update_status :
-  Coord.config ->
+  Workspace.config ->
   task_id:string ->
   status:Masc_domain.task_status ->
   (unit, Masc_error.t) result
-(** [update_status config ~task_id ~status] takes the Coord [.backlog]
+(** [update_status config ~task_id ~status] takes the Workspace [.backlog]
     file lock, reads the backlog,
     runs {!validate_transition}, and on success rewrites the task
     list with the new status, bumping [version] and refreshing
@@ -116,10 +116,10 @@ val update_status :
     - [System IoError <message>] when the backlog cannot be read. *)
 
 val delete_task :
-  Coord.config ->
+  Workspace.config ->
   task_id:string ->
   (unit, Masc_error.t) result
-(** [delete_task config ~task_id] takes the Coord [.backlog] file lock,
+(** [delete_task config ~task_id] takes the Workspace [.backlog] file lock,
     filters the task out of the
     backlog and writes it back with [version] bumped.  Idempotent
     — deleting a non-existent task is silently a no-op (always

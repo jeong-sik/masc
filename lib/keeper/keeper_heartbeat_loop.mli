@@ -138,8 +138,8 @@ val provider_timeout_policy_decision :
     timeout evidence is not liveness loss by itself. *)
 
 val persist_message_cursor_updates :
-  config:Coord.config -> keeper_meta -> (string * int) list -> keeper_meta
-(** Persist coord-message cursor updates immediately after observation.
+  config:Workspace.config -> keeper_meta -> (string * int) list -> keeper_meta
+(** Persist workspace-message cursor updates immediately after observation.
     This is intentionally exposed for the regression that proves a failed
     turn cannot replay the same scoped messages forever. *)
 
@@ -205,7 +205,7 @@ val visibility_gate_decision :
   Keeper_heartbeat_smart.decision
 
 val run_smart_heartbeat_gate :
-  config:Coord.config ->
+  config:Workspace.config ->
   clock:'a Eio.Time.clock ->
   stop:bool Atomic.t ->
   wakeup:bool Atomic.t ->

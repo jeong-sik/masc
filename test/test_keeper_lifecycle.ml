@@ -1012,8 +1012,8 @@ let test_post_turn_resilience_runtime_executor_pauses_handoff () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       with_env "MASC_RESILIENCE" (Some "1") @@ fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "operator"));
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "operator"));
       let meta =
         let base =
           make_keeper_meta ~name:"keeper-resilience-runtime"

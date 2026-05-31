@@ -43,8 +43,8 @@ let make_test_ctx_with_agent agent_name =
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-task-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
-  let config = Coord.default_config tmp in
-  let _ = Coord.init config ~agent_name:(Some agent_name) in
+  let config = Workspace.default_config tmp in
+  let _ = Workspace.init config ~agent_name:(Some agent_name) in
   { Tool_task.config; agent_name; sw = None }
 
 let make_test_ctx () = make_test_ctx_with_agent "test-agent"
@@ -116,16 +116,16 @@ let register_test_keeper ?(tool_denylist = []) ctx ~keeper_name ~agent_name =
   with
   | Ok meta ->
       ignore
-        (Keeper_registry.register_offline ~base_path:ctx.Tool_task.config.Coord.base_path
+        (Keeper_registry.register_offline ~base_path:ctx.Tool_task.config.Workspace.base_path
            keeper_name meta)
   | Error e -> failwith ("failed to build keeper meta: " ^ e)
 
 let set_only_task_do_not_reclaim_reason ctx reason =
   let config = ctx.Tool_task.config in
-  let backlog = Coord.read_backlog config in
+  let backlog = Workspace.read_backlog config in
   match backlog.Masc_domain.tasks with
   | [ task ] ->
-      Coord.write_backlog config
+      Workspace.write_backlog config
         { Masc_domain.tasks = [ { task with do_not_reclaim_reason = Some reason } ];
           last_updated = Masc_domain.now_iso ();
           version = backlog.version + 1;
@@ -135,7 +135,7 @@ let set_only_task_do_not_reclaim_reason ctx reason =
         (Printf.sprintf "expected exactly one task, got %d" (List.length tasks))
 
 let only_task ctx =
-  match Coord.get_tasks_raw ctx.Tool_task.config with
+  match Workspace.get_tasks_raw ctx.Tool_task.config with
   | [ task ] -> task
   | tasks ->
       failwith
@@ -197,7 +197,7 @@ let () = test "task_history_events_json_filters_by_task_id" (fun () ->
   let tm = gmtime (gettimeofday ()) in
   let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
   let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
-  let events_dir = Filename.concat (Coord.masc_dir ctx.config) "events" in
+  let events_dir = Filename.concat (Workspace.masc_dir ctx.config) "events" in
   let month_dir = Filename.concat events_dir month in
   let log_file = Filename.concat month_dir day in
   mkdir_p month_dir;
@@ -392,7 +392,7 @@ let () = test "handle_add_task_persists_contract" (fun () ->
         ])
   in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-  match Coord.get_tasks_raw ctx.config with
+  match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.contract with
       | Some contract ->
@@ -413,7 +413,7 @@ let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
         ])
   in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-  match Coord.get_tasks_raw ctx.config with
+  match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.contract with
       | Some contract ->
@@ -444,7 +444,7 @@ let () = test "handle_batch_add_tasks_injects_default_verification_contracts" (f
         ])
   in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-  let tasks = Coord.get_tasks_raw ctx.config in
+  let tasks = Workspace.get_tasks_raw ctx.config in
   assert (List.length tasks = 2);
   List.iter
     (fun (task : Masc_domain.task) ->
@@ -532,7 +532,7 @@ let () = test "handle_transition_release_requires_handoff_for_strict_task" (fun 
         ])
   in
   if not (Tool_result.is_success result_release) then failwith (Tool_result.message result_release);
-  match Coord.get_tasks_raw ctx.config with
+  match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       assert (task.do_not_reclaim_reason = None);
       match task.handoff_context with
@@ -651,7 +651,7 @@ let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun ()
         ])
   in
   if not (Tool_result.is_success result_release) then failwith ("unexpected rejection: " ^ (Tool_result.message result_release));
-  match Coord.get_tasks_raw ctx.config with
+  match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.handoff_context with
       | Some handoff_context ->
@@ -687,7 +687,7 @@ let () = test "handle_transition_release_prefers_notes_then_reason_for_synthesis
         ])
   in
   if not (Tool_result.is_success result_release) then failwith ("unexpected rejection: " ^ (Tool_result.message result_release));
-  match Coord.get_tasks_raw ctx.config with
+  match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.handoff_context with
       | Some handoff_context ->
@@ -825,7 +825,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (f
               ] );
         ])
   in
-  let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let result =
     Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
@@ -856,9 +856,9 @@ let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun
                 ] );
           ])
     in
-    let _ = Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
+    let _ = Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001" in
     let _ =
-      Coord.transition_task_r ctx.config ~agent_name:"test-agent"
+      Workspace.transition_task_r ctx.config ~agent_name:"test-agent"
         ~task_id:"task-001" ~action:Masc_domain.Submit_for_verification ()
     in
     let result =
@@ -907,10 +907,10 @@ let () = test "handle_transition_verifier_noops_terminal_verdicts" (fun () ->
   register_test_keeper ctx ~keeper_name:"verifier" ~agent_name:"verifier"
     ~tool_denylist:verifier_transition_action_denylist;
   let verifier_ctx = { ctx with Tool_task.agent_name = "verifier" } in
-  let _ = Coord.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
-  let _ = Coord.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
+  let _ = Workspace.add_task ctx.config ~title:"Already done" ~priority:1 ~description:"" in
+  let _ = Workspace.claim_task ctx.config ~agent_name:"worker" ~task_id:"task-001" in
   let done_result =
-    Coord.transition_task_r ctx.config ~agent_name:"worker"
+    Workspace.transition_task_r ctx.config ~agent_name:"worker"
       ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"complete" ()
   in
   (match done_result with
@@ -945,7 +945,7 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
         (`Assoc [ ("title", `String "Verifier may approve") ])
     in
     let _ =
-      Coord.claim_task worker_ctx.config ~agent_name:"worker" ~task_id:"task-001"
+      Workspace.claim_task worker_ctx.config ~agent_name:"worker" ~task_id:"task-001"
     in
     let submit_result =
       Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0
@@ -1004,7 +1004,7 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Coord.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.join ctx.config ~agent_name:"keeper-executor-agent"
        ~capabilities:[] ());
   register_test_keeper ctx ~keeper_name:"executor"
     ~agent_name:"keeper-executor-agent";
@@ -1041,7 +1041,7 @@ let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun (
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Coord.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.join ctx.config ~agent_name:"keeper-executor-agent"
        ~capabilities:[] ());
   register_test_keeper ctx ~keeper_name:"executor"
     ~agent_name:"keeper-executor-agent";
@@ -1078,10 +1078,10 @@ let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_ta
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Coord.bind_session ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.join ctx.config ~agent_name:"keeper-executor-agent"
        ~capabilities:[] ());
   ignore
-    (Coord.bind_session ctx.config ~agent_name:"keeper-executor-warm-raven-agent"
+    (Workspace.join ctx.config ~agent_name:"keeper-executor-warm-raven-agent"
        ~capabilities:[] ());
   register_test_keeper ctx ~keeper_name:"executor"
     ~agent_name:"keeper-executor-agent";
@@ -1118,10 +1118,10 @@ let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_ta
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Coord.bind_session ctx.config ~agent_name:"keeper-tech-glutton-agent"
+    (Workspace.join ctx.config ~agent_name:"keeper-tech-glutton-agent"
        ~capabilities:[] ());
   ignore
-    (Coord.bind_session ctx.config ~agent_name:"keeper-tech_glutton-agent"
+    (Workspace.join ctx.config ~agent_name:"keeper-tech_glutton-agent"
        ~capabilities:[] ());
   register_test_keeper ctx ~keeper_name:"tech-glutton"
     ~agent_name:"keeper-tech-glutton-agent";
@@ -1158,7 +1158,7 @@ let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fu
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Coord.bind_session ctx.config ~agent_name:"keeper-spoof-agent"
+    (Workspace.join ctx.config ~agent_name:"keeper-spoof-agent"
        ~capabilities:[] ());
   let spoof_ctx =
     { ctx with Tool_task.agent_name = "keeper-spoof-agent" }
@@ -1207,7 +1207,7 @@ let () = test "handle_claim_rejects_second_active_owned_task" (fun () ->
   assert (not (Tool_result.is_success second));
   assert (str_contains (Tool_result.message second) "already owns active task(s)");
   let task_002 =
-    Coord.get_tasks_raw ctx.config
+    Workspace.get_tasks_raw ctx.config
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-002")
   in
   match task_002 with
@@ -1381,7 +1381,7 @@ let () =
         ~finally:(fun () -> close_out_noerr oc)
         (fun () -> output_string oc "{not valid json")
     in
-    let backlog_path = Coord.backlog_path ctx.config in
+    let backlog_path = Workspace.backlog_path ctx.config in
     corrupt backlog_path;
     corrupt (backlog_path ^ ".last-good");
     let result =
@@ -1418,7 +1418,7 @@ let () = test "handle_claim_next_ignores_keeper_tool_access_for_open_claims" (fu
   | Ok () -> ()
   | Error e -> failwith ("write_meta failed: " ^ e));
   (match
-     Coord.update_agent_r ctx.config ~agent_name
+     Workspace.update_agent_r ctx.config ~agent_name
        ~capabilities:[ "keeper"; "preset:minimal" ] ()
    with
   | Ok _ -> ()
@@ -1429,7 +1429,7 @@ let () = test "handle_claim_next_ignores_keeper_tool_access_for_open_claims" (fu
   in
   let result = Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc []) in
   assert (Tool_result.is_success result);
-  match Coord.get_tasks_raw ctx.config with
+  match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.task_status with
       | Masc_domain.Claimed { assignee; _ } -> assert (assignee = agent_name)
@@ -1837,7 +1837,7 @@ let () = test "transition_done_redirects_to_verification_and_clears_planning_cur
   assert (Tool_result.is_success done_result);
   assert (not (str_contains (Tool_result.message done_result) "rejected"));
   assert (Planning_eio.get_current_task ctx.config = None);
-  match Coord.get_tasks_raw ctx.config with
+  match Workspace.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.task_status with
       | Masc_domain.AwaitingVerification _ -> ()
@@ -1880,7 +1880,7 @@ let () = test "transition_still_rejects_plain_unknown_arguments" (fun () ->
 let () = test "handle_done_owned_by_other_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done test")]) in
-  let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let result =
     Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
@@ -1903,9 +1903,9 @@ let () = test "handle_done_todo_guidance" (fun () ->
 let () = test "handle_done_already_done_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Done test")]) in
-  let _ = Coord.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
+  let _ = Workspace.claim_task ctx.config ~agent_name:"other-agent" ~task_id:"task-001" in
   let _ =
-    Coord.transition_task_r ctx.config ~agent_name:"other-agent"
+    Workspace.transition_task_r ctx.config ~agent_name:"other-agent"
       ~task_id:"task-001" ~action:Masc_domain.Done_action ~notes:"done" ()
   in
   let result =
@@ -1919,7 +1919,7 @@ let () = test "handle_done_already_done_guidance" (fun () ->
 let () = test "handle_done_cancelled_guidance" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Cancelled test")]) in
-  let _ = Coord.cancel_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~reason:"stop" in
+  let _ = Workspace.cancel_task_r ctx.config ~agent_name:"test-agent" ~task_id:"task-001" ~reason:"stop" in
   let result =
     Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
@@ -2150,7 +2150,7 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
     ("action", `String "done");
     ("notes", `String "Completed");
   ]) in
-  (* Now try to claim next from a different agent in same room *)
+  (* Now try to claim next from a different agent in same workspace *)
   let agent2_ctx = make_test_ctx_with_agent "agent-2" in
   let msg_result = Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 agent2_ctx (`Assoc []) in
   (* Should report no unclaimed tasks (success=true, message contains "No") *)
@@ -2164,7 +2164,7 @@ let () = test "claim_next_returns_no_unclaimed_when_all_tasks_terminal" (fun () 
 let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Cancelled task")]) in
-  let _ = Coord.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id:"task-001" ~reason:"not needed" in
+  let _ = Workspace.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id:"task-001" ~reason:"not needed" in
   let agent2_ctx = make_test_ctx_with_agent "agent-claim-2" in
   let msg_result = Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 agent2_ctx (`Assoc []) in
   match String.index_opt (Tool_result.message msg_result) 'N' with
@@ -2179,7 +2179,7 @@ let () = test "claim_next_filters_out_cancelled_tasks" (fun () ->
    The keeper-side regression for [keeper_task_create] (#13981) lives in
    [test_keeper_task_dispatch.ml:test_create_rejects_fourth_open_task_for_goal].
    The 4 tests below cover the remaining 4 entrypoints. Three of them
-   currently invoke [Coord_task.add_task] without a [goal_id], so the
+   currently invoke [Workspace_task.add_task] without a [goal_id], so the
    cap is by definition a no-op for them — the regression they pin is
    that the [reject_if] hook is wired and that orphan tasks pass.
    [masc_add_task] is the only entrypoint of the four that actually
@@ -2224,7 +2224,7 @@ let () = test "rfc_0034_v2_masc_add_task_caps_per_goal" (fun () ->
           ("goal_id", `String goal.id);
         ])
   in
-  (* [Coord_task_create.add_task] returns the rejection as an
+  (* [Workspace_task_create.add_task] returns the rejection as an
      ["Error: <msg>"] string, mirroring the existing dedup-rejection
      surface, so [handle_add_task] still returns [(true, "Error: ...")].
      The cap is enforced at persistence time — pin both the message
@@ -2241,7 +2241,7 @@ let () = test "rfc_0034_v2_masc_add_task_caps_per_goal" (fun () ->
       (Printf.sprintf
          "expected rejection message to mention goal_task_limit_exceeded, got: %s"
          (Tool_result.message message_result));
-  let backlog = Coord.read_backlog ctx.config in
+  let backlog = Workspace.read_backlog ctx.config in
   if List.length backlog.tasks <> 3
   then
     failwith
@@ -2261,7 +2261,7 @@ let () = test "rfc_0034_v2_task_dispatch_orphan_bypasses_cap" (fun () ->
   in
   for i = 1 to 3 do
     ignore
-      (Coord_task.add_task
+      (Workspace_task.add_task
          ~goal_id:goal.id
          ctx.config
          ~title:(Printf.sprintf "Goal-bound task %d" i)
@@ -2286,8 +2286,8 @@ let () = test "rfc_0034_v2_task_dispatch_orphan_bypasses_cap" (fun () ->
            "task_dispatch orphan path returned Error: %s"
            (Masc_error.to_string err)))
 
-(* RFC-0034.v2 Test 3: Tool_inline_dispatch_coord — verified through
-   direct Coord_task.add_task with the same [reject_if] hook the
+(* RFC-0034.v2 Test 3: Tool_inline_dispatch_workspace — verified through
+   direct Workspace_task.add_task with the same [reject_if] hook the
    inline dispatcher wires. Confirms the [rejection_for_add_task ?goal_id:None]
    call shape compiles AND is non-blocking for orphan tasks. *)
 let () = test "rfc_0034_v2_inline_dispatch_orphan_bypasses_cap" (fun () ->
@@ -2299,7 +2299,7 @@ let () = test "rfc_0034_v2_inline_dispatch_orphan_bypasses_cap" (fun () ->
   in
   for i = 1 to 3 do
     ignore
-      (Coord_task.add_task
+      (Workspace_task.add_task
          ~goal_id:goal.id
          ctx.config
          ~title:(Printf.sprintf "Pre-existing goal task %d" i)
@@ -2307,8 +2307,8 @@ let () = test "rfc_0034_v2_inline_dispatch_orphan_bypasses_cap" (fun () ->
          ~description:"desc")
   done;
   let result =
-    Coord_task.add_task
-      ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+    Workspace_task.add_task
+      ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id:None)
       ctx.config
       ~title:"Inline-dispatched orphan task"
       ~priority:3
@@ -2333,7 +2333,7 @@ let () = test "rfc_0034_v2_operator_task_inject_orphan_bypasses_cap" (fun () ->
   in
   for i = 1 to 3 do
     ignore
-      (Coord_task.add_task
+      (Workspace_task.add_task
          ~goal_id:goal.id
          ctx.config
          ~title:(Printf.sprintf "Operator goal task %d" i)
@@ -2341,8 +2341,8 @@ let () = test "rfc_0034_v2_operator_task_inject_orphan_bypasses_cap" (fun () ->
          ~description:"desc")
   done;
   let result =
-    Coord.add_task
-      ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+    Workspace.add_task
+      ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id:None)
       ctx.config
       ~title:"Operator-injected orphan"
       ~priority:2
@@ -2367,22 +2367,22 @@ let () = test "rfc_0034_v2_capacity_check_returns_some_at_limit" (fun () ->
   in
   for i = 1 to 3 do
     ignore
-      (Coord_task.add_task
+      (Workspace_task.add_task
          ~goal_id:goal.id
          ctx.config
          ~title:(Printf.sprintf "Unit-level goal task %d" i)
          ~priority:3
          ~description:"desc")
   done;
-  let backlog = Coord.read_backlog ctx.config in
-  (match Coord_task_capacity.check ?goal_id:None backlog with
+  let backlog = Workspace.read_backlog ctx.config in
+  (match Workspace_task_capacity.check ?goal_id:None backlog with
    | None -> ()
    | Some _ ->
        failwith "orphan check (goal_id=None) should be a no-op");
-  (match Coord_task_capacity.check ~goal_id:goal.id backlog with
+  (match Workspace_task_capacity.check ~goal_id:goal.id backlog with
    | Some err ->
        assert (err.open_task_count = 3);
-       assert (err.limit = Coord_task_capacity.default_goal_open_limit);
+       assert (err.limit = Workspace_task_capacity.default_goal_open_limit);
        assert (str_contains err.message "goal_task_limit_exceeded")
    | None ->
        failwith "expected capacity_error at the per-goal limit"))

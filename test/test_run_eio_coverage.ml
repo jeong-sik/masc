@@ -121,7 +121,7 @@ let test_log_entry_json_roundtrip () =
    Eio Helpers
    ============================================================ *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -143,12 +143,12 @@ let with_initialized_masc f =
   let tmp_dir = make_test_dir () in
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Coord.default_config tmp_dir in
-  let _ = Coord.init config ~agent_name:None in
+  let config = Workspace.default_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
   Fun.protect
     ~finally:(fun () ->
       try
-        let _ = Coord.reset config in
+        let _ = Workspace.reset config in
         rm_rf tmp_dir
       with _ -> ())
     (fun () -> f config)

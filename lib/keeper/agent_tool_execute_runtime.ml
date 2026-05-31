@@ -83,7 +83,7 @@ let is_git_command cmd =
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(turn_sandbox_factory_git : Keeper_sandbox_factory.t option)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
       ~timeout_sec
@@ -310,7 +310,7 @@ let handle_tool_execute
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~turn_sandbox_factory_git
       ~exec_cache:_
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
       ()

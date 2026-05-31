@@ -40,7 +40,7 @@ val metric_tool_assignment_telemetry_failures : string
     [Eio.Cancel.Cancelled] is re-raised and not counted. *)
 val metric_telemetry_observe_failures : string
 
-(** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
+(** #10358 (c1): total times [lib/workspace.ml]'s lifecycle hook caught
     [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry
     pair because dispatch happened outside an Eio scheduler. Labels:
     [event_family] (one of [agent_lifecycle] / [task_transition] /
@@ -55,9 +55,9 @@ val metric_telemetry_observe_failures : string
     outside an Eio fiber and the corresponding audit/telemetry rows
     are missing — the silent root cause behind the [#10358] 5-tag → 2-tag
     durable-ledger attrition. *)
-val metric_coord_telemetry_drop : string
+val metric_workspace_telemetry_drop : string
 
-(** #10358 (c1): total times [lib/coord.ml]'s lifecycle hook caught
+(** #10358 (c1): total times [lib/workspace.ml]'s lifecycle hook caught
     [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry
     pair because dispatch happened outside an Eio scheduler. Labels:
     [event_family] (one of [agent_lifecycle] / [task_transition] /
@@ -72,7 +72,7 @@ val metric_coord_telemetry_drop : string
     outside an Eio fiber and the corresponding audit/telemetry rows
     are missing — the silent root cause behind the [#10358] 5-tag → 2-tag
     durable-ledger attrition. *)
-val metric_coord_claim_post_provision_failures : string
+val metric_workspace_claim_post_provision_failures : string
 (** Total best-effort claim post-provision hook failures. Labels: [site]
     and [agent_name]. *)
 

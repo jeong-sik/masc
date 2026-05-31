@@ -45,7 +45,7 @@ let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_d
 
 
 (** Broadcast handler: parse JSON body, extract "message" string field, and
-    relay via Coord.broadcast.  Error responses are encoded through Yojson so
+    relay via Workspace.broadcast.  Error responses are encoded through Yojson so
     exception messages cannot break JSON framing via embedded quotes. *)
 (* Dashboard request handlers extracted to
    [Server_routes_http_dashboard_handlers] (godfile decomp). *)
@@ -58,9 +58,9 @@ let handle_dashboard_workspace = Server_routes_http_dashboard_handlers.handle_da
    as part of godfile near-threshold split. *)
 let handle_telemetry request reqd =
   with_public_read (fun state req reqd ->
-    let config = state.Mcp_server.coord_config in
+    let config = state.Mcp_server.workspace_config in
     let base_path = config.base_path in
-    let masc_root = Coord.masc_root_dir config in
+    let masc_root = Workspace.masc_root_dir config in
     let float_query_param req key =
       match Server_utils.query_param req key with
       | None -> None

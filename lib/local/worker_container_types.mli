@@ -182,7 +182,7 @@ val default_system_prompt :
 (** Builds the canonical system prompt seeded into a freshly
     spawned local worker.  [role] and [selection_note] are
     optional contextual hints (the leader-selected model
-    note, the assigned coord role) — both empty strings are
+    note, the assigned workspace role) — both empty strings are
     treated as missing. *)
 
 (** {1 Helpers reached through [include Worker_container_types]} *)
@@ -245,5 +245,5 @@ val worker_auth_token :
 (** Builds the canonical system prompt seeded into a freshly
     spawned local worker.  [role] and [selection_note] are
     optional contextual hints (the leader-selected model
-    note, the assigned coord role) — both empty strings are
+    note, the assigned workspace role) — both empty strings are
     treated as missing. *)

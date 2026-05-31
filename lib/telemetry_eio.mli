@@ -22,7 +22,7 @@
     non-positive values disable the matching bound. The byte cap prunes oldest
     completed day-files while preserving the current day-file. *)
 
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** {1 Events} *)
 

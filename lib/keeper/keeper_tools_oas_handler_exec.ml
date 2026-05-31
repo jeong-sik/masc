@@ -12,7 +12,7 @@ open Keeper_tools_oas_handler_telemetry
 
 let execute_with_observers
       ~(name : string)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?turn_sandbox_factory
@@ -450,7 +450,7 @@ let execute_with_observers
     in
     let is_edeadlk = edeadlk_backtrace <> None in
     (* #10567: EDEADLK is a transient mutex-contention race in shared
-       coord/keeper Stdlib.Mutex sites, not a real keeper-side failure.
+       workspace/keeper Stdlib.Mutex sites, not a real keeper-side failure.
        Counting it toward [failure_counts] burns the consecutive-failure
        budget (max 3) and ends the keeper turn even when the next call
        would succeed.  Skip the counter bump and downgrade the log to

@@ -1,4 +1,4 @@
-(** Team_context — shared context for coordinated workers.
+(** Team_context — shared context for coupled workers.
     @since 3.0.0 *)
 
 type task_summary = {
@@ -33,7 +33,7 @@ let max_tasks = 10
 (** Shared findings file within the .masc directory. *)
 let findings_path ~base_path =
   Filename.concat
-    (Coord_utils.masc_dir_from_base_path ~base_path)
+    (Workspace_utils.masc_dir_from_base_path ~base_path)
     "shared_findings.jsonl"
 
 let persistence_surface = "team_context_findings"

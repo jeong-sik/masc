@@ -72,7 +72,7 @@ let sdk_bindings : sdk_tool_binding list =
     {
       sdk_name = "masc_broadcast";
       canonical_operation = "masc_broadcast";
-      description = "Broadcast a message to all active agents. Use when sharing status updates, coordination signals, or requesting help from any available agent.";
+      description = "Broadcast a message to all active agents. Use when sharing status updates, workspace signals, or requesting help from any available agent.";
       input_schema =
         object_schema ~required:[ "message" ]
           [

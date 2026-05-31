@@ -264,7 +264,7 @@ val preferred_tool_choice_for_required_tool_names :
 
 (** Find the active task ID a keeper currently owns. *)
 val owned_active_task_id_for_meta :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_id.Task_id.t option
 
@@ -276,14 +276,14 @@ val merge_current_task_id :
 
 (** Reconcile [meta.current_task_id] with the backlog. *)
 val sync_current_task_id_from_backlog :
-  config:Coord.config ->
+  config:Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   Keeper_meta_contract.keeper_meta
 
 (** Best-effort reconciliation for callers that only know an agent name.
     No-ops for non-keeper agents. *)
 val sync_current_task_id_for_agent_name :
-  config:Coord.config ->
+  config:Workspace.config ->
   agent_name:string ->
   unit
 

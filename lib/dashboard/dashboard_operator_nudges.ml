@@ -95,7 +95,7 @@ let fallback_targets (msg : Masc_domain.message) =
 let nudge_id (msg : Masc_domain.message) = Printf.sprintf "n-%09d" msg.seq
 
 let decode_message_for_parsing content =
-  (* Restore JSON syntax escaped by Coord.sanitize_message. Decode structural
+  (* Restore JSON syntax escaped by Workspace.sanitize_message. Decode structural
      quotes before [&amp;] so body text that originally contained [&quot;]
      stays as an entity until after JSON parsing. *)
   content
@@ -269,7 +269,7 @@ let entry_of_message (msg : Masc_domain.message) =
 
 let recent ~config ~limit =
   let limit = clamp_limit limit in
-  Coord.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
+  Workspace.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
   |> List.filter_map entry_of_message
   |> take limit
 ;;

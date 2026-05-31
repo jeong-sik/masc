@@ -10,7 +10,7 @@ type tool_result = Tool_result.result
     handlers return structured [Tool_result.result] records. *)
 
 type context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
 }
 

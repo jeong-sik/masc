@@ -1,9 +1,9 @@
-(** MASC gRPC Coordination Service.
+(** MASC gRPC Workspace Service.
 
-    Implements the MascCoordination gRPC service using grpc-direct.
-    See proto/masc_coordination.proto for the canonical API contract. *)
+    Implements the MascWorkspace gRPC service using grpc-direct.
+    See proto/masc_workspace.proto for the canonical API contract. *)
 
-(** Full gRPC service name: "masc.coordination.v1.MascCoordination". *)
+(** Full gRPC service name: "masc.workspace.v1.MascWorkspace". *)
 val service_name : string
 
 (** Per-subscriber outbound buffer drop threshold.  Reads
@@ -14,12 +14,12 @@ val service_name : string
     value without instrumenting the full subscribe handler. *)
 val stream_max_buffer : unit -> int
 
-(** Create the gRPC service with all handlers wired to the given room config.
+(** Create the gRPC service with all handlers wired to the given workspace config.
 
-    @param coord_config The MASC room configuration.
+    @param workspace_config The MASC workspace configuration.
     @param tool_dispatcher Function that dispatches tool calls:
       [tool_name -> arguments_json -> (result_json, error_message) result]. *)
 val create_service :
-  coord_config:Coord_utils_backend_setup.config ->
+  workspace_config:Workspace_utils_backend_setup.config ->
   tool_dispatcher:(string -> string -> (string, string) result) ->
   Grpc_eio.Service.t

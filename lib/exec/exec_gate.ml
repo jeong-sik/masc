@@ -38,7 +38,7 @@ let rollout_config : Approval_config.t =
     defaults = Approval_config.enforced_all;
     per_agent =
       [
-        (`Coord_git, internal_git_admin_overlay);
+        (`Workspace_git, internal_git_admin_overlay);
         (`System_sandbox, internal_git_admin_overlay);
         (`System_notify, notify_overlay);
         (`Voice_bridge, internal_observer_overlay);
@@ -51,7 +51,7 @@ let rollout_config : Approval_config.t =
         (`System_worker_runtime_docker, internal_observer_overlay);
         (`System_spawn, internal_observer_overlay);
         (`System_auto_responder, internal_observer_overlay);
-        (`Coord_identity, internal_observer_overlay);
+        (`Workspace_identity, internal_observer_overlay);
         (`Tool_local_runtime, internal_observer_overlay);
         (`Tool_local_runtime_bench, internal_observer_overlay);
         (`Tool_execute, internal_observer_overlay);

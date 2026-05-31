@@ -429,7 +429,7 @@ include Keeper_world_observation_provider_cooldown
 let observe
       ~allowed_tool_names
       ~(pending_board_events : pending_board_event list option)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
   : world_observation
   =
@@ -485,7 +485,7 @@ let observe
 
 let observe_direct_keeper_msg
       ~allowed_tool_names
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
   : world_observation
   =
@@ -524,7 +524,7 @@ let observe_direct_keeper_msg
 let durable_signal_present
       ~allowed_tool_names
       ~pending_board_events
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
   : bool
   =

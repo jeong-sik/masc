@@ -6,7 +6,7 @@
     3. Shell metacharacters (;, |, &, etc.) are rejected
     4. Empty commands are rejected *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Keeper_meta_tool_access = Masc_mcp.Keeper_meta_tool_access
 module Exec_core = Masc_mcp.Exec_core
 module Agent_tool_command_runtime = Masc_mcp.Agent_tool_command_runtime
@@ -276,7 +276,7 @@ let test_cleanup_dir_does_not_follow_symlinks () =
 let make_config () =
   let tmp = temp_dir () in
   ensure_dir (Filename.concat tmp Common.masc_dirname);
-  (tmp, Coord.default_config tmp)
+  (tmp, Workspace.default_config tmp)
 
 let make_docker_meta name =
   let json =
@@ -360,7 +360,7 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   run_process_ok ~cwd:base "git" [ "init"; "-q"; "--initial-branch=main" ];
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let repo_dir =
     Filename.concat base ".masc/playground/sangsu/repos/masc-mcp"
@@ -390,7 +390,7 @@ let test_tool_execute_rejects_parent_git_repo_path_arg () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   run_process_ok ~cwd:base "git" [ "init"; "-q"; "--initial-branch=main" ];
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
   let repo_dir = Filename.concat playground "repos/masc-mcp" in
@@ -424,7 +424,7 @@ let test_tool_execute_rg_pattern_under_repos_is_not_repo_path () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
   let repo_dir = Filename.concat playground "repos/masc-mcp" in
@@ -459,7 +459,7 @@ let test_tool_execute_rejects_inline_git_work_tree_path_arg () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   run_process_ok ~cwd:base "git" [ "init"; "-q"; "--initial-branch=main" ];
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
   ensure_dir (Filename.concat playground "repos/masc-mcp");
@@ -489,7 +489,7 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
   let repo_dir = Filename.concat playground "repos/masc-mcp" in

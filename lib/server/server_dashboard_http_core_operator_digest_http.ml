@@ -4,14 +4,16 @@
     [operator_digest_http_json] is the GET handler backing the
     operator dashboard's digest surface. Two paths:
 
-    1. **Default request** (no actor and no include_workers override)
-       serves the cached [operator_digest_cache] surface immediately
-       (0ms), decorated with the default query metadata.
+    1. **Default root request** (no actor, no target_id, no
+       include_workers override, target_type omitted or [root]) — serves the cached
+       [operator_digest_cache] surface immediately (0ms), decorated
+       with the default query metadata.
 
     2. **Parameterized request** — computes on-demand with a 5s SWR
        cache. Cache key is the colon-delimited concatenation of
-       [actor | include_workers] so distinct query shapes are cached
-       independently. The compute closure runs [Operator_control.digest_json] inside
+       [actor | effective_target_type | target_id | include_workers]
+       so distinct query shapes are cached independently. The compute
+       closure runs [Operator_control.digest_json] inside
        [run_dashboard_compute ~mode:Offloaded_readonly] and decorates
        with [with_projection_diagnostics ~surface:"operator_digest"].
        Validation errors are surfaced as `{error, message, generated_at}`
@@ -40,7 +42,7 @@ module Core_operator_query = Server_dashboard_http_core_operator_query
 open Server_dashboard_http_runtime_support
 
 let operator_digest_http_json ~state ~sw ~clock request =
-  let config = state.Mcp_server.coord_config in
+  let config = state.Mcp_server.workspace_config in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
   let actor =
     dashboard_actor_for_request ~base_path:config.base_path request
@@ -53,16 +55,26 @@ let operator_digest_http_json ~state ~sw ~clock request =
     | Some ("1" | "true" | "yes") -> Some true
     | _ -> None
   in
+  let root_target_type value =
+    match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
+    | None -> true
+    | Some "workspace" -> true
+    | Some _ -> false
+  in
+  let effective_target_type = Option.value ~default:"workspace" target_type in
   let default_namespace_request =
     actor = None
     && target_id = None
     && include_workers = None
-    && Option.bind target_type String_util.trim_to_option = None
+    && root_target_type target_type
   in
   let query =
     Core_operator_query.operator_digest_query_json
       ~actor
+      ~target_type
+      ~target_id
       ~include_workers
+      ~effective_target_type
       ~default_namespace_request
   in
   if default_namespace_request
@@ -74,12 +86,15 @@ let operator_digest_http_json ~state ~sw ~clock request =
     let started_at = Unix.gettimeofday () in
     let cache_key =
       Printf.sprintf
-        "operator_digest:param:%s|%s"
+        "operator_digest:param:%s|%s|%s|%s|%s"
         (Option.value ~default:"" actor)
+        effective_target_type
+        (Option.value ~default:"" target_id)
         (match include_workers with
          | None -> ""
          | Some true -> "1"
          | Some false -> "0")
+        ""
     in
     let compute () =
       match
@@ -106,7 +121,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
                   match
                     Operator_control.digest_json
                       ?actor
-                      ?target_type
+                      ~target_type:effective_target_type
                       ?target_id
                       ?include_workers
                       ctx
@@ -124,7 +139,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
           ~surface:"operator_digest"
           ~started_at
           ~extra:
-            [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
+            [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json () ]
           json
       | Error `Timeout ->
         `Assoc

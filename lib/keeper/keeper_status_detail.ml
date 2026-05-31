@@ -153,7 +153,7 @@ let apply_tail_order order items =
   | Newest_first -> List.rev items
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let resolve_status_target_config ~(config : Coord.config) ~(agent_name : string) args =
+let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : string) args =
   let requested_name = effective_status_name_config ~agent_name args in
   if not (validate_name requested_name) then
     Error
@@ -197,7 +197,7 @@ let model_observability_json = Keeper_status_detail_observability.model_observab
 (* TEL-OK: status handler — telemetry surfaces via the cache layer
    ([_cache] mutex-protected reads/writes) and Prometheus counters in
    the downstream [Keeper_status_runtime]/[Keeper_status_bridge] calls. *)
-let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) args : tool_result =
+let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
   match resolve_status_target_config ~config ~agent_name args with
   | Error err -> tool_result_error err
   | Ok (name, m) ->
@@ -273,7 +273,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
          let agent_status = parse_agent_status config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =
-           Coord_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
+           Workspace_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
          in
          let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
          let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
@@ -899,7 +899,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            ("model_observability", model_observability);
            ("runtime_trust", runtime_trust);
            ("runtime", runtime_surface_json config m);
-           ("coordination", coordination_surface_json m);
+           ("workspace", workspace_surface_json m);
            ("sources", source_provenance_json config m);
            ("context", ctx_stats);
            ("skill_route", Json_util.option_to_yojson Fun.id last_skill_route);
@@ -944,8 +944,8 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                (Filename.concat
                  (Common.masc_dir_from_base_path ~base_path:config.base_path)
                  (Printf.sprintf "evidence/%s/%s"
-                   (Coord_utils.safe_filename m.name)
-                   (Coord_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
+                   (Workspace_utils.safe_filename m.name)
+                   (Workspace_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
            (let sandbox = Keeper_sandbox.of_meta ~config:config ~meta:m in
            let playground_abs = sandbox.host_root_abs in

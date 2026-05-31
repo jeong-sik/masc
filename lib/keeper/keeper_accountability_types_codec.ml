@@ -125,7 +125,7 @@ let accountability_dir base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "accountability"
 ;;
 
-let get_store (config : Coord_query.config) : Dated_jsonl.t =
+let get_store (config : Workspace_query.config) : Dated_jsonl.t =
   let base_path = config.base_path in
   Eio.Mutex.use_rw ~protect:true store_cache_mu (fun () ->
     match Hashtbl.find_opt store_cache base_path with
@@ -278,7 +278,7 @@ let resolution_event_of_json json =
   | _ -> None
 ;;
 
-let read_window_entries (config : Coord_query.config) =
+let read_window_entries (config : Workspace_query.config) =
   (match !window_read_count_for_testing_ref with
    (* tla-lint: allow-mutation: test hook — opt-in counter for window-read assertions *)
    | Some count -> window_read_count_for_testing_ref := Some (count + 1)

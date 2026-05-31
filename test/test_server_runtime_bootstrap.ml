@@ -767,7 +767,7 @@ let test_bootstrap_skip_mode_creates_nothing () =
 
 let test_constructor_is_pure () =
   with_temp_dir "startup-pure" (fun dir ->
-      let agents_dir = Coord.agents_dir (Coord.default_config dir) in
+      let agents_dir = Workspace.agents_dir (Workspace.default_config dir) in
       Fs_compat.mkdir_p agents_dir;
       write_file (Filename.concat agents_dir "alice.json") "{}";
       let state = Mcp_server.create_state ~base_path:dir in
@@ -777,7 +777,7 @@ let test_constructor_is_pure () =
 let test_restore_persisted_sessions_uses_flat_agents_dir () =
   with_temp_dir "startup-scope" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let agents = Coord.agents_dir state.Mcp_server.coord_config in
+      let agents = Workspace.agents_dir state.Mcp_server.workspace_config in
       Fs_compat.mkdir_p agents;
       write_file (Filename.concat agents "test-agent.json") "{}";
       Server_runtime_bootstrap.restore_persisted_sessions state;
@@ -791,7 +791,7 @@ let test_restore_persisted_sessions_uses_flat_agents_dir () =
 let test_keeper_paths_use_cluster_root () =
   with_temp_dir "startup-cluster" (fun dir ->
       with_env "MASC_CLUSTER_NAME" (Some "cluster-alpha") (fun () ->
-          let config = Coord.default_config dir in
+          let config = Workspace.default_config dir in
           let keeper_dir = Keeper_fs.keeper_dir config in
           let expected_root =
             Filename.concat
@@ -857,11 +857,11 @@ let test_keeper_tool_call_log_uses_cluster_root () =
                 1
                 (List.length (Keeper_tool_call_log.read_recent ~n:10 ())))))
 
-let test_coord_init_bootstraps_keeper_runtime_dirs () =
+let test_workspace_init_bootstraps_keeper_runtime_dirs () =
   with_temp_dir "startup-keeper-dirs" (fun dir ->
-      let config = Coord.default_config dir in
-      ignore (Coord.init config ~agent_name:None);
-      let root_dir = Coord.masc_root_dir config in
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:None);
+      let root_dir = Workspace.masc_root_dir config in
       let keeper_dir = Filename.concat root_dir "keepers" in
       let traces_dir = Filename.concat root_dir "traces" in
       Alcotest.(check bool) "keeper dir exists" true
@@ -938,7 +938,7 @@ let write_keeper_meta_exn config meta =
   | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
 
 let with_running_keeper_metas config metas f =
-  let base_path = config.Coord.base_path in
+  let base_path = config.Workspace.base_path in
   List.iter
     (fun (meta : Keeper_meta_contract.keeper_meta) ->
       Keeper_registry.unregister ~base_path meta.name;
@@ -955,7 +955,7 @@ let with_running_keeper_metas config metas f =
 let mark_keeper_failing config (meta : Keeper_meta_contract.keeper_meta) =
   match
     Keeper_registry.dispatch_event
-      ~base_path:config.Coord.base_path
+      ~base_path:config.Workspace.base_path
       meta.name
       (Keeper_state_machine.Turn_failed { consecutive = 1; max_allowed = 10 })
   with
@@ -978,7 +978,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
         (fun () ->
           let state = Mcp_server.create_state ~base_path:dir in
           Server_auth.server_state := Some state;
-          let config = state.Mcp_server.coord_config in
+          let config = state.Mcp_server.workspace_config in
           write_keeper_meta_exn config
             (make_keeper_meta ~name:"durable-paused" ~trace_id:"trace-paused"
                ~paused:true ());
@@ -1144,7 +1144,7 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
       (fun () ->
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.coord_config in
+        let config = state.Mcp_server.workspace_config in
         let timeout_paused =
           { (make_keeper_meta
                ~name:"timeout-without-policy"
@@ -1201,7 +1201,7 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
       (fun () ->
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.coord_config in
+        let config = state.Mcp_server.workspace_config in
         let paused =
           make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
             ~paused:true ()
@@ -1263,7 +1263,7 @@ let test_health_json_distinguishes_failing_executable_keepers () =
       (fun () ->
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.coord_config in
+        let config = state.Mcp_server.workspace_config in
         let paused =
           make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
             ~paused:true ()
@@ -1308,7 +1308,7 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
         Config_dir_resolver.reset ();
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.coord_config in
+        let config = state.Mcp_server.workspace_config in
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"cursor-swept" ~trace_id:"trace-cursor" ());
         let stimulus post_id updated_at : Keeper_event_queue.stimulus =
@@ -1834,7 +1834,7 @@ let test_prompt_markdown_dir_does_not_use_repo_seed () =
                ~workspace_path:dir ~base_path:dir)
       in
       Alcotest.(check string)
-        "temp room keeps resolved default prompt dir without repo seed"
+        "temp workspace keeps resolved default prompt dir without repo seed"
         (canonical_path expected) (canonical_path resolved))
 
 let test_prompt_markdown_dir_honors_masc_config_dir_override () =
@@ -2684,8 +2684,8 @@ let () =
             test_tool_usage_log_uses_cluster_root;
           Alcotest.test_case "keeper tool call log uses cluster root" `Quick
             test_keeper_tool_call_log_uses_cluster_root;
-          Alcotest.test_case "coord init bootstraps keeper runtime dirs" `Quick
-            test_coord_init_bootstraps_keeper_runtime_dirs;
+          Alcotest.test_case "workspace init bootstraps keeper runtime dirs" `Quick
+            test_workspace_init_bootstraps_keeper_runtime_dirs;
           Alcotest.test_case "otel exporter setup failure is soft" `Quick
             test_otel_exporter_setup_failure_is_soft;
           Alcotest.test_case "lazy startup plan parallelizes independent tasks"

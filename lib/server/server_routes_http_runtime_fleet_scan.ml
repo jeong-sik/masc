@@ -32,7 +32,7 @@ let blocker_detail (info : Keeper_meta_contract.blocker_info option) =
   Option.map (fun (info : Keeper_meta_contract.blocker_info) -> info.detail) info
 
 let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
-  match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+  match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))
   | Some _ | None -> None
 
@@ -161,7 +161,7 @@ let paused_keepers_health_json () =
   let running_names = running_paused_keeper_names () in
   let durable_scan =
     match current_server_state_opt () with
-    | Some state -> durable_paused_keeper_scan state.Mcp_server.coord_config
+    | Some state -> durable_paused_keeper_scan state.Mcp_server.workspace_config
     | None -> empty_paused_keeper_scan
   in
   paused_keepers_health_json_of_scan ~running_names durable_scan
@@ -388,8 +388,8 @@ let keeper_fleet_safety_health_json
       match current_server_state_opt () with
       | Some state ->
         (try
-           ( Keeper_runtime.bootable_keeper_names state.Mcp_server.coord_config
-           , autoboot_enabled_keeper_scan state.Mcp_server.coord_config )
+           ( Keeper_runtime.bootable_keeper_names state.Mcp_server.workspace_config
+           , autoboot_enabled_keeper_scan state.Mcp_server.workspace_config )
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->

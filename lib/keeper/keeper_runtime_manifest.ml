@@ -665,7 +665,7 @@ let execution_receipt_path_for_today config ~keeper_name =
 let base_dir config ~keeper_name =
   Filename.concat
     (Filename.concat
-       (Filename.concat (Coord.masc_root_dir config) "keepers")
+       (Filename.concat (Workspace.masc_root_dir config) "keepers")
        keeper_name)
     "runtime-manifests"
 
@@ -714,7 +714,7 @@ let append_best_effort ?(site = "runtime_manifest") config manifest =
       Keeper_disk_pressure.note_if_disk_exhaustion
         ~site:"keeper_runtime_manifest.append_best_effort"
         msg;
-      let masc_root = Coord.masc_root_dir config in
+      let masc_root = Workspace.masc_root_dir config in
       let fd_pressure =
         Keeper_fd_pressure.active () || Keeper_fd_pressure.is_fd_exhaustion_text msg
       in

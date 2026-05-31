@@ -57,5 +57,5 @@ val keepers_section : float -> section
 
 (** {1 Generation} *)
 
-val generate : ?scope:scope -> Coord_utils.config -> string
-val generate_compact : ?scope:scope -> Coord_utils.config -> string
+val generate : ?scope:scope -> Workspace_utils.config -> string
+val generate_compact : ?scope:scope -> Workspace_utils.config -> string

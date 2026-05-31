@@ -20,7 +20,7 @@ module Float = Stdlib.Float
 open Tool_args
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
 }
 
@@ -36,7 +36,7 @@ type context = {
                   call sites (Not_found in get_metrics,
                   Validation_error in agent_card) are caller-input
                   rejections.
-   [result_to_response] : [Coord.update_agent_r] Ok/Error
+   [result_to_response] : [Workspace.update_agent_r] Ok/Error
                   projection.  Error is classified
                   [Workflow_rejection] until [Masc_domain] grows
                   a typed failure_class per error variant — at
@@ -109,7 +109,7 @@ let handle_agents ?(tool_name = "masc_agents") ?(start_time = 0.0) ctx args
   : Tool_result.result
   =
   let limit = get_int args "limit" 20 |> max 1 |> min 50 in
-  let json = Coord.get_agents_status ctx.config in
+  let json = Workspace.get_agents_status ctx.config in
   let json = match json with
     | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
     | other -> other
@@ -127,7 +127,7 @@ let handle_agent_update ?(tool_name = "masc_agent_update") ?(start_time = 0.0) c
     | _ -> None
   in
   result_to_response ~tool_name ~start_time
-    (Coord.update_agent_r ctx.config ~agent_name:ctx.agent_name ?status ?capabilities ())
+    (Workspace.update_agent_r ctx.config ~agent_name:ctx.agent_name ?status ?capabilities ())
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx args
@@ -285,18 +285,18 @@ let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0)
          Without this, agents active on the board but without task metrics
          are invisible to fitness queries (Issue #1861). *)
       let metrics_agents = Metrics_store_eio.get_all_agents ctx.config in
-      let coord_agents =
+      let workspace_agents =
         try
-          Coord.get_agents_raw ctx.config
+          Workspace.get_agents_raw ctx.config
           |> List.map (fun (a : Masc_domain.agent) -> a.name)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-          Log.Misc.warn "coord agents fallback (metrics_store still used): %s"
+          Log.Misc.warn "workspace agents fallback (metrics_store still used): %s"
             (Stdlib.Printexc.to_string exn);
           []
       in
-      List.sort_uniq String.compare (metrics_agents @ coord_agents)
+      List.sort_uniq String.compare (metrics_agents @ workspace_agents)
   in
   if Stdlib.List.length agents = 0 then
     json_ok ~tool_name ~start_time
@@ -348,7 +348,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
         (Printf.sprintf "invalid action %S; expected one of: %s" action_raw
            (String.concat ", " valid_agent_card_action_strings))
   | Some action ->
-      let agents = Coord.get_agents_raw ctx.config in
+      let agents = Workspace.get_agents_raw ctx.config in
       let target = get_string_opt args "agent_name" in
       let target_agent =
         Option.bind target (fun name ->
@@ -360,7 +360,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
         `Assoc [
           ("schema", `String "masc.agent_card.v1");
           ("name", `String "MASC-MCP");
-          ("description", `String "MASC multi-agent coordination MCP server");
+          ("description", `String "MASC multi-agent workspace MCP server");
           ("action", `String (agent_card_action_to_string action));
           ("requested_by", `String ctx.agent_name);
           ("base_path", `String ctx.config.base_path);
@@ -372,7 +372,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
             | None -> `Null );
           ( "capabilities",
             `Assoc [
-              ("coordination", `Bool true);
+              ("workspace", `Bool true);
               ("task_backlog", `Bool true);
               ("keeper_runtime", `Bool true);
               ("dashboard", `Bool true);

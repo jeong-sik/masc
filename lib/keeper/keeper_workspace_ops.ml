@@ -16,7 +16,7 @@ include Keeper_workspace_ops_setup
 let handle_tool_search_files
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =

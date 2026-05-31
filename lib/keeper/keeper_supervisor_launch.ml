@@ -42,7 +42,7 @@ let launch_supervised_fiber
       (reg : Keeper_registry.registry_entry)
   =
   let base_path = ctx.config.base_path in
-  let keepers_dir = Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in
+  let keepers_dir = Filename.concat (Workspace.masc_root_dir ctx.config) "keepers" in
   (match Keeper_registry.prepare_fiber_launch ~base_path meta.name with
    | Ok _ -> ()
    | Error err ->
@@ -518,7 +518,7 @@ let launch_supervised_fiber
 (* #10993: persona drift visibility.
 
    [Keeper_identity.normalize_all_names ~check_persona:true] runs on
-   every dispatch via [Tool_inline_dispatch_coord] (RFC P3-a
+   every dispatch via [Tool_inline_dispatch_workspace] (RFC P3-a
    logging-only mode), but its [Persona_not_found] branch emits a
    Log.Misc.warn that is hard to triage:
 

@@ -46,7 +46,7 @@ let namespace_truth_bootstrap_shell_json () =
       ("meta_cognition", `Null);
     ]
 
-let shell_json_matches_config ~(config : Coord.config) json =
+let shell_json_matches_config ~(config : Workspace.config) json =
   match json_assoc_field "paths" json |> json_string_field_opt "effective_base_path" with
   | Some base_path -> String.equal base_path config.base_path
   | None -> false
@@ -100,7 +100,7 @@ let schedule_namespace_truth_shell_refresh ~sw ~clock config =
                    (Printexc.to_string exn))))
 
 let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
-  let config = state.Mcp_server.coord_config in
+  let config = state.Mcp_server.workspace_config in
   (* Fast-path: if the proactive execution refresh hasn't produced a result
      yet, return "initializing" immediately instead of blocking for 15-20s
      on cold-start on-demand compute. The frontend retries every 3s via
@@ -199,7 +199,7 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
           |> json_string_field_opt "cache_state"
         in
         Namespace_truth_support.compose_namespace_truth_snapshot ~config
-          ~initialized:(Coord.is_initialized config) ~shell_json ~execution_json
+          ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json
           ~command_summary_json
         |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
              ~extra:
@@ -219,7 +219,7 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         |> json_string_field_opt "cache_state"
       in
       Namespace_truth_support.compose_namespace_truth_snapshot ~config
-        ~initialized:(Coord.is_initialized config)
+        ~initialized:(Workspace.is_initialized config)
         ~shell_json ~execution_json
         ~command_summary_json:(`Assoc [])
       |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
@@ -243,7 +243,7 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
   if not (cached_surface_has_success Server_dashboard_http_execution_surfaces.execution_cache) then
     None
   else
-    let config = state.Mcp_server.coord_config in
+    let config = state.Mcp_server.workspace_config in
     let shell_json = cached_shell_json_for_namespace ~config in
     let execution_json =
       cached_surface_json Server_dashboard_http_execution_surfaces.execution_cache
@@ -251,7 +251,7 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
     let command_summary_json = `Assoc [] in
     Some
       (Namespace_truth_support.compose_namespace_truth_snapshot ~config
-         ~initialized:(Coord.is_initialized config) ~shell_json ~execution_json
+         ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json
          ~command_summary_json)
 
 let last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =

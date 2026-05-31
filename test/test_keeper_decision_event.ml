@@ -1,7 +1,7 @@
 (** Tests for the typed keeper decision-log projection
     ([Dashboard_http_keeper_feeds.parse_decision_event] /
     [decision_event_to_yojson]). The feed routes themselves are not unit-testable
-    here (they need a live room), but extracting the per-line transform into a
+    here (they need a live workspace), but extracting the per-line transform into a
     pure typed parse makes exactly that transform testable — which is the point
     of parsing into a record at the boundary. These pin field extraction, the
     keeper-name fallback, malformed-line rejection, and that the rendered payload

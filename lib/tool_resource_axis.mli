@@ -13,7 +13,7 @@ type t =
   | Filesystem_read
   | Filesystem_write
   | Board_write
-  | Coordination_write
+  | Workspace_write
   | Web
   | Generic_write
 

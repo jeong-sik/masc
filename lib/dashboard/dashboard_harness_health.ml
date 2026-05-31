@@ -478,7 +478,7 @@ let handoff_event_json (event : handoff_event) =
     ]
 ;;
 
-let read_keeper_metric_records ?since ?until (config : Coord.config) keeper_name =
+let read_keeper_metric_records ?since ?until (config : Workspace.config) keeper_name =
   let store = Keeper_types_support.keeper_metrics_store config keeper_name in
   match since, until with
   | Some _, _ | _, Some _ ->
@@ -489,7 +489,7 @@ let read_keeper_metric_records ?since ?until (config : Coord.config) keeper_name
   | None, None -> Dated_jsonl.read_recent store max_signal_scan
 ;;
 
-let read_handoff_events ?since ?until (config : Coord.config) =
+let read_handoff_events ?since ?until (config : Workspace.config) =
   let events =
     Keeper_meta_store.keeper_names config
     |> List.concat_map (fun keeper_name ->
@@ -502,7 +502,7 @@ let read_handoff_events ?since ?until (config : Coord.config) =
     events
 ;;
 
-let has_any_handoff_events (config : Coord.config) =
+let has_any_handoff_events (config : Workspace.config) =
   Keeper_meta_store.keeper_names config
   |> List.exists (fun keeper_name ->
     read_keeper_metric_records config keeper_name
@@ -825,7 +825,7 @@ let recent_handoffs_json
     ]
 ;;
 
-let json ~(config : Coord.config) ?since ?until () =
+let json ~(config : Workspace.config) ?since ?until () =
   let calibration = Eval_calibration.calibration_stats ?since ?until () in
   let recent_verdicts = read_recent_verdicts ?since ?until () in
   let has_window = Option.is_some since || Option.is_some until in

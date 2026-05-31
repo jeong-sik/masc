@@ -69,7 +69,7 @@ let summary_json_of_runtime ?base_path
 
 let baseline_dir base_path =
   Filename.concat
-    (Coord_utils.masc_dir_from_base_path ~base_path)
+    (Workspace_utils.masc_dir_from_base_path ~base_path)
     "governance"
   |> fun d -> Filename.concat d "baselines"
 

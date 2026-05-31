@@ -23,14 +23,13 @@ let with_isolated_runtime_env f =
       with_env "MASC_STORAGE_TYPE" None f))
 
 let make_ctx base_path =
-  let config = Coord.default_config base_path in
+  let config = Workspace.default_config base_path in
   let agent_name = "telemetry-agent" in
-  ignore (Coord.init config ~agent_name:(Some agent_name));
+  ignore (Workspace.init config ~agent_name:(Some agent_name));
   { Tool_task.config; agent_name; sw = None }
 
 let make_peer_ctx config agent_name =
-  (* See: fixture session setup; returned agent record is not used. *)
-  ignore (Coord.bind_session config ~agent_name ~capabilities:[] ());
+  ignore (Workspace.join config ~agent_name ~capabilities:[] ());
   { Tool_task.config; agent_name; sw = None }
 
 let run_transition ctx ~task_id ~action ?(notes = "") () =

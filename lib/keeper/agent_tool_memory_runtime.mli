@@ -14,14 +14,14 @@ val all_memory_search_sources : memory_search_source list
 val valid_memory_search_source_strings : string list
 
 val keeper_memory_search_json
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_work:Keeper_types.working_context
   -> args:Yojson.Safe.t
   -> string
 
 val keeper_context_status_json
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_work:Keeper_types.working_context
   -> string
@@ -49,7 +49,7 @@ val keeper_context_status_json
         long_term_via_explicit_write_not_yet_supported}].
     - On cap drop: [ok=false], [error_kind=rows_dropped_by_cap]. *)
 val keeper_memory_write_json
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> args:Yojson.Safe.t
   -> string
@@ -59,7 +59,7 @@ val keeper_memory_write_max_title_chars : int
 
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
-    [Coord.config]. *)
+    [Workspace.config]. *)
 type memory_write_error_kind =
   | Invalid_memory_kind
   | Title_too_long

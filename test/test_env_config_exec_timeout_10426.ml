@@ -42,7 +42,7 @@ let cases =
     E.Auto_responder, 120.0;
     E.Build_identity, 5.0;
     E.Voice, 60.0;
-    E.Coord_identity, 5.0;
+    E.Workspace_identity, 5.0;
     E.Http_routes, 15.0;
     (* #13081 follow-up — added to fix reviewer-identified budget regressions:
        repo_git.ml was 300s but was mapped to Unknown "misc" (30s fallback);

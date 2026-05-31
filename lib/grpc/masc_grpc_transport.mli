@@ -1,9 +1,9 @@
-(** MASC Agent Transport — protocol selection for MASC coordination.
+(** MASC Agent Transport — protocol selection for MASC workspace.
 
-    Agents communicate with the MASC coordination server via one of:
+    Agents communicate with the MASC workspace server via one of:
     - [Http] — existing HTTP/SSE transport (default, backward compatible).
     - [Grpc] — gRPC transport using grpc-direct h2c.
-    - [Local] — direct filesystem-based Coord calls (in-process).
+    - [Local] — direct filesystem-based Workspace calls (in-process).
 
     Selection order:
     1. Explicit [~transport] parameter on API calls.
@@ -13,10 +13,10 @@
 (** Transport kind. *)
 type t =
   | Http    (** HTTP/SSE to MASC server. *)
-  | Grpc    (** gRPC (h2c) to MASC gRPC coordination port. *)
+  | Grpc    (** gRPC (h2c) to MASC gRPC workspace port. *)
   | Ws      (** WebSocket to MASC server. *)
   | Webrtc  (** WebRTC DataChannel for P2P agent communication. *)
-  | Local   (** Direct Coord filesystem calls (in-process). *)
+  | Local   (** Direct Workspace filesystem calls (in-process). *)
 
 (** Resolve transport from env var [MASC_AGENT_TRANSPORT].
     Returns [Local] when unset or unrecognized. *)

@@ -1,6 +1,6 @@
 (** MASC gRPC Client.
 
-    Client-side wrapper for the MascCoordination gRPC service.
+    Client-side wrapper for the MascWorkspace gRPC service.
     Uses grpc-direct [Client] for HTTP/2 transport. *)
 
 module T = Masc_grpc_types

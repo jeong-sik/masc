@@ -14,7 +14,7 @@ module List = Stdlib.List
 
 type effect_domain =
   | Read_only
-  | Masc_coordination
+  | Masc_workspace
   | Playground_write
   | Host_repo_write
 
@@ -32,7 +32,7 @@ type tool_group =
 
 let effect_domain_to_string = function
   | Read_only -> "read_only"
-  | Masc_coordination -> "masc_coordination"
+  | Masc_workspace -> "masc_workspace"
   | Playground_write -> "playground_write"
   | Host_repo_write -> "host_repo_write"
 
@@ -77,7 +77,7 @@ let inferred_effect_domain_of_typed_tool_name = function
       Some Read_only
   | TN.Keeper (TK.Fs_edit | TK.Fs_write) -> Some Playground_write
   | TN.Keeper TK.Memory_write ->
-      Some Masc_coordination
+      Some Masc_workspace
   | TN.Keeper TK.Board_comment
   | TN.Keeper TK.Board_comment_vote
   | TN.Keeper TK.Board_curation_submit
@@ -102,7 +102,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Voice_session_end
   | TN.Keeper TK.Voice_session_start
   | TN.Keeper TK.Voice_speak ->
-      Some Masc_coordination
+      Some Masc_workspace
   | TN.Masc TM.Deliver
   | TN.Masc TM.Operator_action
   | TN.Masc TM.Start ->
@@ -178,7 +178,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Tool_revoke
   | TN.Masc TM.Transition
   | TN.Masc TM.Update_priority ->
-      Some Masc_coordination
+      Some Masc_workspace
   | TN.Masc_keeper TMK.List
   | TN.Masc_keeper TMK.Persona_audit
   | TN.Masc_keeper TMK.Sandbox_status
@@ -195,7 +195,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc_keeper TMK.Sandbox_start
   | TN.Masc_keeper TMK.Sandbox_stop
   | TN.Masc_keeper TMK.Up ->
-      Some Masc_coordination
+      Some Masc_workspace
 
 let inferred_effect_domain name =
   match Tool_name.of_string name with

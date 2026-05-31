@@ -85,7 +85,7 @@ let keeper_status_fast_default () : bool =
 (* #11111: was 0.5, which fired ContextOverflowImminent at half-window
    on every keeper turn (18 events / 2d, all in 0.50–0.55 band).
    OAS pipeline applies a hard floor of 0.9 when this is unset; we
-   stay just below that so compaction has room to run before the
+   stay just below that so compaction has workspace to run before the
    upstream guard triggers. *)
 let keeper_compact_ratio_rp =
   _rp_float ~key:"keeper.compaction.ratio"

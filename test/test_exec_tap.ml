@@ -97,9 +97,9 @@ let test_gate_decision_shape () =
   let captured = ref "" in
   Exec_tap.enable ~writer:(fun line -> captured := line);
   Exec_tap.record_gate_decision
-    ~actor:"coord/git"
+    ~actor:"workspace/git"
     ~raw_source:"git --version"
-    ~summary:"coord git version"
+    ~summary:"workspace git version"
     ~gate_mode:"parallel"
     ~gate_verdict:"allow"
     ~gate_enforced:false
@@ -108,7 +108,7 @@ let test_gate_decision_shape () =
   let line = !captured in
   Exec_tap.disable ();
   must_contain ~tag:"gate kind" line "\"kind\":\"Exec_gate.decision\"";
-  must_contain ~tag:"actor" line "\"actor\":\"coord/git\"";
+  must_contain ~tag:"actor" line "\"actor\":\"workspace/git\"";
   must_contain ~tag:"mode" line "\"gate_mode\":\"parallel\"";
   must_contain ~tag:"verdict" line "\"gate_verdict\":\"allow\"";
   must_contain ~tag:"enforced" line "\"gate_enforced\":false"

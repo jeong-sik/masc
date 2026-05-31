@@ -37,7 +37,7 @@ let test_make_functor_signature_stable () =
     - Keeper: receipts, phase gate, runtime routing
     - Mcp:    runtime token / transport / dispatch
     - Auth:   token resolution events
-    - Coord:  fleet coordination
+    - Workspace:  fleet workspace
     Other module loggers (Cancel, Session, Backend, etc.) share the
     same functor signature, so checking these four is sufficient. *)
 let test_predefined_loggers_signature_stable () =
@@ -49,10 +49,10 @@ let test_predefined_loggers_signature_stable () =
     "[15d-anchor]";
   Log.Auth.info ?turn_id:None ?keeper_name:None "%s"
     "[15d-anchor]";
-  Log.Coord.info ?turn_id:None ?keeper_name:None "%s"
+  Log.Workspace.info ?turn_id:None ?keeper_name:None "%s"
     "[15d-anchor]";
   Alcotest.(check bool)
-    "Log.{Keeper,Mcp,Auth,Coord} carry ?turn_id and ?keeper_name"
+    "Log.{Keeper,Mcp,Auth,Workspace} carry ?turn_id and ?keeper_name"
     true true
 
 (** Accepting an [int turn_id] specifically (not just [None]) catches

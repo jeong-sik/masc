@@ -4,9 +4,9 @@
     operator snapshot. Reuse short-lived actor-scoped cache entries so warm
     refresh loops and repeated navigation do not recompute identical reads. *)
 
-let cache_partition_segment (_config : Coord_utils.config) = "default"
+let cache_partition_segment (_config : Workspace_utils.config) = "default"
 
-let actor_cache_key (config : Coord_utils.config) prefix actor_name =
+let actor_cache_key (config : Workspace_utils.config) prefix actor_name =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
     (cache_partition_segment config) actor_name
 

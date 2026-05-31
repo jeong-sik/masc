@@ -48,7 +48,7 @@ let deliverable_claims_completion ~task_id deliverable =
         normalized
       || String.starts_with ~prefix:"completed" normalized)
 
-let submit_request_spec ~(config : Coord.config) ~(task : Masc_domain.task)
+let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
   let request_kind, request_summary, next_action, board_type, board_title, board_content =
     match Planning_eio.load config ~task_id:task.id with
@@ -118,9 +118,9 @@ let warn_contract_gap (task : Masc_domain.task) =
        task.id
    | Some _ -> ())
 
-let create_submit_request ~(config : Coord.config)
+let create_submit_request ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
-  let base_path = config.Coord.base_path in
+  let base_path = config.Workspace.base_path in
   warn_contract_gap task;
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
   match
@@ -135,7 +135,7 @@ let create_submit_request ~(config : Coord.config)
       task.id verification_id e;
     Error e
 
-let notify_submit_for_verification ~(config : Coord.config)
+let notify_submit_for_verification ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
   let meta_json = `Assoc [
@@ -176,7 +176,7 @@ let notify_submit_for_verification ~(config : Coord.config)
   ]);
   ()
 
-let on_submit_for_verification ~(config : Coord.config)
+let on_submit_for_verification ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   match create_submit_request ~config ~task ~assignee ~verification_id ~evidence_refs with
   | Error e -> Error e
@@ -184,9 +184,9 @@ let on_submit_for_verification ~(config : Coord.config)
     notify_submit_for_verification ~config ~task ~assignee ~verification_id ~evidence_refs;
     Ok ()
 
-let record_approve_verification ~(config : Coord.config)
+let record_approve_verification ~(config : Workspace.config)
     ~task_id ~verifier ~verification_id ~notes =
-  let base_path = config.Coord.base_path in
+  let base_path = config.Workspace.base_path in
   (* Update Verification.ml state machine: Pending -> Completed Pass.
      Issue #7544. *)
   if verification_id = "" then
@@ -246,7 +246,7 @@ let notify_approve_verification ~task_id ~verifier ~verification_id ~notes =
     ("timestamp", `Float (Time_compat.now ()));
   ])
 
-let on_approve_verification ~(config : Coord.config)
+let on_approve_verification ~(config : Workspace.config)
     ~task_id ~verifier ~verification_id ~notes =
   match
     record_approve_verification ~config ~task_id ~verifier ~verification_id ~notes
@@ -256,9 +256,9 @@ let on_approve_verification ~(config : Coord.config)
     notify_approve_verification ~task_id ~verifier ~verification_id ~notes;
     Ok ()
 
-let record_reject_verification ~(config : Coord.config)
+let record_reject_verification ~(config : Workspace.config)
     ~task_id ~verifier ~verification_id ~reason =
-  let base_path = config.Coord.base_path in
+  let base_path = config.Workspace.base_path in
   (* Update Verification.ml state machine: Pending -> Completed (Fail reason).
      Issue #7544. *)
   if verification_id = "" then
@@ -316,7 +316,7 @@ let notify_reject_verification ~task_id ~verifier ~verification_id ~reason =
     ("timestamp", `Float (Time_compat.now ()));
   ])
 
-let on_reject_verification ~(config : Coord.config)
+let on_reject_verification ~(config : Workspace.config)
     ~task_id ~verifier ~verification_id ~reason =
   match
     record_reject_verification ~config ~task_id ~verifier ~verification_id ~reason
@@ -347,11 +347,11 @@ let awaiting_verification_deadline
          , deadline_ts )
      | None -> None)
 
-let check_timeouts ~(config : Coord.config) =
+let check_timeouts ~(config : Workspace.config) =
   if not (Env_config_runtime.Verification.fsm_enabled ()) then ()
   else
     try
-      let backlog = Coord.read_backlog config in
+      let backlog = Workspace.read_backlog config in
       let now = Time_compat.now () in
       List.iter (fun (task : Masc_domain.task) ->
         match task.task_status with
@@ -412,7 +412,7 @@ let check_timeouts ~(config : Coord.config) =
                  assignee verification_id dl deadline_source
              in
              (match
-                Coord.force_cancel_task_r
+                Workspace.force_cancel_task_r
                   config
                   ~agent_name:"system"
                   ~task_id:task.id

@@ -53,7 +53,7 @@ val enforce_caller_identity :
 (** {1 Inline dispatch fallback} *)
 
 val dispatch :
-  config:Coord.config ->
+  config:Workspace.config ->
   agent_name:string ->
   arguments:Yojson.Safe.t ->
   state:Mcp_server.server_state ->

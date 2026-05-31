@@ -188,7 +188,7 @@ type action_log_entry = {
 }
 
 val append_action_log :
-  Coord.config -> action_log_entry -> unit
+  Workspace.config -> action_log_entry -> unit
 (** Appends [entry] to the operator action log JSONL.
     Pinned because {!Operator_control} reaches it via the
     runtime-include of this module. *)
@@ -236,7 +236,7 @@ val snapshot_json :
     {!Operator_control} re-exposes it via the
     runtime-include of this module. *)
 
-val recent_actions_json : Coord.config -> Yojson.Safe.t
+val recent_actions_json : Workspace.config -> Yojson.Safe.t
 (** Returns the most recent operator-action log entries
     as a [`List].  Returns [`List []] when the log file
     is missing.  Pinned for the same runtime-include
@@ -244,7 +244,7 @@ val recent_actions_json : Coord.config -> Yojson.Safe.t
 
 val cached_tool_audit_json :
   lightweight:bool ->
-  Coord.config ->
+  Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t
 (** Returns the cached tool-audit JSON for a keeper.

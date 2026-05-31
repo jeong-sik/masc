@@ -10,7 +10,7 @@ open Server_dashboard_http_runtime_support
     Pool reference is shared via [Executor_pool_ref] in masc_core. *)
 let set_executor_pool = Server_dashboard_http_runtime_support.set_executor_pool
 
-let dashboard_runtime ?net ?mono_clock (config : Coord.config)
+let dashboard_runtime ?net ?mono_clock (config : Workspace.config)
   : Server_dashboard_http_runtime_support.runtime option
   =
   let _ = config in
@@ -25,7 +25,7 @@ let run_dashboard_compute
       ?mono_clock
       ~sw
       ~clock
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       compute
   =
   let runtime = dashboard_runtime ?net ?mono_clock config in

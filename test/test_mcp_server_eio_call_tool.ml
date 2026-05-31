@@ -318,13 +318,13 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   let keeper_name = "sangsu-task-contract" in
-  let config = Masc_mcp.Coord.default_config base_path in
-  ignore (Masc_mcp.Coord.init config ~agent_name:(Some keeper_name));
+  let config = Masc_mcp.Workspace.default_config base_path in
+  ignore (Masc_mcp.Workspace.init config ~agent_name:(Some keeper_name));
   let contract =
     contract_requiring_tools [ "tool_execute"; "tool_edit_file" ]
   in
   ignore
-    (Masc_mcp.Coord.add_task
+    (Masc_mcp.Workspace.add_task
        ~contract
        config
        ~title:"Needs execution tools"

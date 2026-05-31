@@ -10,7 +10,7 @@
    causes measured on 2026-05-19 (TOCTOU race between [list_dir] and
    delete-then-replace writers, and [ENFILE]/[EMFILE] FD pressure).
    PR-1 is pure additive: callers continue to use [Entry_load_error].
-   PR-2 promotes [Coord_verification_store.load_request_header] to a
+   PR-2 promotes [Workspace_verification_store.load_request_header] to a
    typed [load_error]. PR-3 routes the new variants away from the
    data-integrity WARN/counter path. *)
 

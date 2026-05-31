@@ -292,7 +292,7 @@ let task_status_to_string = function
 
 let string_of_task_status = task_status_to_string
 
-(** Display icon for task status. Used by coord_status and coord_query
+(** Display icon for task status. Used by workspace_status and workspace_query
     rendering. Exhaustive match — adding a constructor forces an update here. *)
 let task_status_icon = function
   | Todo -> "📋"
@@ -732,8 +732,8 @@ type message = {
   relevance: string; [@default "medium"]
 } [@@deriving yojson { strict = false }, show]
 
-(** Coord state *)
-type coord_state = {
+(** Workspace state *)
+type workspace_state = {
   protocol_version: string;
   project: string;
   started_at: string;
@@ -741,7 +741,7 @@ type coord_state = {
   active_agents: string list;
   paused: bool; [@default false]  (** Global pause flag - when true, orchestrator won't spawn *)
   pause_reason: string option; [@default None]  (** Reason for pause *)
-  paused_by: string option; [@default None]  (** Who paused the room *)
+  paused_by: string option; [@default None]  (** Who paused the workspace *)
   paused_at: string option; [@default None]  (** When paused *)
   search_strategy_default: string option; [@default None]
   speculation_enabled: bool; [@default false]
@@ -1024,7 +1024,7 @@ type tool_schema = {
 }
 
 (** Structured result for claim_next scheduling (avoids brittle string parsing).
-    Defined here so that both Coord_task_schedule (producer) and consumers
+    Defined here so that both Workspace_task_schedule (producer) and consumers
     (tool_task, orchestrator) can reference the type without
     triggering warning 34 from [include] re-export. *)
 type claim_next_result =

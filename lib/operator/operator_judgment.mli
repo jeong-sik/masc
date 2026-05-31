@@ -1,7 +1,8 @@
 (** Operator_judgment — operator-level judgment records persisted
     to [<masc_dir>/operator/judgments.jsonl].
 
-    A judgment captures one operator-level decision with provenance, freshness
+    A judgment captures one operator-level decision (currently:
+    workspace-level scope decisions) with provenance, freshness
     window, supersedes-chain, confidence, evidence refs, and
     optional recommended-action JSON.
 
@@ -12,9 +13,18 @@
 
 (** {1 Types} *)
 
+type target_type = Workspace
+(** Currently a single constructor.  Closed variant — adding a
+    second target (e.g. [Keeper]) must extend
+    {!target_type_to_string} / {!target_type_of_string}
+    explicitly so the JSONL on-disk format remains
+    backward-compatible. *)
+
 type record = {
   judgment_id : string;
   surface : string;
+  target_type : target_type;
+  target_id : string option;
   status : string;
   summary : string;
   confidence : float;
@@ -35,20 +45,33 @@ type record = {
     ({!Operator_control_action}, {!Dashboard_operator_judge},
     {!test_operator_control_judgment}) field-access the record
     when projecting to JSON or checking specific fields.  All
-    17 fields are part of the on-disk JSONL contract — drift
-    requires coordinated migration. *)
+    19 fields are part of the on-disk JSONL contract — drift
+    requires synchronized migration. *)
+
+(** {1 target_type codec} *)
+
+val target_type_to_string : target_type -> string
+(** [Workspace -> "workspace"].  Pinned literal for the on-disk JSONL format. *)
+
+val target_type_of_string : string -> target_type option
+(** Accepts only the canonical [["workspace"]] target type for [Workspace].
+    Historical [["workspace"]] / [["namespace"]] aliases are rejected at
+    the parse boundary. *)
 
 (** {1 JSON codec} *)
 
 val to_yojson : record -> Yojson.Safe.t
-(** Renders the 18-field JSON object (17 record fields +
+(** Renders the 20-field JSON object (19 record fields +
     [["provenance": "judgment"]] tag).  The provenance literal
     is pinned — dashboard consumers grep on it to distinguish
     judgment posts from other JSONL records. *)
 
 val of_yojson : Yojson.Safe.t -> (record, string) result
-(** Parses the JSON object back to a record. Field-by-field reads via
-    Yojson.Util may raise [Type_error], which is caught and surfaced as
+(** Parses the JSON object back to a record.  Fail-fast:
+    returns [Error "missing target_type"] / [Error "invalid
+    target_type"] when the [target_type] field is missing or
+    unrecognised; field-by-field reads via Yojson.Util may
+    raise [Type_error] which is caught and surfaced as
     [Error]. *)
 
 (** {1 Freshness} *)
@@ -67,33 +90,42 @@ val is_fresh : ?now:float -> record -> bool
 
 (** {1 Persistence} *)
 
-val judgments_path : Coord.config -> string
+val judgments_path : Workspace.config -> string
 (** [judgments_path config] returns
     [<masc_dir>/operator/judgments.jsonl].  Exposed for tests
     that assert path existence after a [record] call. *)
 
-val load_all : Coord.config -> record list
+val load_all : Workspace.config -> record list
 (** Reads every JSONL entry from the judgments file, parses,
     and returns the records.  Parse failures are logged at
     [Log.Governance.warn] and skipped — operator alerts on
     "operator judgment parse:" prefix.  Returns the empty list
     when the file does not exist. *)
 
-(** {1 Lookup} *)
+(** {1 Lookup}
+
+    Records are keyed by [(surface, target_type, target_id)]
+    triple.  When [target_id] is [None] or empty/whitespace, the
+    composite key uses the literal [["__workspace__"]] sentinel —
+    pinned because it must remain stable across runs. *)
 
 val latest_active :
-  Coord.config ->
+  Workspace.config ->
   surface:string ->
+  target_type:target_type ->
+  target_id:string option ->
   record option
 (** Returns the most-recently-generated record for the
-    [surface] key, comparing by [generated_at_unix]. None when the key
-    has no records. *)
+    [(surface, target_type, target_id)] key, comparing by
+    [generated_at_unix].  None when the key has no records. *)
 
 (** {1 Write} *)
 
 val record :
-  Coord.config ->
+  Workspace.config ->
   surface:string ->
+  target_type:target_type ->
+  target_id:string option ->
   summary:string ->
   confidence:float ->
   ?model_name:string ->
@@ -109,8 +141,8 @@ val record :
   keeper_name:string ->
   unit ->
   record
-(** [record config ~surface ~summary ~confidence ... ()] persists a new
-    judgment record.
+(** [record config ~surface ~target_type ~target_id ~summary
+    ~confidence ... ()] persists a new judgment record.
 
     {2 Side effects}
 

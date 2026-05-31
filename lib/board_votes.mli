@@ -271,7 +271,7 @@ type voter_kind =
 
 val classify_voter_target : string -> voter_kind
 (** [classify_voter_target target] derives the typed {!voter_kind}
-    from a vote-log target key ([coord:agent] tuple or bare agent
+    from a vote-log target key ([workspace:agent] tuple or bare agent
     name).  Extracts the voter segment after the rightmost [':']
     then dispatches on the [hot-voter-] / [synthetic-voter-] /
     [test-voter-] prefixes (matching the legacy

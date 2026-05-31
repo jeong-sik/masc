@@ -18,8 +18,8 @@ include Keeper_approval_queue_rules
    or poison the registry after a recoverable store-creation failure. *)
 (** Dated JSONL audit trail for approval events.
     Stored at [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl].
-    Dashboard and coord-scoped keeper runs pass [base_path] explicitly so approval
-    history stays with the coord that made the decision. *)
+    Dashboard and workspace-scoped keeper runs pass [base_path] explicitly so approval
+    history stays with the workspace that made the decision. *)
 let audit_stores_mu = Stdlib.Mutex.create ()
 
 let audit_io_mu = Stdlib.Mutex.create ()

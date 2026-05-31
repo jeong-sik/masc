@@ -64,7 +64,7 @@ let persist_directive_meta_update
   : unit
   =
   let keeper_filename = entry.name ^ ".json" in
-  let masc_root = Coord_utils.masc_dir_from_base_path ~base_path:entry.base_path in
+  let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
   let default_path =
     Filename.concat (Filename.concat masc_root "keepers") keeper_filename
   in
@@ -369,7 +369,7 @@ let run_grpc_heartbeat_fiber
       ~sw
       ~stop
       ~(grpc_client : Masc_grpc_client.t)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(agent_name : string)
       ~(session_id : string)
       ~(interval_sec : float)
@@ -473,9 +473,9 @@ let start_keeper_grpc_heartbeat
 
 let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_meta =
   try
-    if not (Coord_utils.is_initialized ctx.config)
+    if not (Workspace_utils.is_initialized ctx.config)
     then (
-      let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
+      let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
       ());
     let m =
       match repair_identity_drift_for_keepalive ~ctx m with
@@ -528,7 +528,7 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", m.name; "phase", "bootstrap-catch" ]
       ();
-    Log.Keeper.error "coord presence bootstrap failed: %s" (Printexc.to_string exn);
+    Log.Keeper.error "workspace presence bootstrap failed: %s" (Printexc.to_string exn);
     m
 ;;
 

@@ -1,11 +1,11 @@
 module Types = Masc_domain
 
-(** Goal tool coverage — shared Goal Store surface through Tool_coord. *)
+(** Goal tool coverage — shared Goal Store surface through Tool_workspace. *)
 
 open Alcotest
 open Masc_mcp
-open Coord_types
-open Tool_coord
+open Workspace_types
+open Tool_workspace
 
 let temp_dir () =
   let path = Filename.temp_file "goal_tool_test" "" in
@@ -28,7 +28,7 @@ let rm_rf dir =
   | _ -> ()
 ;;
 
-let with_room f =
+let with_workspace f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -36,12 +36,12 @@ let with_room f =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-       let config = Coord.default_config dir in
-       ignore (Coord.init config ~agent_name:(Some "planner"));
+       let config = Workspace.default_config dir in
+       ignore (Workspace.init config ~agent_name:(Some "planner"));
        f config)
 ;;
 
-let coord_ctx config : Tool_coord.context = { Tool_coord.config; agent_name = "planner" }
+let workspace_ctx config : Tool_workspace.context = { Tool_workspace.config; agent_name = "planner" }
 
 let parse_json_result (result : Tool_result.result) =
   if (Tool_result.is_success result)
@@ -85,14 +85,14 @@ let contains_substring s needle =
 
 let create_done_task config ~goal_id ~title =
   ignore
-    (Coord_task.add_task
+    (Workspace_task.add_task
        ~goal_id
        config
        ~title
        ~priority:3
        ~description:"done task fixture");
   let task_id =
-    Coord.get_tasks_raw config
+    Workspace.get_tasks_raw config
     |> List.find_map (fun (task : Masc_domain.task) ->
       if String.equal task.title title then Some task.id else None)
     |> function
@@ -101,7 +101,7 @@ let create_done_task config ~goal_id ~title =
   in
   let step action notes =
     match
-      Coord.transition_task_r config ~agent_name:"planner" ~task_id ~action ~notes ()
+      Workspace.transition_task_r config ~agent_name:"planner" ~task_id ~action ~notes ()
     with
     | Ok _ -> ()
     | Error err -> fail (Masc_domain.masc_error_to_string err)
@@ -120,11 +120,11 @@ let expect_error (result : Tool_result.result option) =
 ;;
 
 let test_goal_upsert_and_list () =
-  with_room
+  with_workspace
   @@ fun config ->
   let created =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_upsert"
       ~args:
         (`Assoc
@@ -156,8 +156,8 @@ let test_goal_upsert_and_list () =
   check bool "title marker omitted" true
     (Yojson.Safe.Util.member "task_title_marker" created_json = `Null);
   let listed =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_list"
       ~args:(`Assoc [ "horizon", `String "mid" ])
   in
@@ -179,7 +179,7 @@ let test_goal_upsert_and_list () =
 ;;
 
 let test_goal_list_filters_by_phase () =
-  with_room
+  with_workspace
   @@ fun config ->
   let create ~title ~phase =
     let phase =
@@ -194,8 +194,8 @@ let test_goal_list_filters_by_phase () =
   create ~title:"Executing goal" ~phase:"executing";
   create ~title:"Blocked goal" ~phase:"blocked";
   let listed =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_list"
       ~args:(`Assoc [ "phase", `String "blocked" ])
   in
@@ -213,14 +213,14 @@ let test_goal_list_filters_by_phase () =
 ;;
 
 let test_goal_list_ignores_blank_optional_filters () =
-  with_room
+  with_workspace
   @@ fun config ->
   (match Goal_store.upsert_goal config ~title:"Blank filter goal" () with
    | Ok _ -> ()
    | Error msg -> fail msg);
   let listed =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_list"
       ~args:(`Assoc [ "horizon", `String ""; "phase", `String "" ])
   in
@@ -237,11 +237,11 @@ let test_goal_list_ignores_blank_optional_filters () =
 ;;
 
 let test_goal_list_rejects_status_filter () =
-  with_room
+  with_workspace
   @@ fun config ->
   let rejected =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_list"
       ~args:(`Assoc [ "status", `String "active" ])
   in
@@ -266,11 +266,11 @@ let test_goal_list_rejects_status_filter () =
 ;;
 
 let test_goal_upsert_rejects_lifecycle_fields () =
-  with_room
+  with_workspace
   @@ fun config ->
   let rejected_phase =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_upsert"
       ~args:(`Assoc [ "title", `String "Bypass block"; "phase", `String "blocked" ])
   in
@@ -291,8 +291,8 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     | Error msg -> fail msg
   in
   let rejected_status =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_upsert"
       ~args:(`Assoc [ "id", `String goal.id; "status", `String "dropped" ])
   in
@@ -316,11 +316,11 @@ let test_goal_upsert_rejects_lifecycle_fields () =
 
 let test_goal_upsert_normalizes_noop_verifier_policy () =
   let assert_no_policy args =
-    with_room
+    with_workspace
     @@ fun config ->
     let created =
-      Tool_coord.dispatch
-        (coord_ctx config)
+      Tool_workspace.dispatch
+        (workspace_ctx config)
         ~name:"masc_goal_upsert"
         ~args:(`Assoc (("title", `String "No-op verifier policy") :: args))
     in
@@ -346,11 +346,11 @@ let test_goal_upsert_normalizes_noop_verifier_policy () =
 ;;
 
 let test_goal_upsert_rejects_malformed_verifier_policy_shape () =
-  with_room
+  with_workspace
   @@ fun config ->
   let rejected =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_upsert"
       ~args:
         (`Assoc
@@ -368,7 +368,7 @@ let test_goal_upsert_rejects_malformed_verifier_policy_shape () =
 ;;
 
 let test_goal_transition_verification_to_completion () =
-  with_room
+  with_workspace
   @@ fun config ->
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
@@ -388,8 +388,8 @@ let test_goal_transition_verification_to_completion () =
   in
   create_done_task config ~goal_id:goal.id ~title:"Verify done task";
   let transitioned =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -422,8 +422,8 @@ let test_goal_transition_verification_to_completion () =
      |> Yojson.Safe.Util.member "latest_request"
      |> fun json -> get_string_field json "id");
   let verified =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_verify"
       ~args:
         (`Assoc
@@ -494,7 +494,7 @@ let test_goal_transition_verification_to_completion () =
 ;;
 
 let test_goal_transition_rejected_verification_retains_evidence () =
-  with_room
+  with_workspace
   @@ fun config ->
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
@@ -514,8 +514,8 @@ let test_goal_transition_rejected_verification_retains_evidence () =
   in
   create_done_task config ~goal_id:goal.id ~title:"Reject done task";
   let transitioned =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -535,8 +535,8 @@ let test_goal_transition_rejected_verification_retains_evidence () =
     |> fun json -> get_string_field json "id"
   in
   let rejected =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_verify"
       ~args:
         (`Assoc
@@ -598,7 +598,7 @@ let test_goal_transition_rejected_verification_retains_evidence () =
 ;;
 
 let test_goal_transition_manual_reject_blocks_and_cancels_request () =
-  with_room
+  with_workspace
   @@ fun config ->
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
@@ -618,8 +618,8 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
   in
   create_done_task config ~goal_id:goal.id ~title:"Manual reject done task";
   let transitioned =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -639,8 +639,8 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
     |> fun json -> get_string_field json "id"
   in
   let rejected =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -683,7 +683,7 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
 ;;
 
 let test_goal_transition_approval_gate () =
-  with_room
+  with_workspace
   @@ fun config ->
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
@@ -710,8 +710,8 @@ let test_goal_transition_approval_gate () =
   in
   create_done_task config ~goal_id:goal.id ~title:"Approval done task";
   let transitioned =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -731,8 +731,8 @@ let test_goal_transition_approval_gate () =
     |> fun json -> get_string_field json "id"
   in
   let verified =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_verify"
       ~args:
         (`Assoc
@@ -755,8 +755,8 @@ let test_goal_transition_approval_gate () =
      |> Yojson.Safe.Util.member "goal"
      |> fun json -> get_string_field json "phase");
   let approved =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -780,11 +780,11 @@ let test_goal_transition_approval_gate () =
 ;;
 
 let test_goal_review_removed_from_dispatch () =
-  with_room
+  with_workspace
   @@ fun config ->
   let result =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_review"
       ~args:(`Assoc [ "goal_id", `String "goal-legacy"; "outcome", `String "done" ])
   in
@@ -792,7 +792,7 @@ let test_goal_review_removed_from_dispatch () =
 ;;
 
 let test_goal_completion_requires_linked_task () =
-  with_room
+  with_workspace
   @@ fun config ->
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"No task completion" () with
@@ -800,8 +800,8 @@ let test_goal_completion_requires_linked_task () =
     | Error msg -> fail msg
   in
   let completed =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -824,7 +824,7 @@ let test_goal_completion_requires_linked_task () =
 ;;
 
 let test_goal_completion_blocks_open_tasks () =
-  with_room
+  with_workspace
   @@ fun config ->
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"Open task completion" () with
@@ -832,15 +832,15 @@ let test_goal_completion_blocks_open_tasks () =
     | Error msg -> fail msg
   in
   ignore
-    (Coord_task.add_task
+    (Workspace_task.add_task
        ~goal_id:goal.id
        config
        ~title:"Still open"
        ~priority:3
        ~description:"open");
   let completed =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -858,7 +858,7 @@ let test_goal_completion_blocks_open_tasks () =
 ;;
 
 let test_goal_completion_override_allows_empty_goal () =
-  with_room
+  with_workspace
   @@ fun config ->
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"Override completion" () with
@@ -866,8 +866,8 @@ let test_goal_completion_override_allows_empty_goal () =
     | Error msg -> fail msg
   in
   let completed =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -892,7 +892,7 @@ let test_goal_completion_override_allows_empty_goal () =
 ;;
 
 let test_operator_actions_require_operator_principal () =
-  with_room
+  with_workspace
   @@ fun config ->
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"Only operators can block" () with
@@ -900,8 +900,8 @@ let test_operator_actions_require_operator_principal () =
     | Error msg -> fail msg
   in
   let blocked =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -925,7 +925,7 @@ let test_operator_actions_require_operator_principal () =
 ;;
 
 let test_completion_approval_requires_operator_principal () =
-  with_room
+  with_workspace
   @@ fun config ->
   let goal, _kind =
     match
@@ -939,8 +939,8 @@ let test_completion_approval_requires_operator_principal () =
     | Error msg -> fail msg
   in
   let approved =
-    Tool_coord.dispatch
-      (coord_ctx config)
+    Tool_workspace.dispatch
+      (workspace_ctx config)
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
@@ -970,7 +970,7 @@ let test_completion_approval_requires_operator_principal () =
 let () =
   run
     "goal_tools"
-    [ ( "tool_coord"
+    [ ( "tool_workspace"
       , [ test_case "upsert and list" `Quick test_goal_upsert_and_list
         ; test_case "list filters by phase" `Quick test_goal_list_filters_by_phase
         ; test_case

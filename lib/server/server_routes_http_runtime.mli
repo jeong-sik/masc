@@ -105,7 +105,7 @@ val health_path_diagnostics :
 (** [health_path_diagnostics ()] resolves the base-path
     diagnostics for the [/health] response.  When the runtime
     state is initialised, reads from
-    [state.coord_config.base_path]; otherwise falls back to the
+    [state.workspace_config.base_path]; otherwise falls back to the
     default base path computed from env. *)
 
 val make_health_json :
@@ -275,7 +275,7 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 val board_post_detail_json :
   include_moderation:bool ->
   blind_votes:bool ->
-  config:Coord.config option ->
+  config:Workspace.config option ->
   voter:string option ->
   response_format:string ->
   post_id:string ->

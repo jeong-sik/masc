@@ -3,7 +3,7 @@
     This avoids the large shared [tests] stanza while still exercising the
     real handler path that used to rely only on allowed_paths resolution. *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 module Agent_tool_filesystem_runtime = Masc_mcp.Agent_tool_filesystem_runtime
@@ -77,7 +77,7 @@ let setup f =
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        Keeper_registry.clear ();
-       let config = Coord.default_config base in
+       let config = Workspace.default_config base in
        let meta = make_meta "tester" in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;

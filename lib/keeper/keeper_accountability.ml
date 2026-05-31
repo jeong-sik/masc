@@ -33,7 +33,7 @@ let candidate_decision_keeper_names keeper_name =
   |> List.sort_uniq String.compare
 ;;
 
-let keeper_decision_log_path (config : Coord_query.config) name =
+let keeper_decision_log_path (config : Workspace_query.config) name =
   let keepers_dir =
     Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "keepers"
   in
@@ -185,11 +185,11 @@ let make_claim_id ~agent_name ~kind ~subject ~task_id ~created_at =
   "acct-" ^ String.sub digest 0 12
 ;;
 
-let append_claim (config : Coord_query.config) (event : claim_event) =
+let append_claim (config : Workspace_query.config) (event : claim_event) =
   Dated_jsonl.append (get_store config) (claim_event_to_json event)
 ;;
 
-let append_resolution (config : Coord_query.config) (event : resolution_event) =
+let append_resolution (config : Workspace_query.config) (event : resolution_event) =
   Dated_jsonl.append (get_store config) (resolution_event_to_json event)
 ;;
 
@@ -213,8 +213,8 @@ let resolution_for_claim
   }
 ;;
 
-let task_title_for_id (config : Coord_query.config) task_id =
-  Coord_query.get_tasks_safe config
+let task_title_for_id (config : Workspace_query.config) task_id =
+  Workspace_query.get_tasks_safe config
   |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
   |> Option.map (fun (task : Masc_domain.task) -> task.title)
 ;;
@@ -353,7 +353,7 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
    actions explicitly produce no commitment side effects -- their
    accountability tracking lives in [record_completion_claim]. *)
 let record_task_transition
-      (config : Coord_query.config)
+      (config : Workspace_query.config)
       ~agent_name
       ~task_id
       ~(transition : Masc_domain.task_action)
@@ -412,7 +412,7 @@ let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =
 ;;
 
 let record_completion_claim
-      (config : Coord_query.config)
+      (config : Workspace_query.config)
       ~keeper_name
       ~agent_name
       ~trace_id
@@ -736,7 +736,7 @@ let accountability_snapshot_cache :
    call; it is per-keeper and cheap relative to the window scan. *)
 let accountability_snapshot_ttl_s = 3.0
 
-let build_accountability_snapshot (config : Coord_query.config) :
+let build_accountability_snapshot (config : Workspace_query.config) :
     accountability_snapshot =
   let now = Time_compat.now () in
   let cutoff = summary_cutoff now in
@@ -758,7 +758,7 @@ let build_accountability_snapshot (config : Coord_query.config) :
       add_snapshot by_keeper snapshot.claim.keeper_name snapshot));
   { snap_now = now; by_agent; by_keeper }
 
-let cached_accountability_snapshot (config : Coord_query.config) :
+let cached_accountability_snapshot (config : Workspace_query.config) :
     accountability_snapshot =
   let key = config.base_path in
   let now = Time_compat.now () in
@@ -770,7 +770,7 @@ let cached_accountability_snapshot (config : Coord_query.config) :
       Hashtbl.replace accountability_snapshot_cache key (now, snap);
       snap
 
-let accountability_summary_lookup (config : Coord_query.config) =
+let accountability_summary_lookup (config : Workspace_query.config) =
   let { snap_now = now; by_agent; by_keeper } =
     cached_accountability_snapshot config
   in
@@ -795,7 +795,7 @@ let accountability_summary_lookup (config : Coord_query.config) =
     |> with_accountability_coverage ~coverage_gap ~decision_activity
 ;;
 
-let accountability_summary_json (config : Coord_query.config) ~keeper_name ~agent_name =
+let accountability_summary_json (config : Workspace_query.config) ~keeper_name ~agent_name =
   accountability_summary_lookup config ~keeper_name ~agent_name
 ;;
 

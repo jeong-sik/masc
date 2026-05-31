@@ -49,4 +49,4 @@ val handle_keeper_status :
 
 (** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
 val handle_keeper_status_config :
-  config:Coord.config -> agent_name:string -> Yojson.Safe.t -> tool_result
+  config:Workspace.config -> agent_name:string -> Yojson.Safe.t -> tool_result

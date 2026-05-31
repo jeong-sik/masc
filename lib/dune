@@ -120,7 +120,7 @@
  server_routes_http_keeper_stream
  server_routes_http_sidecar_paths
  server_routes_http_routes_frontend
- server_routes_http_routes_coord
+ server_routes_http_routes_workspace
  server_routes_http_dashboard_provider_logs
  server_routes_http_routes_dashboard
  server_routes_http_routes_activity
@@ -289,9 +289,9 @@
   tool_local_runtime_probe
   ;; tool_inline_dispatch sub-modules
   tool_inline_dispatch_types
-  tool_inline_dispatch_coord
+  tool_inline_dispatch_workspace
   tool_inline_dispatch_comm
-  coord_goals_verification
+  workspace_goals_verification
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
   tool_misc_admin
@@ -363,7 +363,7 @@
    cstruct
    digestif
    ocaml-protoc-plugin
-   ;; Protobuf-generated types from proto/masc_coordination.proto
+   ;; Protobuf-generated types from proto/masc_workspace.proto
    masc_proto
    ;; grpc grpc-lwt - disabled (h2 version conflict with httpun-eio)
    ;; grpc-direct (native Eio gRPC from lib/grpc-direct)
@@ -416,7 +416,7 @@
    masc_mcp.keeper_skill_routing
    ;; RFC-0056 Phase 1C — Host_config leaf module extracted to
    ;; lib/host_config/. RFC-0084 §1.5/§3.4 typed host configuration record;
-   ;; deps: stdlib + masc_mcp.coord (already sub-library).
+   ;; deps: stdlib + masc_mcp.workspace (already sub-library).
    masc_mcp.host_config
    ;; RFC-0056 Phase 1D — Briefing_compactors leaf module extracted to
    ;; lib/briefing_compactors/. 174+21 LoC, deps: stdlib + Yojson +
@@ -568,11 +568,11 @@
    masc_mcp.masc_exec_command_gate
    ;; Board types (extracted sub-library — first step toward board isolation)
    masc_board
-   ;; Random identifier helper — shared between masc_coord and masc_mcp
+   ;; Random identifier helper — shared between masc_workspace and masc_mcp
    ;; so the vrf-/p-/c-/fn- generation algorithm lives in one place.
    masc_random_id
-   ;; Room coordination (extracted sub-library)
-   masc_coord
+   ;; Workspace workspace (extracted sub-library)
+   masc_workspace
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
    masc_mcp.ide

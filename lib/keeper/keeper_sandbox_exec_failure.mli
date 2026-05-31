@@ -31,7 +31,7 @@ val docker_failure_message_with_context :
   string
 
 val record_docker_failure :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   image:string ->
   container_kind:string ->

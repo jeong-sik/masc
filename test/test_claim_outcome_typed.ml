@@ -19,7 +19,7 @@
 open Alcotest
 
 let outcome_carries_both_fields () =
-  let o : Masc_mcp.Coord.claim_outcome =
+  let o : Masc_mcp.Workspace.claim_outcome =
     { message = "alice claimed t-1 (auto-released t-2)"
     ; auto_released_task_ids = [ "t-2" ]
     }
@@ -30,7 +30,7 @@ let outcome_carries_both_fields () =
     [ "t-2" ] o.auto_released_task_ids
 
 let outcome_empty_list_when_no_preemption () =
-  let o : Masc_mcp.Coord.claim_outcome =
+  let o : Masc_mcp.Workspace.claim_outcome =
     { message = "alice claimed t-1"
     ; auto_released_task_ids = []
     }
@@ -42,7 +42,7 @@ let outcome_empty_list_when_no_preemption () =
     [`Assoc [ ...; ("auto_released_task_ids", `List [...]) ]]. If a future
     refactor renames or drops the field, this test fails. *)
 let json_encode_includes_field () =
-  let o : Masc_mcp.Coord.claim_outcome =
+  let o : Masc_mcp.Workspace.claim_outcome =
     { message = "irrelevant"
     ; auto_released_task_ids = [ "t-2"; "t-3" ]
     }

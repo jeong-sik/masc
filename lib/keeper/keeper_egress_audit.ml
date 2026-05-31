@@ -28,7 +28,7 @@
     location, so the [Stale_orphan] class only applies to Docker
     keepers. *)
 
-module Coord = Coord
+module Workspace = Workspace
 module Keeper_types = Keeper_types
 
 type audit_status =
@@ -43,7 +43,7 @@ type result = {
   status : audit_status;
 }
 
-let host_direct_egress_path ~(config : Coord.config)
+let host_direct_egress_path ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
   (* The pre-Leak-11 location used by host (Local) keepers and by the
      external setup script that seeded executor's file at the wrong
@@ -54,7 +54,7 @@ let host_direct_egress_path ~(config : Coord.config)
        (Filename.concat ".masc/playground" meta.name))
     "egress.json"
 
-let audit_one ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) =
+let audit_one ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) =
   let expected = Keeper_sandbox_runner.egress_policy_path ~config ~meta in
   let status =
     match meta.sandbox_profile with
@@ -76,7 +76,7 @@ let audit_one ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta
     status;
   }
 
-let audit_all ~(config : Coord.config) ~(metas : Keeper_meta_contract.keeper_meta list)
+let audit_all ~(config : Workspace.config) ~(metas : Keeper_meta_contract.keeper_meta list)
     =
   List.map (fun meta -> audit_one ~config ~meta) metas
 

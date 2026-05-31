@@ -29,8 +29,8 @@ let handle_broadcast state agent_name reqd body_str =
     let json = Yojson.Safe.from_string body_str in
     match Json_util.assoc_member_opt "message" json with
     | Some (`String message) ->
-        let config = state.Mcp_server.coord_config in
-        let _ = Coord.broadcast config ~from_agent:agent_name ~content:message in
+        let config = state.Mcp_server.workspace_config in
+        let _ = Workspace.broadcast config ~from_agent:agent_name ~content:message in
         reply true None
     | Some `Null -> reply false (Some "missing required field: message")
     | None | Some _ -> reply false (Some "field 'message' must be a string")
@@ -78,12 +78,12 @@ let handle_dashboard_task_history state req reqd =
     in
     let cache_key =
       Printf.sprintf "task_history:%s:%s:%d"
-        state.Mcp_server.coord_config.base_path task_id limit
+        state.Mcp_server.workspace_config.base_path task_id limit
     in
     let json =
       Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
         Domain_pool_ref.submit_io_or_inline (fun () ->
-          Tool_task.task_history_events_json state.Mcp_server.coord_config
+          Tool_task.task_history_events_json state.Mcp_server.workspace_config
             ~task_id ~limit))
     in
     Http.Response.json_value ~compress:true ~request:req json reqd
@@ -98,16 +98,16 @@ let handle_dashboard_workspace state req reqd =
     | Some _ as value -> value
     | None -> trimmed_query_param req "agent"
   in
-  (* Dashboard_workspace.json queries up to ~1000 messages from Coord per request
+  (* Dashboard_workspace.json queries up to ~1000 messages from Workspace per request
      (uncached, ~4.7s measured solo; under a parallel dashboard burst it held
      the single Eio HTTP domain and dragged co-fired requests to ~3.4s). Cache
      + offload via respond_cached_read; cache_key carries limit + actor so
-     param variants stay distinct. Shared by /dashboard/workspace and /coords. *)
+     param variants stay distinct. Shared by /dashboard/workspace and /workspaces. *)
   let cache_key =
     Printf.sprintf "workspace:%s:%d:%s"
-      state.Mcp_server.coord_config.base_path limit
+      state.Mcp_server.workspace_config.base_path limit
       (Option.value ~default:"" me)
   in
   Server_routes_http_common.respond_cached_read ~request:req ~reqd ~cache_key
     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s (fun () ->
-      Dashboard_workspace.json ~config:state.Mcp_server.coord_config ?me ~limit ())
+      Dashboard_workspace.json ~config:state.Mcp_server.workspace_config ?me ~limit ())

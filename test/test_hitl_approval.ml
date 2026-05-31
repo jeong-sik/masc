@@ -170,7 +170,7 @@ let with_test_config f =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      f state.coord_config)
+      f state.workspace_config)
 
 let with_eio_base_path f =
   Eio_main.run @@ fun env ->
@@ -843,9 +843,9 @@ let test_resolve_with_policy_does_not_remember_high_allow () =
       | Error err ->
           Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err)
 
-let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
+let test_dashboard_resolve_and_delete_rules_use_workspace_base_path () =
   let env_base = temp_dir () in
-  let room_base = temp_dir () in
+  let workspace_base = temp_dir () in
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   AQ.For_testing.reset_audit_store ();
@@ -861,20 +861,20 @@ let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
        | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
        | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       cleanup_dir env_base;
-      cleanup_dir room_base)
+      cleanup_dir workspace_base)
     (fun () ->
       let id =
         AQ.submit_pending
-          ~keeper_name:"dashboard-room-keeper"
+          ~keeper_name:"dashboard-workspace-keeper"
           ~tool_name:"masc_transition"
           ~input:
             (`Assoc
               [
                 ("action", `String "claim");
-                ("task_id", `String "task-room");
+                ("task_id", `String "task-workspace");
               ])
           ~risk_level:AQ.Medium
-          ~base_path:room_base
+          ~base_path:workspace_base
           ~on_resolution:(fun _ -> ())
           ()
       in
@@ -888,7 +888,7 @@ let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
       in
       let rule_id =
         match
-          SDH.dashboard_governance_approval_resolve_http_json ~base_path:room_base
+          SDH.dashboard_governance_approval_resolve_http_json ~base_path:workspace_base
             ~args:resolve_args
         with
         | Ok json ->
@@ -899,29 +899,29 @@ let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
               ("dashboard resolve failed: "
               ^ SDH.approval_resolve_http_error_to_string err)
       in
-      Alcotest.(check int) "room rule persisted" 1
-        (List.length (AQ.list_rules ~base_path:room_base ()));
+      Alcotest.(check int) "workspace rule persisted" 1
+        (List.length (AQ.list_rules ~base_path:workspace_base ()));
       Alcotest.(check int) "env fallback has no rule" 0
         (List.length (AQ.list_rules ~base_path:env_base ()));
       (match
          SDH.dashboard_governance_approval_rule_delete_http_json
-           ~base_path:room_base
+           ~base_path:workspace_base
            ~args:(`Assoc [ ("id", `String rule_id) ])
        with
        | Ok _ -> ()
        | Error message ->
            Alcotest.fail ("dashboard rule delete failed: " ^ message));
-      Alcotest.(check int) "room rule deleted" 0
-        (List.length (AQ.list_rules ~base_path:room_base ()));
+      Alcotest.(check int) "workspace rule deleted" 0
+        (List.length (AQ.list_rules ~base_path:workspace_base ()));
       Alcotest.(check int) "env fallback still empty" 0
         (List.length (AQ.list_rules ~base_path:env_base ())))
 
-let test_submit_pending_audit_uses_room_base_path () =
+let test_submit_pending_audit_uses_workspace_base_path () =
   let env_base = temp_dir () in
-  let room_base = temp_dir () in
+  let workspace_base = temp_dir () in
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  let keeper_name = "approval-room-audit-keeper" in
+  let keeper_name = "approval-workspace-audit-keeper" in
   AQ.For_testing.reset_audit_store ();
   Unix.putenv "MASC_BASE_PATH" env_base;
   Unix.putenv "MASC_BASE_PATH_INPUT" env_base;
@@ -935,7 +935,7 @@ let test_submit_pending_audit_uses_room_base_path () =
        | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
        | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       cleanup_dir env_base;
-      cleanup_dir room_base)
+      cleanup_dir workspace_base)
     (fun () ->
       ignore
         (AQ.submit_pending
@@ -945,20 +945,20 @@ let test_submit_pending_audit_uses_room_base_path () =
              (`Assoc
                [
                  ("action", `String "claim");
-                 ("task_id", `String "task-room-audit");
+                 ("task_id", `String "task-workspace-audit");
                ])
            ~risk_level:AQ.High
-           ~base_path:room_base
+           ~base_path:workspace_base
            ~on_resolution:(fun _ -> ())
            ());
       AQ.expire_stale ~max_wait_s:(-1.0);
-      let room_events = audit_event_names ~base_path:room_base ~keeper_name in
+      let workspace_events = audit_event_names ~base_path:workspace_base ~keeper_name in
       let env_events = audit_event_names ~base_path:env_base ~keeper_name in
-      Alcotest.(check bool) "room audit has pending" true
-        (List.exists (String.equal "pending") room_events);
-      Alcotest.(check bool) "room audit has expired" true
-        (List.exists (String.equal "expired") room_events);
-      Alcotest.(check (list string)) "env fallback has no room audit" []
+      Alcotest.(check bool) "workspace audit has pending" true
+        (List.exists (String.equal "pending") workspace_events);
+      Alcotest.(check bool) "workspace audit has expired" true
+        (List.exists (String.equal "expired") workspace_events);
+      Alcotest.(check (list string)) "env fallback has no workspace audit" []
         env_events)
 
 let test_approval_get_dispatch_missing_id () =
@@ -1016,7 +1016,7 @@ let test_callback_production_tool_edit_file_requires_approval () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let config = state.coord_config in
+  let config = state.workspace_config in
   Eio.Fiber.fork ~sw (fun () ->
     let cb =
       GP.to_oas_approval_callback
@@ -1191,7 +1191,7 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
            Alcotest.fail
              ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err));
       let pending_before = AQ.pending_count () in
-      let config = Masc_mcp.Coord.default_config base_path in
+      let config = Masc_mcp.Workspace.default_config base_path in
       let cb =
         GP.to_oas_approval_callback
           ~governance_level:"paranoid" ~keeper_name:"remember-keeper"
@@ -1282,7 +1282,7 @@ let test_callback_always_approve_respects_forbidden () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let config = state.coord_config in
+      let config = state.workspace_config in
       let meta =
         meta_from_json
           (`Assoc [
@@ -1456,9 +1456,9 @@ let () =
       Alcotest.test_case "resolve_with_policy skips high allow memory" `Quick
         test_resolve_with_policy_does_not_remember_high_allow;
       Alcotest.test_case "dashboard approve-always rules use workspace base_path" `Quick
-        test_dashboard_resolve_and_delete_rules_use_room_base_path;
+        test_dashboard_resolve_and_delete_rules_use_workspace_base_path;
       Alcotest.test_case "submit_pending audit uses workspace base_path" `Quick
-        test_submit_pending_audit_uses_room_base_path;
+        test_submit_pending_audit_uses_workspace_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
         test_read_recent_audit_filters_after_wide_scan;
       Alcotest.test_case

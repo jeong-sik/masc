@@ -48,21 +48,21 @@ type autoboot_exclusion = {
 (** Why a configured keeper is intentionally absent from
     {!bootable_keeper_names}. *)
 
-val bootable_keeper_names : Coord.config -> string list
+val bootable_keeper_names : Workspace.config -> string list
 (** Names of every keeper whose [keepers/<name>/keeper.toml] exists and
     looks bootable on disk. *)
 
-val autoboot_excluded_keeper_reasons : Coord.config -> autoboot_exclusion list
+val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 
-val auto_recoverable_paused_keeper_names : ?now:float -> Coord.config -> string list
+val auto_recoverable_paused_keeper_names : ?now:float -> Workspace.config -> string list
 (** Configured, autoboot-enabled keepers that are currently paused but whose
     supervisor-owned auto-resume timer has elapsed.  These keepers remain
     excluded from {!bootable_keeper_names} until the supervisor clears
     [paused=false], but they are enough reason to start the supervisor sweep on
     cold boot. *)
 
-val canonicalize_if_keeper : Coord.config -> string -> string
+val canonicalize_if_keeper : Workspace.config -> string -> string
 (** [canonicalize_if_keeper config name] returns [keeper-<n>-agent]
     when [name] (bare or already canonical) refers to a configured
     keeper, else returns [name] unchanged. Safe to apply at credential
@@ -97,7 +97,7 @@ val resynced_tool_access :
     the meta-level [preset] and per-tool overrides stay consistent. *)
 
 val ensure_keeper_meta :
-  Coord.config ->
+  Workspace.config ->
   string -> (Keeper_meta_contract.keeper_meta, string) result
 (** Load the keeper meta for [keeper_name], materialising defaults from
     the profile when the on-disk meta is missing fields. *)
@@ -164,11 +164,11 @@ val existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t
     bootstrapped during this process lifetime; prevents duplicate
     spawns on hot-reload. *)
 
-val has_boot_entries : Coord.config -> bool
+val has_boot_entries : Workspace.config -> bool
 (** [true] when at least one bootable keeper exists for [config]. *)
 
 val should_start_supervisor_sweep :
-  config:Coord.config -> stats:keeper_bootstrap_stats -> bool
+  config:Workspace.config -> stats:keeper_bootstrap_stats -> bool
 (** Policy gate: should the supervisor sweep run given [config] and the
     bootstrap stats? *)
 

@@ -146,7 +146,7 @@ val metric_file_lock_table_cas_retries : string
 (** Counter for [Memory_jsonl.parse_line] silent drop events.
     Closed-vocabulary labels: [reason] in
     [no_key | not_assoc | json_parse_error].  Empty lines are
-    intentionally not counted.  Wired from [lib/coord.ml] via
+    intentionally not counted.  Wired from [lib/workspace.ml] via
     [Memory_jsonl.on_parse_drop_fn].  RFC-0109 §5.1 Option A canary
     for V15. *)
 val metric_memory_jsonl_parse_drops : string

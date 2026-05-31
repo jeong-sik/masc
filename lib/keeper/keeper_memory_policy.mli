@@ -3,7 +3,7 @@
 
     Centralises the heuristics that turn LLM turn output into structured
     keeper memory: extracting the [STATE] block emitted by the persona
-    template, scoring "interesting" coord messages for alerting, capping
+    template, scoring "interesting" workspace messages for alerting, capping
     snapshot fields to the prompt budget, and round-tripping snapshots
     through assistant messages so a fresh keeper generation can resume
     from disk. *)
@@ -248,11 +248,11 @@ val prompt_memory_sections_of_snapshot :
     long) from a snapshot, optionally tagging the source generation. *)
 
 val read_progress_snapshot :
-  config:Coord.config -> name:string -> keeper_state_snapshot option
+  config:Workspace.config -> name:string -> keeper_state_snapshot option
 (** Read the persisted snapshot for [name] under [config]. *)
 
 val read_progress_snapshot_cache :
-  config:Coord.config ->
+  config:Workspace.config ->
   name:string -> progress_snapshot_cache option
 (** Read the persisted snapshot together with its generation tag. *)
 

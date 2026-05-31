@@ -89,12 +89,12 @@ let test_required_present () =
       (Yojson.Safe.to_string (Tool_result.data r)))
 
 let test_required_missing () =
-  let schema = make_schema ~required:["name"; "room"] [("name", "string"); ("room", "string")] in
+  let schema = make_schema ~required:["name"; "workspace"] [("name", "string"); ("workspace", "string")] in
   let args = `Assoc [("name", `String "alice")] in
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Reject r ->
     let msg = Yojson.Safe.to_string (Tool_result.data r) in
-    Alcotest.(check bool) "mentions room" true (string_contains msg "room")
+    Alcotest.(check bool) "mentions workspace" true (string_contains msg "workspace")
   | Pass | Proceed _ -> Alcotest.fail "Expected Reject for missing required field"
 
 let test_required_missing_multiple () =
@@ -444,7 +444,7 @@ let masc_transition_schema =
   find_schema_exn "masc_transition" Tool_task_schemas.schemas
 
 let masc_goal_list_schema =
-  find_schema_exn "masc_goal_list" Tool_schemas_coord_extra.schemas
+  find_schema_exn "masc_goal_list" Tool_schemas_workspace_extra.schemas
 
 let tool_edit_file_schema =
   find_schema_exn "tool_edit_file" Config.raw_all_tool_schemas

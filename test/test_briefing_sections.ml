@@ -14,7 +14,7 @@
     1. {b Output shape} — returns [(watch_summary, [c; a; w])]
        where the list always has length 3 with section ids
        [communication / alignment / watch] in that order.
-    2. {b Watch branches} — risky coord → "risk"; incidents or
+    2. {b Watch branches} — risky workspace → "risk"; incidents or
        recommended actions → "watch"; otherwise "ok".
     3. {b Communication branches} — positive signal vs
        metadata gaps vs live-session-count vs known mode count.

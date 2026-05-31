@@ -214,7 +214,7 @@ type message =
   }
 [@@deriving yojson { strict = false }, show]
 
-type coord_state =
+type workspace_state =
   { protocol_version : string
   ; project : string
   ; started_at : string

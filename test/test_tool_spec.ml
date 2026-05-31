@@ -60,7 +60,7 @@ let () =
                 ~is_idempotent:true
                 ~visibility:Tool_catalog.Hidden
                 ~required_permission:Masc_domain.CanAdmin
-                ~effect_domain:Tool_catalog.Masc_coordination
+                ~effect_domain:Tool_catalog.Masc_workspace
                 ~requires_actor_binding:true
                 ~reason:"hidden for test"
                 ~title:"Test Tool"
@@ -71,7 +71,7 @@ let () =
             check bool "required_permission" true
               (spec.required_permission = Some Masc_domain.CanAdmin);
             check bool "effect_domain" true
-              (spec.effect_domain = Some Tool_catalog.Masc_coordination);
+              (spec.effect_domain = Some Tool_catalog.Masc_workspace);
             check bool "requires_actor_binding" true
               (spec.requires_actor_binding = Some true);
             check bool "reason present" true (Option.is_some spec.reason);
@@ -185,7 +185,7 @@ let () =
             Tool_catalog.register_metadata name
               { existing with
                 requires_actor_binding = Some true;
-                effect_domain = Some Tool_catalog.Masc_coordination };
+                effect_domain = Some Tool_catalog.Masc_workspace };
             let spec =
               Tool_spec.create
                 ~name

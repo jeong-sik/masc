@@ -213,9 +213,9 @@ let test_calculate_adaptive_tempo_low_priority () =
    tempo_file Tests
    ============================================================ *)
 
-module Coord_utils = Coord_utils
+module Workspace_utils = Workspace_utils
 
-let make_test_config ~base_path : Coord_utils.config =
+let make_test_config ~base_path : Workspace_utils.config =
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
     base_path;
@@ -225,11 +225,11 @@ let make_test_config ~base_path : Coord_utils.config =
   } in
   let memory_backend = Backend.Memory.create () in
   {
-    Coord_utils.base_path;
+    Workspace_utils.base_path;
     workspace_path = base_path;
     lock_expiry_minutes = 30;
     backend_config;
-    backend = Coord_utils.Memory memory_backend;
+    backend = Workspace_utils.Memory memory_backend;
   }
 
 let test_tempo_file_basic () =

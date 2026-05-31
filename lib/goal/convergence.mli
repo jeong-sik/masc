@@ -25,7 +25,7 @@ val task_has_goal_id : goal_id:string -> Masc_domain.task -> bool
     [None] when work is still in progress.
 
     @param goal_id  The goal whose tasks to evaluate.
-    @param tasks    All tasks in the room, filtered internally by explicit
+    @param tasks    All tasks in the workspace, filtered internally by explicit
                     [task.goal_id].
     @param stagnation_threshold  Number of iterations without progress before
                                  emitting [StagnationDetected]. Defaults to [5].

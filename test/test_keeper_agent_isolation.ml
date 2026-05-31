@@ -3,9 +3,9 @@ module Types = Masc_domain
 (** Tests for keeper-agent tool isolation.
 
     Validates the structural invariant that keeper tools and agent
-    coordination tools occupy disjoint namespaces.
+    workspace tools occupy disjoint namespaces.
 
-	    The isolation boundary is between keeper tools and agent coordination tools
+	    The isolation boundary is between keeper tools and agent workspace tools
     (spawned_agent_public).
 
     Pure synchronous tests — no Eio or network required. *)
@@ -124,7 +124,7 @@ let test_write_done_returns_empty () =
   Alcotest.(check (list string)) "write_done returns empty" [] names
 
 (* ============================================================
-   Invariant 3: Agent coordination tools never contain keeper_*
+   Invariant 3: Agent workspace tools never contain keeper_*
    ============================================================ *)
 
 let test_agent_surface_no_keeper_tools () =
@@ -133,14 +133,14 @@ let test_agent_surface_no_keeper_tools () =
   Alcotest.(check (list string)) "no keeper_* in agent surface" [] leaked
 
 (* ============================================================
-   Invariant 4: Keeper tools never overlap with agent coordination
+   Invariant 4: Keeper tools never overlap with agent workspace
    ============================================================ *)
 
 let test_no_overlap_heuristic_vs_agent () =
   let meta = make_meta () in
   let keeper_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
-  (* Some MASC coordination tools are intentionally shared between spawned
+  (* Some MASC workspace tools are intentionally shared between spawned
      agents and keeper-selected surfaces. *)
   let overlap =
     List.filter
@@ -150,7 +150,7 @@ let test_no_overlap_heuristic_vs_agent () =
       keeper_names
   in
   Alcotest.(check (list string))
-    "heuristic keeper only shares approved coordination tools with agent surface"
+    "heuristic keeper only shares approved workspace tools with agent surface"
     [] overlap
 
 let test_no_overlap_research_vs_agent () =
@@ -166,11 +166,11 @@ let test_no_overlap_research_vs_agent () =
       keeper_names
   in
   Alcotest.(check (list string))
-    "research keeper only shares approved coordination tools with agent surface"
+    "research keeper only shares approved workspace tools with agent surface"
     [] overlap
 
 let test_shard_tools_overlap_with_agent_documented () =
-  (* Shards may include approved shared coordination tools that also appear in
+  (* Shards may include approved shared workspace tools that also appear in
      the agent surface. *)
   let keeper_tools = Tool_shard.keeper_model_tools
     |> List.map (fun (t : Masc_domain.tool_schema) -> t.name) in

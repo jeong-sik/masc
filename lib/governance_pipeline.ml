@@ -98,7 +98,7 @@ let should_audit ~governance_level risk =
   | None -> false
 ;;
 
-let audit_decision (config : Coord.config) (decision : governance_decision) =
+let audit_decision (config : Workspace.config) (decision : governance_decision) =
   let audit_decision, action_str =
     match decision.action with
     | `Allow -> Audit_log.Governance_allow, "allow"
@@ -375,7 +375,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in
       let base_path =
-        Option.map (fun (config : Coord.config) -> config.base_path) config
+        Option.map (fun (config : Workspace.config) -> config.base_path) config
       in
       (* PR-E (Plan v3 Leak 1+3): evaluate the routine allowlist BEFORE
          the soft-forbidden check.  A routine match is the operator's

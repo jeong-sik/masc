@@ -9,4 +9,4 @@ val refresh_work_as_heartbeat :
   consecutive_failures:int ref ->
   unit
 (** Treat recent productive work as heartbeat evidence when a regular
-    heartbeat succeeds for any session-bound coord. *)
+    heartbeat succeeds for any session-bound workspace. *)

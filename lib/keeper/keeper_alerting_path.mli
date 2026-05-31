@@ -27,9 +27,9 @@ val parse_rejection_prefix : string -> keeper_path_rejection option
     with a [kind] label derived from the constructor. *)
 val rejection_to_telemetry : keeper_path_rejection -> unit
 
-(** Project a [Coord.config] to its project root by stripping the
+(** Project a [Workspace.config] to its project root by stripping the
     trailing [.masc] base-path component when present. *)
-val project_root_of_config : Coord.config -> string
+val project_root_of_config : Workspace.config -> string
 
 
 (** Re-export of [Env_config_core.strip_trailing_slashes]. *)
@@ -90,12 +90,12 @@ val is_within_allowed_norms :
 
 (** Project per-keeper allowed_paths to absolute, normalized paths. *)
 val absolute_allowed_paths :
-  config:Coord.config -> allowed_paths:string list -> string list
+  config:Workspace.config -> allowed_paths:string list -> string list
 
 (** Like [absolute_allowed_paths] but errors when normalization
     silently drops every entry. *)
 val absolute_allowed_paths_result :
-  config:Coord.config ->
+  config:Workspace.config ->
   allowed_paths:string list ->
   (string list, string) result
 
@@ -106,7 +106,7 @@ val raw_looks_like_playground_subdir : string -> bool
 (** Resolve a write target path under [allowed_paths] within the
     project root. *)
 val resolve_keeper_target_path :
-  config:Coord.config ->
+  config:Workspace.config ->
   allowed_paths:string list ->
   raw_path:string ->
   (string, keeper_path_rejection) result
@@ -138,15 +138,15 @@ val sandbox_bundle_paths_of_meta :
 (** Ensure the playground bundle dirs exist; returns the absolute
     paths created. *)
 val ensure_playground_bundle :
-  config:Coord.config -> name:string -> string list
+  config:Workspace.config -> name:string -> string list
 
 val ensure_sandbox_bundle :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   string list
 
 val ensure_sandbox_bundle_for_profile :
-  config:Coord.config ->
+  config:Workspace.config ->
   name:string ->
   sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
   string list
@@ -164,7 +164,7 @@ val effective_write_allowed_paths :
 (** Resolve a path for read-only access within the keeper's
     effective allowlist; walks roots for missing relative paths. *)
 val resolve_keeper_read_path :
-  config:Coord.config ->
+  config:Workspace.config ->
   allowed_paths:string list ->
   raw_path:string ->
   (string, keeper_path_rejection) result

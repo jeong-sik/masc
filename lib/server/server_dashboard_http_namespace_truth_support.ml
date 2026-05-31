@@ -20,7 +20,7 @@ let pending_confirm_summary_empty_json =
 let last_good_pending_confirm_summary : Yojson.Safe.t Atomic.t =
   Atomic.make pending_confirm_summary_empty_json
 
-let pending_confirm_summary_cached (config : Coord.config) =
+let pending_confirm_summary_cached (config : Workspace.config) =
   let key = Printf.sprintf "pending_confirm_summary:%s" config.base_path in
   let fallback = Atomic.get last_good_pending_confirm_summary in
   let compute () =
@@ -67,7 +67,7 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
     let target_id = json_string_field_opt "target_id" top_item in
   let source, target_kind, suggested_tab, suggested_surface, suggested_params =
       match target_type with
-      | Some "coord_meta_cognition" | Some "namespace_meta_cognition" ->
+      | Some "workspace_meta_cognition" | Some "namespace_meta_cognition" ->
           ( "meta_cognition",
             "meta_cognition",
             "overview",
@@ -204,7 +204,7 @@ let severity_of_meta_salience = function
   | Meta_cognition.Operator_tension -> "bad"
   | Meta_cognition.Contested_belief
   | Meta_cognition.Operator_desire
-  | Meta_cognition.Stagnant_coord -> "warn"
+  | Meta_cognition.Stagnant_workspace -> "warn"
   | Meta_cognition.Stable -> "info"
 
 let derived_meta_attention_item ~meta_cognition_json
@@ -233,7 +233,7 @@ let derived_meta_attention_item ~meta_cognition_json
                  ] );
            ])
 
-let derived_operator_digest_json (config : Coord.config) _execution_json
+let derived_operator_digest_json (config : Workspace.config) _execution_json
     meta_cognition_json meta_interpretation =
   let meta_attention =
     Option.bind meta_interpretation
@@ -363,11 +363,11 @@ let namespace_truth_aliases =
 let namespace_truth_aliases_json () =
   `List (List.map (fun alias -> `String alias) namespace_truth_aliases)
 
-let namespace_truth_retention_json ~(config : Coord.config) =
+let namespace_truth_retention_json ~(config : Workspace.config) =
   `Assoc
     [
       ("scope", `String "dashboard_namespace_truth");
-      ("coordination_root", `String config.base_path);
+      ("workspace_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
       ("shell_input", `String "/api/v1/dashboard/shell");
       ("execution_input", `String "/api/v1/dashboard/execution");
@@ -376,7 +376,7 @@ let namespace_truth_retention_json ~(config : Coord.config) =
         `String "proactive_execution_cache_last_good_shell_fallback" );
     ]
 
-let namespace_truth_metadata_fields ~(config : Coord.config) ~generated_at =
+let namespace_truth_metadata_fields ~(config : Workspace.config) ~generated_at =
   [
     ("dashboard_surface", `String namespace_truth_dashboard_surface);
     ("dashboard_aliases", namespace_truth_aliases_json ());
@@ -385,7 +385,7 @@ let namespace_truth_metadata_fields ~(config : Coord.config) ~generated_at =
     ("generated_at_iso", `String generated_at);
   ]
 
-let compose_namespace_truth_initializing ~(config : Coord.config) ~message =
+let compose_namespace_truth_initializing ~(config : Workspace.config) ~message =
   let generated_at = Masc_domain.now_iso () in
   `Assoc
     (namespace_truth_metadata_fields ~config ~generated_at
@@ -688,7 +688,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
         ~key:"operational_clarity"
         ~label:"Operational Clarity"
         ~status:operational_clarity_status
-        ~ok_message:"The control coord has recent audit anchors and no open attention backlog."
+        ~ok_message:"The control workspace has recent audit anchors and no open attention backlog."
         ~reasons:operational_clarity_reasons
         ~metrics:
           [
@@ -845,7 +845,7 @@ let runtime_count_authority_json ~runtime_count ~shell_counts
           ] );
     ]
 
-let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shell_json
+let compose_namespace_truth_snapshot ~(config : Workspace.config) ~initialized ~shell_json
     ~execution_json ~command_summary_json =
   let generated_at = Masc_domain.now_iso () in
   let meta_cognition_summary = json_assoc_field "meta_cognition" shell_json in

@@ -18,7 +18,7 @@ type implementation_status =
 
 type effect_domain =
   | Read_only
-  | Masc_coordination
+  | Masc_workspace
   | Playground_write
   | Host_repo_write
 

@@ -50,7 +50,7 @@ type implementation_status =
 include (Tool_catalog_inference : sig
   type effect_domain = Tool_catalog_inference.effect_domain =
     | Read_only
-    | Masc_coordination
+    | Masc_workspace
     | Playground_write
     | Host_repo_write
 
@@ -171,11 +171,11 @@ let readonly_tool =
 let destructive_tool =
   with_semantic_flags ~destructive:true default_metadata
 
-let masc_coordination_tool =
-  with_semantic_flags ~effect_domain:Masc_coordination default_metadata
+let masc_workspace_tool =
+  with_semantic_flags ~effect_domain:Masc_workspace default_metadata
 
-let actor_bound_masc_coordination_tool =
-  with_semantic_flags ~requires_actor_binding:true masc_coordination_tool
+let actor_bound_masc_workspace_tool =
+  with_semantic_flags ~requires_actor_binding:true masc_workspace_tool
 
 let with_required_permission permission meta =
   { meta with required_permission = Some permission }
@@ -184,19 +184,19 @@ let read_state_tool =
   with_required_permission Masc_domain.CanReadState readonly_tool
 
 let broadcast_tool =
-  with_required_permission Masc_domain.CanBroadcast masc_coordination_tool
+  with_required_permission Masc_domain.CanBroadcast masc_workspace_tool
 
 let actor_broadcast_tool =
-  with_required_permission Masc_domain.CanBroadcast actor_bound_masc_coordination_tool
+  with_required_permission Masc_domain.CanBroadcast actor_bound_masc_workspace_tool
 
 let add_task_tool =
-  with_required_permission Masc_domain.CanAddTask masc_coordination_tool
+  with_required_permission Masc_domain.CanAddTask masc_workspace_tool
 
 let claim_task_tool =
-  with_required_permission Masc_domain.CanClaimTask actor_bound_masc_coordination_tool
+  with_required_permission Masc_domain.CanClaimTask actor_bound_masc_workspace_tool
 
 let complete_task_tool =
-  with_required_permission Masc_domain.CanCompleteTask actor_bound_masc_coordination_tool
+  with_required_permission Masc_domain.CanCompleteTask actor_bound_masc_workspace_tool
 
 let admin_tool =
   with_required_permission Masc_domain.CanAdmin destructive_tool
@@ -261,14 +261,14 @@ let explicit_metadata : (string * metadata) list =
     ("masc_broadcast", broadcast_tool);
     ("channel_gate", broadcast_tool);
     ( "masc_portal_open",
-      { masc_coordination_tool with required_permission = Some Masc_domain.CanOpenPortal } );
+      { masc_workspace_tool with required_permission = Some Masc_domain.CanOpenPortal } );
     ( "masc_portal_close",
-      { masc_coordination_tool with required_permission = Some Masc_domain.CanOpenPortal } );
+      { masc_workspace_tool with required_permission = Some Masc_domain.CanOpenPortal } );
     ( "masc_portal_send",
-      { masc_coordination_tool with required_permission = Some Masc_domain.CanSendPortal } );
+      { masc_workspace_tool with required_permission = Some Masc_domain.CanSendPortal } );
     (* Run schemas register from tool_run.ml; catalog still owns early auth metadata.
        RFC-0182: 7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
-       masc_admin_reset, masc_gc_force, masc_coord_delete, masc_force_leave,
+       masc_admin_reset, masc_gc_force, masc_workspace_delete, masc_force_leave,
        masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
@@ -371,7 +371,7 @@ let explicit_metadata : (string * metadata) list =
         destructive_tool with
         visibility = Hidden;
         required_permission = Some Masc_domain.CanBroadcast;
-        effect_domain = Some Masc_coordination;
+        effect_domain = Some Masc_workspace;
       } );
   ]
 

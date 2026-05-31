@@ -24,7 +24,7 @@ module Float = Stdlib.Float
 (* Yojson.Safe.Util removed — use Json_util SSOT helpers instead *)
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
   sw: Eio.Switch.t option;
 }
@@ -34,7 +34,7 @@ open Tool_args
 (* RFC-0189: [Masc_domain] backend Error variants (Task_error /
    Agent_error / etc.) currently surface as caller-actionable
    workflow violations ("task not found", "invalid transition",
-   "agent not in room") rather than transient/runtime failures.
+   "agent not in workspace") rather than transient/runtime failures.
    Tag [Workflow_rejection] uniformly at the helper boundary —
    when [Masc_domain] grows typed per-variant failure_class
    assignment, this tag becomes per-call-site. *)
@@ -54,12 +54,12 @@ let log_task_transition_failed ~agent_name err =
   | _ -> Log.Task.error ~keeper_name:agent_name "task transition failed: %s" message
 
 (** Client-side FSM gate: reject impossible transitions before server dispatch.
-    Uses [Coord_task_classify.valid_next_actions_for_status] as SSOT. *)
+    Uses [Workspace_task_classify.valid_next_actions_for_status] as SSOT. *)
 let client_side_transition_gate_error ~task_opt ~action ~action_s =
   match task_opt with
   | None -> None
   | Some (task : Masc_domain.task) ->
-    let valid_actions = Coord_task_classify.valid_next_actions_for_status task.task_status in
+    let valid_actions = Workspace_task_classify.valid_next_actions_for_status task.task_status in
     if List.mem action valid_actions
     then None
     else
@@ -83,8 +83,8 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
        missing agents file, malformed JSON) returned [ctx.agent_name]
        silently while only the rare [exn] catch-all logged. Operators
        saw the loud path but missed the common one. Single warn arm
-       mirrors [Tool_coord.safe_read_backlog]. *)
-    try Coord.resolve_agent_name ctx.config ctx.agent_name with
+       mirrors [Tool_workspace.safe_read_backlog]. *)
+    try Workspace.resolve_agent_name ctx.config ctx.agent_name with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
         Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
@@ -100,7 +100,7 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
       String.equal assignee ctx.agent_name || String.equal assignee actual_name
     in
     let owned_task =
-      Coord.get_tasks_raw ctx.config
+      Workspace.get_tasks_raw ctx.config
       |> List.find_map (fun (task : Masc_domain.task) ->
              match task.task_status with
              | Masc_domain.Claimed { assignee; _ }
@@ -255,8 +255,8 @@ let handle_add_task ~tool_name ~start_time ctx args =
           ~tool_name ~start_time error
     | Ok contract ->
         Tool_result.ok ~tool_name ~start_time
-          (Coord.add_task ?contract ?goal_id
-            ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id)
+          (Workspace.add_task ?contract ?goal_id
+            ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id)
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description)
 
@@ -325,7 +325,7 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
     let tasks =
       List.filter_map (function Ok t -> Some t | Error _ -> None) validated
     in
-    Tool_result.ok ~tool_name ~start_time (Coord.batch_add_tasks_with_contracts
+    Tool_result.ok ~tool_name ~start_time (Workspace.batch_add_tasks_with_contracts
       ~created_by:ctx.agent_name ctx.config tasks)
 
 let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
@@ -333,7 +333,7 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
      dispatch path bypasses MCP entry session binding, so this gate produced
      false-negative rejects for every keeper turn (fleet evidence:
      ~/.masc/agents/ empty while keepers run normally; only
-     masc_claim/masc_claim_next failed).  Coord.claim_task_r works on
+     masc_claim/masc_claim_next failed).  Workspace.claim_task_r works on
      agent_name alone; gate added no real authorization. *)
   if Option.is_some (Json_util.assoc_member_opt "agent_role" args) then
     Tool_result.error
@@ -351,7 +351,7 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
     | None -> keeper_agent_tool_names ctx
   in
   let result =
-    Coord.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+    Workspace.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
       ?agent_tool_names ()
   in
   (match result with
@@ -364,7 +364,7 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
           ["… (auto-released X, Y)"] out of the response message. Empty
           list when the claim did not displace any prior holding. *)
        let auto_released_json =
-         `List (List.map (fun id -> `String id) outcome.Coord.auto_released_task_ids)
+         `List (List.map (fun id -> `String id) outcome.Workspace.auto_released_task_ids)
        in
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");
@@ -375,7 +375,7 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
        ])
    | Error e -> Log.Task.warn ~keeper_name:task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
   let response_result =
-    Result.map (fun (o : Coord.claim_outcome) -> o.message) result
+    Result.map (fun (o : Workspace.claim_outcome) -> o.message) result
   in
   result_to_response ~tool_name ~start_time response_result
 
@@ -433,7 +433,7 @@ let format_no_eligible
 
 let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
   (* #18965 — removed [is_agent_session_bound] hard gate (same rationale as
-     [handle_claim] above).  Coord.claim_next_r operates on
+     [handle_claim] above).  Workspace.claim_next_r operates on
      [~agent_name] alone; backlog read does not require an entry under
      agents_dir. *)
   let agent_tool_names =
@@ -442,18 +442,18 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
     | None -> keeper_agent_tool_names ctx
   in
   let result =
-    Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name ?agent_tool_names ()
+    Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name ?agent_tool_names ()
   in
   match result with
-  | Coord.Claim_next_claimed { message; task_id; _ } ->
+  | Workspace.Claim_next_claimed { message; task_id; _ } ->
     sync_keeper_current_task_binding ctx;
     sync_planning_current_task_with_owned_task ctx;
     append_claim_observation message ~now:(Time_compat.now ())
       ~agent_name:ctx.agent_name ~task_id
     |> Tool_result.ok ~tool_name ~start_time
-  | Coord.Claim_next_no_unclaimed ->
+  | Workspace.Claim_next_no_unclaimed ->
     Tool_result.ok ~tool_name ~start_time "No unclaimed tasks available"
-  | Coord.Claim_next_no_eligible
+  | Workspace.Claim_next_no_eligible
       { excluded_count
       ; blocked_count
       ; verification_blocked_count
@@ -498,8 +498,8 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
       `Assoc [ "message", `String message; "diagnostics", diagnostics ]
     in
     Tool_result.make_ok ~tool_name ~start_time ~data ()
-  | Coord.Claim_next_error e ->
-    (* RFC-0189: Claim_next_error wraps coord-side reasons like
+  | Workspace.Claim_next_error e ->
+    (* RFC-0189: Claim_next_error wraps workspace-side reasons like
        "no claimable task", "agent not allowed", "permission denied"
        — all caller-actionable. [Workflow_rejection]. *)
     Tool_result.error
@@ -513,7 +513,7 @@ let handle_release ~tool_name ~start_time ctx args =
   | Error e -> result_to_response ~tool_name ~start_time (Error e)
   | Ok task_id ->
   let expected_version = get_int_opt args "expected_version" in
-  let tasks = Coord.get_tasks_raw ctx.config in
+  let tasks = Workspace.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   let handoff_context =
     parse_handoff_context ~agent_name:ctx.agent_name
@@ -534,7 +534,7 @@ let handle_release ~tool_name ~start_time ctx args =
            "Strict task release requires handoff_context.summary"
        else
          let result =
-           Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
+           Workspace.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
              ?expected_version ?handoff_context ()
          in
          (match result with

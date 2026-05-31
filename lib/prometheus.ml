@@ -68,7 +68,7 @@ let metric_tool_assignment_telemetry_failures =
 let metric_telemetry_observe_failures = "masc_telemetry_observe_failures_total"
 
 (* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
-   in [lib/coord.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
+   in [lib/workspace.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
    [Keeper_accountability.record_task_transition].  Those three try/with
    sites swallow the exception that fires when the lifecycle hook is
    dispatched from a non-Eio context (test path, bootstrap, certain HTTP
@@ -84,10 +84,10 @@ let metric_telemetry_observe_failures = "masc_telemetry_observe_failures_total"
    [done] / [cancel] / [release] / [submit_for_verification] / [approve]
    / [reject]. Both vocabularies are bounded so series cardinality is at
    most 19 (3 + 8 + 8). *)
-let metric_coord_telemetry_drop = "masc_coord_telemetry_drop_total"
+let metric_workspace_telemetry_drop = "masc_workspace_telemetry_drop_total"
 
-let metric_coord_claim_post_provision_failures =
-  "masc_coord_claim_post_provision_failures_total"
+let metric_workspace_claim_post_provision_failures =
+  "masc_workspace_claim_post_provision_failures_total"
 ;;
 
 (* #10094: per-caller counter for [Masc_oas_bridge.run_safe]
@@ -266,7 +266,7 @@ let metric_cost_ledger_status = "masc_cost_ledger_status_total"
 
 (* RFC-0040: sender-side mention dedup decision counter.  Labels:
    [outcome] in [skipped|passed|no_target|bypassed].  Wired from
-   [lib/coord.ml] via [Coord_hooks.mention_dedup_decision_fn]. *)
+   [lib/workspace.ml] via [Workspace_hooks.mention_dedup_decision_fn]. *)
 let metric_mention_dedup_decisions_total = "masc_mention_dedup_decisions_total"
 
 (** {1 Built-in Metrics} *)
@@ -390,7 +390,7 @@ let record_error ?(error_type = "unknown") () =
 let set_active_agents count = set_gauge metric_active_agents (float_of_int count)
 let set_pending_tasks count = set_gauge "masc_pending_tasks" (float_of_int count)
 (** Reconcile active_agents gauge with existing agent files on disk.
-    Call after Coord/server initialization to sync Prometheus state. *)
+    Call after Workspace/server initialization to sync Prometheus state. *)
 let reconcile_active_agents_gauge masc_dir =
   let agents_dir = Filename.concat masc_dir "agents" in
   if Sys.file_exists agents_dir && Sys.is_directory agents_dir

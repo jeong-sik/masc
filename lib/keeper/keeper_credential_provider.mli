@@ -69,7 +69,7 @@ val pp_error : error -> string
     callers can refer to as [Keeper_credential_provider.S]. *)
 module type S = sig
   val resolve :
-    config:Coord.config -> identity:string -> (binding, error) result
+    config:Workspace.config -> identity:string -> (binding, error) result
   (** Must be total.  Pure up to filesystem read; no network. *)
 
   val finalize :

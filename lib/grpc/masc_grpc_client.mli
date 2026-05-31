@@ -1,6 +1,6 @@
 (** MASC gRPC Client.
 
-    Client-side wrapper for the MascCoordination gRPC service.
+    Client-side wrapper for the MascWorkspace gRPC service.
     Mirrors the server RPCs defined in [Masc_grpc_service].
 
     Each function maps to one gRPC RPC:
@@ -72,7 +72,7 @@ val broadcast :
 
 (** {1 Streaming RPCs} *)
 
-(** Subscribe to room events (server-streaming).
+(** Subscribe to workspace events (server-streaming).
 
     Returns a stream of events. The stream closes when the server
     finishes sending backlog events or the connection drops. *)

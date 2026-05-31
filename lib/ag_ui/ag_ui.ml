@@ -13,7 +13,7 @@
     @see https://docs.ag-ui.com/concepts/events
     @since 2.60.0 *)
 
-(** AG-UI event types — subset relevant to MASC agent coordination *)
+(** AG-UI event types — subset relevant to MASC agent workspace *)
 type event_type =
   | Run_started
   | Run_finished
@@ -194,7 +194,7 @@ let of_tool_call ~agent_name ~tool_name ~call_id ~args_json : event list =
   ]
 
 (** Map MASC workspace state to AG-UI STATE_SNAPSHOT *)
-let of_coord_state (state : Yojson.Safe.t) : event =
+let of_workspace_state (state : Yojson.Safe.t) : event =
   make_event ~thread_id:default_thread_id
     ~snapshot:(Some state)
     State_snapshot

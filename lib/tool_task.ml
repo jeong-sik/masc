@@ -20,7 +20,7 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
   | Error e -> result_to_response ~tool_name ~start_time (Error e)
   | Ok task_id ->
   let reason = get_string args "reason" "" in
-  let tasks = Coord.get_tasks_raw ctx.config in
+  let tasks = Workspace.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   let started_at_actual = match task_opt with
     | Some t -> (match t.task_status with
@@ -31,7 +31,7 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
         | _ -> Time_compat.now () -. 60.0)
     | None -> Time_compat.now () -. 60.0
   in
-  let result = Coord.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~reason in
+  let result = Workspace.cancel_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ~reason in
   (* Record failed metric on cancellation *)
   (match result with
    | Ok _ ->
@@ -214,7 +214,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
         false
     else false
   in
-  let tasks = Coord.get_tasks_raw ctx.config in
+  let tasks = Workspace.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
   let terminal_verdict_noop =
     if transition_action_policy_applies transition_action_denylist
@@ -508,7 +508,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
         | Some _ -> agent_tool_names
         | None -> keeper_agent_tool_names ctx
       in
-      let r = Coord.transition_task_r ctx.config ~agent_name:ctx.agent_name
+      let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
                 ~task_id ~action ?expected_version:ev ~notes ~reason
                 ?handoff_context ?agent_tool_names ?prepare_verification_request
                 ?prepare_verification_verdict () in
@@ -549,7 +549,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
        ]);
        (match action with
         | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
-          let tasks = Coord.get_tasks_raw ctx.config in
+          let tasks = Workspace.get_tasks_raw ctx.config in
           (match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
            | Some task ->
              let evidence_refs = verification_evidence_refs_for_task task in
@@ -643,7 +643,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
 let handle_update_priority ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
   let priority = get_int args "priority" 3 in
-  Tool_result.ok ~tool_name ~start_time (Coord.update_priority ctx.config ~task_id ~priority)
+  Tool_result.ok ~tool_name ~start_time (Workspace.update_priority ctx.config ~task_id ~priority)
 
 let handle_tasks ~tool_name ~start_time ctx args =
   let include_done = get_bool args "include_done" false in
@@ -653,9 +653,9 @@ let handle_tasks ~tool_name ~start_time ctx args =
     | `String s when not (String.equal s "") -> Some s
     | _ -> None
   in
-  Tool_result.ok ~tool_name ~start_time (Coord.list_tasks ctx.config ~include_done ~include_cancelled ?status)
+  Tool_result.ok ~tool_name ~start_time (Workspace.list_tasks ctx.config ~include_done ~include_cancelled ?status)
 
-let task_history_events_json (config : Coord.config) ~task_id ~limit =
+let task_history_events_json (config : Workspace.config) ~task_id ~limit =
   let scan_limit = min 500 (limit * 5) in
   let lines = Mcp_server.read_event_lines config ~limit:scan_limit in
   let (parsed, _malformed) =

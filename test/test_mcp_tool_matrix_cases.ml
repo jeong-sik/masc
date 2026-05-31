@@ -296,7 +296,7 @@ let ensure_initialized fixture =
   (* masc_init pruned from registry. Initialise the workspace state directly so
      downstream tools can work. *)
   ignore
-    (Masc_mcp.Coord.init fixture.state.coord_config
+    (Masc_mcp.Workspace.init fixture.state.workspace_config
        ~agent_name:(Some fixture.agent_name))
 
 let ensure_joined fixture =
@@ -375,7 +375,7 @@ let ensure_goal fixture =
   | None ->
       let goal =
         match
-          Goal_store.upsert_goal fixture.state.coord_config
+          Goal_store.upsert_goal fixture.state.workspace_config
             ~title:"Tool Matrix Goal" ()
         with
         | Ok (goal, _status) -> goal
@@ -452,7 +452,7 @@ let ensure_verification_request fixture =
   | Some req_id -> req_id
   | None ->
       let base_path =
-        Masc_mcp.Coord.masc_dir fixture.state.coord_config
+        Masc_mcp.Workspace.masc_dir fixture.state.workspace_config
       in
       let req =
         match
@@ -572,7 +572,7 @@ let field_value fixture ~tool_name field_name schema =
   match field_name with
   | "agent_name" | "author" | "owner" | "worker" | "agent" | "leader_id" ->
       `String fixture.agent_name
-  | "path" when tool_name = "masc_set_coord" || tool_name = "masc_start" ->
+  | "path" when tool_name = "masc_set_workspace" || tool_name = "masc_start" ->
       `String fixture.base_path
   | "path"
     when List.mem tool_name
@@ -684,7 +684,7 @@ let field_value fixture ~tool_name field_name schema =
   | "search" -> `String "tool matrix"
   | "prompt" -> `String "tool matrix"
   | "topic_id" -> `String "topic-001"
-  | "coord_id" -> `String "default"
+  | "workspace_id" -> `String "default"
   | "checkpoint_ref" -> `String "checkpoint-001"
   | "intent_id" -> `String "intent-001"
   | "operation_id" -> `String "operation-001"
@@ -775,7 +775,7 @@ let state_guard_fragments =
     "invalid";
     "must be";
     "join required";
-    "coord not initialized";
+    "workspace not initialized";
     "already exists";
     "no active";
     "unknown";
@@ -844,7 +844,7 @@ let guard_fragments_for_name name =
 let case_for_name name =
   let init_mode =
     match name with
-    | "masc_init" | "masc_start" | "masc_set_coord" -> Fresh
+    | "masc_init" | "masc_start" | "masc_set_workspace" -> Fresh
     | _ -> Init_joined
   in
   let prepare fixture = prepare_for_name fixture name in

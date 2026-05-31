@@ -28,7 +28,7 @@ val select_shell_json :
   ?request:Httpun.Request.t ->
   ?timing:Server_timing.t ->
   ?light:bool ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 (** Returns [Dashboard_snapshot.current ()].shell when the refresh
     fiber has published (wait-free, [O(1)]).  Falls back to the
@@ -50,7 +50,7 @@ val select_shell_json :
 val select_tools_json :
   ?actor:string ->
   ?timing:Server_timing.t ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 (** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/tools read path
     selector.  Returns [Dashboard_snapshot.current ()].tools when the
@@ -67,7 +67,7 @@ val select_tools_json :
 
 val select_telemetry_summary_json :
   ?timing:Server_timing.t ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 (** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/telemetry/summary read
     path selector.  Returns [Dashboard_snapshot.current ()].telemetry_summary

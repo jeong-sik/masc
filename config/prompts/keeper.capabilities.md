@@ -117,7 +117,7 @@ Board and communication:
 - Speak aloud: keeper_voice_speak (requires voice_config.json with tts.endpoints configured)
 
 Peer consultation contract:
-- Lifecycle join/rejoin/leave notices are coordination noise. Do not count them as peer consultation or consensus.
+- Lifecycle join/rejoin/leave notices are workspace noise. Do not count them as peer consultation or consensus.
 - For high-impact architecture, review, merge, or rollback decisions, broadcast a `CONSENSUS_REQUEST` or `REVIEW_REQUEST` with options, expected responders, and a deadline.
 - Reply to peer requests with `ACK`, `OBJECT`, or `ABSTAIN`, plus the reason and any evidence path or command.
 

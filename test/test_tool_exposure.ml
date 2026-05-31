@@ -118,7 +118,7 @@ let () =
               let hidden_names =
                 [
                   "masc_operator_judgment_write";
-                  "masc_set_coord";
+                  "masc_set_workspace";
                 ]
               in
               List.iter
@@ -131,7 +131,7 @@ let () =
               let hidden_names =
                 [
                   "masc_operator_judgment_write";
-                  "masc_set_coord";
+                  "masc_set_workspace";
                 ]
               in
               List.iter
@@ -157,14 +157,14 @@ let () =
                     false
                     (List.mem name all_names))
                 removed_names);
-          test_case "removed named-coord tools are absent from the schema registry" `Quick
+          test_case "removed named-workspace tools are absent from the schema registry" `Quick
             (fun () ->
               let all_names = Config.all_tool_names () in
               List.iter
                 (fun name ->
                   check bool (name ^ " removed from registry") false
                     (List.mem name all_names))
-                [ "masc_coords_list"; "masc_coord_create"; "masc_coord_enter" ]);
+                [ "masc_workspaces_list"; "masc_workspace_create"; "masc_workspace_enter" ]);
         ] );
       ( "description_budget_audit",
         [

@@ -270,7 +270,7 @@ val goal_policy_nodes :
     [runtime_blocker_class] and [runtime_blocker_summary] are absent or
     empty. Reads wall-clock for [ts] / [observed_at]. *)
 val runtime_blocker_event_from_meta :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t option
 
@@ -280,7 +280,7 @@ val runtime_blocker_event_from_meta :
     a 19-key runtime_trust JSON record. Used when the upstream
     [Keeper_runtime_trust_snapshot.snapshot_json] is unavailable. *)
 val runtime_trust_from_receipt_fallback :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t ->
   Yojson.Safe.t

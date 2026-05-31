@@ -9,7 +9,7 @@
     counted, never propagated.  [Eio.Cancel.Cancelled] is re-raised. *)
 
 val run :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   memory:Agent_sdk.Memory.t ->
   turn:int ->

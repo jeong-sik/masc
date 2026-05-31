@@ -53,7 +53,7 @@ let store_cache_mu = Eio.Mutex.create ()
 let ledger_dir base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "reputation_v2"
 
-let get_store (config : Coord.config) : Dated_jsonl.t =
+let get_store (config : Workspace.config) : Dated_jsonl.t =
   let base_path = config.base_path in
   Eio.Mutex.use_rw ~protect:true store_cache_mu (fun () ->
     match Hashtbl.find_opt store_cache base_path with
@@ -170,7 +170,7 @@ let ledger_event_of_json json : ledger_event option =
 
 (** {1 Emitters} *)
 
-let append_event (config : Coord.config) (event : ledger_event) =
+let append_event (config : Workspace.config) (event : ledger_event) =
   Dated_jsonl.append (get_store config) (ledger_event_to_json event)
 
 let emit_tool_outcome config ~agent_id ~tool_name ~success
@@ -203,7 +203,7 @@ let emit_safety_violation config ~agent_id ~violation_kind
 
 (** {1 Readers} *)
 
-let read_events_for_agent (config : Coord.config) ~agent_id ~window_days
+let read_events_for_agent (config : Workspace.config) ~agent_id ~window_days
     : ledger_event list =
   if String.trim agent_id = "" then []
   else begin
@@ -248,7 +248,7 @@ let default_ledger_metrics : agent_ledger_metrics =
 
 let clamp01 v = Float.max 0.0 (Float.min 1.0 v)
 
-let compute_ledger_metrics (config : Coord.config) ~agent_id ~window_days
+let compute_ledger_metrics (config : Workspace.config) ~agent_id ~window_days
     : agent_ledger_metrics =
   let events = read_events_for_agent config ~agent_id ~window_days in
   let tool_calls = ref 0 in

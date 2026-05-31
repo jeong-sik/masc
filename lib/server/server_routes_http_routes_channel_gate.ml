@@ -26,7 +26,7 @@ module Http = Http_server_eio
         "channel": "discord",
         "channel_user_id": "123456789",
         "channel_user_name": "user#1234",
-        "channel_room_id": "987654321",
+        "channel_workspace_id": "987654321",
         "keeper_name": "luna",
         "content": "What is the project status?",
         "idempotency_key": "discord-msg-abc123",
@@ -66,23 +66,23 @@ let metric_context_of_json json =
     | "" -> "unknown"
     | value -> String.lowercase_ascii (String.trim value)
   in
-  (channel, field "channel_room_id", field "keeper_name")
+  (channel, field "channel_workspace_id", field "keeper_name")
 
 let record_validation_error_metric ~duration_ms body_str message =
   let fallback () =
     Channel_gate_metrics.record_attempt
       ~channel:"unknown"
-      ~room_id:""
+      ~workspace_id:""
       ~keeper:""
       ~duration_ms
       (Channel_gate_metrics.Validation_error message)
   in
   try
     let json = Yojson.Safe.from_string body_str in
-    let channel, room_id, keeper = metric_context_of_json json in
+    let channel, workspace_id, keeper = metric_context_of_json json in
     Channel_gate_metrics.record_attempt
       ~channel
-      ~room_id
+      ~workspace_id
       ~keeper
       ~duration_ms
       (Channel_gate_metrics.Validation_error message)
@@ -93,7 +93,7 @@ let record_internal_error_metric ~duration_ms body_str exn =
   let fallback () =
     Channel_gate_metrics.record_internal_error_exn
       ~channel:"unknown"
-      ~room_id:""
+      ~workspace_id:""
       ~keeper:""
       ~duration_ms exn
   in
@@ -103,7 +103,7 @@ let record_internal_error_metric ~duration_ms body_str exn =
     | Ok msg ->
         Channel_gate_metrics.record_internal_error_exn
           ~channel:msg.channel
-          ~room_id:msg.channel_room_id
+          ~workspace_id:msg.channel_workspace_id
           ~keeper:msg.keeper_name
           ~duration_ms exn
     | Error _ -> fallback ()
@@ -122,7 +122,7 @@ let handle_gate_message ~sw ~clock state request reqd =
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net
-        ~config:state.Mcp_server.coord_config
+        ~config:state.Mcp_server.workspace_config
     in
     let result =
       try
@@ -160,7 +160,7 @@ let handle_gate_message ~sw ~clock state request reqd =
           (Channel_gate.error_json client_msg)
   )
 
-(** GET /api/v1/gate/events?channel=<channel>&keeper=<keeper>&room_id=<room>&limit=<n>
+(** GET /api/v1/gate/events?channel=<channel>&keeper=<keeper>&workspace_id=<workspace>&limit=<n>
 
     Recent connector event snapshot for dashboard/ops surfaces.
     Returns newest-first gate attempts with optional filters.
@@ -179,7 +179,7 @@ let handle_gate_events _state request reqd =
     Channel_gate_metrics.events_json
       ?channel:(trim_filter "channel")
       ?keeper:(trim_filter "keeper")
-      ?room_id:(trim_filter "room_id")
+      ?workspace_id:(trim_filter "workspace_id")
       ~limit ()
   in
   respond_public_read_json_value ~status:`OK request reqd json
@@ -256,7 +256,7 @@ let handle_gate_connector_status _state request reqd =
 
 let gate_keeper_ctx ~sw ~clock state =
   {
-    Tool_keeper.config = state.Mcp_server.coord_config;
+    Tool_keeper.config = state.Mcp_server.workspace_config;
     agent_name = "gate:connector";
     sw;
     clock;
@@ -377,7 +377,7 @@ let handle_bind_for_connector ~sw ~clock state request reqd
         | Ok true -> (
             let actor_name =
               sanitized_dashboard_actor_for_request
-                ~base_path:state.Mcp_server.coord_config.base_path request
+                ~base_path:state.Mcp_server.workspace_config.base_path request
               |> Option.value ~default:"dashboard"
               |> String.trim
             in
@@ -411,7 +411,7 @@ let handle_unbind_for_connector state request reqd
       else
         let actor_name =
           sanitized_dashboard_actor_for_request
-            ~base_path:state.Mcp_server.coord_config.base_path request
+            ~base_path:state.Mcp_server.workspace_config.base_path request
           |> Option.value ~default:"dashboard"
           |> String.trim
         in

@@ -1,7 +1,7 @@
 
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
-    Delegates to sub-modules for coord, comm, and extra tool handling.
+    Delegates to sub-modules for workspace, comm, and extra tool handling.
     Keeps inline: mcp_session, approval, spawn, discover_tools.
 
     @since 0.1.0 *)
@@ -11,7 +11,7 @@
 type tool_result = Tool_inline_dispatch_types.tool_result
 
 type context = Tool_inline_dispatch_types.context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
   registry : Session.registry;
   state : Mcp_server.server_state;
@@ -27,11 +27,11 @@ type context = Tool_inline_dispatch_types.context = {
     Yojson.Safe.t option;
   governance_defaults : string -> Mcp_server_eio_governance.governance_config;
   save_governance :
-    Coord.config -> Mcp_server_eio_governance.governance_config -> unit;
+    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
   load_mcp_sessions :
-    Coord.config -> Mcp_server_eio_governance.mcp_session_record list;
+    Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :
-    Coord.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
+    Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
 (** {1 Dispatch} *)

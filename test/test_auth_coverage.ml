@@ -40,7 +40,7 @@ let test_generate_token_unique () =
   let t2 = Auth.generate_token () in
   check bool "unique" true (t1 <> t2)
 
-let setup_test_room () =
+let setup_test_workspace () =
   let unique_id =
     Printf.sprintf "masc-auth-coverage-%d-%d"
       (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))
@@ -51,7 +51,7 @@ let setup_test_room () =
   Unix.mkdir masc_dir 0o755;
   tmp
 
-let cleanup_test_room dir =
+let cleanup_test_workspace dir =
   let rec rm_rf path =
     if Sys.is_directory path then begin
       Array.iter (fun f -> rm_rf (Filename.concat path f)) (Sys.readdir path);
@@ -417,9 +417,9 @@ let test_http_auth_accepts_internal_keeper_header () =
 
 let test_observer_sse_auth_accepts_query_token_fallback () =
   let module Server_auth = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
@@ -438,9 +438,9 @@ let test_observer_sse_auth_accepts_query_token_fallback () =
 
 let test_presence_sse_auth_accepts_query_token_fallback () =
   let module Server_auth = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
@@ -459,9 +459,9 @@ let test_presence_sse_auth_accepts_query_token_fallback () =
 
 let test_observer_sse_auth_rejects_query_token_on_non_observer_path () =
   let module Server_auth = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
@@ -489,9 +489,9 @@ let test_observer_sse_auth_rejects_query_token_on_non_observer_path () =
    test failure. Spec: AuthIdentityFSM.tla I2 NoSilentRewrite. *)
 let test_verify_mcp_auth_accepts_valid_bearer () =
   let module Server_auth = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
@@ -509,9 +509,9 @@ let test_verify_mcp_auth_accepts_valid_bearer () =
 
 let test_verify_mcp_auth_rejects_invalid_bearer () =
   let module Server_auth = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       (* Build an invalid bearer header in pieces so source scanners do not
@@ -791,9 +791,9 @@ let test_permission_for_tool_empty () =
 
 let test_resolve_agent_name_prefers_token_for_generated_actor () =
   let module SA = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
@@ -817,9 +817,9 @@ let test_resolve_agent_name_prefers_token_for_generated_actor () =
 
 let test_resolve_agent_name_preserves_explicit_stable_actor () =
   let module SA = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
@@ -843,9 +843,9 @@ let test_resolve_agent_name_preserves_explicit_stable_actor () =
 
 let test_sanitized_dashboard_actor_for_request_uses_token_owner () =
   let module SA = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
@@ -867,9 +867,9 @@ let test_sanitized_dashboard_actor_for_request_uses_token_owner () =
 
 let test_dashboard_actor_invalid_token_fallback_is_counted () =
   let module SA = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let before =
@@ -899,9 +899,9 @@ let test_dashboard_actor_invalid_token_fallback_is_counted () =
 
 let test_resolve_agent_name_rejects_invalid_token () =
   let module SA = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let invalid_token = "definitely-invalid-token" in
@@ -923,9 +923,9 @@ let test_resolve_agent_name_rejects_invalid_token () =
 
 let test_authorize_read_request_canonicalizes_token_owner () =
   let module SA = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
@@ -949,9 +949,9 @@ let test_authorize_read_request_canonicalizes_token_owner () =
 
 let test_authorize_tool_request_canonicalizes_token_owner () =
   let module SA = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token =
@@ -978,9 +978,9 @@ let test_authorize_tool_request_canonicalizes_token_owner () =
 
 let test_resolve_agent_name_uses_internal_keeper_header () =
   let module SA = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token = Auth.ensure_internal_keeper_token dir in
@@ -1001,9 +1001,9 @@ let test_resolve_agent_name_uses_internal_keeper_header () =
 
 let test_resolve_agent_name_rejects_internal_keeper_without_name () =
   let module SA = Masc_mcp.Server_auth in
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let raw_token = Auth.ensure_internal_keeper_token dir in

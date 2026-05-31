@@ -19,7 +19,7 @@ module Float = Stdlib.Float
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
     Delegates to sub-modules:
-    - Tool_inline_dispatch_coord: masc_start
+    - Tool_inline_dispatch_workspace: masc_start
     - Tool_inline_dispatch_comm: masc_broadcast, masc_messages
     - Tool_inline_dispatch_extra: remaining tools (board, etc.)
 
@@ -33,7 +33,7 @@ module Float = Stdlib.Float
     without knowing about the types sub-module. *)
 type tool_result = Tool_inline_dispatch_types.tool_result
 type context = Tool_inline_dispatch_types.context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
   registry : Session.registry;
   state : Mcp_server.server_state;
@@ -49,10 +49,10 @@ type context = Tool_inline_dispatch_types.context = {
     Yojson.Safe.t option;
   governance_defaults : string -> Mcp_server_eio_governance.governance_config;
   save_governance :
-    Coord.config -> Mcp_server_eio_governance.governance_config -> unit;
-  load_mcp_sessions : Coord.config -> Mcp_server_eio_governance.mcp_session_record list;
+    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
+  load_mcp_sessions : Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :
-    Coord.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
+    Workspace.config -> Mcp_server_eio_governance.mcp_session_record list -> unit;
 }
 
 let tool_index_entry_of_schema (schema : Masc_domain.tool_schema)
@@ -184,9 +184,9 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   in
 
   match name with
-  (* ── Coord lifecycle (delegated) ─────────────────────────────── *)
+  (* ── Workspace lifecycle (delegated) ─────────────────────────────── *)
   | "masc_start" ->
-      Tool_inline_dispatch_coord.handle_start ~tool_name:name ~start_time:start ctx
+      Tool_inline_dispatch_workspace.handle_start ~tool_name:name ~start_time:start ctx
 
   (* ── Communication (delegated) ──────────────────────────────── *)
   | "masc_broadcast" ->
@@ -323,7 +323,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 (* Tool_spec registration (RFC-0182 §3.2)                           *)
 (* ================================================================ *)
 
-(* Migrates the inline-dispatched coord + approval tools from the legacy
+(* Migrates the inline-dispatched workspace + approval tools from the legacy
    register_module_tag bootstrap (mcp_server_eio.ml) to the Tool_spec
    single-call SSOT. Scope: 6 of 10 §3.2 live tools.
 
@@ -359,7 +359,7 @@ let inline_tool_mcp_context_required =
 
 let inline_tool_effect_domain name : Tool_catalog.effect_domain =
   if List.mem name inline_tool_read_only then Tool_catalog.Read_only
-  else Tool_catalog.Masc_coordination
+  else Tool_catalog.Masc_workspace
 
 let () =
   inline_register_targets

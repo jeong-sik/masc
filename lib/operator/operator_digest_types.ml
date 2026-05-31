@@ -74,40 +74,36 @@ let compare_recommendation (a : recommended_action) (b : recommended_action) =
 
 let attention_item_to_yojson (item : attention_item) =
   `Assoc
-    ([
+    [
       ("kind", `String item.kind);
       ("severity", `String (operator_severity_to_string item.severity));
       ("summary", `String item.summary);
+      ("target_type", `String item.target_type);
+      ("target_id", Json_util.string_opt_to_json item.target_id);
       ("actor", Json_util.string_opt_to_json item.actor);
       ("evidence", item.evidence);
       ("provenance", `String "derived");
       ("authoritative", `Bool false);
     ]
-    @ (if item.target_type = "" then [] else [ ("target_type", `String item.target_type) ])
-    @
-    match item.target_id with
-    | None -> []
-    | Some value -> [ ("target_id", `String value) ])
 
 let recommended_confirm_required = Operator_approval.confirm_required
 
 let recommended_action_to_yojson ~actor (item : recommended_action) =
   let preview =
     `Assoc
-      ([
+      [
         ("actor", `String actor);
         ("action_type", `String item.action_type);
+        ("target_type", `String item.target_type);
+        ("target_id", Json_util.string_opt_to_json item.target_id);
         ("payload", item.suggested_payload);
       ]
-      @ (if item.target_type = "" then [] else [ ("target_type", `String item.target_type) ])
-      @
-      match item.target_id with
-      | None -> []
-      | Some value -> [ ("target_id", `String value) ])
   in
   `Assoc
-    ([
+    [
       ("action_type", `String item.action_type);
+      ("target_type", `String item.target_type);
+      ("target_id", Json_util.string_opt_to_json item.target_id);
       ("severity", `String (operator_severity_to_string item.severity));
       ("reason", `String item.reason);
       ("confirm_required", `Bool (recommended_confirm_required item.action_type));
@@ -116,11 +112,6 @@ let recommended_action_to_yojson ~actor (item : recommended_action) =
       ("provenance", `String "fallback");
       ("authoritative", `Bool false);
     ]
-    @ (if item.target_type = "" then [] else [ ("target_type", `String item.target_type) ])
-    @
-    match item.target_id with
-    | None -> []
-    | Some value -> [ ("target_id", `String value) ])
 
 let summary_of_attention_items (items : attention_item list) =
   let sorted = List.sort compare_attention items in
@@ -181,12 +172,13 @@ let summary_of_recommendations ~actor (items : recommended_action list) =
       ("authoritative", `Bool false);
     ]
 
-let is_omitted_target_type value = String.equal value ""
+(** [is_root_target_type v] is true when [v] matches the canonical "workspace" target type. *)
+let is_root_target_type value = String.equal value "workspace"
 
 let normalize_digest_target_type value =
   match value with
   | Some raw ->
       let normalized = String.trim raw |> String.lowercase_ascii in
-      if is_omitted_target_type normalized then Ok ""
-      else Error "target_type must be omitted"
-  | None -> Ok ""
+      if is_root_target_type normalized then Ok "workspace"
+      else Error "target_type must be root"
+  | None -> Ok "workspace"

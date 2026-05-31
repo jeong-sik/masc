@@ -13,7 +13,7 @@
  (libraries
    masc_core
    masc_log
-   masc_coord
+   masc_workspace
    fs_compat
    yojson
    unix

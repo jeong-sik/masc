@@ -1095,8 +1095,8 @@ let test_replay_retention_lists_selected_sources () =
   | `Assoc fields ->
     Alcotest.(check string) "scope" "dashboard_telemetry_replay"
       (json_string_field "scope" json);
-    Alcotest.(check string) "coordination root" root
-      (json_string_field "coordination_root" json);
+    Alcotest.(check string) "workspace root" root
+      (json_string_field "workspace_root" json);
     let selected_sources =
       match List.assoc_opt "selected_sources" fields with
       | Some (`List values) ->

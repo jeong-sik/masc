@@ -1,7 +1,7 @@
 (** Livelock block handling for keeper unified turns. *)
 
 val handle
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> generation:int
   -> keeper_turn_id:int

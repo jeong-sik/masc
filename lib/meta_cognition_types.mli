@@ -1,4 +1,4 @@
-(** Meta_cognition_types — types and utilities for coord-level meta-cognition.
+(** Meta_cognition_types — types and utilities for workspace-level meta-cognition.
 
     Shared type definitions and leaf utility functions used across the
     meta-cognition sub-modules.
@@ -105,7 +105,7 @@ type salience =
   | Contested_belief
   | Operator_tension
   | Operator_desire
-  | Stagnant_coord
+  | Stagnant_workspace
 
 type interpretation = {
   primary_salience : salience;

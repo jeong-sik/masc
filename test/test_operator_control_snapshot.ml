@@ -211,11 +211,9 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      (* See: fixture session setup; returned agent record is not used. *)
-      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.join config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -356,10 +354,9 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: this fixture only needs an initialized coord for digest reads. *)
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config = Workspace.default_config base_dir in
+      (* See: this fixture only needs an initialized workspace for digest reads. *)
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
       let meta =
         match
           Masc_test_deps.meta_of_json_fixture
@@ -486,7 +483,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "full paused pipeline" "paused"
         (full_keeper |> member "pipeline_stage" |> to_string))
 
-let test_digest_coord_includes_keeper_runtime_attention () =
+let test_digest_workspace_includes_keeper_runtime_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -499,9 +496,8 @@ let test_digest_coord_includes_keeper_runtime_attention () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "operator")); (* See: fixture init. *)
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator")); (* See: fixture init. *)
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -605,9 +601,8 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -688,15 +683,13 @@ let test_snapshot_has_expected_sections () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      (* See: fixture session setup; returned agent record is not used. *)
-      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
-      ignore (Coord.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
-      ignore (Coord.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore (Workspace.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
+      ignore (Workspace.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
-      let root = Yojson.Safe.Util.member "coord" json in
+      let root = Yojson.Safe.Util.member "workspace" json in
       Alcotest.(check bool) "root block present" true
         (root <> `Null);
       Alcotest.(check bool) "root initialized" true
@@ -750,9 +743,8 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
       let ctx = operator_ctx env sw config "owner" in
       let request_namespace_pause actor =
         match
@@ -761,7 +753,7 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
               [
                 ("actor", `String actor);
                 ("action_type", `String "namespace_pause");
-                ("target_type", `String "coord");
+                ("target_type", `String "workspace");
               ])
         with
         | Ok _ -> ()
@@ -824,11 +816,9 @@ let test_snapshot_summary_view_excludes_retired_command_plane () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      (* See: fixture session setup; returned agent record is not used. *)
-      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.join config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_messages:false
@@ -852,11 +842,9 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      (* See: fixture session setup; returned agent record is not used. *)
-      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.join config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:true
@@ -892,11 +880,9 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      (* See: fixture session setup; returned agent record is not used. *)
-      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.join config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -1005,11 +991,9 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
       Eio_guard.disable ();
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      (* See: fixture session setup; returned agent record is not used. *)
-      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.join config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -1111,11 +1095,9 @@ let test_snapshot_waiters_share_inflight_result () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      (* See: fixture session setup; returned agent record is not used. *)
-      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.join config ~agent_name:"owner" ~capabilities:[] ());
       Operator_control.invalidate_snapshot_cache ();
       let ctx = operator_ctx env sw config "owner" in
       ignore (Operator_control.snapshot_json ctx);
@@ -1190,11 +1172,9 @@ let test_snapshot_waiter_returns_stale_inflight_result () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      (* See: fixture session setup; returned agent record is not used. *)
-      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.join config ~agent_name:"owner" ~capabilities:[] ());
       Operator_control.invalidate_snapshot_cache ();
       let ctx = operator_ctx env sw config "owner" in
       ignore (Operator_control.snapshot_json ctx);
@@ -1241,9 +1221,9 @@ let test_snapshot_waiter_returns_stale_inflight_result () =
       Alcotest.(check bool) "stale waiter does not replace owner" true
         still_computing)
 
-(* test_orchestra_coord_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
+(* test_orchestra_workspace_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
 
-let test_digest_coord_exposes_pending_confirm_attention () =
+let test_digest_workspace_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1251,9 +1231,8 @@ let test_digest_coord_exposes_pending_confirm_attention () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       let action_json =
         Operator_control.action_json ctx
@@ -1261,7 +1240,7 @@ let test_digest_coord_exposes_pending_confirm_attention () =
             [
               ("actor", `String "operator");
                ("action_type", `String "namespace_pause");
-               ("target_type", `String "coord");
+               ("target_type", `String "workspace");
             ])
       in
       (match action_json with Ok _ -> () | Error err -> Alcotest.fail err);
@@ -1270,7 +1249,7 @@ let test_digest_coord_exposes_pending_confirm_attention () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "target_type" "coord"
+      Alcotest.(check string) "target_type" "workspace"
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
@@ -1290,8 +1269,8 @@ let test_digest_coord_exposes_pending_confirm_attention () =
                Yojson.Safe.Util.(item |> member "provenance" |> to_string))
            attention_items);
       (* command_* attention items only appear when microarch signals
-         are warn/bad; in a fresh coord they are absent *)
-      Alcotest.(check bool) "no command attention in fresh coord" true
+         are warn/bad; in a fresh workspace they are absent *)
+      Alcotest.(check bool) "no command attention in fresh workspace" true
         (not
            (List.exists
               (fun item ->
@@ -1300,7 +1279,7 @@ let test_digest_coord_exposes_pending_confirm_attention () =
                   Yojson.Safe.Util.(item |> member "kind" |> to_string))
               attention_items)))
 
-let test_digest_coord_includes_tool_host_failure_attention () =
+let test_digest_workspace_includes_tool_host_failure_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1308,11 +1287,9 @@ let test_digest_coord_includes_tool_host_failure_attention () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: fixture setup; returned init state is not used. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      (* See: fixture session setup; returned agent record is not used. *)
-      ignore (Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.join config ~agent_name:"owner" ~capabilities:[] ());
       Dashboard_tool_host_events.record ~fs:() config
         {
           Dashboard_tool_host_events.agent_name = "agent_code";

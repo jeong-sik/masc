@@ -5,7 +5,7 @@
     executable evidence and which still need proof. *)
 
 val json :
-  config:Coord.config ->
+  config:Workspace.config ->
   ?n:int ->
   ?window_hours:float ->
   ?success_threshold_pct:float ->

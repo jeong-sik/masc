@@ -14,12 +14,12 @@ let section_label = function
   | Watch -> "Watch Next"
 
 let has_operational_signal ~section ~workspace_health ~incident_count ~recommended_action_count =
-  let coord_risky =
+  let workspace_risky =
     Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string workspace_health)
   in
   match section with
-  | Watch -> coord_risky || incident_count > 0 || recommended_action_count > 0
-  | Communication | Alignment -> coord_risky || incident_count > 0
+  | Watch -> workspace_risky || incident_count > 0 || recommended_action_count > 0
+  | Communication | Alignment -> workspace_risky || incident_count > 0
 
 let annotate_section ~section ~status ~summary ~evidence ~metadata_gaps
     ~workspace_health ~incident_count ~recommended_action_count =

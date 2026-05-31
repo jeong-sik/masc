@@ -119,7 +119,7 @@ let keeper_tool_audit_fields
 
 let cached_tool_audit_json
       ~lightweight
-      (config : Coord.config)
+      (config : Workspace.config)
       (meta : Keeper_meta_contract.keeper_meta)
   =
   let base_hash = Digest.to_hex (Digest.string config.base_path) in

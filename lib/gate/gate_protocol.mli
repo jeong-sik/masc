@@ -1,6 +1,6 @@
 (** Gate_protocol -- wire-level types for the Channel Gate HTTP API.
 
-    Pure module: no Eio, no Agent_identity, no Tool_keeper, no Coord.
+    Pure module: no Eio, no Agent_identity, no Tool_keeper, no Workspace.
     Only depends on Yojson for JSON serialization.
 
     Connectors (Discord, Telegram, etc.) and the gate orchestrator
@@ -18,7 +18,7 @@ type inbound_message = {
           The gate never interprets this beyond passing it to metrics. *)
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
   keeper_name : string;
   content : string;
   idempotency_key : string;

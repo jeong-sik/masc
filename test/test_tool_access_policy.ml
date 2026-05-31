@@ -612,9 +612,9 @@ let test_dispatch_preset_routes_pm_tools () =
   check bool "dispatch excludes code git" false
     (List.mem "tool_execute" allowed)
 
-let test_delivery_preset_routes_coordination_read_models () =
+let test_delivery_preset_routes_workspace_read_models () =
   init_keeper_tool_registry ();
-  let base = make_gate_test_meta ~name:"test-delivery-coordination-read" () in
+  let base = make_gate_test_meta ~name:"test-delivery-workspace-read" () in
   let meta = { base with
     tool_access = [];
     tool_denylist = [];
@@ -629,11 +629,11 @@ let test_delivery_preset_routes_coordination_read_models () =
   check bool "delivery includes goal verify" true
     (List.mem "masc_goal_verify" allowed)
 
-let test_coordination_presets_route_plan_history_reads () =
+let test_workspace_presets_route_plan_history_reads () =
   init_keeper_tool_registry ();
   List.iter
     (fun (label, _) ->
-      let base = make_gate_test_meta ~name:("test-" ^ label ^ "-coordination") () in
+      let base = make_gate_test_meta ~name:("test-" ^ label ^ "-workspace") () in
       let meta =
         {
           base with
@@ -799,10 +799,10 @@ let () =
         [
           test_case "dispatch routes PM tools" `Quick
             test_dispatch_preset_routes_pm_tools;
-          test_case "delivery routes coordination read models" `Quick
-            test_delivery_preset_routes_coordination_read_models;
-          test_case "coordination presets route plan/history reads" `Quick
-            test_coordination_presets_route_plan_history_reads;
+          test_case "delivery routes workspace read models" `Quick
+            test_delivery_preset_routes_workspace_read_models;
+          test_case "workspace presets route plan/history reads" `Quick
+            test_workspace_presets_route_plan_history_reads;
         ] );
       ( "inter_diff_composition",
         [

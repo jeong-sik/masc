@@ -18,14 +18,14 @@ val resolve_claim_goal_scope :
       all tasks; explicit persisted [active_goal_ids] stay scoped unless this
       flag is set. *)
   ?allow_empty_goal_scope_fallback:bool ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   unit ->
   claim_goal_scope
 
 val resolve_observation_claim_goal_scope :
   ?agent_tool_names:string list ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   unit ->
   claim_goal_scope
@@ -34,7 +34,7 @@ val resolve_observation_claim_goal_scope :
     [active_goal_ids] remain scoped. *)
 
 val runtime_contract_json :
-  ?config:Coord.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+  ?config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 
 val runtime_contract_json_from_fields :
   keeper_name:string ->

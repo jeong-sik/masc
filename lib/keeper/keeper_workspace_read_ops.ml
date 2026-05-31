@@ -12,7 +12,7 @@ open Keeper_workspace_ops_setup
 
 let try_handle
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
       ~op

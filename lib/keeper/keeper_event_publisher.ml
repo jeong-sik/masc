@@ -1,6 +1,6 @@
 (** MASC Event_bus publishers for runtime events.
 
-    Publishes MASC coordination events (broadcasts, heartbeats, board
+    Publishes MASC workspace events (broadcasts, heartbeats, board
     posts, task transitions, keeper lifecycle, audit) to the MASC-owned
     Event_bus. Events follow dot-separated snake_case naming per OAS
     Custom-name convention: [masc.broadcast], [masc.heartbeat],
@@ -48,7 +48,7 @@ let publish_heartbeat ~agent_name ~turn ~context_pct =
     variant -- typos at call sites fail to compile. JSON wire format
     ("claim" / "start" / "done" / ...) is preserved via
     [Masc_domain.task_action_to_string]. Sibling refactor of #8846 (the
-    Coord-side hook for the same transition vocabulary). *)
+    Workspace-side hook for the same transition vocabulary). *)
 let publish_task_transition ~agent_name ~task_id
     ~(transition : Masc_domain.task_action) =
   let payload = `Assoc [

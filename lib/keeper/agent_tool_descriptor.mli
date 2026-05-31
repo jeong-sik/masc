@@ -56,7 +56,7 @@ type runtime_handler =
   | Tool_masc_plan_dispatch
   | Tool_masc_run_dispatch
   | Tool_masc_agent_dispatch
-  | Tool_masc_coord_dispatch
+  | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
@@ -103,15 +103,15 @@ val runtime_handler_to_string : runtime_handler -> string
     entries pinned by [test_alias_table_is_stable]). *)
 val public_descriptors : t list
 
-(** [internal_descriptors] is the descriptor-backed coordination surface
+(** [internal_descriptors] is the descriptor-backed workspace surface
     (RFC-0179). Starts empty; each cluster migration PR adds entries that map
-    [keeper_*] / [masc_*] coordination tools to a typed handler. Not part of
+    [keeper_*] / [masc_*] workspace tools to a typed handler. Not part of
     the LLM-native public-name contract. *)
 val internal_descriptors : t list
 
 (** [all_descriptors ()] is [public_descriptors @ internal_descriptors]. The
     runtime dispatcher walks this list to resolve [internal_name] for any
-    descriptor-backed tool, regardless of LLM-native vs coordination origin. *)
+    descriptor-backed tool, regardless of LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
 
 val public_names : unit -> string list
@@ -121,7 +121,7 @@ val public_name_for_internal : string -> string option
 val public_descriptors_for_internal : string -> t list
 
 (** [descriptors_for_internal name] walks [all_descriptors ()]. Use this from
-    the runtime dispatcher to support descriptor-backed coordination tools
+    the runtime dispatcher to support descriptor-backed workspace tools
     alongside the seven LLM-native descriptors. *)
 val descriptors_for_internal : string -> t list
 

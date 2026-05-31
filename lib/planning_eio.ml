@@ -48,7 +48,7 @@ let create_context ~task_id =
 
 (* ===== File System Helpers ===== *)
 
-let planning_dir (config : Coord.config) task_id =
+let planning_dir (config : Workspace.config) task_id =
   Filename.concat config.base_path (Printf.sprintf "planning/%s" task_id)
 
 (** File read via Fs_compat (Eio-native when available, blocking fallback) *)
@@ -117,7 +117,7 @@ let parse_full_context_markdown content =
 (* ===== Core Operations (Pure Sync) ===== *)
 
 (** Initialize planning context for a task *)
-let init (config : Coord.config) ~task_id : (planning_context, string) result =
+let init (config : Workspace.config) ~task_id : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     Fs_compat.mkdir_p dir;
@@ -136,7 +136,7 @@ let init (config : Coord.config) ~task_id : (planning_context, string) result =
   | e -> Error (Printexc.to_string e)
 
 (** Load planning context *)
-let load (config : Coord.config) ~task_id : (planning_context, string) result =
+let load (config : Workspace.config) ~task_id : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     let ctx_path = Filename.concat dir "context.json" in
@@ -152,7 +152,7 @@ let load (config : Coord.config) ~task_id : (planning_context, string) result =
   | e -> Error (Printexc.to_string e)
 
 (** Update task plan *)
-let update_plan (config : Coord.config) ~task_id ~content : (planning_context, string) result =
+let update_plan (config : Workspace.config) ~task_id ~content : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     match load config ~task_id with
@@ -183,7 +183,7 @@ let update_plan (config : Coord.config) ~task_id ~content : (planning_context, s
   | e -> Error (Printexc.to_string e)
 
 (** Add note *)
-let add_note (config : Coord.config) ~task_id ~note : (planning_context, string) result =
+let add_note (config : Workspace.config) ~task_id ~note : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     match load config ~task_id with
@@ -207,7 +207,7 @@ let add_note (config : Coord.config) ~task_id ~note : (planning_context, string)
   | e -> Error (Printexc.to_string e)
 
 (** Add error - PDCA Check phase. Auto-creates planning context if none exists. *)
-let add_error (config : Coord.config) ~task_id ~error_type ~message ?context () : (planning_context, string) result =
+let add_error (config : Workspace.config) ~task_id ~error_type ~message ?context () : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     let ctx = match load config ~task_id with
@@ -244,7 +244,7 @@ let add_error (config : Coord.config) ~task_id ~error_type ~message ?context () 
   | e -> Error (Printexc.to_string e)
 
 (** Mark error as resolved *)
-let resolve_error (config : Coord.config) ~task_id ~index : (planning_context, string) result =
+let resolve_error (config : Workspace.config) ~task_id ~index : (planning_context, string) result =
   try
     match load config ~task_id with
     | Error e -> Error e
@@ -266,7 +266,7 @@ let resolve_error (config : Coord.config) ~task_id ~index : (planning_context, s
   | e -> Error (Printexc.to_string e)
 
 (** Set deliverable. Auto-creates planning context if none exists. *)
-let set_deliverable (config : Coord.config) ~task_id ~content : (planning_context, string) result =
+let set_deliverable (config : Workspace.config) ~task_id ~content : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
     let ctx = match load config ~task_id with
@@ -289,8 +289,8 @@ let set_deliverable (config : Coord.config) ~task_id ~content : (planning_contex
 
 (* ===== Session-level Context ===== *)
 
-let current_task_file (config : Coord.config) =
-  Filename.concat (Coord_utils.masc_dir config) "current_task"
+let current_task_file (config : Workspace.config) =
+  Filename.concat (Workspace_utils.masc_dir config) "current_task"
 
 (* The planning [current_task] path must be a file, but runtime state can be
    corrupted by external writers. Keep these helpers total for directory-shaped
@@ -299,8 +299,8 @@ let current_task_file (config : Coord.config) =
 let is_directory_path path =
   try Sys.is_directory path with Sys_error _ -> false
 
-let quarantine_dir_under_trash (config : Coord.config) ~path ~op =
-  let trash_dir = Filename.concat (Coord_utils.masc_dir config) "_trash" in
+let quarantine_dir_under_trash (config : Workspace.config) ~path ~op =
+  let trash_dir = Filename.concat (Workspace_utils.masc_dir config) "_trash" in
   Fs_compat.mkdir_p trash_dir;
   let stamp =
     let t = Time_compat.now () in
@@ -355,7 +355,7 @@ let remove_empty_current_task_dir ~path ~op =
     false
 
 (** Get current task_id for session *)
-let get_current_task (config : Coord.config) : string option =
+let get_current_task (config : Workspace.config) : string option =
   let path = current_task_file config in
   if not (Sys.file_exists path) then None
   else if is_directory_path path then begin
@@ -373,7 +373,7 @@ let get_current_task (config : Coord.config) : string option =
       None
 
 (** Set current task_id for session *)
-let set_current_task (config : Coord.config) ~task_id : (unit, string) result =
+let set_current_task (config : Workspace.config) ~task_id : (unit, string) result =
   let path = current_task_file config in
   Fs_compat.mkdir_p (Filename.dirname path);
   let write_current_task () =
@@ -409,7 +409,7 @@ let set_current_task (config : Coord.config) ~task_id : (unit, string) result =
   else write_current_task ()
 
 (** Clear current task *)
-let clear_current_task (config : Coord.config) : unit =
+let clear_current_task (config : Workspace.config) : unit =
   let path = current_task_file config in
   if not (Sys.file_exists path) then ()
   else if is_directory_path path then
@@ -423,7 +423,7 @@ let clear_current_task (config : Coord.config) : unit =
         path msg
 
 (** Resolve task_id - use provided or fall back to current *)
-let resolve_task_id (config : Coord.config) ~task_id : (string, string) result =
+let resolve_task_id (config : Workspace.config) ~task_id : (string, string) result =
   match task_id with
   | "" ->
       (match get_current_task config with

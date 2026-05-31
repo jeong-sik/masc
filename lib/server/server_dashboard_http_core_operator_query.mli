@@ -1,7 +1,7 @@
 (** Operator query metadata helpers for dashboard HTTP core. *)
 
 val operator_retention_json :
-  config:Coord.config -> scope:string -> producer:string -> Yojson.Safe.t
+  config:Workspace.config -> scope:string -> producer:string -> Yojson.Safe.t
 
 val operator_snapshot_query_json :
   actor:string option ->
@@ -19,7 +19,7 @@ val operator_digest_query_json :
   Yojson.Safe.t
 
 val with_operator_surface_metadata :
-  config:Coord.config ->
+  config:Workspace.config ->
   ?cache_key:string ->
   dashboard_surface:string ->
   source:string ->
@@ -30,14 +30,14 @@ val with_operator_surface_metadata :
   Yojson.Safe.t
 
 val with_operator_snapshot_metadata :
-  config:Coord.config ->
+  config:Workspace.config ->
   ?cache_key:string ->
   query:Yojson.Safe.t ->
   Yojson.Safe.t ->
   Yojson.Safe.t
 
 val with_operator_digest_metadata :
-  config:Coord.config ->
+  config:Workspace.config ->
   ?cache_key:string ->
   query:Yojson.Safe.t ->
   Yojson.Safe.t ->

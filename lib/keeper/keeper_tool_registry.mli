@@ -57,7 +57,7 @@ val is_read_only_with_input :
 
 (** Input-aware main-worktree boundary check: returns [true] when the tool
     should NOT open the per-turn checkpoint boundary (read-only, MASC
-    coordination, or playground-sandboxed mutations). *)
+    workspace, or playground-sandboxed mutations). *)
 val is_main_worktree_boundary_exempt_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 

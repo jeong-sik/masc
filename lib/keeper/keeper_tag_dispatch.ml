@@ -66,7 +66,7 @@ let get_fs_opt () = Fs_compat.get_fs_opt ()
 
 (** Dispatch a tool by its module tag using keeper-available context.
 
-    @param config   Coord configuration
+    @param config   Workspace configuration
     @param agent_name  Keeper's agent name (meta.name)
     @param tag      Module tag from [Tool_dispatch.lookup_tag]
     @param name     Tool name
@@ -75,7 +75,7 @@ let get_fs_opt () = Fs_compat.get_fs_opt ()
     Returns [Some result] or [None] if module dispatch
     does not recognize the tool name (should not happen when tag is correct). *)
 let dispatch
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(agent_name : string)
       ~(tag : Tool_dispatch.module_tag)
       ~(name : string)
@@ -112,7 +112,7 @@ let dispatch
         ~args
     | Mod_run -> Tool_run.dispatch { Tool_run.config } ~name ~args
     | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
-    | Mod_state -> Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args
+    | Mod_state -> Tool_workspace.dispatch { Tool_workspace.config; agent_name } ~name ~args
     | Mod_control ->
       if name = "masc_pause_status"
       then Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args

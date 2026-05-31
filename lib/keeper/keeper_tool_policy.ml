@@ -361,7 +361,7 @@ let keeper_default_model_tools (_meta : keeper_meta) : Masc_domain.tool_schema l
     group is caught by [test_failing_minimum_essential.ml].
 
     Rationale (board P1, 9 keepers × 0 claimable masc_web_search):
-    a Failing keeper still needs to check coordination state, look up
+    a Failing keeper still needs to check workspace state, look up
     information for recovery, and defer to operator approval. Removing
     these from the recovery floor caused task contracts that require
     [masc_web_search] to become unclaimable when any keeper entered

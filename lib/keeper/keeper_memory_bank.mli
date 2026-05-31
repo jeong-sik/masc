@@ -140,9 +140,9 @@ val prompt_memory_sections_of_snapshot :
   current_generation:int ->
   ?source_generation:int -> keeper_state_snapshot -> string list
 val read_progress_snapshot :
-  config:Coord.config -> name:string -> keeper_state_snapshot option
+  config:Workspace.config -> name:string -> keeper_state_snapshot option
 val read_progress_snapshot_cache :
-  config:Coord.config ->
+  config:Workspace.config ->
   name:string -> progress_snapshot_cache option
 val write_progress_snapshot_path :
   path:string ->
@@ -320,7 +320,7 @@ val write_memory_bank_rows :
 
 val compact_memory_bank_if_needed :
   ?summarizer:memory_consolidation_summarizer ->
-  Coord.config ->
+  Workspace.config ->
   Keeper_meta_contract.keeper_meta -> memory_bank_compaction
 (** Run a compaction pass for the keeper if the file has crossed the
     byte trigger or note-count target; returns
@@ -329,7 +329,7 @@ val compact_memory_bank_if_needed :
 (** {1 Append-from-reply} *)
 
 val append_memory_notes_from_reply :
-  Coord.config ->
+  Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   ?snapshot:keeper_state_snapshot ->
   turn:int -> reply:string -> unit -> int * string list
@@ -340,7 +340,7 @@ val append_memory_notes_from_reply :
     memory-bank rows. Only results carrying the existing
     [Multimodal.Tool_emission] reserved kind/id tags are eligible. *)
 val append_memory_notes_from_tool_results :
-  Coord.config ->
+  Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   turn:int ->
   results:Yojson.Safe.t list ->

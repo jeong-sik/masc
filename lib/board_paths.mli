@@ -1,7 +1,7 @@
 (** Board persistence paths and JSONL rotation policy.
 
     All paths are derived from [Env_config_core.base_path] +
-    [Env_config_core.cluster_name] via [Coord_utils.masc_root_dir_from],
+    [Env_config_core.cluster_name] via [Workspace_utils.masc_root_dir_from],
     so they reflect the active cluster at call time. *)
 
 val board_base_path : unit -> string

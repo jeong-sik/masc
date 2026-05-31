@@ -7,7 +7,7 @@
     - [.masc/playground/<keeper>/mind/]   — notes, drafts, scratch
     - [.masc/playground/<keeper>/repos/]  — git clones (one dir per repo)
 
-    These helpers are the single source of truth. Both [masc_room]
+    These helpers are the single source of truth. Both [masc_workspace]
     (worktree resolver) and the keeper modules
     ([Keeper_alerting_path.playground_*]) delegate here so the literal
     [".masc/playground"] and sanitization rules exist in one place. *)

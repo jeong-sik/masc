@@ -36,7 +36,7 @@ let essential_tools = [
   make_schema "masc_agents"
     "Get detailed status of all agents: current tasks, capabilities.";
   make_schema "masc_who"
-    "List all agents currently in the room with their capabilities.";
+    "List all agents currently in the workspace with their capabilities.";
   make_schema "masc_tasks"
     "List tasks in backlog with their status and assignee.";
   make_schema "masc_add_task"

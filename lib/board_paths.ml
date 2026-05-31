@@ -6,7 +6,7 @@
 let board_base_path () = Env_config_core.base_path ()
 
 let board_masc_dir () =
-  Coord_utils.masc_root_dir_from
+  Workspace_utils.masc_root_dir_from
     ~base_path:(board_base_path ())
     ~cluster_name:(Env_config_core.cluster_name ())
 ;;

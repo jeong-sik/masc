@@ -36,7 +36,7 @@ type ctx =
   ; channel : Keeper_world_observation.keeper_cycle_channel
   ; cleanup : unit -> unit
   ; committed_mutating_tools_snapshot : unit -> string list
-  ; config : Coord.config
+  ; config : Workspace.config
   ; current_turn_blocker_info : blocker_info option ref
   ; degraded_retry_info : EC.degraded_retry option ref
   ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
@@ -81,7 +81,7 @@ let run (ctx : ctx)
       ~(user_message : string)
       ~(registry_base_path : string)
       ~(degraded_retry_slot_phase_budget_sec : float)
-      ~(record_streaming_cancelled_observation : config:Coord.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
+      ~(record_streaming_cancelled_observation : config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
       ~(runtime_id_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
   : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result

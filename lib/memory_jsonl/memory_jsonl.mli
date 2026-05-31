@@ -93,7 +93,7 @@ val make_backend_with_query_observer :
 
     The leaf [masc_mcp_memory_jsonl] sub-library cannot depend on
     [Prometheus] (cycle), so emission is wired from the [masc_mcp] root
-    at startup ([lib/coord.ml]) via this Atomic ref.  Mirrors the
+    at startup ([lib/workspace.ml]) via this Atomic ref.  Mirrors the
     [File_lock_eio.on_lock_attempt_fn] / [on_cas_retry_fn] pattern.
 
     RFC-0109 §5.1 Option A canary for V15. *)

@@ -69,8 +69,8 @@ let test_empty_governance_structure () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let json =
         Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
@@ -137,8 +137,8 @@ let test_dashboard_surfaces_lenient_fallback_metrics () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let before_unparseable =
         governance_fallback_count
           Lib.Prometheus.metric_governance_judge_unparseable
@@ -845,8 +845,8 @@ let test_pending_ruling_reflects_disk_truth () =
       Fun.protect
         ~finally:(fun () -> close_out_noerr oc)
         (fun () -> output_string oc (Yojson.Safe.to_string case_json));
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let json =
         Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
           ~offset:0 ~status_filter:None
@@ -893,8 +893,8 @@ let test_governance_dir_created_before_read () =
       (* read_recent on empty dir returns [] — dashboard_json should still work *)
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let json =
         Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
@@ -910,8 +910,8 @@ let test_dashboard_exposes_keeper_approval_queue () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       Eio.Switch.run @@ fun sw ->
       let decision_result = ref None in
       Eio.Fiber.fork ~sw (fun () ->

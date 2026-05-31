@@ -75,7 +75,7 @@ let test_snapshot_counts_malformed_decision_rows () =
     (fun () ->
        with_env "MASC_BASE_PATH" base_dir
        @@ fun () ->
-       let config = Masc_mcp.Coord.default_config base_dir in
+       let config = Masc_mcp.Workspace.default_config base_dir in
        let keeper_name = "runtime-trust-decision-drop" in
        let meta = make_meta keeper_name in
        let path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config keeper_name in

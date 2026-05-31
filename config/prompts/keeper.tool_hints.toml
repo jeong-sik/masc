@@ -31,7 +31,7 @@ description = "reply to a board post"
 [[hints]]
 name = "keeper_board_post"
 call = "`keeper_board_post` { content: \"note\" }"
-description = "coordinate via board"
+description = "align via board"
 
 [[hints]]
 name = "keeper_broadcast"

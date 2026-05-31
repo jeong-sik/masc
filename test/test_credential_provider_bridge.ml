@@ -27,7 +27,7 @@
        when repo-derived credentials are ambiguous or missing.
 
     Integration of [Keeper_host_config_provider.resolve] itself with
-    [Coord.config] + filesystem bundles is exercised by
+    [Workspace.config] + filesystem bundles is exercised by
     [test_keeper_sandbox_docker_route]; this file stays pure to avoid
     re-staging that fixture. *)
 

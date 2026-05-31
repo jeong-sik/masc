@@ -152,7 +152,7 @@ val int_query_param :
 (** {1 Event log reader} *)
 
 val read_event_lines :
-  Coord.config -> limit:int -> string list
+  Workspace.config -> limit:int -> string list
 (** Reads up to [limit] most-recent event lines from the
     activity-events JSONL log under [config].  Lines are
     raw strings — caller decides whether to parse via
@@ -173,7 +173,7 @@ val schema_markdown : string
 (** {1 Server state} *)
 
 type server_state = {
-  mutable coord_config : Coord.config;
+  mutable workspace_config : Workspace.config;
   session_registry : Session.registry;
   on_sse_broadcast :
     (Yojson.Safe.t -> unit) option Atomic.t;
@@ -185,7 +185,7 @@ type server_state = {
   net : Eio_context.eio_net option;
 }
 (** Runtime state threaded through every request handler.
-    [coord_config] is mutable so coord-switch tools can swap
+    [workspace_config] is mutable so workspace-switch tools can swap
     backends mid-flight.  Eio handles are [option] because
     the legacy non-Eio bootstrap ({!create_state}) still
     needs to construct a state without an active switch. *)

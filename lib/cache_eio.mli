@@ -22,8 +22,8 @@ val batch_eviction_interval : float
 
 (** {1 Paths} *)
 
-val cache_dir : Coord_utils.config -> string
-val ensure_cache_dir : Coord_utils.config -> unit
+val cache_dir : Workspace_utils.config -> string
+val ensure_cache_dir : Workspace_utils.config -> unit
 val sanitize_key : string -> string
 val cache_filename : string -> string
 
@@ -35,25 +35,25 @@ val entry_of_json : Yojson.Safe.t -> cache_entry option
 (** {1 Core Operations} *)
 
 val set :
-  Coord_utils.config ->
+  Workspace_utils.config ->
   key:string ->
   value:string ->
   ?ttl_seconds:int ->
   ?tags:string list ->
   unit ->
   (cache_entry, string) result
-val get : Coord_utils.config -> key:string -> (cache_entry option, string) result
-val delete : Coord_utils.config -> key:string -> (bool, string) result
-val list : Coord_utils.config -> ?tag:string -> unit -> cache_entry list
-val clear : Coord_utils.config -> (int, string) result
-val stats : Coord_utils.config -> (int * int * float, string) result
+val get : Workspace_utils.config -> key:string -> (cache_entry option, string) result
+val delete : Workspace_utils.config -> key:string -> (bool, string) result
+val list : Workspace_utils.config -> ?tag:string -> unit -> cache_entry list
+val clear : Workspace_utils.config -> (int, string) result
+val stats : Workspace_utils.config -> (int * int * float, string) result
 val format_stats : int * int * float -> string
 
 (** {1 Eviction} *)
 
-val evict_expired : Coord_utils.config -> int
-val maybe_evict_expired : Coord_utils.config -> int
-val count_entries : Coord_utils.config -> int
+val evict_expired : Workspace_utils.config -> int
+val maybe_evict_expired : Workspace_utils.config -> int
+val count_entries : Workspace_utils.config -> int
 val is_expired : cache_entry -> bool
 val last_batch_eviction : float Atomic.t
 val cached_entry_count : int Atomic.t

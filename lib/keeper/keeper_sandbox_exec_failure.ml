@@ -97,7 +97,7 @@ let docker_failure_message_with_context
 ;;
 
 let record_docker_failure
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~image
       ~container_kind

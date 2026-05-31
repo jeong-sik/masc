@@ -1,4 +1,4 @@
-(** MASC Agent Transport — protocol selection for MASC coordination. *)
+(** MASC Agent Transport — protocol selection for MASC workspace. *)
 
 type t =
   | Http

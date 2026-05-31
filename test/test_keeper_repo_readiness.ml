@@ -56,7 +56,7 @@ let normalize_path path =
 
 let test_missing_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
@@ -69,7 +69,7 @@ let test_missing_clone () =
 
 let test_non_git_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
     Masc_mcp.Keeper_repo_readiness.clone_path ~config
@@ -87,7 +87,7 @@ let test_non_git_clone () =
 
 let test_invalid_repo_name () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
@@ -140,7 +140,7 @@ let git_ok ~cwd args =
 let test_parent_git_checkout_does_not_count_as_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
   git_ok ~cwd:base_path [ "init"; "-q"; "--initial-branch=main" ];
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
     Masc_mcp.Keeper_repo_readiness.clone_path ~config
@@ -210,7 +210,7 @@ let test_auto_provisionable_workspace_repo () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
@@ -244,7 +244,7 @@ let test_missing_clone_skips_workspace_discovery () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config ~meta
@@ -271,7 +271,7 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
@@ -300,7 +300,7 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
@@ -329,7 +329,7 @@ let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc_mcp.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config

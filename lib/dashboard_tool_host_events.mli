@@ -61,7 +61,7 @@ val details_json : report -> Yojson.Safe.t
 
 val record :
   ?fs:'fs ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   report ->
   unit
 (** [record ?fs config report] is the fan-out side-effect:
@@ -88,7 +88,7 @@ type assignment_snapshot = {
 
 val record_assignment :
   ?fs:'fs ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   assignment_snapshot ->
   unit
 (** [record_assignment ?fs config snapshot] forwards to

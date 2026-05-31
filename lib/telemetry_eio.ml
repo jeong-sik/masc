@@ -2,7 +2,7 @@
 
 
 (** Config type alias *)
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** Tool-call error classification labels. *)
 type error_kind = Error_kind of string
@@ -120,7 +120,7 @@ let update_tool_usage stats_by_tool ~tool_name ~success ~timestamp =
 
 (** Legacy single-file path (for fallback reads). *)
 let telemetry_file config =
-  Filename.concat (Coord_utils.masc_dir config) "telemetry.jsonl"
+  Filename.concat (Workspace_utils.masc_dir config) "telemetry.jsonl"
 
 (** Date-split store: [.masc/telemetry/YYYY-MM/DD.jsonl].
     Cached per base_dir so all callers share the same Eio.Mutex.
@@ -151,7 +151,7 @@ let telemetry_max_bytes () =
     ~default:default_telemetry_max_bytes
 
 let get_telemetry_store config : Dated_jsonl.t =
-  let base = Filename.concat (Coord_utils.masc_dir config) "telemetry" in
+  let base = Filename.concat (Workspace_utils.masc_dir config) "telemetry" in
   Eio_guard.with_mutex telemetry_store_cache_mu (fun () ->
     match Hashtbl.find_opt telemetry_store_cache base with
     | Some store -> store

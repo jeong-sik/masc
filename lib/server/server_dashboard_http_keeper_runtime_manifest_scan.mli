@@ -60,7 +60,7 @@ val max_int_opt : int option -> int -> int option
 val update_runtime_manifest_scan : runtime_manifest_scan -> Keeper_runtime_manifest.t -> unit
 
 val read_runtime_manifest_scan :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   trace_id:string ->
   ?turn_id:int ->

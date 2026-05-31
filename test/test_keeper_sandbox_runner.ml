@@ -96,7 +96,7 @@ let with_fixture f =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       let config = Coord.default_config base in
+       let config = Workspace.default_config base in
        let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Docker in
        f ~config ~meta)
 
@@ -140,7 +140,7 @@ let test_uses_backend_respects_profile () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       let config = Coord.default_config base in
+       let config = Workspace.default_config base in
        let docker_meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Docker in
        let local_meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Local in
        let docker_cwd =
@@ -167,7 +167,7 @@ let test_local_route_does_not_force_backend_cwd () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       let config = Coord.default_config base in
+       let config = Workspace.default_config base in
        let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Local in
        let cwd = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        let result =

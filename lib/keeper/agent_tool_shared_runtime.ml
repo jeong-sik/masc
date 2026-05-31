@@ -115,7 +115,7 @@ let actionable_path_error
 let file_not_found_prefix = "File not found:"
 
 let missing_file_error_json
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(target : string)
       ~(fallback_dir : string)
       ~(error : string)
@@ -171,16 +171,16 @@ let keeper_effective_write_allowed_paths ~(meta : keeper_meta) =
   Keeper_alerting_path.effective_write_allowed_paths ~meta
 ;;
 
-let keeper_playground_root ~(config : Coord.config) ~(meta : keeper_meta) =
+let keeper_playground_root ~(config : Workspace.config) ~(meta : keeper_meta) =
   ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
   Keeper_sandbox.host_root_abs_of_meta ~config meta
 ;;
 
-let keeper_default_write_root ~(config : Coord.config) ~(meta : keeper_meta) =
+let keeper_default_write_root ~(config : Workspace.config) ~(meta : keeper_meta) =
   keeper_playground_root ~config ~meta
 ;;
 
-let keeper_default_read_root ~(config : Coord.config) ~(meta : keeper_meta) =
+let keeper_default_read_root ~(config : Workspace.config) ~(meta : keeper_meta) =
   keeper_playground_root ~config ~meta
 ;;
 
@@ -194,7 +194,7 @@ let safe_is_dir path =
   | Sys_error _ -> false
 ;;
 
-let keeper_sandbox_repo_names ~(config : Coord.config) ~(meta : keeper_meta) =
+let keeper_sandbox_repo_names ~(config : Workspace.config) ~(meta : keeper_meta) =
   let repos_dir = Filename.concat (keeper_playground_root ~config ~meta) "repos" in
   if not (safe_is_dir repos_dir)
   then []
@@ -252,7 +252,7 @@ let repo_relative_path_candidate ~(meta : keeper_meta) (raw : string) =
 ;;
 
 let rewrite_single_repo_relative_path
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       (raw : string)
   =
@@ -288,7 +288,7 @@ let rewrite_single_repo_relative_path
 ;;
 
 let host_path_of_own_container_path
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       (raw : string)
   =
@@ -314,7 +314,7 @@ let host_path_of_own_container_path
     else None)
 ;;
 
-let project_relative_host_path ~(config : Coord.config) (path : string) =
+let project_relative_host_path ~(config : Workspace.config) (path : string) =
   let root =
     Keeper_alerting_path.project_root_of_config config
     |> Keeper_alerting_path.normalize_path_for_check_stripped
@@ -332,7 +332,7 @@ let project_relative_host_path ~(config : Coord.config) (path : string) =
    but rooted-looking relative paths (for example
    "workspace/..." or "lib/...") keep project-root/boundary semantics. *)
 let playground_relative_unless_allowed_root
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       (raw : string)
   : (string, string) result
@@ -368,7 +368,7 @@ let playground_relative_unless_allowed_root
 ;;
 
 let resolve_keeper_path
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
@@ -385,7 +385,7 @@ let resolve_keeper_path
 ;;
 
 let resolve_keeper_read_path
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
@@ -463,7 +463,7 @@ let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
 ;;
 
 let tag_dispatch_fn
-  : (config:Coord.config
+  : (config:Workspace.config
      -> agent_name:string
      -> tag:Tool_dispatch.module_tag
      -> name:string
@@ -505,7 +505,7 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Task_force_release
     | Tool_name.Keeper.Task_submit_for_verification
     | Tool_name.Keeper.Tasks_audit
-    | Tool_name.Keeper.Tasks_list -> "coordination"
+    | Tool_name.Keeper.Tasks_list -> "workspace"
     | Tool_name.Keeper.Execute -> "execute"
     | Tool_name.Keeper.Search_files -> "search_files"
     | Tool_name.Keeper.Fs_edit
@@ -516,7 +516,7 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Library_search
     | Tool_name.Keeper.Memory_search
     | Tool_name.Keeper.Memory_write -> "memory"
-    | Tool_name.Keeper.Broadcast | Tool_name.Keeper.Handoff -> "coordination"
+    | Tool_name.Keeper.Broadcast | Tool_name.Keeper.Handoff -> "workspace"
     | Tool_name.Keeper.Context_status
     | Tool_name.Keeper.Stay_silent
     | Tool_name.Keeper.Time_now

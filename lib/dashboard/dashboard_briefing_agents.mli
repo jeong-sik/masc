@@ -9,7 +9,7 @@
 
     Internal: 9 helpers (\[build_task_lookup\],
     \[latest_message_from\], \[latest_message_to\],
-    \[read_recent_coord_event_lines\], \[is_session_concluded\],
+    \[read_recent_workspace_event_lines\], \[is_session_concluded\],
     \[status_of_archived_session\], \[archived_reason_for_session\],
     \[archived_agent_meta_map\], \[keeper_alias_by_agent_name\])
     stay private — none are referenced bare in the runtime
@@ -113,18 +113,18 @@ type archived_agent_meta = {
 (** {1 Brief builder} *)
 
 val build_agent_briefs :
-  Coord.config ->
+  Workspace.config ->
   session_context list ->
   attention_context list ->
   Yojson.Safe.t ->
   Yojson.Safe.t list ->
   Yojson.Safe.t list
-(** [build_agent_briefs config sessions attention_queue snapshot_json
+(** [build_agent_briefs config sessions attention_queue workspace_json
       keepers] aggregates per-agent briefs from session contexts +
     attention queue + keeper list.
 
-    [snapshot_json] is currently unused and kept in signature for
-    forward compatibility.
+    [workspace_json] is currently unused (placeholder for future workspace
+    metadata expansion) — kept in signature for forward compat.
 
     Returns a JSON list, one entry per active / archived agent,
     sorted for dashboard display. *)

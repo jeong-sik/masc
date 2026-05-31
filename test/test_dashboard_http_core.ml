@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 module Lib = Masc_mcp
 module Auth = Masc_mcp.Auth
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 
 open Alcotest
 
@@ -116,7 +116,7 @@ let with_test_env f =
       with_env "MASC_STORAGE_TYPE" "filesystem" @@ fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Coord_utils.default_config dir in
+      let config = Workspace_utils.default_config dir in
       Eio.Switch.run @@ fun sw ->
       Eio_context.with_test_env
         ~net:(Eio.Stdenv.net env)
@@ -299,7 +299,7 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
     `Assoc
       [
         ("generated_at", `String "2026-04-17T00:00:00Z");
-        ("status", `Assoc [("project", `String "warm-room")]);
+        ("status", `Assoc [("project", `String "warm-workspace")]);
         ("counts", `Assoc [("agents", `Int 7); ("tasks", `Int 11); ("keepers", `Int 3)]);
       ]
   in
@@ -318,7 +318,7 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
           config
       in
       let open Yojson.Safe.Util in
-      check string "last-good project reused" "warm-room"
+      check string "last-good project reused" "warm-workspace"
         (json |> member "status" |> member "project" |> to_string);
       check int "last-good counts reused" 7
         (json |> member "counts" |> member "agents" |> to_int))
@@ -360,14 +360,14 @@ let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
   let full_last_good =
     `Assoc
       [
-        ("status", `Assoc [("project", `String "full-room")]);
+        ("status", `Assoc [("project", `String "full-workspace")]);
         ("counts", `Assoc [("agents", `Int 9)]);
       ]
   in
   let light_last_good =
     `Assoc
       [
-        ("status", `Assoc [("project", `String "light-room")]);
+        ("status", `Assoc [("project", `String "light-workspace")]);
         ("counts", `Assoc [("agents", `Int 2)]);
         ("projection_diagnostics", `Assoc [("light", `Bool true)]);
       ]
@@ -392,7 +392,7 @@ let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
           config
       in
       let open Yojson.Safe.Util in
-      check string "light last-good project reused" "light-room"
+      check string "light last-good project reused" "light-workspace"
         (json |> member "status" |> member "project" |> to_string);
       check int "light last-good counts reused" 2
         (json |> member "counts" |> member "agents" |> to_int);
@@ -596,7 +596,7 @@ let test_dashboard_proof_route_registered_in_http_routers () =
 
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let hangul_ga = "\234\176\128" in
   let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
   (match Lib.Goal_store.upsert_goal config ~title () with
@@ -640,7 +640,7 @@ let test_credential_monitoring_json_surfaces_archive_counter () =
 
 let test_dashboard_batch_json_includes_credential_monitoring () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let before = credential_archived_starvation_total () in
   record_test_credential_archive ();
   let json = Lib.Server_dashboard_http_core.dashboard_batch_json config in
@@ -926,12 +926,12 @@ let test_dashboard_shell_light_includes_runtime_health_ssot () =
 
 let test_dashboard_shell_light_counts_agents_from_summary_fields () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Coord.init config ~agent_name:None);
+  ignore (Workspace.init config ~agent_name:None);
   let write_agent ~name ~agent_type ~status =
     let path =
-      Filename.concat (Coord.agents_dir config) (Coord.safe_filename name ^ ".json")
+      Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename name ^ ".json")
     in
-    Coord.write_json
+    Workspace.write_json
       config
       path
       (`Assoc

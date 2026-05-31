@@ -2,7 +2,7 @@ include Server_dashboard_http_composite_claims
 include Server_dashboard_http_composite_recommendations
 
 let enrich_composite_snapshot_json
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       (entry : Keeper_registry.registry_entry)
       json
   =
@@ -38,7 +38,7 @@ let enrich_composite_snapshot_json
 ;;
 
 let dashboard_keeper_composite_json
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       (entry : Keeper_registry.registry_entry)
   : Yojson.Safe.t
   =
@@ -47,7 +47,7 @@ let dashboard_keeper_composite_json
   |> enrich_composite_snapshot_json ~config entry
 ;;
 
-let dashboard_fleet_composite_json ~(config : Coord.config) () : Yojson.Safe.t =
+let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe.t =
   let entries = Keeper_registry.all ~base_path:config.base_path () in
   let snapshots = List.map (dashboard_keeper_composite_json ~config) entries in
   `Assoc

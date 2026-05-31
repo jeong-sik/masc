@@ -12,10 +12,10 @@ val handle_keeper_lifecycle_post :
     [action] parameter selects the keeper FSM event. *)
 
 val refresh_keeper_execution_surfaces :
-  config:Coord.config -> name:string -> string -> unit
+  config:Workspace.config -> name:string -> string -> unit
 (** Invalidate caches and patch execution-surface dependents after a keeper
     lifecycle transition. *)
 
-val invalidate_keeper_execution_surfaces : config:Coord.config -> unit -> unit
+val invalidate_keeper_execution_surfaces : config:Workspace.config -> unit -> unit
 (** Invalidate snapshot/projection/execution caches without per-keeper
     patching (used on wakeup/reset paths). *)

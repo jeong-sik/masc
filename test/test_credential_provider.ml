@@ -372,7 +372,7 @@ let test_compose_env_explicit_ssh_key () =
 
 let test_resolve_without_mapping_fails_closed () =
   with_temp_base_path (fun base_path ->
-      let config = Masc_mcp.Coord.default_config base_path in
+      let config = Masc_mcp.Workspace.default_config base_path in
       match HCP.resolve ~config ~identity:"keeper-unmapped" with
       | Error (CP.Missing_bundle { identity; path }) ->
           check string "identity" "keeper-unmapped" identity;
@@ -416,7 +416,7 @@ let seed_minimal_gh_bundle ~gh_config_dir =
 
 let test_resolve_credential_store_mounts_explicit_ssh_key () =
   with_temp_base_path (fun base_path ->
-      let config = Masc_mcp.Coord.default_config base_path in
+      let config = Masc_mcp.Workspace.default_config base_path in
       let gh_config_dir =
         Filename.concat base_path ".masc/repo-cli-identities/cred-A/gh"
       in
@@ -458,7 +458,7 @@ let test_resolve_credential_store_mounts_explicit_ssh_key () =
 let test_credential_store_mapping_conflicting_repo_cli_identity_fails_closed
     () =
   with_temp_base_path (fun base_path ->
-      let config = Masc_mcp.Coord.default_config base_path in
+      let config = Masc_mcp.Workspace.default_config base_path in
       let config_dir = Filename.concat base_path ".masc/config" in
       let keeper_name = "keeper-conflict" in
       let declared_identity = "declared-reviewer" in
@@ -581,7 +581,7 @@ let test_f1_gate_ct_hex_equal () =
   check bool "non-64-char string -> false" false (ICLP.For_testing.ct_hex_equal "short" hash_a)
 
 let test_f1_gate_resolve_stub () =
-  let config = Masc_mcp.Coord.default_config "/tmp/nonexistent" in
+  let config = Masc_mcp.Workspace.default_config "/tmp/nonexistent" in
   match ICLP.resolve ~config ~identity:"test-keeper" with
   | Error (CP.Missing_bundle { identity; path }) ->
       check string "identity" "test-keeper" identity;
@@ -598,7 +598,7 @@ let test_preflight_missing_hosts_yml () =
   (* gh_config_dir exists but has no hosts.yml/oauth_token -> resolve must
      return Missing_bundle without invoking gh auth status. *)
   with_temp_base_path (fun base_path ->
-      let config = Masc_mcp.Coord.default_config base_path in
+      let config = Masc_mcp.Workspace.default_config base_path in
       let gh_config_dir =
         Filename.concat base_path ".masc/repo-cli-identities/cred-B/gh"
       in
@@ -630,7 +630,7 @@ let test_preflight_fake_token_accepted_without_gh_auth_probe () =
      the configured bundle without running gh auth status; real token
      validity belongs to the first scoped forge operation. *)
   with_temp_base_path (fun base_path ->
-      let config = Masc_mcp.Coord.default_config base_path in
+      let config = Masc_mcp.Workspace.default_config base_path in
       let gh_config_dir =
         Filename.concat base_path ".masc/repo-cli-identities/cred-C/gh"
       in
@@ -651,7 +651,7 @@ let test_preflight_fake_token_accepted_without_gh_auth_probe () =
 let test_preflight_empty_dir_rejected () =
   (* gh_config_dir is an empty string -> resolve must return Missing_bundle. *)
   with_temp_base_path (fun base_path ->
-      let config = Masc_mcp.Coord.default_config base_path in
+      let config = Masc_mcp.Workspace.default_config base_path in
       seed_credential ~base_path
         (make_credential ~id:"cred-D" ~username:"user-D"
            ~gh_config_dir:"" ());

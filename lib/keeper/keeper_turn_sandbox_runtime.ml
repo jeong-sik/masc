@@ -7,7 +7,7 @@ type state =
   | Running of { container_name : string }
 
 type t =
-  { config : Coord.config
+  { config : Workspace.config
   ; meta : keeper_meta
   ; turn_id : int
   ; raw_host_root : string
@@ -24,7 +24,7 @@ let host_root t = t.host_root
 let normalize_path path = Keeper_alerting_path.normalize_path_for_check_stripped path
 
 let create
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?(network_mode = Network_none)
       ~turn_id
@@ -65,7 +65,7 @@ let container_name_of (t : t) =
   let seq = Atomic.fetch_and_add container_counter 1 in
   Printf.sprintf
     "masc-keeper-turn-%s-%s-%d-%d-%d"
-    (Coord_utils.safe_filename t.meta.name)
+    (Workspace_utils.safe_filename t.meta.name)
     net_suffix
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
@@ -352,7 +352,7 @@ let start_container (t : t) ~(timeout_sec : float) =
            @ Keeper_sandbox_runtime.docker_config_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
-           @ Keeper_sandbox_runtime.docker_coord_state_mount_args
+           @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
            @ cred_mounts

@@ -530,7 +530,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       ("Internal error: "
                                      ^ Printexc.to_string exn))))))))
 
-let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Coordinator)
+let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Workspace_client)
     request reqd =
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
@@ -545,7 +545,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Coordinator)
         (match sse_kind with
          | Sse.Observer | Sse.Presence ->
              deps.verify_mcp_observer_stream_auth ~base_path request
-         | Sse.Coordinator ->
+         | Sse.Workspace_client ->
              deps.verify_mcp_auth ~base_path request)
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request

@@ -4,7 +4,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
   if EC.is_runtime_exhausted_error err
   then (
     Keeper_registry.mark_turn_runtime_exhausted
-      ~base_path:config.Coord.base_path
+      ~base_path:config.Workspace.base_path
       keeper_name;
     Prometheus.inc_counter
       Keeper_metrics.(to_string FsmEdgeTransitions)
@@ -26,7 +26,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       ())
   else (
     Keeper_registry.set_turn_phase
-      ~base_path:config.Coord.base_path
+      ~base_path:config.Workspace.base_path
       keeper_name
       Keeper_registry.(Packed Turn_finalizing);
     Prometheus.inc_counter

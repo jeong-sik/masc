@@ -105,7 +105,7 @@ let belief_summary_of_observation
       ]
   in
   match parts with
-  | [] -> "quiet_coord"
+  | [] -> "quiet_workspace"
   | _ -> String.concat "; " parts
 
 let make_state ~(meta : keeper_meta)

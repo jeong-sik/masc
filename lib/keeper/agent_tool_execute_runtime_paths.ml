@@ -22,7 +22,7 @@ let replace_all_substrings ~needle ~replacement text =
     Buffer.contents buf
 
 let rewrite_turn_runtime_paths_to_host
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       text
   =
@@ -34,7 +34,7 @@ let rewrite_turn_runtime_paths_to_host
     text
 
 let rewrite_docker_host_paths_to_container
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       text
   =

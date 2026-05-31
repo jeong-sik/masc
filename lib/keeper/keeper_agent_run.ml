@@ -47,7 +47,7 @@ end
     message, builds OAS tools + hooks, and delegates to
     [Keeper_turn_driver.run_named] which internally calls Agent.run().
 
-    @param config Coord configuration
+    @param config Workspace configuration
     @param meta Keeper metadata
     @param base_dir Session base directory for checkpoints
     @param max_context Maximum context window tokens
@@ -66,7 +66,7 @@ end
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
 let run_turn
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(base_dir : string)
       ~(max_context : int)

@@ -272,7 +272,7 @@ let mark_lost_after_recovery (entry : entry) =
 let generate_request_id ~keeper_name =
   let n = Atomic.fetch_and_add counter 1 in
   let safe_keeper_name =
-    Coord_utils_backend_setup.sanitize_namespace_segment keeper_name
+    Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
   in
   Printf.sprintf
     "kmsg_%s_%d_%d"

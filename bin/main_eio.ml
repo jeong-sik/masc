@@ -14,8 +14,8 @@ module Http = Masc_mcp.Http_server_eio
 module Http_h2 = Masc_mcp.Http_server_h2
 module Mcp_server = Masc_mcp.Mcp_server
 module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Coord = Masc_mcp.Coord
-module Coord_utils = Coord_utils
+module Workspace = Masc_mcp.Workspace
+module Workspace_utils = Workspace_utils
 module Tool_keeper = Masc_mcp.Tool_keeper
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_meta_store = Masc_mcp.Keeper_meta_store
@@ -261,7 +261,7 @@ let dispatch_route ~router ~request ~path reqd =
              ~status:"server_error" ~message:"Server not initialized" ())
           reqd
       | Some state ->
-        let config = state.Mcp_server.coord_config in
+        let config = state.Mcp_server.workspace_config in
         (match state.Mcp_server.sw, state.Mcp_server.clock with
         | Some sw, Some clock ->
             let (status, resp_body) =
@@ -426,7 +426,7 @@ let dispatch_route ~router ~request ~path reqd =
       let format = Option.value ~default:"nested" (query_param request "format") in
       let voter = board_voter_query request in
       let config =
-        Option.map (fun state -> state.Mcp_server.coord_config) !server_state
+        Option.map (fun state -> state.Mcp_server.workspace_config) !server_state
       in
       let (status, body) =
         board_post_detail_json ~include_moderation:false ~blind_votes:false
@@ -678,7 +678,7 @@ let run_cmd host port base_path =
       base_path normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" normalized_base_path;
-  Coord_utils_backend_setup.cache_resolved_base_path normalized_base_path;
+  Workspace_utils_backend_setup.cache_resolved_base_path normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when

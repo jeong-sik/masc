@@ -7,7 +7,7 @@ val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   unit ->

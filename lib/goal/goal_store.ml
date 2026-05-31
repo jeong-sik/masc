@@ -346,17 +346,17 @@ let parse_refresh_mode s =
   | _ -> None
 
 let goals_path config =
-  Filename.concat (Coord.masc_dir config) "goals.json"
+  Filename.concat (Workspace.masc_dir config) "goals.json"
 
 let snapshots_dir config =
-  Filename.concat (Coord.masc_dir config) "goals_snapshots"
+  Filename.concat (Workspace.masc_dir config) "goals_snapshots"
 
 let scheduler_state_path config =
-  Filename.concat (Coord.masc_dir config) "goals_scheduler_state.json"
+  Filename.concat (Workspace.masc_dir config) "goals_scheduler_state.json"
 
 let ensure_dirs config =
-  Coord.mkdir_p (Coord.masc_dir config);
-  Coord.mkdir_p (snapshots_dir config)
+  Workspace.mkdir_p (Workspace.masc_dir config);
+  Workspace.mkdir_p (snapshots_dir config)
 
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
@@ -364,8 +364,8 @@ let default_state () =
 let read_state config =
   ensure_dirs config;
   let path = goals_path config in
-  if Coord.path_exists config path then
-    match state_of_yojson (Coord.read_json config path) with
+  if Workspace.path_exists config path then
+    match state_of_yojson (Workspace.read_json config path) with
     | Ok state -> { state with goals = List.map normalize_goal state.goals }
     | Error _ -> default_state ()
   else
@@ -373,7 +373,7 @@ let read_state config =
 
 let write_state config state =
   ensure_dirs config;
-  Coord.write_json config (goals_path config) (state_to_yojson state)
+  Workspace.write_json config (goals_path config) (state_to_yojson state)
 
 let now_ms () =
   int_of_float (Time_compat.now () *. 1000.0)
@@ -390,7 +390,7 @@ let replace_goal goals updated =
 
 let update_state config f =
   let lock_path = goals_path config in
-  Coord.with_file_lock config lock_path (fun () ->
+  Workspace.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let next_state = f state in
       write_state config next_state;
@@ -401,7 +401,7 @@ let get_goal config ~goal_id =
 
 let update_goal config ~goal_id f =
   let lock_path = goals_path config in
-  Coord.with_file_lock config lock_path (fun () ->
+  Workspace.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       match find_goal state.goals goal_id with
       | None -> Error "goal not found"
@@ -611,7 +611,7 @@ let snapshot config ~mode =
   let path =
     Filename.concat (snapshots_dir config) (snapshot_id ^ ".json")
   in
-  Coord.write_json config path (snapshot_to_yojson snapshot);
+  Workspace.write_json config path (snapshot_to_yojson snapshot);
   snapshot
 
 let parse_yyyy_mm_dd s =
@@ -704,4 +704,4 @@ let active_goals config =
   list_goals config ~status:Active ()
 
 let has_scheduler_state config =
-  Coord.path_exists config (scheduler_state_path config)
+  Workspace.path_exists config (scheduler_state_path config)

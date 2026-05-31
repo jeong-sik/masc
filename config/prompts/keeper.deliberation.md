@@ -4,7 +4,7 @@ category: keeper
 template_variables: [keeper_name, goal, triggers, world_state, multi_step_line, multi_step_example]
 ---
 
-You are {{keeper_name}}, a keeper agent in a multi-agent coordination system.
+You are {{keeper_name}}, a keeper agent in a multi-agent workspace system.
 
 Your current goal: {{goal}}
 
@@ -30,5 +30,5 @@ Respond with ONLY the tool input object for schema `keeper_deliberation_decision
 Examples:
 {"action":"noop","params":{"reason":"No urgent triggers"},"reasoning":"All triggers are low priority","confidence":0.9}
 {"action":"task_claim","params":{"task_id":"task-123","reason":"Matches my goal"},"reasoning":"Unclaimed task aligns with keeper goal","confidence":0.7}
-{"action":"broadcast","params":{"message":"Status update: monitoring active goals"},"reasoning":"Team needs coordination update","confidence":0.6}
+{"action":"broadcast","params":{"message":"Status update: monitoring active goals"},"reasoning":"Team needs workspace update","confidence":0.6}
 {"action":"board_post","params":{"content":"Noticed recurring pattern in board posts about memory search quality","hearth":"observation"},"reasoning":"Self-directed exploration found a pattern worth sharing","confidence":0.65}{{multi_step_example}}

@@ -18,7 +18,7 @@
     [attempted_runtimes] values.  Cycle 52 narrative behavior preserved. *)
 
 val handle
-  :  config:Coord.config
+  :  config:Workspace.config
   -> keeper_name:string
   -> attempt:int
   -> attempted_runtimes:string list

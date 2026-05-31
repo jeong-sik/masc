@@ -42,7 +42,7 @@ val admin_surface_tools : string list
 val keeper_internal_surface_tools : string list
 val keeper_denied_surface_tools : string list
 val system_internal_surface_tools : string list
-val coordination_role_tools : string list
+val workspace_role_tools : string list
 val execution_role_tools : string list
 
 (** {1 Replacement table} *)

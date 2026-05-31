@@ -117,51 +117,51 @@ let test_broadcast_event_contains_data () =
 let test_broadcast_to_observers_only () =
   reset ();
   ignore (Sse.register ~kind:Observer "s-obs" ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-coord" ~last_event_id:0);
+  ignore (Sse.register ~kind:Workspace_client "s-workspace" ~last_event_id:0);
   Sse.broadcast_to Observers (`Assoc [("target", `String "observers")]);
   let got_obs = Sse.try_pop "s-obs" in
-  let got_coord = Sse.try_pop "s-coord" in
+  let got_workspace = Sse.try_pop "s-workspace" in
   Alcotest.(check bool) "observer got event" true (got_obs <> None);
-  Alcotest.(check bool) "coordinator did not" true (got_coord = None);
+  Alcotest.(check bool) "workspace_client did not" true (got_workspace = None);
   Sse.unregister "s-obs";
-  Sse.unregister "s-coord"
+  Sse.unregister "s-workspace"
 
-let test_broadcast_to_coordinators_only () =
+let test_broadcast_to_workspace_clients_only () =
   reset ();
   ignore (Sse.register ~kind:Observer "s-obs2" ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-coord2" ~last_event_id:0);
-  Sse.broadcast_to Coordinators (jsonrpc_notification "notifications/test");
+  ignore (Sse.register ~kind:Workspace_client "s-workspace2" ~last_event_id:0);
+  Sse.broadcast_to Workspace_clients (jsonrpc_notification "notifications/test");
   let got_obs = Sse.try_pop "s-obs2" in
-  let got_coord = Sse.try_pop "s-coord2" in
+  let got_workspace = Sse.try_pop "s-workspace2" in
   Alcotest.(check bool) "observer did not get event" true (got_obs = None);
-  Alcotest.(check bool) "coordinator got event" true (got_coord <> None);
+  Alcotest.(check bool) "workspace_client got event" true (got_workspace <> None);
   Sse.unregister "s-obs2";
-  Sse.unregister "s-coord2"
+  Sse.unregister "s-workspace2"
 
 let test_broadcast_to_all () =
   reset ();
   ignore (Sse.register ~kind:Observer "s-all-obs" ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-all-coord" ~last_event_id:0);
+  ignore (Sse.register ~kind:Workspace_client "s-all-workspace" ~last_event_id:0);
   Sse.broadcast_to All (jsonrpc_notification "notifications/test");
   let got_obs = Sse.try_pop "s-all-obs" in
-  let got_coord = Sse.try_pop "s-all-coord" in
+  let got_workspace = Sse.try_pop "s-all-workspace" in
   Alcotest.(check bool) "observer got event" true (got_obs <> None);
-  Alcotest.(check bool) "coordinator got event" true (got_coord <> None);
+  Alcotest.(check bool) "workspace_client got event" true (got_workspace <> None);
   Sse.unregister "s-all-obs";
-  Sse.unregister "s-all-coord"
+  Sse.unregister "s-all-workspace"
 
 let test_broadcast_equals_broadcast_to_all () =
   reset ();
   ignore (Sse.register ~kind:Observer "s-eq-obs" ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-eq-coord" ~last_event_id:0);
+  ignore (Sse.register ~kind:Workspace_client "s-eq-workspace" ~last_event_id:0);
   (* broadcast (no target) should reach everyone, same as broadcast_to All *)
   Sse.broadcast (jsonrpc_notification "notifications/test");
   let got_obs = Sse.try_pop "s-eq-obs" in
-  let got_coord = Sse.try_pop "s-eq-coord" in
+  let got_workspace = Sse.try_pop "s-eq-workspace" in
   Alcotest.(check bool) "observer got broadcast" true (got_obs <> None);
-  Alcotest.(check bool) "coordinator got broadcast" true (got_coord <> None);
+  Alcotest.(check bool) "workspace_client got broadcast" true (got_workspace <> None);
   Sse.unregister "s-eq-obs";
-  Sse.unregister "s-eq-coord"
+  Sse.unregister "s-eq-workspace"
 
 let test_broadcast_all_excludes_presence_sessions () =
   reset ();
@@ -205,34 +205,34 @@ let test_broadcast_presence_is_live_only () =
       Alcotest.(check (list string)) "presence not replay buffered" []
         (Sse.get_events_after before_id))
 
-let test_non_jsonrpc_broadcast_does_not_reach_coordinators () =
+let test_non_jsonrpc_broadcast_does_not_reach_workspace_clients () =
   reset ();
   let before_id = Sse.current_id () in
   ignore (Sse.register ~kind:Observer "s-nonjson-obs" ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-nonjson-coord" ~last_event_id:0);
+  ignore (Sse.register ~kind:Workspace_client "s-nonjson-workspace" ~last_event_id:0);
   Sse.broadcast (`Assoc [("type", `String "keeper_tool_call")]);
   let got_obs = Sse.try_pop "s-nonjson-obs" in
-  let got_coord = Sse.try_pop "s-nonjson-coord" in
+  let got_workspace = Sse.try_pop "s-nonjson-workspace" in
   Alcotest.(check bool) "observer got dashboard event" true (got_obs <> None);
-  Alcotest.(check bool) "coordinator skipped non-JSON-RPC" true
-    (got_coord = None);
+  Alcotest.(check bool) "workspace_client skipped non-JSON-RPC" true
+    (got_workspace = None);
   Alcotest.(check int) "observer replay keeps dashboard event" 1
     (List.length (Sse.get_events_after_for_kind Observer before_id));
   Alcotest.(check (list string))
-    "coordinator replay skips non-JSON-RPC"
+    "workspace_client replay skips non-JSON-RPC"
     []
-    (Sse.get_events_after_for_kind Coordinator before_id);
+    (Sse.get_events_after_for_kind Workspace_client before_id);
   Sse.unregister "s-nonjson-obs";
-  Sse.unregister "s-nonjson-coord"
+  Sse.unregister "s-nonjson-workspace"
 
-let test_register_defaults_to_coordinator () =
+let test_register_defaults_to_workspace_client () =
   reset ();
   (* Register without explicit kind *)
   ignore (Sse.register "s-default" ~last_event_id:0);
-  (* Should be Coordinator: receives Coordinators-targeted broadcast *)
-  Sse.broadcast_to Coordinators (jsonrpc_notification "notifications/test");
+  (* Should be Workspace_client: receives Workspace_clients-targeted broadcast *)
+  Sse.broadcast_to Workspace_clients (jsonrpc_notification "notifications/test");
   let got = Sse.try_pop "s-default" in
-  Alcotest.(check bool) "default kind is Coordinator" true (got <> None);
+  Alcotest.(check bool) "default kind is Workspace_client" true (got <> None);
   (* Should not receive Observers-targeted broadcast *)
   Sse.broadcast_to Observers (`Assoc [("observer_only", `Bool true)]);
   let got2 = Sse.try_pop "s-default" in
@@ -267,13 +267,13 @@ let () =
       ( "broadcast_to_targeting",
         [
           Alcotest.test_case "observers only" `Quick test_broadcast_to_observers_only;
-          Alcotest.test_case "coordinators only" `Quick test_broadcast_to_coordinators_only;
+          Alcotest.test_case "workspace_clients only" `Quick test_broadcast_to_workspace_clients_only;
           Alcotest.test_case "all targets" `Quick test_broadcast_to_all;
           Alcotest.test_case "broadcast = broadcast_to All" `Quick test_broadcast_equals_broadcast_to_all;
           Alcotest.test_case "broadcast All excludes presence" `Quick test_broadcast_all_excludes_presence_sessions;
           Alcotest.test_case "presence live-only" `Quick test_broadcast_presence_is_live_only;
-          Alcotest.test_case "non-JSON-RPC skips coordinators" `Quick
-            test_non_jsonrpc_broadcast_does_not_reach_coordinators;
-          Alcotest.test_case "default kind is Coordinator" `Quick test_register_defaults_to_coordinator;
+          Alcotest.test_case "non-JSON-RPC skips workspace_clients" `Quick
+            test_non_jsonrpc_broadcast_does_not_reach_workspace_clients;
+          Alcotest.test_case "default kind is Workspace_client" `Quick test_register_defaults_to_workspace_client;
         ] );
     ]

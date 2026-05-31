@@ -109,7 +109,7 @@ type agent_setup =
   }
 
 val prepare_agent_setup
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_work:working_context
   -> session:Keeper_types.session_context

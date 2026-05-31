@@ -113,8 +113,8 @@ val of_tool_call :
 (** Tool call → 3 events: [Tool_call_start], [Tool_call_args]
     (with [delta=args_json]), [Tool_call_end]. *)
 
-val of_coord_state : Yojson.Safe.t -> event
-(** Coord snapshot → [State_snapshot]. *)
+val of_workspace_state : Yojson.Safe.t -> event
+(** Workspace snapshot → [State_snapshot]. *)
 
 val of_custom : name:string -> Yojson.Safe.t -> event
 (** Wrap any MASC event in [Custom] with the given [name]/[value]. *)

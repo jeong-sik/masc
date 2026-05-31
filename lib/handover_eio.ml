@@ -133,7 +133,7 @@ let handover_of_json (json : Yojson.Safe.t) : handover_record option =
   with Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
 
 (** Storage paths *)
-let handover_dir_path (config : Coord_utils.config) =
+let handover_dir_path (config : Workspace_utils.config) =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path:config.base_path)
     "handovers"

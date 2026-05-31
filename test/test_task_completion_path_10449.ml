@@ -1,12 +1,12 @@
 (** #10449: pin the pure classifiers that feed
     [masc_task_completion_path_total].  The Prometheus emit point
-    is fed by [Coord_task.classify_contract_state] +
+    is fed by [Workspace_task.classify_contract_state] +
     [classify_completion_path]; pinning each axis here keeps the
     metric label vocabulary stable as the lifecycle module grows. *)
 
 open Alcotest
-module CT = Masc_mcp.Coord
-module L = Coord_task_lifecycle
+module CT = Masc_mcp.Workspace
+module L = Workspace_task_lifecycle
 module T = Masc_domain
 
 let empty_links : T.task_execution_links = {

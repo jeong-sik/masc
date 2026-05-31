@@ -61,7 +61,7 @@ type world_observation = {
   (** Agent economy mode: Normal, Frugal, or Hustle. *)
 
   unclaimed_task_count : int;
-  (** Number of unclaimed tasks in the coord backlog. *)
+  (** Number of unclaimed tasks in the workspace backlog. *)
 
   claimable_task_count : int;
   (** Number of unclaimed tasks this keeper can claim with its current tool
@@ -72,7 +72,7 @@ type world_observation = {
       capacity/cooldown when no fail-open runtime is available. *)
 
   failed_task_count : int;
-  (** Number of failed/cancelled tasks in the coord backlog. *)
+  (** Number of failed/cancelled tasks in the workspace backlog. *)
 
   pending_verification_count : int;
   (** Number of tasks awaiting cross-agent verification. *)
@@ -83,7 +83,7 @@ type world_observation = {
       so newly added work is not delayed behind the previous turn's timer. *)
 
   active_agent_count : int;
-  (** Number of agents currently active in the coord. *)
+  (** Number of agents currently active in the workspace. *)
 
   last_turn_budget : (int * int) option;
   (** Previous generation's turn usage as [(used, total)], if available. *)
@@ -207,38 +207,38 @@ val pending_board_event_of_stimulus :
 (** Read the best available continuity summary for a keeper.
     Recovery order is progress log -> checkpoint snapshot -> meta summary. *)
 val read_continuity_summary :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   string
 
 (** Build a world observation from workspace state and keeper metadata.
 
-    Reads coord backlog, agent list, checkpoint context, economy state,
+    Reads workspace backlog, agent list, checkpoint context, economy state,
     and recent board activity.
     All I/O errors are caught and produce safe defaults (0, empty, Normal).
 
     @param pending_board_events Pre-collected board event summaries for this
       heartbeat, if already fetched during triage
-    @param config Coord configuration for I/O operations
+    @param config Workspace configuration for I/O operations
     @param meta Current keeper metadata *)
 val observe :
   allowed_tool_names:string list option ->
   pending_board_events:pending_board_event list option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   world_observation
 
 (** Build the observation used by direct [masc_keeper_msg] turns.
 
-    This intentionally reads durable coord/task state, including pending
+    This intentionally reads durable workspace/task state, including pending
     verification counts, while suppressing transient board/message events and
     cursor updates. Direct operator messages should not advance autonomous
-    cursors, inherit unrelated coord chatter, or synthesize scheduled
+    cursors, inherit unrelated workspace chatter, or synthesize scheduled
     scheduled timer signals, but they must still see the durable work
     signals that drive tool-use contracts. *)
 val observe_direct_keeper_msg :
   allowed_tool_names:string list option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   world_observation
 
@@ -251,7 +251,7 @@ val observe_direct_keeper_msg :
 val durable_signal_present :
   allowed_tool_names:string list option ->
   pending_board_events:pending_board_event list option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   bool
 

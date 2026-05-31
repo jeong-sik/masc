@@ -154,7 +154,7 @@ let build_session_seed session_json _cards =
         namespace =
           (match String_util.trim_to_option (string_field "project" meta) with
           | Some _ as value -> value
-          | None -> String_util.trim_to_option (string_field "coord_id" meta));
+          | None -> String_util.trim_to_option (string_field "workspace_id" meta));
         status = session_status_string session_json;
         health =
           (match session_card with

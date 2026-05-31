@@ -361,7 +361,7 @@ let int_query_param uri key ~default =
 
 (** Read recent event log lines from .masc/events *)
 let read_event_lines config ~limit =
-  let events_dir = Filename.concat (Coord.masc_dir config) "events" in
+  let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
     let month_dirs =
@@ -406,14 +406,14 @@ let read_event_lines config ~limit =
     List.rev !collected
 
 (** Issue #8474: FSM transition matrix.  Each entry mirrors a match-arm
-    in [task transition] (lib/coord/task_state.ml ~line
+    in [task transition] (lib/workspace/task_state.ml ~line
     831).  Verifier-FSM rows ([submit_for_verification],
     [approve_verification], [reject_verification]) are gated at runtime
     by [MASC_VERIFICATION_FSM_ENABLED] but listed unconditionally so
     the published schema matches the action enum
     ([Masc_domain.valid_task_action_strings] via #8354).  The regression test
     [test_types.ml :: fsm_transition_matrix] asserts every action
-    listed by [Coord_task.valid_next_actions_for_status] for any
+    listed by [Workspace_task.valid_next_actions_for_status] for any
     reachable status appears here, so adding a 4th verifier action
     fails the test before it ships with a stale schema. *)
 let task_fsm_transitions : (string * string list * string * string option) list =
@@ -478,7 +478,7 @@ let schema_markdown =
 
 (** MCP Server state *)
 type server_state = {
-  mutable coord_config: Coord.config;
+  mutable workspace_config: Workspace.config;
   session_registry: Session.registry;
   on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
@@ -490,14 +490,14 @@ type server_state = {
 }
 
 let create_state ~base_path =
-  let config = Coord.default_config base_path in
+  let config = Workspace.default_config base_path in
   let registry = Session.create () in
   (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event
   );
   let state = {
-    coord_config = config;
+    workspace_config = config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
     sw = None;
@@ -508,14 +508,14 @@ let create_state ~base_path =
     net = None;
   } in
   Tool_board.set_agent_lookup (fun name ->
-    try Coord.is_agent_session_bound state.coord_config ~agent_name:name
+    try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 
 (** Create state with Eio context. *)
 let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   let config =
-    Coord.default_config_eio ~sw
+    Workspace.default_config_eio ~sw
       ~on_backend_ready:(fun _backend ->
         Log.Backend.info "Board: JSONL default backend";
         Board_dispatch.init_jsonl ())
@@ -541,7 +541,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     Session.push_notification_to_active_agents registry ~event
   );
   let state = {
-    coord_config = config;
+    workspace_config = config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
     sw = Some sw;
@@ -551,10 +551,10 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     mono_clock = Some mono_clock;
     net = Some net;
   } in
-  (* Board post kind auto-classification: reads state.coord_config so
-     coord changes via set_coord are reflected automatically. *)
+  (* Board post kind auto-classification: reads state.workspace_config so
+     workspace changes via set_workspace are reflected automatically. *)
   Tool_board.set_agent_lookup (fun name ->
-    try Coord.is_agent_session_bound state.coord_config ~agent_name:name
+    try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 

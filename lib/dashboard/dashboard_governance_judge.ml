@@ -106,7 +106,7 @@ let resolve_governance_model_used ~raw_model ~canonical_model_id =
 
 let governance_dir base_path =
   Filename.concat
-    (Coord_utils.masc_dir_from_base_path ~base_path)
+    (Workspace_utils.masc_dir_from_base_path ~base_path)
     "governance"
 
 (** Legacy single-file path (for fallback reads). *)

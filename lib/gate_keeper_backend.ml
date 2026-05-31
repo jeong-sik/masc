@@ -64,24 +64,24 @@ let filesystem_safe_or_unknown value =
     let s = Buffer.contents buf in
     if s = "" || String.for_all (fun c -> c = '_') s then "unknown" else s
 
-let agent_name_for_channel_actor ~channel ~channel_room_id ~channel_user_id =
+let agent_name_for_channel_actor ~channel ~channel_workspace_id ~channel_user_id =
   Printf.sprintf "gate:%s:%s:%s"
     (filesystem_safe_or_unknown channel)
-    (filesystem_safe_or_unknown channel_room_id)
+    (filesystem_safe_or_unknown channel_workspace_id)
     (filesystem_safe_or_unknown channel_user_id)
 
 let contextualize_message ~channel ~channel_user_id ~channel_user_name
-    ~channel_room_id ~content =
+    ~channel_workspace_id ~content =
   let safe_channel = normalized_or_unknown channel in
   let safe_user_id = normalized_or_unknown channel_user_id in
   let safe_user_name = normalized_or_unknown channel_user_name in
-  let safe_room_id = normalized_or_unknown channel_room_id in
+  let safe_workspace_id = normalized_or_unknown channel_workspace_id in
   let safe_content = String.trim content in
   String.concat "\n"
     [
       "[External channel context]";
       "channel: " ^ safe_channel;
-      "room_id: " ^ safe_room_id;
+      "workspace_id: " ^ safe_workspace_id;
       "user_id: " ^ safe_user_id;
       "user_name: " ^ safe_user_name;
       "";
@@ -90,20 +90,20 @@ let contextualize_message ~channel ~channel_user_id ~channel_user_name
     ]
 
 let dispatch ~sw ~clock ~proc_mgr ~net ~config
-    ~channel ~channel_user_id ~channel_user_name ~channel_room_id
+    ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~content =
   let agent_name =
-    agent_name_for_channel_actor ~channel ~channel_room_id ~channel_user_id
+    agent_name_for_channel_actor ~channel ~channel_workspace_id ~channel_user_id
   in
   (* Use filesystem-safe sanitizer: this key is later used as a directory
-     component in session_dir. An unsanitized channel_room_id with '..' or '/'
+     component in session_dir. An unsanitized channel_workspace_id with '..' or '/'
      would escape the intended traces/channels/ subtree. Discord passes
      numeric IDs so this is defensive for future integrations (webhooks,
      custom channels) that could pass attacker-controlled values. *)
   let channel_session_key =
     Printf.sprintf "%s_%s"
       (filesystem_safe_or_unknown channel)
-      (filesystem_safe_or_unknown channel_room_id)
+      (filesystem_safe_or_unknown channel_workspace_id)
   in
   let args =
     `Assoc [
@@ -111,7 +111,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       ( "message",
         `String
           (contextualize_message ~channel ~channel_user_id ~channel_user_name
-             ~channel_room_id ~content) );
+             ~channel_workspace_id ~content) );
       ("direct_reply", `Bool true);
       ("channel_session_key", `String channel_session_key);
     ]

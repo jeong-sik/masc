@@ -30,7 +30,7 @@ let execution_smoke_fixture_json () =
       ( "status",
         `Assoc
           [
-            ("coordination_root", `String "/tmp/masc-execution-fixture");
+            ("workspace_root", `String "/tmp/masc-execution-fixture");
             ("cluster", `String "fixture");
             ("project", `String "execution-smoke");
             ("tempo_interval_s", `Float 300.0);

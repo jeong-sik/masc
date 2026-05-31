@@ -51,7 +51,7 @@ type audit_entry = {
   timestamp: float;
   agent_id: string;
   action: action;
-  coord_id: string option;
+  workspace_id: string option;
   details: Yojson.Safe.t;
   outcome: outcome;
   cost_estimate: float option;
@@ -138,7 +138,7 @@ let entry_to_json (e : audit_entry) : Yojson.Safe.t =
     ("timestamp", `Float e.timestamp);
     ("agent_id", `String e.agent_id);
     ("action", `String (action_to_string e.action));
-    ("coord_id", Json_util.string_opt_to_json e.coord_id);
+    ("workspace_id", Json_util.string_opt_to_json e.workspace_id);
     ("details", e.details);
     ("outcome", outcome_to_json e.outcome);
   ] in
@@ -163,7 +163,7 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     let timestamp = Json_util.get_float json "timestamp" in
     let agent_id = Json_util.get_string json "agent_id" in
     let action_raw = Json_util.get_string json "action" in
-    let coord_id = Json_util.get_string json "coord_id" in
+    let workspace_id = Json_util.get_string json "workspace_id" in
     let details =
       match Safe_ops.json_member_opt "details" json with
       | Some v -> v
@@ -185,7 +185,7 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     match timestamp, agent_id, action_raw with
     | Some timestamp, Some agent_id, Some action_raw ->
       let action = string_to_action action_raw in
-      Ok { timestamp; agent_id; action; coord_id; details; outcome; cost_estimate; token_count; trace_id }
+      Ok { timestamp; agent_id; action; workspace_id; details; outcome; cost_estimate; token_count; trace_id }
     | _ -> Error "missing required fields (timestamp, agent_id, action)"
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     (* Redact details field to prevent sensitive content leaking into logs *)
@@ -211,7 +211,7 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
 
 (** {1 File Operations} *)
 
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** Date-split store: [.masc/audit/YYYY-MM/DD.jsonl].
     Cached per base_dir so all callers share the same Eio.Mutex.
@@ -229,7 +229,7 @@ let audit_store_cache : Dated_jsonl.t StringMap.t ref = ref StringMap.empty
 let audit_store_cache_mu = Eio.Mutex.create ()
 
 let get_audit_store (config : config) : Dated_jsonl.t =
-  let base = Filename.concat (Coord_utils.masc_dir config) "audit" in
+  let base = Filename.concat (Workspace_utils.masc_dir config) "audit" in
   Eio_guard.with_mutex audit_store_cache_mu (fun () ->
     match StringMap.find_opt base !audit_store_cache with
     | Some store -> store
@@ -432,7 +432,7 @@ let log_action
     (config : config)
     ~agent_id
     ~action
-    ?(coord_id : string option)
+    ?(workspace_id : string option)
     ?(details : Yojson.Safe.t = `Null)
     ?(cost_estimate : float option)
     ?(token_count : int option)
@@ -443,7 +443,7 @@ let log_action
     timestamp = Time_compat.now ();
     agent_id;
     action;
-    coord_id;
+    workspace_id;
     details;
     outcome;
     cost_estimate;
@@ -489,12 +489,12 @@ let log_broadcast config ~agent_id ~message_preview ?cost_estimate ?token_count 
     ~details:(`Assoc [("preview", `String preview)])
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_suspend config ~agent_id ~target_agent ~reason ~coords_affected ?cost_estimate ?token_count () =
+let log_suspend config ~agent_id ~target_agent ~reason ~workspaces_affected ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:Suspend
     ~details:(`Assoc [
       ("target_agent", `String target_agent);
       ("reason", `String reason);
-      ("coords_affected", `Int coords_affected);
+      ("workspaces_affected", `Int workspaces_affected);
     ])
     ?cost_estimate ?token_count ~outcome:Success ()
 

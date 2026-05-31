@@ -182,7 +182,7 @@ let mention_inbox_json ?me (msg : Masc_domain.message) =
 ;;
 
 let active_agent_names config =
-  if not (Coord.is_initialized config)
+  if not (Workspace.is_initialized config)
   then []
   else (
     try
@@ -190,7 +190,7 @@ let active_agent_names config =
          instead of [get_agents_raw] which also returned tombstones /
          left agents. The function name and the workspace participants
          contract both expect "active only". *)
-      Coord.get_active_agents config
+      Workspace.get_active_agents config
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -219,7 +219,7 @@ let workspace_json ~config messages =
 let compute_json ~config ?me ~limit () =
   let limit = clamp_limit limit in
   let recent_desc =
-    Coord.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
+    Workspace.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
     |> List.filter is_workspace_message
     |> take limit
   in
@@ -239,7 +239,7 @@ let compute_json ~config ?me ~limit () =
 ;;
 
 (* /api/v1/dashboard/workspace was measured at 8-9s under live load.
-   [Coord.get_messages_raw] is a synchronous scan over the message
+   [Workspace.get_messages_raw] is a synchronous scan over the message
    store and was being executed on the Eio main domain, so other
    HTTP fibers sharing the domain stalled for the duration.  Cache
    the response with stale-while-revalidate and run the underlying
@@ -250,7 +250,7 @@ let json ~config ?me ~limit () =
   let key =
     Printf.sprintf
       "dashboard.workspace:%s;%s;%d"
-      config.Coord.base_path
+      config.Workspace.base_path
       (Option.value ~default:"-" me)
       limit
   in

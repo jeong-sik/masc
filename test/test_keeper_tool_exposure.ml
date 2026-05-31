@@ -395,7 +395,7 @@ let test_fallback_floor_has_no_implicit_repo_tools () =
   check bool "fallback floor omits Read" false (List.mem "tool_read_file" floor)
 ;;
 
-let test_core_coordination_presets_have_task_lifecycle_tools () =
+let test_core_workspace_presets_have_task_lifecycle_tools () =
   [ "social", (); "messaging", () ]
   |> List.iter (fun (label, _) ->
     let meta = make_meta () in
@@ -412,7 +412,7 @@ let test_core_coordination_presets_have_task_lifecycle_tools () =
       (has_tool "keeper_task_submit_for_verification" tools))
 ;;
 
-let test_delivery_preset_has_coordination_tools () =
+let test_delivery_preset_has_workspace_tools () =
   let meta = make_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_tasks_list" true (has_tool "keeper_tasks_list" tools);
@@ -553,7 +553,7 @@ let test_path_relative_within_root () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let result =
            Keeper_alerting_path.resolve_keeper_target_path
              ~config
@@ -569,7 +569,7 @@ let test_path_absolute_outside_root () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let result =
            Keeper_alerting_path.resolve_keeper_target_path
              ~config
@@ -607,7 +607,7 @@ let test_path_traversal_attack () =
     ~finally:(fun () -> cleanup_path_test_dir base)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config deep in
+         let config = Workspace.default_config deep in
          (* ../../../../etc/passwd should escape any reasonable root *)
          let result =
            Keeper_alerting_path.resolve_keeper_target_path
@@ -624,7 +624,7 @@ let test_path_allowed_paths_filter () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          (* lib is allowed, src is not *)
          let ok_result =
            Keeper_alerting_path.resolve_keeper_target_path
@@ -662,7 +662,7 @@ let test_path_allowed_paths_filter_strips_all_trailing_slashes () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let ok_result =
            Keeper_alerting_path.resolve_keeper_target_path
              ~config
@@ -685,7 +685,7 @@ let test_path_absolute_allowed_paths_filter () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let ok_result =
            Keeper_alerting_path.resolve_keeper_target_path
              ~config
@@ -714,7 +714,7 @@ let test_absolute_allowed_paths_normalization () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let normalized =
            Keeper_alerting_path.absolute_allowed_paths
              ~config
@@ -733,7 +733,7 @@ let test_absolute_allowed_paths_slashes_only_rejected () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let normalized =
            Keeper_alerting_path.absolute_allowed_paths ~config ~allowed_paths:[ "////" ]
          in
@@ -757,7 +757,7 @@ let test_absolute_allowed_paths_result_rejects_invalid_explicit_allowlist () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let result =
            Keeper_alerting_path.absolute_allowed_paths_result
              ~config
@@ -772,7 +772,7 @@ let test_path_allowed_paths_single_trailing_slash () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let exact_match =
            Keeper_alerting_path.resolve_keeper_target_path
              ~config
@@ -803,7 +803,7 @@ let test_path_empty_rejected () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let result =
            Keeper_alerting_path.resolve_keeper_target_path
              ~config
@@ -819,7 +819,7 @@ let test_path_whitespace_only_rejected () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let result =
            Keeper_alerting_path.resolve_keeper_target_path
              ~config
@@ -835,7 +835,7 @@ let test_path_empty_allowlist_defaults_to_project_root () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          (* Empty low-level allowlist falls back to project-root resolution. *)
          let r1 =
            Keeper_alerting_path.resolve_keeper_target_path
@@ -863,7 +863,7 @@ let test_read_path_empty_allowlist_defaults_to_project_root () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let read_lib =
            Keeper_alerting_path.resolve_keeper_read_path
              ~config
@@ -886,7 +886,7 @@ let test_read_path_respects_allowed_paths () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let read_lib =
            Keeper_alerting_path.resolve_keeper_read_path
              ~config
@@ -909,7 +909,7 @@ let test_read_path_rejects_outside_root () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let result =
            Keeper_alerting_path.resolve_keeper_read_path
              ~config
@@ -925,7 +925,7 @@ let test_read_vs_write_path_alignment () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          (* Write: lib allowed, src rejected *)
          let write_lib =
            Keeper_alerting_path.resolve_keeper_target_path
@@ -968,7 +968,7 @@ let test_read_path_rejects_nonexistent () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          (* Path within root but does not exist on disk *)
          let result =
            Keeper_alerting_path.resolve_keeper_read_path
@@ -1005,7 +1005,7 @@ let test_read_path_resolves_unique_nested_repo_suffix () =
        mkdir repo;
        mkdir lib_dir;
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let result =
            Keeper_alerting_path.resolve_keeper_read_path
              ~config
@@ -1044,7 +1044,7 @@ let test_read_path_rejects_ambiguous_nested_repo_suffix () =
        make_repo "workspace-a";
        make_repo "workspace-b";
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let result =
            Keeper_alerting_path.resolve_keeper_read_path
              ~config
@@ -1090,7 +1090,7 @@ let test_read_path_does_not_follow_symlink_outside_root () =
        mkdir outside_lib;
        Unix.symlink outside link_path;
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let result =
            Keeper_alerting_path.resolve_keeper_read_path
              ~config
@@ -1150,7 +1150,7 @@ let test_keeper_reported_nonexistent_subdir () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let allowed =
            [ ".masc/playground/goal-default-demo/"
            ; ".masc/keepers/goal-default-demo/"
@@ -1187,7 +1187,7 @@ let test_keeper_reported_explicit_paths_only () =
     ~finally:(fun () -> cleanup_path_test_dir dir)
     (fun () ->
        run_with_isolated_base_path (fun () ->
-         let config = Coord.default_config dir in
+         let config = Workspace.default_config dir in
          let allowed =
            [ ".masc/playground/allowed-only/"
            ; ".masc/keepers/allowed-only/"
@@ -1310,13 +1310,13 @@ let () =
             `Quick
             test_fallback_floor_has_no_implicit_repo_tools
         ; test_case
-            "core coordination presets have task lifecycle tools"
+            "core workspace presets have task lifecycle tools"
             `Quick
-            test_core_coordination_presets_have_task_lifecycle_tools
+            test_core_workspace_presets_have_task_lifecycle_tools
         ; test_case
-            "delivery has coordination tools"
+            "delivery has workspace tools"
             `Quick
-            test_delivery_preset_has_coordination_tools
+            test_delivery_preset_has_workspace_tools
         ; test_case
             "verifier identity uses verdict-only task surface"
             `Quick
@@ -1415,7 +1415,7 @@ let () =
       , [ test_case "dangerous tools denied" `Quick (fun () ->
             (* Post-pruning: keeper_denied surface narrowed to
            [masc_reset; masc_spawn]. Most former dangerous tools
-           (masc_room_delete, masc_force_leave, masc_config_set,
+           (masc_workspace_delete, masc_force_leave, masc_config_set,
            masc_execute / masc_execute_dry_run) were removed from the
            registry entirely. *)
             let dl = Keeper_hooks_oas.keeper_denied_tools in

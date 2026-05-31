@@ -17,7 +17,7 @@ val default_case_set_path : repo_root:string -> string
     [<repo_root>/benchmark/tool_call_quality_cases.json].
     Pinned at the contract seam — operator runbooks reference
     the exact relative path; a future case-set move requires
-    coordinated runbook + benchmark-runner updates. *)
+    synchronized runbook + benchmark-runner updates. *)
 
 val default_evidence_path : repo_root:string -> string
 (** [default_evidence_path ~repo_root] returns

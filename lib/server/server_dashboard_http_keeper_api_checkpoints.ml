@@ -40,7 +40,7 @@ let oas_checkpoint_summary_json
     ]
 ;;
 
-let inventory_json (config : Coord.config) (name : string)
+let inventory_json (config : Workspace.config) (name : string)
   : [ `OK | `Not_found ] * Yojson.Safe.t
   =
   match Keeper_meta_store.read_meta_resolved config name with

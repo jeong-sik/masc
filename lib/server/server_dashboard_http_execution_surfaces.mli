@@ -132,7 +132,7 @@ val start_execution_refresh_loop :
 (** Forks the per-process execution-cache refresh fiber.
     Idempotent.  Default refresh interval keeps timeout
     < interval (60 s) so [Proactive_refresh]'s clamp
-    leaves coord for the first build window after boot. *)
+    leaves workspace for the first build window after boot. *)
 
 val start_transport_health_refresh_loop :
   state:Mcp_server.server_state ->
@@ -206,7 +206,7 @@ val paused_of_lifecycle_event : string -> bool option
 val seed_execution_cache_for_test : unit -> unit
 
 val patch_surface_json_for_running_keepers :
-  Coord.config -> Yojson.Safe.t -> Yojson.Safe.t
+  Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t
 
 val patch_keeper_row :
   keeper_name:string ->

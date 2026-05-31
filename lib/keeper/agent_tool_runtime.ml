@@ -11,7 +11,7 @@ open Agent_tool_descriptor
    tests) leave them unset and the Eio-bound descriptor handlers return
    a typed "Eio context not provided" failure instead of crashing. *)
 type context =
-  { config : Coord.config
+  { config : Workspace.config
   ; meta : Keeper_meta_contract.keeper_meta
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
@@ -68,7 +68,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_plan_dispatch
   | Tool_masc_run_dispatch
   | Tool_masc_agent_dispatch
-  | Tool_masc_coord_dispatch
+  | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
@@ -125,7 +125,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_plan_dispatch
   | Tool_masc_run_dispatch
   | Tool_masc_agent_dispatch
-  | Tool_masc_coord_dispatch
+  | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
@@ -177,7 +177,7 @@ let handle_remote_mcp ctx descriptor args =
   | Tool_masc_plan_dispatch
   | Tool_masc_run_dispatch
   | Tool_masc_agent_dispatch
-  | Tool_masc_coord_dispatch
+  | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
@@ -276,9 +276,9 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~name
          ~args)
-  | Tool_masc_coord_dispatch ->
+  | Tool_masc_workspace_dispatch ->
     Some
-      (Agent_tool_in_process_runtime.handle_masc_coord
+      (Agent_tool_in_process_runtime.handle_masc_workspace
          ~config:ctx.config
          ~meta:ctx.meta
          ~name

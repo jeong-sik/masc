@@ -152,7 +152,7 @@ let test_atomic_write_not_empty () =
   let json =
     `Assoc [ ("name", `String "test"); ("status", `String "ok") ]
   in
-  require_write_ok "atomic write" (Coord_utils.write_json_local path json);
+  require_write_ok "atomic write" (Workspace_utils.write_json_local path json);
   let content = Fs_compat.load_file path in
   check bool "file not empty after atomic write" true
     (String.length content > 0);
@@ -174,7 +174,7 @@ let test_concurrent_atomic_writes_never_empty () =
   let path = Filename.concat dir "agent.json" in
   (* Seed with initial content *)
   require_write_ok "seed write"
-    (Coord_utils.write_json_local path
+    (Workspace_utils.write_json_local path
        (`Assoc [ ("name", `String "init") ]));
   let empty_seen = ref false in
   let iterations = 200 in
@@ -185,7 +185,7 @@ let test_concurrent_atomic_writes_never_empty () =
       let json =
         `Assoc [ ("name", `String (Printf.sprintf "v%d" i)) ]
       in
-      require_write_ok "concurrent write" (Coord_utils.write_json_local path json);
+      require_write_ok "concurrent write" (Workspace_utils.write_json_local path json);
       Eio.Fiber.yield ()
     done);
   (* Reader fiber: read concurrently *)

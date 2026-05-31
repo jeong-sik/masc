@@ -1,7 +1,7 @@
 (** Tool_name_alias_axis -- low-dependency public alias projection.
 
     This module intentionally stays string-only so lower libraries such as
-    [masc_coord] can canonicalize public model aliases without depending on
+    [masc_workspace] can canonicalize public model aliases without depending on
     keeper runtime modules. *)
 
 type public_alias =

@@ -29,9 +29,9 @@ type keeper_binding = {
   gh_config_dir : string;
 }
 
-let bundle_root (config : Coord.config) ~(repo_cli_identity : string) =
+let bundle_root (config : Workspace.config) ~(repo_cli_identity : string) =
   Filename.concat
-    (Filename.concat (Coord.masc_dir config) "repo-cli-identities")
+    (Filename.concat (Workspace.masc_dir config) "repo-cli-identities")
     repo_cli_identity
 
 let root_bundle_root config =
@@ -75,7 +75,7 @@ let root_repo_cli_config_dir_exists config =
 
 (** Root fallback is MASC-owned under the active base path.  Keeper
     execution never falls back to ambient operator GH config. *)
-let config_dir (config : Coord.config) : string option =
+let config_dir (config : Workspace.config) : string option =
   let dir = root_repo_cli_config_dir config in
   if repo_cli_config_dir_exists dir then Some dir else None
 
@@ -159,10 +159,10 @@ let binding_of_mapped_credential
                  ~bundle_root:(Filename.dirname gh_config_dir)
                  ~gh_config_dir))
 
-let mapped_keeper_binding ~(config : Coord.config) ~keeper_name ~defaults =
+let mapped_keeper_binding ~(config : Workspace.config) ~keeper_name ~defaults =
   match
     Keeper_repo_mapping.credentials_for_keeper
-      ~base_path:config.Coord.base_path ~keeper_id:keeper_name
+      ~base_path:config.Workspace.base_path ~keeper_id:keeper_name
   with
   | Error reason ->
       Error
@@ -177,7 +177,7 @@ let mapped_keeper_binding ~(config : Coord.config) ~keeper_name ~defaults =
             fall back to profile/root credentials."
            keeper_name
            (Config_dir_resolver.keeper_repo_mappings_toml_path
-              ~base_path:config.Coord.base_path)
+              ~base_path:config.Workspace.base_path)
            keeper_name)
   | Ok [ credential ] ->
       binding_of_mapped_credential ~keeper_name ~defaults credential
@@ -187,13 +187,13 @@ let mapped_keeper_binding ~(config : Coord.config) ~keeper_name ~defaults =
            "keeper %s maps to %d repo CLI credentials; exactly one is required"
            keeper_name (List.length credentials))
 
-let keeper_binding (config : Coord.config) ~(keeper_name : string) :
+let keeper_binding (config : Workspace.config) ~(keeper_name : string) :
     (keeper_binding, string) result =
   match Keeper_types_profile.load_keeper_profile_defaults_result keeper_name with
   | Error reason -> Error reason
   | Ok defaults -> mapped_keeper_binding ~config ~keeper_name ~defaults
 
-let keeper_config_dir (config : Coord.config) ~(keeper_name : string) :
+let keeper_config_dir (config : Workspace.config) ~(keeper_name : string) :
     (string, string) result =
   keeper_binding config ~keeper_name
   |> Result.map (fun binding -> binding.gh_config_dir)
@@ -201,7 +201,7 @@ let keeper_config_dir (config : Coord.config) ~(keeper_name : string) :
 (** Prepend [GH_CONFIG_DIR=<dir>] to a gh shell command when a
     keeper-scoped config exists. Scoped to the single subprocess
     invocation — the operator's terminal is unaffected. *)
-let with_env (config : Coord.config) (repo_cli_cmd : string) : string =
+let with_env (config : Workspace.config) (repo_cli_cmd : string) : string =
   let bundle_root = root_bundle_root config in
   Printf.sprintf
     "GH_TOKEN= GITHUB_TOKEN= SSH_AUTH_SOCK= HOME=%s GH_CONFIG_DIR=%s \
@@ -256,10 +256,10 @@ let compose_base_with_repo_cli_config ~dir =
   in
   Array.of_list (scoped @ without_existing_config)
 
-let process_env (config : Coord.config) : string array option =
+let process_env (config : Workspace.config) : string array option =
   Some (compose_base_with_repo_cli_config ~dir:(root_repo_cli_config_dir config))
 
-let keeper_process_env (config : Coord.config) ~(keeper_name : string) :
+let keeper_process_env (config : Workspace.config) ~(keeper_name : string) :
     (string array option, string) result =
   keeper_config_dir config ~keeper_name
   |> Result.map (fun dir -> Some (compose_base_with_repo_cli_config ~dir))

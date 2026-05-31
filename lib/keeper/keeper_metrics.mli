@@ -115,7 +115,7 @@ type t =
   | ClaimAutoProvision
   | TomlInvalid
   | PersonaDriftMissing
-  | CoordInitFailures
+  | WorkspaceInitFailures
   | PresenceSyncFailures
   | SelfPreservationUniversal
   | StaleStormPaused
@@ -125,7 +125,7 @@ type t =
   | StateSnapshotSkippedNoState
   | ProgressUpdatedLineFailures
   | SseBroadcastFailures
-  | CoordHeartbeatFailures
+  | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
   | OasExecutionErrors
   | EpisodeCreateFailures

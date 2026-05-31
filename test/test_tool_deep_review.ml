@@ -108,7 +108,7 @@ let test_build_prompt_rejects_task_state_history_paths () =
       | Error msg ->
           check bool "mentions rejected" true
             (String.length msg > 0)
-      | Ok _ -> fail "expected room/task history to be rejected")
+      | Ok _ -> fail "expected workspace/task history to be rejected")
 
 let () =
   run "tool_deep_review"

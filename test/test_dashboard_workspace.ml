@@ -21,13 +21,13 @@ let with_workspace f =
   let dir = temp_dir "masc_workspace" in
   Fun.protect
     ~finally:(fun () ->
-      let config = Coord.default_config dir in
-      ignore (Coord.reset config);
+      let config = Workspace.default_config dir in
+      ignore (Workspace.reset config);
       try Unix.rmdir dir with
       | _ -> ())
     (fun () ->
-       let config = Coord.default_config dir in
-       ignore (Coord.init config ~agent_name:(Some "operator"));
+       let config = Workspace.default_config dir in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
        f config)
 ;;
 
@@ -41,11 +41,10 @@ let string_list_field key json =
 let test_workspace_projection_includes_messages_and_mentions () =
   with_workspace
   @@ fun config ->
-  (* See: fixture session setup; returned agent record is not used. *)
-  ignore (Coord.bind_session config ~agent_name:"sangsu" ~capabilities:[] ());
-  ignore (Coord.broadcast config ~from_agent:"operator" ~content:"hello @sangsu");
+  ignore (Workspace.join config ~agent_name:"sangsu" ~capabilities:[] ());
+  ignore (Workspace.broadcast config ~from_agent:"operator" ~content:"hello @sangsu");
   ignore
-    (Coord.broadcast
+    (Workspace.broadcast
        config
        ~from_agent:"sangsu"
        ~msg_type:"state_block:plan"
@@ -56,7 +55,7 @@ let test_workspace_projection_includes_messages_and_mentions () =
   let inbox = list_field "mentions_inbox" json in
   Alcotest.(check int) "two messages" 2 (List.length messages);
   Alcotest.(check int) "one mention" 1 (List.length inbox);
-  Alcotest.(check string) "workspace id" "workspace" (string_field "id" workspace);
+  Alcotest.(check string) "workspace id" "root" (string_field "id" workspace);
   Alcotest.(check bool)
     "participants include sangsu"
     true
@@ -82,8 +81,8 @@ let test_workspace_projection_includes_messages_and_mentions () =
 let test_mentions_without_me_returns_all_mentions () =
   with_workspace
   @@ fun config ->
-  ignore (Coord.broadcast config ~from_agent:"operator" ~content:"hello @rama");
-  ignore (Coord.broadcast config ~from_agent:"operator" ~content:"plain broadcast");
+  ignore (Workspace.broadcast config ~from_agent:"operator" ~content:"hello @rama");
+  ignore (Workspace.broadcast config ~from_agent:"operator" ~content:"plain broadcast");
   let json = Dashboard_workspace.json ~config ~limit:10 () in
   Alcotest.(check int) "all mentions" 1 (List.length (list_field "mentions_inbox" json))
 ;;

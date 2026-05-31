@@ -63,7 +63,7 @@ let test_label_isolation_across_reasons () =
      failure modes in operator dashboards. *)
   let tool = "masc_status" in
   let agent_name = "isolation-test-9770" in
-  let before_coord =
+  let before_workspace =
     counter_for ~tool ~agent_name ~reason:"workspace_uninitialized"
   in
   Masc_mcp.Prometheus.inc_counter
@@ -74,7 +74,7 @@ let test_label_isolation_across_reasons () =
     ();
   Alcotest.(check (float 0.0001))
     "workspace_uninitialized counter unchanged when agent_not_joined fires"
-    before_coord
+    before_workspace
     (counter_for ~tool ~agent_name ~reason:"workspace_uninitialized")
 
 let test_label_isolation_across_agents () =

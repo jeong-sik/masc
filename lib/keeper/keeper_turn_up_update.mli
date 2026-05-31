@@ -9,7 +9,7 @@
     finally to the existing meta's value. Validates each goal id
     exists in [Goal_store]; returns [Error] listing unknown ids. *)
 val resolve_active_goal_ids :
-  Coord.config ->
+  Workspace.config ->
   Keeper_turn_up_args.parsed_args ->
   string list ->
   (string list, string) result

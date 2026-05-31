@@ -12,11 +12,11 @@ let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
 
 let meta_cognition_summary_ttl = Mc_cache.summary_ttl
 
-let dashboard_shell_cache_prefix (config : Coord.config) =
-  Printf.sprintf "shell:coord=%s:" config.base_path
+let dashboard_shell_cache_prefix (config : Workspace.config) =
+  Printf.sprintf "shell:workspace=%s:" config.base_path
 ;;
 
-let dashboard_shell_cache_key ?(light = false) (config : Coord.config) =
+let dashboard_shell_cache_key ?(light = false) (config : Workspace.config) =
   Printf.sprintf
     "%sworkspace=%s:mode=%s"
     (dashboard_shell_cache_prefix config)
@@ -24,13 +24,13 @@ let dashboard_shell_cache_key ?(light = false) (config : Coord.config) =
     (if light then "light" else "full")
 ;;
 
-let meta_cognition_summary_key (config : Coord.config) =
+let meta_cognition_summary_key (config : Workspace.config) =
   dashboard_cache_key config "meta_cognition_summary" "dashboard_shell"
 ;;
 
 let clear_meta_cognition_warm_flag = Mc_cache.clear_warm_flag
 
-let schedule_meta_cognition_summary_warm (config : Coord.config) =
+let schedule_meta_cognition_summary_warm (config : Workspace.config) =
   let key = meta_cognition_summary_key config in
   let compute () = Meta_cognition.summary_json config in
   if Mc_cache.try_acquire_warm_slot key
@@ -60,7 +60,7 @@ let schedule_meta_cognition_summary_warm (config : Coord.config) =
     | None -> Mc_cache.clear_warm_flag key)
 ;;
 
-let meta_cognition_summary_cached (config : Coord.config) : Yojson.Safe.t =
+let meta_cognition_summary_cached (config : Workspace.config) : Yojson.Safe.t =
   let key = meta_cognition_summary_key config in
   let compute () = Meta_cognition.summary_json config in
   match Dashboard_cache.peek key with

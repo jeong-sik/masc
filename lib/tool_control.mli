@@ -5,7 +5,7 @@
     Dispatches [masc_pause], [masc_resume], [masc_pause_status]. *)
 
 type context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
 }
 

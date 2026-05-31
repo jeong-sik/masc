@@ -13,7 +13,7 @@ let keeper_debug = Env_config.KeeperRuntime.debug
 include Keeper_types_profile_sandbox
 
 type 'a context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
   sw: Eio.Switch.t;
   clock: 'a Eio.Time.clock;
@@ -77,23 +77,23 @@ let ensure_dir = Keeper_fs.ensure_dir
 (* ── TOML parsing, normalizers, merge, discover ──────────────────── *)
 include Keeper_types_profile_toml
 
-(* ── JSON room-seq helpers ───────────────────────────────────────── *)
+(* ── JSON workspace-seq helpers ───────────────────────────────────────── *)
 
-let coord_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
-  `Assoc (List.map (fun (coord_id, seq) -> (coord_id, `Int seq)) items)
+let workspace_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
+  `Assoc (List.map (fun (workspace_id, seq) -> (workspace_id, `Int seq)) items)
 
-let coord_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
+let workspace_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
   match json with
   | `Assoc fields ->
       fields
-      |> List.filter_map (fun (coord_id, value) ->
-             if not (validate_name coord_id) then
+      |> List.filter_map (fun (workspace_id, value) ->
+             if not (validate_name workspace_id) then
                None
              else
                match value with
-               | `Int seq -> Some (coord_id, seq)
+               | `Int seq -> Some (workspace_id, seq)
                | `Intlit raw ->
-                   Some (coord_id, Safe_ops.int_of_string_with_default ~default:0 raw)
+                   Some (workspace_id, Safe_ops.int_of_string_with_default ~default:0 raw)
                | _ -> None)
   | _ -> []
 
@@ -547,13 +547,13 @@ let load_persona_summary_from_path =
 
 let list_persona_summaries = Keeper_types_profile_persona.list_persona_summaries
 
-let keeper_dir (config : Coord.config) =
-  let d = Filename.concat (Coord.masc_root_dir config) "keepers" in
+let keeper_dir (config : Workspace.config) =
+  let d = Filename.concat (Workspace.masc_root_dir config) "keepers" in
   ensure_dir d
 
 let keeper_meta_path config name =
   Filename.concat (keeper_dir config) (name ^ ".json")
 
-let session_base_dir (config : Coord.config) =
-  let d = Filename.concat (Coord.masc_root_dir config) "traces" in
+let session_base_dir (config : Workspace.config) =
+  let d = Filename.concat (Workspace.masc_root_dir config) "traces" in
   ensure_dir d

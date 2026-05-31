@@ -1,19 +1,19 @@
 (** {1 Path resolution} *)
 
 val resolve_tool_read_cwd :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
 
 val resolve_tool_write_cwd :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
 
 val validate_repo_path_args_ready :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   Masc_exec.Shell_ir.t ->
@@ -31,7 +31,7 @@ val auto_correct_path :
     happens through {!Playground_paths}. *)
 
 val resolve_tool_read_path :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result

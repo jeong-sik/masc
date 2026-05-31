@@ -25,7 +25,7 @@ val paused_keeper_detail_json :
   [> `Assoc of (string * Yojson.Safe.t) list ]
 val running_paused_keeper_names : unit -> String.t list
 val durable_paused_keeper_scan :
-  ?include_details:bool -> Coord.config -> paused_keeper_scan
+  ?include_details:bool -> Workspace.config -> paused_keeper_scan
 val paused_keepers_health_json_of_scan :
   running_names:String.t list ->
   paused_keeper_scan ->
@@ -50,9 +50,9 @@ val sort_paused_keeper_details :
   'a list
 val keeper_fleet_meta_scan :
   ?include_paused_details:bool ->
-  Coord.config -> keeper_fleet_meta_scan
+  Workspace.config -> keeper_fleet_meta_scan
 val autoboot_enabled_keeper_scan :
-  Coord.config -> autoboot_keeper_scan
+  Workspace.config -> autoboot_keeper_scan
 type keeper_phase_counts = {
   running : int;
   failing : int;

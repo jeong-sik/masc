@@ -633,7 +633,7 @@ let is_claim_context_tool_name name =
    tools even before any LLM hinting lands. *)
 let keeper_selection_top_k = 10
 
-(* BM25 candidate pool for TopK_llm: wide enough to give reranking room to
+(* BM25 candidate pool for TopK_llm: wide enough to give reranking workspace to
    improve results, but still bounded and deterministic. *)
 let keeper_selection_bm25_prefilter_n = 30
 

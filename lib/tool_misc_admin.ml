@@ -76,7 +76,7 @@ let error_workflow ~tool_name ~start_time msg : Tool_result.result =
 let valid_admin_section_strings : string list = [ "auth" ]
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
 }
 

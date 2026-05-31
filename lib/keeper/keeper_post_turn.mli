@@ -9,7 +9,7 @@
     turn. Memory bank append, episode flush, and Hebbian learning
     are recorded elsewhere:
     - memory bank / episodes: [Keeper_agent_run] tail after [Agent.run]
-    - hebbian: task lifecycle in [Coord_task]
+    - hebbian: task lifecycle in [Workspace_task]
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 

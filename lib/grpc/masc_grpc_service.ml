@@ -1,15 +1,15 @@
-(** MASC gRPC Coordination Service.
+(** MASC gRPC Workspace Service.
 
-    Implements the MascCoordination gRPC service using grpc-direct.
-    All handlers delegate to the Coord module for actual coordination logic.
+    Implements the MascWorkspace gRPC service using grpc-direct.
+    All handlers delegate to the Workspace module for actual workspace logic.
 
     Wire format: protobuf binary via ocaml-protoc-plugin.
-    See proto/masc_coordination.proto for the canonical API contract. *)
+    See proto/masc_workspace.proto for the canonical API contract. *)
 
 module T = Masc_grpc_types
 
 (** Service name matching the proto package.service pattern. *)
-let service_name = "masc.coordination.v1.MascCoordination"
+let service_name = "masc.workspace.v1.MascWorkspace"
 
 (** Current timestamp in milliseconds. *)
 let now_ms () = Int64.of_float (Unix.gettimeofday () *. 1000.0)
@@ -79,7 +79,7 @@ let task_info_of_task (task : Masc_domain.task) : T.task_info =
 (** {1 Unary Handlers} *)
 
 (** Broadcast handler: send a message to all agents. *)
-let handle_broadcast (coord_config : Coord_utils_backend_setup.config) (bytes : string)
+let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (bytes : string)
   : string
   =
   let req =
@@ -96,7 +96,7 @@ let handle_broadcast (coord_config : Coord_utils_backend_setup.config) (bytes : 
           in
           mention_prefix ^ " " ^ req.message)
       in
-      let _msg = Coord.broadcast coord_config ~from_agent:req.agent_name ~content in
+      let _msg = Workspace.broadcast workspace_config ~from_agent:req.agent_name ~content in
       T.BroadcastResponse.{ success = true; seq = now_ms () }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -108,10 +108,10 @@ let handle_broadcast (coord_config : Coord_utils_backend_setup.config) (bytes : 
 ;;
 
 (** GetStatus handler: return current workspace state. *)
-let handle_get_status (coord_config : Coord_utils_backend_setup.config) (_bytes : string)
+let handle_get_status (workspace_config : Workspace_utils_backend_setup.config) (_bytes : string)
   : string
   =
-  let masc_dir = Common.masc_dir_from_base_path ~base_path:coord_config.base_path in
+  let masc_dir = Common.masc_dir_from_base_path ~base_path:workspace_config.base_path in
   let agents_dir = Filename.concat masc_dir "agents" in
   let agents =
     if Sys.file_exists agents_dir && Sys.is_directory agents_dir
@@ -145,9 +145,9 @@ let handle_get_status (coord_config : Coord_utils_backend_setup.config) (_bytes 
           None)
     else []
   in
-  let tasks = Coord.get_tasks_safe coord_config |> List.map task_info_of_task in
+  let tasks = Workspace.get_tasks_safe workspace_config |> List.map task_info_of_task in
   T.StatusResponse.(
-    to_bytes { agents; tasks; message_count = 0; workspace_path = coord_config.base_path })
+    to_bytes { agents; tasks; message_count = 0; workspace_path = workspace_config.base_path })
 ;;
 
 (** ToolCall handler: dispatch an MCP tool call via gRPC. *)
@@ -208,11 +208,11 @@ let active_subscribe_streams = Atomic.make 0
     Returns a list of string directives to include in HeartbeatAck.
     Reads agent paused state and unclaimed tasks from the filesystem. *)
 let compute_directives
-      ~(coord_config : Coord_utils_backend_setup.config)
+      ~(workspace_config : Workspace_utils_backend_setup.config)
       ~(agent_name : string)
   : string list
   =
-  let masc_dir = Common.masc_dir_from_base_path ~base_path:coord_config.base_path in
+  let masc_dir = Common.masc_dir_from_base_path ~base_path:workspace_config.base_path in
   let directives = ref [] in
   (* 1. Pause directive: check if agent is marked paused *)
   let agent_file =
@@ -236,10 +236,10 @@ let compute_directives
         agent_file
         (Printexc.to_string exn));
   (* 2. Task assignment: find first unclaimed task for idle agent *)
-  if Coord.root_is_initialized coord_config
+  if Workspace.root_is_initialized workspace_config
   then (
     let unclaimed =
-      Coord.get_tasks_safe coord_config
+      Workspace.get_tasks_safe workspace_config
       |> List.filter_map (fun (task : Masc_domain.task) ->
         match task.task_status with
         | Masc_domain.Todo -> Some task.id
@@ -257,7 +257,7 @@ let compute_directives
 
 (** Heartbeat bidi handler: receive pings, respond with acks. *)
 let handle_heartbeat
-      (coord_config : Coord_utils_backend_setup.config)
+      (workspace_config : Workspace_utils_backend_setup.config)
       ~(sw : Eio.Switch.t)
       (request_stream : string Grpc_eio.Stream.t)
   : string Grpc_eio.Stream.t
@@ -294,7 +294,7 @@ let handle_heartbeat
                  let agent_file =
                    Filename.concat
                      (Filename.concat
-                        (Common.masc_dir_from_base_path ~base_path:coord_config.base_path)
+                        (Common.masc_dir_from_base_path ~base_path:workspace_config.base_path)
                         "agents")
                      (safe_filename ping.agent_name ^ ".json")
                  in
@@ -325,7 +325,7 @@ let handle_heartbeat
                    (Printexc.to_string exn));
               (* Count active agents and pending tasks *)
               let masc_dir =
-                Common.masc_dir_from_base_path ~base_path:coord_config.base_path
+                Common.masc_dir_from_base_path ~base_path:workspace_config.base_path
               in
               let agents_dir = Filename.concat masc_dir "agents" in
               let agent_count =
@@ -344,7 +344,7 @@ let handle_heartbeat
                 else 0
               in
               let directives =
-                compute_directives ~coord_config ~agent_name:ping.agent_name
+                compute_directives ~workspace_config ~agent_name:ping.agent_name
               in
               let ack =
                 T.HeartbeatAck.
@@ -381,8 +381,8 @@ let handle_heartbeat
   response_stream
 ;;
 
-(** Subscribe server-streaming handler: push room events to the agent. *)
-let handle_subscribe (coord_config : Coord_utils_backend_setup.config) (bytes : string)
+(** Subscribe server-streaming handler: push workspace events to the agent. *)
+let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (bytes : string)
   : string Grpc_eio.Stream.t
   =
   let req =
@@ -428,7 +428,7 @@ let handle_subscribe (coord_config : Coord_utils_backend_setup.config) (bytes : 
   (* Read recent messages and push as events *)
   let backlog_file =
     Filename.concat
-      (Common.masc_dir_from_base_path ~base_path:coord_config.base_path)
+      (Common.masc_dir_from_base_path ~base_path:workspace_config.base_path)
       "backlog.jsonl"
   in
   if Sys.file_exists backlog_file
@@ -533,21 +533,21 @@ let handle_subscribe (coord_config : Coord_utils_backend_setup.config) (bytes : 
 
 (** {1 Service Construction} *)
 
-(** Create the gRPC service with all handlers wired to the given room config.
+(** Create the gRPC service with all handlers wired to the given workspace config.
 
-    @param coord_config The MASC room configuration.
+    @param workspace_config The MASC workspace configuration.
     @param tool_dispatcher Function that dispatches tool calls:
       [tool_name -> arguments_json -> (result_json, error_message) result]. *)
 let create_service
-      ~(coord_config : Coord_utils_backend_setup.config)
+      ~(workspace_config : Workspace_utils_backend_setup.config)
       ~(tool_dispatcher : string -> string -> (string, string) result)
   : Grpc_eio.Service.t
   =
   Grpc_eio.Service.create service_name
-  |> Grpc_eio.Service.add_unary "Broadcast" (handle_broadcast coord_config)
-  |> Grpc_eio.Service.add_unary "GetStatus" (handle_get_status coord_config)
+  |> Grpc_eio.Service.add_unary "Broadcast" (handle_broadcast workspace_config)
+  |> Grpc_eio.Service.add_unary "GetStatus" (handle_get_status workspace_config)
   |> Grpc_eio.Service.add_unary "ToolCall" (handle_tool_call tool_dispatcher)
   |> Grpc_eio.Service.add_unary "LspCall" handle_lsp_call
-  |> Grpc_eio.Service.add_server_streaming "Subscribe" (handle_subscribe coord_config)
-  |> Grpc_eio.Service.add_bidi_streaming "Heartbeat" (handle_heartbeat coord_config)
+  |> Grpc_eio.Service.add_server_streaming "Subscribe" (handle_subscribe workspace_config)
+  |> Grpc_eio.Service.add_bidi_streaming "Heartbeat" (handle_heartbeat workspace_config)
 ;;

@@ -263,7 +263,7 @@ let make_append_manifest
 let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
   let record_turn_progress event_kind =
     Keeper_registry.record_turn_progress
-      ~base_path:config.Coord.base_path
+      ~base_path:config.Workspace.base_path
       keeper_name
       ~event_kind
   in

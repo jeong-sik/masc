@@ -9,7 +9,7 @@ val is_self_author : self_tokens:string list -> string -> bool
 val is_keeper_authored_message : string -> bool
 
 val collect_message_scope
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> (string * string) list * (string * string) list * (string * int) list
 

@@ -887,7 +887,7 @@ and with_read_auth handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.coord_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_read_request ~base_path request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -899,7 +899,7 @@ and with_permission_auth ~permission handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.coord_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_permission_request ~base_path ~permission request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -911,7 +911,7 @@ and with_tool_auth ~tool_name handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.coord_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_tool_request ~base_path ~tool_name request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -923,7 +923,7 @@ and with_token_permission_auth ~permission handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.coord_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_token_bound_permission_request ~base_path ~permission request with
       | Ok agent_name ->
           (match check_agent_rate_limit request reqd with

@@ -14,7 +14,7 @@ val add_routes :
 val record_validation_error_metric :
   duration_ms:int -> string -> string -> unit
 (** Record a [Validation_error] attempt against [Channel_gate_metrics]
-    using the channel/room/keeper extracted from the request body
+    using the channel/workspace/keeper extracted from the request body
     (best-effort: invalid JSON falls back to [unknown / empty / empty]).
     Exposed so [test_channel_gate_metrics] can lock the request-metadata
     extraction contract independently from the HTTP route. *)

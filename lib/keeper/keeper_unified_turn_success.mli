@@ -1,7 +1,7 @@
 (** Success-path post-processing for [Keeper_unified_turn]. *)
 
 val handle
-  :  config:Coord.config
+  :  config:Workspace.config
   -> base_dir:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> observation:Keeper_world_observation.world_observation

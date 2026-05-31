@@ -116,7 +116,7 @@ let init ?cluster_name ~base_path () =
   let cluster_name =
     Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
   in
-  let masc_root = Coord_utils.masc_root_dir_from ~base_path ~cluster_name in
+  let masc_root = Workspace_utils.masc_root_dir_from ~base_path ~cluster_name in
   let dir = Filename.concat masc_root "tool_calls" in
   configured_store_ref := Some (masc_root, dir);
   try

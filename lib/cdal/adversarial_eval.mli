@@ -7,7 +7,7 @@
     Output is advisory only — not a gate.
 
     Red line: this evaluator never sees README, design docs,
-    coord/task history, or governance history. *)
+    workspace/task history, or governance history. *)
 
 (** Allowed input types — anything not in this type is banned. *)
 type allowed_input =

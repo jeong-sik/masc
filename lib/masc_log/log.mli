@@ -167,7 +167,7 @@ module Make (_ : sig val name : string end) : LOGGER
 
 (** {1 Pre-defined module loggers} *)
 
-module Coord : LOGGER
+module Workspace : LOGGER
 module Mcp : LOGGER
 module Auth : LOGGER
 module Retry : LOGGER

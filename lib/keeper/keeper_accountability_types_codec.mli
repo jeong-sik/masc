@@ -61,7 +61,7 @@ val record_emit_skip : kind:string -> reason:string -> unit
 val keeper_name_of_agent : string -> string
 val normalize_keeper_name : string -> string
 val accountability_dir : string -> string
-val get_store : Coord_query.config -> Dated_jsonl.t
+val get_store : Workspace_query.config -> Dated_jsonl.t
 val json_string_opt : string -> Yojson.Safe.t -> string option
 val json_int_opt :
   'a ->
@@ -94,4 +94,4 @@ val resolution_event_to_json :
 val event_date_string : float -> string
 val claim_event_of_json : Yojson.Safe.t -> claim_event option
 val resolution_event_of_json : Yojson.Safe.t -> resolution_event option
-val read_window_entries : Coord_query.config -> Yojson.Safe.t list
+val read_window_entries : Workspace_query.config -> Yojson.Safe.t list

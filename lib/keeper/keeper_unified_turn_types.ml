@@ -377,7 +377,7 @@ let record_turn_tool_events
     record_pre_dispatch_terminal_observation are *boundary* side
     effects intentionally retained from the godfile. *)
 let record_streaming_cancelled_observation
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
       ~(runtime_id : string)

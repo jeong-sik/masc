@@ -49,7 +49,7 @@ let read_file_max_max_bytes = 200_000
 
 let handle_read_file
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(args : Yojson.Safe.t)
   =
@@ -376,7 +376,7 @@ let check_invariant_sandbox_isolation
 
 let handle_file_write
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(args : Yojson.Safe.t)
   =

@@ -9,7 +9,7 @@
       {id, ts, ts_unix, keeper, kind, summary} *)
 
 open Alcotest
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Dash = Masc_mcp.Dashboard_http_keeper
 module Keeper_config = Masc_mcp.Keeper_config
 module Keeper_fs = Masc_mcp.Keeper_fs
@@ -40,7 +40,7 @@ let with_config f =
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = tmpdir "dashboard_k2_feeds" in
-  let config = Coord.default_config base_dir in
+  let config = Workspace.default_config base_dir in
   f config
 ;;
 

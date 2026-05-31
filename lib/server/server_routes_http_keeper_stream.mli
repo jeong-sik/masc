@@ -47,12 +47,12 @@ type keeper_chat_stream_request = {
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [timeout_sec] is clamped to [\[5, 300\]] when
     present.  [channel] / [channel_user_id] /
-    [channel_user_name] / [channel_room_id] are all
+    [channel_user_name] / [channel_workspace_id] are all
     required together when any connector context is
     supplied; otherwise they are accepted as empty. *)
 

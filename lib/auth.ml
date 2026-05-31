@@ -69,7 +69,7 @@ let archive_credential_file config ~agent_name ~reason =
      PR-3a (#11146)   archive bare when token differs from canonical
                       (dual-identity guard).
      PR-3b1 (#11152)  starve runtime callers via canonicalize_if_keeper
-                      in tool_coord.
+                      in tool_workspace.
      PR-3b2 (#11155)  archive bare unconditionally, on the assumption
                       that starvation killed every short-form caller.
      PR-#10440        ensure_credential_alias re-creates a bare-form
@@ -526,7 +526,7 @@ let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) 
 ;;
 
 (* ============================================ *)
-(* Coord secret                                  *)
+(* Workspace secret                                  *)
 (* ============================================ *)
 
 (** Initialize workspace secret *)
@@ -556,7 +556,7 @@ let verify_workspace_secret config secret : bool =
 (* High-level auth operations                   *)
 (* ============================================ *)
 
-(** Enable authentication for a coord.
+(** Enable authentication for a workspace.
     Creates a bootstrap admin token for the enabling agent to prevent
     circular permission deadlock (BUG-025). *)
 let enable_auth config ~require_token ~agent_name : string * string option =

@@ -8,7 +8,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
         "Read a file as text (truncated at max_bytes). path is REQUIRED. Paths resolve \
          relative to your playground — use 'repos/X/lib/foo.ml' not \
          '.masc/playground/your-name/repos/X/lib/foo.ml'. Good: path='lib/foo.ml', \
-         path='repos/masc-mcp/lib/room.ml'. Bad: path=''. For multi-file search, use \
+         path='repos/masc-mcp/lib/workspace.ml'. Bad: path=''. For multi-file search, use \
          SearchFiles."
     ; input_schema =
         `Assoc

@@ -150,7 +150,7 @@ let save_file_unix (path : string) (content : string) : unit =
    [append_file_unix] (and removes the now-dead [Append_fd_cache]
    module and [at_exit] hook) so the ~15 [append_file] callers
    (metrics_store_eio, memory_jsonl,
-   coord_utils_ops, board_core, keeper_chat_store, etc.) get the
+   workspace_utils_ops, board_core, keeper_chat_store, etc.) get the
    same guarantee.
 
    The mutex registry is shared between [append_file_unix] and
@@ -163,7 +163,7 @@ let save_file_unix (path : string) (content : string) : unit =
    removed cache folded three syscalls (open/output_string/close)
    into one cached output_string under 64-keeper telemetry. Fresh
    fd per call restores those three syscalls. A future domain-safe
-   cache (per-domain fd, or a single-writer coordinator fiber) can
+   cache (per-domain fd, or a single-writer workspace_client fiber) can
    reinstate the optimization without giving up correctness. *)
 let append_path_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
   Hashtbl.create 32
@@ -406,7 +406,7 @@ let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
     1-based, increments only on non-blank lines so it tracks the
     {b printed} JSONL row number an operator would see in [cat -n].
     Aligns with the file-level diagnostic at line 559 ("line %d") so
-    a malformed log from either path uses the same coordinate system. *)
+    a malformed log from either path uses the same orchestrate system. *)
 let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t list * int =
   let malformed = ref 0 in
   let line_no = ref 0 in
@@ -452,7 +452,7 @@ let load_jsonl (path : string) : Yojson.Safe.t list = fst (load_jsonl_diagnostic
 
     Uses [Eio.Buf_read.lines] over [Eio.Path.with_open_in] when the
     global fs is registered ([set_fs] called at boot), giving O(1)
-    resident memory regardless of file size and non-blocking IO inside
+    memory regardless of file size and non-blocking IO inside
     the Eio scheduler.  Falls back to {!load_jsonl} + [List.fold_left]
     when no fs is available (tests, pre-boot helpers).
 

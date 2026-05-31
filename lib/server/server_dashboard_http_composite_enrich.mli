@@ -22,10 +22,10 @@ val composite_claim_scope_json :
 val find_override_field_source :
   string -> Yojson.Safe.t -> Yojson.Safe.t option
 val composite_config_drift_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val composite_execution_receipt_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val lower_string_opt : string option -> string option
 val string_opt_is_any : string option -> string list -> bool
@@ -87,10 +87,10 @@ val composite_recommended_actions_json :
   execution:Yojson.Safe.t ->
   attention:composite_runtime_attention -> [> `List of Yojson.Safe.t list ]
 val enrich_composite_snapshot_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   Keeper_registry.registry_entry -> Yojson.Safe.t -> Yojson.Safe.t
 val dashboard_keeper_composite_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   Keeper_registry.registry_entry -> Yojson.Safe.t
 val dashboard_fleet_composite_json :
-  config:Coord.config -> unit -> Yojson.Safe.t
+  config:Workspace.config -> unit -> Yojson.Safe.t

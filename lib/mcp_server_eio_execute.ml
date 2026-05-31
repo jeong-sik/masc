@@ -60,11 +60,11 @@ let execute_tool_eio
   Eio_context.set_clock clock;
   (* Prometheus: count every inbound tool call *)
   Prometheus.record_request ();
-  let config = state.Mcp_server.coord_config in
+  let config = state.Mcp_server.workspace_config in
   let registry = state.Mcp_server.session_registry in
   (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls.
      Updated after auto-init succeeds. *)
-  let workspace_init_cached = ref (Coord.is_initialized config) in
+  let workspace_init_cached = ref (Workspace.is_initialized config) in
   (* Fix 4: Check resolved-name cache for fast identity resolution.
      On 2nd+ call in the same MCP session, the cached name preserves the
      nickname selected by the prior session binding without relying on sidecar files. *)
@@ -214,7 +214,7 @@ let execute_tool_eio
            | Some (keeper_name, keeper_id)
              when agent_name <> "unknown" && !workspace_init_cached ->
              (try
-                Coord_task.update_local_agent_state config ~agent_name (fun agent ->
+                Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
                   let meta =
                     match agent.meta with
                     | Some existing ->
@@ -263,7 +263,7 @@ let execute_tool_eio
             if (not skip_heartbeat) && !workspace_init_cached
             then (
               try
-                let (_ : string) = Coord.heartbeat config ~agent_name in
+                let (_ : string) = Workspace.heartbeat config ~agent_name in
                 ()
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -331,8 +331,8 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_state ->
-                   Tool_coord.dispatch
-                     { Tool_coord.config; agent_name }
+                   Tool_workspace.dispatch
+                     { Tool_workspace.config; agent_name }
                      ~name
                      ~args:coerced_args
                  | Mod_control ->
@@ -450,7 +450,7 @@ let execute_tool_eio
                       address by registering the keeper / fixing the
                       agent invocation context.  Same semantic family
                       as tool_task_handlers' "Agent '%s' is not a
-                      member of this room" — [Workflow_rejection]. *)
+                      member of this workspace" — [Workflow_rejection]. *)
                    Some
                      (Tool_result.error
                         ~failure_class:(Some Tool_result.Workflow_rejection)
@@ -592,12 +592,12 @@ let execute_tool_eio
                          (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))
 ;;
 
-(* RFC-0182 §3.1 — register Tool_coord.dispatch with the dependency
-   inversion ref so [Agent_tool_in_process_runtime.handle_masc_coord]
-   (compiled early) can dispatch coord tools without statically
-   importing [Tool_coord] (compiled late). *)
+(* RFC-0182 §3.1 — register Tool_workspace.dispatch with the dependency
+   inversion ref so [Agent_tool_in_process_runtime.handle_masc_workspace]
+   (compiled early) can dispatch workspace tools without statically
+   importing [Tool_workspace] (compiled late). *)
 let () =
-  Coord_dispatch_ref.dispatch
+  Workspace_dispatch_ref.dispatch
   := fun ~config ~agent_name ~name ~args ->
-    Tool_coord.dispatch { config; agent_name } ~name ~args
+    Tool_workspace.dispatch { config; agent_name } ~name ~args
 ;;

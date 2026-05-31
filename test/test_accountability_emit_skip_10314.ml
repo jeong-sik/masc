@@ -54,8 +54,8 @@ let with_temp_config f =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-      let config = Coord.default_config dir in
-      ignore (Coord.init config ~agent_name:(Some "planner"));
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:(Some "planner"));
       f config)
 
 let counter_for ~kind ~reason =

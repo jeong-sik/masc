@@ -113,13 +113,13 @@ let test_local_shell_failure_class_reaches_tool_called () =
       Process_eio.reset_for_testing ();
       cleanup_path base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See test setup: Coord.init side effect creates the room store. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
+      let config = Workspace.default_config base_dir in
+      (* See test setup: Workspace.init side effect creates the workspace store. *)
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
       let tools =
         match
           Worker_container.build_local_shell_tools
-            ~coord_config:(Some config)
+            ~workspace_config:(Some config)
             ~worker_name:"local-worker-test"
             ~workdir:base_dir
         with

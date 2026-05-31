@@ -294,7 +294,7 @@ let next_human_action_or_terminal ~needs_attention ~latest_next_action
   | None when needs_attention -> latest_next_action
   | None -> None
 
-let disposition_fields_json ~(config : Coord.config) ~(meta : keeper_meta) :
+let disposition_fields_json ~(config : Workspace.config) ~(meta : keeper_meta) :
     Yojson.Safe.t =
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
@@ -329,7 +329,7 @@ let report_decision_log_read_drop ~reason ~path ~detail =
     ~path
     ~detail
 
-let latest_decision_json ~(config : Coord.config) ~(keeper_name : string) :
+let latest_decision_json ~(config : Workspace.config) ~(keeper_name : string) :
     Yojson.Safe.t option =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   if not (Fs_compat.file_exists path) then None
@@ -379,7 +379,7 @@ let latest_turn_id ~(registry_entry : Keeper_registry.registry_entry option)
                 | Some { last_completed_turn = Some turn; _ } -> Some turn.ct_turn_id
                 | _ -> None)))
 
-let latest_receipt_json ~(config : Coord.config) ~(keeper_name : string) =
+let latest_receipt_json ~(config : Workspace.config) ~(keeper_name : string) =
   Keeper_execution_receipt.latest_json config keeper_name
 
 let selected_model_of_latest_decision latest_decision =
@@ -610,7 +610,7 @@ let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
   |> sort_timeline_events
   |> fun events -> latest_causal_from_timeline (`List events)
 
-let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
+let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let latest_decision = latest_decision_json ~config ~keeper_name:meta.name in
   let latest_tool_call = latest_tool_call_json ~keeper_name:meta.name in
   let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
@@ -785,7 +785,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
   |> take 12
   |> fun items -> `List items
 
-let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
+let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let registry_entry =
     Keeper_registry.get ~base_path:config.base_path meta.name
   in

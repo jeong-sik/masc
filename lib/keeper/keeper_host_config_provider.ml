@@ -394,7 +394,7 @@ let bind_from_credential_checked ~keeper_name cred =
 let resolve ~config ~identity:keeper_name =
   match
     Keeper_repo_mapping.credentials_for_keeper
-      ~base_path:config.Coord.base_path ~keeper_id:keeper_name
+      ~base_path:config.Workspace.base_path ~keeper_id:keeper_name
   with
   | Error err ->
       count_resolve_outcome ~keeper_name ~source:"credential_store"
@@ -422,7 +422,7 @@ let resolve ~config ~identity:keeper_name =
                   legacy host_config_provider fallback has been removed."
                  keeper_name
                  (Config_dir_resolver.keeper_repo_mappings_toml_path
-                    ~base_path:config.Coord.base_path)
+                    ~base_path:config.Workspace.base_path)
                  keeper_name
            })
   | Ok [cred] ->

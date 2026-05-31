@@ -3,12 +3,12 @@
     Keeps OAS memory persistence details out of [Keeper_agent_run],
     preserving the keeper runner as a thin orchestration layer. *)
 
-(** Emit an [episode.flush] activity payload via [Coord_hooks.activity_emit_fn].
+(** Emit an [episode.flush] activity payload via [Workspace_hooks.activity_emit_fn].
     No-op if both [episodes] and [procedures] are zero. Logs and counts
     non-cancel exceptions, records a telemetry coverage-gap row, and
     re-raises [Eio.Cancel.Cancelled]. *)
 val emit_flush_activity :
-  config:Coord_utils.config ->
+  config:Workspace_utils.config ->
   keeper_name:string ->
   turn:int ->
   ?oas_turn_count:int ->
@@ -22,7 +22,7 @@ val emit_flush_activity :
 (** Persist a successful turn snapshot as an OAS episode and flush incremental
     procedures. Logs and swallows non-cancel exceptions. *)
 val record_success :
-  config:Coord_utils.config ->
+  config:Workspace_utils.config ->
   keeper_name:string ->
   memory:Agent_sdk.Memory.t ->
   turn:int ->
@@ -35,7 +35,7 @@ val record_success :
 (** Persist a failed-turn episode. Logs and swallows
     non-cancel exceptions. *)
 val record_failure :
-  config:Coord_utils.config ->
+  config:Workspace_utils.config ->
   keeper_name:string ->
   memory:Agent_sdk.Memory.t ->
   turn:int ->

@@ -2,7 +2,7 @@
 ; masc_mcp namespace. Stacked on Phase 1B (keeper_skill_routing).
 ;
 ; Host_config is dependency-leaf: stdlib (Filename, Format, String,
-; Sys, Unix) + Coord (already its own sub-library). Authored under
+; Sys, Unix) + Workspace (already its own sub-library). Authored under
 ; RFC-0084 §1.5 + §3.4 as the typed host configuration record for
 ; keeper-tool dispatch portability.
 ;
@@ -20,11 +20,11 @@
   unix
   ; RFC-0085 PR-9 — Host_config absorbs base_path normalisation
   ; (previously Env_config_core.base_path_opt) so callers get a single
-  ; SSOT for the normalised env-derived base_path.  The masc_coord
+  ; SSOT for the normalised env-derived base_path.  The masc_workspace
   ; dep was unused (audit 2026-05-15) so it is dropped here, making
-  ; Host_config a true leaf below masc_coord.  Reverse migration of
-  ; coord_utils_backend_setup callers becomes possible because
-  ; masc_coord can now depend on masc_mcp.host_config without cycling.
+  ; Host_config a true leaf below masc_workspace.  Reverse migration of
+  ; workspace_utils_backend_setup callers becomes possible because
+  ; masc_workspace can now depend on masc_mcp.host_config without cycling.
   masc_mcp.config
   ; RFC-0121: derive .masc/<sub> paths via Common helpers. We cannot
   ; depend on masc_mcp.config_dir_resolver here because the resolver

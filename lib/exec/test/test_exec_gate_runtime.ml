@@ -60,9 +60,9 @@ let test_enforced_internal_audited_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
     let status, out =
       Exec_gate.run_argv_with_status
-        ~actor:`Coord_git
+        ~actor:`Workspace_git
         ~raw_source:"git --version"
-        ~summary:"coord git version"
+        ~summary:"workspace git version"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())
         [ "git"; "--version" ]
     in
@@ -100,7 +100,7 @@ let test_typed_audited_internal_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
     let status, out =
       Exec_gate.run_argv_with_status
-        ~actor:`Coord_git
+        ~actor:`Workspace_git
         ~raw_source:"git status"
         ~summary:"typed git status"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())

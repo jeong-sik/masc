@@ -81,13 +81,13 @@ let test_init () =
 
 let test_sse_sessions () =
   TM.set_sse_sessions ~kind:"observer" 10;
-  TM.set_sse_sessions ~kind:"coordinator" 5;
+  TM.set_sse_sessions ~kind:"workspace_client" 5;
   let obs = Prometheus.metric_value_or_zero "masc_sse_sessions_total"
     ~labels:[("kind", "observer")] () in
-  let coord = Prometheus.metric_value_or_zero "masc_sse_sessions_total"
-    ~labels:[("kind", "coordinator")] () in
+  let workspace = Prometheus.metric_value_or_zero "masc_sse_sessions_total"
+    ~labels:[("kind", "workspace_client")] () in
   check (float 0.01) "observer sessions" 10.0 obs;
-  check (float 0.01) "coordinator sessions" 5.0 coord
+  check (float 0.01) "workspace_client sessions" 5.0 workspace
 
 let test_broadcast_duration () =
   TM.observe_broadcast_duration 0.05;
@@ -317,13 +317,13 @@ let test_transport_health_json () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   ignore (Masc_mcp.Sse.close_all_clients ());
   let base_dir = temp_dir () in
-  let config = Masc_mcp.Coord.default_config base_dir in
-  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "tester"));
+  let config = Masc_mcp.Workspace.default_config base_dir in
+  ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "tester"));
   ignore
     (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer "observer-session"
        ~last_event_id:0);
   ignore
-    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator "coordinator-session"
+    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Workspace_client "workspace_client-session"
        ~last_event_id:0);
   ignore
     (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Presence "presence-session"
@@ -361,8 +361,8 @@ let test_transport_health_json () =
   let agent_health_json = json |> U.member "agent_health" in
   check int "observer sessions" 1
     (sse_json |> U.member "sessions_observer" |> U.to_int);
-  check int "coordinator sessions" 1
-    (sse_json |> U.member "sessions_coordinator" |> U.to_int);
+  check int "workspace_client sessions" 1
+    (sse_json |> U.member "sessions_workspace_client" |> U.to_int);
   check int "presence sessions" 1
     (sse_json |> U.member "sessions_presence" |> U.to_int);
   check bool "queue depth reflects queued event" true
@@ -438,7 +438,7 @@ let test_transport_health_json () =
   check bool "webrtc signaling_mode field exists" true
     (match webrtc_json |> U.member "signaling_mode" with `String _ -> true | _ -> false);
   check string "workspace id" "default"
-    (cluster_json |> U.member "coord_id" |> U.to_string);
+    (cluster_json |> U.member "workspace_id" |> U.to_string);
   check bool "summary primary path exists" true
     (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
   check string "summary queue pressure reflects relay drops" "high"

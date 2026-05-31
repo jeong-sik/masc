@@ -83,7 +83,7 @@ let test_dedup_distinguishes_content () =
     false different
 
 let test_bypass_dedup_force () =
-  (* The [bypass_dedup] flag is enforced in [Coord_broadcast.broadcast].
+  (* The [bypass_dedup] flag is enforced in [Workspace_broadcast.broadcast].
      The dedup module itself does not implement bypass — the broadcast
      path skips the [should_skip] call entirely.  This test asserts the
      dedup module remains the "would skip" oracle: with the same

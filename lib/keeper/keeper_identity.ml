@@ -233,7 +233,7 @@ let strip_nickname_once name =
    does not exist in production deployments — personas live under the
    repo's [config/personas/] which the resolver finds, but the legacy
    path silently fails [check_persona] and triggers logging-only
-   fallback at every coord_join_normalize call.
+   fallback at every workspace_join_normalize call.
 
    Design: prefer the resolver result; fall back to the legacy path
    only when the resolver yields no candidate (preserves test

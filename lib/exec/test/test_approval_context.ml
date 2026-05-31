@@ -19,7 +19,7 @@ let test_make_and_read () =
 let test_distinct_sessions_are_independent () =
   let a =
     Approval_context.make
-      ~actor:`Coord_git
+      ~actor:`Workspace_git
       ~session_id:"A"
       ~workspace_root:"/wt" ~now:0.0
   in

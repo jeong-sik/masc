@@ -33,13 +33,13 @@
     [include Dashboard_http_keeper], so every symbol it
     reaches unqualified must be exposed here. *)
 
-val keeper_count : Coord.config -> int
+val keeper_count : Workspace.config -> int
 (** Total keepers visible in [config.base_path] meta. *)
 
-val keeper_names : Coord.config -> string list
+val keeper_names : Workspace.config -> string list
 (** Keeper names visible in [config.base_path] meta. *)
 
-val running_keeper_count : Coord.config -> int
+val running_keeper_count : Workspace.config -> int
 (** Counts keepers whose meta indicates an active
     keep-alive runtime.  Used by the dashboard fleet
     summary on the runtime consumer side. *)
@@ -62,28 +62,28 @@ val compute_outcomes_rollup :
 (** {1 Dashboard producers} *)
 
 val keepers_dashboard_json :
-  ?compact:bool -> Coord.config -> Yojson.Safe.t
+  ?compact:bool -> Workspace.config -> Yojson.Safe.t
 (** Renders the full keepers dashboard envelope.  With
     [~compact:true] (default [false]), per-keeper
     payloads drop the deep history / memory-bank /
     metrics-series sections and keep only the high-level
     summary row used by the lightweight overview pane. *)
 
-val execution_trust_dashboard_json : Coord.config -> Yojson.Safe.t
+val execution_trust_dashboard_json : Workspace.config -> Yojson.Safe.t
 (** Renders the execution-trust dashboard surface.  Folds
     every keeper's recent turns + capability metadata
     into a single JSON envelope used by the
     [Server_dashboard_http_execution_surfaces] cache. *)
 
 val keeper_cost_aggregates_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   window_minutes:int ->
   Yojson.Safe.t
 (** Renders per-keeper cost and latency aggregates for the provider dashboard. *)
 
 val keeper_decisions_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->
@@ -91,7 +91,7 @@ val keeper_decisions_json :
 (** Renders a recent unified keeper decision/event stream. *)
 
 val keeper_decisions_log_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->
@@ -99,7 +99,7 @@ val keeper_decisions_log_json :
 (** Renders the K2 cross-keeper decision log feed. *)
 
 val keeper_memory_log_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->
@@ -109,7 +109,7 @@ val keeper_memory_log_json :
 (** {1 Per-keeper runtime snapshots} *)
 
 val keeper_config_json :
-  Coord.config ->
+  Workspace.config ->
   string ->
   [ `OK | `Not_found ] * Yojson.Safe.t
 (** Returns the keeper's effective configuration JSON
@@ -121,7 +121,7 @@ val keeper_config_json :
     request path off the keeper-meta mutex (#3335). *)
 
 val keeper_bdi_snapshot_json :
-  Coord.config ->
+  Workspace.config ->
   string ->
   [ `OK | `Not_found ] * Yojson.Safe.t
 (** Returns a small live BDI snapshot for the IDE inspector rail:

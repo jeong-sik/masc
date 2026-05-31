@@ -126,7 +126,7 @@ let store_for_base_path ~base_path ~keeper_name =
 
 let store_for_config config ~keeper_name =
   Dated_jsonl.create
-    ~base_dir:(store_dir ~masc_root:(Coord.masc_root_dir config) ~keeper_name)
+    ~base_dir:(store_dir ~masc_root:(Workspace.masc_root_dir config) ~keeper_name)
     ()
 ;;
 

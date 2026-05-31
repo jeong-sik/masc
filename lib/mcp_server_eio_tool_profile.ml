@@ -59,9 +59,9 @@ let dedupe_tool_schemas_by_name (schemas : Masc_domain.tool_schema list) =
   List.rev result
 
 let default_instructions =
-  "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
-PROJECT: Agents sharing the same base path (.masc/ folder) coordinate together. \
-CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (otherwise tool surfaces use the configured cluster/default label). \
+  "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \
+PROJECT: Agents sharing the same base path (.masc/ folder) align together. \
+CLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool surfaces use the configured cluster/default label). \
 READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
 WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
 WORKFLOW: masc_status → masc_transition(claim) → work in a repo-local worktree → masc_transition(done). \
@@ -227,7 +227,7 @@ let label_words_from_identifier ident =
 (** Custom human-readable titles for key tools.
     Falls back to auto-generated Title Case when absent. *)
 let custom_tool_titles : (string * string) list = [
-  (* Coord lifecycle *)
+  (* Workspace lifecycle *)
   ("masc_status", "Project Status");
   ("masc_reset", "Reset Project");
   ("masc_check", "Check Preconditions");

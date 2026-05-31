@@ -31,7 +31,7 @@ let path_is_directory path =
 ;;
 
 let docker_mount_preflight_details
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~image
       ~container_kind
@@ -76,12 +76,12 @@ let is_credential_preflight_failure message =
   || String_util.contains_substring message "Invalid_token"
 ;;
 
-let egress_policy_path ~(config : Coord.config) ~(meta : keeper_meta) =
+let egress_policy_path ~(config : Workspace.config) ~(meta : keeper_meta) =
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Filename.concat playground "egress.json"
 ;;
 
-let check_egress ~(config : Coord.config) ~(meta : keeper_meta) ~cmd =
+let check_egress ~(config : Workspace.config) ~(meta : keeper_meta) ~cmd =
   let path = egress_policy_path ~config ~meta in
   let policy = Masc_exec.Egress_policy.of_file path in
   match Masc_exec.Egress_policy.check_command policy cmd with
@@ -99,7 +99,7 @@ let keeper_private_container_root =
 let docker_private_workspace_cwd =
   Keeper_sandbox_docker_container_name.docker_private_workspace_cwd
 
-let rewrite_docker_command_paths ~(config : Coord.config) ~(meta : keeper_meta) cmd =
+let rewrite_docker_command_paths ~(config : Workspace.config) ~(meta : keeper_meta) cmd =
   let raw_host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Keeper_alerting_path.strip_trailing_slashes
@@ -124,7 +124,7 @@ let rewrite_docker_command_paths ~(config : Coord.config) ~(meta : keeper_meta) 
 ;;
 
 let rewrite_docker_command_paths_for_host_validation
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       cmd
   =
@@ -272,7 +272,7 @@ let cleanup_oneshot_container ~container_name =
          (Exec_policy.truncate_for_log retry_output))
 ;;
 
-let fd_admission_error ~(config : Coord.config) =
+let fd_admission_error ~(config : Workspace.config) =
   let active_keepers = Keeper_registry.count_running ~base_path:config.base_path () in
   match
     Keeper_fd_pressure.admission_decision
@@ -340,7 +340,7 @@ let resolve_credential_mounts ~config ~meta ~git_creds_enabled =
 ;;
 
 let docker_run_argv
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~container_name
       ~container_root
@@ -389,7 +389,7 @@ let docker_run_argv
   @ Keeper_sandbox_runtime.docker_config_mount_args
       ~base_path:config.base_path
       ~container_root
-  @ Keeper_sandbox_runtime.docker_coord_state_mount_args
+  @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
       ~base_path:config.base_path
       ~container_root
   @ network_args
@@ -424,12 +424,12 @@ let nested_runtime_blocker ~git_creds_enabled =
     "sandbox_profile=docker blocks nested container runtimes and host socket references"
 ;;
 
-let sandbox_error_json ~(config : Coord.config) ~(meta : keeper_meta) message =
+let sandbox_error_json ~(config : Workspace.config) ~(meta : keeper_meta) message =
   Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
   error_json message
 ;;
 
-let sandbox_error ~(config : Coord.config) ~(meta : keeper_meta) ?details message =
+let sandbox_error ~(config : Workspace.config) ~(meta : keeper_meta) ?details message =
   Keeper_registry_error_recording.record ?details ~base_path:config.base_path meta.name message;
   Error message
 ;;
@@ -444,7 +444,7 @@ let sandbox_error ~(config : Coord.config) ~(meta : keeper_meta) ?details messag
     internal dispatch) may pass [false]. *)
 let validate_docker_dispatch_context
       ?(validate_command_paths = true)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
       ~(cmd : string)
@@ -485,7 +485,7 @@ let validate_docker_dispatch_context
 
 let run_docker_shell_command_with_status_internal
       ~validate_command_paths
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
       ~(timeout_sec : float)
@@ -778,7 +778,7 @@ let docker_result_to_bash_response ~config ~meta ~git_creds_enabled result =
     [run_docker_shell_command_with_status] → response JSON.
     Used by [run_docker_credentialed_bash] and [run_docker_bash]. *)
 let run_docker_bash_via_container
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
       ~(timeout_sec : float)
@@ -802,7 +802,7 @@ let run_docker_bash_via_container
 
 let run_docker_credentialed_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
       ~(timeout_sec : float)
@@ -821,7 +821,7 @@ let run_docker_credentialed_bash
 
 let run_docker_bash
       ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
       ~(timeout_sec : float)

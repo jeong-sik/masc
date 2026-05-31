@@ -10,7 +10,7 @@
     and per tool. [~now_ts] is injectable for tests (defaults to
     [Unix.gettimeofday ()]). *)
 val tool_call_health_json :
-  ?now_ts:float -> Coord.config -> Yojson.Safe.t
+  ?now_ts:float -> Workspace.config -> Yojson.Safe.t
 
 (** [board_monitoring_json ~now_ts] returns a JSON snapshot of the
     internal board plus a boolean [needs_attention] flag. *)
@@ -32,4 +32,4 @@ val slot_monitoring_json : unit -> Yojson.Safe.t
 
 (** Per-executor outcome counts (success / failure / cancelled)
     aggregated from the audit log. *)
-val executor_outcomes_json : Coord.config -> Yojson.Safe.t
+val executor_outcomes_json : Workspace.config -> Yojson.Safe.t

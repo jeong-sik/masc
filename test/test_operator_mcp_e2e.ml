@@ -319,8 +319,8 @@ let extract_nickname_from_join_result result =
   match from_nickname_line with
   | Some nickname when nickname <> "" -> nickname
   | _ ->
-      (* Handle "already in room" format: "... <nickname> already in room ..." *)
-      let already_suffix = " already in room" in
+      (* Handle "already in workspace" format: "... <nickname> already in workspace ..." *)
+      let already_suffix = " already in workspace" in
       let tick_prefix = "\xe2\x9c\x85 " in (* UTF-8 for check mark emoji *)
       (match
         List.find_map
@@ -355,25 +355,25 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let personas_dir = Filename.concat config_dir "personas" in
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Masc_mcp.Coord.default_config base_path in
-  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor-root"));
+  let config = Masc_mcp.Workspace.default_config base_path in
+  ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor-root"));
   let supervisor_nickname =
-    Masc_mcp.Coord.bind_session config ~agent_name:"supervisor-root"
+    Masc_mcp.Workspace.join config ~agent_name:"supervisor-root"
       ~capabilities:[ "supervisor"; "operator" ] ()
     |> extract_nickname_from_join_result
   in
   let planner_nickname =
-    Masc_mcp.Coord.bind_session config ~agent_name:"planner"
+    Masc_mcp.Workspace.join config ~agent_name:"planner"
       ~capabilities:[ "planner" ] ()
     |> extract_nickname_from_join_result
   in
   let implementer_a_nickname =
-    Masc_mcp.Coord.bind_session config ~agent_name:"implementer-a"
+    Masc_mcp.Workspace.join config ~agent_name:"implementer-a"
       ~capabilities:[ "backend" ] ()
     |> extract_nickname_from_join_result
   in
   let implementer_b_nickname =
-    Masc_mcp.Coord.bind_session config ~agent_name:"implementer-b"
+    Masc_mcp.Workspace.join config ~agent_name:"implementer-b"
       ~capabilities:[ "docs"; "tests" ] ()
     |> extract_nickname_from_join_result
   in

@@ -91,10 +91,10 @@ let main () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Keeper_tool_call_log.init ~base_path ();
-  let coord_config = Coord.default_config base_path in
+  let workspace_config = Workspace.default_config base_path in
   let json =
     Dashboard_keeper_feature_proof.json
-      ~config:coord_config
+      ~config:workspace_config
       ~n:cfg.n
       ?window_hours:cfg.window_hours
       ~success_threshold_pct:cfg.threshold

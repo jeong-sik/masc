@@ -1,6 +1,6 @@
 (** MASC gRPC Server.
 
-    Runs the gRPC coordination service on a separate port (default 8936).
+    Runs the gRPC workspace service on a separate port (default 8936).
     Configurable via MASC_GRPC_PORT environment variable.
 
     The server runs in a forked Eio fiber alongside the HTTP/SSE server.
@@ -117,7 +117,7 @@ module Reflection_bridge = struct
     [ "reflection_v1alpha.proto"; "grpc/reflection/v1alpha/reflection.proto" ]
   ;;
 
-  let masc_proto_filenames = [ "masc_coordination.proto" ]
+  let masc_proto_filenames = [ "masc_workspace.proto" ]
 
   let health_symbols =
     [ "grpc.health.v1.Health"
@@ -301,7 +301,7 @@ module Reflection_bridge = struct
   let handles_health_filename filename = List.mem filename health_proto_filenames
 
   let handles_masc_symbol symbol =
-    List.mem symbol masc_symbols || has_prefix ~prefix:"masc.coordination.v1." symbol
+    List.mem symbol masc_symbols || has_prefix ~prefix:"masc.workspace.v1." symbol
   ;;
 
   let handles_masc_filename filename = List.mem filename masc_proto_filenames
@@ -394,11 +394,11 @@ end
 
 let create_server
       ~(port : int)
-      ~(coord_config : Coord_utils_backend_setup.config)
+      ~(workspace_config : Workspace_utils_backend_setup.config)
       ~(tool_dispatcher : string -> string -> (string, string) result)
   : Grpc_eio.Server.t
   =
-  let service = Masc_grpc_service.create_service ~coord_config ~tool_dispatcher in
+  let service = Masc_grpc_service.create_service ~workspace_config ~tool_dispatcher in
   let health = Grpc_eio.Health.create ~default_status:Grpc_eio.Health.Serving () in
   Grpc_eio.Health.register_service health ~service:Masc_grpc_service.service_name;
   Grpc_eio.Health.set_status
@@ -439,18 +439,18 @@ let create_server
   server
 ;;
 
-(** Start the gRPC coordination server.
+(** Start the gRPC workspace server.
 
     Runs in a forked fiber. Does not block the caller.
 
     @param sw Eio switch for structured concurrency.
     @param env Eio environment (for network access).
-    @param coord_config The MASC room configuration.
+    @param workspace_config The MASC workspace configuration.
     @param tool_dispatcher Function that dispatches tool calls. *)
 let start
       ~(sw : Eio.Switch.t)
       ~(env : Eio_unix.Stdenv.base)
-      ~(coord_config : Coord_utils_backend_setup.config)
+      ~(workspace_config : Workspace_utils_backend_setup.config)
       ~(tool_dispatcher : string -> string -> (string, string) result)
   : unit
   =
@@ -463,9 +463,9 @@ let start
     let port = configured_port () in
     Eio.Fiber.fork ~sw (fun () ->
       try
-        let server = create_server ~port ~coord_config ~tool_dispatcher in
+        let server = create_server ~port ~workspace_config ~tool_dispatcher in
         Log.Server.info
-          "gRPC coordination server starting on port %d (health + reflection enabled)"
+          "gRPC workspace server starting on port %d (health + reflection enabled)"
           port;
         Log.Server.info "  service: %s" Masc_grpc_service.service_name;
         Log.Server.info "  health: %s/Check" health_service_name;
@@ -485,7 +485,7 @@ let start
         Transport_metrics.set_grpc_runtime_listening false;
         Transport_metrics.set_grpc_listen_status "bind_failed";
         Log.Server.error
-          "gRPC coordination transport unavailable on %s:%d: port already in use"
+          "gRPC workspace transport unavailable on %s:%d: port already in use"
           Masc_network_defaults.masc_http_default_host
           port
       | exn ->

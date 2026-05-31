@@ -1,7 +1,7 @@
 (** Tool_inline_dispatch_types — shared types for inline dispatch modules.
 
     Extracted to avoid circular dependencies between
-    [tool_inline_dispatch], [tool_inline_dispatch_coord], and
+    [tool_inline_dispatch], [tool_inline_dispatch_workspace], and
     [tool_inline_dispatch_comm]. *)
 
 type tool_result = Tool_result.result
@@ -12,7 +12,7 @@ type tool_result = Tool_result.result
     that the inline dispatch block needs. Pure data — callers
     populate all fields. *)
 type context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
   registry : Session.registry;
   state : Mcp_server.server_state;
@@ -31,11 +31,11 @@ type context = {
   governance_defaults : string -> Mcp_server_eio_governance.governance_config;
       (** Governance helpers passed in to avoid circular deps. *)
   save_governance :
-    Coord.config -> Mcp_server_eio_governance.governance_config -> unit;
+    Workspace.config -> Mcp_server_eio_governance.governance_config -> unit;
   load_mcp_sessions :
-    Coord.config -> Mcp_server_eio_governance.mcp_session_record list;
+    Workspace.config -> Mcp_server_eio_governance.mcp_session_record list;
   save_mcp_sessions :
-    Coord.config ->
+    Workspace.config ->
     Mcp_server_eio_governance.mcp_session_record list ->
     unit;
 }

@@ -3,6 +3,8 @@
 module T = Multimodal.Tool_emission
 module A = Multimodal.Artifact
 
+let emit = Multimodal.Keeper_emitter.emit
+
 let test_extract_kind_present () =
   let result =
     `Assoc
@@ -54,7 +56,9 @@ let test_emit_no_tag_returns_unchanged () =
         ("count", `Int 42);
       ]
   in
-  let wc = T.emit_from_tool_result ~working_context:initial ~result in
+  let wc =
+    T.emit_from_tool_result ~emit ~working_context:initial ~result
+  in
   assert (wc = initial);
   print_endline "  emit_no_tag_returns_unchanged: OK"
 
@@ -63,7 +67,9 @@ let test_emit_missing_id_returns_unchanged () =
   let result =
     `Assoc [ (T.multimodal_kind_key, `String "code") ]
   in
-  let wc = T.emit_from_tool_result ~working_context:initial ~result in
+  let wc =
+    T.emit_from_tool_result ~emit ~working_context:initial ~result
+  in
   assert (wc = initial);
   print_endline "  emit_missing_id_returns_unchanged: OK"
 
@@ -78,7 +84,7 @@ let test_emit_strips_reserved_keys_from_payload () =
       ]
   in
   let wc =
-    T.emit_from_tool_result ~working_context:None ~result
+    T.emit_from_tool_result ~emit ~working_context:None ~result
   in
   let raws, _ = Multimodal.Wirein_helpers.extract_raw_artifacts wc in
   assert (List.length raws = 1);
@@ -109,7 +115,7 @@ let test_emit_metadata_default_when_absent () =
       ]
   in
   let wc =
-    T.emit_from_tool_result ~working_context:None ~result
+    T.emit_from_tool_result ~emit ~working_context:None ~result
   in
   let raws, _ = Multimodal.Wirein_helpers.extract_raw_artifacts wc in
   let raw = List.hd raws in
@@ -141,7 +147,7 @@ let test_emit_from_tool_results_bulk () =
       ]
   in
   let wc =
-    T.emit_from_tool_results ~working_context:None [ r1; r2; r3; r4 ]
+    T.emit_from_tool_results ~emit ~working_context:None [ r1; r2; r3; r4 ]
   in
   let raws, _ = Multimodal.Wirein_helpers.extract_raw_artifacts wc in
   assert (List.length raws = 3);

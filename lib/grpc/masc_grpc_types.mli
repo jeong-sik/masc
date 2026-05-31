@@ -26,53 +26,6 @@ type task_info =
   ; priority : int
   }
 
-(** {1 Agent Lifecycle} *)
-
-module JoinRequest : sig
-  type t =
-    { agent_name : string
-    ; capabilities : string list
-    ; metadata : (string * string) list
-    }
-
-  val of_bytes_result : string -> (t, string) result
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end
-
-module JoinResponse : sig
-  type t =
-    { success : bool
-    ; message : string
-    ; session_id : string
-    ; active_agents : agent_info list
-    }
-
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end
-
-module LeaveRequest : sig
-  type t =
-    { agent_name : string
-    ; session_id : string
-    }
-
-  val of_bytes_result : string -> (t, string) result
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end
-
-module LeaveResponse : sig
-  type t =
-    { success : bool
-    ; message : string
-    }
-
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end
-
 (** {1 Heartbeat} *)
 
 module HeartbeatPing : sig

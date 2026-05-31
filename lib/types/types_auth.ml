@@ -137,8 +137,6 @@ let auth_config_of_yojson json =
 type permission =
   | CanInit
   | CanReset
-  | CanJoin
-  | CanLeave
   | CanReadState
   | CanAddTask
   | CanClaimTask
@@ -160,8 +158,6 @@ type permission =
 let permission_to_string = function
   | CanInit -> "CanInit"
   | CanReset -> "CanReset"
-  | CanJoin -> "CanJoin"
-  | CanLeave -> "CanLeave"
   | CanReadState -> "CanReadState"
   | CanAddTask -> "CanAddTask"
   | CanClaimTask -> "CanClaimTask"
@@ -175,7 +171,7 @@ let permission_to_string = function
 (** Get permissions for a role *)
 let permissions_for_role = function
   | Worker -> [
-      CanReadState; CanJoin; CanLeave;
+      CanReadState;
       CanAddTask; CanClaimTask; CanCompleteTask;
       CanBroadcast;
       CanOpenPortal; CanSendPortal;
@@ -183,7 +179,7 @@ let permissions_for_role = function
     ]
   | Admin -> [
       CanInit; CanReset;
-      CanReadState; CanJoin; CanLeave;
+      CanReadState;
       CanAddTask; CanClaimTask; CanCompleteTask;
       CanBroadcast;
       CanOpenPortal; CanSendPortal;
@@ -205,8 +201,7 @@ let has_permission role permission =
   match role, permission with
   | Admin, _ -> true
   | Worker, (CanInit | CanReset | CanAdmin) -> false
-  | Worker, ( CanJoin | CanLeave | CanReadState | CanAddTask
-            | CanClaimTask | CanCompleteTask | CanBroadcast
+  | Worker, ( CanReadState | CanAddTask | CanClaimTask | CanCompleteTask | CanBroadcast
             | CanOpenPortal | CanSendPortal | CanVote ) -> true
 
 (* ============================================ *)

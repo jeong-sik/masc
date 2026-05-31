@@ -230,7 +230,7 @@ let resources : mcp_resource list = [
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://who" ~name:"Active Agents"
     ~title:"Online Agents"
-    ~description:"In-memory agent/session status (same as masc_who)"
+    ~description:"In-memory agent/session status"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://who.json" ~name:"Active Agents (JSON)"
     ~title:"Online Agents (JSON)"

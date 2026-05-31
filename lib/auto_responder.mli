@@ -5,7 +5,6 @@ type mode = Disabled | Model
 val get_mode : unit -> mode
 val is_enabled : unit -> bool
 val activity_log_file : unit -> string
-val extract_nickname : string -> string option
 val chain_limit : int
 val chain_window_sec : float
 

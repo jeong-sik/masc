@@ -228,11 +228,8 @@ let label_words_from_identifier ident =
     Falls back to auto-generated Title Case when absent. *)
 let custom_tool_titles : (string * string) list = [
   (* Coord lifecycle *)
-  ("masc_join", "Join Project");
-  ("masc_leave", "Leave Project");
   ("masc_status", "Project Status");
   ("masc_reset", "Reset Project");
-  ("masc_who", "List Online Agents");
   ("masc_check", "Check Preconditions");
   (* Task management *)
   ("masc_tasks", "List Tasks");

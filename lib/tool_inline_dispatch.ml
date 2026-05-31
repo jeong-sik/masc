@@ -19,8 +19,8 @@ module Float = Stdlib.Float
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
     Delegates to sub-modules:
-    - Tool_inline_dispatch_coord: masc_start, masc_join, masc_leave
-    - Tool_inline_dispatch_comm: masc_broadcast, masc_messages, masc_who
+    - Tool_inline_dispatch_coord: masc_start
+    - Tool_inline_dispatch_comm: masc_broadcast, masc_messages
     - Tool_inline_dispatch_extra: remaining tools (board, etc.)
 
     Keeps inline: mcp_session, approval, spawn, discover_tools.
@@ -187,18 +187,12 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   (* ── Coord lifecycle (delegated) ─────────────────────────────── *)
   | "masc_start" ->
       Tool_inline_dispatch_coord.handle_start ~tool_name:name ~start_time:start ctx
-  | "masc_join" ->
-      Tool_inline_dispatch_coord.handle_join ~tool_name:name ~start_time:start ctx
-  | "masc_leave" ->
-      Tool_inline_dispatch_coord.handle_leave ~tool_name:name ~start_time:start ctx
 
   (* ── Communication (delegated) ──────────────────────────────── *)
   | "masc_broadcast" ->
       Tool_inline_dispatch_comm.handle_broadcast ~tool_name:name ~start_time:start ctx
   | "masc_messages" ->
       Tool_inline_dispatch_comm.handle_messages ~tool_name:name ~start_time:start ctx
-  | "masc_who" ->
-      Tool_inline_dispatch_comm.handle_who ~tool_name:name ~start_time:start ctx
 
   (* ── Approval queue (#5907) ─────────────────────────────────── *)
   | "masc_approval_pending" ->
@@ -344,13 +338,11 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
      (lib/tool_shard.ml:348). Audit row was a false positive. *)
 
 let inline_register_targets =
-  [ "masc_join"; "masc_leave"; "masc_broadcast"; "masc_messages"
+  [ "masc_broadcast"; "masc_messages"
   ; "masc_approval_get"; "masc_approval_pending" ]
 
 let inline_tool_required_permission name : Masc_domain.permission option =
   match name with
-  | "masc_join" -> Some Masc_domain.CanJoin
-  | "masc_leave" -> Some Masc_domain.CanLeave
   | "masc_broadcast" -> Some Masc_domain.CanBroadcast
   | "masc_messages" -> Some Masc_domain.CanReadState
   | "masc_approval_get" -> Some Masc_domain.CanAdmin
@@ -360,12 +352,12 @@ let inline_tool_required_permission name : Masc_domain.permission option =
 let inline_tool_read_only =
   [ "masc_messages"; "masc_approval_get"; "masc_approval_pending" ]
 
-let inline_tool_requires_join = [ "masc_leave"; "masc_broadcast" ]
+let inline_tool_requires_join = [ "masc_broadcast" ]
 
-let inline_tool_requires_actor_binding = [ "masc_join"; "masc_leave" ]
+let inline_tool_requires_actor_binding = []
 
 let inline_tool_mcp_context_required =
-  [ "masc_join"; "masc_leave"; "masc_broadcast"; "masc_messages"; "masc_approval_get" ]
+  [ "masc_broadcast"; "masc_messages"; "masc_approval_get" ]
 
 let inline_tool_effect_domain name : Tool_catalog.effect_domain =
   if List.mem name inline_tool_read_only then Tool_catalog.Read_only

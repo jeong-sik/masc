@@ -274,12 +274,10 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Approval_get
     | Approval_pending
     | Broadcast
-    | Join
-    | Leave
     | Mcp_session
     | Messages
     | Start
-    | Who -> Some Mod_inline
+    -> Some Mod_inline
     | Check
     | Goal_list
     | Goal_transition

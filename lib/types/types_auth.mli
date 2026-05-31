@@ -116,8 +116,6 @@ val auth_config_of_yojson : Yojson.Safe.t -> (auth_config, string) result
 type permission =
   | CanInit
   | CanReset
-  | CanJoin
-  | CanLeave
   | CanReadState
   | CanAddTask
   | CanClaimTask

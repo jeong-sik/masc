@@ -48,7 +48,6 @@ let synonyms : (string * string list) list =
       ; "take task"
       ] )
   ; "masc_add_task", [ "create task"; "new task"; "make task"; "register task" ]
-  ; "masc_leave", [ "disconnect"; "go offline"; "exit room"; "sign off"; "leave room" ]
   ; "masc_messages", [ "chat"; "conversation"; "history"; "log"; "what was said" ]
   ; "masc_agents", [ "who is working"; "team members"; "workers"; "collaborators" ]
   ; "masc_status", [ "how are things"; "state"; "health"; "situation" ]

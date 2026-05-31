@@ -17,7 +17,7 @@ module Float = Stdlib.Float
 
 (** Tool_inline_dispatch_comm — communication tool handlers.
 
-    Handles: masc_broadcast, masc_messages, masc_who.
+    Handles: masc_broadcast, masc_messages.
 
     Extracted from tool_inline_dispatch.ml to reduce file size. *)
 
@@ -111,8 +111,3 @@ let handle_messages ~tool_name ~start_time (ctx : context) : tool_result option 
   let since_seq = arg_get_int ctx "since_seq" 0 in
   let limit = arg_get_int ctx "limit" 10 in
   Some (Tool_result.ok ~tool_name ~start_time (Coord.get_messages config ~since_seq ~limit))
-
-(** masc_who — list agents currently in the room *)
-let handle_who ~tool_name ~start_time (ctx : context) : tool_result option =
-  let registry = ctx.registry in
-  Some (Tool_result.ok ~tool_name ~start_time (Session.status_string registry))

@@ -1,12 +1,9 @@
-(** Tool_inline_dispatch_coord — room lifecycle tool handlers.
+(** Tool_inline_dispatch_coord — project startup tool handler.
 
-    Three [masc_*] handlers covering the agent room lifecycle:
-    {!handle_start} (project root + join + optional task),
-    {!handle_join} (idempotent re-join), {!handle_leave}
-    (graceful exit).
+    Handles project root setup and optional task bootstrapping.
 
     Extracted from {!Tool_inline_dispatch} to keep the dispatch
-    table file under the lint cap.  All three return
+    table file under the lint cap.  The handler returns
     [Tool_result.result option] — [Some] when the tool name matches,
     [None] when the dispatcher should fall through to a default handler.
 
@@ -39,9 +36,8 @@ val handle_start :
     1. **Set project root**: validates the directory exists,
        initialises {!Coord} when not already initialised, and
        atomically swaps [state.room_config].
-    2. **Join**: idempotent — re-join is a no-op when already
-       in the room.  Failure surfaces with hint
-       [["Hint: try masc_join separately."]].
+    2. **Bind agent session**: idempotent when already bound.
+       Failure surfaces as a startup error.
     3. **Optional task creation**: when [task_title] non-empty,
        runs [Coord_task.add_task] + extracts the task id from
        the [["Added task-NNN: title"]] response prefix.
@@ -55,24 +51,8 @@ val handle_start :
     - Step 1 failure:
       ["masc_start failed while setting project scope: <e>"]
     - Step 2 failure:
-      ["masc_start failed at join: <e>\nHint: try masc_join separately."]
+      ["masc_start failed while binding agent session: <e>"]
 
     Operator runbooks grep on these prefixes; pinning at the
     contract seam so a future "let's rephrase the errors" PR
     must touch this. *)
-
-val handle_join :
-  tool_name:string -> start_time:float ->
-  Tool_inline_dispatch_types.context ->
-  Tool_result.result option
-(** [handle_join ~tool_name ~start_time ctx] handles [masc_join] —
-    register the agent in the project namespace.  Idempotent:
-    re-joining is a no-op success.  Reads [path] / [room] /
-    [agent] / [capabilities] (string list) from [ctx.arguments]. *)
-
-val handle_leave :
-  tool_name:string -> start_time:float ->
-  Tool_inline_dispatch_types.context ->
-  Tool_result.result option
-(** [handle_leave ~tool_name ~start_time ctx] handles [masc_leave] —
-    graceful agent exit. *)

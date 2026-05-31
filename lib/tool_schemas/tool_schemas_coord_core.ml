@@ -22,7 +22,7 @@ let schemas : tool_schema list = [
     name = "masc_status";
     description = "Get current project status: active agents, task queue, recent broadcasts, and cluster info. \
 Use when you need a snapshot of who is online and what tasks are available. \
-Call after masc_join to orient yourself. Pair with masc_tasks for detailed backlog.";
+Call after masc_start to orient yourself. Pair with masc_tasks for detailed backlog.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);

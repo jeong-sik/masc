@@ -54,7 +54,7 @@ let assertion_kind_of_string_lenient = function
 
 let assertion_fix_hint = function
   | Room_set -> "Call masc_start with your project root path."
-  | Joined -> "Call masc_join to register your agent in the project namespace"
+  | Joined -> "Call masc_start to bind your agent session"
   | Task_claimed -> "Claim a task with masc_transition(action=claim) or masc_claim_next"
   | Current_task_set ->
     "Call masc_plan_set_task to choose or re-sync the active task when current_task is \

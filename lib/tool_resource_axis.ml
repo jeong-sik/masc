@@ -198,8 +198,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Goal_upsert
   | Goal_verify
   | Heartbeat
-  | Join
-  | Leave
   | Note_add
   | Plan_clear_task
   | Plan_init
@@ -251,8 +249,7 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Tool_admin_snapshot
   | Tool_help
   | Tool_list
-  | Tool_stats
-  | Who -> Ungated
+  | Tool_stats -> Ungated
 ;;
 
 let classify_masc_keeper_tool (tool : Tool_name.Masc_keeper.t) =

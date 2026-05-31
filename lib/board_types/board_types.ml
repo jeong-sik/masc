@@ -87,7 +87,7 @@ end = struct
 
   (* Issue #8633: pattern was [^[a-zA-Z0-9._-]+$] which rejected the
      [keeper:foo] colon-namespacing supported by the canonical
-     [Validation.Agent_id] (used by masc_join / masc_claim_next).
+     [Validation.Agent_id] (used by session-bound task coordination).
      Real callers exist (server_routes_http_keeper_stream:413,
      server_openai_compat:153). Pattern is now a strict superset of
      both: optional single colon namespace + previously-allowed dots.

@@ -83,7 +83,7 @@ let register_capabilities config ~agent_name ~capabilities =
           Printf.sprintf "Invalid agent file for %s" actual_name
     )
   end else
-    Printf.sprintf "Agent %s not found. Join first!" agent_name
+    Printf.sprintf "Agent %s not found. Bind the session first." agent_name
 
 (** Update agent metadata (status/capabilities).
     Since #4638 agent metadata always lives under the root agents_dir. *)

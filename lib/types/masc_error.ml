@@ -119,7 +119,7 @@ module Agent_error = struct
   let to_string = function
     | NotFound name -> Printf.sprintf "[AgentError] Agent not found: %s" name
     | NotJoined name ->
-        Printf.sprintf "[AgentError] Agent not joined: %s. Use masc_join first." name
+        Printf.sprintf "[AgentError] Agent not joined: %s. Use masc_start first." name
     | AlreadyJoined name -> Printf.sprintf "[AgentError] Agent already joined: %s" name
     | InvalidName reason -> Printf.sprintf "[AgentError] Invalid agent name: %s" reason
 end

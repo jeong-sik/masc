@@ -21,7 +21,7 @@ module Float = Stdlib.Float
     reads Tool_catalog-declared required_permission metadata.
 
     Each tool's required permission determines which role tier it belongs to:
-    - Worker tier: CanReadState, CanJoin, CanLeave, CanAddTask, CanClaimTask,
+    - Worker tier: CanReadState, CanAddTask, CanClaimTask,
                    CanCompleteTask, CanBroadcast,
                    CanOpenPortal, CanSendPortal
     - Admin tier:  CanInit, CanReset, CanAdmin
@@ -38,8 +38,7 @@ let all_surface_tools () =
 
 let required_role_of_permission = function
   | Masc_domain.CanInit | Masc_domain.CanReset | Masc_domain.CanAdmin -> Admin_role
-  | Masc_domain.CanReadState | Masc_domain.CanJoin | Masc_domain.CanLeave
-  | Masc_domain.CanAddTask
+  | Masc_domain.CanReadState | Masc_domain.CanAddTask
   | Masc_domain.CanClaimTask
   | Masc_domain.CanCompleteTask
   | Masc_domain.CanBroadcast

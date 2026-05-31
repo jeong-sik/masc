@@ -213,7 +213,7 @@ let execute_tool_eio
        let caller_tool_names =
          Some (dedupe_string_list (profile_tool_names @ keeper_tool_names))
        in
-       let extract_nickname_from_join_result ~fallback result =
+       let extract_nickname_from_session_binding_result ~fallback result =
          try
            let prefix = "  Nickname: " in
            let start_idx =
@@ -235,9 +235,9 @@ let execute_tool_eio
          with
          | Invalid_argument _ -> fallback
        in
-       (* Auto-init/auto-join for better UX.
+       (* Auto-init/auto-bind for better UX.
      - Auto-init only when auth is disabled (avoid side effects in secured rooms).
-     - Auto-join when allowed by auth (and safe for token-based auth). *)
+     - Auto-bind when allowed by auth (and safe for token-based auth). *)
        let join_required =
          Agent_tool_descriptor_resolution.capability_has
            Tool_capability.Requires_join
@@ -272,14 +272,14 @@ let execute_tool_eio
             then false
             else if Option.is_none mcp_session_id
             then
-              (* Sessionless requests (no Mcp-Session-Id header) should not auto-join.
+              (* Sessionless requests (no Mcp-Session-Id header) should not auto-bind.
          Without a session, each request gets a new ephemeral agent name,
          causing orphan agent proliferation in the room. *)
               false
             else if not auth_enabled
             then true
             else (
-              (* If per-agent tokens are required, only auto-join when agent_name already
+              (* If per-agent tokens are required, only auto-bind when agent_name already
          looks like a stable nickname. Otherwise Coord.join would generate a new
          nickname, breaking token verification for subsequent calls. *)
               let auth_cfg = Auth.load_auth_config config.base_path in
@@ -291,7 +291,7 @@ let execute_tool_eio
                     config.base_path
                     ~agent_name
                     ~token
-                    ~tool_name:"masc_join"
+                    ~tool_name:"masc_start"
                 with
                 | Ok () -> true
                 | Error _ -> false))
@@ -323,7 +323,7 @@ let execute_tool_eio
               if is_joined
               then agent_name
               else (
-                let join_result =
+                let session_binding_result =
                   Coord.join
                     config
                     ~agent_name
@@ -333,9 +333,11 @@ let execute_tool_eio
                     ()
                 in
                 let nickname =
-                  extract_nickname_from_join_result ~fallback:agent_name join_result
+                  extract_nickname_from_session_binding_result
+                    ~fallback:agent_name
+                    session_binding_result
                 in
-                Log.Mcp.info "Auto-joined for %s: %s -> %s" name agent_name nickname;
+                Log.Mcp.info "Auto-bound session for %s: %s -> %s" name agent_name nickname;
                 (* Remember nickname so subsequent calls in this MCP session can use it. *)
                 record_mcp_session_agent nickname;
                 let (_ : Session.session) =
@@ -429,7 +431,7 @@ let execute_tool_eio
           then (
             (* #9770: surface guard fires as a fleet-wide metric so
        operators can see which (tool, agent) pairs repeatedly skip
-       masc_join without log-scraping. *)
+       session binding without log-scraping. *)
             Prometheus.inc_counter
               Prometheus.metric_tool_join_required_guard
               ~labels:
@@ -442,7 +444,7 @@ let execute_tool_eio
                     "MASC room not initialized.\n\n\
                      Fastest: masc_start(path=\"<project>\") — one-step init+join, then \
                      call %s.\n\
-                     Alternative: masc_init → masc_join → masc_status → %s\n\
+                     Alternative: masc_init → masc_start → masc_status → %s\n\
                      📚 See: @~/me/instructions/masc-workflow.md\n\
                      [DEBUG] agent_name=%s room_initialized=%b"
                     name
@@ -460,10 +462,9 @@ let execute_tool_eio
               ~agent_name
               (runtime_error_result
                  (Printf.sprintf
-                    "Join required before using %s.\n\n\
-                     Fastest: masc_start(path=\"<project>\") — one-step join with room \
-                     scope.\n\
-                     Alternative: masc_join → masc_status → %s\n\
+                    "Session binding required before using %s.\n\n\
+                     Fastest: masc_start(path=\"<project>\") — one-step session binding.\n\
+                     Alternative: masc_start → masc_status → %s\n\
                      📚 See: @~/me/instructions/masc-workflow.md\n\
                      [DEBUG] agent_name=%s is_joined=%b"
                     name

@@ -4,7 +4,7 @@
     Mirrors the server RPCs defined in [Masc_grpc_service].
 
     Each function maps to one gRPC RPC:
-    - [join], [leave], [get_status], [tool_call], [broadcast] are unary.
+    - [get_status], [tool_call], [broadcast] are unary.
     - [subscribe] is server-streaming (returns an event stream).
     - [heartbeat_stream] is bidirectional streaming.
 
@@ -41,25 +41,6 @@ val create_from_env :
 val close : t -> unit
 
 (** {1 Unary RPCs} *)
-
-(** Join the coordination room. *)
-val join :
-  t ->
-  sw:Eio.Switch.t ->
-  env:Eio_unix.Stdenv.base ->
-  agent_name:string ->
-  capabilities:string list ->
-  metadata:(string * string) list ->
-  (Masc_grpc_types.JoinResponse.t, string) result
-
-(** Leave the coordination room. *)
-val leave :
-  t ->
-  sw:Eio.Switch.t ->
-  env:Eio_unix.Stdenv.base ->
-  agent_name:string ->
-  session_id:string ->
-  (Masc_grpc_types.LeaveResponse.t, string) result
 
 (** Get current room status. *)
 val get_status :

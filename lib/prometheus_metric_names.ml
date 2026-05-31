@@ -153,7 +153,7 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
 
 (* #9770: counter for the [join_required] guard firing in
    [Mcp_server_eio_execute].  Production observed agents calling
-   [masc_claim_next] (and similar) without [masc_join] first; the
+   [masc_claim_next] (and similar) before session binding; the
    guard returns a polite error message but no fleet-wide signal
    exists for "how often does this happen, and which agent / tool
    pair is most affected".  Labels:

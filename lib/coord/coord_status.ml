@@ -94,7 +94,7 @@ let status config =
     if total_agents > max_agents_display then
       Buffer.add_string buf
         (Printf.sprintf
-           "  … and %d more agents (use masc_who for full list)\n"
+           "  … and %d more agents\n"
            (total_agents - max_agents_display))
   end;
 

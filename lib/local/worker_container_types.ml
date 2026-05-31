@@ -549,26 +549,6 @@ let local_worker_max_tokens () = Env_config.Worker.local_worker_max_tokens
 
 let local_worker_heartbeat_interval_sec () = Env_config.Worker.local_worker_heartbeat_sec
 
-let join_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
-  let args =
-    `Assoc
-      [
-        ("agent_name", `String worker_name);
-        ( "capabilities",
-          `List
-            [
-              `String "llama";
-              `String "mcp-worker";
-              `String "local-tool-loop";
-            ] );
-      ]
-  in
-  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:"masc_join" ~args
-
-let leave_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
-  let args = `Assoc [ ("agent_name", `String worker_name) ] in
-  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:"masc_leave" ~args
-
 let default_system_prompt ~worker_name ~model_id ?role
     ?selection_note () =
   let role_line =

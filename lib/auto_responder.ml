@@ -185,23 +185,6 @@ let masc_call ~sw:_ ~tool_name ~(args : Yojson.Safe.t) : (string, string) result
         Log.Misc.warn "auto_responder: MCP response parse failed: %s" (Printexc.to_string exn);
         Ok body_str
 
-let extract_nickname (response_text : string) : string option =
-  let prefix = "Nickname:" in
-  let lines = String.split_on_char '\n' response_text in
-  let rec find = function
-    | [] -> None
-    | line :: rest ->
-        let trimmed = String.trim line in
-        if String.starts_with trimmed ~prefix
-        then
-          Some
-            (String.trim
-               (String.sub trimmed (String.length prefix)
-                  (String.length trimmed - String.length prefix)))
-        else find rest
-  in
-  find lines
-
 let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
   let response = call_model_direct_sync ~agent_type ~prompt in
   debug_log (Printf.sprintf "MODEL_RESPONSE: %s"
@@ -209,50 +192,19 @@ let call_model_and_broadcast ~sw ~agent_type ~prompt ~mention =
   if response = "" || response = "no response" then
     Log.AutoResponder.info "MODEL returned empty response"
   else begin
-    let join_args =
-      `Assoc [
-        ("agent_name", `String agent_type);
-        ("capabilities", `List [`String "model-auto-responder"]);
-      ]
-    in
-    match
-      masc_call ~sw
-        ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Join)
-        ~args:join_args
-    with
-    | Error e ->
-        debug_log (Printf.sprintf "MASC_JOIN_FAILED: %s" e);
-        Log.AutoResponder.error "Failed to join MASC (%s)" e
-    | Ok join_resp -> (
-        debug_log (Printf.sprintf "MASC_JOIN: %s"
-          (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." join_resp |> String_util.to_string));
-        match extract_nickname join_resp with
-        | None ->
-            debug_log "MASC_JOIN_FAILED: Could not extract nickname";
-            Log.AutoResponder.error "Failed to join MASC (no nickname)"
-        | Some nickname ->
-            let msg = Printf.sprintf "@%s %s" mention response in
-            let broadcast_args = `Assoc [("agent_name", `String nickname); ("message", `String msg)] in
-            (try
-               ignore
-                 (masc_call ~sw
-                    ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Broadcast)
-                    ~args:broadcast_args)
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn -> Log.AutoResponder.error "broadcast failed: %s" (Printexc.to_string exn));
-            let leave_args = `Assoc [("agent_name", `String nickname)] in
-            (try
-               ignore
-                 (masc_call ~sw
-                    ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Leave)
-                    ~args:leave_args)
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn -> Log.AutoResponder.error "leave failed: %s" (Printexc.to_string exn));
-            let short_resp = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." response |> String_util.to_string in
-            Log.AutoResponder.info "%s: %s" nickname short_resp
-      )
+    let nickname = agent_type in
+    let msg = Printf.sprintf "@%s %s" mention response in
+    let broadcast_args = `Assoc [("agent_name", `String nickname); ("message", `String msg)] in
+    (try
+       ignore
+         (masc_call ~sw
+            ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Broadcast)
+            ~args:broadcast_args)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn -> Log.AutoResponder.error "broadcast failed: %s" (Printexc.to_string exn));
+    let short_resp = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." response |> String_util.to_string in
+    Log.AutoResponder.info "%s: %s" nickname short_resp
   end
 
 (* --- Public API --- *)

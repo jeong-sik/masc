@@ -3449,7 +3449,7 @@ let test_logical_seq_backward_compat () =
       ; ("keeper_turn_id", `Null)
       ; ("oas_turn_count", `Null)
       ; ("event", `String "turn_started")
-      ; ("cascade_name", `Null)
+      ; ("runtime_id", `Null)
       ; ("status", `String "ok")
       ; ("decision", `Assoc [])
       ; ("links", `Assoc

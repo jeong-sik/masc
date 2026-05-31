@@ -385,7 +385,7 @@ let manifest_top_level_allowlist =
   StringSet.of_list
     [ "schema_version"; "ts"; "keeper_name"; "agent_name"; "trace_id"
     ; "generation"; "keeper_turn_id"; "oas_turn_count"; "logical_seq"; "event"
-    ; "cascade_name"; "status"; "decision"; "links"
+    ; "runtime_id"; "status"; "decision"; "links"
     ]
 
 let decision_public_allowlist =
@@ -510,7 +510,7 @@ let to_json manifest =
       ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
       ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
-      ("cascade_name", json_of_string_opt manifest.cascade_name);
+      ("runtime_id", json_of_string_opt manifest.cascade_name);
       ("status", `String manifest.status);
       ("decision", manifest.decision);
       ("links", links_to_json manifest.links);
@@ -529,7 +529,7 @@ let public_to_json manifest =
       ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
       ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
-      ("cascade_name", json_of_string_opt manifest.cascade_name);
+      ("runtime_id", json_of_string_opt manifest.cascade_name);
       ("status", `String manifest.status);
       ("decision", public_projection_of_decision manifest.decision);
       ("links", links_to_json manifest.links);
@@ -619,7 +619,11 @@ let of_json = function
             | None -> Error (Printf.sprintf "unknown event: %S" event_string)
             | Some event -> Ok event)
             >>= fun event ->
-            optional_string "cascade_name" fields >>= fun cascade_name ->
+            (match optional_string "runtime_id" fields with
+             | Ok (Some runtime_id) -> Ok (Some runtime_id)
+             | Ok None -> optional_string "cascade_name" fields
+             | Error _ as error -> error)
+            >>= fun cascade_name ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
             field "links" fields >>= fun links_json ->

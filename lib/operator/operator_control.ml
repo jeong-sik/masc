@@ -237,7 +237,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | None -> Ok ()
         | Some _ ->
             Error
-              "legacy keeper model args removed for masc_keeper_msg: models. Use cascade_name; concrete provider/model identity is OAS-owned."
+              "legacy keeper model args removed for masc_keeper_msg: models. Use cascade_name; concrete provider/model identity is resolved from the default runtime."
       in
       let direct_reply =
         Json_util.get_bool request.payload "direct_reply" |> Option.value ~default:false

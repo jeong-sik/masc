@@ -27,7 +27,7 @@ let effective_declarative_cascade_name
       (defaults : keeper_profile_defaults)
       (meta : keeper_meta)
   =
-  (* WORKAROUND (#19327 follow-up): field renamed cascade_name→model. *)
+  (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
   match defaults.model, defaults.manifest_path with
   | Some cascade_name, _ ->
     Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
@@ -84,7 +84,7 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
   if effective_cascade_name <> cascade_name
   then
     override_field
-      "model.cascade_name"
+      "model.runtime_id"
       ~default_value:(`String effective_cascade_name)
       ~live_value:(`String cascade_name)
     :: acc

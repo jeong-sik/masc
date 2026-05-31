@@ -11,7 +11,7 @@ type t =
   | Rejected_by_capability of { missing : string list }
       (** Capability gate rejected the dispatch.  [missing] enumerates
           the capability kinds the caller lacked (e.g.
-          ["destructive"; "requires_join"]).  PR-10 introduces the
+          ["destructive"]).  PR-10 introduces the
           variant; PR-7 still treats capability as advisory.  PR-12+
           may wire enforcement on top of this variant. *)
   | Rejected_by_pre_hook of { reason : string }

@@ -116,14 +116,6 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
     | _, Error e -> Error e
     | Ok _, Ok _ -> Ok ()
   in
-  (* BUG-005: Verify agent has joined before allowing claim. *)
-  let actual_name = resolve_agent_name config agent_name in
-  let filename = safe_filename actual_name ^ ".json" in
-  let agent_path = Filename.concat (agents_dir config) filename in
-  let agent_joined = path_exists config agent_path in
-  let* () =
-    if not agent_joined then Error (Masc_domain.Agent (Masc_domain.Agent_error.NotJoined actual_name)) else Ok ()
-  in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock config backlog_path (fun () ->
     match read_backlog_r config with

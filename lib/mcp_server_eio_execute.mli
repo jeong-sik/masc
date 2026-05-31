@@ -1,11 +1,6 @@
-(** Mcp_server_eio_execute — inner [tools/call] dispatcher
-    plus the join-state resolver shared with the keeper
-    onboarding path.
+(** Mcp_server_eio_execute — inner [tools/call] dispatcher.
 
     Only a small set of entries reach callers:
-    - {!resolve_join_state} —
-      [test/test_mcp_server_eio.ml] exercises the join-required
-      decisions to keep alias handling consistent across refactors.
     - {!caller_agent_name_from_arguments} — isolates the
       HTTP [_agent_name] caller identity contract without running
       the full dispatcher.
@@ -26,26 +21,6 @@
     body itself contains many internal sub-helpers
     (audit wrappers, tool dispatchers, error formatters)
     that are local to its lexical scope. *)
-
-(** {1 Session binding state resolution} *)
-
-val resolve_join_state :
-  room_initialized:bool ->
-  join_required:bool ->
-  agent_name:string ->
-  check_join:(string -> bool) ->
-  bool
-(** Returns [true] iff the request should be treated as a
-    joined-agent call.
-
-    The decision is short-circuited:
-    - [room_initialized = false] or [join_required = false]
-      → [false] (no join check needed).
-    - [agent_name = "unknown"] → [false] (sentinel name).
-    - Otherwise probes only [check_join agent_name].
-
-    [check_join] is injected so tests can drive the
-    resolver against a deterministic registry. *)
 
 val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
 (** Returns the explicit caller identity carried in [tools/call]

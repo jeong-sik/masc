@@ -8,14 +8,6 @@
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
-let resolve_join_state ~room_initialized ~join_required ~agent_name ~check_join =
-  if not (room_initialized && join_required)
-  then false
-  else if agent_name = "unknown"
-  then false
-  else check_join agent_name
-;;
-
 let caller_agent_name_from_arguments arguments =
   Mcp_server_eio_caller_identity.caller_agent_name_from_arguments arguments
 ;;
@@ -213,138 +205,10 @@ let execute_tool_eio
        let caller_tool_names =
          Some (dedupe_string_list (profile_tool_names @ keeper_tool_names))
        in
-       let extract_nickname_from_session_binding_result ~fallback result =
-         try
-           let prefix = "  Nickname: " in
-           let start_idx =
-             let idx = ref 0 in
-             while
-               !idx < String.length result - String.length prefix
-               && String.sub result !idx (String.length prefix) <> prefix
-             do
-               incr idx
-             done;
-             !idx + String.length prefix
-           in
-           let end_idx =
-             match String.index_from_opt result start_idx '\n' with
-             | Some idx -> idx
-             | None -> String.length result
-           in
-           String.sub result start_idx (end_idx - start_idx)
-         with
-         | Invalid_argument _ -> fallback
-       in
-       (* Auto-init/auto-bind for better UX.
-     - Auto-init only when auth is disabled (avoid side effects in secured rooms).
-     - Auto-bind when allowed by auth (and safe for token-based auth). *)
-       let join_required =
-         Agent_tool_descriptor_resolution.capability_has
-           Tool_capability.Requires_join
-           name
-       in
-       let init_error =
-         if (not auth_enabled) && join_required && not !room_init_cached
-         then (
-           try
-             let (_init_msg : string) = Coord.init config ~agent_name:None in
-             room_init_cached := true;
-             (* Fix 3: update cache after successful init *)
-             None
-           with
-           | Invalid_argument msg -> Some msg
-           | Sys_error msg -> Some msg
-           | Yojson.Json_error msg -> Some msg
-           | Eio.Cancel.Cancelled _ as exn -> raise exn
-           | exn -> Some (Printexc.to_string exn))
-         else None
-       in
-       (match init_error with
-        | Some msg -> with_system_internal_audit ~agent_name (runtime_error_result msg)
-        | None ->
           let is_read_only =
             Agent_tool_descriptor_resolution.capability_has
               Tool_capability.Read_only
               name
-          in
-          let can_auto_join =
-            if (not join_required) || agent_name = "unknown"
-            then false
-            else if Option.is_none mcp_session_id
-            then
-              (* Sessionless requests (no Mcp-Session-Id header) should not auto-bind.
-         Without a session, each request gets a new ephemeral agent name,
-         causing orphan agent proliferation in the room. *)
-              false
-            else if not auth_enabled
-            then true
-            else (
-              (* If per-agent tokens are required, only auto-bind when agent_name already
-         looks like a stable nickname. Otherwise Coord.bind_session would generate a new
-         nickname, breaking token verification for subsequent calls. *)
-              let auth_cfg = Auth.load_auth_config config.base_path in
-              if auth_cfg.require_token && not (Nickname.is_generated_nickname agent_name)
-              then false
-              else (
-                match
-                  Auth.authorize_tool_v2
-                    config.base_path
-                    ~agent_name
-                    ~token
-                    ~tool_name:"masc_start"
-                with
-                | Ok () -> true
-                | Error _ -> false))
-          in
-          let agent_name =
-            if can_auto_join
-            then (
-              (* Fix 3: use cached room_initialized *)
-              let is_joined =
-                if !room_init_cached
-                then (
-                  (* Auto-bind gate hides the failure mode that distinguishes
-                     "agent really isn't bound yet" from "we can't read the
-                     binding state". Invalid_argument is kept because
-                     [Coord.is_agent_joined] surface formerly raised it on
-                     malformed agent_name input; dropping it changes scope. *)
-                  try Coord.is_agent_joined config ~agent_name with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | (Sys_error _ | Yojson.Json_error _ | Invalid_argument _) as exn
-                    ->
-                    Log.Mcp.warn
-                      "[is_agent_joined gate] read failed for %s: %s; \
-                       treating as not-bound"
-                      agent_name
-                      (Printexc.to_string exn);
-                    false)
-                else false
-              in
-              if is_joined
-              then agent_name
-              else (
-                let session_binding_result =
-                  Coord.bind_session
-                    config
-                    ~agent_name
-                    ~capabilities:[]
-                    ~keeper_name:(Option.map fst owner_keeper_identity)
-                    ~keeper_id:(Option.bind owner_keeper_identity snd)
-                    ()
-                in
-                let nickname =
-                  extract_nickname_from_session_binding_result
-                    ~fallback:agent_name
-                    session_binding_result
-                in
-                Log.Mcp.info "Auto-bound session for %s: %s -> %s" name agent_name nickname;
-                (* Remember nickname so subsequent calls in this MCP session can use it. *)
-                record_mcp_session_agent nickname;
-                let (_ : Session.session) =
-                  Session.register registry ~agent_name:nickname
-                in
-                nickname))
-            else agent_name
           in
           (match owner_keeper_identity with
            | Some (keeper_name, keeper_id)
@@ -409,70 +273,7 @@ let execute_tool_eio
                   agent_name
                   name
                   (Printexc.to_string exn)));
-          (* Check if agent must be session-bound first — Fix 3: use cached value *)
-          let room_initialized = !room_init_cached in
-          let is_joined =
-            resolve_join_state
-              ~room_initialized
-              ~join_required
-              ~agent_name
-              ~check_join:(fun candidate ->
-                Coord.is_agent_joined config ~agent_name:candidate)
-          in
-          (* Debug: log session binding check *)
-          Log.Misc.debug
-            "tool=%s agent_name=%s join_required=%b room_initialized=%b is_joined=%b"
-            name
-            agent_name
-            join_required
-            room_initialized
-            is_joined;
-          if join_required && not room_initialized
-          then (
-            (* #9770: surface guard fires as a fleet-wide metric so
-       operators can see which (tool, agent) pairs repeatedly skip
-       session binding without log-scraping. *)
-            Prometheus.inc_counter
-              Prometheus.metric_tool_join_required_guard
-              ~labels:
-                [ "tool", name; "agent_name", agent_name; "reason", "room_uninitialized" ]
-              ();
-            with_system_internal_audit
-              ~agent_name
-              (runtime_error_result
-                 (Printf.sprintf
-                    "MASC room not initialized.\n\n\
-                     Fastest: masc_start(path=\"<project>\") — one-step init+session binding, then \
-                     call %s.\n\
-                     Alternative: masc_init → masc_start → masc_status → %s\n\
-                     📚 See: @~/me/instructions/masc-workflow.md\n\
-                     [DEBUG] agent_name=%s room_initialized=%b"
-                    name
-                    name
-                    agent_name
-                    room_initialized)))
-          else if join_required && not is_joined
-          then (
-            Prometheus.inc_counter
-              Prometheus.metric_tool_join_required_guard
-              ~labels:
-                [ "tool", name; "agent_name", agent_name; "reason", "agent_not_joined" ]
-              ();
-            with_system_internal_audit
-              ~agent_name
-              (runtime_error_result
-                 (Printf.sprintf
-                    "Session binding required before using %s.\n\n\
-                     Fastest: masc_start(path=\"<project>\") — one-step session binding.\n\
-                     Alternative: masc_start → masc_status → %s\n\
-                     📚 See: @~/me/instructions/masc-workflow.md\n\
-                     [DEBUG] agent_name=%s is_joined=%b"
-                    name
-                    name
-                    agent_name
-                    is_joined)))
-          else (
-            (* === Fix 1: Tag-based lazy context dispatch ===
+          (* === Fix 1: Tag-based lazy context dispatch ===
      O(1) tag lookup determines which module handles this tool.
      Only the matched module's context is created (1 out of 45+).
      Eliminates per-call 40+ context creation and ~210 Hashtbl.replace. *)

@@ -82,7 +82,6 @@ type metadata = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
-  requires_join : bool option;
   mcp_context_required : bool option;
   destructive : bool option;
   idempotent : bool option;
@@ -105,7 +104,6 @@ let default_metadata =
     reason = None;
     allow_direct_call_when_hidden = false;
     readonly = None;
-    requires_join = None;
     mcp_context_required = None;
     destructive = None;
     idempotent = None;
@@ -134,7 +132,6 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     reason = Some reason;
     allow_direct_call_when_hidden;
     readonly = None;
-    requires_join = None;
     mcp_context_required = None;
     destructive = None;
     idempotent = None;
@@ -143,16 +140,12 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     requires_actor_binding = None;
   }
 
-let with_semantic_flags ?readonly ?requires_join ?mcp_context_required
+let with_semantic_flags ?readonly ?mcp_context_required
     ?destructive ?idempotent ?effect_domain ?requires_actor_binding meta =
   {
     meta with
     readonly =
       (match readonly with Some value -> Some value | None -> meta.readonly);
-    requires_join =
-      (match requires_join with
-      | Some value -> Some value
-      | None -> meta.requires_join);
     mcp_context_required =
       (match mcp_context_required with
       | Some value -> Some value
@@ -213,9 +206,6 @@ let admin_read_tool =
 
 let reset_tool =
   with_required_permission Masc_domain.CanReset destructive_tool
-
-let static_requires_join_tool_names =
-  [ "masc_broadcast" ]
 
 let static_mcp_context_required_tool_names =
   [ "masc_start"
@@ -481,8 +471,6 @@ let attach_inferred_effect_domain name (meta : metadata) =
 let attach_static_capabilities name (meta : metadata) =
   {
     meta with
-    requires_join =
-      force_true_if_member name static_requires_join_tool_names meta.requires_join;
     mcp_context_required =
       force_true_if_member
         name
@@ -626,15 +614,10 @@ let metadata_to_fields name =
         ("toolGroup", `String (tool_group_to_string group)) :: with_effect_domain
     | None -> with_effect_domain
   in
-  let with_requires_join =
-    match meta.requires_join with
-    | Some value -> ("requiresJoin", `Bool value) :: with_tool_group
-    | None -> with_tool_group
-  in
   let with_mcp_context_required =
     match meta.mcp_context_required with
-    | Some value -> ("mcpContextRequired", `Bool value) :: with_requires_join
-    | None -> with_requires_join
+    | Some value -> ("mcpContextRequired", `Bool value) :: with_tool_group
+    | None -> with_tool_group
   in
   let with_actor_binding =
     match meta.requires_actor_binding with
@@ -667,15 +650,10 @@ let public_contract_fields name =
     | Some value -> ("requiresActorBinding", `Bool value) :: with_effect_domain
     | None -> with_effect_domain
   in
-  let with_requires_join =
-    match meta.requires_join with
-    | Some value -> ("requiresJoin", `Bool value) :: with_actor_binding
-    | None -> with_actor_binding
-  in
   let with_mcp_context_required =
     match meta.mcp_context_required with
-    | Some value -> ("mcpContextRequired", `Bool value) :: with_requires_join
-    | None -> with_requires_join
+    | Some value -> ("mcpContextRequired", `Bool value) :: with_actor_binding
+    | None -> with_actor_binding
   in
   match meta.canonical_name with
   | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_mcp_context_required

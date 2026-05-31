@@ -21,40 +21,30 @@ open Masc_domain
 open Coord_types
 
 type agent_state =
-  { room_set : bool
-  ; joined : bool
-  ; task_claimed : bool
+  { task_claimed : bool
   ; current_task_set : bool
   }
 
 type assertion_kind =
-  | Room_set
-  | Joined
   | Task_claimed
   | Current_task_set
 
 let assertion_kind_to_string = function
-  | Room_set -> "room_set"
-  | Joined -> "joined"
   | Task_claimed -> "task_claimed"
   | Current_task_set -> "current_task_set"
 ;;
 
-let all_assertion_kinds = [ Room_set; Joined; Task_claimed; Current_task_set ]
+let all_assertion_kinds = [ Task_claimed; Current_task_set ]
 
 let valid_assertion_strings = List.map assertion_kind_to_string all_assertion_kinds
 
 let assertion_kind_of_string_lenient = function
-  | "room_set" -> Some Room_set
-  | "joined" -> Some Joined
   | "task_claimed" -> Some Task_claimed
   | "current_task_set" -> Some Current_task_set
   | _ -> None
 ;;
 
 let assertion_fix_hint = function
-  | Room_set -> "Call masc_start with your project root path."
-  | Joined -> "Call masc_start to bind your agent session"
   | Task_claimed -> "Claim a task with masc_transition(action=claim) or masc_claim_next"
   | Current_task_set ->
     "Call masc_plan_set_task to choose or re-sync the active task when current_task is \
@@ -62,8 +52,6 @@ let assertion_fix_hint = function
 ;;
 
 let assertion_passes st = function
-  | Room_set -> st.room_set
-  | Joined -> st.joined
   | Task_claimed -> st.task_claimed
   | Current_task_set -> st.current_task_set
 ;;
@@ -93,9 +81,7 @@ let check_assertion st assertion =
 
 let state_to_json st =
   `Assoc
-    [ "room_set", `Bool st.room_set
-    ; "joined", `Bool st.joined
-    ; "task_claimed", `Bool st.task_claimed
+    [ "task_claimed", `Bool st.task_claimed
     ; "current_task_set", `Bool st.current_task_set
     ; "session_active", `Bool false
     ]
@@ -104,7 +90,7 @@ let state_to_json st =
 let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_time ctx args
   =
   let st = inspect_state ctx in
-  let default_assertions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ] in
+  let default_assertions = [ "task_claimed"; "current_task_set" ] in
   let assertions =
     match Json_util.assoc_member_opt "assertions" args with
     | Some (`List items) ->

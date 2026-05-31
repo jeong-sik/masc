@@ -36,7 +36,6 @@ type t = {
   module_tag : Tool_dispatch.module_tag;
   handler_binding : handler_binding;
   is_read_only : bool;
-  requires_join : bool;
   mcp_context_required : bool;
   is_destructive : bool;
   is_idempotent : bool;
@@ -61,7 +60,6 @@ val create :
   input_schema:Yojson.Safe.t ->
   handler_binding:handler_binding ->
   ?is_read_only:bool ->
-  ?requires_join:bool ->
   ?mcp_context_required:bool ->
   ?is_destructive:bool ->
   ?is_idempotent:bool ->

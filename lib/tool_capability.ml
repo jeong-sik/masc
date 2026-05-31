@@ -3,14 +3,12 @@
 
 type kind =
   | Read_only
-  | Requires_join
   | Mcp_context_required
   | Destructive
   | Idempotent
 
 let to_string = function
   | Read_only -> "read_only"
-  | Requires_join -> "requires_join"
   | Mcp_context_required -> "mcp_context_required"
   | Destructive -> "destructive"
   | Idempotent -> "idempotent"
@@ -18,7 +16,6 @@ let to_string = function
 
 let of_string = function
   | "read_only" -> Some Read_only
-  | "requires_join" -> Some Requires_join
   | "mcp_context_required" -> Some Mcp_context_required
   | "destructive" -> Some Destructive
   | "idempotent" -> Some Idempotent
@@ -26,7 +23,7 @@ let of_string = function
 ;;
 
 let all_kinds =
-  [ Read_only; Requires_join; Mcp_context_required; Destructive; Idempotent ]
+  [ Read_only; Mcp_context_required; Destructive; Idempotent ]
 ;;
 
 module Set = Stdlib.Set.Make (struct
@@ -45,10 +42,6 @@ let rec has kind tool_name =
     (match metadata.readonly, metadata.effect_domain with
      | Some true, _ | _, Some Tool_catalog.Read_only -> true
      | Some false, _ | None, _ -> false)
-  | Requires_join ->
-    (match metadata.requires_join with
-     | Some true -> true
-     | Some false | None -> false)
   | Mcp_context_required ->
     (match metadata.mcp_context_required with
      | Some true -> true

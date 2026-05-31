@@ -12,7 +12,6 @@
 
 type kind =
   | Read_only
-  | Requires_join
   | Mcp_context_required
   | Destructive
   | Idempotent

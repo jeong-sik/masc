@@ -28,8 +28,6 @@ end
 module Agent_error : sig
   type t =
     | NotFound of string
-    | NotJoined of string
-    | AlreadyJoined of string
     | InvalidName of string
   val to_string : t -> string
 end

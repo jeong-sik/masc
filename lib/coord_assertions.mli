@@ -22,37 +22,26 @@
 (** {1 State snapshot} *)
 
 (** Concrete record because {!Tool_coord} field-constructs it
-    when projecting an inspected context to the assertion engine
-    ([Coord_assertions.room_set = s.room_set]).  Hiding would
-    break the type seam. *)
+    when projecting an inspected context to the assertion engine. *)
 type agent_state =
-  { room_set : bool
-  ; joined : bool
-  ; task_claimed : bool
+  { task_claimed : bool
   ; current_task_set : bool
   }
 
 (** {1 Assertion taxonomy} *)
 
-(** Closed variant — every match site must update on extension.
-    [Tool_coord] type-aliases this exact shape with the same four
-    constructors, so the cross-module re-export is structurally
-    pinned. *)
+(** Closed variant — every match site must update on extension. *)
 type assertion_kind =
-  | Room_set
-  (** Project root configured. *)
-  | Joined (** Agent has joined the project namespace. *)
   | Task_claimed (** Agent owns at least one claimed task. *)
   | Current_task_set (** [current_task] is set, fresh, and unambiguous. *)
 
 (** [assertion_kind_to_string k] returns the canonical snake_case
-    tag (e.g. [Room_set -> "room_set"]).  This is the operator-
+    tag.  This is the operator-
     visible name in JSON output — runbook commands grep on these
     literals. *)
 val assertion_kind_to_string : assertion_kind -> string
 
-(** Canonical declaration order: [Room_set; Joined; Task_claimed;
-    Current_task_set].  Used by
+(** Canonical declaration order: [Task_claimed; Current_task_set].  Used by
     {!handle_check}'s default-list fallback when callers omit the
     [assertions] argument. *)
 val all_assertion_kinds : assertion_kind list
@@ -85,9 +74,8 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
       context.
     - [args] is the raw JSON-RPC params.  Recognises an optional
       [assertions: [<string>...]] array; missing or non-list values
-      fall back to the canonical defaults (the four
-      [room_set / joined / task_claimed / current_task_set]
-      strings.  An empty list also falls back to
+      fall back to the canonical defaults ([task_claimed] /
+      [current_task_set]).  An empty list also falls back to
       defaults so callers cannot accidentally pass nothing.
 
     {2 Return value}

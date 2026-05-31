@@ -1,7 +1,7 @@
 (** Coord_query -- Task/agent/message query and listing functions.
 
     Read-only operations on room state: raw list retrieval, orphan auditing,
-    message collection, agent-joined checks, and formatted listing. *)
+    message collection, agent-session-bound checks, and formatted listing. *)
 
 open Masc_domain
 include Coord_utils
@@ -118,7 +118,7 @@ let get_all_agents config =
 let audit_orphan_tasks config : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else
-    (* Read agent files from the same path that cleanup_zombies and join use *)
+    (* Read agent files from the same path that cleanup_zombies and session binding use *)
     let agents_path = agents_dir config in
     let active_names =
       load_agents_from_dir config agents_path ~include_inactive:false
@@ -151,8 +151,8 @@ let is_agent_active_at_path config path =
        | Ok agent -> agent.status <> Inactive
        | Error _ -> false)
 
-(** Check if an agent has joined the room *)
-let is_agent_joined config ~agent_name =
+(** Check if an agent has session-bound *)
+let is_agent_session_bound config ~agent_name =
   if not (root_is_initialized config) then false
   else
     let actual_name = resolve_agent_name config agent_name in

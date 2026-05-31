@@ -205,7 +205,7 @@ let observe_agent_lifecycle
       match event with
       | Session_ended -> Telemetry_eio.track_agent_left config ~agent_id ~reason:"session_ended"
       | Session_bound | Session_rebound ->
-        Telemetry_eio.track_agent_joined config ~agent_id ())
+        Telemetry_eio.track_agent_session_bound config ~agent_id ())
   with
   | Stdlib.Effect.Unhandled _ as exn ->
     let lifecycle_kind : Coord_telemetry_drop_event.lifecycle_kind =

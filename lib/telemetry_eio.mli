@@ -34,7 +34,7 @@ val error_kind_of_string : string -> error_kind
 val error_kind_to_string : error_kind -> string
 
 type event =
-  | Agent_joined of { agent_id : string; capabilities : string list }
+  | Agent_session_bound of { agent_id : string; capabilities : string list }
   | Agent_left of { agent_id : string; reason : string }
   | Task_started of { task_id : string; agent_id : string }
   | Task_completed of {
@@ -153,7 +153,7 @@ val calculate_error_rate : event_record list -> float
 
 (** {1 Convenience emitters} *)
 
-val track_agent_joined :
+val track_agent_session_bound :
   ?fs:'a ->
   config ->
   agent_id:string ->

@@ -87,8 +87,8 @@ val event_to_sse : event -> string
 val default_thread_id : string
 (** Thread ID used by the single-namespace MASC bridge (["default"]). *)
 
-val of_agent_joined : agent_name:string -> event
-(** [agent_joined] → [Run_started] with [custom_name="AGENT_JOINED"]. *)
+val of_agent_session_bound : agent_name:string -> event
+(** [agent_session_bound] → [Run_started] with [custom_name="AGENT_SESSION_BOUND"]. *)
 
 val of_agent_left : agent_name:string -> event
 (** [agent_left] → [Run_finished] with [custom_name="AGENT_LEFT"]. *)

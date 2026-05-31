@@ -5,7 +5,7 @@
     - the {b agent-lookup callback} ({!set_agent_lookup} /
       {!set_agent_lookup_none} / {!is_agent}) wired at
       server bootstrap so post-kind classification can ask
-      whether a name is currently joined to the room,
+      whether a name is currently bound to the namespace,
     - the {b post / comment / vote handlers} routed
       through {!handle_tool} (one entry per
       [masc_board_*] tool name),
@@ -109,7 +109,7 @@ val visibility_of_string : string -> Board.visibility option
 (** {1 Agent lookup callback} *)
 
 val set_agent_lookup : (string -> bool) -> unit
-(** Wires the [is_agent_joined] check used by the
+(** Wires the [is_agent_session_bound] check used by the
     auto-classifier to decide whether a [system_*] author
     name resolves to a live agent.  Installed once at
     server bootstrap from [server_state.room_config]. *)

@@ -14,7 +14,7 @@ type deliberation_trigger =
   | DirectMention
   | NewUnclaimedTask
   | FailedTask
-  | AgentJoinedOrLeft
+  | AgentSessionBoundOrLeft
   | GoalDeadline
   | BoardActivity of string
   | IdleTimeout
@@ -26,7 +26,7 @@ let deliberation_trigger_to_string = function
   | DirectMention -> "direct_mention"
   | NewUnclaimedTask -> "new_unclaimed_task"
   | FailedTask -> "failed_task"
-  | AgentJoinedOrLeft -> "agent_joined_or_left"
+  | AgentSessionBoundOrLeft -> "agent_session_bound_or_left"
   | GoalDeadline -> "goal_deadline"
   | BoardActivity detail -> "board_activity:" ^ detail
   | IdleTimeout -> "idle_timeout"
@@ -203,7 +203,7 @@ let triage (obs : world_observation) : triage_result =
   if obs.direct_mention then add DirectMention;
   if obs.unclaimed_task_count > 0 then add NewUnclaimedTask;
   if obs.failed_task_count > 0 then add FailedTask;
-  if obs.agent_count_changed then add AgentJoinedOrLeft;
+  if obs.agent_count_changed then add AgentSessionBoundOrLeft;
 
   (* L2 Proactive triggers — goal-directed *)
   if obs.board_mention_count > 0 then

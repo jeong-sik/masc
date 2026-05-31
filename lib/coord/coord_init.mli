@@ -9,7 +9,7 @@ open Coord_utils
 open Coord_state
 open Coord_broadcast
 
-(** Initialise room state; auto-joins [agent_name] when given. *)
+(** Initialise room state; session-binds [agent_name] when given. *)
 val init :
   Coord_utils_backend_setup.config -> agent_name:'a option -> string
 

@@ -9,7 +9,7 @@ type deliberation_trigger =
   | DirectMention
   | NewUnclaimedTask
   | FailedTask
-  | AgentJoinedOrLeft
+  | AgentSessionBoundOrLeft
   | GoalDeadline
   | BoardActivity of string
   | IdleTimeout

@@ -12,18 +12,12 @@ package masc.coordination.v1;
 
 // Agent lifecycle and coordination service.
 service MascCoordination {
-  // Agent joins the coordination room.
-  rpc Join(JoinRequest) returns (JoinResponse);
-
-  // Agent leaves the coordination room.
-  rpc Leave(LeaveRequest) returns (LeaveResponse);
-
   // Bidirectional heartbeat stream.
   // Agent sends periodic pings; server responds with acks containing room state.
   rpc Heartbeat(stream HeartbeatPing) returns (stream HeartbeatAck);
 
   // Server-streaming event subscription (replaces SSE for agents).
-  // Returns a stream of room events: broadcasts, task changes, agent joins/leaves.
+  // Returns a stream of room events: broadcasts, task changes, agent session changes.
   rpc Subscribe(SubscribeRequest) returns (stream Event);
 
   // Unary tool call (replaces POST /mcp tools/call).
@@ -41,33 +35,6 @@ service MascCoordination {
   // obtain hover, codeLens, inlayHint, and diagnostic results over the
   // gRPC-web transport instead of a separate WebSocket.
   rpc LspCall(LspRequest) returns (LspResponse);
-}
-
-// ===== Agent Lifecycle =====
-
-message JoinRequest {
-  string agent_name = 1;
-  repeated string capabilities = 2;
-  // Optional metadata: model name, version, etc.
-  map<string, string> metadata = 3;
-}
-
-message JoinResponse {
-  bool success = 1;
-  string message = 2;
-  string session_id = 3;
-  // Current agents already in the room.
-  repeated AgentInfo active_agents = 4;
-}
-
-message LeaveRequest {
-  string agent_name = 1;
-  string session_id = 2;
-}
-
-message LeaveResponse {
-  bool success = 1;
-  string message = 2;
 }
 
 // ===== Heartbeat =====
@@ -160,7 +127,7 @@ message AgentInfo {
   string status = 2;
   repeated string capabilities = 3;
   int64 last_heartbeat_ms = 4;
-  int64 joined_at_ms = 5;
+  int64 session_bound_at_ms = 5;
   string current_task_id = 6;
 }
 

@@ -301,10 +301,10 @@ let agent_typ =
         ~typ:Schema.string
         ~args:Arg.[]
         ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.current_task);
-      Schema.field "joinedAt"
+      Schema.field "sessionBoundAt"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.joined_at);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.session_bound_at);
       Schema.field "lastSeen"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]

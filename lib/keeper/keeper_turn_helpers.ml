@@ -290,7 +290,7 @@ let record_pre_dispatch_terminal_observation
     in
     Keeper_runtime_manifest.make ~ts:ended_at ~keeper_name:meta.name
       ~agent_name:meta.agent_name ~trace_id ~generation ?keeper_turn_id ~event
-      ~cascade_name:cascade_name_string ~status ?decision ~receipt_path ()
+      ~runtime_id:cascade_name_string ~status ?decision ~receipt_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in
   append_manifest

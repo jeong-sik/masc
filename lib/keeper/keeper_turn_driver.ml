@@ -521,7 +521,7 @@ let run_named
          in
          Keeper_runtime_manifest.make_for_context manifest_ctx
            ~event:Keeper_runtime_manifest.Pre_dispatch_blocked
-           ~cascade_name
+           ~runtime_id:cascade_name
            ~status:"error"
            ~decision:
              (`Assoc
@@ -698,7 +698,7 @@ let run_named
         | None -> decision
       in
       Keeper_runtime_manifest.make_for_context manifest_ctx ~event
-        ?oas_turn_count ~logical_seq:!seq_ref ~cascade_name ?status ?decision
+        ?oas_turn_count ~logical_seq:!seq_ref ~runtime_id:cascade_name ?status ?decision
         ()
       |> append
     | _ -> ()

@@ -125,7 +125,7 @@ let emit_runtime_manifest
            decision)
     in
     Keeper_runtime_manifest.make_for_context manifest_ctx ~event
-      ~cascade_name:ctx.cascade_name ?logical_seq:(Some !(ctx.seq_ref))
+      ~runtime_id:ctx.cascade_name ?logical_seq:(Some !(ctx.seq_ref))
       ?status ?decision ()
     |> append
   | _ -> ()

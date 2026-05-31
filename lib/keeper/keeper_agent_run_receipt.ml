@@ -296,7 +296,7 @@ let finalize
       ~trace_id:receipt.trace_id ~generation:receipt.generation
       ~keeper_turn_id:manifest_keeper_turn_id ~event
       ?oas_turn_count
-      ~cascade_name:(receipt.cascade_name)
+      ~runtime_id:(receipt.cascade_name)
       ~status ~decision ~receipt_path ?tool_call_log_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in

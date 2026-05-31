@@ -140,6 +140,6 @@ let operator_digest_default_query () =
     ~target_type:None
     ~target_id:None
     ~include_workers:None
-    ~effective_target_type:"root"
+    ~effective_target_type:"coord"
     ~default_namespace_request:true
 ;;

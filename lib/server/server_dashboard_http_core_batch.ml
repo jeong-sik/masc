@@ -2,7 +2,7 @@
     [server_dashboard_http_core.ml] (godfile decomp).
 
     [dashboard_batch_json ?compact config] builds the operator
-    dashboard's all-in-one snapshot: room status, monitoring
+    dashboard's all-in-one snapshot: coord status, monitoring
     sub-feeds (board / governance / credentials / coord_state /
     executor / slots), alert thresholds, tasks list (filtered by
     [compact] flag — Done entries dropped when [compact=true]),

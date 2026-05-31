@@ -355,7 +355,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Coord.default_config base_dir in
-      (* See: this fixture only needs an initialized room for digest reads. *)
+      (* See: this fixture only needs an initialized coord for digest reads. *)
       ignore (Coord.init config ~agent_name:(Some "operator"));
       let meta =
         match
@@ -483,7 +483,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "full paused pipeline" "paused"
         (full_keeper |> member "pipeline_stage" |> to_string))
 
-let test_digest_room_includes_keeper_runtime_attention () =
+let test_digest_coord_includes_keeper_runtime_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -689,7 +689,7 @@ let test_snapshot_has_expected_sections () =
       ignore (Coord.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
       ignore (Coord.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
-      let root = Yojson.Safe.Util.member "root" json in
+      let root = Yojson.Safe.Util.member "coord" json in
       Alcotest.(check bool) "root block present" true
         (root <> `Null);
       Alcotest.(check bool) "root initialized" true
@@ -753,7 +753,7 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
               [
                 ("actor", `String actor);
                 ("action_type", `String "namespace_pause");
-                ("target_type", `String "root");
+                ("target_type", `String "coord");
               ])
         with
         | Ok _ -> ()
@@ -1221,9 +1221,9 @@ let test_snapshot_waiter_returns_stale_inflight_result () =
       Alcotest.(check bool) "stale waiter does not replace owner" true
         still_computing)
 
-(* test_orchestra_room_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
+(* test_orchestra_coord_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
 
-let test_digest_room_exposes_pending_confirm_attention () =
+let test_digest_coord_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1240,7 +1240,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
             [
               ("actor", `String "operator");
                ("action_type", `String "namespace_pause");
-               ("target_type", `String "root");
+               ("target_type", `String "coord");
             ])
       in
       (match action_json with Ok _ -> () | Error err -> Alcotest.fail err);
@@ -1249,7 +1249,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "target_type" "root"
+      Alcotest.(check string) "target_type" "coord"
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
@@ -1269,8 +1269,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
                Yojson.Safe.Util.(item |> member "provenance" |> to_string))
            attention_items);
       (* command_* attention items only appear when microarch signals
-         are warn/bad; in a fresh room they are absent *)
-      Alcotest.(check bool) "no command attention in fresh room" true
+         are warn/bad; in a fresh coord they are absent *)
+      Alcotest.(check bool) "no command attention in fresh coord" true
         (not
            (List.exists
               (fun item ->
@@ -1279,7 +1279,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
                   Yojson.Safe.Util.(item |> member "kind" |> to_string))
               attention_items)))
 
-let test_digest_room_includes_tool_host_failure_attention () =
+let test_digest_coord_includes_tool_host_failure_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->

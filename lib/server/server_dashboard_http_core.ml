@@ -94,7 +94,7 @@ let mission_cache =
   create_cached_surface
     (`Assoc
         [ "generated_at", `String (Masc_domain.now_iso ())
-        ; "summary", `Assoc [ "room_health", `String "initializing" ]
+        ; "summary", `Assoc [ "coord_health", `String "initializing" ]
         ; "incidents", `List []
         ; "recommended_actions", `List []
         ; "command_focus", `Assoc []
@@ -314,7 +314,7 @@ let provider_capacity_json = Server_dashboard_http_core_entities.provider_capaci
    light is genuinely under-scoped or has accidentally taken on full's
    work. Splitting the budget makes that distinction visible: a light
    timeout means "light path is doing too much"; a full timeout means
-   "the full path needs more headroom or a real perf fix". *)
+   "the full path needs more headcoord or a real perf fix". *)
 let dashboard_shell_timeout_s = Env_config_runtime.Dashboard.shell_timeout_sec
 let dashboard_shell_light_timeout_s = Env_config_runtime.Dashboard.shell_light_timeout_sec
 
@@ -327,7 +327,7 @@ let dashboard_shell_timeout_for ~light =
 ;;
 
 (* Meta_cognition.summary_json does a full board_posts.jsonl scan +
-   belief/tension/desire rule evaluation. On a room with 450+ posts this
+   belief/tension/desire rule evaluation. On a coord with 450+ posts this
    regularly exceeds 8s, which was the previous shell timeout and caused
    repeat "cache compute timeout: shell:..." + "cache bg-revalidate failed"
    noise in the log. Give it its own cache with a longer TTL, and on a cold
@@ -483,7 +483,7 @@ let dashboard_shell_payload_json
         `Null)
   in
   match
-    (* Cold workspaces lazily materialize room/keeper state on first access.
+    (* Cold workspaces lazily materialize coord/keeper state on first access.
        Keep those stateful reads sequential so one failing init path does not
        cancel sibling fibers and poison shared Eio mutexes. Retain parallelism
        only for projection-style reads that are safe to drop to `Null`. *)
@@ -747,7 +747,7 @@ let dashboard_shell_http_json
        The payload compute runs status / agents / tasks / keepers /
        meta_cognition projections (the latter scans board_posts.jsonl and
        evaluates belief/tension/desire rules — frequently 8s+ on a hot
-       room).  Under cache miss this used to run inline on the calling
+       coord).  Under cache miss this used to run inline on the calling
        fiber's Eio main domain, blocking every other HTTP fiber for the
        duration — the same Eio cooperative scheduling violation that
        PRs #18991 / #18993 / #18994 / #19007 / #19015 / #19023 / #19024 /

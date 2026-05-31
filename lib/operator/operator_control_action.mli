@@ -29,7 +29,7 @@ val judgment_write_json :
     {!Operator_judgment} entry parsed from [args].  Required fields:
 
     - [surface]: ["command.namespace"] or ["intervene"].
-    - [target_type]: ["root"].
+    - [target_type]: ["coord"].
     - [summary] (non-empty after trim).
 
     Optional: [target_id], [fresh_ttl_sec] (default 60s for

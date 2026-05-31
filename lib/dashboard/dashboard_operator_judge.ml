@@ -87,7 +87,7 @@ let enabled () = Env_config.Operator.judge_enabled
 
 let interval_sec () = Env_config.Operator.judge_interval_sec
 
-let room_ttl_sec () = Env_config.Operator.room_ttl_sec
+let coord_ttl_sec () = Env_config.Operator.coord_ttl_sec
 
 let session_ttl_sec () = Env_config.Operator.session_ttl_sec
 
@@ -177,7 +177,7 @@ let prompt_for_facts facts_json =
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt prompt_dashboard_operator_judge
 
-let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ json =
+let parse_coord_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ json =
   match json with
   | `Assoc _ ->
       let summary =
@@ -191,14 +191,14 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
           |> Option.value ~default:0.0
         in
         let fresh_until_unix =
-          generated_at_unix +. float_of_int (room_ttl_sec ())
+          generated_at_unix +. float_of_int (coord_ttl_sec ())
         in
         Some
           (Operator_judgment.record config ~surface:"command.namespace"
              ~target_type:Operator_judgment.Coord ~target_id:None ~summary
              ~confidence ?model_name:None
              ?recommended_action:
-               (build_recommended_action ~actor:keeper_name ~target_type:"root"
+               (build_recommended_action ~actor:keeper_name ~target_type:"coord"
                   ~target_id:None (Option.value ~default:`Null (Json_util.assoc_member_opt member_recommended_action json)))
              ~evidence_refs:(parse_string_list json "evidence_refs")
              ~disagreement_with_truth:
@@ -299,13 +299,13 @@ let refresh_once ~sw ~net
         let generated_at_unix = Unix.gettimeofday () in
         let generated_at = Masc_domain.iso8601_of_unix_seconds generated_at_unix in
         let expires_at =
-          Masc_domain.iso8601_of_unix_seconds (generated_at_unix +. float_of_int (room_ttl_sec ()))
+          Masc_domain.iso8601_of_unix_seconds (generated_at_unix +. float_of_int (coord_ttl_sec ()))
         in
-        let room_judgment =
-          parse_room_judgment ~config ~generated_at ~generated_at_unix
+        let coord_judgment =
+          parse_coord_judgment ~config ~generated_at ~generated_at_unix
             ~model_used result_json
         in
-        let has_any = Option.is_some room_judgment in
+        let has_any = Option.is_some coord_judgment in
         with_lock st (fun () ->
             st.refreshing <- false;
             st.judge_online <- has_any;

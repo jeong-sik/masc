@@ -199,8 +199,8 @@ let rec evidence_preview_strings json =
       fields |> List.map snd |> List.concat_map evidence_preview_strings |> dedup_strings |> take 4
   | _ -> []
 
-(* Issue #8395: root-level attention uses [target_type="root"].  This
-   predicate previously compared only to the literal "room", so the
+(* Issue #8395: root-level attention uses [target_type="coord"].  This
+   predicate previously compared only to the literal "coord", so the
    canonical form fell through to the public queue.  Delegate to the
    shared canonical target check used by [Dashboard_briefing_assembly]. *)
 let is_internal_attention incident =
@@ -361,9 +361,9 @@ let build_projection ?actor ~config ~sw ~clock
               ])
   in
   let namespace_json =
-    match member_assoc "root" snapshot_json with
+    match member_assoc "coord" snapshot_json with
     | `Assoc _ as value -> value
-    | _ -> member_assoc "room" snapshot_json
+    | _ -> member_assoc "coord" snapshot_json
   in
   let incidents =
     list_field "attention_items" digest_json
@@ -408,7 +408,7 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
   let summary_json =
     `Assoc
       [
-        ("room_health", `String (string_field ~default:"ok" "health" projection.digest_json));
+        ("coord_health", `String (string_field ~default:"ok" "health" projection.digest_json));
         ("cluster", Json_util.string_opt_to_json (Some (string_field "cluster" projection.namespace_json)));
         ("project", Json_util.string_opt_to_json (Some (string_field "project" projection.namespace_json)));
       ]

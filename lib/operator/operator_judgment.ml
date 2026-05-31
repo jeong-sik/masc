@@ -26,10 +26,10 @@ type record = {
 }
 
 let target_type_to_string = function
-  | Coord -> "root"
+  | Coord -> "coord"
 
 let target_type_of_string = function
-  | "root" -> Some Coord
+  | "coord" -> Some Coord
   | _ -> None
 
 
@@ -47,8 +47,8 @@ let key_of ~surface ~target_type ~target_id =
     match target_id with
     | Some value ->
         let trimmed = String.trim value in
-        if trimmed <> "" then trimmed else "__room__"
-    | None -> "__room__"
+        if trimmed <> "" then trimmed else "__coord__"
+    | None -> "__coord__"
   in
   String.concat ":" [ surface; target_type_to_string target_type; target ]
 

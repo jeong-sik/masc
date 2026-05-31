@@ -1,8 +1,8 @@
-(** Dashboard_operator_judge — periodic LLM-driven room judgment loop.
+(** Dashboard_operator_judge — periodic LLM-driven coord judgment loop.
 
     Runs as an Eio daemon fiber per [base_path]: every
     [Env_config.Operator.judge_interval_sec], it asks an operator-judge
-    keeper to evaluate room health using freshly built facts, then
+    keeper to evaluate coord health using freshly built facts, then
     caches the verdict (and "is the judge online?" status) for HTTP
     consumption.
 

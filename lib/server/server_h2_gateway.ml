@@ -872,9 +872,9 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
       | `GET, "/api/v1/namespace/current"
-      | `GET, "/api/v1/room/current"
+      | `GET, "/api/v1/coord/current"
       | `POST, "/api/v1/namespace/current"
-      | `POST, "/api/v1/room/current" ->
+      | `POST, "/api/v1/coord/current" ->
           h2_respond_removed_surface h2_reqd ~surface:"namespace" ~extra_headers:cors
 
       | `POST, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->

@@ -67,7 +67,7 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
     let target_id = json_string_field_opt "target_id" top_item in
   let source, target_kind, suggested_tab, suggested_surface, suggested_params =
       match target_type with
-      | Some "room_meta_cognition" | Some "namespace_meta_cognition" ->
+      | Some "coord_meta_cognition" | Some "namespace_meta_cognition" ->
           ( "meta_cognition",
             "meta_cognition",
             "overview",
@@ -204,7 +204,7 @@ let severity_of_meta_salience = function
   | Meta_cognition.Operator_tension -> "bad"
   | Meta_cognition.Contested_belief
   | Meta_cognition.Operator_desire
-  | Meta_cognition.Stagnant_room -> "warn"
+  | Meta_cognition.Stagnant_coord -> "warn"
   | Meta_cognition.Stable -> "info"
 
 let derived_meta_attention_item ~meta_cognition_json
@@ -688,7 +688,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
         ~key:"operational_clarity"
         ~label:"Operational Clarity"
         ~status:operational_clarity_status
-        ~ok_message:"The control room has recent audit anchors and no open attention backlog."
+        ~ok_message:"The control coord has recent audit anchors and no open attention backlog."
         ~reasons:operational_clarity_reasons
         ~metrics:
           [
@@ -902,7 +902,7 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
     (namespace_truth_metadata_fields ~config ~generated_at
      @ [
          ("generated_at", `String generated_at);
-        ("root", namespace_block);
+        ("coord", namespace_block);
         ( "execution",
         `Assoc
           [

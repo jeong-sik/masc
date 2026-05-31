@@ -76,45 +76,45 @@ let keeper_recovery_outcome after_diagnostic =
 
 (** {1 Domain-specific action handlers} *)
 
-let room_action_result request result =
+let coord_action_result request result =
   Ok (`Assoc [
     ("tool_name", `String (delegated_tool_for request.action_type));
     ("result", result);
   ])
 
-let execute_room_action (ctx : 'a context) (request : action_request) =
+let execute_coord_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "broadcast" ->
-      let* () = validate_target_type "root" request in
+      let* () = validate_target_type "coord" request in
       let* message =
         match get_string_opt request.payload "message" with
         | Some value -> Ok value
         | None -> Error "payload.message is required"
       in
       let result = Coord.broadcast ctx.config ~from_agent:request.actor ~content:message in
-      room_action_result request (`String result)
+      coord_action_result request (`String result)
   | "namespace_pause" ->
-      let* () = validate_target_type "root" request in
+      let* () = validate_target_type "coord" request in
       let reason =
         get_string request.payload "reason" "Paused by operator control plane"
       in
       Coord.pause ctx.config ~by:request.actor ~reason;
-      room_action_result request
+      coord_action_result request
         (`Assoc [ ("paused", `Bool true); ("reason", `String reason) ])
   | "namespace_resume" ->
-      let* () = validate_target_type "root" request in
+      let* () = validate_target_type "coord" request in
       let status =
         match Coord.resume ctx.config ~by:request.actor with
         | `Resumed -> "resumed"
         | `Already_running -> "already_running"
       in
-      room_action_result request (`Assoc [ ("status", `String status) ])
+      coord_action_result request (`Assoc [ ("status", `String status) ])
   | "social_sweep" ->
-      room_action_result request
+      coord_action_result request
         (`Assoc [("status", `String "removed");
                  ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")])
   | "task_inject" ->
-      let* () = validate_target_type "root" request in
+      let* () = validate_target_type "coord" request in
       let* title =
         match get_string_opt request.payload "title" with
         | Some value -> Ok value
@@ -132,7 +132,7 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
           ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
           ctx.config ~title ~priority ~description
       in
-      room_action_result request (`String result)
+      coord_action_result request (`String result)
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
 (* Issue #8394: removed [execute_team_action] — team session execution
@@ -288,7 +288,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
   match request.action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
   | "task_inject" ->
-      execute_room_action ctx request
+      execute_coord_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
   | "" -> Error "action_type is required"

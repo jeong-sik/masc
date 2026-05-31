@@ -470,7 +470,7 @@ let start_keeper_loops
         activity_kind
         (Printexc.to_string exn));
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
-     can react to new tasks, mentions, or room activity immediately.
+     can react to new tasks, mentions, or coord activity immediately.
      SSOT: Coord_broadcast.on_broadcast_mention is the single ref wired here. *)
   let broadcast_mention_handler =
     fun mention ->
@@ -514,12 +514,12 @@ let start_keeper_loops
     let start_time = Time_compat.now () in
     let config = state.coord_config in
     let agent_name = actor in
-    let ctx_room : Tool_coord.context = { config; agent_name } in
+    let ctx_coord : Tool_coord.context = { config; agent_name } in
     let ctx_task : Tool_task.context = { config; agent_name; sw = Some sw } in
     let ctx_agent : Tool_agent.context = { config; agent_name } in
     match name with
     | "masc_status" ->
-      (match Tool_coord.dispatch ctx_room ~name ~args with
+      (match Tool_coord.dispatch ctx_coord ~name ~args with
        | Some result -> result
        | None ->
          (* RFC-0189: [Tool_*.dispatch] returning [None] when the

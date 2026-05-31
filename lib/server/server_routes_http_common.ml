@@ -258,7 +258,7 @@ let handle_presence_events request reqd =
    Executor_pool ([Domain_pool_ref.submit_io_or_inline]). ~20 routes inline
    this 2-call nesting; ~28 dashboard GET routes still omit it and recompute
    uncached on the main HTTP domain per request. The uncached ones (e.g.
-   /branches spawning `git branch`, /rooms querying up to 1000 messages,
+   /branches spawning `git branch`, /coords querying up to 1000 messages,
    /status) head-of-line-block other requests when a dashboard page fires
    many calls in parallel — a 12-way parallel probe converged every endpoint
    (incl. ms-cached ones) to ~3.4s because the uncached handlers held the

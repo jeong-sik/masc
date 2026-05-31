@@ -15,7 +15,7 @@
 
     Layer B (shared): when [Keeper_fd_pressure.active ()] is true, ALL
     kinds serialize against a shared global mutex. Engaged
-    automatically; gives the cooldown room to drain.
+    automatically; gives the cooldown coord to drain.
 
     Callers wrap with [with_slot ~kind f]; [f] is invoked after a slot
     is acquired and FD-pressure (if active) is taken. *)

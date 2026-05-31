@@ -58,10 +58,10 @@ let operator_digest_http_json ~state ~sw ~clock request =
   let root_target_type value =
     match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
     | None -> true
-    | Some "root" -> true
+    | Some "coord" -> true
     | Some _ -> false
   in
-  let effective_target_type = Option.value ~default:"root" target_type in
+  let effective_target_type = Option.value ~default:"coord" target_type in
   let default_namespace_request =
     actor = None
     && target_id = None

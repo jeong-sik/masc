@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 1a-2: toggle sangsu's cascade between live mode and ollama_bench.
+# Phase 1a-2: toggle sangsu's runtime between live mode and ollama_bench.
 #
 # Mutates <base-path>/.masc/config/keepers/sangsu.toml in place. Backup
 # written alongside as sangsu.toml.bench-bak. Hot-reload is mtime-based so no
@@ -8,7 +8,7 @@
 # Usage:
 #   ./sangsu_bench_toggle.sh on              # backup + switch to ollama_bench
 #   ./sangsu_bench_toggle.sh off             # restore from backup
-#   ./sangsu_bench_toggle.sh status          # print current cascade_name
+#   ./sangsu_bench_toggle.sh status          # print current runtime_id
 #   ./sangsu_bench_toggle.sh model qwen3.6:35b-a3b-mlx-bf16
 #                                            # mutate ollama_bench profile's
 #                                            # single model slot in cascade.toml
@@ -34,8 +34,8 @@ CASCADE_TOML="${BASE_PATH}/.masc/config/cascade.toml"
 cmd="${1:-status}"
 arg="${2:-}"
 
-current_cascade() {
-  awk -F' *= *' '/^cascade_name *=/ {gsub(/"/,"",$2); print $2; exit}' "$SANGSU_TOML"
+current_runtime_id() {
+  awk -F' *= *' '/^runtime_id *=/ {gsub(/"/,"",$2); print $2; exit}' "$SANGSU_TOML"
 }
 
 current_bench_model() {
@@ -53,28 +53,28 @@ PY
 
 case "$cmd" in
   status)
-    printf 'sangsu cascade_name: %s\n' "$(current_cascade)"
+    printf 'sangsu runtime_id: %s\n' "$(current_runtime_id)"
     printf 'ollama_bench model:  %s\n' "$(current_bench_model)"
     if [ -f "$SANGSU_BAK" ]; then
       printf 'backup:              %s (exists)\n' "$SANGSU_BAK"
     fi
     ;;
   on)
-    cur="$(current_cascade)"
+    cur="$(current_runtime_id)"
     if [ "$cur" = "ollama_bench" ]; then
       echo "already on ollama_bench"
       exit 0
     fi
     cp "$SANGSU_TOML" "$SANGSU_BAK"
     # shellcheck disable=SC2016
-    sed -E -i '' 's|^cascade_name *= *"[^"]+"|cascade_name = "ollama_bench"|' "$SANGSU_TOML"
-    new="$(current_cascade)"
+    sed -E -i '' 's|^runtime_id *= *"[^"]+"|runtime_id = "ollama_bench"|' "$SANGSU_TOML"
+    new="$(current_runtime_id)"
     if [ "$new" != "ollama_bench" ]; then
-      echo "FAIL: sed did not switch cascade_name (got: $new). Restoring from backup." >&2
+      echo "FAIL: sed did not switch runtime_id (got: $new). Restoring from backup." >&2
       mv "$SANGSU_BAK" "$SANGSU_TOML"
       exit 1
     fi
-    printf 'sangsu cascade_name: %s -> ollama_bench (backup at %s)\n' "$cur" "$SANGSU_BAK"
+    printf 'sangsu runtime_id: %s -> ollama_bench (backup at %s)\n' "$cur" "$SANGSU_BAK"
     ;;
   off)
     if [ ! -f "$SANGSU_BAK" ]; then
@@ -82,7 +82,7 @@ case "$cmd" in
       exit 1
     fi
     mv "$SANGSU_BAK" "$SANGSU_TOML"
-    printf 'sangsu cascade_name restored to: %s\n' "$(current_cascade)"
+    printf 'sangsu runtime_id restored to: %s\n' "$(current_runtime_id)"
     ;;
   model)
     if [ -z "$arg" ]; then

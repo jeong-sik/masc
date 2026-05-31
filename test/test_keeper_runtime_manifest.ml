@@ -1791,7 +1791,7 @@ let test_runtime_trace_lens_derives_clock_edges () =
         (json_int_member "edge_count" tool_group);
       Alcotest.(check (list string))
         "tool batch group spans tool and cascade lanes"
-        [ "tool_runtime"; "masc_policy_cascade" ]
+        [ "tool_runtime"; "masc_policy_runtime" ]
         (json_string_list_member "lanes" tool_group);
       let provider_group =
         require_group
@@ -2772,7 +2772,7 @@ let test_wired_manifest_sites () =
           "let keeper_turn_id = meta.runtime.usage.total_turns + 1";
           "Keeper_runtime_manifest.Turn_started";
           "Keeper_runtime_manifest.Phase_gate_decided";
-          "Keeper_runtime_manifest.Cascade_routed";
+          "Keeper_runtime_manifest.Runtime_routed";
           "Keeper_runtime_manifest.Event_bus_correlated";
           "turn_event_bus_manifest_decision";
         ] );

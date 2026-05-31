@@ -148,11 +148,11 @@ let run_keeper_cycle
         Keeper_unified_turn_cascade_resolution.resolve_cascade
           ~meta
           ~phase_opt
-          ~append_cascade_routed_manifest:(fun ~cascade_name ~decision ->
-            append_manifest ~site:"cascade_routed"
+          ~append_runtime_routed_manifest:(fun ~cascade_name ~decision ->
+            append_manifest ~site:"runtime_routed"
               ~runtime_id:cascade_name
               ~decision
-              Keeper_runtime_manifest.Cascade_routed)
+              Keeper_runtime_manifest.Runtime_routed)
       in
       (* Concrete runtime health/capacity is owned by OAS/provider adapters.
          Keeper routing no longer rewrites cascades from provider cooldown or

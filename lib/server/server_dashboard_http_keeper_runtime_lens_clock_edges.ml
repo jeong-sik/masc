@@ -89,7 +89,7 @@ let event_started_at row =
   match row.Keeper_runtime_manifest.event with
   | Keeper_runtime_manifest.Turn_started
   | Keeper_runtime_manifest.Phase_gate_decided
-  | Keeper_runtime_manifest.Cascade_routed
+  | Keeper_runtime_manifest.Runtime_routed
   | Keeper_runtime_manifest.Tool_surface_selected
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Provider_attempt_started
@@ -124,7 +124,7 @@ let event_finished_at row =
     Some row.Keeper_runtime_manifest.ts
   | Keeper_runtime_manifest.Turn_started
   | Keeper_runtime_manifest.Phase_gate_decided
-  | Keeper_runtime_manifest.Cascade_routed
+  | Keeper_runtime_manifest.Runtime_routed
   | Keeper_runtime_manifest.Tool_surface_selected
   | Keeper_runtime_manifest.Provider_lane_resolved
   | Keeper_runtime_manifest.Provider_attempt_started

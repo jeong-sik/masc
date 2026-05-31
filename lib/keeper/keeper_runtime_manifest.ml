@@ -189,9 +189,9 @@ let clock_lane_of_event = function
   | Receipt_appended
   | Turn_finished ->
     "keeper"
-  | Cascade_routed
+  | Runtime_routed
   | Provider_lane_resolved ->
-    "masc_policy_cascade"
+    "masc_policy_runtime"
   | Provider_attempt_started
   | Provider_attempt_finished ->
     "provider"

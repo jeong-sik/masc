@@ -124,8 +124,8 @@ let lane_policies =
     ; mandatory_events = [ Keeper_runtime_manifest.Tool_surface_selected ]
     ; terminal_events = []
     }
-  ; { lane = "masc_policy_cascade"
-    ; mandatory_events = [ Keeper_runtime_manifest.Cascade_routed ]
+  ; { lane = "masc_policy_runtime"
+    ; mandatory_events = [ Keeper_runtime_manifest.Runtime_routed ]
     ; terminal_events = []
     }
   ; { lane = "oas_agent"
@@ -153,9 +153,9 @@ let event_lane = function
   | Keeper_runtime_manifest.Receipt_appended
   | Keeper_runtime_manifest.Turn_finished ->
     "keeper"
-  | Keeper_runtime_manifest.Cascade_routed
+  | Keeper_runtime_manifest.Runtime_routed
   | Keeper_runtime_manifest.Provider_lane_resolved ->
-    "masc_policy_cascade"
+    "masc_policy_runtime"
   | Keeper_runtime_manifest.Provider_attempt_started
   | Keeper_runtime_manifest.Provider_attempt_finished ->
     "provider"

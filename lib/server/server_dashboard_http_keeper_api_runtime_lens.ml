@@ -295,12 +295,12 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   (runtime_lens_keeper_terminal_status ~terminal_event_present scan)
                 ~synthetic_events:[]
             );
-            ( "masc_policy_cascade",
+            ( "masc_policy_runtime",
               runtime_lens_swimlane_json swimlane_scan gaps
-                ~lane:"masc_policy_cascade" ~label:"MASC Cascade"
+                ~lane:"masc_policy_runtime" ~label:"MASC Runtime"
                 ~events:
                   [
-                    Keeper_runtime_manifest.Cascade_routed;
+                    Keeper_runtime_manifest.Runtime_routed;
                     Keeper_runtime_manifest.Provider_lane_resolved;
                   ]
                 ~terminal_status:

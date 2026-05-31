@@ -121,7 +121,7 @@ let provider_error_count_to_yojson (c : provider_error_count) =
   `Assoc
     [
       ("provider_id", `String public_runtime_provider_label);
-      ("cascade_name", `String c.cascade_name);
+      ("runtime_id", `String c.cascade_name);
       ("kind", `String c.kind);
       ("capacity_scope", `String c.capacity_scope);
       ("count", `Int c.count);

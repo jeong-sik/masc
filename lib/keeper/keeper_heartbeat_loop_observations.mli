@@ -23,7 +23,7 @@ val record_semaphore_wait_observation
 type runtime_backpressure_decision =
   | Runtime_admitted
   | Runtime_backpressured of {
-      cascade_name : string;
+      runtime_id : string;
       reason : string;
     }
 
@@ -32,8 +32,8 @@ val runtime_backpressure_observation_reasons : reason:string -> string list
 val runtime_backpressure_decision
   :  runtime_resilience:Keeper_runtime_resilience.runtime_resilience option
   -> should_run_turn:bool
-  -> cascade_name:string
-  -> cascade_status:Keeper_health_probe.health_status
+  -> runtime_id:string
+  -> runtime_status:Keeper_health_probe.health_status
   -> runtime_backpressure_decision
 
 val record_runtime_backpressure_observation

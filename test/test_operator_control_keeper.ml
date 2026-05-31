@@ -2873,9 +2873,9 @@ proactive_enabled = true
         (json |> member "proactive" |> member "enabled" |> to_bool);
       Alcotest.(check string) "default source kind" "toml"
         (json |> member "sources" |> member "default_source_kind" |> to_string);
-      Alcotest.(check string) "selected cascade name"
+      Alcotest.(check string) "selected runtime id"
         Masc_mcp.(Keeper_config.default_cascade_name ())
-        (json |> member "execution" |> member "selected_cascade_name"
+        (json |> member "execution" |> member "selected_runtime_id"
        |> to_string);
       Alcotest.(check string) "selected runtime canonical"
         Masc_mcp.(Keeper_config.default_cascade_name ())
@@ -3033,9 +3033,9 @@ proactive_enabled = true
         Masc_mcp.Dashboard_http_keeper.keeper_config_json config keeper_name
       in
       Alcotest.(check bool) "stale config still found" true (stale_status = `OK);
-      Alcotest.(check string) "stale cascade raw name preserved"
+      Alcotest.(check string) "stale runtime id preserved"
         "vendor_mix_balanced"
-        (stale_json |> member "execution" |> member "selected_cascade_name"
+        (stale_json |> member "execution" |> member "selected_runtime_id"
        |> to_string);
       Alcotest.(check string) "stale cascade falls back to live default"
         Masc_mcp.(Keeper_config.default_cascade_name ())

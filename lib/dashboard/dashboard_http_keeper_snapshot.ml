@@ -249,7 +249,7 @@ let keeper_config_json (config : Coord.config) (name : string)
          canonical field surfaces as JSON [null] (parse-don't-validate
          honest signal) instead of the silent [Keeper_turn] rewrite the
          legacy [live_keeper_cascade_name] would produce. *)
-      let selected_cascade_canonical_json =
+      let selected_runtime_canonical_json =
         match live_keeper_cascade_name_result cascade_name with
         | Ok runtime ->
           `String (runtime)
@@ -257,9 +257,9 @@ let keeper_config_json (config : Coord.config) (name : string)
       in
       let execution =
         `Assoc [
-          ("selected_cascade_name", `String cascade_name);
-          ( "selected_cascade_canonical",
-            selected_cascade_canonical_json );
+          ("selected_runtime_id", `String cascade_name);
+          ( "selected_runtime_canonical",
+            selected_runtime_canonical_json );
           ("models", `List []);
           ("active_model", `Null);
           ("active_model_label", `Null);

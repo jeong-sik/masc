@@ -217,8 +217,6 @@ let wake_reason
   let matched = match_signal ~continuity_summary ~meta ~signal in
   if matched.explicit_mention
   then Some "explicit_mention"
-  else if Message_scope.scope_message_feed_enabled meta
-  then Some "board_activity"
   else (
     let stigmergy = stigmergy_match ~meta ~signal in
     if stigmergy.overall_score > 0

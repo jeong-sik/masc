@@ -1,10 +1,8 @@
 (** Message-scope helpers for keeper world observation. *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-val scope_message_feed_enabled : keeper_meta -> bool
 val message_feed_targets : keeper_meta -> string list
 val self_identity_tokens : keeper_meta -> string list
 val is_self_author : self_tokens:string list -> string -> bool

@@ -118,7 +118,6 @@ type board_signal_match = Board_signal.match_result =
 module Message_scope = Keeper_world_observation_message_scope
 module Inputs = Keeper_world_observation_inputs
 
-let scope_message_feed_enabled = Message_scope.scope_message_feed_enabled
 let self_identity_tokens = Message_scope.self_identity_tokens
 let is_self_author = Message_scope.is_self_author
 let collect_message_scope = Message_scope.collect_message_scope
@@ -228,7 +227,6 @@ let collect_board_events_with_cursor_policy
   : pending_board_event list * int * int
   =
   try
-    let broad_scope = scope_message_feed_enabled meta in
     let cursor_ts, cursor_post_id =
       Keeper_registry.get_board_cursor ~base_path meta.name
     in
@@ -288,11 +286,11 @@ let collect_board_events_with_cursor_policy
              }
            in
            let matched = board_signal_match ~continuity_summary ~meta ~signal in
-           if not (matched.explicit_mention || broad_scope)
+           if not matched.explicit_mention
            then (
              Log.Keeper.debug
-               "board dedup: skipping post_id=%s (no mention and no prior keeper \
-                participation)"
+               "board dedup: skipping post_id=%s (no explicit mention and no prior \
+                keeper participation)"
                post_id;
              consume_posts remaining (Some next_cursor) acc rest)
            else if remaining <= 0

@@ -139,7 +139,7 @@ let keeper_fixture ?(name = "k-1") ?(status = "active")
 let agent_fixture ?(name = "a-1") ?(agent_type = "agent_llm_a")
     ?(status = T.Active) ?(capabilities = [ "ocaml"; "python"; "rust" ])
     ?(current_task = Some "implement X")
-    ?(joined_at = "2026-05-05T00:00:00Z")
+    ?(session_bound_at = "2026-05-05T00:00:00Z")
     ?(last_seen = "2026-05-05T03:00:00Z") () : T.agent =
   {
     id = None;
@@ -148,7 +148,7 @@ let agent_fixture ?(name = "a-1") ?(agent_type = "agent_llm_a")
     status;
     capabilities;
     current_task;
-    joined_at;
+    session_bound_at;
     last_seen;
     meta = None;
   }
@@ -475,7 +475,7 @@ let test_compact_agent_strict_keys () =
     List.sort compare
       [
         "name"; "agent_type"; "status"; "assignment_status";
-        "current_focus"; "goal_hint"; "joined_at"; "last_seen";
+        "current_focus"; "goal_hint"; "session_bound_at"; "last_seen";
         "capabilities";
       ]
   in

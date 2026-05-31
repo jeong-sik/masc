@@ -67,6 +67,7 @@ val deliverable_claims_completion :
 
 val status_summary_string :
   ctx:Coord_types.context ->
+  session_bound:bool ->
   actual_name:string ->
   credential_state:Coord_types.credential_state ->
   credential_blocked:bool ->

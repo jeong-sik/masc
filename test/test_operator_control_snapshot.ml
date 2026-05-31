@@ -213,7 +213,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -685,7 +685,7 @@ let test_snapshot_has_expected_sections () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       ignore (Coord.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
       ignore (Coord.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
@@ -818,7 +818,7 @@ let test_snapshot_summary_view_excludes_retired_command_plane () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_messages:false
@@ -844,7 +844,7 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:true
@@ -882,7 +882,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -993,7 +993,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let keeper_ctx : _ Tool_keeper.context =
         {
           config;
@@ -1097,7 +1097,7 @@ let test_snapshot_waiters_share_inflight_result () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Operator_control.invalidate_snapshot_cache ();
       let ctx = operator_ctx env sw config "owner" in
       ignore (Operator_control.snapshot_json ctx);
@@ -1174,7 +1174,7 @@ let test_snapshot_waiter_returns_stale_inflight_result () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Operator_control.invalidate_snapshot_cache ();
       let ctx = operator_ctx env sw config "owner" in
       ignore (Operator_control.snapshot_json ctx);
@@ -1289,7 +1289,7 @@ let test_digest_coord_includes_tool_host_failure_attention () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Dashboard_tool_host_events.record ~fs:() config
         {
           Dashboard_tool_host_events.agent_name = "agent_code";

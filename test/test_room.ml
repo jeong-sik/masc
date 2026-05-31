@@ -107,7 +107,7 @@ let test_join_creates_agent () =
   let _ = Coord.init config ~agent_name:None in
 
   (* Join - now returns auto-generated nickname like "test_agent-swift-fox" *)
-  let result = Coord.join config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
+  let result = Coord.bind_session config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
   Alcotest.(check bool) "join success" true (contains_check result);
 
   (* Check agent exists via Coord.read_state - nickname starts with agent_type *)
@@ -352,12 +352,12 @@ let with_test_env f =
 
 let test_lifecycle_messages_are_typed () =
   with_test_env (fun config ->
-    let join_result = Coord.join config ~agent_name:"provider_f" ~capabilities:[] () in
+    let join_result = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
     Alcotest.(check bool) "join success" true
       (str_contains join_result "joined");
-    let leave_result = Coord.leave config ~agent_name:"provider_f" in
+    let leave_result = Coord.end_session config ~agent_name:"provider_f" in
     Alcotest.(check bool) "leave success" true (str_contains leave_result "left");
-    ignore (Coord.join config ~agent_name:"provider_f" ~capabilities:[] ());
+    ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"provider_f" ~capabilities:[] ());
 
     let messages = Coord.get_all_messages_raw config ~since_seq:0 in
     let has_msg_type msg_type =
@@ -460,23 +460,23 @@ let test_double_complete () =
 
 let test_leave_removes_agent () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:["test"] () in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:["test"] () in
 
     (* Check agent exists *)
     let status1 = Coord.status config in
     Alcotest.(check bool) "provider_f in status" true (String.length status1 > 0);
 
     (* Leave *)
-    let result = Coord.leave config ~agent_name:"provider_f" in
+    let result = Coord.end_session config ~agent_name:"provider_f" in
     Alcotest.(check bool) "leave success" true (contains_check result)
   )
 
 let test_double_join () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:["test"] () in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:["test"] () in
 
     (* Join again - should update or warn *)
-    let result = Coord.join config ~agent_name:"provider_f" ~capabilities:["updated"] () in
+    let result = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:["updated"] () in
     (* Either success (update) or warning is acceptable *)
     Alcotest.(check bool) "double join handled" true (String.length result > 0)
   )
@@ -518,7 +518,7 @@ let test_special_chars_in_message () =
 let test_agent_name_with_special_chars () =
   with_test_env (fun config ->
     (* Agent name with dots, dashes should work *)
-    let result = Coord.join config ~agent_name:"model-a-sonnet-sonnet" ~capabilities:[] () in
+    let result = Coord.bind_session config ~agent_name:"model-a-sonnet-sonnet" ~capabilities:[] () in
     Alcotest.(check bool) "special agent name" true (contains_check result)
   )
 
@@ -618,7 +618,7 @@ let test_reinit_existing_room () =
 let test_operations_preserve_state () =
   with_test_env (fun config ->
     (* Do a bunch of operations *)
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:["test"] () in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:["test"] () in
     let _ = Coord.add_task config ~title:"X" ~priority:1 ~description:"" in
     let _ = Coord.broadcast config ~from_agent:"agent_llm_a" ~content:"hello" in
 
@@ -638,7 +638,7 @@ let test_event_log_on_join () =
 
   let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:None in
-  let _ = Coord.join config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
+  let _ = Coord.bind_session config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
 
   (* Verify join was recorded - agent has auto-generated nickname starting with "test_agent-" *)
   let state = Coord.read_state config in
@@ -683,16 +683,16 @@ let contains_heartbeat result =
 
 let test_heartbeat_updates_lastseen () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
 
     (* Send heartbeat *)
     let result = Coord.heartbeat config ~agent_name:"provider_f" in
     Alcotest.(check bool) "heartbeat success" true (contains_heartbeat result)
   )
 
-let test_is_agent_session_bounded_after_default_join () =
+let test_is_agent_session_bound_after_default_join () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
     let agents : Masc_domain.agent list = Coord.get_agents_raw config in
     let gemini_name =
       match List.find_opt (fun (agent : Masc_domain.agent) ->
@@ -702,7 +702,7 @@ let test_is_agent_session_bounded_after_default_join () =
       | None -> failwith "expected provider_f agent"
     in
     Alcotest.(check bool) "joined agent detected" true
-      (Coord.is_agent_session_bounded config ~agent_name:gemini_name)
+      (Coord.is_agent_session_bound config ~agent_name:gemini_name)
   )
 
 let test_room_bootstrap_preserves_backend_state () =
@@ -796,7 +796,7 @@ let other_nick = "agent_llm_a-other-bear"
 
 let test_release_stale_claims_clears_agent_current_task () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:stale_nick ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:stale_nick ~capabilities:[] () in
     let _ = Coord.add_task config ~title:"Stale work" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:stale_nick ~task_id:"task-001" in
     (* claim_task does not mirror current_task on the agent file —
@@ -820,7 +820,7 @@ let test_release_stale_claims_clears_agent_current_task () =
    [Some Y] — only the task-X-specific pointer gets cleared. *)
 let test_release_stale_claims_preserves_other_agent_task () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:other_nick ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:other_nick ~capabilities:[] () in
     let _ = Coord.add_task config ~title:"Stale work" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:other_nick ~task_id:"task-001" in
     Coord.update_local_agent_state config ~agent_name:other_nick
@@ -840,7 +840,7 @@ let test_release_stale_claims_preserves_other_agent_task () =
    not assignee zombification. *)
 let test_release_stale_claims_releases_stale_verification () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:stale_nick ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:stale_nick ~capabilities:[] () in
     let _ = Coord.add_task config ~title:"Stale verification" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:stale_nick ~task_id:"task-001" in
     (* Force task into AwaitingVerification with an old submitted_at
@@ -890,8 +890,8 @@ let test_heartbeat_nonexistent_agent () =
 
 let test_get_agents_status () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:["python"] () in
-    let _ = Coord.join config ~agent_name:"agent_code" ~capabilities:["rust"] () in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:["python"] () in
+    let _ = Coord.bind_session config ~agent_name:"agent_code" ~capabilities:["rust"] () in
 
     let status = Coord.get_agents_status config in
     (* Should be a JSON with agents array *)
@@ -925,13 +925,13 @@ let iso_ago seconds =
 
 (** Helper: join an agent then overwrite its last_seen to simulate staleness *)
 let make_stale_agent ?(agent_type = "test") config ~name ~age_seconds =
-  let _ = Coord.join config ~agent_name:name ~capabilities:[] () in
+  let _ = Coord.bind_session config ~agent_name:name ~capabilities:[] () in
   (* Overwrite the agent file with a stale last_seen *)
   let agents_path = Filename.concat (Coord.masc_dir config) "agents" in
   let path = Filename.concat agents_path (Coord.safe_filename name ^ ".json") in
   let stale_ts = iso_ago age_seconds in
   let agent_json = Printf.sprintf
-    {|{"name":"%s","agent_type":"%s","status":"inactive","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
+    {|{"name":"%s","agent_type":"%s","status":"inactive","capabilities":[],"session_bound_at":"%s","last_seen":"%s"}|}
     name agent_type stale_ts stale_ts
   in
   Coord.write_json config path (Yojson.Safe.from_string agent_json)
@@ -1041,7 +1041,7 @@ let contains_antenna result = String.sub result 0 4 = "\xF0\x9F\x93\xA1"  (* �
 
 let test_register_capabilities () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
 
     (* Register capabilities *)
     let result = Coord.register_capabilities config ~agent_name:"provider_f"
@@ -1051,8 +1051,8 @@ let test_register_capabilities () =
 
 let test_find_by_capability () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:["python"; "search"] () in
-    let _ = Coord.join config ~agent_name:"agent_code" ~capabilities:["python"; "rust"] () in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:["python"; "search"] () in
+    let _ = Coord.bind_session config ~agent_name:"agent_code" ~capabilities:["python"; "rust"] () in
 
     (* Find agents with python capability *)
     let result = Coord.find_agents_by_capability config ~capability:"python" in
@@ -1066,7 +1066,7 @@ let test_find_by_capability () =
 
 let test_find_by_capability_no_match () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:["python"] () in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:["python"] () in
 
     (* Find agents with nonexistent capability *)
     let result = Coord.find_agents_by_capability config ~capability:"haskell" in
@@ -1125,7 +1125,7 @@ let test_very_long_agent_name () =
 let test_korean_agent_name () =
   with_test_env (fun config ->
     (* Korean characters should work *)
-    let result = Coord.join config ~agent_name:"클로드" ~capabilities:["한글"] () in
+    let result = Coord.bind_session config ~agent_name:"클로드" ~capabilities:["한글"] () in
     Alcotest.(check bool) "korean agent name" true (contains_check result)
   )
 
@@ -1234,7 +1234,7 @@ let test_many_agents () =
   with_test_env (fun config ->
     (* Join many agents *)
     for i = 1 to 10 do
-      let _ = Coord.join config ~agent_name:(Printf.sprintf "agent%d" i) ~capabilities:["test"] () in
+      let _ = Coord.bind_session config ~agent_name:(Printf.sprintf "agent%d" i) ~capabilities:["test"] () in
       ()
     done;
 
@@ -1274,7 +1274,7 @@ let test_negative_priority () =
 
 let test_xss_in_message () =
   with_test_env (fun config ->
-    ignore (Coord.join config ~agent_name:"tester" ~capabilities:[] ());
+    ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"tester" ~capabilities:[] ());
     let xss_payload = "<script>alert('xss')</script>" in
     let result = Coord.broadcast config ~from_agent:"tester" ~content:xss_payload in
     (* Check that raw script tags are not in the result *)
@@ -1285,7 +1285,7 @@ let test_xss_in_message () =
 let test_xss_in_agent_name () =
   with_test_env (fun config ->
     let xss_name = "<img src=x onerror=alert('xss')>" in
-    let result = Coord.join config ~agent_name:xss_name ~capabilities:[] () in
+    let result = Coord.bind_session config ~agent_name:xss_name ~capabilities:[] () in
     Alcotest.(check bool) "join with xss name" true (contains_check result);
     (* Backend-agnostic: verify agent was registered (original test checked filename sanitization,
        which is FileSystem-specific. For other backends, we just verify the join worked) *)
@@ -1295,7 +1295,7 @@ let test_xss_in_agent_name () =
 
 let test_xss_in_message_type () =
   with_test_env (fun config ->
-    ignore (Coord.join config ~agent_name:"tester" ~capabilities:[] ());
+    ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"tester" ~capabilities:[] ());
     let xss_msg_type = "<script>alert('xss')</script>" in
     ignore
       (Coord.broadcast config ~from_agent:"tester" ~msg_type:xss_msg_type
@@ -1327,7 +1327,7 @@ let test_agent_z = "agent-test-zombie"
 let test_force_release_bypasses_assignee () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Orphan Task" ~priority:1 ~description:"" in
-    let _ = Coord.join config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Different agent cannot release without force *)
     let normal = Coord.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
@@ -1346,7 +1346,7 @@ let test_force_release_bypasses_assignee () =
 let test_force_done_bypasses_assignee () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Force Done Task" ~priority:1 ~description:"" in
-    let _ = Coord.join config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* Normal done by different agent fails *)
     let normal = Coord.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
@@ -1366,13 +1366,13 @@ let test_force_done_bypasses_assignee () =
 let test_audit_orphan_tasks () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
-    let _ = Coord.join config ~agent_name:test_agent_a ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     (* While agent is active, no orphans *)
     let orphans_before = Coord.audit_orphan_tasks config in
     Alcotest.(check int) "no orphans while active" 0 (List.length orphans_before);
     (* Remove agent file to simulate it disappearing *)
-    let _ = Coord.leave config ~agent_name:test_agent_a in
+    let _ = Coord.end_session config ~agent_name:test_agent_a in
     (* Now the task is orphaned (claimed by test_agent_a but agent is gone) *)
     let orphans_after = Coord.audit_orphan_tasks config in
     Alcotest.(check int) "one orphan detected" 1 (List.length orphans_after);
@@ -1395,7 +1395,7 @@ let test_audit_orphan_awaiting_verification_tasks () =
           Coord.add_task config ~title:"Verification Orphan Candidate"
             ~priority:1 ~description:""
         in
-        let _ = Coord.join config ~agent_name:test_agent_a ~capabilities:[] () in
+        let _ = Coord.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
         let _ = Coord.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
         match
           Coord.transition_task_r config ~agent_name:test_agent_a
@@ -1408,7 +1408,7 @@ let test_audit_orphan_awaiting_verification_tasks () =
             let orphans_before = Coord.audit_orphan_tasks config in
             Alcotest.(check int) "no verification orphans while active" 0
               (List.length orphans_before);
-            let _ = Coord.leave config ~agent_name:test_agent_a in
+            let _ = Coord.end_session config ~agent_name:test_agent_a in
             let orphans_after = Coord.audit_orphan_tasks config in
             Alcotest.(check int) "one verification orphan detected" 1
               (List.length orphans_after);
@@ -1421,7 +1421,7 @@ let test_audit_orphan_awaiting_verification_tasks () =
 let test_cleanup_zombies_releases_tasks () =
   with_test_env (fun config ->
     let _ = Coord.add_task config ~title:"Zombie Task" ~priority:1 ~description:"" in
-    let _ = Coord.join config ~agent_name:test_agent_z ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:test_agent_z ~capabilities:[] () in
     let _ = Coord.claim_task config ~agent_name:test_agent_z ~task_id:"task-001" in
     (* Manually set agent's last_seen to a very old timestamp to make it a zombie *)
     let agents_path = Filename.concat
@@ -1454,7 +1454,7 @@ let test_cleanup_zombies_releases_tasks () =
 let test_rejoin_preserves_identity () =
   with_test_env (fun config ->
     (* 1. Join: get a nickname *)
-    let join1 = Coord.join config ~agent_name:"agent_llm_a" ~capabilities:["code"] () in
+    let join1 = Coord.bind_session config ~agent_name:"agent_llm_a" ~capabilities:["code"] () in
     Alcotest.(check bool) "first join success" true (contains_check join1);
 
     (* Extract nickname from active_agents *)
@@ -1464,7 +1464,7 @@ let test_rejoin_preserves_identity () =
     ) state1.active_agents in
 
     (* 2. Leave *)
-    let leave_result = Coord.leave config ~agent_name:"agent_llm_a" in
+    let leave_result = Coord.end_session config ~agent_name:"agent_llm_a" in
     Alcotest.(check bool) "leave success" true (contains_check leave_result);
 
     (* Agent should be removed from active_agents but file preserved *)
@@ -1475,7 +1475,7 @@ let test_rejoin_preserves_identity () =
     Alcotest.(check bool) "not in active_agents after leave" false still_active;
 
     (* 3. Re-join: should get the SAME nickname *)
-    let join2 = Coord.join config ~agent_name:"agent_llm_a" ~capabilities:["code"; "review"] () in
+    let join2 = Coord.bind_session config ~agent_name:"agent_llm_a" ~capabilities:["code"; "review"] () in
     Alcotest.(check bool) "rejoin success" true (contains_check join2);
 
     let state3 = Coord.read_state config in
@@ -1489,11 +1489,11 @@ let test_rejoin_preserves_identity () =
 
 let test_rejoin_restores_active_status () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:["search"] () in
-    let _ = Coord.leave config ~agent_name:"provider_f" in
+    let _ = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:["search"] () in
+    let _ = Coord.end_session config ~agent_name:"provider_f" in
 
     (* Re-join *)
-    let result = Coord.join config ~agent_name:"provider_f" ~capabilities:["search"] () in
+    let result = Coord.bind_session config ~agent_name:"provider_f" ~capabilities:["search"] () in
     Alcotest.(check bool) "rejoin success" true (contains_check result);
 
     (* Should be back in active_agents *)
@@ -1506,7 +1506,7 @@ let test_rejoin_restores_active_status () =
 
 let test_multiple_rejoin_cycles () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"agent_code" ~capabilities:["impl"] () in
+    let _ = Coord.bind_session config ~agent_name:"agent_code" ~capabilities:["impl"] () in
     let state1 = Coord.read_state config in
     let nick1 = List.find (fun name ->
       String.length name > 5 && String.sub name 0 5 = "agent_code"
@@ -1514,8 +1514,8 @@ let test_multiple_rejoin_cycles () =
 
     (* Three leave/rejoin cycles *)
     for _ = 1 to 3 do
-      let _ = Coord.leave config ~agent_name:"agent_code" in
-      let _ = Coord.join config ~agent_name:"agent_code" ~capabilities:["impl"] () in
+      let _ = Coord.end_session config ~agent_name:"agent_code" in
+      let _ = Coord.bind_session config ~agent_name:"agent_code" ~capabilities:["impl"] () in
       ()
     done;
 
@@ -1555,11 +1555,11 @@ let read_event_log config =
 let test_rejoin_event_log () =
   with_test_env (fun config ->
     (* Join then leave to create Inactive agent *)
-    let _ = Coord.join config ~agent_name:"logcheck" ~capabilities:[] () in
-    let _ = Coord.leave config ~agent_name:"logcheck" in
+    let _ = Coord.bind_session config ~agent_name:"logcheck" ~capabilities:[] () in
+    let _ = Coord.end_session config ~agent_name:"logcheck" in
 
     (* Rejoin — should produce event log with "rejoin":true *)
-    let _ = Coord.join config ~agent_name:"logcheck" ~capabilities:[] () in
+    let _ = Coord.bind_session config ~agent_name:"logcheck" ~capabilities:[] () in
 
     (* Read event log and check for rejoin entry *)
     let events = read_event_log config in
@@ -1671,7 +1671,7 @@ let test_heartbeat_concurrent_start_stop () =
 let test_bug006_transition_with_unsuffixed_name () =
   with_test_env (fun config ->
     (* Join with canonical agent name to establish the identity recorded at claim time *)
-    let _ = Coord.join config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Coord.bind_session config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
     let _ = Coord.add_task config ~title:"BUG-006 Task" ~priority:1 ~description:"" in
     (* Claim using the canonical name — assignee is recorded as "keeper-coder-agent" *)
     (match Coord.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
@@ -1695,7 +1695,7 @@ let test_bug006_transition_with_unsuffixed_name () =
 
 let test_bug006_cancel_with_unsuffixed_name () =
   with_test_env (fun config ->
-    let _ = Coord.join config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Coord.bind_session config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
     let _ = Coord.add_task config ~title:"BUG-006 Cancel Task" ~priority:1 ~description:"" in
     (match Coord.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
@@ -1816,7 +1816,7 @@ let () =
     (* === Heartbeat & Zombie Detection Tests === *)
     "heartbeat", [
       Alcotest.test_case "updates last_seen" `Quick test_heartbeat_updates_lastseen;
-      Alcotest.test_case "default join keeps joined status" `Quick test_is_agent_session_bounded_after_default_join;
+      Alcotest.test_case "default join keeps joined status" `Quick test_is_agent_session_bound_after_default_join;
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "backend bootstrap preserves room state" `Quick test_room_bootstrap_preserves_backend_state;

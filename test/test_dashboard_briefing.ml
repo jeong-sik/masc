@@ -73,15 +73,15 @@ let write_pending_confirm config _session_id =
 
 let seed_coord config session_id =
   ignore (Lib.Coord.init config ~agent_name:(Some "fixture-root"));
-  ignore (Lib.Coord.join config ~agent_name:"mission-local64-smoke"
+  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"mission-local64-smoke"
             ~capabilities:[ "operator"; "fixture"; "local64" ] ());
-  ignore (Lib.Coord.join config ~agent_name:"llama-local-alpha"
+  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"llama-local-alpha"
             ~capabilities:[ "worker"; "local64"; "manager" ] ());
-  ignore (Lib.Coord.join config ~agent_name:"llama-local-beta"
+  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"llama-local-beta"
             ~capabilities:[ "worker"; "local64"; "metacog" ] ());
-  ignore (Lib.Coord.join config ~agent_name:"llama-local-gamma"
+  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"llama-local-gamma"
             ~capabilities:[ "worker"; "local64"; "executor" ] ());
-  ignore (Lib.Coord.join config ~agent_name:"llama-local-delta"
+  ignore ((* fire-and-forget: test fixture session setup. *) Lib.Coord.bind_session config ~agent_name:"llama-local-delta"
             ~capabilities:[ "worker"; "local64"; "observer" ] ());
   ignore
     (Lib.Coord.broadcast config ~from_agent:"mission-local64-smoke"

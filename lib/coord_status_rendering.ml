@@ -154,6 +154,7 @@ let deliverable_claims_completion ~task_id deliverable =
 
 let status_summary_string
     ~(ctx : context)
+    ~(session_bound : bool)
     ~(actual_name : string)
     ~(credential_state : credential_state)
     ~credential_blocked:_
@@ -198,8 +199,8 @@ let status_summary_string
        in_progress_count (max 0 state.message_seq));
   Buffer.add_string buf
     (Printf.sprintf
-       "🧭 You: agent=%s | owned=%s | current=%s\n"
-       actual_name (option_or_dash binding.primary_owned)
+       "🧭 You: agent=%s | session_bound=%s | owned=%s | current=%s\n"
+       actual_name (bool_flag session_bound) (option_or_dash binding.primary_owned)
        (option_or_dash current_task));
   Buffer.add_string buf
     (Printf.sprintf

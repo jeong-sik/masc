@@ -555,20 +555,18 @@ let rec run_worker_via_oas
   in
   let* () = Worker_container.save_worker_meta ~base_path ~worker_name meta in
   let workspace_path =
-           if String.trim meta.workspace_path <> ""
-           then meta.workspace_path
-           else base_path
-         in
-         run_existing_worker_agent
-           ~sw
-           ~base_path
-           ~meta
-           ~prompt
-           ~workspace_path
-           ~raw_trace
-           ?worker_run_id
-           ~tool_names_ref
-           agent
+    if String.trim meta.workspace_path <> "" then meta.workspace_path else base_path
+  in
+  run_existing_worker_agent
+    ~sw
+    ~base_path
+    ~meta
+    ~prompt
+    ~workspace_path
+    ~raw_trace
+    ?worker_run_id
+    ~tool_names_ref
+    agent
 
 and resume_worker_via_oas
       ~(sw : Eio.Switch.t)
@@ -640,30 +638,28 @@ and resume_worker_via_oas
     }
   in
   let agent =
-           Agent_sdk.Agent.resume
-             ~net
-             ~checkpoint
-             ~tools
-             ~options
-             ~config
-             ~context:shared_context
-             ()
-         in
-         let workspace_path =
-           if String.trim meta.workspace_path <> ""
-           then meta.workspace_path
-           else base_path
-         in
-         run_existing_worker_agent
-           ~sw
-           ~base_path
-           ~meta
-           ~prompt
-           ~workspace_path
-           ~raw_trace
-           ?worker_run_id
-           ~tool_names_ref
-           agent
+    Agent_sdk.Agent.resume
+      ~net
+      ~checkpoint
+      ~tools
+      ~options
+      ~config
+      ~context:shared_context
+      ()
+  in
+  let workspace_path =
+    if String.trim meta.workspace_path <> "" then meta.workspace_path else base_path
+  in
+  run_existing_worker_agent
+    ~sw
+    ~base_path
+    ~meta
+    ~prompt
+    ~workspace_path
+    ~raw_trace
+    ?worker_run_id
+    ~tool_names_ref
+    agent
 
 and run_existing_worker_agent
       ~(sw : Eio.Switch.t)

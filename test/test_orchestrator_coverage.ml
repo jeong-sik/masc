@@ -182,7 +182,7 @@ let test_should_orchestrate_with_task_and_agent () =
   with_initialized_room @@ fun config ->
   (* Add task and join as agent *)
   let _ = Coord.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
-  let _ = Coord.join config ~agent_name:"active-agent" ~capabilities:[] () in
+  let _ = Coord.bind_session config ~agent_name:"active-agent" ~capabilities:[] () in
   (* Active agent exists → should return false *)
   let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration with active agent" false result

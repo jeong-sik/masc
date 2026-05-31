@@ -87,7 +87,7 @@ let enabled () = Env_config.Operator.judge_enabled
 
 let interval_sec () = Env_config.Operator.judge_interval_sec
 
-let coord_ttl_sec () = Env_config.Operator.coord_ttl_sec
+let coord_ttl_sec () = Env_config.Operator.room_ttl_sec
 
 let session_ttl_sec () = Env_config.Operator.session_ttl_sec
 

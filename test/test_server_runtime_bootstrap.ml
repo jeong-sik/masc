@@ -2743,20 +2743,7 @@ let test_main_eio_invalid_cascade_stays_degraded_but_serves_dashboard () =
             Yojson.Safe.Util.(startup |> member "last_error" |> to_string)
           in
           Alcotest.(check bool) "last error mentions catalog validation" true
-            (String.starts_with ~prefix:"startup catalog validation failed:" startup_error);
-          let config_headers, config_body =
-            curl_request_capture ~output_dir:dir ~name:"cascade-config-invalid"
-              ~method_:"GET"
-              ~url:(Printf.sprintf "http://127.0.0.1:%d/api/v1/cascade/config" port)
-              ()
-          in
-          Alcotest.(check (option int)) "cascade config http 200" (Some 200)
-            (http_status_from_headers config_headers);
-          let config_json = parse_json_response_file config_body in
-          Alcotest.(check string) "dashboard cascade surface is live"
-            (Filename.concat dir ".masc/config/cascade.toml")
-            Yojson.Safe.Util.(
-              config_json |> member "config_path" |> to_string)))
+            (String.starts_with ~prefix:"startup catalog validation failed:" startup_error)))
 
 let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
   with_temp_dir "startup-partial-cascade" (fun dir ->
@@ -2829,23 +2816,7 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
           Alcotest.(check bool) "startup remains ready" true
             Yojson.Safe.Util.(startup |> member "state_ready" |> to_bool);
           Alcotest.(check bool) "last error remains unset" true
-            Yojson.Safe.Util.(startup |> member "last_error" |> to_string_option = None);
-          let config_headers, config_body =
-            curl_request_capture ~output_dir:dir ~name:"cascade-config-partial"
-              ~method_:"GET"
-              ~url:(Printf.sprintf "http://127.0.0.1:%d/api/v1/cascade/config" port)
-              ()
-          in
-          Alcotest.(check (option int)) "cascade config http 200" (Some 200)
-            (http_status_from_headers config_headers);
-          let config_json = parse_json_response_file config_body in
-          Alcotest.(check string) "partial validation stays validated"
-            "validated"
-            Yojson.Safe.Util.(
-              config_json |> member "validation_status" |> to_string);
-          Alcotest.(check int) "one invalid profile is surfaced" 1
-            Yojson.Safe.Util.(
-              config_json |> member "invalid_profiles" |> to_list |> List.length)))
+            Yojson.Safe.Util.(startup |> member "last_error" |> to_string_option = None)))
 
 let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
   with_temp_dir "startup-default-invalid-partial-cascade" (fun dir ->
@@ -2937,23 +2908,7 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
             (List.exists
                (fun error ->
                   contains_substring error "required default profile")
-               rejection_errors);
-          let config_headers, config_body =
-            curl_request_capture ~output_dir:dir ~name:"cascade-config-default-invalid"
-              ~method_:"GET"
-              ~url:(Printf.sprintf "http://127.0.0.1:%d/api/v1/cascade/config" port)
-              ()
-          in
-          Alcotest.(check (option int)) "cascade config http 200" (Some 200)
-            (http_status_from_headers config_headers);
-          let config_json = parse_json_response_file config_body in
-          Alcotest.(check string) "default-invalid partial catalog is invalid"
-            "invalid"
-            Yojson.Safe.Util.(
-              config_json |> member "validation_status" |> to_string);
-          Alcotest.(check int) "default-invalid profile is surfaced" 1
-            Yojson.Safe.Util.(
-              config_json |> member "invalid_profiles" |> to_list |> List.length)))
+               rejection_errors)))
 
 let () =
   Eio_main.run @@ fun env ->

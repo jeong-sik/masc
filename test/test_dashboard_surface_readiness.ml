@@ -190,7 +190,7 @@ let test_cognition_readiness_uses_cognition_read_model () =
              "live_spotcheck+logs+metrics"
              (surface |> member "verification_ref_bar" |> to_string))
 
-let test_runtime_readiness_uses_cascade_health_read_model () =
+let test_runtime_readiness_uses_provider_read_model () =
   let json = Dashboard_surface_readiness.json ~surface_id:"monitoring.runtime" () in
   let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
   match List.find_opt
@@ -206,7 +206,7 @@ let test_runtime_readiness_uses_cascade_health_read_model () =
            let open Yojson.Safe.Util in
            check string "live_spotcheck kind" "route"
              (ref_json |> member "kind" |> to_string);
-           check string "live_spotcheck value" "/api/v1/cascade/health"
+           check string "live_spotcheck value" "/api/v1/providers"
              (ref_json |> member "value" |> to_string);
            check string "surface verification ref labels"
              "live_spotcheck+logs+metrics+tool"
@@ -324,8 +324,8 @@ let () =
             test_live_spotcheck_keeps_script_values_as_scripts;
           test_case "cognition readiness uses cognition read model" `Quick
             test_cognition_readiness_uses_cognition_read_model;
-          test_case "runtime readiness uses cascade health read model" `Quick
-            test_runtime_readiness_uses_cascade_health_read_model;
+          test_case "runtime readiness uses provider read model" `Quick
+            test_runtime_readiness_uses_provider_read_model;
           test_case "code ide readiness uses ide presence read model" `Quick
             test_code_ide_readiness_uses_ide_presence_read_model;
           test_case "verification ref bar reflects declared refs" `Quick

@@ -57,7 +57,7 @@ type ctx =
       : ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
       -> ?productive_phase_elapsed_ms:int
       -> ?retry_phase_elapsed_ms:int
-      -> from_cascade:string
+      -> from_runtime_id:string
       -> retry:EC.degraded_retry
       -> outcome:Keeper_execution_receipt.cascade_rotation_outcome
       -> Agent_sdk.Error.sdk_error
@@ -511,7 +511,7 @@ let run (ctx : ctx)
                  Keeper_execution_receipt.Retry_setup_failed
                ~productive_phase_elapsed_ms
                ?retry_phase_elapsed_ms
-               ~from_cascade:execution.cascade_name
+               ~from_runtime_id:execution.cascade_name
                ~retry:degraded_retry
                ~outcome:
                  Keeper_execution_receipt.Rotation_setup_failed
@@ -549,7 +549,7 @@ let run (ctx : ctx)
                ?slot_release_at_phase
                ~productive_phase_elapsed_ms
                ?retry_phase_elapsed_ms
-               ~from_cascade:execution.cascade_name
+               ~from_runtime_id:execution.cascade_name
                ~retry:degraded_retry
                ~outcome:
                  Keeper_execution_receipt.Rotation_retry_scheduled
@@ -628,7 +628,7 @@ let run (ctx : ctx)
               Keeper_execution_receipt.Retry_budget_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
-            ~from_cascade:execution.cascade_name
+            ~from_runtime_id:execution.cascade_name
             ~retry:degraded_retry
             ~outcome:
               Keeper_execution_receipt.Rotation_budget_exhausted
@@ -656,7 +656,7 @@ let run (ctx : ctx)
               Keeper_execution_receipt.Productive_phase_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
-            ~from_cascade:execution.cascade_name
+            ~from_runtime_id:execution.cascade_name
             ~retry:degraded_retry
             ~outcome:
               Keeper_execution_receipt.Rotation_slot_phase_exhausted

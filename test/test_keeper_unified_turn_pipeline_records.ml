@@ -96,7 +96,7 @@ let test_provider_attempt_records_manifest_decision_contract () =
   let provenance : KRun.provider_attempt_provenance =
     { model_source = "named_cascade"
     ; resolved_model_source = "cascade_catalog_binding"
-    ; capability_source = "provider_config_from_cascade_catalog"
+    ; capability_source = "provider_config_from_runtime_id_catalog"
     ; fallback_authority = "declared_cascade"
     ; provider_source_cascade = Some "phase_buffer"
     }
@@ -196,7 +196,7 @@ let test_rotation_attempt_builder_records_retry_decision () =
       ~slot_release_at_phase:Receipt.Retry_scheduled
       ~productive_phase_elapsed_ms:1234
       ~retry_phase_elapsed_ms:56
-      ~from_cascade:(Cascade_name.of_string_exn "cascade.default")
+      ~from_runtime_id:(Cascade_name.of_string_exn "cascade.default")
       ~retry
       ~outcome:Receipt.Rotation_retry_scheduled
       err
@@ -205,12 +205,12 @@ let test_rotation_attempt_builder_records_retry_decision () =
     string
     "from cascade"
     "cascade.default"
-    (Cascade_name.to_string attempt.from_cascade);
+    (Cascade_name.to_string attempt.from_runtime_id);
   check
     string
     "to cascade"
     "cascade.tool_required_fallback"
-    (Cascade_name.to_string attempt.to_cascade);
+    (Cascade_name.to_string attempt.to_runtime_id);
   check
     string
     "fallback reason"

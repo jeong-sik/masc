@@ -79,8 +79,8 @@ val decode_tool_list : string -> string list option
 val decode_contract_violation_reason :
   string -> (string * string list * string list) option
 type runtime_rotation_attempt = {
-  from_cascade : string;
-  to_cascade : string;
+  from_runtime_id : string;
+  to_runtime_id : string;
   reason : Keeper_error_classify.degraded_retry_reason;
   outcome : runtime_rotation_outcome;
   slot_release_at_phase : slot_release_phase option;

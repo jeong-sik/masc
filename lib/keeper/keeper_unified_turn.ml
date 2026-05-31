@@ -400,7 +400,7 @@ let run_keeper_cycle
                      ?slot_release_at_phase
                      ?productive_phase_elapsed_ms
                      ?retry_phase_elapsed_ms
-                     ~(from_cascade : string)
+                     ~(from_runtime_id : string)
                      ~(retry : EC.degraded_retry)
                      ~(outcome : Keeper_execution_receipt.cascade_rotation_outcome)
                      (err : Agent_sdk.Error.sdk_error)
@@ -411,7 +411,7 @@ let run_keeper_cycle
                      ?slot_release_at_phase
                      ?productive_phase_elapsed_ms
                      ?retry_phase_elapsed_ms
-                     ~from_cascade
+                     ~from_runtime_id
                      ~retry
                      ~outcome
                      err

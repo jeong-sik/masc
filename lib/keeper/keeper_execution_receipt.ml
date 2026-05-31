@@ -29,8 +29,8 @@ let last_tool_name receipt =
 
 let runtime_rotation_attempt_to_json attempt =
   `Assoc
-    [ "from_cascade", `String (attempt.from_cascade)
-    ; "to_cascade", `String (attempt.to_cascade)
+    [ "from_runtime_id", `String (attempt.from_runtime_id)
+    ; "to_runtime_id", `String (attempt.to_runtime_id)
     ; ( "reason"
       , `String (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason) )
     ; "outcome", `String (runtime_rotation_outcome_to_string attempt.outcome)

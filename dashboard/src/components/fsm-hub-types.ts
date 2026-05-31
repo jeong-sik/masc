@@ -554,7 +554,7 @@ const OPERATOR_DISPOSITION_LABELS: Record<string, string> = {
   pass: '진행',
   pause_human: '운영자 일시정지',
   alert_exhausted: '경보 소진',
-  fail_open_next_cascade: '다음 cascade 로 fail-open',
+  fail_open_next_runtime_id: '다음 cascade 로 fail-open',
   pass_next_model: '다음 모델로 진행',
   user_cancelled: '사용자 취소',
   skipped: '건너뜀',

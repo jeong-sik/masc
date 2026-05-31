@@ -816,10 +816,10 @@ let append_execution_receipt
          | Some retry_cascade, Some reason ->
            [
              {
-               from_cascade =
+               from_runtime_id =
                  Cascade_name.of_string_exn
                    (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta);
-               to_cascade =
+               to_runtime_id =
                  Cascade_name.of_string_exn
                    retry_cascade;
                reason;

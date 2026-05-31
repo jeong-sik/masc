@@ -531,10 +531,10 @@ let append_execution_receipt
       cascade_rotation_attempts =
         [
           {
-            from_cascade =
+            from_runtime_id =
               Cascade_name.of_string_exn
                 Lib.(Keeper_config.default_runtime_id ());
-            to_cascade =
+            to_runtime_id =
               Cascade_name.of_string_exn
                 (Lib.Keeper_config.default_runtime_id ());
             reason = Lib.Keeper_error_classify.Turn_timeout;
@@ -873,7 +873,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (Lib.Keeper_config.default_runtime_id ())
               (trust_row |> member "trust" |> member "cascade"
              |> member "rotation_attempts" |> to_list |> List.hd
-             |> member "to_cascade" |> to_string);
+             |> member "to_runtime_id" |> to_string);
             check int "execution trust row preserves productive phase elapsed"
               174000
               (trust_row |> member "trust" |> member "cascade"

@@ -21,7 +21,7 @@ include module type of Runtime_error_classify
 
 (** {1 Cascade error helpers} *)
 
-val sdk_error_to_cascade_outcome :
+val sdk_error_to_runtime_id_outcome :
   Agent_sdk.Error.sdk_error -> Runtime_fsm.provider_outcome option
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool

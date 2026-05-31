@@ -1583,7 +1583,7 @@ let test_runtime_trace_lens_derives_clock_edges () =
              (`Assoc
                [
                  ("model_source", `String "named_cascade");
-                 ("capability_source", `String "provider_config_from_cascade_catalog");
+                 ("capability_source", `String "provider_config_from_runtime_id_catalog");
                  ("clock_refs", `Assoc [ ("edge_id", `String "edge-provider-start") ]);
                ])
            ());
@@ -2693,7 +2693,7 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                    started_row.M.decision);
               Alcotest.(check (option string))
                 "declared cascade attempt records capability source"
-                (Some "provider_config_from_cascade_catalog")
+                (Some "provider_config_from_runtime_id_catalog")
                 (json_string_member_opt
                    "capability_source"
                    started_row.M.decision);

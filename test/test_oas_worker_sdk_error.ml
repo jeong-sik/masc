@@ -136,12 +136,12 @@ let test_sdk_error_is_hard_quota_keeps_not_found_false () =
     (Keeper_turn_driver.sdk_error_is_hard_quota err)
 ;;
 
-let test_sdk_error_to_cascade_outcome_maps_not_found_to_404 () =
+let test_sdk_error_to_runtime_id_outcome_maps_not_found_to_404 () =
   let err =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest { message = {|{"detail":"Not Found"}|} })
   in
-  match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
+  match Keeper_turn_driver.sdk_error_to_runtime_id_outcome err with
   | Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.HttpError
@@ -152,12 +152,12 @@ let test_sdk_error_to_cascade_outcome_maps_not_found_to_404 () =
       (Cascade_fsm.provider_outcome_option_to_string outcome)
 ;;
 
-let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
+let test_sdk_error_to_runtime_id_outcome_keeps_invalid_request_as_400 () =
   let err =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest { message = {|{"detail":"Bad Request"}|} })
   in
-  match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
+  match Keeper_turn_driver.sdk_error_to_runtime_id_outcome err with
   | Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.HttpError
@@ -168,10 +168,10 @@ let test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400 () =
       (Cascade_fsm.provider_outcome_option_to_string outcome)
 ;;
 
-let test_sdk_error_to_cascade_outcome_cascades_model_access_denied () =
+let test_sdk_error_to_runtime_id_outcome_cascades_model_access_denied () =
   let message = "Invalid request: You do not have permission to access provider_k-5-code" in
   let err = Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message }) in
-  match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
+  match Keeper_turn_driver.sdk_error_to_runtime_id_outcome err with
   | Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.ProviderFailure
@@ -216,13 +216,13 @@ let test_sdk_error_is_model_access_denied_predicate () =
     (Keeper_turn_driver.sdk_error_is_model_access_denied ordinary)
 ;;
 
-let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
+let test_sdk_error_to_runtime_id_outcome_cascades_runtime_mcp_auth_config () =
   let detail = "cli_tool_a runtime MCP cannot carry keeper-bound auth headers" in
   let err =
     Agent_sdk.Error.Config
       (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
   in
-  match Keeper_turn_driver.sdk_error_to_cascade_outcome err with
+  match Keeper_turn_driver.sdk_error_to_runtime_id_outcome err with
   | Some (Cascade_fsm.Call_err (Llm_provider.Http_client.AcceptRejected { reason })) ->
     Alcotest.(check string) "reason preserved" detail reason
   | outcome ->
@@ -231,7 +231,7 @@ let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
       (Cascade_fsm.provider_outcome_option_to_string outcome)
 ;;
 
-let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
+let test_sdk_error_to_runtime_id_outcome_cascades_resumable_cli_session () =
   let detail =
     Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
   in
@@ -243,7 +243,7 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
          ; exit_code = Some 75
          })
   in
-  match Keeper_turn_driver.sdk_error_to_cascade_outcome structured with
+  match Keeper_turn_driver.sdk_error_to_runtime_id_outcome structured with
   | Some (Cascade_fsm.Call_err (Llm_provider.Http_client.NetworkError { message; kind }))
     ->
     Alcotest.(check string) "detail remains typed marker" detail message;
@@ -345,29 +345,29 @@ let cases =
       `Quick
       test_sdk_error_is_hard_quota_keeps_not_found_false
   ; Alcotest.test_case
-      "sdk_error_to_cascade_outcome maps NotFound to 404"
+      "sdk_error_to_runtime_id_outcome maps NotFound to 404"
       `Quick
-      test_sdk_error_to_cascade_outcome_maps_not_found_to_404
+      test_sdk_error_to_runtime_id_outcome_maps_not_found_to_404
   ; Alcotest.test_case
-      "sdk_error_to_cascade_outcome keeps ordinary InvalidRequest at 400"
+      "sdk_error_to_runtime_id_outcome keeps ordinary InvalidRequest at 400"
       `Quick
-      test_sdk_error_to_cascade_outcome_keeps_invalid_request_as_400
+      test_sdk_error_to_runtime_id_outcome_keeps_invalid_request_as_400
   ; Alcotest.test_case
-      "sdk_error_to_cascade_outcome cascades model access denial"
+      "sdk_error_to_runtime_id_outcome cascades model access denial"
       `Quick
-      test_sdk_error_to_cascade_outcome_cascades_model_access_denied
+      test_sdk_error_to_runtime_id_outcome_cascades_model_access_denied
   ; Alcotest.test_case
       "sdk_error_is_model_access_denied classifies model access denial"
       `Quick
       test_sdk_error_is_model_access_denied_predicate
   ; Alcotest.test_case
-      "sdk_error_to_cascade_outcome cascades runtime MCP auth config"
+      "sdk_error_to_runtime_id_outcome cascades runtime MCP auth config"
       `Quick
-      test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config
+      test_sdk_error_to_runtime_id_outcome_cascades_runtime_mcp_auth_config
   ; Alcotest.test_case
-      "sdk_error_to_cascade_outcome cascades resumable CLI session"
+      "sdk_error_to_runtime_id_outcome cascades resumable CLI session"
       `Quick
-      test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session
+      test_sdk_error_to_runtime_id_outcome_cascades_resumable_cli_session
   ; Alcotest.test_case
       "sdk_error_is_resumable_cli_session detects structured error"
       `Quick

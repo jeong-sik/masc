@@ -61,7 +61,7 @@ let prepare_run_context
   let max_tokens =
     match max_tokens with
     | Some t ->
-      Runtime_inference.cap_max_tokens_to_cascade_ceiling
+      Runtime_inference.cap_max_tokens_to_runtime_id_ceiling
         ~cascade_name
         ~source:"caller_override"
         t

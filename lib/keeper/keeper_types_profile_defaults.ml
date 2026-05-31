@@ -20,7 +20,6 @@ type keeper_profile_defaults = {
   proactive_enabled : bool option;
   proactive_idle_sec : int option;
   proactive_cooldown_sec : int option;
-  room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
@@ -79,7 +78,6 @@ let empty_keeper_profile_defaults =
     proactive_enabled = None;
     proactive_idle_sec = None;
     proactive_cooldown_sec = None;
-    room_signal_prompt_enabled = None;
     shards = None;
     allowed_paths = None;
     sandbox_profile = None;

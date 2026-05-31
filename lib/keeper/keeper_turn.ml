@@ -550,7 +550,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               in
               (* #9733: keeper_msg turn-completion is the same race shape
                  as the unified-turn failure path — heartbeat updates
-                 [last_seen]/[joined_room_ids] in parallel and bumps
+                 [last_seen] in parallel and bumps
                  [meta_version], so a bare [write_meta] loses the CAS
                  race and silently drops the turn payload (usage tokens,
                  trace_history, generation).  Use the same merged-CAS

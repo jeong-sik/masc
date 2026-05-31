@@ -180,11 +180,6 @@ let field_catalog_entries =
         ~field_effect:"Cooldown between proactive turns."
         ()
     ; field_catalog_entry
-        ~path:"keeper.room_signal_prompt_enabled"
-        ~typ:"boolean"
-        ~field_effect:"Whether room signal context is injected into keeper prompts."
-        ()
-    ; field_catalog_entry
         ~path:"keeper.shards"
         ~typ:"string[]"
         ~field_effect:"Persona-specific prompt shards applied after keeper creation."
@@ -481,8 +476,7 @@ let normalize_keeper_json ~handle keeper_json =
                         fields
                  in
                  let fields =
-                   [ "room_signal_prompt_enabled"
-                   ; "telemetry_feedback_enabled"
+                   [ "telemetry_feedback_enabled"
                    ; "always_approve"
                    ]
                    |> List.fold_left

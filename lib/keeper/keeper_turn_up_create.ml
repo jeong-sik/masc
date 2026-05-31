@@ -190,17 +190,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                      | Some tools -> normalize_tool_names tools
                      | None -> default_tool_access_of_meta_json ())
               in
-              let room_signal_prompt_enabled =
-                match keeper_room_signal_prompt_enabled_override () with
-                | Some value -> value
-                | None ->
-                    Option.value
-                      ~default:
-                        (tool_access_default_room_signal_prompt_enabled
-                           ~default:default_room_signal_prompt_enabled
-                           tool_access)
-                      p.profile_defaults.room_signal_prompt_enabled
-              in
               let tool_denylist =
                 resolve_tool_name_list
                   ~preferred:p.tool_denylist_opt
@@ -427,7 +416,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         tool_access;
         tool_denylist;
         mention_targets;
-        room_signal_prompt_enabled;
         proactive = {
           enabled = proactive_enabled;
           idle_sec = proactive_idle_sec;

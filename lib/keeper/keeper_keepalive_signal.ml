@@ -339,8 +339,7 @@ let wakeup_relevant_keeper_for_board_signal
              reply after a self-comment. Without this counter, operators
              cannot distinguish between a board post that legitimately
              had no addressee and one that was silently dropped by a
-             keeper whose [room_signal_prompt_enabled] / mention_targets
-             configuration is too narrow. *)
+             keeper whose mention_targets configuration is too narrow. *)
           (match wake_reason, entry.phase with
            | None, Keeper_state_machine.Running ->
              Prometheus.inc_counter

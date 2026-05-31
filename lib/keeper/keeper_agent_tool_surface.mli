@@ -135,7 +135,6 @@ type turn_affordance =
   | Board_curation
   | Board_post_or_comment
   | Message_sweep
-  | Reply_in_room
   | Task_claim
   | Task_audit
   | Task_verify

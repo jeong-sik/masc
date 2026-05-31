@@ -229,10 +229,8 @@ val metric_write_meta_cas_retry_total : string
     [Keeper_world_observation.board_signal_wake_reason] returns
     [None] — no explicit_mention, scope feed disabled, and no
     external reply after a self-comment. Discoverability for the
-    REPO_WAKE_UP audit finding: keepers with
-    [room_signal_prompt_enabled = false] (Minimal preset default)
-    silently drop board posts. Labels: keeper,
-    kind=post_created|comment_added. *)
+    REPO_WAKE_UP audit finding: keepers with narrow mention targets
+    can silently drop board posts. Labels: keeper, kind=post_created|comment_added. *)
 
 (** Total keeper OAS hook tool-output JSON parse failures. Labels:
     [surface] is the parser-owned hook surface. *)

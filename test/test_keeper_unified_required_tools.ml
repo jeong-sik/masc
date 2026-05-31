@@ -189,7 +189,6 @@ let test_satisfying_tools_for_turn_computes_from_affordances () =
       ~allowed_tool_names:[ "masc_claim_next"; "masc_status" ]
   in
   check (list string) "task_claim returns only allowed subset" [ "masc_claim_next" ] partial;
-  ()
   let empty =
     Surface.satisfying_tools_for_turn
       ~turn_affordances:[ "unknown_affordance" ]

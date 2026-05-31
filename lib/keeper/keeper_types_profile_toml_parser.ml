@@ -203,7 +203,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         proactive_enabled = bool_ "proactive_enabled";
         proactive_idle_sec = int_ "proactive_idle_sec";
         proactive_cooldown_sec = int_ "proactive_cooldown_sec";
-        room_signal_prompt_enabled = bool_ "room_signal_prompt_enabled";
         shards =
           (match strs "shards" with
            | [] -> None
@@ -260,7 +259,6 @@ let parsed_field_key_names =
   ; "proactive_enabled"
   ; "proactive_idle_sec"
   ; "proactive_cooldown_sec"
-  ; "room_signal_prompt_enabled"
   ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
@@ -309,7 +307,6 @@ let canonical_keeper_toml_key_names =
   ; "proactive_enabled"
   ; "proactive_idle_sec"
   ; "proactive_cooldown_sec"
-  ; "room_signal_prompt_enabled"
   ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
@@ -452,8 +449,6 @@ let merge_keeper_profile_defaults
     proactive_idle_sec = prefer overlay.proactive_idle_sec base.proactive_idle_sec;
     proactive_cooldown_sec =
       prefer overlay.proactive_cooldown_sec base.proactive_cooldown_sec;
-    room_signal_prompt_enabled =
-      prefer overlay.room_signal_prompt_enabled base.room_signal_prompt_enabled;
     shards = prefer overlay.shards base.shards;
     allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;

@@ -188,9 +188,8 @@ let register
      [Keeper_world_observation.board_signal_wake_reason] returns [None] — i.e. no \
      explicit_mention, scope feed disabled, and (for comments) no external reply after a \
      self-comment. Operators alert on this counter when keepers should be reacting to a \
-     known board signal: a high rate identifies keepers whose \
-     [room_signal_prompt_enabled] / mention-target configuration drops legitimate \
-     signals. Labels: keeper, kind=post_created|comment_added."
+     known board signal: a high rate identifies keepers whose mention-target \
+     configuration drops legitimate signals. Labels: keeper, kind=post_created|comment_added."
     `Counter;
   add
     Keeper_metrics.(to_string MetaJsonFailures)

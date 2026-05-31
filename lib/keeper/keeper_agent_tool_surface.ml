@@ -170,7 +170,6 @@ type turn_affordance =
   | Board_curation
   | Board_post_or_comment
   | Message_sweep
-  | Reply_in_room
   | Task_claim
   | Task_audit
   | Task_verify
@@ -179,7 +178,6 @@ let turn_affordance_of_string = function
   | "board_curation" -> Some Board_curation
   | "board_post_or_comment" -> Some Board_post_or_comment
   | "message_sweep" -> Some Message_sweep
-  | "reply_in_room" -> Some Reply_in_room
   | "task_claim" -> Some Task_claim
   | "task_audit" -> Some Task_audit
   | "task_verify" -> Some Task_verify
@@ -189,7 +187,6 @@ let turn_affordance_to_string = function
   | Board_curation -> "board_curation"
   | Board_post_or_comment -> "board_post_or_comment"
   | Message_sweep -> "message_sweep"
-  | Reply_in_room -> "reply_in_room"
   | Task_claim -> "task_claim"
   | Task_audit -> "task_audit"
   | Task_verify -> "task_verify"
@@ -199,7 +196,6 @@ let should_tool_gate_affordance = function
   | Board_curation
   | Board_post_or_comment
   | Message_sweep
-  | Reply_in_room
   | Task_audit
   | Task_verify -> true
 
@@ -223,9 +219,6 @@ let tools_for_gated_affordance = function
   | Board_post_or_comment ->
     [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
   | Message_sweep -> [ "masc_messages"; "masc_keeper_msg" ]
-  | Reply_in_room ->
-    [ "keeper_board_post"; "keeper_board_comment";
-      "masc_keeper_msg"; "masc_broadcast" ]
   | Task_claim ->
     [ "keeper_task_claim"; "masc_claim_next" ]
   | Task_audit ->
@@ -264,9 +257,6 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
          [ "keeper_board_comment"; "keeper_board_post" ]
        | Message_sweep ->
          [ "masc_keeper_msg"; "masc_broadcast" ]
-       | Reply_in_room ->
-         [ "keeper_board_comment"; "keeper_board_post";
-           "masc_keeper_msg"; "masc_broadcast" ]
        | Task_claim ->
          [ "keeper_task_claim"; "masc_claim_next" ]
        | Task_audit ->
@@ -443,12 +433,6 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
           && List.exists
                progress_tool_available
                [ "keeper_board_comment"; "keeper_board_post"; "masc_broadcast" ]
-  then Agent_sdk.Types.Any
-  else if has_turn_affordance Reply_in_room turn_affordances
-          && List.exists
-               progress_tool_available
-               [ "keeper_board_comment"; "keeper_board_post"; "masc_keeper_msg";
-                 "masc_broadcast" ]
   then Agent_sdk.Types.Any
   else if has_turn_affordance Task_audit turn_affordances
           && progress_tool_available "keeper_tasks_audit"

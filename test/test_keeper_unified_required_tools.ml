@@ -189,15 +189,7 @@ let test_satisfying_tools_for_turn_computes_from_affordances () =
       ~allowed_tool_names:[ "masc_claim_next"; "masc_status" ]
   in
   check (list string) "task_claim returns only allowed subset" [ "masc_claim_next" ] partial;
-  let multi =
-    Surface.satisfying_tools_for_turn
-      ~turn_affordances:[ "reply_in_room"; "board_post_or_comment" ]
-      ~allowed_tool_names:
-        [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast"; "masc_keeper_msg" ]
-  in
-  List.iter
-    (fun t -> check bool ("tool in multi-affordance result: " ^ t) true (List.mem t multi))
-    [ "keeper_board_post"; "keeper_board_comment"; "masc_keeper_msg"; "masc_broadcast" ];
+  ()
   let empty =
     Surface.satisfying_tools_for_turn
       ~turn_affordances:[ "unknown_affordance" ]

@@ -190,7 +190,7 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Provider_timeout _) -> true
   | Some
-      ( Keeper_turn_driver.Cascade_exhausted _
+      ( Keeper_turn_driver.Runtime_exhausted _
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
 
@@ -235,7 +235,7 @@ let provider_timeout_policy_decision
             ; liveness = Keeper_failure_policy.Recent_heartbeat
             }))
   | Some
-      ( Keeper_turn_driver.Cascade_exhausted _
+      ( Keeper_turn_driver.Runtime_exhausted _
       | Keeper_turn_driver.Capacity_backpressure _
       | Keeper_turn_driver.Resumable_cli_session _
 

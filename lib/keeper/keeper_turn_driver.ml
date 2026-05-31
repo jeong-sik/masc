@@ -499,13 +499,13 @@ let run_named
                   provider_rejections
             }
           in
-          Cascade_exhausted
+          Runtime_exhausted
             {
               cascade_name = error_cascade_name;
               reason = Keeper_meta_contract.No_tool_capable (Some detail);
             }
         | Provider_unavailable ->
-          Cascade_exhausted
+          Runtime_exhausted
             {
               cascade_name = error_cascade_name;
               reason = Keeper_meta_contract.No_providers_available;
@@ -801,7 +801,7 @@ let run_named
            continues without throttling. *)
         ()
   in
-  let cascade_exhausted_after_filter ~cycle =
+  let runtime_exhausted_after_filter ~cycle =
     let observation =
       Keeper_observation.cascade_observation_with_metrics
         ~cascade_name:error_cascade_name
@@ -813,7 +813,7 @@ let run_named
       ~outcome:`Failure ~observation:(Some observation) ();
     Error
       (sdk_error_of_masc_internal_error
-         (Cascade_exhausted
+         (Runtime_exhausted
             {
               cascade_name = error_cascade_name;
               reason = Keeper_meta_contract.Candidates_filtered_after_cycles;
@@ -847,7 +847,7 @@ let run_named
     match ordered with
     | [] when last_cycle ->
       record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:0 ~kind:Exhausted;
-      cascade_exhausted_after_filter ~cycle:n
+      runtime_exhausted_after_filter ~cycle:n
     | [] ->
       let backoff = Cascade_strategy.backoff_ms strategy.cycle ~cycle:(n + 1) in
       record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:backoff

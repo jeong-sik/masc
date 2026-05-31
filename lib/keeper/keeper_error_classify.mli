@@ -64,9 +64,9 @@ val extract_input_required
   :  Agent_sdk.Error.sdk_error
   -> Agent_sdk.Error.input_required option
 
-(** [true] when an error represents terminal cascade exhaustion or a
+(** [true] when an error represents terminal runtime exhaustion or a
     final accept-rejected result from the MASC OAS boundary. *)
-val is_cascade_exhausted_error : Agent_sdk.Error.sdk_error -> bool
+val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the rotation-cap fast-fail should fire: the error is a
     [required_tool_contract_violation], at least one cascade rotation has
@@ -91,7 +91,7 @@ type degraded_retry_reason =
   | Turn_timeout
   | Cascade_candidates_filtered
   | Required_tool_contract_violation
-  | Cascade_exhausted
+  | Runtime_exhausted
   | Capacity_backpressure
   | Rate_limit
   | Server_error

@@ -199,7 +199,7 @@ let operator_disposition_kind_to_string = function
 
 type operator_disposition_reason =
   | Reason_healthy
-  | Reason_cascade_exhausted
+  | Reason_runtime_exhausted
   | Reason_preflight_config_error
   | Reason_degraded_retry
   | Reason_cascade_fallback
@@ -214,7 +214,7 @@ type operator_disposition_reason =
 
 let operator_disposition_reason_to_string = function
   | Reason_healthy -> "healthy"
-  | Reason_cascade_exhausted -> "cascade_exhausted"
+  | Reason_runtime_exhausted -> "runtime_exhausted"
   | Reason_preflight_config_error -> "preflight_config_error"
   | Reason_degraded_retry -> "degraded_retry"
   | Reason_cascade_fallback -> "cascade_fallback"
@@ -256,14 +256,14 @@ let operator_disposition (receipt : t)
       string_contains_ci terminal_reason "config"
       || string_contains_ci terminal_reason "auth"
   in
-  (* Pre-typing, this branch also matched cascade_outcome="cascade_exhausted"
+  (* Pre-typing, this branch also matched cascade_outcome="runtime_exhausted"
      and "exhausted" — neither is in the producer's closed [cascade_outcome]
      set ([Cascade_passed_to_next_model] / [_completed] / [_not_observed] /
      [_not_dispatched]).  Those branches were unreachable workarounds; the
      typed migration drops them.  Cascade exhaustion still reaches this
-     branch via [terminal_reason="cascade_exhausted"]. *)
-  if String.equal terminal_reason "cascade_exhausted"
-  then Disp_alert_exhausted, Reason_cascade_exhausted
+     branch via [terminal_reason="runtime_exhausted"]. *)
+  if String.equal terminal_reason "runtime_exhausted"
+  then Disp_alert_exhausted, Reason_runtime_exhausted
   else if preflight_config_failure
   then Disp_pause_human, Reason_preflight_config_error
   else if

@@ -198,7 +198,7 @@ let run_keeper_cycle
             let failure_reason =
               match Keeper_turn_driver.classify_masc_internal_error err with
               | Some
-                  (Keeper_turn_driver.Cascade_exhausted
+                  (Keeper_turn_driver.Runtime_exhausted
                      { cascade_name
                      ; reason = Keeper_meta_contract.No_tool_capable _
                      ; _
@@ -207,7 +207,7 @@ let run_keeper_cycle
                   { cascade_name = cascade_name
                   ; detail = error_message
                   }
-              | _ when EC.is_cascade_exhausted_error err ->
+              | _ when EC.is_runtime_exhausted_error err ->
                 Keeper_turn_fsm.Failure_cascade_unavailable
                   { base = effective_cascade_runtime_name
                   ; resolved = None
@@ -664,7 +664,7 @@ let run_keeper_cycle
                        else
                          match Keeper_turn_driver.classify_masc_internal_error err with
                          | Some
-                             (Keeper_turn_driver.Cascade_exhausted
+                             (Keeper_turn_driver.Runtime_exhausted
                                 { cascade_name
                                 ; reason = Keeper_meta_contract.No_tool_capable _
                                 ; _

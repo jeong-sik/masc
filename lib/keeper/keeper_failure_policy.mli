@@ -55,7 +55,7 @@ type failure =
       ; liveness : liveness_evidence
       }
   | Transient_provider_failure
-  | Cascade_exhausted of { retryable : bool }
+  | Runtime_exhausted of { retryable : bool }
   | Required_tool_contract_violation
   | Fatal_environment of { detail : string option }
   | Stale_turn of { progress_seen : bool }

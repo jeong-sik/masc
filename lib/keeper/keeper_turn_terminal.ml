@@ -82,7 +82,7 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
         Keeper_turn_disposition.Turn_wall_clock_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       make ~source:"typed_error" "capacity_backpressure"
-    | Some (Keeper_turn_driver.Cascade_exhausted _) ->
+    | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       of_disposition
         ~source:"typed_error"
         Keeper_turn_disposition.Cascade_attempts_exhausted

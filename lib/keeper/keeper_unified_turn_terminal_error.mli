@@ -1,12 +1,12 @@
 (** RFC-0136 PR-4-b: terminal error side effects extracted from
     [keeper_unified_turn] retry loop.
 
-    Two paths based on [Keeper_error_classify.is_cascade_exhausted_error]:
+    Two paths based on [Keeper_error_classify.is_runtime_exhausted_error]:
 
-    - [Cascade_exhausted] — sets registry to [Turn_cascade_exhausted],
+    - [Runtime_exhausted] — sets registry to [Turn_runtime_exhausted],
       increments the [kcl_to_ktc_exhaustion] FSM edge counter, logs a
       structured WARN listing the attempted cascades, and increments
-      the [oas_execution_errors] counter with phase [Cascade_exhausted].
+      the [oas_execution_errors] counter with phase [Runtime_exhausted].
 
     - Otherwise — sets the turn phase to [Turn_finalizing], increments
       the [oas_execution_errors] counter with phase

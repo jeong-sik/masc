@@ -103,7 +103,7 @@ let keeper_agent_status (meta : keeper_meta) =
     Heartbeat health and turn health are independent in the keeper FSM. A
     successful heartbeat may recover [heartbeat_healthy], but it must not emit
     [Turn_succeeded] or reset provider/tool failure counters. Otherwise a
-    cascade_exhausted turn can be erased by the next keepalive heartbeat before
+    runtime_exhausted turn can be erased by the next keepalive heartbeat before
     auto-pause and diagnostics see the failure streak. *)
 let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : keeper_meta)
   =

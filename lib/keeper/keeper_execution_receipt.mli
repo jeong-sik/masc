@@ -275,7 +275,7 @@ val operator_disposition_kind_to_string : operator_disposition_kind -> string
     form is byte-compatible with the pre-typing string. *)
 type operator_disposition_reason =
   | Reason_healthy
-  | Reason_cascade_exhausted
+  | Reason_runtime_exhausted
   | Reason_preflight_config_error
   | Reason_degraded_retry
   | Reason_cascade_fallback

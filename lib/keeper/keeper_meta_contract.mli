@@ -136,7 +136,7 @@ type no_tool_capable_detail =
   ; provider_rejections : (string * string) list
   }
 
-type cascade_exhaustion_reason =
+type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
       (** RFC-0142 PR-2: typed surface for hostname-resolution failure.
@@ -155,21 +155,21 @@ type cascade_exhaustion_reason =
           provider timeouts. This variant is accepted only from typed
           envelopes; free-form messages stay [Other_detail]. *)
   | Capacity_exhausted
-      (** Typed surface for capacity-induced cascade exhaustion.
+      (** Typed surface for capacity-induced runtime exhaustion.
           Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
           through to [Other_detail message], losing auto-recovery eligibility
           and triggering the harsher failure policy. *)
   | No_tool_capable of no_tool_capable_detail option
-      (** Cascade exhausted because no configured provider can satisfy the
+      (** Runtime exhausted because no configured provider can satisfy the
           required tool set.  Previously a standalone [blocker_class] variant;
           reclassified here because the cascade rotation filtered all candidates
-          before dispatch — a semantic subset of cascade exhaustion.
+          before dispatch — a semantic subset of runtime exhaustion.
           The optional detail carries telemetry from the former
           [No_tool_capable_provider] variant of [masc_internal_error]. *)
   | Other_detail of string
 
 type blocker_class =
-  | Cascade_exhausted of cascade_exhaustion_reason
+  | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
@@ -199,8 +199,8 @@ val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator
     dashboards parse these for keeper supervisor alerting. *)
 
-val cascade_exhaustion_summary :
-  cascade_exhaustion_reason -> string
+val runtime_exhaustion_summary :
+  runtime_exhaustion_reason -> string
 (** Human-readable one-sentence summary per reason variant.
     Used in keeper supervisor logs + dashboard tooltips. *)
 
@@ -212,21 +212,21 @@ val blocker_class_continue_gate : blocker_class -> bool
     other blocker terminates the keeper.  Pinned at the
     contract seam — drift changes keeper recovery semantics. *)
 
-val cascade_exhaustion_reason_to_json :
-  cascade_exhaustion_reason -> Yojson.Safe.t
+val runtime_exhaustion_reason_to_json :
+  runtime_exhaustion_reason -> Yojson.Safe.t
 
-val cascade_exhaustion_reason_of_json :
-  Yojson.Safe.t -> cascade_exhaustion_reason option
+val runtime_exhaustion_reason_of_json :
+  Yojson.Safe.t -> runtime_exhaustion_reason option
 
 val blocker_class_of_serialized_string :
   string -> blocker_class option
 (** [blocker_class_of_serialized_string label] is the inverse
-    of {!blocker_class_to_string}.  [Cascade_exhausted _]
-    maps from the bare ["cascade_exhausted"] string to
-    [Cascade_exhausted (Other_detail "cascade_exhausted")] —
+    of {!blocker_class_to_string}.  [Runtime_exhausted _]
+    maps from the bare ["runtime_exhausted"] string to
+    [Runtime_exhausted (Other_detail "runtime_exhausted")] —
     the reason payload is not round-trippable through this
     function alone (callers needing the reason use
-    {!cascade_exhaustion_reason_of_json}).  Used by
+    {!runtime_exhaustion_reason_of_json}).  Used by
     {!Keeper_meta_json_parse} to decode persisted blocker
     state. *)
 
@@ -249,8 +249,8 @@ val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
     for [klass].  [detail] defaults to [""]. *)
 
 val blocker_info_to_json : blocker_info -> Yojson.Safe.t
-(** Round-trippable JSON encoding.  [Cascade_exhausted reason] uses
-    a structured object so the inner [cascade_exhaustion_reason] is
+(** Round-trippable JSON encoding.  [Runtime_exhausted reason] uses
+    a structured object so the inner [runtime_exhaustion_reason] is
     preserved across read/write cycles. *)
 
 val blocker_info_of_json : Yojson.Safe.t -> blocker_info option

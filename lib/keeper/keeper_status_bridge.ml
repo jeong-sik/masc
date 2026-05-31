@@ -115,8 +115,8 @@ let runtime_keepalive_started_at (config : Coord_utils.config) (meta : keeper_me
 ;;
 
 (* ── Structured blocker classification ──────────────────────── *)
-(* Types blocker_class, cascade_exhaustion_reason, blocker_class_to_string,
-   cascade_exhaustion_summary, blocker_class_continue_gate
+(* Types blocker_class, runtime_exhaustion_reason, blocker_class_to_string,
+   runtime_exhaustion_summary, blocker_class_continue_gate
    are defined in Keeper_types (keeper_types.ml). *)
 
 
@@ -369,7 +369,7 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
         true, Some "continue_gate_required", Some "approve_or_reject_continue"
       | Some _ when meta.paused ->
         true, Some "paused", Some "inspect_blocker_before_resume"
-      | Some blocker when is_cascade_exhausted_blocker_class blocker.blocker_class ->
+      | Some blocker when is_runtime_exhausted_blocker_class blocker.blocker_class ->
         true, Some "cascade_attempts_exhausted", Some "inspect_cascade_attempts"
       | Some blocker when is_no_tool_capable_blocker_class blocker.blocker_class ->
         true, Some "provider_tool_capability_missing", Some "inspect_provider_tool_lane"

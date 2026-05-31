@@ -139,7 +139,7 @@ let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
         }
       in
       Some
-        (Keeper_meta_contract.Cascade_exhausted
+        (Keeper_meta_contract.Runtime_exhausted
            {
              cascade_name;
              reason = Keeper_meta_contract.No_tool_capable (Some detail);

@@ -770,7 +770,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
            | Some blocker ->
                let severity =
                  match blocker with
-                 | "cascade_exhausted" | "completion_contract_violation" -> "bad"
+                 | "runtime_exhausted" | "completion_contract_violation" -> "bad"
                  | _ -> "warn"
                in
                Some

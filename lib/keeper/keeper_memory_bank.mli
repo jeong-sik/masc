@@ -27,7 +27,6 @@ type keeper_policy_observation =
   message_chars : int;
   total_turns : int;
   active_goal_count : int;
-  joined_room_count : int;
   last_turn_ago_s : float;
 }
 (** @see [Keeper_memory_policy.keeper_policy_observation] *)

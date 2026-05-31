@@ -51,7 +51,6 @@ type keeper_policy_observation = {
   message_chars: int;
   total_turns: int;
   active_goal_count: int;
-  joined_room_count: int;
   last_turn_ago_s: float;
 }
 
@@ -79,7 +78,6 @@ let keeper_policy_observation_of_room_message
     message_chars = String.length msg.content;
     total_turns = meta.runtime.usage.total_turns;
     active_goal_count = List.length meta.active_goal_ids;
-    joined_room_count = List.length meta.joined_room_ids;
     last_turn_ago_s;
   }
 

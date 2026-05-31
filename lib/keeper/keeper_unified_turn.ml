@@ -841,9 +841,8 @@ let run_keeper_cycle
                     ~terminal_reason
                     ();
                   (* #9769 root fix: heartbeat-field-merge prevents the
-             turn-failure retry from clobbering heartbeat-owned fields
-             (joined_room_ids, last_seen_seq_by_room), which was the
-             dominant source of the observed CAS race exhaustion after
+             turn-failure retry from clobbering heartbeat-owned fields metadata fields, which was the
+dominant source of the observed CAS race exhaustion after
              keeper OAS timeout. *)
                   (match
                      write_meta_with_merge

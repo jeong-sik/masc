@@ -31,7 +31,6 @@ type keeper_policy_observation = {
   message_chars : int;
   total_turns : int;
   active_goal_count : int;
-  joined_room_count : int;
   last_turn_ago_s : float;
 }
 (** Structured view of a single room message used by the alerting

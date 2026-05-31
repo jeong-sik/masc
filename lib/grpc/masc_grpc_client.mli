@@ -42,7 +42,7 @@ val close : t -> unit
 
 (** {1 Unary RPCs} *)
 
-(** Get current room status. *)
+(** Get current project status. *)
 val get_status :
   t ->
   sw:Eio.Switch.t ->

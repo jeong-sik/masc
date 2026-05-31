@@ -132,6 +132,6 @@ val root_is_initialized : config -> bool
     present). Backend-agnostic check. Cached with 1-second TTL. *)
 val is_initialized : config -> bool
 
-(** Invalidate the is_initialized cache. Call when room state
+(** Invalidate the is_initialized cache. Call when workspace state
     changes (init, reset, cleanup). *)
 val invalidate_initialized_cache : unit -> unit

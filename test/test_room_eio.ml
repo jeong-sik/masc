@@ -197,8 +197,8 @@ let () =
       Alcotest.test_case "get message" `Quick test_get_message;
     ];
     "state", [
-      Alcotest.test_case "room state" `Quick test_coord_state;
-      Alcotest.test_case "room status" `Quick test_room_status;
+      Alcotest.test_case "workspace state" `Quick test_coord_state;
+      Alcotest.test_case "project status" `Quick test_room_status;
     ];
     "health", [
       Alcotest.test_case "health check" `Quick test_health_check;

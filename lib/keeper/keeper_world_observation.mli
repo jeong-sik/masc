@@ -1,6 +1,6 @@
 (** Keeper_world_observation — Structured world state for keeper cycles.
 
-    Extracts and normalizes observation signals from coord state, keeper meta,
+    Extracts and normalizes observation signals from workspace state, keeper meta,
     and context so the unified prompt builder and turn runner can consume
     a single coherent snapshot instead of re-reading scattered sources.
 
@@ -211,7 +211,7 @@ val read_continuity_summary :
   meta:Keeper_meta_contract.keeper_meta ->
   string
 
-(** Build a world observation from coord state and keeper metadata.
+(** Build a world observation from workspace state and keeper metadata.
 
     Reads coord backlog, agent list, checkpoint context, economy state,
     and recent board activity.
@@ -244,7 +244,7 @@ val observe_direct_keeper_msg :
 
 (** Non-mutating probe for the smart-heartbeat gate.
 
-    Returns [true] when durable coord state already contains work that should
+    Returns [true] when durable workspace state already contains work that should
     force a keeper cycle even if the adaptive heartbeat would otherwise
     [Skip_idle]. Unlike {!observe}, this helper does not advance board or
     message cursors. *)

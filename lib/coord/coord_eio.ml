@@ -29,7 +29,7 @@ type agent_state = {
   status: string;
 }
 
-(** Coord state *)
+(** Workspace state *)
 type coord_state = {
   protocol_version: string;
   started_at: float;
@@ -269,7 +269,7 @@ let coord_state_of_json json =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
 
-(** Read room state *)
+(** Read workspace state *)
 let read_state config =
   match Backend.FileSystem.get config.backend state_key with
   | Ok json_str ->
@@ -285,13 +285,13 @@ let read_state config =
   | Error (Backend.ConnectionFailed m) -> Error ("Connection failed: " ^ m)
   | Error (Backend.BackendNotSupported m) -> Error ("Not supported: " ^ m)
 
-(** Write room state *)
+(** Write workspace state *)
 let write_state config state =
   let state = { state with last_updated = Time_compat.now () } in
   let json_str = Yojson.Safe.to_string (coord_state_to_json state) in
   Backend.FileSystem.set config.backend state_key json_str
 
-(** Atomically update room state with a transform function.
+(** Atomically update workspace state with a transform function.
     This is safe for multiple processes accessing the same state file.
     The transform receives current state (or default if not exists) and returns new state.
     Returns [Ok new_state] on success.
@@ -376,7 +376,7 @@ let register_agent config ~name ?(capabilities=[]) () =
   let json_str = Yojson.Safe.to_string (agent_state_to_json agent) in
   match Backend.FileSystem.set config.backend (agent_key name) json_str with
   | Ok () ->
-      (* Atomically update room state to include this agent *)
+      (* Atomically update workspace state to include this agent *)
       (match atomic_update_state config ~f:(fun state ->
         let active_agents =
           if List.mem name state.active_agents then state.active_agents
@@ -426,7 +426,7 @@ let get_agent config ~name =
 let remove_agent config ~name =
   match Backend.FileSystem.delete config.backend (agent_key name) with
   | Ok () ->
-      (* Atomically update room state to remove this agent *)
+      (* Atomically update workspace state to remove this agent *)
       (match atomic_update_state config ~f:(fun state ->
         let active_agents = List.filter (fun n -> n <> name) state.active_agents in
         { state with active_agents }

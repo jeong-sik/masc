@@ -1,4 +1,4 @@
-(** Coord coord bootstrap — initialize the default room state on
+(** Workspace bootstrap — initialize the default workspace state on
     first boot. *)
 
 open Masc_domain

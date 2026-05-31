@@ -1825,7 +1825,7 @@ let () =
       Alcotest.test_case "default join keeps joined status" `Quick test_is_agent_session_bound_after_default_join;
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
-      Alcotest.test_case "backend bootstrap preserves coord state" `Quick test_room_bootstrap_preserves_backend_state;
+      Alcotest.test_case "backend bootstrap preserves workspace state" `Quick test_room_bootstrap_preserves_backend_state;
       Alcotest.test_case "bootstrap ignores invalid coord id in flat mode" `Quick test_room_bootstrap_ignores_invalid_coord_id_in_flat_mode;
       Alcotest.test_case "read_backlog_r recovers from last good snapshot" `Quick
         test_read_backlog_r_recovers_from_last_good_snapshot;

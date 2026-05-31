@@ -1,6 +1,6 @@
 (** Coord Status - Coord status display.
 
-    Extracted from Coord module. Renders the full room status view
+    Extracted from Coord module. Renders the full project status view
     including agents, tasks, and message summary. *)
 
 open Masc_domain
@@ -8,7 +8,7 @@ open Coord_utils
 open Coord_state
 open Coord_backlog
 
-(** Get room status *)
+(** Get project status *)
 let status config =
   ensure_initialized config;
 

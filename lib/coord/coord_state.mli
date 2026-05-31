@@ -1,4 +1,4 @@
-(** Coord state — backlog, room state, and recovery helpers. *)
+(** Workspace state — backlog, workspace state, and recovery helpers. *)
 
 open Masc_domain
 open Coord_utils

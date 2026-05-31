@@ -11,7 +11,7 @@
     - {!Coord_utils_paths_backend} — base-path / data-path
       resolvers shared across coord backends.
     - {!Coord_utils_ops} — operations executed against the
-      resolved coord state (read / write / sync paths).
+      resolved workspace state (read / write / sync paths).
 
     Each sub-module has its own .mli; this facade re-exposes
     them as the [Coord_utils] entry point.  Adding a new entry

@@ -101,7 +101,7 @@ val messages_key : string
 (** Key prefix for locks namespace. *)
 val locks_key : string
 
-(** Key for room state. *)
+(** Key for workspace state. *)
 val state_key : string
 
 (** Key prefix for events namespace. *)
@@ -121,23 +121,23 @@ val event_key : int -> string
 
 (** {1 State Management} *)
 
-(** Return a fresh default room state. *)
+(** Return a fresh default workspace state. *)
 val default_coord_state : unit -> coord_state
 
-(** Serialize room state to JSON. *)
+(** Serialize workspace state to JSON. *)
 val coord_state_to_json : coord_state -> Yojson.Safe.t
 
-(** Deserialize room state from JSON. *)
+(** Deserialize workspace state from JSON. *)
 val coord_state_of_json : Yojson.Safe.t -> (coord_state, string) result
 
-(** Read room state from the backend (defaults if absent). *)
+(** Read workspace state from the backend (defaults if absent). *)
 val read_state : config -> (coord_state, string) result
 
-(** Write room state to the backend. *)
+(** Write workspace state to the backend. *)
 val write_state : config -> coord_state ->
   (unit, Backend.error) result
 
-(** Atomically read-modify-write room state.
+(** Atomically read-modify-write workspace state.
     [f] receives the current state and returns the new state. *)
 val atomic_update_state :
   config -> f:(coord_state -> coord_state) -> (coord_state, string) result
@@ -231,5 +231,5 @@ val state_health_counters : unit -> Yojson.Safe.t
 (** Run a health check against the backend. *)
 val health_check : config -> (Backend_types.health_result, string) result
 
-(** Return room status as a JSON object. *)
+(** Return project status as a JSON object. *)
 val status : config -> Yojson.Safe.t

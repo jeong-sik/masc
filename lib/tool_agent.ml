@@ -281,7 +281,7 @@ let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0)
     match agent_opt with
     | Some a -> [a]
     | None ->
-      (* Merge agents from metrics store AND coord state.
+      (* Merge agents from metrics store AND workspace state.
          Without this, agents active on the board but without task metrics
          are invisible to fitness queries (Issue #1861). *)
       let metrics_agents = Metrics_store_eio.get_all_agents ctx.config in

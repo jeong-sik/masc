@@ -910,7 +910,7 @@ let test_handle_request_tools_list_managed_profile () =
                    (List.mem "masc_tasks" names);
                  Alcotest.(check bool) "has canonical managed transition" true
                    (List.mem "masc_transition" names);
-                 Alcotest.(check bool) "omits managed coord status alias" false
+                 Alcotest.(check bool) "omits managed project status alias" false
                    (List.mem "masc_coord_status" names);
                  Alcotest.(check bool) "omits managed list tasks alias" false
                    (List.mem "masc_list_tasks" names);

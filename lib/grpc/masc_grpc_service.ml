@@ -107,7 +107,7 @@ let handle_broadcast (coord_config : Coord_utils_backend_setup.config) (bytes : 
   T.BroadcastResponse.to_bytes result
 ;;
 
-(** GetStatus handler: return current room state. *)
+(** GetStatus handler: return current workspace state. *)
 let handle_get_status (coord_config : Coord_utils_backend_setup.config) (_bytes : string)
   : string
   =
@@ -204,7 +204,7 @@ let active_heartbeat_streams = Atomic.make 0
 (** Active subscribe stream count (atomic for signal safety). *)
 let active_subscribe_streams = Atomic.make 0
 
-(** Compute directives for a keeper based on current room state.
+(** Compute directives for a keeper based on current workspace state.
     Returns a list of string directives to include in HeartbeatAck.
     Reads agent paused state and unclaimed tasks from the filesystem. *)
 let compute_directives

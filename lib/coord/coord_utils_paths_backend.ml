@@ -272,7 +272,7 @@ let is_initialized config =
       Atomic.set initialized_cache (Some { cached_result = result; cached_at = now });
       result
 
-(** Invalidate the is_initialized cache. Call this when room state
+(** Invalidate the is_initialized cache. Call this when workspace state
     changes (e.g., after init, reset, or cleanup operations). *)
 let invalidate_initialized_cache () =
   Atomic.set initialized_cache None

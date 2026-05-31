@@ -293,7 +293,7 @@ let execute_tool_ok fixture ~name ~arguments =
   else failwith (Printf.sprintf "setup tool failed for %s: %s" name ((Tool_result.message result)))
 
 let ensure_initialized fixture =
-  (* masc_init pruned from registry. Initialise the coord state directly so
+  (* masc_init pruned from registry. Initialise the workspace state directly so
      downstream tools can work. *)
   ignore
     (Masc_mcp.Coord.init fixture.state.coord_config

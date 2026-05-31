@@ -193,7 +193,7 @@ let of_tool_call ~agent_name ~tool_name ~call_id ~args_json : event list =
       Tool_call_end;
   ]
 
-(** Map MASC coord state to AG-UI STATE_SNAPSHOT *)
+(** Map MASC workspace state to AG-UI STATE_SNAPSHOT *)
 let of_coord_state (state : Yojson.Safe.t) : event =
   make_event ~thread_id:default_thread_id
     ~snapshot:(Some state)

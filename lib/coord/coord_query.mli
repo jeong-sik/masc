@@ -1,6 +1,6 @@
 (** Coord_query -- Task/agent/message query and listing functions.
 
-    Read-only operations on room state: raw list retrieval, orphan
+    Read-only operations on workspace state: raw list retrieval, orphan
     auditing, message collection, agent-session-bound checks, and formatted
     listing.
 

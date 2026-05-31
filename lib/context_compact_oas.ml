@@ -257,7 +257,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.t =
     OAS Dynamic is turn-scoped and message-scoped — it answers
     "given this conversation state, which single reduction to apply?".
     MASC Dynamic is world-scoped — it answers "given the multi-agent
-    coord state, which {i combination} of reductions is appropriate?".
+    workspace state, which {i combination} of reductions is appropriate?".
 
     They operate at different abstraction levels:
     - OAS Dynamic:  per-conversation, single strategy, inside [reduce]

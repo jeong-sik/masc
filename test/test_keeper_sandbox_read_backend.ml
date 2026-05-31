@@ -1275,7 +1275,7 @@ let run_tests ~clock () =
             test_docker_masc_config_binding_pins_container_runtime_paths;
           Alcotest.test_case "docker config mount and env args" `Quick
             test_docker_config_mount_and_env_args;
-          Alcotest.test_case "docker room state mount exposes safe subset" `Quick
+          Alcotest.test_case "docker workspace state mount exposes safe subset" `Quick
             test_docker_coord_state_mount_args_expose_safe_subset;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;

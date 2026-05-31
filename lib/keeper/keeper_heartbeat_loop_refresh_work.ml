@@ -35,21 +35,17 @@ let refresh_work_as_heartbeat
   if work_as_hb () && proactive_warmup_elapsed
   then (
     let hb_ok =
-      List.exists
-        (fun _room_id ->
-           try
-             ignore
-               (Coord.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name);
-             true
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Keeper.debug
-               "heartbeat failed for %s: %s"
-               meta_after_proactive.name
-               (Printexc.to_string exn);
-             false)
-        meta_after_proactive.joined_room_ids
+      try
+        ignore (Coord.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name);
+        true
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Keeper.debug
+          "heartbeat failed for %s: %s"
+          meta_after_proactive.name
+          (Printexc.to_string exn);
+        false
     in
     if hb_ok
     then (

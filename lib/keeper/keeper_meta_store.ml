@@ -309,8 +309,7 @@ let is_version_conflict_error msg =
 
 (* #9769 root fix: CAS retry with explicit field ownership. The
    turn-failure/cycle path uses [Keeper_meta_merge.heartbeat_fields_from_disk]
-   so its retry does not clobber heartbeat-owned fields ([joined_room_ids],
-   [last_seen_seq_by_room]). *)
+   now only carries the disk meta_version forward. *)
 let write_meta_with_merge
       ?(max_retries = 3)
       ~(merge : latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta)

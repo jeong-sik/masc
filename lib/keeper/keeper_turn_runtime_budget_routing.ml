@@ -41,11 +41,8 @@ let record_turn_failure_stress
       ~(err : Agent_sdk.Error.sdk_error)
   : unit
   =
-  let room_id =
-    match meta.joined_room_ids with
-    | room_id :: _ -> room_id
-    | [] -> ""
-  in
+  let room_id = "" in
+  Agent_stress.record
   Agent_stress.record
     { agent_name = meta.name
     ; room_id

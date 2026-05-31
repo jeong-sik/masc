@@ -360,24 +360,6 @@ let resolve_max_context_resolution_of_meta (m : keeper_meta)
   resolve_max_context_resolution
     ~requested_override:m.max_context_override labels
 
-let room_cursor_for meta room_id =
-  meta.last_seen_seq_by_room
-  |> List.find_map (fun (rid, seq) -> if rid = room_id then Some seq else None)
-  |> Option.value ~default:0
-
-let set_room_cursor meta room_id seq =
-  let kept =
-    meta.last_seen_seq_by_room
-    |> List.filter (fun (rid, _) -> rid <> room_id)
-  in
-  {
-    meta with
-    last_seen_seq_by_room = dedupe_keep_order ((room_id, seq) :: kept);
-  }
-
-let room_ids_for_meta _config (_meta : keeper_meta) : string list =
-  [ "default" ]
-
 let keeper_room_capabilities (_meta : keeper_meta) =
   [ "keeper" ]
 
@@ -402,48 +384,23 @@ type room_presence_error = {
 
 let ensure_keeper_room_presence config (meta : keeper_meta)
   : keeper_meta * room_presence_error list =
-  let room_ids = room_ids_for_meta config meta in
   let capabilities = keeper_room_capabilities meta in
-  let successful_rooms, errors =
-    List.fold_left
-      (fun (acc_rooms, acc_errs) room_id ->
-        try
-          let joined =
-            Coord.is_agent_joined config ~agent_name:meta.agent_name
-          in
-          if not joined
-          then begin
-            Coord.ensure_room_bootstrap config;
-            ignore
-              (Coord.join config ~agent_name:meta.agent_name
-                 ~capabilities ())
-          end;
-          if joined && keeper_room_capabilities_need_sync config meta capabilities
-          then
-            ignore
-              (Coord.update_agent_r config ~agent_name:meta.agent_name
-                 ~capabilities ());
-          ignore
-            (Coord.heartbeat config ~agent_name:meta.agent_name);
-          room_id :: acc_rooms, acc_errs
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          let exn_msg = Printexc.to_string exn in
-          Log.Keeper.error
-            "room_presence_join_failed keeper=%s room=%s exn=%s"
-            meta.name room_id exn_msg;
-          acc_rooms, { room_id; exn_msg } :: acc_errs)
-      ([], [])
-      room_ids
-  in
-  let errors = List.rev errors in
-  let synced = { meta with joined_room_ids = List.rev successful_rooms } in
-  if room_ids <> [] && successful_rooms = [] then
-    Log.Keeper.error
-      "room_presence_all_failed keeper=%s rooms=%d errors=%d — keeper has no room presence"
-      meta.name (List.length room_ids) (List.length errors);
-  synced, errors
+  try
+    let joined = Coord.is_agent_joined config ~agent_name:meta.agent_name in
+    if not joined then begin
+      Coord.ensure_room_bootstrap config;
+      ignore (Coord.join config ~agent_name:meta.agent_name ~capabilities ())
+    end;
+    if joined && keeper_room_capabilities_need_sync config meta capabilities then
+      ignore (Coord.update_agent_r config ~agent_name:meta.agent_name ~capabilities ());
+    ignore (Coord.heartbeat config ~agent_name:meta.agent_name);
+    meta, []
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    let exn_msg = Printexc.to_string exn in
+    Log.Keeper.error "workspace_presence_failed keeper=%s exn=%s" meta.name exn_msg;
+    meta, [ { room_id = ""; exn_msg } ]
 
-let exact_direct_mention_present ~(targets : string list) (content : string) :
+let exact_direct_mention_presentlet exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
 

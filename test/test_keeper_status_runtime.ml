@@ -739,7 +739,7 @@ let test_status_bridge_classifies_oas_agent_execution_timeout () =
 let test_runtime_blocker_summary_is_not_reparsed_from_masc_error_payload () =
   let summary =
     "Internal error: [masc_oas_error] \
-     {\"kind\":\"capacity_backpressure\",\"cascade_name\":\"primary\",\"source\":\"client_capacity\",\"detail\":\"slot full\",\"retry_after_sec\":null}"
+     {\"kind\":\"capacity_backpressure\",\"runtime_id\":\"primary\",\"source\":\"client_capacity\",\"detail\":\"slot full\",\"retry_after_sec\":null}"
   in
   let cascade_surface =
     KSB.runtime_blocker_surface_of_typed_class

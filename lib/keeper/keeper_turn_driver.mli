@@ -1,6 +1,6 @@
-(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
+(** Keeper_turn_driver — MASC named-runtime and model-label execution entry points.
 
-    Public API for running OAS agents through MASC-managed named cascade
+    Public API for running OAS agents through MASC-managed named runtime
     profiles ([run_named]) or explicit model label ([run_model_by_label]),
     with optional MASC tool bridging variants.
 
@@ -19,7 +19,7 @@
 
 include module type of Runtime_error_classify
 
-(** {1 Cascade error helpers} *)
+(** {1 Runtime error helpers} *)
 
 val sdk_error_to_runtime_id_outcome :
   Agent_sdk.Error.sdk_error -> Runtime_fsm.provider_outcome option

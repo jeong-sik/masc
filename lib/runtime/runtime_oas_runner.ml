@@ -36,7 +36,7 @@ let eio_context_error_to_sdk_error detail =
 
 let cascade_catalog_error_to_sdk_error detail =
   Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig { field = "cascade_name"; detail })
+    (Agent_sdk.Error.InvalidConfig { field = "runtime_id"; detail })
 
 (** Resolve cascade provider configs via MASC Cascade_config.
     Returns Provider_config.t list for the downstream OAS runtime,

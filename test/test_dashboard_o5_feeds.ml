@@ -76,7 +76,6 @@ let test_agent_stress_feed_exposes_board_rows () =
   let event =
     Agent_stress.event_to_json
       { agent_name = "sangsu"
-      ; room_id = "default"
       ; kind =
           Agent_stress.Turn_failure
             { consecutive = 2

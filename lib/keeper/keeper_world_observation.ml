@@ -625,7 +625,7 @@ let should_inject_entropic_oscillation ~since_last_scheduled_autonomous ~draw_pe
 ;;
 
 let keeper_cycle_decision
-      ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_cascade)
+      ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
@@ -763,20 +763,20 @@ let keeper_cycle_decision
                   || backlog_elapsed
                   || (idle_gate_elapsed && cooldown_elapsed)))
         in
-        let cascade_name = runtime_id_of_meta meta in
+        let runtime_id = runtime_id_of_meta meta in
         let provider_cooldown_remaining_sec =
           if should_run
           then
             provider_cooldown_remaining_sec
-              ~cascade_name:(cascade_name)
+              ~runtime_id:(runtime_id)
           else None
         in
         let provider_cooldown_fail_open =
           match provider_cooldown_remaining_sec with
           | Some _ ->
             fallback_cascade_for_provider_cooldown
-              ~base_runtime_id:cascade_name
-              ~effective_runtime_id:cascade_name
+              ~base_runtime_id:runtime_id
+              ~effective_runtime_id:runtime_id
           | None -> None
         in
         let verdict =

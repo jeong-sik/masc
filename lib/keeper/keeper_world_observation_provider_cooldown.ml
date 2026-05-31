@@ -24,12 +24,12 @@ let fallback_cascade_for_provider_cooldown
   then None
   else Some (Keeper_config.default_runtime_id ())
 
-let provider_cooldown_remaining_sec_for_cascade
-      ~(cascade_name : string)
+let provider_cooldown_remaining_sec_for_runtime
+      ~(runtime_id : string)
   : int option
   =
   let runtime_health_keys =
-    Provider_runtime_projection.default_execution_model_strings cascade_name
+    Provider_runtime_projection.default_execution_model_strings runtime_id
     |> Runtime_candidate.runtime_health_keys_of_labels
   in
   match runtime_health_keys with
@@ -64,7 +64,7 @@ let provider_cooldown_remaining_sec_for_cascade
         | first :: rest -> Some (List.fold_left min first rest)))
 
 let provider_capacity_blocked_task_count
-      ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_cascade)
+      ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
       ~(meta : keeper_meta)
       ~(claimable_task_count : int)
       ()
@@ -72,15 +72,15 @@ let provider_capacity_blocked_task_count
   if claimable_task_count <= 0
   then 0
   else (
-    let cascade_name = runtime_id_of_meta meta in
+    let runtime_id = runtime_id_of_meta meta in
     match
       provider_cooldown_remaining_sec
-        ~cascade_name:(cascade_name)
+        ~runtime_id:(runtime_id)
     with
     | Some _
       when Option.is_none
              (fallback_cascade_for_provider_cooldown
-                ~base_runtime_id:cascade_name
-                ~effective_runtime_id:cascade_name) ->
+                ~base_runtime_id:runtime_id
+                ~effective_runtime_id:runtime_id) ->
       claimable_task_count
     | Some _ | None -> 0)

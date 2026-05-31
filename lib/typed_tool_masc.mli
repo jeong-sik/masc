@@ -26,7 +26,6 @@ val create :
   ?is_destructive:bool ->
   ?is_idempotent:bool ->
   ?visibility:Tool_catalog.visibility ->
-  ?requires_join:bool ->
   ?effect_domain:Tool_catalog.effect_domain ->
   unit ->
   ('input, 'output) t

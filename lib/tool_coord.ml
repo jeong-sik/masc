@@ -632,47 +632,32 @@ let handle_reset ~tool_name ~start_time ctx args =
 (* ── State inspection (shared by status and check) ──────── *)
 
 type agent_state =
-  { room_set : bool
-  ; joined : bool
-  ; task_claimed : bool
+  { task_claimed : bool
   ; current_task_set : bool
   }
 
 let inspect_state ctx =
-  let room_set = Coord.is_initialized ctx.config in
-  let joined =
-    if room_set
-    then (
-      try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with
-      | Sys_error _ | Yojson.Json_error _ -> false)
-    else false
-  in
   let binding =
-    if joined
-    then (
-      let actual_name = safe_resolve_agent_name ctx ~joined in
-      let matches_you assignee =
-        String.equal assignee ctx.agent_name || String.equal assignee actual_name
-      in
-      let assigned_task_ids =
-        Coord.get_tasks_raw ctx.config
-        |> Coord_status_rendering.assigned_task_ids ~matches_you
-      in
-      resolve_current_binding
-        ~assigned_task_ids
-        ~planning_current:(safe_current_task ctx ~joined))
-    else resolve_current_binding ~assigned_task_ids:[] ~planning_current:None
+    let actual_name = safe_resolve_agent_name ctx ~joined:true in
+    let matches_you assignee =
+      String.equal assignee ctx.agent_name || String.equal assignee actual_name
+    in
+    let assigned_task_ids =
+      Coord.get_tasks_raw ctx.config
+      |> Coord_status_rendering.assigned_task_ids ~matches_you
+    in
+    resolve_current_binding
+      ~assigned_task_ids
+      ~planning_current:(safe_current_task ctx ~joined:true)
   in
   let task_claimed = Stdlib.List.length binding.assigned_task_ids > 0 in
   let current_task_set = binding.current_task_set in
-  { room_set; joined; task_claimed; current_task_set }
+  { task_claimed; current_task_set }
 ;;
 
 let state_to_json st =
   `Assoc
-    [ "room_set", `Bool st.room_set
-    ; "joined", `Bool st.joined
-    ; "task_claimed", `Bool st.task_claimed
+    [ "task_claimed", `Bool st.task_claimed
     ; "current_task_set", `Bool st.current_task_set
     ; "session_active", `Bool false
     ]
@@ -730,9 +715,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | "masc_check" ->
     let inspect ctx =
       let s = inspect_state ctx in
-      { Coord_assertions.room_set = s.room_set
-      ; joined = s.joined
-      ; task_claimed = s.task_claimed
+      { Coord_assertions.task_claimed = s.task_claimed
       ; current_task_set = s.current_task_set
       }
     in
@@ -755,8 +738,6 @@ let schemas = Tool_schemas_coord.schemas
 let tool_spec_read_only = [ "masc_status"; "masc_goal_list" ];;
 
 let tool_spec_system_internal = [ "masc_reset" ]
-let tool_spec_requires_join = [ "masc_heartbeat" ]
-
 let tool_required_permission = function
   | "masc_status"
   | "masc_check"
@@ -779,7 +760,6 @@ let () =
             ~module_tag:Tool_dispatch.Mod_room
             ~input_schema:s.input_schema
             ~handler_binding:Tag_dispatch
-            ~requires_join:(List.mem s.name tool_spec_requires_join)
             ~is_read_only:(List.mem s.name tool_spec_read_only)
             ~is_idempotent:(List.mem s.name tool_spec_read_only)
             ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)

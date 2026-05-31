@@ -5,7 +5,7 @@
     Combines:
     - {!Tool_catalog}: visibility, lifecycle, metadata
     - {!Tool_registry}: call statistics (count, success, failure, duration)
-    - {!Tool_dispatch}: registration status, read-only, join-required *)
+    - {!Tool_dispatch}: registration status, read-only *)
 
 (** {1 Types} *)
 
@@ -15,7 +15,6 @@ type tool_info = {
   lifecycle : Tool_catalog.lifecycle;
   is_registered : bool;
   is_read_only : bool;
-  is_join_required : bool;
   call_stats : Tool_registry.call_stats option;
 }
 

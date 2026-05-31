@@ -352,8 +352,6 @@ let inline_tool_required_permission name : Masc_domain.permission option =
 let inline_tool_read_only =
   [ "masc_messages"; "masc_approval_get"; "masc_approval_pending" ]
 
-let inline_tool_requires_join = [ "masc_broadcast" ]
-
 let inline_tool_requires_actor_binding = []
 
 let inline_tool_mcp_context_required =
@@ -383,7 +381,6 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only
            ~is_idempotent:is_read_only
-           ~requires_join:(List.mem name inline_tool_requires_join)
            ~mcp_context_required:(List.mem name inline_tool_mcp_context_required)
            ~requires_actor_binding:(List.mem name inline_tool_requires_actor_binding)
            ~effect_domain:(inline_tool_effect_domain name)

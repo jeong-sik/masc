@@ -151,20 +151,6 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
      [time() - masc_keeper_supervisor_last_sweep_unixtime > 90]
      means the sweep is stalled (default sweep interval is 30s). *)
 
-(* #9770: counter for the [join_required] guard firing in
-   [Mcp_server_eio_execute].  Production observed agents calling
-   [masc_claim_next] (and similar) before session binding; the
-   guard returns a polite error message but no fleet-wide signal
-   exists for "how often does this happen, and which agent / tool
-   pair is most affected".  Labels:
-     [tool]: tool name that hit the guard (bounded by tool surface
-       size, ~50).
-     [agent_name]: agent that called the tool (bounded by fleet
-       size, ~10).
-     [reason]: ["room_uninitialized" | "agent_not_joined"].
-   Cardinality: ~50 × ~10 × 2 = ~1000 series, safe for Prometheus. *)
-let metric_tool_join_required_guard = "masc_tool_join_required_guard_total"
-
 (* tool_metrics_persist write queue overflow.
    Counts JSONL records dropped because the bounded write queue is full.
    No labels (single source). Existing in-memory [dropped_full_queue]

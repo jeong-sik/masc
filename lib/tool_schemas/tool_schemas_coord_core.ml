@@ -15,7 +15,7 @@ open Masc_domain
     compilation in [assertion_kind_to_string] AND fails the test here,
     instead of silently dropping from the JSON Schema. *)
 let assertion_kind_enum_strings =
-  [ "room_set"; "joined"; "task_claimed"; "current_task_set" ]
+  [ "task_claimed"; "current_task_set" ]
 
 let schemas : tool_schema list = [
   {
@@ -49,7 +49,7 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
   };
   {
     name = "masc_check";
-    description = "Assert preconditions on your agent state (joined, task claimed, current task set, etc). \
+    description = "Assert task preconditions on your agent state (task claimed, current task set, etc). \
 Call when you want to confirm prerequisites before starting work; returns pass/fail with fix hints.";
     input_schema = `Assoc [
       ("type", `String "object");
@@ -62,7 +62,7 @@ Call when you want to confirm prerequisites before starting work; returns pass/f
              `List
                (List.map (fun s -> `String s) assertion_kind_enum_strings));
           ]);
-          ("description", `String "List of state assertions to check. Each returns true/false with a fix hint if false. Canonical readiness key is 'room_set'.");
+          ("description", `String "List of task-state assertions to check. Each returns true/false with a fix hint if false.");
         ]);
       ]);
       ("required", `List [`String "assertions"]);

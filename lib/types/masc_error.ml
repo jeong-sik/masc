@@ -112,15 +112,10 @@ end
 module Agent_error = struct
   type t =
     | NotFound of string
-    | NotJoined of string
-    | AlreadyJoined of string
     | InvalidName of string
 
   let to_string = function
     | NotFound name -> Printf.sprintf "[AgentError] Agent not found: %s" name
-    | NotJoined name ->
-        Printf.sprintf "[AgentError] Agent not joined: %s. Use masc_start first." name
-    | AlreadyJoined name -> Printf.sprintf "[AgentError] Agent already joined: %s" name
     | InvalidName reason -> Printf.sprintf "[AgentError] Invalid agent name: %s" reason
 end
 
@@ -241,9 +236,7 @@ let code = function
          | Task_error.NotClaimed _
          | Task_error.InvalidState _
          | Task_error.InvalidId _) -> 400
-  | Agent (Agent_error.NotJoined _
-          | Agent_error.AlreadyJoined _
-          | Agent_error.InvalidName _) -> 400
+  | Agent (Agent_error.InvalidName _) -> 400
   | Portal (Portal_error.NotOpen _
            | Portal_error.AlreadyOpen _
            | Portal_error.Closed _) -> 400

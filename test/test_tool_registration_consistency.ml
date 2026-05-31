@@ -4,6 +4,15 @@ module Types = Masc_domain
 
 open Masc_mcp
 
+let policy_config_for_validation () =
+  Option.map
+    (fun cfg ->
+      { Tool_registration_check.configured_tools =
+          Keeper_tool_policy_config.all_group_tools cfg
+          @ Keeper_tool_policy_config.all_masc_tools cfg
+      })
+    (Keeper_tool_policy.policy_config_for_validation ())
+
 (* ── All schema tool names ─────────────────────────────────────── *)
 
 let all_schema_names =
@@ -231,7 +240,8 @@ let test_unsharded_default_tools_not_orphaned () =
   | Error msg ->
       Alcotest.failf "failed to load tool policy config: %s" msg
   | Ok () ->
-      let validation = Tool_registration_check.validate () in
+      let policy_config = policy_config_for_validation () in
+      let validation = Tool_registration_check.validate ?policy_config () in
       List.iter (fun name ->
         if List.mem name validation.Tool_registration_check.orphan_toml then
           Alcotest.failf
@@ -245,7 +255,8 @@ let test_tool_registration_check_does_not_depend_on_injected_masc_schemas () =
       Alcotest.failf "failed to load tool policy config: %s" msg
   | Ok () ->
       Agent_tool_dispatch_runtime.with_masc_schemas_for_test [] (fun () ->
-          let validation = Tool_registration_check.validate () in
+          let policy_config = policy_config_for_validation () in
+          let validation = Tool_registration_check.validate ?policy_config () in
           let masc_orphans =
             validation.Tool_registration_check.orphan_toml
             |> List.filter (String.starts_with ~prefix:"masc_")

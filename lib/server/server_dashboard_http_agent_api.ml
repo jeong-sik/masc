@@ -40,7 +40,11 @@ let add_agent_api_routes router =
   (* Tool metrics -- unified registry stats for dashboard *)
   |> Http.Router.get "/api/v1/tool-metrics" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let json = Tool_unified.summary_report () in
+         let json =
+           Tool_unified.summary_report
+             ~runtime_metrics:Keeper_observation.runtime_metrics_json
+             ()
+         in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
 

@@ -120,7 +120,7 @@ let credential_state (ctx : context) ~actual_name =
   let credential_candidates = unique_strings [ ctx.agent_name; actual_name ] in
   let internal_keeper_credential_available name =
     match
-      ( Keeper_identity.keeper_name_from_agent_name name
+      ( Coord_identity_backend.keeper_name_for_agent_name name
       , Sys.getenv_opt Auth.internal_keeper_token_env_key )
     with
     | Some _, Some raw ->
@@ -147,7 +147,7 @@ let credential_state (ctx : context) ~actual_name =
             || Option.is_some
                  (Auth.load_credential
                     ctx.config.base_path
-                    (Keeper_runtime.canonicalize_if_keeper ctx.config name)))
+                    (Coord_identity_backend.canonicalize_if_keeper ctx.config name)))
          credential_candidates
   in
   { credential_required; credential_available; credential_candidates }

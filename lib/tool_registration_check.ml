@@ -26,6 +26,8 @@ type validation_result = {
   uncovered : string list;
 }
 
+type policy_config = { configured_tools : string list }
+
 let add_names names tbl =
   List.iter (fun name -> Hashtbl.replace tbl name ()) names;
   tbl
@@ -42,16 +44,14 @@ let runtime_keeper_tool_names () =
   |> add_names (Agent_tool_dispatch_runtime.effective_core_tools ())
   |> add_names (raw_masc_tool_names ())
 
-let validate () : validation_result =
-  match Keeper_tool_policy.policy_config_for_validation () with
+let validate ?policy_config () : validation_result =
+  match policy_config with
   | None -> { orphan_toml = []; uncovered = [] }
   | Some cfg ->
     let runtime_keeper_tools = runtime_keeper_tool_names () in
     let configured =
       let tbl = Hashtbl.create 256 in
-      List.iter (fun n -> Hashtbl.replace tbl n ())
-        (Keeper_tool_policy_config.all_group_tools cfg
-         @ Keeper_tool_policy_config.all_masc_tools cfg);
+      List.iter (fun n -> Hashtbl.replace tbl n ()) cfg.configured_tools;
       tbl
     in
     let orphan_toml =

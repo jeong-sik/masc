@@ -74,42 +74,7 @@ let client_side_transition_gate_error ~task_opt ~action ~action_s =
 include Tool_task_payloads
 
 let is_registered_keeper_agent_alias_name config agent_name =
-  let agent_name = String.trim agent_name in
-  let keeper_name_variants keeper_name =
-    let map_sep ~from_ch ~to_ch value =
-      String.map (fun c -> if Char.equal c from_ch then to_ch else c) value
-    in
-    let separator_variants value =
-      Json_util.dedupe_keep_order
-        [
-          value;
-          map_sep ~from_ch:('_') ~to_ch:('-') value;
-          map_sep ~from_ch:('-') ~to_ch:('_') value;
-        ]
-    in
-    let generated_type_variants value =
-      if Nickname.is_dictionary_generated_nickname value then
-        match Nickname.extract_agent_type value with
-        | Some agent_type when Keeper_config.validate_name agent_type ->
-            separator_variants agent_type
-        | _ -> []
-      else []
-    in
-    let base_variants = separator_variants keeper_name in
-    Json_util.dedupe_keep_order
-      (base_variants @ List.concat_map generated_type_variants base_variants)
-  in
-  let registered_keeper_name keeper_name =
-    keeper_name_variants keeper_name
-    |> List.exists (fun name ->
-           Option.is_some
-             (Keeper_registry.get ~base_path:config.Coord.base_path name))
-  in
-  match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
-  | Some keeper_name ->
-      Keeper_identity.is_keeper_agent_alias agent_name
-      && registered_keeper_name keeper_name
-  | None -> false
+  Task_keeper_backend.is_registered_agent_alias config agent_name
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
   let actual_name =
@@ -157,52 +122,17 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
     | None -> Planning_eio.clear_current_task ctx.config
 
 let sync_keeper_current_task_binding (ctx : context) =
-  Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
-    ~config:ctx.config ~agent_name:ctx.agent_name
+  Task_keeper_backend.sync_current_task_binding
+    ctx.config
+    ~agent_name:ctx.agent_name
 
 let keeper_agent_tool_names (ctx : context) =
-  let resolved =
-    try Coord.resolve_agent_name ctx.config ctx.agent_name with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Log.Task.warn "resolve_agent_name failed for keeper tool surface %s: %s"
-          ctx.agent_name
-          (Stdlib.Printexc.to_string exn);
-        ctx.agent_name
-  in
-  [ ctx.agent_name; resolved ]
-  |> List.filter_map Keeper_identity.canonical_keeper_name
-  |> List.sort_uniq String.compare
-  |> List.find_map (fun keeper_name ->
-       match Keeper_registry.get ~base_path:ctx.config.base_path keeper_name with
-       | Some entry -> Some (Keeper_tool_policy.keeper_allowed_tool_names entry.meta)
-       | None -> None)
-
-let keeper_meta_for_agent (ctx : context) =
-  let resolved =
-    try Coord.resolve_agent_name ctx.config ctx.agent_name with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Log.Task.warn "resolve_agent_name failed for keeper policy %s: %s"
-          ctx.agent_name
-          (Stdlib.Printexc.to_string exn);
-        ctx.agent_name
-  in
-  [ ctx.agent_name; resolved ]
-  |> List.filter_map Keeper_identity.canonical_keeper_name
-  |> Json_util.dedupe_keep_order
-  |> List.find_map (fun keeper_name ->
-       match Keeper_registry.get ~base_path:ctx.config.base_path keeper_name with
-       | Some entry -> Some entry.meta
-       | None ->
-           match Keeper_meta_store.read_meta ctx.config keeper_name with
-           | Ok (Some meta) -> Some meta
-           | Ok None | Error _ -> None)
+  Task_keeper_backend.agent_tool_names ctx.config ~agent_name:ctx.agent_name
 
 let keeper_transition_action_denylist (ctx : context) =
-  match keeper_meta_for_agent ctx with
-  | Some meta -> meta.tool_denylist
-  | None -> []
+  Task_keeper_backend.transition_action_denylist
+    ctx.config
+    ~agent_name:ctx.agent_name
 
 let review_completion_notes
     ~(completion_contract : string list option)
@@ -458,16 +388,9 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
    from the bare excluded_count. See PR body for the velvet-hammer
    misdiagnosis that motivated this surface. *)
 let active_goal_phases_for_agent ctx =
-  match Keeper_meta_store.read_meta_resolved ctx.config ctx.agent_name with
-  | Ok (Some (_, meta)) ->
-      List.map
-        (fun goal_id ->
-           match Goal_store.get_goal ctx.config ~goal_id with
-           | Some goal ->
-               Printf.sprintf "%s=%s" goal_id (Goal_phase.to_string goal.phase)
-           | None -> Printf.sprintf "%s=missing" goal_id)
-        meta.active_goal_ids
-  | Ok None | Error _ -> []
+  Task_keeper_backend.active_goal_phases_for_agent
+    ctx.config
+    ~agent_name:ctx.agent_name
 
 let no_eligible_diagnostics_json =
   Tool_task_no_eligible.no_eligible_diagnostics_json

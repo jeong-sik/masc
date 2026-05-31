@@ -135,17 +135,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
          | Some tools -> normalize_tool_names tools
          | None -> old.tool_access)
   in
-  let room_signal_prompt_enabled =
-    match keeper_room_signal_prompt_enabled_override () with
-    | Some value -> value
-    | None ->
-        Option.value
-          ~default:
-            (tool_access_default_room_signal_prompt_enabled
-               ~default:default_room_signal_prompt_enabled
-               tool_access)
-          p.profile_defaults.room_signal_prompt_enabled
-  in
   let tool_denylist =
     let profile_or_old =
       match p.profile_defaults.tool_denylist with
@@ -264,7 +253,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
          }
        else old.runtime);
     mention_targets;
-    room_signal_prompt_enabled;
     telemetry_feedback_enabled =
       Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_enabled
         old.telemetry_feedback_enabled;

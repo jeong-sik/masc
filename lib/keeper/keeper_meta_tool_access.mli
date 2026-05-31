@@ -8,11 +8,6 @@
     tool. Used to detect implicit board surface. *)
 val tool_names_include_board : string list -> bool
 
-(** Keep [room_signal_prompt] on when [default] is set or the allowlist
-    contains any board tool. *)
-val tool_access_default_room_signal_prompt_enabled :
-  default:bool -> string list -> bool
-
 (** Trim, drop blanks, dedupe (preserve first-seen order). *)
 val normalize_tool_names : string list -> string list
 
@@ -67,10 +62,6 @@ val tool_access_to_string_list : Tool_name.Keeper.t list -> string list
 
 val tool_names_include_board_typed : Tool_name.Keeper.t list -> bool
 (** Typed variant: true if any tool in the list is a board tool. *)
-
-val tool_access_default_room_signal_prompt_enabled_typed :
-  default:bool -> Tool_name.Keeper.t list -> bool
-(** Typed variant of [tool_access_default_room_signal_prompt_enabled]. *)
 
 val normalize_tool_access_typed : Tool_name.Keeper.t list -> Tool_name.Keeper.t list
 (** Deduplicate a typed tool list preserving first-seen order. *)

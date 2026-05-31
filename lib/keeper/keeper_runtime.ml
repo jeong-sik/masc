@@ -177,17 +177,6 @@ let ensure_keeper_meta config name =
     let target_cooldown_sec =
       apply_default defaults.proactive_cooldown_sec Keeper_config.default_proactive_cooldown_sec in
     let target_tool_access = resynced_tool_access defaults meta in
-    let target_room_signal_prompt_enabled =
-      match Keeper_config.keeper_room_signal_prompt_enabled_override () with
-      | Some override -> override
-      | None ->
-          Option.value
-            ~default:
-              (tool_access_default_room_signal_prompt_enabled
-                 ~default:Keeper_config.default_room_signal_prompt_enabled
-                 target_tool_access)
-            defaults.room_signal_prompt_enabled
-    in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
     let target_social_model =
       apply_default defaults.social_model meta.social_model
@@ -293,8 +282,6 @@ let ensure_keeper_meta config name =
       meta.proactive.enabled <> target_proactive
       || meta.proactive.idle_sec <> target_idle_sec
       || meta.proactive.cooldown_sec <> target_cooldown_sec in
-    let signal_changed =
-      meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled in
     let denylist_changed = meta.tool_denylist <> target_denylist in
     let social_model_changed = meta.social_model <> target_social_model in
     (* [meta runtime id] may be a raw TOML/JSON value while
@@ -349,7 +336,7 @@ let ensure_keeper_meta config name =
       meta.per_provider_timeout_s <> target_per_provider_timeout in
     let oas_env_changed = meta.oas_env <> target_oas_env in
     let any_changed =
-      proactive_changed || signal_changed || denylist_changed
+      proactive_changed || denylist_changed
       || social_model_changed
       || runtime_changed
       || personality_changed || policy_changed
@@ -415,7 +402,6 @@ let ensure_keeper_meta config name =
           idle_sec = target_idle_sec;
           cooldown_sec = target_cooldown_sec;
         };
-        room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
         social_model = target_social_model;
         goal = target_goal;

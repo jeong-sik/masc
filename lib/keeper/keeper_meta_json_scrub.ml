@@ -18,7 +18,7 @@ let config_field_names =
   ; "will"; "needs"; "desires"; "instructions"
   ; "sandbox_profile"; "sandbox_image"; "network_mode"; "allowed_paths"
   ; "tool_access"; "tool_denylist"
-  ; "mention_targets"; "room_signal_prompt_enabled"
+  ; "mention_targets"
   ; "proactive_enabled"; "proactive_idle_sec"; "proactive_cooldown_sec"
   ; "compaction_profile"; "compaction_ratio_gate"
   ; "compaction_message_gate"; "compaction_token_gate"

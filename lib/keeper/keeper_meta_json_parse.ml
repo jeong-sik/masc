@@ -33,7 +33,6 @@ type parsed_keeper_policy =
   ; pp_tool_access : string list
   ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
-  ; pp_room_signal_prompt_enabled : bool
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
   ; pp_auto_handoff : bool
@@ -186,12 +185,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_mention_targets =
       Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
     in
-    let pp_room_signal_prompt_enabled =
-      Safe_ops.json_bool
-        ~default:default_room_signal_prompt_enabled
-        "room_signal_prompt_enabled"
-        json
-    in
     let proactive_enabled =
     let proactive_enabled =
       Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
@@ -256,7 +249,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_tool_access
       ; pp_tool_denylist
       ; pp_mention_targets
-      ; pp_room_signal_prompt_enabled
       ; pp_joined_room_ids
       ; pp_last_seen_seq_by_room
       ; pp_proactive =
@@ -594,7 +586,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; tool_access = policy.pp_tool_access
                    ; tool_denylist = policy.pp_tool_denylist
                    ; mention_targets = policy.pp_mention_targets
-                   ; room_signal_prompt_enabled = policy.pp_room_signal_prompt_enabled
                    ; proactive = policy.pp_proactive
                    ; compaction = policy.pp_compaction
                    ; auto_handoff = policy.pp_auto_handoff

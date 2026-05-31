@@ -567,7 +567,6 @@ type keeper_meta =
   ; tool_access : string list
   ; tool_denylist : string list
   ; mention_targets : string list
-  ; room_signal_prompt_enabled : bool
   ; proactive : proactive_policy
   ; compaction : compaction_policy
   ; auto_handoff : bool

@@ -43,7 +43,6 @@ val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
-val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
 val legacy_provider_filter_name : string
@@ -267,9 +266,6 @@ val keeper_adaptive_thinking_mode : unit -> bool
 (** {1 Runtime Param Handles}
 
     Exposed for test use only (e.g. [Runtime_params.clear]). *)
-
-(** Coord signal prompt enabled override from env var. *)
-val keeper_room_signal_prompt_enabled_override : unit -> bool option
 
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore].  Call from server bootstrap. *)

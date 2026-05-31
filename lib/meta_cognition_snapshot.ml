@@ -3,7 +3,7 @@ module StringMap = Set_util.StringMap
 (** Meta_cognition_snapshot — Data loading, JSON builders, and snapshot generation.
 
     Loads board posts/comments/votes/governance cases and produces
-    deterministic JSON snapshots of room-level beliefs, tensions, desires,
+    deterministic JSON snapshots of coord-level beliefs, tensions, desires,
     and social edges.
 
     @since God file decomposition — extracted from meta_cognition.ml *)

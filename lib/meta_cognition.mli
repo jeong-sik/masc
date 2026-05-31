@@ -1,7 +1,7 @@
 (** Coord-level meta-cognition read model.
 
     Derives high-signal beliefs, tensions, desires, and discourse edges
-    from existing room artifacts without mutating state. *)
+    from existing coord artifacts without mutating state. *)
 
 type belief_summary = {
   id : string option;
@@ -47,7 +47,7 @@ type salience =
   | Contested_belief
   | Operator_tension
   | Operator_desire
-  | Stagnant_room
+  | Stagnant_coord
 
 type interpretation = {
   primary_salience : salience;

@@ -49,7 +49,7 @@ let task_has_actionable_verification actionable_request_ids
   | Masc_domain.Cancelled _ -> false
 ;;
 
-(** Read room backlog counts. *)
+(** Read coord backlog counts. *)
 let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : keeper_meta)
   : int * int * int * int * bool
   =
@@ -116,7 +116,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : ke
     0, 0, 0, 0, false
 ;;
 
-(** Count active agents in room. *)
+(** Count active agents in coord. *)
 let count_active_agents ~(config : Coord.config) : int =
   try List.length (Coord.get_agents_raw config) with
   | Eio.Cancel.Cancelled _ as e -> raise e

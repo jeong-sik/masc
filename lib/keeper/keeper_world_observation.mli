@@ -1,6 +1,6 @@
 (** Keeper_world_observation — Structured world state for keeper cycles.
 
-    Extracts and normalizes observation signals from room state, keeper meta,
+    Extracts and normalizes observation signals from coord state, keeper meta,
     and context so the unified prompt builder and turn runner can consume
     a single coherent snapshot instead of re-reading scattered sources.
 
@@ -61,7 +61,7 @@ type world_observation = {
   (** Agent economy mode: Normal, Frugal, or Hustle. *)
 
   unclaimed_task_count : int;
-  (** Number of unclaimed tasks in the room backlog. *)
+  (** Number of unclaimed tasks in the coord backlog. *)
 
   claimable_task_count : int;
   (** Number of unclaimed tasks this keeper can claim with its current tool
@@ -72,7 +72,7 @@ type world_observation = {
       capacity/cooldown when no fail-open runtime is available. *)
 
   failed_task_count : int;
-  (** Number of failed/cancelled tasks in the room backlog. *)
+  (** Number of failed/cancelled tasks in the coord backlog. *)
 
   pending_verification_count : int;
   (** Number of tasks awaiting cross-agent verification. *)
@@ -83,7 +83,7 @@ type world_observation = {
       so newly added work is not delayed behind the previous turn's timer. *)
 
   active_agent_count : int;
-  (** Number of agents currently active in the room. *)
+  (** Number of agents currently active in the coord. *)
 
   last_turn_budget : (int * int) option;
   (** Previous generation's turn usage as [(used, total)], if available. *)
@@ -211,9 +211,9 @@ val read_continuity_summary :
   meta:Keeper_meta_contract.keeper_meta ->
   string
 
-(** Build a world observation from room state and keeper metadata.
+(** Build a world observation from coord state and keeper metadata.
 
-    Reads room backlog, agent list, checkpoint context, economy state,
+    Reads coord backlog, agent list, checkpoint context, economy state,
     and recent board activity.
     All I/O errors are caught and produce safe defaults (0, empty, Normal).
 
@@ -230,10 +230,10 @@ val observe :
 
 (** Build the observation used by direct [masc_keeper_msg] turns.
 
-    This intentionally reads durable room/task state, including pending
+    This intentionally reads durable coord/task state, including pending
     verification counts, while suppressing transient board/message events and
     cursor updates. Direct operator messages should not advance autonomous
-    cursors, inherit unrelated room chatter, or synthesize scheduled
+    cursors, inherit unrelated coord chatter, or synthesize scheduled
     scheduled timer signals, but they must still see the durable work
     signals that drive tool-use contracts. *)
 val observe_direct_keeper_msg :
@@ -244,7 +244,7 @@ val observe_direct_keeper_msg :
 
 (** Non-mutating probe for the smart-heartbeat gate.
 
-    Returns [true] when durable room state already contains work that should
+    Returns [true] when durable coord state already contains work that should
     force a keeper cycle even if the adaptive heartbeat would otherwise
     [Skip_idle]. Unlike {!observe}, this helper does not advance board or
     message cursors. *)

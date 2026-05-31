@@ -3,7 +3,7 @@
 
     Centralises the heuristics that turn LLM turn output into structured
     keeper memory: extracting the [STATE] block emitted by the persona
-    template, scoring "interesting" room messages for alerting, capping
+    template, scoring "interesting" coord messages for alerting, capping
     snapshot fields to the prompt budget, and round-tripping snapshots
     through assistant messages so a fresh keeper generation can resume
     from disk. *)

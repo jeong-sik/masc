@@ -36,7 +36,7 @@ let test_digest_room_prefers_fresh_operator_judgment () =
        with
       | Some _ -> ()
       | None ->
-          Alcotest.failf "expected room judgment in %s"
+          Alcotest.failf "expected coord judgment in %s"
             (Operator_judgment.judgments_path config));
       let ctx = operator_ctx env sw config "operator" in
       let digest =
@@ -168,9 +168,9 @@ let test_operator_judgment_rejects_retired_target_type_aliases () =
     true
     (Option.is_none (Operator_judgment.target_type_of_string "namespace"));
   Alcotest.(check bool)
-    "room no longer parses"
+    "namespace no longer parses"
     true
-    (Option.is_none (Operator_judgment.target_type_of_string "room"));
+    (Option.is_none (Operator_judgment.target_type_of_string "namespace"));
   Alcotest.(check (result string string))
     "digest rejects namespace"
     (Error "target_type must be root")

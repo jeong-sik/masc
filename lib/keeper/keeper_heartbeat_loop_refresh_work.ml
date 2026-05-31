@@ -5,16 +5,16 @@
     "implicit heartbeat" path: when the keeper just finished a
     productive turn (`work_as_hb () = true`) and the proactive warmup
     has elapsed, we count any successful Coord.heartbeat against any
-    joined room as evidence that the keeper is alive — and reset the
+    session-bound coord as evidence that the keeper is alive — and reset the
     consecutive-failure counter accordingly.
 
-    Per-room failure logging is at DEBUG (not WARN) because the
-    *any-success* aggregation policy means a single live room is
-    sufficient; transient per-room misses are expected during room
+    Per-coord failure logging is at DEBUG (not WARN) because the
+    *any-success* aggregation policy means a single live coord is
+    sufficient; transient per-coord misses are expected during coord
     rebalance and shouldn't pollute the WARN stream.
 
     Cancellation re-raises (preserves Eio cancellation semantics).
-    All other exceptions degrade to a per-room `false` result.
+    All other exceptions degrade to a per-coord `false` result.
 
     Pure helper move — no callback injection, no parent-local
     dependencies. *)

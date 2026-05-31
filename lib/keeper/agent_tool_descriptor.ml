@@ -938,7 +938,7 @@ let internal_descriptors : t list =
   ; task_descriptor
       "broadcast"
       "keeper_broadcast"
-      "Broadcast a coordination message to the MASC room."
+      "Broadcast a coordination message to the MASC coord."
       ~readonly:false
   ; task_descriptor
       "claim"

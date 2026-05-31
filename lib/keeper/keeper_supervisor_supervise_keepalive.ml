@@ -11,8 +11,8 @@
     2. On [Ok ()]:
        - logs persona drift if missing
        - registers offline in [Keeper_registry]
-       - lazily initializes the coordination room (Coord.init)
-       - syncs keeper room presence + writes meta (failures degrade
+       - lazily initializes the coordination root (Coord.init)
+       - syncs keeper coord presence + writes meta (failures degrade
          to original meta but tick failure counters)
        - calls the injected [~launch_supervised_fiber] to actually
          spawn the supervised fiber

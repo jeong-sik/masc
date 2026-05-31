@@ -1,7 +1,7 @@
 (** Coord paths + backend dispatch.
 
-    Resolves the canonical [.masc/] directory layout (per-cluster +
-    legacy room paths), and dispatches CRUD/lock/pubsub calls to
+    Resolves the canonical [.masc/] directory layout (per-cluster),
+    and dispatches CRUD/lock/pubsub calls to
     the active [Backend] implementation (Memory / FileSystem). *)
 
 open Coord_utils_backend_setup
@@ -19,12 +19,7 @@ val masc_root_dir : config -> string
     callsites). *)
 val masc_dir_from_base_path : base_path:string -> string
 
-val current_room_root_path : config -> string
 val room_dir_for : config -> string -> string
-
-(** Always [Some "default"] — the operational namespace is
-    single-room. *)
-val read_current_room : config -> string option
 
 val masc_dir : config -> string
 val agents_dir : config -> string

@@ -69,7 +69,6 @@ type room_info =
 type room_registry =
   { rooms : room_info list [@default []]
   ; default_room : string [@default "default"]
-  ; current_room : string option [@default None]
   }
 [@@deriving yojson { strict = false }, show]
 

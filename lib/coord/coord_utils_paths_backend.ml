@@ -28,14 +28,9 @@ let masc_root_dir config =
 let masc_dir_from_base_path ~base_path =
   masc_root_dir_from ~base_path ~cluster_name:"default"
 
-(** Legacy room path helpers — retained for room_multi.ml compat shim. *)
-let current_room_root_path config = Filename.concat (masc_root_dir config) "current_room"
-let room_dir_for config room_id =
-  if room_id = "default" then masc_root_dir config
-  else Filename.concat (Filename.concat (masc_root_dir config) "rooms") room_id
-
-(** The operational namespace is always "default". *)
-let read_current_room _config = Some "default"
+(** Compatibility helper for callers not yet renamed away from room terminology.
+    The runtime layout is single-root, so every scope resolves to [.masc/]. *)
+let room_dir_for config _room_id = masc_root_dir config
 
 (** Directory resolution. Always resolves to the root .masc/ directory. *)
 let masc_dir config = masc_root_dir config

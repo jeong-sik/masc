@@ -16,7 +16,6 @@ type t = {
   env_masc_base_path : string option;
   resolution_source : string option;
   effective_has_masc_dir : bool;
-  effective_legacy_dirs : string list;
   roots_diverge : bool;
   strict_mode_requested : bool;
   startup_rejected : bool;
@@ -45,19 +44,6 @@ let normalize_path ~cwd path =
 
 let dir_exists path =
   Sys.file_exists path && Sys.is_directory path
-
-let legacy_dir_names = [ "perpetual"; "resident-keepers"; "rooms" ]
-
-let legacy_dirs_under masc_root =
-  if not (dir_exists masc_root) then
-    []
-  else
-    List.filter (fun name -> dir_exists (Filename.concat masc_root name))
-      legacy_dir_names
-
-let format_legacy_dirs = function
-  | [] -> "none"
-  | dirs -> String.concat ", " dirs
 
 let strict_mode_env_enabled () =
   match Sys.getenv_opt "MASC_BASE_PATH_STRICT" with
@@ -151,7 +137,6 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     inspect_current_task_path effective_masc_norm
   in
   let effective_has_masc_dir = dir_exists effective_masc_norm in
-  let effective_legacy_dirs = legacy_dirs_under effective_masc_norm in
   let roots_diverge = not (String.equal cwd_norm effective_base_norm) in
   let resolution_source = resolution_source_opt ?resolution_source () in
   let strict_mode_requested =
@@ -176,7 +161,6 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     env_masc_base_path = trim_opt env_masc_base_path;
     resolution_source;
     effective_has_masc_dir;
-    effective_legacy_dirs;
     roots_diverge;
     strict_mode_requested;
     startup_rejected;
@@ -208,12 +192,6 @@ let startup_lines (diag : t) =
       (match diag.warning with
        | Some message -> Some (Printf.sprintf "   Path warning: %s" message)
        | None -> None);
-      (if diag.effective_has_masc_dir then
-         Some
-           (Printf.sprintf "   Active .masc legacy dirs: %s"
-              (format_legacy_dirs diag.effective_legacy_dirs))
-       else
-         None);
       (if diag.strict_mode_requested then
          Some "   Path strict mode: enabled"
        else
@@ -258,8 +236,6 @@ let to_yojson (diag : t) =
        ("current_task_path", `String diag.current_task_path);
        ("current_task_shape", `String diag.current_task_shape);
        ("effective_has_masc_dir", `Bool diag.effective_has_masc_dir);
-       ( "effective_legacy_dirs",
-         `List (List.map (fun dir -> `String dir) diag.effective_legacy_dirs) );
        ("roots_diverge", `Bool diag.roots_diverge);
        ("strict_mode_requested", `Bool diag.strict_mode_requested);
        ("startup_rejected", `Bool diag.startup_rejected);

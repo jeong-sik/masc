@@ -1553,237 +1553,7 @@ let test_health_response_survives_deleted_cwd () =
              |> member "effective_base_path"
              |> to_string)))
 
-let test_migrate_resident_keeper_dirs_promotes_valid_meta () =
-  with_temp_dir "startup-legacy-keepers" (fun dir ->
-      let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let keepers_dir = Filename.concat masc_root "keepers" in
-      let legacy_dir = Filename.concat masc_root "resident-keepers" in
-      let quarantine_dir =
-        Filename.concat masc_root "_quarantine/_replaced/resident-keepers"
-      in
-      Fs_compat.mkdir_p keepers_dir;
-      Fs_compat.mkdir_p legacy_dir;
-      write_file (Filename.concat keepers_dir "sangsu.json")
-        {|{"name":"sangsu","created_at":"2026-03-26T15:53:16Z","updated_at":"2026-03-26T17:44:32Z"}|};
-      write_file (Filename.concat legacy_dir "sangsu.json")
-        (make_keeper_meta_json ());
-      write_file (Filename.concat legacy_dir "other.json")
-        (make_keeper_meta_json ~name:"other" ~trace_id:"trace-other-live" ());
-      Server_runtime_bootstrap.migrate_legacy_dirs state;
-      let read_meta_exn path =
-        match Keeper_meta_store.read_meta_file_path path with
-        | Ok (Some meta) -> meta
-        | Ok None -> Alcotest.failf "missing keeper meta at %s" path
-        | Error err -> Alcotest.failf "failed to read keeper meta %s: %s" path err
-      in
-      let sangsu_meta =
-        read_meta_exn (Filename.concat keepers_dir "sangsu.json")
-      in
-      let other_meta =
-        read_meta_exn (Filename.concat keepers_dir "other.json")
-      in
-      Alcotest.(check string) "sangsu trace promoted from resident-keepers"
-        "trace-sangsu-live" (Keeper_id.Trace_id.to_string sangsu_meta.runtime.trace_id);
-      Alcotest.(check string) "other keeper migrated from resident-keepers"
-        "trace-other-live" (Keeper_id.Trace_id.to_string other_meta.runtime.trace_id);
-      Alcotest.(check bool) "legacy dir removed after merge" false
-        (Sys.file_exists legacy_dir);
-      Alcotest.(check bool) "replaced stale keeper quarantined" true
-        (Sys.file_exists (Filename.concat quarantine_dir "sangsu.json")))
-
-let test_migrate_resident_keeper_dirs_keeps_fresher_current_meta () =
-  with_temp_dir "startup-legacy-keepers-current-wins" (fun dir ->
-      let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let keepers_dir = Filename.concat masc_root "keepers" in
-      let legacy_dir = Filename.concat masc_root "resident-keepers" in
-      let quarantine_path =
-        Filename.concat masc_root "_quarantine/resident-keepers/sangsu.json"
-      in
-      Fs_compat.mkdir_p keepers_dir;
-      Fs_compat.mkdir_p legacy_dir;
-      write_file (Filename.concat keepers_dir "sangsu.json")
-        (make_keeper_meta_json ~updated_at:"2026-03-29T11:36:57Z" ());
-      write_file (Filename.concat legacy_dir "sangsu.json")
-        (make_keeper_meta_json ~updated_at:"2026-03-29T10:36:57Z" ());
-      Server_runtime_bootstrap.migrate_legacy_dirs state;
-      let current_meta =
-        match
-          Keeper_meta_store.read_meta_file_path
-            (Filename.concat keepers_dir "sangsu.json")
-        with
-        | Ok (Some meta) -> meta
-        | Ok None -> Alcotest.fail "missing current keeper meta"
-        | Error err -> Alcotest.failf "failed to read current keeper meta: %s" err
-      in
-      Alcotest.(check string) "fresher current meta preserved"
-        "2026-03-29T11:36:57Z" current_meta.updated_at;
-      Alcotest.(check bool) "older legacy keeper quarantined" true
-        (Sys.file_exists quarantine_path))
-
-let test_migrate_resident_keeper_dirs_use_source_scoped_quarantine_path () =
-  with_temp_dir "startup-resident-keepers-quarantine-source" (fun dir ->
-      let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let keepers_dir = Filename.concat masc_root "keepers" in
-      let legacy_dir = Filename.concat masc_root "resident-keepers" in
-      Fs_compat.mkdir_p keepers_dir;
-      Fs_compat.mkdir_p legacy_dir;
-      write_file (Filename.concat keepers_dir "sangsu.json")
-        (make_keeper_meta_json ~updated_at:"2026-03-29T12:36:57Z" ());
-      write_file (Filename.concat legacy_dir "sangsu.json")
-        (make_keeper_meta_json ~updated_at:"2026-03-29T11:36:57Z" ());
-      Server_runtime_bootstrap.migrate_legacy_dirs state;
-      Alcotest.(check bool) "resident keeper quarantined under source dir" true
-        (Sys.file_exists
-           (Filename.concat masc_root
-              "_quarantine/resident-keepers/sangsu.json")))
-
-let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
-  with_temp_dir "startup-blocking-legacy-keepers" (fun dir ->
-      let _config_root = make_config_root dir in
-      write_basepath_keeper_toml dir "sangsu";
-      with_env "MASC_CONFIG_DIR" (Some _config_root) @@ fun () ->
-      Config_dir_resolver.reset ();
-      let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let legacy_dir = Filename.concat masc_root "resident-keepers" in
-      let legacy_trace_dir = Filename.concat masc_root "perpetual" in
-      Fs_compat.mkdir_p legacy_dir;
-      Fs_compat.mkdir_p legacy_trace_dir;
-      write_file (Filename.concat legacy_dir "sangsu.json")
-        (make_keeper_meta_json ());
-      write_file (Filename.concat legacy_trace_dir "trace.jsonl") {|{"ok":true}|};
-      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
-      Alcotest.(check bool) "legacy keeper meta promoted during blocking bootstrap"
-        true
-        (Sys.file_exists
-           (Filename.concat (Keeper_fs.keeper_dir state.Mcp_server.room_config)
-              "sangsu.json"));
-      Alcotest.(check bool) "legacy dir removed before later startup readers" false
-        (Sys.file_exists legacy_dir);
-      Alcotest.(check bool) "legacy traces stay deferred to lazy startup" true
-        (Sys.file_exists legacy_trace_dir);
-      let keepalive =
-        Keeper_meta_store.keepalive_keeper_names state.Mcp_server.room_config
-      in
-      Alcotest.(check (list string))
-        "autoboot sees promoted keepers on first scan"
-        [ "sangsu" ]
-        (List.filter (fun n -> String.equal n "sangsu") keepalive))
-
-let test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback () =
-  with_temp_dir "startup-blocking-room-flatten" (fun dir ->
-      let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let legacy_tasks = Filename.concat masc_root "rooms/focus-room/tasks" in
-      Fs_compat.mkdir_p legacy_tasks;
-      write_file (Filename.concat masc_root "current_room") "../escape\n";
-      write_file
-        (Filename.concat legacy_tasks "backlog.json")
-        (Yojson.Safe.to_string
-           (Masc_domain.backlog_to_yojson
-              { tasks = []; last_updated = Masc_domain.now_iso (); version = 7 }));
-      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
-      let root_backlog =
-        Yojson.Safe.from_string
-          (read_file (Filename.concat masc_root "tasks/backlog.json"))
-      in
-      Alcotest.(check int) "legacy backlog promoted before init seeds defaults" 7
-        Yojson.Safe.Util.(root_backlog |> member "version" |> to_int);
-      Alcotest.(check bool) "legacy backlog not quarantined" false
-        (Sys.file_exists
-           (Filename.concat masc_root
-              "_quarantine/rooms/focus-room/tasks/backlog.json")))
-
-let test_blocking_bootstrap_flattens_single_legacy_room_without_current_room () =
-  with_temp_dir "startup-blocking-room-single-fallback" (fun dir ->
-      let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let legacy_tasks = Filename.concat masc_root "rooms/team-room/tasks" in
-      Fs_compat.mkdir_p legacy_tasks;
-      write_file
-        (Filename.concat legacy_tasks "backlog.json")
-        (Yojson.Safe.to_string
-           (Masc_domain.backlog_to_yojson
-              { tasks = []; last_updated = Masc_domain.now_iso (); version = 11 }));
-      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
-      let root_backlog =
-        Yojson.Safe.from_string
-          (read_file (Filename.concat masc_root "tasks/backlog.json"))
-      in
-      Alcotest.(check int) "single legacy room promoted without current_room" 11
-        Yojson.Safe.Util.(root_backlog |> member "version" |> to_int);
-      Alcotest.(check bool) "single legacy backlog not quarantined" false
-        (Sys.file_exists
-           (Filename.concat masc_root
-              "_quarantine/rooms/team-room/tasks/backlog.json")))
-
-let test_blocking_bootstrap_skips_flatten_with_multiple_legacy_rooms () =
-  with_temp_dir "startup-blocking-room-multi-fallback" (fun dir ->
-      let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let alpha_tasks = Filename.concat masc_root "rooms/alpha-room/tasks" in
-      let beta_tasks = Filename.concat masc_root "rooms/beta-room/tasks" in
-      Fs_compat.mkdir_p alpha_tasks;
-      Fs_compat.mkdir_p beta_tasks;
-      write_file
-        (Filename.concat alpha_tasks "backlog.json")
-        (Yojson.Safe.to_string
-           (Masc_domain.backlog_to_yojson
-              { tasks = []; last_updated = Masc_domain.now_iso (); version = 7 }));
-      write_file
-        (Filename.concat beta_tasks "backlog.json")
-        (Yojson.Safe.to_string
-           (Masc_domain.backlog_to_yojson
-              { tasks = []; last_updated = Masc_domain.now_iso (); version = 11 }));
-      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
-      let root_backlog_path = Filename.concat masc_root "tasks/backlog.json" in
-      let root_backlog_promoted =
-        if Sys.file_exists root_backlog_path then
-          let root_backlog = Yojson.Safe.from_string (read_file root_backlog_path) in
-          let version = Yojson.Safe.Util.(root_backlog |> member "version" |> to_int) in
-          version = 7 || version = 11
-        else
-          false
-      in
-      Alcotest.(check bool)
-        "multiple legacy rooms do not promote a legacy backlog into root"
-        false root_backlog_promoted;
-      Alcotest.(check bool) "alpha-room backlog stays in legacy dir" true
-        (Sys.file_exists (Filename.concat alpha_tasks "backlog.json"));
-      Alcotest.(check bool) "beta-room backlog stays in legacy dir" true
-        (Sys.file_exists (Filename.concat beta_tasks "backlog.json")))
-
-let test_blocking_bootstrap_ignores_whitespace_legacy_room_dirs () =
-  with_temp_dir "startup-blocking-room-whitespace" (fun dir ->
-      let state = Mcp_server.create_state ~base_path:dir in
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let spaced_tasks = Filename.concat masc_root "rooms/focus-room /tasks" in
-      Fs_compat.mkdir_p spaced_tasks;
-      write_file
-        (Filename.concat spaced_tasks "backlog.json")
-        (Yojson.Safe.to_string
-           (Masc_domain.backlog_to_yojson
-              { tasks = []; last_updated = Masc_domain.now_iso (); version = 13 }));
-      Server_runtime_bootstrap.bootstrap_server_state_blocking state;
-      let root_backlog_path = Filename.concat masc_root "tasks/backlog.json" in
-      let root_backlog_promoted =
-        if Sys.file_exists root_backlog_path then
-          let root_backlog = Yojson.Safe.from_string (read_file root_backlog_path) in
-          let version = Yojson.Safe.Util.(root_backlog |> member "version" |> to_int) in
-          version = 13
-        else
-          false
-      in
-      Alcotest.(check bool) "whitespace room backlog stays in legacy dir" true
-        (Sys.file_exists (Filename.concat spaced_tasks "backlog.json"));
-      Alcotest.(check bool)
-        "whitespace room backlog does not promote into root" false
-        root_backlog_promoted)
-
-let execution_label = function
+let execution_label = functionlet execution_label = function
   | Server_runtime_bootstrap.Parallel -> "parallel"
   | Server_runtime_bootstrap.Serial -> "serial"
 
@@ -1799,7 +1569,7 @@ let check_lazy_group group ~name ~execution ~tasks =
     group.Server_runtime_bootstrap.task_names
 
 let test_lazy_startup_plan_groups_independent_tasks () =
-  let groups = Server_runtime_bootstrap.lazy_startup_plan ~has_legacy_traces:false in
+  let groups = Server_runtime_bootstrap.lazy_startup_plan () in
   Alcotest.(check (list string))
     "group order"
     [ "initialize"; "tool_state"; "cleanup" ]
@@ -1833,39 +1603,10 @@ let test_lazy_startup_plan_groups_independent_tasks () =
           "jsonl_prune";
           "auth_archive_prune";
         ]
-        (Server_runtime_bootstrap.lazy_startup_task_names
-           ~has_legacy_traces:false)
+        (Server_runtime_bootstrap.lazy_startup_task_names ())
   | _ -> Alcotest.fail "unexpected lazy startup group shape"
 
-let test_lazy_startup_plan_keeps_legacy_migration_serial () =
-  let groups = Server_runtime_bootstrap.lazy_startup_plan ~has_legacy_traces:true in
-  Alcotest.(check (list string))
-    "group order"
-    [ "initialize"; "tool_state"; "legacy_trace_migration"; "cleanup" ]
-    (List.map
-       (fun group -> group.Server_runtime_bootstrap.group_name)
-       groups);
-  match groups with
-  | [ _initialize; _tool_state; legacy_migration; _cleanup ] ->
-      check_lazy_group legacy_migration ~name:"legacy_trace_migration"
-        ~execution:"serial" ~tasks:[ "legacy_trace_dir_migration" ];
-      Alcotest.(check (list string))
-        "flattened task order includes legacy migration before cleanup"
-        [
-          "restore_sessions";
-          "reconcile_active_agents";
-          "prompt_bootstrap";
-          "keeper_history_migration";
-          "telemetry_warmup";
-          "tool_metrics_restore";
-          "legacy_trace_dir_migration";
-          "jsonl_prune";
-          "auth_archive_prune";
-        ]
-        (Server_runtime_bootstrap.lazy_startup_task_names
-           ~has_legacy_traces:true)
-  | _ -> Alcotest.fail "unexpected legacy lazy startup group shape"
-
+let test_startup_state_json () =
 let test_startup_state_json () =
   Server_startup_state.reset ~backend_mode:"postgres-native" ();
   Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
@@ -2950,40 +2691,8 @@ let () =
             test_room_init_bootstraps_keeper_runtime_dirs;
           Alcotest.test_case "otel exporter setup failure is soft" `Quick
             test_otel_exporter_setup_failure_is_soft;
-          Alcotest.test_case
-            "legacy keeper migration promotes valid resident meta"
-            `Quick test_migrate_resident_keeper_dirs_promotes_valid_meta;
-          Alcotest.test_case
-            "legacy keeper migration keeps fresher current meta"
-            `Quick test_migrate_resident_keeper_dirs_keeps_fresher_current_meta;
-          Alcotest.test_case
-            "legacy keeper migration uses source-scoped quarantine paths"
-            `Quick
-            test_migrate_resident_keeper_dirs_use_source_scoped_quarantine_path;
-          Alcotest.test_case
-            "blocking bootstrap promotes legacy keeper meta"
-            `Quick
-            test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot;
-          Alcotest.test_case
-            "blocking bootstrap flattens room with safe current_room fallback"
-            `Quick
-            test_blocking_bootstrap_flattens_room_with_safe_current_room_fallback;
-          Alcotest.test_case
-            "blocking bootstrap flattens single legacy room without current_room"
-            `Quick
-            test_blocking_bootstrap_flattens_single_legacy_room_without_current_room;
-          Alcotest.test_case
-            "blocking bootstrap skips flatten with multiple legacy rooms"
-            `Quick
-            test_blocking_bootstrap_skips_flatten_with_multiple_legacy_rooms;
-          Alcotest.test_case
-            "blocking bootstrap ignores whitespace legacy room dirs"
-            `Quick
-            test_blocking_bootstrap_ignores_whitespace_legacy_room_dirs;
-          Alcotest.test_case "lazy startup plan parallelizes independent tasks"
+          Alcotest.test_case "lazy startup plan parallelizes independent tasks"          Alcotest.test_case "lazy startup plan parallelizes independent tasks"
             `Quick test_lazy_startup_plan_groups_independent_tasks;
-          Alcotest.test_case "lazy startup plan keeps legacy migration serial"
-            `Quick test_lazy_startup_plan_keeps_legacy_migration_serial;
           Alcotest.test_case "startup state json reports lazy failure" `Quick
             test_startup_state_json;
           Alcotest.test_case

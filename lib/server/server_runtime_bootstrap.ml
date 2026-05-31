@@ -168,7 +168,7 @@ let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
   Prometheus.reconcile_active_agents_gauge (Coord.masc_dir state.room_config)
 
 
-(* Legacy directory migration extracted to
+(* Startup maintenance extracted to
    [Server_runtime_startup_maintenance] (godfile decomp). *)
 include Server_runtime_startup_maintenance
 
@@ -177,14 +177,6 @@ include Server_runtime_startup_maintenance
 include Server_runtime_startup_credentials
 
 let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
-  (* Promote legacy room/keeper state before Coord.init seeds fresh root files.
-     Otherwise state.json/backlog.json can be created in the destination first
-     and valid legacy data gets quarantined as a conflict on upgrade. *)
-  migrate_room_to_flat state;
-  (* Promote legacy keeper metadata before any startup readers scan .masc/keepers.
-     Keeper autoboot and other bootstrap readers should see the canonical paths
-     on their first pass, not rely on a later lazy migration task. *)
-  migrate_legacy_keeper_dirs_blocking state;
   (* [create_server_state] normally resets this after config bootstrap, but
      direct state constructors used by tests and execute contexts can leave a
      stale process-global config resolution in place. *)
@@ -204,7 +196,7 @@ type lazy_startup_group = {
   task_names : string list;
 }
 
-let lazy_startup_plan ~has_legacy_traces =
+let lazy_startup_plan () =
   let initial_groups =
     [
       {
@@ -225,18 +217,6 @@ let lazy_startup_plan ~has_legacy_traces =
       };
     ]
   in
-  let legacy_groups =
-    if has_legacy_traces then
-      [
-        {
-          group_name = "legacy_trace_migration";
-          execution = Serial;
-          task_names = [ "legacy_trace_dir_migration" ];
-        };
-      ]
-    else
-      []
-  in
   let cleanup_groups =
     [
       {
@@ -250,10 +230,10 @@ let lazy_startup_plan ~has_legacy_traces =
       };
     ]
   in
-  initial_groups @ legacy_groups @ cleanup_groups
+  initial_groups @ cleanup_groups
 
-let lazy_startup_task_names ~has_legacy_traces =
-  lazy_startup_plan ~has_legacy_traces
+let lazy_startup_task_names () =
+  lazy_startup_plan ()
   |> List.concat_map (fun group -> group.task_names)
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
@@ -586,10 +566,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           Server_startup_state.fail_lazy_task ~task:task_name ~error
     in
     let start_lazy_startup state =
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let has_legacy_traces =
-        Sys.file_exists (Filename.concat masc_root "perpetual")
-      in
       let task_fn = function
         | "restore_sessions" -> fun () -> restore_persisted_sessions state
         | "reconcile_active_agents" -> fun () ->
@@ -601,8 +577,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             warm_tool_registry_from_telemetry state
         | "tool_metrics_restore" -> fun () ->
             restore_tool_metrics_from_disk state
-        | "legacy_trace_dir_migration" -> fun () ->
-            migrate_legacy_trace_dirs state
         | "jsonl_prune" -> fun () -> startup_prune_jsonl state
         | "auth_archive_prune" -> fun () -> startup_prune_auth_archive state
         | task_name ->
@@ -610,9 +584,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
               (Invalid_argument
                  (Printf.sprintf "unknown lazy startup task: %s" task_name))
       in
-      let task_names = lazy_startup_task_names ~has_legacy_traces in
+      let task_names = lazy_startup_task_names () in
       let task_groups =
-        lazy_startup_plan ~has_legacy_traces
+        lazy_startup_plan ()
         |> List.map (fun group ->
                (group, List.map (fun name -> (name, task_fn name)) group.task_names))
       in

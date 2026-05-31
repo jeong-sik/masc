@@ -847,15 +847,15 @@ social_model = "magentic_ledger_v1"
       check string "social_model resynced from TOML" "magentic_ledger_v1"
         updated.social_model
 
-(** Test: authored nonblank unknown cascade_name is rejected. *)
+(** Test: authored nonblank unknown runtime_id is rejected. *)
 ;;
-let test_unknown_cascade_name_rejected () =
+let test_unknown_runtime_id_rejected () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
   Fs_compat.clear_fs ();
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keeper_name = "unknown-cascade-name-test" in
+  let keeper_name = "unknown-runtime-id-test" in
   let keepers_toml_dir = Filename.concat config_dir "keepers" in
   Unix.mkdir keepers_toml_dir 0o755;
   write_file
@@ -863,7 +863,7 @@ let test_unknown_cascade_name_rejected () =
     {|[keeper]
 sandbox_profile = "docker"
 goal = "TOML goal"
-cascade_name = "missing_profile"
+runtime_id = "missing_profile"
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -873,7 +873,7 @@ cascade_name = "missing_profile"
           [
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
-            ("trace_id", `String "trace-unknown-cascade-name");
+            ("trace_id", `String "trace-unknown-runtime-id");
             ("goal", `String "stale goal");
           ])
     with
@@ -883,13 +883,13 @@ cascade_name = "missing_profile"
   seed_persisted_meta config initial_meta;
   match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Ok updated ->
-      failf "expected unknown cascade_name to be rejected, got %s"
+      failf "expected unknown runtime_id to be rejected, got %s"
         (Keeper_meta_contract.cascade_name_of_meta updated)
   | Error detail ->
-      check bool "points at profile.cascade_name" true
-        (contains_substring detail "profile.cascade_name");
-      check bool "mentions unknown cascade_name" true
-        (contains_substring detail "unknown cascade_name")
+      check bool "points at profile.runtime_id" true
+        (contains_substring detail "profile.runtime_id");
+      check bool "mentions unknown runtime_id" true
+        (contains_substring detail "unknown runtime_id")
 
 (** Test: room presence sync updates stale agent capabilities from live keeper meta. *)
 ;;
@@ -944,11 +944,11 @@ let test_toml_update_existing () =
   let input = {|[keeper]
 sandbox_profile = "docker"
 goal = "old goal"
-cascade_name = "default"
+runtime_id = "default"
 instructions = "keep this"
 |} in
   match Keeper_toml_loader.update_field_in_content
-          ~table:"keeper" ~key:"cascade_name" ~value:"local_only" input with
+          ~table:"keeper" ~key:"runtime_id" ~value:"local_only" input with
   | Error e -> fail ("update failed: " ^ e)
   | Ok result ->
       check bool "contains new value"
@@ -957,9 +957,9 @@ instructions = "keep this"
       (match Keeper_toml_loader.parse_toml result with
        | Error e -> fail ("re-parse failed: " ^ e)
        | Ok doc ->
-         check (option string) "cascade_name updated"
+         check (option string) "runtime_id updated"
            (Some "local_only")
-           (Keeper_toml_loader.toml_string_opt doc "keeper.cascade_name");
+           (Keeper_toml_loader.toml_string_opt doc "keeper.runtime_id");
          check (option string) "goal preserved"
            (Some "old goal")
            (Keeper_toml_loader.toml_string_opt doc "keeper.goal");
@@ -975,15 +975,15 @@ sandbox_profile = "docker"
 goal = "test"
 |} in
   match Keeper_toml_loader.update_field_in_content
-          ~table:"keeper" ~key:"cascade_name" ~value:"local_only" input with
+          ~table:"keeper" ~key:"runtime_id" ~value:"local_only" input with
   | Error e -> fail ("update failed: " ^ e)
   | Ok result ->
       (match Keeper_toml_loader.parse_toml result with
        | Error e -> fail ("re-parse failed: " ^ e)
        | Ok doc ->
-         check (option string) "cascade_name inserted"
+         check (option string) "runtime_id inserted"
            (Some "local_only")
-           (Keeper_toml_loader.toml_string_opt doc "keeper.cascade_name");
+           (Keeper_toml_loader.toml_string_opt doc "keeper.runtime_id");
          check (option string) "goal preserved"
            (Some "test")
            (Keeper_toml_loader.toml_string_opt doc "keeper.goal"))
@@ -995,7 +995,7 @@ let test_toml_update_no_table () =
 goal = "orphan"
 |} in
   match Keeper_toml_loader.update_field_in_content
-          ~table:"keeper" ~key:"cascade_name" ~value:"x" input with
+          ~table:"keeper" ~key:"runtime_id" ~value:"x" input with
   | Ok _ -> fail "should have returned Error for missing table"
   | Error _ -> ()
 
@@ -1109,9 +1109,9 @@ let () =
             `Quick
             test_social_model_resynced_from_declarative_defaults;
           test_case
-            "unknown nonblank cascade_name is rejected"
+            "unknown nonblank runtime_id is rejected"
             `Quick
-            test_unknown_cascade_name_rejected;
+            test_unknown_runtime_id_rejected;
           test_case
             "room presence sync overwrites stale agent capabilities"
             `Quick

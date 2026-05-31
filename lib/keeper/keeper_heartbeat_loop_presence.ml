@@ -151,23 +151,21 @@ let sync_keeper_presence
           Log.Keeper.warn "room_presence_error keeper=%s room=%s exn=%s"
             meta_current.name e.room_id e.exn_msg)
         presence_errors;
-      if synced.joined_room_ids = []
+      if presence_errors <> []
       then (
         incr consecutive_failures;
         (* RFC-0001 Gate A: record failure streak *)
         Agent_stress.record
           { agent_name = meta_current.name
-          ; room_id =
-              (match meta_current.joined_room_ids with
-               | r :: _ -> r
-               | [] -> "")
+          ; room_id = ""
           ; kind = Failure_streak !consecutive_failures
           ; timestamp = Unix.gettimeofday ()
           };
         Log.Keeper.warn
-          "room presence returned empty rooms (%d/%d)"
+          "workspace presence failed (%d/%d)"
           !consecutive_failures
           (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ());
+        (* RFC-0002: dispatch heartbeat failure *)
         (* RFC-0002: dispatch heartbeat failure *)
         Prometheus.inc_counter
           Keeper_metrics.(to_string HeartbeatFailures)

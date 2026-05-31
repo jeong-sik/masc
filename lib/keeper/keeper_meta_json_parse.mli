@@ -36,8 +36,6 @@ type parsed_keeper_policy =
   ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
   ; pp_room_signal_prompt_enabled : bool
-  ; pp_joined_room_ids : string list
-  ; pp_last_seen_seq_by_room : (string * int) list
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
   ; pp_auto_handoff : bool

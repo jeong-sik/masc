@@ -42,7 +42,7 @@ let with_config_dir config_root f =
       Config_dir_resolver.reset ();
       f ())
 
-let setup_room config =
+let setup_coord config =
   (* Use Coord.init to properly initialize MASC *)
   ignore (Lib.Coord.init config ~agent_name:(Some "test-agent"))
 
@@ -87,7 +87,7 @@ let test_generate_compact () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Coord_utils.default_config dir in
-  setup_room config;
+  setup_coord config;
   let output = Lib.Dashboard.generate_compact config in
   Alcotest.(check bool) "contains MASC" true (contains output "MASC");
   Alcotest.(check bool) "contains ATTENTION" true (contains output "ATTENTION:");
@@ -100,7 +100,7 @@ let test_generate_full () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Coord_utils.default_config dir in
-  setup_room config;
+  setup_coord config;
   let output = Lib.Dashboard.generate config in
   Alcotest.(check bool) "contains MASC Dashboard" true (contains output "MASC Dashboard");
   Alcotest.(check bool) "contains Attention section" true (contains output "Attention Required");
@@ -115,7 +115,7 @@ let test_agents_section_empty () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Coord_utils.default_config dir in
-  setup_room config;
+  setup_coord config;
   let section = Lib.Dashboard.agents_section (Unix.gettimeofday ()) [] in
   Alcotest.(check string) "title" "Agents" section.title;
   Alcotest.(check string) "empty_msg" "(no agents)" section.empty_msg;
@@ -126,7 +126,7 @@ let test_tasks_section_empty () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Coord_utils.default_config dir in
-  setup_room config;
+  setup_coord config;
   let section = Lib.Dashboard.tasks_section [] in
   Alcotest.(check string) "title" "Tasks" section.title;
   Alcotest.(check string) "empty_msg" "(no tasks)" section.empty_msg;
@@ -137,7 +137,7 @@ let test_messages_section_empty () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Coord_utils.default_config dir in
-  setup_room config;
+  setup_coord config;
   let section = Lib.Dashboard.messages_section [] in
   Alcotest.(check string) "title" "Recent Messages" section.title;
   Alcotest.(check string) "empty_msg" "(no messages)" section.empty_msg;
@@ -191,7 +191,7 @@ let test_generate_full_contains_keepers () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Coord_utils.default_config dir in
-  setup_room config;
+  setup_coord config;
   let output = Lib.Dashboard.generate config in
   Alcotest.(check bool) "contains Keepers section" true (contains output "Keepers");
   cleanup_dir dir
@@ -201,7 +201,7 @@ let test_generate_compact_contains_keepers () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Coord_utils.default_config dir in
-  setup_room config;
+  setup_coord config;
   let output = Lib.Dashboard.generate_compact config in
   Alcotest.(check bool) "contains KEEPERS line" true (contains output "KEEPERS:");
   cleanup_dir dir
@@ -211,7 +211,7 @@ let test_generate_compact_surfaces_board_cap_without_failure () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
   let config = Coord_utils.default_config dir in
-  setup_room config;
+  setup_coord config;
   Lib.Prometheus.inc_counter
     Lib.Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
     ~labels:[("kind", "task")]

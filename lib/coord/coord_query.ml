@@ -1,6 +1,6 @@
 (** Coord_query -- Task/agent/message query and listing functions.
 
-    Read-only operations on room state: raw list retrieval, orphan auditing,
+    Read-only operations on coord state: raw list retrieval, orphan auditing,
     message collection, agent-session-bound checks, and formatted listing. *)
 
 open Masc_domain
@@ -276,7 +276,7 @@ let get_all_messages_raw config ~since_seq =
             | exception e ->
                 Log.legacy_traceln ~level:Log.Warn ~module_name:"Coord"
                   (Printf.sprintf
-                     "[WARN] Failed to read room message %s: %s"
+                     "[WARN] Failed to read coord message %s: %s"
                      name (Printexc.to_string e));
                 loop acc rest
       in

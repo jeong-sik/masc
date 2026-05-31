@@ -319,7 +319,7 @@ let last_cascade_attempt_json (meta : keeper_meta) =
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
     [ "source", `String "keeper_runtime.last_cascade_attempt"
-    ; "cascade_name", `String (cascade_name_of_meta meta)
+    ; "runtime_id", `String (cascade_name_of_meta meta)
     ; "last_cascade_attempt", last_cascade_attempt_json meta
     ]
 ;;

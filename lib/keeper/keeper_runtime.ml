@@ -204,8 +204,7 @@ let ensure_keeper_meta config name =
         ()
     with
     | Error detail ->
-        (* WORKAROUND (#19327 follow-up): field renamed cascade_name→model.
-           Field-label strings kept for backward-compat in error messages. *)
+        (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
         let field =
           match defaults.model, defaults.manifest_path with
           | Some _, _ -> "profile.runtime_id"
@@ -327,7 +326,7 @@ let ensure_keeper_meta config name =
       meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled in
     let denylist_changed = meta.tool_denylist <> target_denylist in
     let social_model_changed = meta.social_model <> target_social_model in
-    (* [meta.cascade_name] may be a raw TOML/JSON value while
+    (* [meta runtime id] may be a raw TOML/JSON value while
        [resolved_target_cascade_name] is the validated runtime catalog
        name. Normalize the meta side only so alias cleanup does not
        register as a semantic change. *)

@@ -97,7 +97,7 @@ let config_drift_summary_json ~config ~keeper_name =
   | Ok (Some meta) ->
     let sources = Keeper_status_bridge.source_provenance_json config meta in
     let override_fields = Json_util.get_string_list sources "override_fields" in
-    let cascade_detail = find_override_field_source "model.cascade_name" sources in
+    let cascade_detail = find_override_field_source "model.runtime_id" sources in
     let default_cascade_name, live_cascade_name =
       match cascade_detail with
       | Some detail ->

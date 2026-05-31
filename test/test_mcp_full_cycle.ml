@@ -11,9 +11,8 @@ open Masc_mcp
 
 (** Test fixtures *)
 module Fixtures = struct
-  let make_room_join_params ~room ~agent_name =
+  let make_identity_params ~agent_name =
     `Assoc [
-      ("room", `String room);
       ("agent_name", `String agent_name);
       ("_agent_name", `String agent_name);
       ("_channel", `String "internal");
@@ -35,12 +34,11 @@ end
 
 (** Test: Agent identity extracted from MCP params *)
 let test_identity_extraction () =
-  let params = Fixtures.make_room_join_params ~room:"test-room" ~agent_name:"integration-agent" in
+  let params = Fixtures.make_identity_params ~agent_name:"integration-agent" in
   let args = Yojson.Safe.Util.(params |> member "arguments" |> function `Null -> params | x -> x) in
   let identity = Agent_identity.from_mcp_params args in
   
   check string "agent_name extracted" "integration-agent" identity.agent_name;
-  check (option string) "room extracted" (Some "test-room") identity.room_id;
   match identity.channel with
   | Some Agent_identity.Internal -> ()
   | _ -> fail "expected Internal channel"
@@ -85,23 +83,6 @@ let test_multi_agent_isolation () =
     | Some id -> check string "correct name" name id.agent_name
     | None -> fail (Printf.sprintf "agent %s not found" name)
   ) agents
-
-(** Test: Coord context preserved in identity *)
-let test_room_context () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let reg = Agent_identity.Registry.create () in
-  
-  let id = Fixtures.identity_for "room-agent" in
-  let _ = Agent_identity.Registry.register reg id in
-  
-  (* Agent joins room *)
-  Agent_identity.Registry.touch reg id.session_key ~room_id:"project-alpha" ();
-  
-  match Agent_identity.Registry.find_by_session reg id.session_key with
-  | Some updated ->
-      check (option string) "room updated" (Some "project-alpha") updated.room_id
-  | None -> fail "identity not found"
 
 (** Test: Capability filtering *)
 let test_capability_filtering () =
@@ -173,9 +154,7 @@ let test_session_key_stability () =
   let original_key = id.session_key in
   let _ = Agent_identity.Registry.register reg id in
   
-  (* Multiple touches with different room IDs *)
-  Agent_identity.Registry.touch reg original_key ~room_id:"room-1" ();
-  Agent_identity.Registry.touch reg original_key ~room_id:"room-2" ();
+  (* Multiple touches keep the session stable. *)
   Agent_identity.Registry.touch reg original_key ();
   
   match Agent_identity.Registry.find_by_session reg original_key with
@@ -189,7 +168,6 @@ let () =
       test_case "extraction" `Quick test_identity_extraction;
       test_case "registry_persistence" `Quick test_identity_registry_persistence;
       test_case "multi_agent_isolation" `Quick test_multi_agent_isolation;
-      test_case "room_context" `Quick test_room_context;
       test_case "capability_filtering" `Quick test_capability_filtering;
     ];
     "lifecycle", [

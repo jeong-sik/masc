@@ -17,14 +17,12 @@ let test_identity_from_mcp_params () =
     ("_channel", `String "telegram");
     ("_user_id", `String "user-12345");
     ("_session_key", `String "session-abc-123");
-    ("room", `String "project-room");
     ("_capabilities", `List [`String "code"; `String "file_ops"]);
   ] in
   
   let identity = Agent_registry_eio.get_or_create_identity params in
   
   check string "agent_name" "agent_llm_a-code-agent" identity.agent_name;
-  check (option string) "room" (Some "project-room") identity.room_id;
   check bool "has code cap" true (Agent_identity.has_capability identity "code");
   check bool "no admin cap" false (Agent_identity.has_capability identity "admin")
 
@@ -49,24 +47,6 @@ let test_mcp_session_persistence () =
   
   check string "id1 == id2" id1.session_key id2.session_key;
   check string "id1 == id3" id1.session_key id3.session_key
-
-(** Test room context updates *)
-let test_room_context_updates () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Agent_registry_eio.reset_for_testing ();
-  
-  let mcp_session = "mcp-room-test" in
-  
-  (* Join room-1 *)
-  let p1 = `Assoc [("_agent_name", `String "room-agent"); ("room", `String "room-1")] in
-  let id1 = Agent_registry_eio.get_or_create_identity ~mcp_session_id:mcp_session p1 in
-  check (option string) "in room-1" (Some "room-1") id1.room_id;
-  
-  (* Move to room-2 *)
-  let p2 = `Assoc [("room", `String "room-2")] in
-  let id2 = Agent_registry_eio.get_or_create_identity ~mcp_session_id:mcp_session p2 in
-  check (option string) "in room-2" (Some "room-2") id2.room_id
 
 (** Test multi-agent isolation *)
 let test_multi_agent_isolation () =
@@ -96,7 +76,6 @@ let test_display_string () =
     agent_name = "test-display-agent";
     channel = Some (Agent_identity.External "telegram");
     user_id = Some "tg-user-99";
-    room_id = Some "work-room";
     capabilities = ["code"; "search"];
     registered_at = Unix.gettimeofday ();
     last_seen = Unix.gettimeofday ();
@@ -130,7 +109,6 @@ let () =
     "integration", [
       test_case "from_mcp_params" `Quick test_identity_from_mcp_params;
       test_case "session_persistence" `Quick test_mcp_session_persistence;
-      test_case "room_updates" `Quick test_room_context_updates;
       test_case "multi_agent" `Quick test_multi_agent_isolation;
       test_case "display_string" `Quick test_display_string;
       test_case "stale_cleanup" `Quick test_stale_cleanup;

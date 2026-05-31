@@ -28,13 +28,11 @@ let test_from_mcp_params () =
     ("_agent_name", `String "mcp-agent-001");
     ("_channel", `String "telegram");
     ("_user_id", `String "12345");
-    ("room", `String "test-room");
     ("_capabilities", `List [`String "code"; `String "search"]);
   ] in
   let identity = Agent_identity.from_mcp_params params in
   check string "agent_name" "mcp-agent-001" identity.agent_name;
   check (option string) "user_id" (Some "12345") identity.user_id;
-  check (option string) "room_id" (Some "test-room") identity.room_id;
   check int "capabilities count" 2 (List.length identity.capabilities);
   check bool "has code capability" true (Agent_identity.has_capability identity "code")
 
@@ -178,7 +176,6 @@ let test_to_display_string () =
     agent_name = "test-agent";
     channel = Some (Agent_identity.External "telegram");
     user_id = Some "user123";
-    room_id = Some "room-a";
     capabilities = [];
     registered_at = 0.0;
     last_seen = 0.0;
@@ -195,7 +192,6 @@ let test_to_display_string_empty_session_key () =
     agent_name = "empty-key-agent";
     channel = Some Agent_identity.Api;
     user_id = None;
-    room_id = None;
     capabilities = [];
     registered_at = 0.0;
     last_seen = 0.0;
@@ -246,7 +242,7 @@ module RegistryTests = struct
     }) in
     let _ = Agent_identity.Registry.register reg identity in
     
-    Agent_identity.Registry.touch reg identity.session_key ~room_id:"new-room" ();
+    Agent_identity.Registry.touch reg identity.session_key ();
     
     match Agent_identity.Registry.find_by_session reg identity.session_key with
     | Some updated ->

@@ -142,7 +142,6 @@ type t = {
   agent_name : string;            (** Display name (e.g., "agent_llm_a-agent-001") *)
   channel : channel option;       (** Source channel if known *)
   user_id : string option;        (** User ID from channel (e.g., telegram user id) *)
-  room_id : string option;        (** Current room if joined *)
   capabilities : string list;     (** Declared agent capabilities *)
   registered_at : float;          (** Unix timestamp *)
   mutable last_seen : float;      (** Last activity timestamp *)
@@ -194,7 +193,6 @@ let from_mcp_params params =
     | None -> None
   in
   let user_id = get_opt "_user_id" in
-  let room_id = get_opt "room" in
   let capabilities = Json_util.get_string_list params "_capabilities" in
   let now = Time_compat.now () in
   {
@@ -203,7 +201,6 @@ let from_mcp_params params =
     agent_name;
     channel;
     user_id;
-    room_id;
     capabilities;
     registered_at = now;
     last_seen = now;
@@ -221,7 +218,6 @@ let anonymous () =
     agent_name = name;
     channel = None;
     user_id = None;
-    room_id = None;
     capabilities = [];
     registered_at = now;
     last_seen = now;
@@ -268,17 +264,12 @@ module Registry = struct
       | None -> None
     )
 
-  (** Update last_seen and optionally room *)
-  let touch reg session_key ?room_id () =
+  (** Update last_seen *)
+  let touch reg session_key () =
     with_lock reg (fun () ->
       match StringMap.find_opt session_key !(reg.identities) with
       | Some identity ->
-          identity.last_seen <- Time_compat.now ();
-          (match room_id with
-           | Some rid -> 
-               let updated = { identity with room_id = Some rid } in
-               reg.identities := StringMap.add session_key updated !(reg.identities)
-           | None -> ())
+          identity.last_seen <- Time_compat.now ()
       | None -> ()
     )
 
@@ -327,15 +318,10 @@ let to_display_string identity =
     | Some c -> Printf.sprintf " via %s" (string_of_channel c)
     | None -> ""
   in
-  let room_str = match identity.room_id with
-    | Some r -> Printf.sprintf " in %s" r
-    | None -> ""
-  in
-  Printf.sprintf "%s (%s)%s%s"
+  Printf.sprintf "%s (%s)%s"
     identity.agent_name
     prefix_str
     channel_str
-    room_str
 
 (** Check if two identities refer to the same agent *)
 let same_agent a b =

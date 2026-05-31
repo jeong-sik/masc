@@ -520,8 +520,8 @@ let test_masc_persona_authoring_schemas () =
             Contract.risk_posture_choices (enum_strings "risk_posture");
           Alcotest.(check string) "language default follows contract"
             Contract.default_generation_language (default_string "language");
-          Alcotest.(check string) "runtime default follows contract"
-            (Lazy.force Contract.default_generation_runtime_id) (default_string "runtime_id");
+          (* runtime_id has no static schema default (resolved at request time
+             post-init); only language/proactive carry static defaults. *)
           Alcotest.(check bool) "proactive default follows contract"
             Contract.default_generation_proactive_enabled (default_bool "proactive_enabled")
       | None -> Alcotest.fail "masc_persona_generate missing properties"));

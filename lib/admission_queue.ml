@@ -239,7 +239,7 @@ let snapshot_json () =
              (fun (w : waiter_info) ->
                 `Assoc
                   [ "keeper_name", `String w.keeper_name
-                  ; ( "cascade_name"
+                  ; ( "runtime_id"
                     , `String
                         (w.cascade_name) )
                   ; ( "priority"

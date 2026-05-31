@@ -42,8 +42,7 @@ val regions_file
   -> string
 (** Append-only region store path under the chosen
     {!Ide_paths.partition}. Default [partition] is
-    {!Ide_paths.Legacy} (the pre-RFC-0128 flat
-    [base_dir/.masc-ide/regions.jsonl]). *)
+    {!Ide_paths.Orphan}. *)
 
 val append_region
   :  base_dir:string
@@ -51,7 +50,7 @@ val append_region
   -> code_region
   -> unit
 (** Append one region to the chosen partition's [regions.jsonl].
-    Default [partition] is {!Ide_paths.Legacy}. *)
+    Default [partition] is {!Ide_paths.Orphan}. *)
 
 val ingest_tool_call
   :  base_dir:string
@@ -63,7 +62,7 @@ val ingest_tool_call
 (** Inspect a tool_call JSON record. If it is a file-writing tool,
     extract regions and append them to the chosen partition's
     [regions.jsonl]. Non-matching tool_calls are silently ignored.
-    Default [partition] is {!Ide_paths.Legacy}. *)
+    Default [partition] is {!Ide_paths.Orphan}. *)
 
 val read_regions
   :  base_dir:string

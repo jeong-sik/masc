@@ -12,12 +12,10 @@ let by_url_path ~base_dir ~canonical_url =
 let orphan_path ~base_dir = Filename.concat (store_path ~base_dir) orphan_subdir
 
 type partition =
-  | Legacy
   | By_url of string
   | Orphan
 
 let partition_store_dir ~base_dir = function
-  | Legacy -> store_path ~base_dir
   | By_url slug -> by_url_path ~base_dir ~canonical_url:slug
   | Orphan -> orphan_path ~base_dir
 ;;

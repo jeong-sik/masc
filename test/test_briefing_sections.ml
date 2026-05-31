@@ -14,7 +14,7 @@
     1. {b Output shape} — returns [(watch_summary, [c; a; w])]
        where the list always has length 3 with section ids
        [communication / alignment / watch] in that order.
-    2. {b Watch branches} — risky room → "risk"; incidents or
+    2. {b Watch branches} — risky coord → "risk"; incidents or
        recommended actions → "watch"; otherwise "ok".
     3. {b Communication branches} — positive signal vs
        metadata gaps vs live-session-count vs known mode count.
@@ -30,11 +30,11 @@ module S = Masc_mcp.Briefing_sections
 
 let s_str s = `String s
 
-let briefing_summary ?(room_health = "ok") ?(incidents = 0)
+let briefing_summary ?(coord_health = "ok") ?(incidents = 0)
     ?(recommended = 0) ?(top_attention = "") () : Yojson.Safe.t =
   `Assoc
     [
-      ("room_health", s_str room_health);
+      ("coord_health", s_str coord_health);
       ("incident_count", `Int incidents);
       ("recommended_action_count", `Int recommended);
       ("top_attention_summary", s_str top_attention);
@@ -168,10 +168,10 @@ let test_watch_summary_matches_watch_section () =
 
 (* ── (2) Watch section branches ────────────────────────────── *)
 
-let test_watch_risky_room () =
+let test_watch_risky_coord () =
   let _ws, sections =
     S.build_briefing_sections
-      ~briefing_summary_json:(briefing_summary ~room_health:"critical" ())
+      ~briefing_summary_json:(briefing_summary ~coord_health:"critical" ())
       ~sessions:[] ~agents:[] ~recent_messages:[]
       ~metadata_gaps:[]
   in
@@ -366,7 +366,7 @@ let () =
   test_output_shape_section_attribute_keys ();
   test_provenance_and_authoritative_pinned ();
   test_watch_summary_matches_watch_section ();
-  test_watch_risky_room ();
+  test_watch_risky_coord ();
   test_watch_incidents_only ();
   test_watch_recommended_actions_only ();
   test_watch_clean_state_ok ();

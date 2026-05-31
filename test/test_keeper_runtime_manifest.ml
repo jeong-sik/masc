@@ -2305,7 +2305,7 @@ let test_successful_provider_turn_links_runtime_artifacts () =
           Alcotest.(check bool)
             "provider lane disables OAS internal cascade"
             false
-            (json_bool_member "oas_internal_cascade_allowed"
+            (json_bool_member "oas_internal_runtime_allowed"
                provider_lane_row.M.decision);
           let expected_tool_batch_id =
             Printf.sprintf "%s:keeper-%d:tool-batch-oas-0" trace_id
@@ -2828,7 +2828,7 @@ let test_wired_manifest_sites () =
       ( "lib/keeper/keeper_cascade_engine.ml",
         [
           "single_provider_agent_run";
-          "oas_internal_cascade_allowed";
+          "oas_internal_runtime_allowed";
           "guard_keeper_hot_path";
         ] );
       ( "lib/keeper/keeper_runtime_manifest.ml",
@@ -3292,7 +3292,7 @@ let test_keeper_cascade_engine_boundary () =
   Alcotest.(check bool)
     "OAS internal cascade disabled"
     false
-    (E.allows_oas_internal_cascade engine);
+    (E.allows_oas_internal_runtime engine);
   (match E.guard_keeper_hot_path engine with
    | Ok () -> ()
    | Error msg -> Alcotest.fail msg);
@@ -3313,7 +3313,7 @@ let test_keeper_cascade_engine_boundary () =
   Alcotest.(check bool)
     "manifest internal cascade flag"
     false
-    Yojson.Safe.Util.(field "oas_internal_cascade_allowed" |> to_bool)
+    Yojson.Safe.Util.(field "oas_internal_runtime_allowed" |> to_bool)
 
 let test_keeper_hot_path_avoids_oas_complete_cascade () =
   List.iter

@@ -730,7 +730,7 @@ let append_execution_receipt
        Masc_mcp.Keeper_execution_receipt.tool_contract_result =
       Contract_satisfied_completion)
     ?(tools_used = [ "tool_read_file" ])
-    ?(cascade_fallback_applied = true)
+    ?(runtime_fallback_applied = true)
     ?(runtime_outcome : Masc_mcp.Keeper_execution_receipt.runtime_outcome =
       Runtime_passed_to_next_model)
     ?(degraded_retry_applied = true)
@@ -766,7 +766,7 @@ let append_execution_receipt
       turn_count = Some 2;
       oas_turn_count = None;
       oas_dispatch_mode = None;
-      oas_internal_cascade_disabled = false;
+      oas_internal_runtime_disabled = false;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome = `Ok;
@@ -802,16 +802,16 @@ let append_execution_receipt
       cascade_name =
         Cascade_name.of_string_exn
           (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta);
-      cascade_selected_model = Some "custom:mock";
+      runtime_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
-      cascade_fallback_applied;
+      runtime_fallback_applied;
       runtime_outcome;
       degraded_retry_applied;
       degraded_retry_runtime_id =
         Option.map Cascade_name.of_string_exn
           degraded_retry_runtime_id;
       fallback_reason;
-      cascade_rotation_attempts =
+      runtime_rotation_attempts =
         (match degraded_retry_runtime_id, fallback_reason with
          | Some retry_cascade, Some reason ->
            [
@@ -849,7 +849,7 @@ let append_execution_receipt
       pre_dispatch_compaction_trigger = None;
       pre_dispatch_compaction_before_tokens = None;
       pre_dispatch_compaction_after_tokens = None;
-      oas_internal_cascade_allowed = false;
+      oas_internal_runtime_allowed = false;
     }
   in
   let tm = Unix.gmtime (Unix.gettimeofday ()) in
@@ -1302,7 +1302,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
   append_execution_receipt
-    ~cascade_fallback_applied:false
+    ~runtime_fallback_applied:false
     ~runtime_outcome:Masc_mcp.Keeper_execution_receipt.Runtime_completed
     ~degraded_retry_applied:false
     ~degraded_retry_runtime_id:None
@@ -1683,7 +1683,7 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
   wait_for_boot_receipt_side_effects config ~keeper_name;
   append_execution_receipt ~tool_contract_result:Contract_satisfied_execution
     ~tools_used:[ "tool_read_file" ]
-    ~cascade_fallback_applied:false
+    ~runtime_fallback_applied:false
     ~runtime_outcome:Masc_mcp.Keeper_execution_receipt.Runtime_completed
     ~degraded_retry_applied:false
     ~degraded_retry_runtime_id:None

@@ -147,7 +147,7 @@ let tool_descriptor_summary_json receipt =
 
 (* Cycle 51 observability: alert when [operator_disposition] cannot
    classify a receipt and falls through to the catch-all
-   [(Disp_unknown, Reason_unmapped_cascade_state)].
+   [(Disp_unknown, Reason_unmapped_runtime_state)].
 
    PR #11651 fixed the historical "blocked" -> "unknown" silent path
    (livelock turns emitted [outcome="blocked"] which was not in
@@ -166,7 +166,7 @@ let () =
     ~help:
       "Total receipts whose (outcome, runtime_outcome) tuple did not match any branch of \
        operator_disposition and fell through to the typed catch-all \
-       (Disp_unknown, Reason_unmapped_cascade_state).  PR #11651 fixed the historical \
+       (Disp_unknown, Reason_unmapped_runtime_state).  PR #11651 fixed the historical \
        'blocked' -> 'unknown' silent path; this counter alerts operators if a future \
        refactor reintroduces such a path. A non-zero rate is a regression signal — \
        investigate which receipt.outcome / runtime_outcome / terminal_reason_code \
@@ -202,7 +202,7 @@ type operator_disposition_reason =
   | Reason_runtime_exhausted
   | Reason_preflight_config_error
   | Reason_degraded_retry
-  | Reason_cascade_fallback
+  | Reason_runtime_fallback
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_required_unsatisfied
@@ -210,14 +210,14 @@ type operator_disposition_reason =
   | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped
-  | Reason_unmapped_cascade_state
+  | Reason_unmapped_runtime_state
 
 let operator_disposition_reason_to_string = function
   | Reason_healthy -> "healthy"
   | Reason_runtime_exhausted -> "runtime_exhausted"
   | Reason_preflight_config_error -> "preflight_config_error"
   | Reason_degraded_retry -> "degraded_retry"
-  | Reason_cascade_fallback -> "cascade_fallback"
+  | Reason_runtime_fallback -> "runtime_fallback"
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_tool_required_unsatisfied -> "tool_required_unsatisfied"
@@ -225,7 +225,7 @@ let operator_disposition_reason_to_string = function
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
-  | Reason_unmapped_cascade_state -> "unmapped_cascade_state"
+  | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
 ;;
 
 let operator_disposition (receipt : t)
@@ -272,9 +272,9 @@ let operator_disposition (receipt : t)
   then Disp_fail_open_next_runtime_id, Reason_degraded_retry
   else if
     provider_runtime_failure
-    && (receipt.cascade_fallback_applied
+    && (receipt.runtime_fallback_applied
         || receipt.runtime_outcome = Runtime_passed_to_next_model)
-  then Disp_pass_next_model, Reason_cascade_fallback
+  then Disp_pass_next_model, Reason_runtime_fallback
   else if provider_runtime_failure
   then Disp_pause_human, Reason_provider_runtime_error
   else if String.starts_with ~prefix:"completion_contract_violation:" terminal_reason
@@ -361,7 +361,7 @@ let operator_disposition (receipt : t)
       if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime_id
       then Disp_fail_open_next_runtime_id, Reason_tool_route_recoverable_failure
       else if
-        receipt.cascade_fallback_applied
+        receipt.runtime_fallback_applied
         || receipt.runtime_outcome = Runtime_passed_to_next_model
       then Disp_pass_next_model, Reason_tool_route_recoverable_failure
       else Disp_pause_human, Reason_tool_route_recoverable_failure
@@ -385,9 +385,9 @@ let operator_disposition (receipt : t)
       receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime_id
     then Disp_fail_open_next_runtime_id, Reason_degraded_retry
     else if
-      receipt.cascade_fallback_applied
+      receipt.runtime_fallback_applied
       || receipt.runtime_outcome = Runtime_passed_to_next_model
-    then Disp_pass_next_model, Reason_cascade_fallback
+    then Disp_pass_next_model, Reason_runtime_fallback
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = Runtime_not_dispatched
@@ -436,7 +436,7 @@ let operator_disposition (receipt : t)
           (Option.value
              (Option.map error_kind_to_string receipt.error_kind)
              ~default:"<none>");
-        Disp_unknown, Reason_unmapped_cascade_state)
+        Disp_unknown, Reason_unmapped_runtime_state)
 ;;
 
 let to_json (receipt : t) =
@@ -505,8 +505,8 @@ let to_json (receipt : t) =
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; ( "oas_turn_count", Json_util.int_opt_to_json receipt.oas_turn_count )
     ; ( "oas_dispatch_mode", string_opt_json receipt.oas_dispatch_mode )
-    ; ( "oas_internal_cascade_disabled"
-      , `Bool receipt.oas_internal_cascade_disabled )
+    ; ( "oas_internal_runtime_disabled"
+      , `Bool receipt.oas_internal_runtime_disabled )
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
@@ -566,9 +566,9 @@ let to_json (receipt : t) =
           [ "name", `String (receipt.runtime_id)
           ; "selected_model", `Null
           ; "attempt_count", `Int receipt.runtime_attempt_count
-          ; "fallback_applied", `Bool receipt.cascade_fallback_applied
+          ; "fallback_applied", `Bool receipt.runtime_fallback_applied
           ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
-          ; "oas_internal_cascade_allowed", `Bool receipt.oas_internal_cascade_allowed
+          ; "oas_internal_runtime_allowed", `Bool receipt.oas_internal_runtime_allowed
           ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
           ; ( "degraded_retry_runtime_id"
             , match receipt.degraded_retry_runtime_id with

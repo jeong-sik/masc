@@ -65,7 +65,7 @@ let mk_receipt
       ?(error_kind = None)
       ?(error_message = None)
       ?(degraded_retry_applied = false)
-      ?(cascade_fallback_applied = false)
+      ?(runtime_fallback_applied = false)
       ()
   : R.t
   =
@@ -76,7 +76,7 @@ let mk_receipt
   ; turn_count = Some 1
   ; oas_turn_count = None
   ; oas_dispatch_mode = None
-  ; oas_internal_cascade_disabled = false
+  ; oas_internal_runtime_disabled = false
   ; current_task_id
   ; goal_ids
   ; outcome
@@ -103,14 +103,14 @@ let mk_receipt
   ; approval_profile = None
   ; approval_profile_derived = false
   ; cascade_name = Cascade_name.of_string_exn "cascade.default"
-  ; cascade_selected_model = None
+  ; runtime_selected_model = None
   ; cascade_attempt_count = 1
-  ; cascade_fallback_applied
+  ; runtime_fallback_applied
   ; runtime_outcome
   ; degraded_retry_applied
   ; degraded_retry_runtime_id = None
   ; fallback_reason = None
-  ; cascade_rotation_attempts = []
+  ; runtime_rotation_attempts = []
   ; stop_reason
   ; error_kind
   ; error_message
@@ -123,7 +123,7 @@ let mk_receipt
   ; pre_dispatch_compaction_trigger = None
   ; pre_dispatch_compaction_before_tokens = None
   ; pre_dispatch_compaction_after_tokens = None
-  ; oas_internal_cascade_allowed = false
+  ; oas_internal_runtime_allowed = false
   }
 ;;
 
@@ -182,7 +182,7 @@ let test_route_failure_uses_recoverable_reason () =
 let test_route_failure_passes_next_when_fallback_available () =
   let r =
     mk_receipt
-      ~cascade_fallback_applied:true
+      ~runtime_fallback_applied:true
       ~runtime_outcome:R.Runtime_passed_to_next_model
       ~tool_contract_result:Contract_tool_surface_mismatch
       ()
@@ -217,7 +217,7 @@ let test_pause_human_when_no_tools_used () =
    [terminal_reason="completion_contract_violation:require_tool_use"] while
    the earlier tool_contract classifier reports
    [tool_contract_result="satisfied_completion"]. Before this branch the
-   two-layer disagreement fell through to ("unknown","unmapped_cascade_state")
+   two-layer disagreement fell through to ("unknown","unmapped_runtime_state")
    and tripped the #11651 regression counter. The terminal_reason is
    authoritative — pause_human/tool_required_unsatisfied. *)
 let test_pause_human_for_completion_contract_violation_with_satisfied_inner () =
@@ -318,7 +318,7 @@ let test_unknown_when_unmapped () =
       ~tool_contract_result:Contract_satisfied_completion
       ()
   in
-  check_disp "unmapped" r "unknown" "unmapped_cascade_state"
+  check_disp "unmapped" r "unknown" "unmapped_runtime_state"
 ;;
 
 (* === Forward-progress states do NOT broadcast ======================== *)
@@ -394,15 +394,15 @@ let test_pause_when_unrelated_tool_used_for_required_progress () =
     "tool_required_unsatisfied"
 ;;
 
-let test_pass_next_for_cascade_fallback () =
+let test_pass_next_for_runtime_fallback () =
   let r =
     mk_receipt
-      ~cascade_fallback_applied:true
+      ~runtime_fallback_applied:true
       ~runtime_outcome:R.Runtime_passed_to_next_model
       ~tool_contract_result:Contract_satisfied_completion
       ()
   in
-  check_disp "cascade_fallback" r "pass_next_model" "cascade_fallback"
+  check_disp "runtime_fallback" r "pass_next_model" "runtime_fallback"
 ;;
 
 let test_fail_open_for_degraded_retry () =
@@ -509,7 +509,7 @@ let test_receipt_json_omits_provider_model_identity () =
     { (mk_receipt ())
       with
       model_used = Some "provider:model-private"
-    ; cascade_selected_model = Some "provider:model-private"
+    ; runtime_selected_model = Some "provider:model-private"
     }
   in
   let json = R.to_json receipt in
@@ -563,7 +563,7 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
          ; turn_count = Some 605
          ; oas_turn_count = None
          ; oas_dispatch_mode = None
-         ; oas_internal_cascade_disabled = false
+         ; oas_internal_runtime_disabled = false
          ; current_task_id = Some "task-livelock-dedupe"
          }
        in
@@ -586,7 +586,7 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
        R.append
          config
          { receipt with trace_id = "trace-livelock-dedupe-3"; turn_count = Some 606; oas_turn_count = None
-         ; oas_internal_cascade_disabled = false
+         ; oas_internal_runtime_disabled = false
          ; oas_dispatch_mode = None };
        check int "new turn emits again" 2 (operator_broadcast_event_count config))
 ;;
@@ -609,7 +609,7 @@ let test_broadcast_payload_carries_turn_diagnostics () =
   let receipt =
     { receipt with
       model_used = Some "provider:model-private"
-    ; cascade_selected_model = Some "provider:model-private"
+    ; runtime_selected_model = Some "provider:model-private"
     }
   in
   let payload =
@@ -908,7 +908,7 @@ let () =
         ; test_case
             "fallback -> pass_next_model"
             `Quick
-            test_pass_next_for_cascade_fallback
+            test_pass_next_for_runtime_fallback
         ; test_case
             "degraded -> fail_open_next_runtime_id"
             `Quick

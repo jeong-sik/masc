@@ -580,7 +580,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.last_model_used).toBeUndefined()
     expect(keeper?.metrics_series?.[0]).toMatchObject({
       cascade_name: 'primary',
-      cascade_selected_model: null,
+      runtime_selected_model: null,
       cascade_attempt_count: 2,
       cascade_outcome: 'passed_to_next_model',
       cascade_strategy: 'round_robin',

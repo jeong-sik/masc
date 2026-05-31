@@ -5,9 +5,9 @@ let build
       ?retry_phase_elapsed_ms
       ~(from_runtime_id : string)
       ~(retry : Keeper_error_classify.degraded_retry)
-      ~(outcome : Keeper_execution_receipt.cascade_rotation_outcome)
+      ~(outcome : Keeper_execution_receipt.runtime_rotation_outcome)
       (err : Agent_sdk.Error.sdk_error)
-  : Keeper_execution_receipt.cascade_rotation_attempt
+  : Keeper_execution_receipt.runtime_rotation_attempt
   =
   { from_runtime_id
   ; (* RFC-0206: cascade-name validation moved to the TOML load boundary; a

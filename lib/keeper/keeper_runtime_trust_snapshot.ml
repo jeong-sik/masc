@@ -236,13 +236,13 @@ let display_disposition_of_operator ~operator_disposition
   match String.lowercase_ascii operator_disposition with
   | "pass" -> ("Pass", "healthy")
   | "skipped" -> ("Pass", "phase_skipped")
-  | "pass_next_model" -> ("Pass", "cascade_fallback")
+  | "pass_next_model" -> ("Pass", "runtime_fallback")
   | "blocked" | "blocked_runtime" -> ("Blocked", reason "runtime_blocked")
   | "pause_human" -> ("Blocked", reason "needs_human_attention")
   | "fail_open_next_runtime_id" -> ("Blocked", reason "degraded_retry")
   | "user_cancelled" -> ("Blocked", reason "cancelled")
   | "alert_exhausted" -> ("Alert", reason "runtime_exhausted")
-  | "unknown" -> ("Alert", reason "unmapped_cascade_state")
+  | "unknown" -> ("Alert", reason "unmapped_runtime_state")
   | _ -> ("Alert", reason "unmapped_operator_disposition")
 
 let display_disposition_requires_attention = function
@@ -525,7 +525,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | `Null -> None
     | json -> json_int_opt_member "attempt_count" json
   in
-  let cascade_fallback_applied =
+  let runtime_fallback_applied =
     match cascade_json with
     | `Null -> None
     | json -> json_bool_opt_member "fallback_applied" json
@@ -562,7 +562,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
         | Some value -> `Int value
         | None -> `Null );
       ( "provider_fallback_applied",
-        match cascade_fallback_applied with
+        match runtime_fallback_applied with
         | Some value -> `Bool value
         | None -> `Null );
       ( "provider_selected_model",

@@ -114,7 +114,7 @@ val run_turn
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime_id:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
-  -> ?cascade_rotation_attempts:Keeper_execution_receipt.cascade_rotation_attempt list
+  -> ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list
   -> ?is_retry:bool
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t

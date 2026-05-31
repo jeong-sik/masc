@@ -862,7 +862,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
         ]
     ; attempt_details_available = true
     ; attempt_details_source = "oas_metrics_callbacks"
-    ; oas_internal_cascade_allowed = false
+    ; oas_internal_runtime_allowed = false
     }
   in
   let json = Cascade_observation.cascade_observation_to_json observation in
@@ -1055,7 +1055,7 @@ let test_cascade_audit_persists_observation () =
              ]
          ; attempt_details_available = true
          ; attempt_details_source = "oas_metrics_callbacks"
-         ; oas_internal_cascade_allowed = false
+         ; oas_internal_runtime_allowed = false
          }
        in
        Masc_mcp.Cascade_observation.record_cascade
@@ -6465,7 +6465,7 @@ let () =
         ] )
     ; ( "idle_detail_enrichment"
       , Test_oas_worker_idle_detail.cases )
-    ; ( "circuit_breaker_cascade_fallback"
+    ; ( "circuit_breaker_runtime_fallback"
       , [ Alcotest.test_case
             "P0: open provider is skipped and fallback succeeds at run_named boundary"
             `Quick

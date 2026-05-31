@@ -46,7 +46,7 @@ val sdk_error_soft_rate_limited :
 
 val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
-val sdk_error_cascade_fallback_class :
+val sdk_error_runtime_fallback_class :
   Agent_sdk.Error.sdk_error -> string option
 
 (** [apply_stream_idle_timeout_default opt] returns [opt] when the caller

@@ -308,7 +308,7 @@ let test_fallback_class_does_not_label_resumable_cli_session () =
   Alcotest.(check (option string))
     "resumable session has no string fallback class"
     None
-    (Keeper_turn_driver.sdk_error_cascade_fallback_class err)
+    (Keeper_turn_driver.sdk_error_runtime_fallback_class err)
 ;;
 
 let cases =

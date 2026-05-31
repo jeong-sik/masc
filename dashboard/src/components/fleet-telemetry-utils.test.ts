@@ -196,7 +196,7 @@ describe('buildFleetRows runtime labels', () => {
             wall_tokens_per_second: null,
             inference_telemetry: null,
             cascade_name: 'primary',
-            cascade_selected_model: 'provider-a:model-a-sonnet',
+            runtime_selected_model: 'provider-a:model-a-sonnet',
             cascade_attempt_count: 2,
             cascade_outcome: 'passed_to_next_model',
             cascade_strategy: 'round_robin',

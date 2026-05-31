@@ -281,7 +281,7 @@ type t =
   ; turn_count : int option
   ; oas_turn_count : int option
   ; oas_dispatch_mode : string option
-  ; oas_internal_cascade_disabled : bool
+  ; oas_internal_runtime_disabled : bool
   ; current_task_id : string option
   ; goal_ids : string list
   ; outcome : outcome_kind
@@ -302,11 +302,11 @@ type t =
   ; approval_profile : string option
   ; approval_profile_derived : bool
   ; runtime_id : string
-  ; cascade_selected_model : string option
+  ; runtime_selected_model : string option
   ; runtime_attempt_count : int
-  ; cascade_fallback_applied : bool
+  ; runtime_fallback_applied : bool
   ; runtime_outcome : runtime_outcome
-  ; oas_internal_cascade_allowed : bool
+  ; oas_internal_runtime_allowed : bool
   ; degraded_retry_applied : bool
   ; degraded_retry_runtime_id : string option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option

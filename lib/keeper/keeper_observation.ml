@@ -26,7 +26,7 @@ type runtime_observation = {
   fallback_events : runtime_fallback_event list;
   attempt_details_available : bool;
   attempt_details_source : string;
-  oas_internal_cascade_allowed : bool;
+  oas_internal_runtime_allowed : bool;
 }
 
 and runtime_attempt = {
@@ -157,7 +157,7 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     ?(fallback_events = [])
     ?(attempt_details_available = false)
     ?(attempt_details_source = "opaque_named_cascade")
-    ?(oas_internal_cascade_allowed = false)
+    ?(oas_internal_runtime_allowed = false)
     () : runtime_observation =
   let candidate_models =
     List.init (max 0 candidate_count) (fun _ -> public_runtime_model_label)
@@ -195,7 +195,7 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     fallback_events;
     attempt_details_available;
     attempt_details_source;
-    oas_internal_cascade_allowed;
+    oas_internal_runtime_allowed;
   }
 
 (* ================================================================ *)
@@ -404,7 +404,7 @@ let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
 let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     ~(candidate_count : int)
     ~(selected_model_raw : string option) ~(capture : runtime_metrics_capture)
-    ?(oas_internal_cascade_allowed = false)
+    ?(oas_internal_runtime_allowed = false)
     () =
   runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     ~candidate_count ~selected_model_raw
@@ -412,7 +412,7 @@ let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     ~fallback_events:(List.rev capture.fallback_events_rev)
     ~attempt_details_available:true
     ~attempt_details_source:"oas_metrics_callbacks"
-    ~oas_internal_cascade_allowed
+    ~oas_internal_runtime_allowed
     ()
 
 (* ================================================================ *)
@@ -444,7 +444,7 @@ let runtime_observation_to_json (obs : runtime_observation) : Yojson.Safe.t =
           (List.map runtime_fallback_event_to_json obs.fallback_events) );
       ("attempt_details_available", `Bool obs.attempt_details_available);
       ("attempt_details_source", `String obs.attempt_details_source);
-      ("oas_internal_cascade_allowed", `Bool obs.oas_internal_cascade_allowed);
+      ("oas_internal_runtime_allowed", `Bool obs.oas_internal_runtime_allowed);
     ]
 
 let get_cascade_audit_store store_opt =

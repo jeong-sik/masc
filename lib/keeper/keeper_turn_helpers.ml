@@ -234,7 +234,7 @@ let record_pre_dispatch_terminal_observation
          | None -> Some meta.runtime.usage.total_turns)
     ; oas_turn_count = None
     ; oas_dispatch_mode = None
-    ; oas_internal_cascade_disabled = true
+    ; oas_internal_runtime_disabled = true
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; goal_ids = meta.active_goal_ids
     ; outcome
@@ -255,14 +255,14 @@ let record_pre_dispatch_terminal_observation
     ; approval_profile = None
     ; approval_profile_derived = false
     ; cascade_name
-    ; cascade_selected_model = None
+    ; runtime_selected_model = None
     ; cascade_attempt_count = 0
-    ; cascade_fallback_applied = false
+    ; runtime_fallback_applied = false
     ; runtime_outcome = Keeper_execution_receipt.Runtime_not_dispatched
     ; degraded_retry_applied = false
     ; degraded_retry_runtime_id = None
     ; fallback_reason = None
-    ; cascade_rotation_attempts = []
+    ; runtime_rotation_attempts = []
     ; stop_reason = None
     ; error_kind
     ; error_message
@@ -275,7 +275,7 @@ let record_pre_dispatch_terminal_observation
     ; pre_dispatch_compaction_trigger = None
     ; pre_dispatch_compaction_before_tokens = None
     ; pre_dispatch_compaction_after_tokens = None
-    ; oas_internal_cascade_allowed = false
+    ; oas_internal_runtime_allowed = false
     }
   in
   let receipt_path =

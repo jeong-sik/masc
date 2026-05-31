@@ -97,7 +97,7 @@ let run_turn
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime_id
       ?fallback_reason
-      ?(cascade_rotation_attempts = [])
+      ?(runtime_rotation_attempts = [])
       ?(is_retry = false)
       ?shared_context
       ?event_bus
@@ -906,7 +906,7 @@ let run_turn
          ~degraded_retry_applied
          ~degraded_retry_runtime_id
          ~fallback_reason
-         ~cascade_rotation_attempts
+         ~runtime_rotation_attempts
          ~turn_result
          ~receipt_turn_count_ref
          ~receipt_model_used_ref

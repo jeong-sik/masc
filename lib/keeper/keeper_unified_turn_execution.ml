@@ -33,7 +33,7 @@ type ctx =
   ; build_turn_prompt :
       base_system_prompt:string -> messages:Agent_sdk.Types.message list ->
       Keeper_agent_run.turn_prompt
-  ; cascade_rotation_attempts : Keeper_execution_receipt.cascade_rotation_attempt list ref
+  ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list ref
   ; channel : Keeper_world_observation.keeper_cycle_channel
   ; cleanup : unit -> unit
   ; committed_mutating_tools_snapshot : unit -> string list
@@ -53,13 +53,13 @@ type ctx =
   ; post_commit_failure_reason : Keeper_registry.failure_reason option ref
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; prompt_timeout_estimate_tokens : int
-  ; record_cascade_rotation_attempt
+  ; record_runtime_rotation_attempt
       : ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
       -> ?productive_phase_elapsed_ms:int
       -> ?retry_phase_elapsed_ms:int
       -> from_runtime_id:string
       -> retry:EC.degraded_retry
-      -> outcome:Keeper_execution_receipt.cascade_rotation_outcome
+      -> outcome:Keeper_execution_receipt.runtime_rotation_outcome
       -> Agent_sdk.Error.sdk_error
       -> unit
   ; shared_context : Agent_sdk.Context.t option
@@ -104,7 +104,7 @@ let run (ctx : ctx)
       ; last_execution
       ; last_provider_timeout_budget
       ; degraded_retry_info
-      ; cascade_rotation_attempts
+      ; runtime_rotation_attempts
       ; current_turn_blocker_info
       ; post_commit_failure_reason
       ; profile_defaults
@@ -113,7 +113,7 @@ let run (ctx : ctx)
       ; drain_turn_event_bus
       ; event_bus_integrity_error_snapshot
       ; committed_mutating_tools_snapshot
-      ; record_cascade_rotation_attempt
+      ; record_runtime_rotation_attempt
       ; failure_reason
       ; attempt = _attempt
       } =
@@ -198,8 +198,8 @@ let run (ctx : ctx)
                     (fun (retry : EC.degraded_retry) ->
                        retry.fallback_reason)
                     !degraded_retry_info)
-               ~cascade_rotation_attempts:
-                 (List.rev !cascade_rotation_attempts)
+               ~runtime_rotation_attempts:
+                 (List.rev !runtime_rotation_attempts)
                ~temperature:execution.temperature
                ~max_tokens:execution.max_tokens
                ~oas_timeout_s
@@ -506,7 +506,7 @@ let run (ctx : ctx)
              let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
                current_turn_phase_elapsed_ms ()
              in
-             record_cascade_rotation_attempt
+             record_runtime_rotation_attempt
                ~slot_release_at_phase:
                  Keeper_execution_receipt.Retry_setup_failed
                ~productive_phase_elapsed_ms
@@ -545,7 +545,7 @@ let run (ctx : ctx)
                  Some Keeper_execution_receipt.Retry_scheduled
                | None -> None
              in
-             record_cascade_rotation_attempt
+             record_runtime_rotation_attempt
                ?slot_release_at_phase
                ~productive_phase_elapsed_ms
                ?retry_phase_elapsed_ms
@@ -623,7 +623,7 @@ let run (ctx : ctx)
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
             current_turn_phase_elapsed_ms ()
           in
-          record_cascade_rotation_attempt
+          record_runtime_rotation_attempt
             ~slot_release_at_phase:
               Keeper_execution_receipt.Retry_budget_exhausted
             ~productive_phase_elapsed_ms
@@ -651,7 +651,7 @@ let run (ctx : ctx)
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
             current_turn_phase_elapsed_ms ()
           in
-          record_cascade_rotation_attempt
+          record_runtime_rotation_attempt
             ~slot_release_at_phase:
               Keeper_execution_receipt.Productive_phase_exhausted
             ~productive_phase_elapsed_ms

@@ -11,6 +11,6 @@ val build
   -> ?retry_phase_elapsed_ms:int
   -> from_runtime_id:string
   -> retry:Keeper_error_classify.degraded_retry
-  -> outcome:Keeper_execution_receipt.cascade_rotation_outcome
+  -> outcome:Keeper_execution_receipt.runtime_rotation_outcome
   -> Agent_sdk.Error.sdk_error
-  -> Keeper_execution_receipt.cascade_rotation_attempt
+  -> Keeper_execution_receipt.runtime_rotation_attempt

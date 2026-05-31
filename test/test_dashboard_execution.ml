@@ -483,7 +483,7 @@ let append_execution_receipt
       turn_count = Some 3;
       oas_turn_count = None;
       oas_dispatch_mode = None;
-      oas_internal_cascade_disabled = false;
+      oas_internal_runtime_disabled = false;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome;
@@ -518,9 +518,9 @@ let append_execution_receipt
       approval_profile_derived = false;
       cascade_name =
         Cascade_name.of_string_exn (Lib.Keeper_meta_contract.cascade_name_of_meta meta);
-      cascade_selected_model = Some "custom:mock";
+      runtime_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
-      cascade_fallback_applied = true;
+      runtime_fallback_applied = true;
       runtime_outcome = Lib.Keeper_execution_receipt.Runtime_passed_to_next_model;
       degraded_retry_applied = true;
       degraded_retry_runtime_id =
@@ -528,7 +528,7 @@ let append_execution_receipt
           (Cascade_name.of_string_exn
              (Lib.Keeper_config.default_runtime_id ()));
       fallback_reason = Some Lib.Keeper_error_classify.Turn_timeout;
-      cascade_rotation_attempts =
+      runtime_rotation_attempts =
         [
           {
             from_runtime_id =
@@ -561,7 +561,7 @@ let append_execution_receipt
       pre_dispatch_compaction_trigger = None;
       pre_dispatch_compaction_before_tokens = None;
       pre_dispatch_compaction_after_tokens = None;
-      oas_internal_cascade_allowed = false;
+      oas_internal_runtime_allowed = false;
     }
   in
   let tm = Unix.gmtime (Unix.gettimeofday ()) in

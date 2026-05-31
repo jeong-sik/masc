@@ -220,7 +220,7 @@ let test_rotation_attempt_builder_records_retry_decision () =
     string
     "outcome"
     "retry_scheduled"
-    (Receipt.cascade_rotation_outcome_to_string attempt.outcome);
+    (Receipt.runtime_rotation_outcome_to_string attempt.outcome);
   check
     (option string)
     "slot release phase"

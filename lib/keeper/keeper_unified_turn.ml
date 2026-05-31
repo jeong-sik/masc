@@ -395,17 +395,17 @@ let run_keeper_cycle
                  ref None
                in
                let degraded_retry_info = ref None in
-               let cascade_rotation_attempts = ref [] in
-               let record_cascade_rotation_attempt
+               let runtime_rotation_attempts = ref [] in
+               let record_runtime_rotation_attempt
                      ?slot_release_at_phase
                      ?productive_phase_elapsed_ms
                      ?retry_phase_elapsed_ms
                      ~(from_runtime_id : string)
                      ~(retry : EC.degraded_retry)
-                     ~(outcome : Keeper_execution_receipt.cascade_rotation_outcome)
+                     ~(outcome : Keeper_execution_receipt.runtime_rotation_outcome)
                      (err : Agent_sdk.Error.sdk_error)
                  =
-                 let attempt : Keeper_execution_receipt.cascade_rotation_attempt =
+                 let attempt : Keeper_execution_receipt.runtime_rotation_attempt =
                    Keeper_unified_turn_rotation_attempt.build
                      ~recorded_at:(now_iso ())
                      ?slot_release_at_phase
@@ -416,7 +416,7 @@ let run_keeper_cycle
                      ~outcome
                      err
                  in
-                 cascade_rotation_attempts := attempt :: !cascade_rotation_attempts
+                 runtime_rotation_attempts := attempt :: !runtime_rotation_attempts
                in
                let run_result, latency_ms =
                  (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps cleanup
@@ -481,7 +481,7 @@ let run_keeper_cycle
                           { attempt = 1
                           ; base_dir
                           ; build_turn_prompt
-                          ; cascade_rotation_attempts
+                          ; runtime_rotation_attempts
                           ; channel
                           ; cleanup
                           ; committed_mutating_tools_snapshot
@@ -501,7 +501,7 @@ let run_keeper_cycle
                           ; post_commit_failure_reason
                           ; profile_defaults
                           ; prompt_timeout_estimate_tokens
-                          ; record_cascade_rotation_attempt
+                          ; record_runtime_rotation_attempt
                           ; shared_context
                           ; trajectory_acc
                           ; turn_affordances

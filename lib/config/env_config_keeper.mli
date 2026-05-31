@@ -265,7 +265,7 @@ end
 
 module RuntimeSaturationSignal : sig
   val enabled : unit -> bool
-  (** [MASC_CASCADE_SATURATION_SIGNAL_ENABLED] flag. Default false.
+  (** [MASC_RUNTIME_SATURATION_SIGNAL_ENABLED] flag. Default false.
 
       When true, {!Runtime_attempt_fsm} emits a Prometheus counter
       ([masc_keeper_runtime_saturation_signal_total]) with a typed

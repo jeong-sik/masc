@@ -253,7 +253,7 @@
 .dr-out-l.lv-info .lv { color: var(--color-fg-disabled); }
 .dr-out-l.lv-info .x  { color: var(--color-fg-secondary); }
 
-/* ─── CASCADE ─────────────────────────────────────────────── */
+/* ─── RUNTIME ─────────────────────────────────────────────── */
 .dr-runtime {
   flex: 1;
   display: flex;

@@ -251,7 +251,7 @@ const SNIPPETS = [
   <div class="aud-row">
     <span class="ts">12:04</span>
     <span class="ac">@nick0cave</span>
-    <span class="kn runtime">CASCADE</span>
+    <span class="kn runtime">RUNTIME</span>
     <div class="sb">probe timeout on hop 4<span class="pl">runtime-v3 · run r-7782</span></div>
     <span class="du">1.84s</span>
   </div>

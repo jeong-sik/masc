@@ -206,8 +206,8 @@ RFC-0027 §3.4 PR #3 가 "cross-runtime fallback resolver capability propagation
 (* 신규 env flag, default "off" *)
 type cross_runtime_mode = Off | Legacy | Explicit_chain_only
 
-let cross_runtime_mode_current () = (* MASC_CROSS_CASCADE_FALLBACK *)
-  match Sys.getenv_opt "MASC_CROSS_CASCADE_FALLBACK" with
+let cross_runtime_mode_current () = (* MASC_CROSS_RUNTIME_FALLBACK *)
+  match Sys.getenv_opt "MASC_CROSS_RUNTIME_FALLBACK" with
   | Some "legacy" -> Legacy
   | Some "chain" | None -> Explicit_chain_only  (* default *)
   | Some "off" | _ -> Off
@@ -323,7 +323,7 @@ and capability_filter_summary = {
 - 모든 PR 은 **backward-compatible** opt-in 설계.
 - L0 의 `Legacy` mode 가 1-2주 default 후보 (rollout 안전성). 그 다음 `Explicit_chain_only` 로 default 변경.
 - keeper_runtime.toml schema 추가 필드는 모두 optional.
-- `MASC_CROSS_CASCADE_FALLBACK` env flag 의 sunset 일정: PR-A 머지 후 4주 운영 → flag 제거 PR.
+- `MASC_CROSS_RUNTIME_FALLBACK` env flag 의 sunset 일정: PR-A 머지 후 4주 운영 → flag 제거 PR.
 
 ## 7. Verification
 

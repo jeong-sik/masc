@@ -49,7 +49,7 @@ let key_to_env =
     "turn.max_tools_per_turn",          "MASC_KEEPER_MAX_TOOLS_PER_TURN";
     "turn.board_event_limit",           "MASC_KEEPER_BOARD_EVENT_LIMIT";
     "turn.llm_rerank",                  "MASC_KEEPER_LLM_RERANK";
-    "turn.llm_rerank_runtime",          "MASC_KEEPER_LLM_RERANK_CASCADE";
+    "turn.llm_rerank_runtime",          "MASC_KEEPER_LLM_RERANK_RUNTIME";
     "turn.temperature",                 "MASC_KEEPER_UNIFIED_TEMP";
     "turn.max_output_tokens",           "MASC_KEEPER_UNIFIED_MAX_TOKENS";
     "turn.slot_pool_size",              "MASC_KEEPER_SLOT_POOL_SIZE";

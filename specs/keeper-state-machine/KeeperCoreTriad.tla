@@ -378,7 +378,7 @@ Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
 \* ── Safety Invariants ────────────────────────────────────
 \*
-\* CASCADE NAME ABSTRACTION (S1/S2/S3-buffer)
+\* RUNTIME NAME ABSTRACTION (S1/S2/S3-buffer)
 \* ----------------------------------------
 \* The string literals "none", "local_recovery", and "local_only" used below
 \* are SPEC-LEVEL CANONICAL ROLE NAMES, not literal OCaml return values.

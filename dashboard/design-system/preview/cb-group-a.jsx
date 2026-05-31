@@ -211,7 +211,7 @@ const KPI_CELLS = [
   { lbl:'PASS',   val:'87%', cap:'47 / 54', live:false, kind:'ok' },
   { lbl:'FAIL',   val:'3', cap:'SUITE-MB', live:false, kind:'err' },
   { lbl:'TASKS',  val:'12', cap:'IN FLIGHT', live:false },
-  { lbl:'CASCADE',val:'2', cap:'HIT @STEP', live:false, spark:true },
+  { lbl:'RUNTIME',val:'2', cap:'HIT @STEP', live:false, spark:true },
 ];
 
 function kpiCellAriaLabel(c) {

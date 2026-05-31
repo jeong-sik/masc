@@ -272,7 +272,7 @@ describe('rosterBlockerDisplay', () => {
       } as Keeper,
     )
 
-    expect(display.cell).toBe('현재 차단: 캐스케이드 소진')
+    expect(display.cell).toBe('현재 차단: 런타임 후보 소진')
     expect(display.detail).toBe('runtime list 소진')
   })
 })

@@ -41,7 +41,7 @@ let read_int_setting ~primary ~default () =
     rolling percentile window. *)
 let window_sec =
   read_float_setting
-    ~primary:"MASC_CASCADE_HEALTH_WINDOW_SEC"
+    ~primary:"MASC_RUNTIME_HEALTH_WINDOW_SEC"
     ~default:300.0
     ()
 
@@ -49,7 +49,7 @@ let window_sec =
     Default: 3, matching LiteLLM's [allowed_fails] concept. *)
 let cooldown_threshold =
   read_int_setting
-    ~primary:"MASC_CASCADE_COOLDOWN_THRESHOLD"
+    ~primary:"MASC_RUNTIME_COOLDOWN_THRESHOLD"
     ~default:3
     ()
 
@@ -59,7 +59,7 @@ let cooldown_threshold =
     terminal provider errors use separate long cooldowns. *)
 let cooldown_sec =
   read_float_setting
-    ~primary:"MASC_CASCADE_COOLDOWN_SEC"
+    ~primary:"MASC_RUNTIME_COOLDOWN_SEC"
     ~default:30.0
     ()
 
@@ -111,7 +111,7 @@ let cooldown_config_for ~provider_key =
     and is significantly longer than {!cooldown_sec}. *)
 let hard_quota_cooldown_sec =
   read_float_setting
-    ~primary:"MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
+    ~primary:"MASC_RUNTIME_HARD_QUOTA_COOLDOWN_SEC"
     ~default:Masc_time_constants.hour
     ()
 
@@ -120,21 +120,21 @@ let hard_quota_cooldown_sec =
     expected to reproduce the same failure until operator/runtime state changes. *)
 let terminal_failure_cooldown_sec =
   read_float_setting
-    ~primary:"MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
+    ~primary:"MASC_RUNTIME_TERMINAL_FAILURE_COOLDOWN_SEC"
     ~default:Masc_time_constants.hour
     ()
 
 (** Default cooldown applied immediately on a transient HTTP 429. *)
 let soft_rate_limit_cooldown_sec =
   read_float_setting
-    ~primary:"MASC_CASCADE_SOFT_RATE_LIMIT_COOLDOWN_SEC"
+    ~primary:"MASC_RUNTIME_SOFT_RATE_LIMIT_COOLDOWN_SEC"
     ~default:10.0
     ()
 
 (** Upper clamp for caller-supplied Retry-After. *)
 let soft_rate_limit_max_clamp_sec =
   read_float_setting
-    ~primary:"MASC_CASCADE_SOFT_RATE_LIMIT_MAX_CLAMP_SEC"
+    ~primary:"MASC_RUNTIME_SOFT_RATE_LIMIT_MAX_CLAMP_SEC"
     ~default:120.0
     ()
 
@@ -147,10 +147,10 @@ let soft_rate_limit_max_clamp_sec =
     [soft_rate_limit_max_clamp_sec] when a real [retry_after] hint is
     present.
 
-    Override via [MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
+    Override via [MASC_RUNTIME_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
 let default_capacity_backpressure_backoff_sec =
   read_float_setting
-    ~primary:"MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC"
+    ~primary:"MASC_RUNTIME_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC"
     ~default:30.0
     ()
 
@@ -169,7 +169,7 @@ let read_ring_size env_name =
             100)
 
 (** Per-provider ring buffer size for recent successful-call latency. *)
-let latency_ring_size = read_ring_size "MASC_CASCADE_LATENCY_RING_SIZE"
+let latency_ring_size = read_ring_size "MASC_RUNTIME_LATENCY_RING_SIZE"
 
-let confidence_ring_size = read_ring_size "MASC_CASCADE_CONFIDENCE_RING_SIZE"
-let cost_ring_size = read_ring_size "MASC_CASCADE_COST_RING_SIZE"
+let confidence_ring_size = read_ring_size "MASC_RUNTIME_CONFIDENCE_RING_SIZE"
+let cost_ring_size = read_ring_size "MASC_RUNTIME_COST_RING_SIZE"

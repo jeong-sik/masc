@@ -167,7 +167,7 @@ function StatusVerbose() {
         <span className="seg" role="group" aria-label="Task t-9f2a">task <span style={{color:'var(--color-fg-secondary)'}}>t-9f2a</span></span>
         <span className="seg" role="group" aria-label="Keeper nick0cave">keeper <span style={{color:'var(--color-accent-fg)'}}>nick0cave</span></span>
         <span className="sep" aria-hidden="true" />
-        <span className="seg" role="group" aria-label="Runtime hit at step 2 in 1.24 seconds">CASCADE hit@2 · <span className="brass">1.24s</span></span>
+        <span className="seg" role="group" aria-label="Runtime hit at step 2 in 1.24 seconds">RUNTIME hit@2 · <span className="brass">1.24s</span></span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Suite 3 fail of 47 pass">SUITE <span style={{color:'var(--err-fg)'}}>3 FAIL</span> / 47 PASS</span>
         <span className="seg push-right" aria-hidden="true">⌘K for commands</span>
@@ -202,7 +202,7 @@ function DrawerTask() {
             <dt>TOOL</dt><dd>tool.write_file</dd>
             <dt>DIFF</dt><dd>+18 −4 · keeper.ts</dd>
             <dt>STARTED</dt><dd>16:31:27Z</dd>
-            <dt>CASCADE</dt><dd>provider-b @step=2 · 1.24s</dd>
+            <dt>RUNTIME</dt><dd>provider-b @step=2 · 1.24s</dd>
           </dl>
         </section>
         <section aria-labelledby="drawer-task-review">

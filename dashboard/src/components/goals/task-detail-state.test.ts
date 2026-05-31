@@ -145,7 +145,7 @@ describe('filterGoalRelations', () => {
   })
 
   it('matches resolved goal title (case-insensitive)', () => {
-    const out = filterGoalRelations(ids, 'CASCADE', resolve)
+    const out = filterGoalRelations(ids, 'RUNTIME', resolve)
     expect(out).toEqual(['g-beta'])
   })
 

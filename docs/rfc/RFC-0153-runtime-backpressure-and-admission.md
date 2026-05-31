@@ -317,7 +317,7 @@ PR #17013 (`feat(runtime): wire tier admission into keeper attempts`, merged 202
 | Admission unit | per-runtime (keeper_runtime.toml `[runtime.X]`) | **per-runtime-name** (`tier_admission_id = runtime_id`) |
 | Capacity 설정 | keeper_runtime.toml `max_inflight = 8` per group | 단일 `Runtime_tier_admission.create ()` (default cap 8) |
 | Policy 결정 | caller site 매핑 (§4.2 본문 테이블) | **per-priority** (`runtime_tier_admission_policy_of_priority : Request_priority.t -> admission_policy`) — Proactive→Required, Background→Bypass |
-| Env flag | (별도) | A.2 와 공유: `MASC_CASCADE_SATURATION_SIGNAL_ENABLED` |
+| Env flag | (별도) | A.2 와 공유: `MASC_RUNTIME_SATURATION_SIGNAL_ENABLED` |
 
 **§4.2.2 plumbing 회피 메커니즘**: `runtime_id` 은 try_runtime entry point 에 이미 있는 식별자. resolver 가 flatten 한 provider 리스트는 *그대로* — admission 결정이 candidate-level 이 아니라 *runtime-call-level* 에서 이루어지므로 tier_id plumbing 불필요.
 
@@ -441,7 +441,7 @@ nested runtime가 같은 semaphore 요구 시 deadlock. **완화**: per-tier sem
 **완화**: 모든 거부에 typed signal + dashboard panel.
 
 ### 6.5 공격 #5: "그냥 300s를 600s로 늘리면?"
-대안: 1줄 PR. **반박**: cap 의미 유지 → stampede / no-queue 문제 그대로. 자원 효율 악화. **잔여**: env override 제공 (`MASC_CASCADE_MAX_EXECUTION_TIME_S`).
+대안: 1줄 PR. **반박**: cap 의미 유지 → stampede / no-queue 문제 그대로. 자원 효율 악화. **잔여**: env override 제공 (`MASC_RUNTIME_MAX_EXECUTION_TIME_S`).
 
 ### 6.6 공격 #6: RFC-0152 와의 의미 충돌 (완화됨)
 D.1 fixed ladder를 RFC-0152 enum의 *명세 채우기*로 위치 → 의미 확장 아니라 *완성*. owner 동일 (vincent).

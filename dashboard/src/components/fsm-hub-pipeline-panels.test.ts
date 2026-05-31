@@ -21,7 +21,7 @@ describe('filterObservedLanes', () => {
   const lanes: ObservedLaneSummary[] = [
     makeLane({ field: 'KTC', label: '턴 주기', value: 'idle', meaning: 'Waiting for the next heartbeat cycle' }),
     makeLane({ field: 'KDP', label: '의사결정', value: 'guard_ok', meaning: 'All safety guards passed' }),
-    makeLane({ field: 'KCL', label: '캐스케이드', value: 'trying', meaning: 'Attempting inference with the selected provider' }),
+    makeLane({ field: 'KCL', label: '런타임', value: 'trying', meaning: 'Attempting inference with the selected provider' }),
     makeLane({ field: 'KMC', label: '컨텍스트 압축', value: 'accumulating', meaning: 'Collecting messages' }),
   ]
 
@@ -39,7 +39,7 @@ describe('filterObservedLanes', () => {
   })
 
   it('matches by label substring (Korean)', () => {
-    const result = filterObservedLanes(lanes, '캐스케이드')
+    const result = filterObservedLanes(lanes, '런타임')
     expect(result.map(l => l.field)).toEqual(['KCL'])
   })
 

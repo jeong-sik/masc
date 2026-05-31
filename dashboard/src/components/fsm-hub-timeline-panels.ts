@@ -46,7 +46,7 @@ const SWIMLANE_LANES: Array<{
   { key: 'phase', label: 'Keeper 생명주기', short: 'KSM' },
   { key: 'turn', label: '턴 주기', short: 'KTC' },
   { key: 'decision', label: '의사결정', short: 'KDP' },
-  { key: 'runtime', label: '캐스케이드', short: 'KCL' },
+  { key: 'runtime', label: '런타임', short: 'KCL' },
   { key: 'compaction', label: '컨텍스트 압축', short: 'KMC' },
 ]
 

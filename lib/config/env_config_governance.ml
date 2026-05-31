@@ -157,7 +157,7 @@ end
 module Model_defaults = struct
   (** Default runtime label (e.g. "provider_f:pro,agent_llm_a:sonnet"). *)
   let default_runtime_opt () =
-    Sys.getenv_opt "MASC_DEFAULT_CASCADE" |> trim_opt
+    Sys.getenv_opt "MASC_DEFAULT_RUNTIME" |> trim_opt
 
   (** Default provider name. *)
   let default_provider_opt () =
@@ -171,7 +171,7 @@ module Model_defaults = struct
       [routes.routing] key; runtime callers normalize it through the runtime
       route table. *)
   let routing_runtime () =
-    match Sys.getenv_opt "MASC_ROUTING_CASCADE" |> trim_opt with
+    match Sys.getenv_opt "MASC_ROUTING_RUNTIME" |> trim_opt with
     | Some s -> s
     | None -> "routing"
 

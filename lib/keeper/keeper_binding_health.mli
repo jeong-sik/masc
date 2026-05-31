@@ -10,7 +10,7 @@
 
 (** {1 Runtime configuration (env-driven, read once at module load)}
 
-    The env var prefix is [MASC_CASCADE_*]. *)
+    The env var prefix is [MASC_RUNTIME_*]. *)
 
 val window_sec : float
 (** Rolling window duration in seconds.  Default 300.0 (5 min). *)
@@ -27,7 +27,7 @@ val hard_quota_cooldown_sec : float
     {!cooldown_sec}, no threshold is required — one hard-quota event is
     enough.  Default 3600.0 (1h).
 
-    Env: [MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC].
+    Env: [MASC_RUNTIME_HARD_QUOTA_COOLDOWN_SEC].
 
     @since 0.161.0 *)
 
@@ -36,7 +36,7 @@ val terminal_failure_cooldown_sec : float
     provider/adapter failure, such as a provider CLI resumable-session conflict.
     Unlike {!cooldown_sec}, no threshold is required.  Default 3600.0 (1h).
 
-    Env: [MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC]. *)
+    Env: [MASC_RUNTIME_TERMINAL_FAILURE_COOLDOWN_SEC]. *)
 
 val soft_rate_limit_cooldown_sec : float
 (** Default cooldown applied immediately on a transient HTTP 429 (soft
@@ -46,7 +46,7 @@ val soft_rate_limit_cooldown_sec : float
     [cooldown_threshold] count-to-three semantics are wrong for transient
     rate limits.  Default 10.0 (10s).
 
-    Env: [MASC_CASCADE_SOFT_RATE_LIMIT_COOLDOWN_SEC]. *)
+    Env: [MASC_RUNTIME_SOFT_RATE_LIMIT_COOLDOWN_SEC]. *)
 
 val soft_rate_limit_max_clamp_sec : float
 (** Upper clamp for caller-supplied [retry_after_s] when recording a soft
@@ -56,7 +56,7 @@ val soft_rate_limit_max_clamp_sec : float
     this clamp should be classified as {!record_hard_quota} by the
     caller, not as a soft rate-limit.  Default 120.0 (2 min).
 
-    Env: [MASC_CASCADE_SOFT_RATE_LIMIT_MAX_CLAMP_SEC]. *)
+    Env: [MASC_RUNTIME_SOFT_RATE_LIMIT_MAX_CLAMP_SEC]. *)
 
 val default_capacity_backpressure_backoff_sec : float
 (** Synthetic typed backoff applied when an upstream [Capacity_backpressure]
@@ -68,7 +68,7 @@ val default_capacity_backpressure_backoff_sec : float
     faster than 429-bearing providers), but non-zero so the runtime does
     not immediately re-select the just-rejected provider.
 
-    Env: [MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
+    Env: [MASC_RUNTIME_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
 
 val latency_ring_size : int
 (** Number of recent successful-call latencies retained per provider for
@@ -81,7 +81,7 @@ val latency_ring_size : int
     a busy provider while staying small enough to sort cheaply on every
     [provider_info] read.
 
-    Default 100, env [MASC_CASCADE_LATENCY_RING_SIZE].  Values [<= 0]
+    Default 100, env [MASC_RUNTIME_LATENCY_RING_SIZE].  Values [<= 0]
     disable latency tracking entirely (the ring is treated as empty and
     [p50_latency_ms] / [p95_latency_ms] always return [None]). *)
 
@@ -89,13 +89,13 @@ val confidence_ring_size : int
 (** Number of recent avg-log-probability samples retained per provider.
     Mirrors {!latency_ring_size} semantics: ring buffer, drop-oldest,
     lazy allocation.  Default 100, env
-    [MASC_CASCADE_CONFIDENCE_RING_SIZE].  Values [<= 0] disable
+    [MASC_RUNTIME_CONFIDENCE_RING_SIZE].  Values [<= 0] disable
     confidence tracking. *)
 
 val cost_ring_size : int
 (** Number of recent per-request cost samples retained per provider.
     Mirrors {!latency_ring_size} semantics: ring buffer, drop-oldest,
-    lazy allocation.  Default 100, env [MASC_CASCADE_COST_RING_SIZE].
+    lazy allocation.  Default 100, env [MASC_RUNTIME_COST_RING_SIZE].
     Values [<= 0] disable cost tracking.  @since 0.191.0 *)
 
 

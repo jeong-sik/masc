@@ -1,6 +1,6 @@
 # RFC-0009 — Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist
 
-**Status**: Implemented (Phase 0a/0b via #10292/#10331. Phase 1 first via #10365, reverted, reinstated as `runtime_trust` module via #12589. Phase 2a operator recommendations live in `lib/dashboard_runtime_recommendations.ml` (action variants `Reduce_weight | Disable | Investigate`); Phase 2b opt-in persist live in `lib/runtime/runtime_trust_persist.{ml,mli}` (JSONL snapshot + hydrate, gated by `MASC_CASCADE_TRUST_PERSIST`).)
+**Status**: Implemented (Phase 0a/0b via #10292/#10331. Phase 1 first via #10365, reverted, reinstated as `runtime_trust` module via #12589. Phase 2a operator recommendations live in `lib/dashboard_runtime_recommendations.ml` (action variants `Reduce_weight | Disable | Investigate`); Phase 2b opt-in persist live in `lib/runtime/runtime_trust_persist.{ml,mli}` (JSONL snapshot + hydrate, gated by `MASC_RUNTIME_TRUST_PERSIST`).)
 **Depends on**: #10292 (Phase 0a), #10331 (Phase 0b), #10365 (Phase 1 — reverted), #12589 (Phase 1 reinstated)
 **Author**: vincent (jeong-sik)
 
@@ -20,7 +20,7 @@ Phase 2 closes both gaps without giving the trust loop authority to silently rew
 | Principle | Application |
 |---|---|
 | Live-only persist | Only `<base-path>/.masc/config/keeper_runtime.toml` is touched; `config/keeper_runtime.toml` (repo seed) is never written to by the trust loop. |
-| Opt-in by default | `MASC_CASCADE_TRUST_PERSIST=1` (or `=dry`) gates everything in this RFC. Default-off for the first release. |
+| Opt-in by default | `MASC_RUNTIME_TRUST_PERSIST=1` (or `=dry`) gates everything in this RFC. Default-off for the first release. |
 | Observation over action | Phase 2a (operator recommendation) is observation-only. Phase 2b (persist) is a separate feature flag and a separate PR. |
 | No self-reload loops | Hot-reload must skip files the trust loop just wrote; otherwise each persist triggers a reload triggers a re-emit. |
 | Audit everything | Every persist write goes to `<base_path>/.masc/runtime_trust/applied/YYYY-MM/DD.jsonl` with before/after values and reason. |
@@ -77,7 +77,7 @@ Rendered on the dashboard as a card with a copy-friendly JSON snippet showing th
 
 ### Activation modes
 
-| `MASC_CASCADE_TRUST_PERSIST` | Behaviour |
+| `MASC_RUNTIME_TRUST_PERSIST` | Behaviour |
 |---|---|
 | unset (default) | No persist. Trust is in-memory only, reset on restart. |
 | `dry` | Compute the would-be diff every hour, append to `runtime_trust/applied/<date>.jsonl` with `mode=dry`, no file write. |
@@ -85,7 +85,7 @@ Rendered on the dashboard as a card with a copy-friendly JSON snippet showing th
 
 ### Persist algorithm
 
-Every `MASC_CASCADE_TRUST_PERSIST_INTERVAL_SEC` (default 3600s):
+Every `MASC_RUNTIME_TRUST_PERSIST_INTERVAL_SEC` (default 3600s):
 
 1. Snapshot `Runtime_health_tracker.global` providers with `events_in_window > 0` AND age of `last_failure_at` < 24h (skip stale).
 2. For each provider, compute target weight: `round(trust_score * 2) / 2` (0.5-step granularity, range [0.5, ceiling × current_weight]).
@@ -114,8 +114,8 @@ Recommendation: mtime threshold + a process-local flag (`Atomic.t` with timestam
 
 ### Acceptance for 2b
 
-- [ ] `MASC_CASCADE_TRUST_PERSIST=dry` runs for 24h locally; audit log shows expected diffs without file writes.
-- [ ] `MASC_CASCADE_TRUST_PERSIST=1` writes happen exactly once per interval; backup file is created.
+- [ ] `MASC_RUNTIME_TRUST_PERSIST=dry` runs for 24h locally; audit log shows expected diffs without file writes.
+- [ ] `MASC_RUNTIME_TRUST_PERSIST=1` writes happen exactly once per interval; backup file is created.
 - [ ] Hot-reloader does not loop (verify by checking `[RuntimeConfig] loaded` log frequency stays ≤ 1/hr after persist).
 - [ ] Repo seed write attempt is blocked by realpath guard (test injects a fake repo path, expects exception).
 - [ ] Tests: 6 alcotest cases — atomic write, backup creation, dry mode no-op, repo guard, hot-reload skip, audit log shape.

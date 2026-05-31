@@ -74,7 +74,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 141 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | feature_flag | n/a | n/a | 152 | Whether governance judge is enabled. Default: true. |
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 149 | Governance judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_DEFAULT_CASCADE` | string_literal | n/a | n/a | 160 | Default runtime label (e.g. "provider_f:pro,agent_llm_a:sonnet"). |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 160 | Default runtime label (e.g. "provider_f:pro,agent_llm_a:sonnet"). |
 | `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 168 | Default model id. |
 | `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 164 | Default provider name. |
 | `MASC_EVENT_BUFFER_SIZE` | typed:int | unclassified | unclassified | 113 | A2A event buffer size per subscription. Caps the in-memory event list to prevent unbounded growth. |
@@ -94,7 +94,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_OPERATOR_JUDGE_SESSION_TTL_SEC` | typed:int | unclassified | unclassified | 129 | Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. |
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 58 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 62 | Max age for rate limit entries before cleanup (seconds) |
-| `MASC_ROUTING_CASCADE` | string_literal | n/a | n/a | 174 | Routing runtime for team session routing. Defaults to the logical [routes.routing] key; runtime callers normalize it ... |
+| `MASC_ROUTING_RUNTIME` | string_literal | n/a | n/a | 174 | Routing runtime for team session routing. Defaults to the logical [routes.routing] key; runtime callers normalize it ... |
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 48 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
 | `MASC_SSE_KEEPALIVE_SEC` | typed:float | unclassified | unclassified | 108 | SSE keepalive interval (seconds). Frequency of `: keepalive` frames on command-plane SSE streams. Clamped to >= 1.0 t... |
 
@@ -103,7 +103,7 @@ the categorization roadmap. Newly-added typed getters in
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALERT_DEDUP_WINDOW_SEC` | typed:float | unclassified | unclassified | 226 | Alert dedup window, clamped to >= 5s. Default: 60. |
-| `MASC_CASCADE_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 743 | {1 Runtime Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Runtime_saturation_signal.t] emission from... |
+| `MASC_RUNTIME_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 743 | {1 Runtime Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Runtime_saturation_signal.t] emission from... |
 | `MASC_CONTEXT_RATIO_HARD_CAP` | typed:float | unclassified | unclassified | 670 | {1 Context Ratio Hard Cap} Absolute ceiling for compaction ratio_gate and handoff threshold after multiplier adjustme... |
 | `MASC_DASHBOARD_HEALTH_CTX_CRITICAL` | typed:float | unclassified | unclassified | 705 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
 | `MASC_DASHBOARD_HEALTH_CTX_WARN` | typed:float | unclassified | unclassified | 706 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
@@ -141,7 +141,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_BOOTSTRAP_MAX_SCAN` | typed:int | unclassified | unclassified | 28 | Max keeper meta files to scan during bootstrap |
 | `MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC` | typed:float | unclassified | unclassified | 70 | Settle delay (seconds) between lazy-startup completion and the keeper bootstrap fan-out. The autoboot fiber sleeps fo... |
 | `MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC` | typed:float | unclassified | unclassified | 24 | Keeper considered stale when last turn exceeds this threshold (seconds) |
-| `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` | string_literal | n/a | n/a | 773 | Comma-separated provider kind allowlist for every keeper runtime call. Values are OAS [Provider_config.string_of_prov... |
+| `MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST` | string_literal | n/a | n/a | 773 | Comma-separated provider kind allowlist for every keeper runtime call. Values are OAS [Provider_config.string_of_prov... |
 | `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | Timeouts | operator | 510 | Stdout-idle timeout for CLI subprocess transports (Provider_c CLI today; Claude Code / Provider_f CLI / Codex CLI nee... |
 | `MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 163 | Crash persistence drain fiber wake interval in seconds. Drain fiber batches in-memory crash events and persists them ... |
 | `MASC_KEEPER_DEBUG` | feature_flag | n/a | n/a | 182 | Enable keeper debug logging. Default: false. |
@@ -375,7 +375,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 655 |  |
 | `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 657 |  |
 | `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 221 |  |
-| `MASC_CASCADE_ATTEMPT_LIVENESS` | string_literal | n/a | n/a | 474 |  |
+| `MASC_RUNTIME_ATTEMPT_LIVENESS` | string_literal | n/a | n/a | 474 |  |
 | `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 311 |  |
 | `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 313 |  |
 | `MASC_DASHBOARD_CACHE_MAX_ENTRIES` | string_literal | n/a | n/a | 223 |  |
@@ -408,7 +408,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_COMPACT_MAX_MESSAGES` | string_literal | n/a | n/a | 161 |  |
 | `MASC_KEEPER_COMPACT_MAX_TOKENS` | string_literal | n/a | n/a | 163 |  |
 | `MASC_KEEPER_COMPACT_RATIO` | string_literal | n/a | n/a | 159 |  |
-| `MASC_KEEPER_LLM_RERANK_CASCADE` | string_literal | n/a | n/a | 557 |  |
+| `MASC_KEEPER_LLM_RERANK_RUNTIME` | string_literal | n/a | n/a | 557 |  |
 | `MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN` | string_literal | n/a | n/a | 188 |  |
 | `MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 184 |  |
 | `MASC_KEEPER_RULE_GUARDRAIL_REPETITION` | string_literal | n/a | n/a | 182 |  |

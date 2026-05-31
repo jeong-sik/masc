@@ -740,7 +740,7 @@ end
     with a typed [kind] label sourced from {!Runtime_saturation_signal.kind}. *)
 module RuntimeSaturationSignal = struct
   let enabled () =
-    get_bool ~default:false "MASC_CASCADE_SATURATION_SIGNAL_ENABLED"
+    get_bool ~default:false "MASC_RUNTIME_SATURATION_SIGNAL_ENABLED"
 end
 
 (** {1 Runtime Runtime Overrides}
@@ -768,9 +768,9 @@ module KeeperRuntimeProviderFilter = struct
 
       [None] (env var unset or blank) = full runtime, unfiltered.
 
-      Env: [MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST]. Default: unset. *)
+      Env: [MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST]. Default: unset. *)
   let provider_allowlist () : string list option =
-    match Env_config_core.raw_value_opt "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" with
+    match Env_config_core.raw_value_opt "MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST" with
     | None -> None
     | Some raw ->
       let parts =

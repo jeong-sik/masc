@@ -195,7 +195,7 @@ describe('ToolQualityPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('캐스케이드별')
+    expect(container.textContent).toContain('런타임별')
     expect(container.textContent).toContain('local_qwen3_27b_only')
   })
 

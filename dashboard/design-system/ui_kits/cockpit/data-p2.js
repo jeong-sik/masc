@@ -122,7 +122,7 @@ window.MASC_P2 = (function () {
     { seq:289, room:"default", from:"janitor",       kind:"broadcast", at:"16:28:30Z", body:"pruned 4 expired posts. board live count: 78.", mentions:[], state:null },
   ];
 
-  // ─── O1 · CASCADE INSPECTOR ──────────────────────────────────────
+  // ─── O1 · RUNTIME INSPECTOR ──────────────────────────────────────
   const runtimeAudit = [
     {
       id:"ca-7f29", at:"16:31:27Z", runtime:"keeper_unified", trigger:"sangsu turn",

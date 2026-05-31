@@ -38,13 +38,13 @@ let resolve_workspace_base ~state ~uri =
 
    Priority:
      1. [?canonical_url=...] explicit override (still re-normalised so a
-        misspelt query falls back to Legacy rather than silently
+        misspelt query falls back to Orphan rather than silently
         creating a new bucket).
      2. [?repo_id=...] → lookup repo.url in [Repo_store] → normalise.
-     3. Default → [Legacy] so traffic that has not been updated to use
-        either parameter keeps reading the historical flat store.
+     3. Default → [Orphan] so traffic that has not been updated to use
+        either parameter is preserved in the unresolved partition.
 
-   PR-1d removes the [Legacy] fallback once the data migration runs. *)
+   PR-1d removed the old [Legacy] constructor in favor of [Orphan]. *)
 let resolve_partition_for_query ~state ~uri =
   let project_base = base_path_of_state state in
   let from_canonical =

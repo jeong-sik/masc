@@ -30,7 +30,7 @@ let sdk_bindings : sdk_tool_binding list =
     {
       sdk_name = "masc_add_task";
       canonical_operation = "masc_add_task";
-      description = "Create a single new task in the MASC coord backlog. Use when you identify work that any agent can pick up. Returns a task-XXX ID for tracking.";
+      description = "Create a single new task in the MASC backlog. Use when you identify work that any agent can pick up. Returns a task-XXX ID for tracking.";
       input_schema =
         object_schema ~required:[ "title"; "description" ]
           [
@@ -72,7 +72,7 @@ let sdk_bindings : sdk_tool_binding list =
     {
       sdk_name = "masc_broadcast";
       canonical_operation = "masc_broadcast";
-      description = "Broadcast a message to all agents currently in the coord. Use when sharing status updates, coordination signals, or requesting help from any available agent.";
+      description = "Broadcast a message to all active agents. Use when sharing status updates, coordination signals, or requesting help from any available agent.";
       input_schema =
         object_schema ~required:[ "message" ]
           [

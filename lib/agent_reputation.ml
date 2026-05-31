@@ -124,10 +124,10 @@ let load_jsonl_safe (path : string) : Yojson.Safe.t list =
 
 (** {1 Task Counting from Coord State} *)
 
-(** Count tasks claimed and completed by an agent from the coord task list.
+(** Count tasks claimed and completed by an agent from the task backlog.
     Reads the canonical Coord backlog so reputation follows the same storage
     path as task transitions. *)
-let count_tasks_from_coord (config : Coord.config) ~(agent_name : string)
+let count_tasks_from_backlog (config : Coord.config) ~(agent_name : string)
     : int * int =
   let claimed = ref 0 in
   let completed = ref 0 in
@@ -321,7 +321,7 @@ let thompson_confidence_for_agent (agent_name : string) : float =
 let compute_reputation (config : Coord.config) ~(agent_name : string)
     : agent_reputation =
   let (tasks_claimed, tasks_completed) =
-    count_tasks_from_coord config ~agent_name
+    count_tasks_from_backlog config ~agent_name
   in
   let completion_rate =
     if tasks_claimed > 0 then

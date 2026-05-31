@@ -10,10 +10,10 @@ open Coord_backlog
 open Coord_broadcast
 open Coord_backlog
 
-(** Initialize MASC coord *)
+(** Initialize MASC workspace state *)
 let init config ~agent_name =
   invalidate_initialized_cache ();
-  (* Ensure root .masc structure exists even when initializing a non-default coord. *)
+  (* Ensure root .masc structure exists even when initializing a non-default workspace. *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
   let root_keepers_dir = Filename.concat root_dir "keepers" in
@@ -92,19 +92,19 @@ let init config ~agent_name =
     write_state config state;
     invalidate_initialized_cache ();
     (* Preserve a migrated backlog when blocking bootstrap has already
-       promoted legacy coord state into the flattened root namespace. *)
+       promoted legacy workspace state into the flattened root namespace. *)
     if not (path_exists config (backlog_path config))
     then (
       let backlog = { tasks = []; last_updated = now_iso (); version = 1 } in
       write_backlog config backlog);
-    let result = "MASC coord created!" in
+    let result = "MASC workspace created!" in
     (* Auto-join if agent specified — uses Coord_lifecycle.join via the caller *)
     match agent_name with
     | Some _name -> result (* Caller is responsible for joining after init *)
     | None -> result)
 ;;
 
-(** Pause the coord - stops orchestrator from spawning new agents *)
+(** Pause workspace automation - stops orchestrator from spawning new agents *)
 let pause config ~by ~reason =
   let _ =
     update_state config (fun s ->
@@ -125,7 +125,7 @@ let pause config ~by ~reason =
   ()
 ;;
 
-(** Resume the coord *)
+(** Resume workspace automation *)
 let resume config ~by =
   let state = read_state config in
   if not state.paused
@@ -145,7 +145,7 @@ let resume config ~by =
     `Resumed)
 ;;
 
-(** Reset coord - delete .masc/ folder *)
+(** Reset workspace state - delete .masc/ folder *)
 let reset config =
   if not (is_initialized config)
   then "MASC not initialized. Nothing to reset."
@@ -163,5 +163,5 @@ let reset config =
     in
     rm_rf (masc_dir config);
     invalidate_initialized_cache ();
-    Printf.sprintf "MASC coord reset! (.masc/ deleted at %s)" config.base_path)
+    Printf.sprintf "MASC workspace reset! (.masc/ deleted at %s)" config.base_path)
 ;;

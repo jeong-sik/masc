@@ -18,7 +18,7 @@ val on_agent_session_ended :
   leaving_agent:string ->
   active_agents:string list ->
   unit
-(** When an agent leaves a MASC coord, record [COLLABORATED_WITH]
+(** When an agent session ends, record [COLLABORATED_WITH]
     edges between [leaving_agent] and every other member of
     [active_agents] (the leaver itself is filtered out). No-op
     when no peers remain. *)

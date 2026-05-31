@@ -1,6 +1,6 @@
 (** Coord init / pause / resume / reset.
 
-    Boot-time coord state initialisation, pause/resume gating for
+    Boot-time workspace state initialisation, pause/resume gating for
     agent claims, and a destructive [reset] hook used by the
     [masc_reset] tool. *)
 
@@ -9,11 +9,11 @@ open Coord_utils
 open Coord_state
 open Coord_broadcast
 
-(** Initialise coord state; session-binds [agent_name] when given. *)
+(** Initialise workspace state; session-binds [agent_name] when given. *)
 val init :
   Coord_utils_backend_setup.config -> agent_name:'a option -> string
 
-(** Mark the coord as paused with metadata for [pause_info]. *)
+(** Mark workspace automation as paused with metadata for [pause_info]. *)
 val pause :
   Coord_utils_backend_setup.config ->
   by:string -> reason:string -> unit
@@ -24,6 +24,6 @@ val resume :
   Coord_utils_backend_setup.config ->
   by:string -> [> `Already_running | `Resumed ]
 
-(** Destructive reset of the coord state — primarily for the
+(** Destructive reset of workspace state — primarily for the
     [masc_reset] tool. *)
 val reset : Coord_utils_backend_setup.config -> string

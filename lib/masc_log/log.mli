@@ -217,7 +217,7 @@ module MemoryJsonl : LOGGER
 module AutoResponder : LOGGER
 module Env : LOGGER
 module Level2 : LOGGER
-module CoordTask : LOGGER
+module TaskState : LOGGER
 module Inline : LOGGER
 module Protocol : LOGGER
 module AlwaysOn : LOGGER

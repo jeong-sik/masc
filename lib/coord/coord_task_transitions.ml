@@ -373,7 +373,7 @@ let transition_task_r
              ~variant:(drift_variant_label Coord_task_lifecycle.Claimed_to_done_skip)
              ~force
              ~agent_name;
-           Log.CoordTask.warn
+           Log.TaskState.warn
              "fsm_drift claimed_to_done_skip task=%s agent=%s force=%b"
              task_id
              agent_name
@@ -396,7 +396,7 @@ let transition_task_r
         (match action, task.task_status with
          | Masc_domain.Release, Masc_domain.Todo ->
 (* Idempotent: already in backlog, nothing to release. *)
-           Log.CoordTask.debug "release on already-todo task %s — no-op" task_id
+           Log.TaskState.debug "release on already-todo task %s — no-op" task_id
          | Masc_domain.Claim, _
          | Masc_domain.Start, _
          | Masc_domain.Done_action, _
@@ -427,7 +427,7 @@ let transition_task_r
             | None -> ()
             | Some (level, threshold) ->
 (* WARN line is the observability surface: structured [level=] label lets operators grep [task_oscillation_severe] to find the worst cases without scanning every release. *)
-              Log.CoordTask.warn
+              Log.TaskState.warn
                 "task_oscillation_%s task=%s agent=%s cycle_count=%d threshold=%d \
                  (sustained claim->release loop, candidate for triage; consider \
                  reformulation or human escalation if level=severe)"

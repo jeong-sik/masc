@@ -59,7 +59,7 @@ let record_collaborations_async ~tag ~context ~agent ~peers =
 
 (** {1 Collaboration — agent leave} *)
 
-(** When an agent leaves a coord, record [COLLABORATED_WITH] edges
+(** When an agent session ends, record [COLLABORATED_WITH] edges
     between the departing agent and every other active agent.
     Runs asynchronously — returns immediately.
     20 peers = 1 HTTP request (alias batching). *)
@@ -68,13 +68,13 @@ let on_agent_session_ended ~leaving_agent ~active_agents =
   if peers <> [] then
     record_collaborations_async
       ~tag:"collab"
-      ~context:(Printf.sprintf "co-present in MASC coord at %s" (Masc_domain.now_iso ()))
+      ~context:(Printf.sprintf "co-present in MASC workspace at %s" (Masc_domain.now_iso ()))
       ~agent:leaving_agent ~peers
 
 (** {1 Task completion} *)
 
 (** When a task is completed, record collaboration between the
-    assignee and all active agents in the coord.
+    assignee and all active agents.
     20 peers = 1 HTTP request (alias batching). *)
 let on_task_done ~assignee ~active_agents =
   let peers = List.filter (fun name -> name <> assignee) active_agents in

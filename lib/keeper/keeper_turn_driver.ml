@@ -755,53 +755,14 @@ let run_named
       ?last_capacity_backpressure
       try_cascade_ctx remaining last_err
   in
-  (* Pluggable strategy + cycle/backoff wrapper (since 0.9.6).
-
-     When no [<name>_strategy] is configured in cascade.toml,
-     [Cascade_config.resolve_strategy] returns [Cascade_strategy.failover]
-     with [max_cycles = 1].  In that case [cycle_loop] invokes
-     [try_cascade] exactly once on the original [candidate_cfgs] —
-     bit-identical to the pre-strategy behaviour (linear failover). *)
-  let profile_knob_or_default ~knob ~default resolve =
-    match resolve () with
-    | Ok value -> Ok value
-    | Error detail ->
-        Log.Misc.error "cascade %s: %s" runtime_id detail;
-        Error (runtime_catalog_error_to_sdk_error detail)
-  in
-  let* strategy =
-    profile_knob_or_default ~knob:"strategy"
-      ~default:Cascade_strategy.failover
-      (fun () -> Runtime_catalog.resolve_strategy ~name:runtime_id ())
-  in
-  let strategy_name = Cascade_strategy.kind_to_string strategy.kind in
-  let () = cascade_strategy_name_ref := Some strategy_name in
+  (* Runtime dispatch no longer resolves a cascade strategy catalog.
+     Candidate ordering is produced by the runtime candidate resolution layer;
+     this driver only applies the health fail-open filter and executes the
+     provider attempts in that order. *)
+  let runtime_strategy_name = "linear_failover" in
+  let () = cascade_strategy_name_ref := Some runtime_strategy_name in
   let _ = sw, net in
-  let adapter = Runtime_candidate.strategy_adapter in
-  let signal_ctx : Cascade_strategy.signal_ctx = {
-    health = Keeper_binding_health.global;
-    capacity = Cascade_capacity_probe.capacity;
-    now = Unix.gettimeofday ();
-    rand_int = Random.int;
-    keeper_name;
-    runtime_id = error_runtime_id;
-  } in
-  let cycle_clock = Eio_context.get_clock_opt () in
-  let do_backoff cycle =
-    let ms = Cascade_strategy.backoff_ms strategy.cycle ~cycle in
-    if ms <= 0 then ()
-    else
-      let secs = float_of_int ms /. 1000. in
-      match cycle_clock with
-      | Some clock -> Eio.Time.sleep clock secs
-      | None ->
-        (* No Eio clock available — skip backoff rather than block the
-           thread.  Reachable only outside an Eio.Switch, which is not a
-           supported entry path for this worker; the cycle simply
-           continues without throttling. *)
-        ()
-  in
-  let runtime_exhausted_after_filter ~cycle =
+  let runtime_exhausted_after_filter () =
     let observation =
       Keeper_observation.runtime_observation_with_metrics
         ~runtime_id:error_runtime_id
@@ -819,66 +780,22 @@ let run_named
               reason = Keeper_meta_contract.Candidates_filtered_after_cycles;
             }))
   in
-  let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =
-    Cascade_strategy_trace.record {
-      ts = Unix.gettimeofday ();
-      runtime_id = runtime_id;
-      strategy = strategy_name;
-      cycle;
-      candidates_in = List.length candidates;
-      candidates_out;
-      backoff_ms;
-      kind;
-      (* trace_id is left [None] until the keeper_turn_id wired by
-         Step 0a is threaded into [try_cascade]; downstream consumers
-         (dashboard_cascade, bin/masc_trace) already render [None] as
-         a JSON [null] so producers can adopt incrementally. *)
-      trace_id = None;
-      confidence_score = None;
-    }
-  in
-  let rec cycle_loop n =
+  let cycle_loop () =
     let ordered =
-      Cascade_strategy.order_candidates strategy
-        ~adapter ~ctx:signal_ctx ~cycle:n candidates
+      candidates
       |> filter_provider_health_fail_open
     in
-    let last_cycle = n + 1 >= strategy.cycle.max_cycles in
     match ordered with
-    | [] when last_cycle ->
-      record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:0 ~kind:Exhausted;
-      runtime_exhausted_after_filter ~cycle:n
-    | [] ->
-      let backoff = Cascade_strategy.backoff_ms strategy.cycle ~cycle:(n + 1) in
-      record_trace ~cycle:n ~candidates_out:0 ~backoff_ms:backoff
-        ~kind:Filtered_empty;
-      Log.Misc.info
-        "cascade %s: cycle %d (%s) filtered all candidates, retrying"
-        runtime_id n strategy_name;
-      do_backoff (n + 1);
-      cycle_loop (n + 1)
+    | [] -> runtime_exhausted_after_filter ()
     | _ ->
-      record_trace ~cycle:n ~candidates_out:(List.length ordered)
-        ~backoff_ms:0 ~kind:Ordered;
-      let on_success ~provider_key =
-        Cascade_strategy.record_choice strategy ~ctx:signal_ctx ~provider_key
-      in
-      (match try_cascade ~on_success ?per_provider_timeout_s ordered None with
-       | Ok _ as ok -> ok
-       | Error _ as err when last_cycle -> err
-       | Error _ ->
-         Log.Misc.info
-           "cascade %s: cycle %d exhausted, backoff before retry (strategy=%s)"
-           runtime_id n strategy_name;
-         do_backoff (n + 1);
-         cycle_loop (n + 1))
+      try_cascade ?per_provider_timeout_s ordered None
   in
   let admission_runtime_id =
     runtime_id
   in
   match Admission_queue.with_permit ?wait_timeout_sec
     ~priority:queue_priority ~keeper_name:name ~runtime_id:admission_runtime_id
-    (fun () -> cycle_loop 0) with
+    cycle_loop with
   | Ok result -> result
   | Error (`Host_resource_saturated reason) ->
       Error

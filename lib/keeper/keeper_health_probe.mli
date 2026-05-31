@@ -63,7 +63,7 @@ val is_terminal_unhealthy : Keeper_state_machine.phase -> bool
 (** {1 Runtime health scan} *)
 
 (** [max_failed_allowed_for_runtime ~total] returns the maximum number
-    of terminal-unhealthy keepers (Dead/Zombie/Crashed) a runtime of
+    of terminal-unhealthy keepers (Dead/Zombie/Crashed) a runtime group of
     size [total] can hold while still being treated as healthy.
     Formula: [max 1 (total / 10)] — one keeper down is always allowed,
     larger runtimes scale at 10%.  Exposed so tests and other callers

@@ -259,9 +259,9 @@ let scan_runtime_health ~base_path =
   let by_runtime = Hashtbl.create 8 in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       let runtime = Keeper_meta_contract.runtime_id_of_meta entry.meta in
+       let runtime_id = Keeper_meta_contract.runtime_id_of_meta entry.meta in
        let acc =
-         match Hashtbl.find_opt by_runtime runtime with
+         match Hashtbl.find_opt by_runtime runtime_id with
          | Some acc -> acc
          | None -> empty_runtime_scan_acc
        in
@@ -275,15 +275,15 @@ let scan_runtime_health ~base_path =
               else acc.failure_reasons)
          }
        in
-       Hashtbl.replace by_runtime runtime acc')
+       Hashtbl.replace by_runtime runtime_id acc')
     entries;
   Hashtbl.fold
-    (fun runtime acc rows ->
+    (fun runtime_id acc rows ->
        let healthy =
          if acc.total <= 0 then true
          else acc.failed <= max_failed_allowed_for_runtime ~total:acc.total
        in
-       (runtime, healthy, acc) :: rows)
+       (runtime_id, healthy, acc) :: rows)
     by_runtime
     []
 ;;
@@ -302,7 +302,7 @@ let scan_runtime_health ~base_path =
     turn. *)
 let check_runtime_health ~base_path =
   scan_runtime_health ~base_path
-  |> List.map (fun (runtime, healthy, _acc) -> runtime, healthy)
+  |> List.map (fun (runtime_id, healthy, _acc) -> runtime_id, healthy)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -312,11 +312,11 @@ let check_runtime_health ~base_path =
 let run_once ~base_path =
   let results = scan_runtime_health ~base_path in
   List.iter
-    (fun (runtime, healthy, acc) ->
+    (fun (runtime_id, healthy, acc) ->
        let status =
          if healthy then Healthy else Unhealthy (runtime_failure_reason acc)
        in
-       set_runtime_status ~runtime_id:runtime status)
+       set_runtime_status ~runtime_id status)
     results
 ;;
 

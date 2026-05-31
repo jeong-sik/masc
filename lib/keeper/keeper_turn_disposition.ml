@@ -13,7 +13,7 @@ type t =
   | External_cancel
   | Input_required
   | Turn_wall_clock_timeout
-  | Cascade_attempts_exhausted
+  | Runtime_attempts_exhausted
   | Required_tool_use_no_tool_call
   | Required_tool_use_unsatisfied
   | Post_commit_ambiguous
@@ -31,7 +31,7 @@ let severity = function
   | Input_required -> Ok
   | External_cancel
   | Turn_wall_clock_timeout
-  | Cascade_attempts_exhausted -> Warn
+  | Runtime_attempts_exhausted -> Warn
   | Required_tool_use_no_tool_call
   | Required_tool_use_unsatisfied
   | Post_commit_ambiguous
@@ -45,7 +45,7 @@ let summary = function
   | External_cancel -> "keeper turn was cancelled before completion"
   | Turn_wall_clock_timeout ->
     "keeper turn hit the wall-clock timeout"
-  | Cascade_attempts_exhausted ->
+  | Runtime_attempts_exhausted ->
     "cascade attempts exhausted; inspect per-attempt root causes"
   | Required_tool_use_no_tool_call ->
     "required keeper tool use was requested, but the model returned no keeper tool call"
@@ -64,7 +64,7 @@ let next_action = function
   | Input_required -> Some "provide_input_or_decline"
   | External_cancel -> Some "rerun_if_still_relevant"
   | Turn_wall_clock_timeout -> Some "inspect_turn_timeout"
-  | Cascade_attempts_exhausted -> Some "inspect_cascade_attempts"
+  | Runtime_attempts_exhausted -> Some "inspect_runtime_attempts"
   | Required_tool_use_no_tool_call ->
     Some "inspect_model_tool_call_contract"
   | Required_tool_use_unsatisfied ->
@@ -78,7 +78,7 @@ let to_wire = function
   | Input_required -> "input_required"
   | External_cancel -> "external_cancel"
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
-  | Cascade_attempts_exhausted -> "cascade_attempts_exhausted"
+  | Runtime_attempts_exhausted -> "runtime_attempts_exhausted"
   | Required_tool_use_no_tool_call -> "required_tool_use_no_tool_call"
   | Required_tool_use_unsatisfied -> "required_tool_use_unsatisfied"
   | Post_commit_ambiguous -> "post_commit_ambiguous"
@@ -124,7 +124,7 @@ let of_wire = function
   | "input_required" -> Input_required
   | "external_cancel" -> External_cancel
   | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
-  | "cascade_attempts_exhausted" -> Cascade_attempts_exhausted
+  | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
   | "required_tool_use_no_tool_call" -> Required_tool_use_no_tool_call
   | "required_tool_use_unsatisfied" -> Required_tool_use_unsatisfied
   | "post_commit_ambiguous" -> Post_commit_ambiguous
@@ -141,7 +141,7 @@ let equal a b =
   | Input_required, Input_required
   | External_cancel, External_cancel
   | Turn_wall_clock_timeout, Turn_wall_clock_timeout
-  | Cascade_attempts_exhausted, Cascade_attempts_exhausted
+  | Runtime_attempts_exhausted, Runtime_attempts_exhausted
   | Required_tool_use_no_tool_call, Required_tool_use_no_tool_call
   | Required_tool_use_unsatisfied, Required_tool_use_unsatisfied
   | Post_commit_ambiguous, Post_commit_ambiguous -> true
@@ -151,7 +151,7 @@ let equal a b =
   | Input_required, _
   | External_cancel, _
   | Turn_wall_clock_timeout, _
-  | Cascade_attempts_exhausted, _
+  | Runtime_attempts_exhausted, _
   | Required_tool_use_no_tool_call, _
   | Required_tool_use_unsatisfied, _
   | Post_commit_ambiguous, _

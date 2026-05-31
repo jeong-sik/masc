@@ -27,8 +27,8 @@ type model_resolution =
   ; provenance : model_resolution_provenance
   }
 
-(** Resolve provider:auto expansion for any registered cascade provider. *)
-val auto_models_for_cascade_prefix
+(** Resolve provider:auto expansion for any registered runtime provider. *)
+val auto_models_for_runtime_prefix
   :  ?getenv:(string -> string option)
   -> string
   -> string list option
@@ -48,6 +48,6 @@ val resolve_auto_model_id : string -> string -> string
 (** Parse a "model@url" custom model spec.
     Returns [(model_id, base_url)].
     Without [@], uses [CUSTOM_LLM_BASE_URL] env or the local discovery
-    default endpoint. Prefer explicit cascade provider endpoints for
+    default endpoint. Prefer explicit runtime provider endpoints for
     operator-configured routing. *)
 val parse_custom_model : string -> string * string

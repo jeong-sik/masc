@@ -710,7 +710,7 @@ let test_run_context_uses_reconciled_current_task_id () =
           ~max_context:4000
           ~cascade_name:
             (Cascade_name.of_string_exn
-               (Keeper_config.default_cascade_name ()))
+               (Keeper_config.default_runtime_id ()))
           ~generation:meta.runtime.generation
           ()
       in

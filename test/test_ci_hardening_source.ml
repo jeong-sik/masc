@@ -1234,7 +1234,7 @@ let test_keeper_direct_reply_contracts () =
   (* Historical: direct_reply once forked cascade name into
      "keeper_reply"/"keeper_turn", but neither was ever defined in
      cascade.json — the drift collapsed to the default cascade via
-     Keeper_cascade_profile.canonicalize. The fork is gone; the
+     Keeper_runtime_profile.canonicalize. The fork is gone; the
      direct_reply flag now only affects persona prompt + skill-route
      suppression (checked below). *)
   check bool "keeper manual turns resolve declared cascade through runtime catalog" true
@@ -1298,7 +1298,7 @@ let test_keeper_zombie_field_contracts () =
       turn_count = Some 1;
       oas_turn_count = None;
       oas_dispatch_mode = None;
-      oas_internal_cascade_disabled = false;
+      oas_internal_runtime_disabled = false;
       current_task_id = Some "task-123";
       goal_ids = [ "goal-123" ];
       outcome = `Ok;
@@ -1338,14 +1338,14 @@ let test_keeper_zombie_field_contracts () =
       approval_profile = None;
       approval_profile_derived = false;
       cascade_name = Cascade_name.of_string_exn "default";
-      cascade_selected_model = Some "test-model";
+      runtime_selected_model = Some "test-model";
       cascade_attempt_count = 1;
-      cascade_fallback_applied = false;
-      cascade_outcome = Masc_mcp.Keeper_execution_receipt.Cascade_completed;
+      runtime_fallback_applied = false;
+      runtime_outcome = Masc_mcp.Keeper_execution_receipt.Runtime_completed;
       degraded_retry_applied = false;
-      degraded_retry_cascade = None;
+      degraded_retry_runtime_id = None;
       fallback_reason = None;
-      cascade_rotation_attempts = [];
+      runtime_rotation_attempts = [];
       stop_reason = None;
       error_kind = None;
       error_message = None;
@@ -1358,7 +1358,7 @@ let test_keeper_zombie_field_contracts () =
       pre_dispatch_compaction_trigger = None;
       pre_dispatch_compaction_before_tokens = None;
       pre_dispatch_compaction_after_tokens = None;
-      oas_internal_cascade_allowed = false;
+      oas_internal_runtime_allowed = false;
     }
   in
   let json = R.to_json receipt in

@@ -81,7 +81,7 @@ let seed_keeper_meta_exn config keeper_name ~goal =
             ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
             ("trace_id", `String trace_id);
             ("goal", `String goal);
-            ("runtime_id", `String (Keeper_config.default_cascade_name ()));
+            ("runtime_id", `String (Keeper_config.default_runtime_id ()));
             ("sandbox_profile", `String "local");
             ("network_mode", `String "inherit");
           ])
@@ -2044,7 +2044,7 @@ let test_keeper_status_exposes_model_observability () =
             ( "cascade",
               `Assoc
                 [
-                  ("runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+                  ("runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ()));
                   ( "configured_labels",
                     `List [ `String "llama:auto"; `String "provider_k:auto" ] );
                   ( "candidate_models",
@@ -2095,7 +2095,7 @@ let test_keeper_status_exposes_model_observability () =
       let status_dump = Yojson.Safe.pretty_to_string status_json in
       Alcotest.(check (option string))
         ("runtime id surfaced\n" ^ status_dump)
-        (Some Masc_mcp.(Keeper_config.default_cascade_name ()))
+        (Some Masc_mcp.(Keeper_config.default_runtime_id ()))
         (observability |> member "runtime_id" |> to_string_option);
       Alcotest.(check bool) "recent turn observation true" true
         (observability |> member "recent_turn_observation" |> to_bool);
@@ -2874,17 +2874,17 @@ proactive_enabled = true
       Alcotest.(check string) "default source kind" "toml"
         (json |> member "sources" |> member "default_source_kind" |> to_string);
       Alcotest.(check string) "selected runtime id"
-        Masc_mcp.(Keeper_config.default_cascade_name ())
+        Masc_mcp.(Keeper_config.default_runtime_id ())
         (json |> member "execution" |> member "selected_runtime_id"
        |> to_string);
       Alcotest.(check string) "selected runtime canonical"
-        Masc_mcp.(Keeper_config.default_cascade_name ())
+        Masc_mcp.(Keeper_config.default_runtime_id ())
         (json |> member "execution" |> member "selected_runtime_canonical"
        |> to_string);
       let expected_default_models =
         Masc_mcp.Cascade_runtime.models_of_cascade_name
           (Cascade_name.of_string_exn
-             Masc_mcp.(Keeper_config.default_cascade_name ()))
+             Masc_mcp.(Keeper_config.default_runtime_id ()))
       in
       Alcotest.(check (list string)) "selected cascade models use default profile"
         expected_default_models
@@ -3038,7 +3038,7 @@ proactive_enabled = true
         (stale_json |> member "execution" |> member "selected_runtime_id"
        |> to_string);
       Alcotest.(check string) "stale cascade falls back to live default"
-        Masc_mcp.(Keeper_config.default_cascade_name ())
+        Masc_mcp.(Keeper_config.default_runtime_id ())
         (stale_json |> member "execution" |> member "selected_runtime_canonical"
        |> to_string);
       Alcotest.(check (list string)) "stale cascade models use live default"

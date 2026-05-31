@@ -483,7 +483,7 @@ let append_execution_receipt
       turn_count = Some 3;
       oas_turn_count = None;
       oas_dispatch_mode = None;
-      oas_internal_cascade_disabled = false;
+      oas_internal_runtime_disabled = false;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome;
@@ -518,25 +518,25 @@ let append_execution_receipt
       approval_profile_derived = false;
       cascade_name =
         Cascade_name.of_string_exn (Lib.Keeper_meta_contract.cascade_name_of_meta meta);
-      cascade_selected_model = Some "custom:mock";
+      runtime_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
-      cascade_fallback_applied = true;
-      cascade_outcome = Lib.Keeper_execution_receipt.Cascade_passed_to_next_model;
+      runtime_fallback_applied = true;
+      runtime_outcome = Lib.Keeper_execution_receipt.Runtime_passed_to_next_model;
       degraded_retry_applied = true;
-      degraded_retry_cascade =
+      degraded_retry_runtime_id =
         Some
           (Cascade_name.of_string_exn
-             (Lib.Keeper_config.default_cascade_name ()));
+             (Lib.Keeper_config.default_runtime_id ()));
       fallback_reason = Some Lib.Keeper_error_classify.Turn_timeout;
-      cascade_rotation_attempts =
+      runtime_rotation_attempts =
         [
           {
-            from_cascade =
+            from_runtime_id =
               Cascade_name.of_string_exn
-                Lib.(Keeper_config.default_cascade_name ());
-            to_cascade =
+                Lib.(Keeper_config.default_runtime_id ());
+            to_runtime_id =
               Cascade_name.of_string_exn
-                (Lib.Keeper_config.default_cascade_name ());
+                (Lib.Keeper_config.default_runtime_id ());
             reason = Lib.Keeper_error_classify.Turn_timeout;
             outcome = Lib.Keeper_execution_receipt.Rotation_retry_scheduled;
             slot_release_at_phase =
@@ -561,7 +561,7 @@ let append_execution_receipt
       pre_dispatch_compaction_trigger = None;
       pre_dispatch_compaction_before_tokens = None;
       pre_dispatch_compaction_after_tokens = None;
-      oas_internal_cascade_allowed = false;
+      oas_internal_runtime_allowed = false;
     }
   in
   let tm = Unix.gmtime (Unix.gettimeofday ()) in
@@ -703,10 +703,10 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
             check bool "diagnostic next action surfaced" true
               (row |> member "diagnostic" |> member "next_action_path" <> `Null);
             check string "runtime id surfaced on execution keeper row"
-              Lib.(Keeper_config.default_cascade_name ())
+              Lib.(Keeper_config.default_runtime_id ())
               (row |> member "runtime_id" |> to_string);
             check string "canonical runtime surfaced on execution keeper row"
-              Lib.(Keeper_config.default_cascade_name ())
+              Lib.(Keeper_config.default_runtime_id ())
               (row |> member "runtime_canonical" |> to_string);
             check bool "primary model omitted on execution keeper row" true
               (row |> member "primary_model" = `Null);
@@ -851,7 +851,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "outcome" |> to_string);
             check string "execution trust row exposes operator disposition"
-              "fail_open_next_cascade"
+              "fail_open_next_runtime_id"
               (trust_row |> member "trust" |> member "operator_disposition"
              |> to_string);
             check string "execution trust row exposes operator disposition reason"
@@ -862,18 +862,18 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "degraded_retry_applied" |> to_bool);
             check (option string) "execution trust row preserves degraded retry lane"
-              (Some (Lib.Keeper_config.default_cascade_name ()))
+              (Some (Lib.Keeper_config.default_runtime_id ()))
               (trust_row |> member "trust" |> member "cascade"
-             |> member "degraded_retry_cascade" |> to_string_option);
+             |> member "degraded_retry_runtime_id" |> to_string_option);
             check (option string) "execution trust row preserves fallback reason"
               (Some "turn_timeout")
               (trust_row |> member "trust" |> member "cascade"
              |> member "fallback_reason" |> to_string_option);
             check string "execution trust row preserves rotation target"
-              (Lib.Keeper_config.default_cascade_name ())
+              (Lib.Keeper_config.default_runtime_id ())
               (trust_row |> member "trust" |> member "cascade"
              |> member "rotation_attempts" |> to_list |> List.hd
-             |> member "to_cascade" |> to_string);
+             |> member "to_runtime_id" |> to_string);
             check int "execution trust row preserves productive phase elapsed"
               174000
               (trust_row |> member "trust" |> member "cascade"
@@ -920,7 +920,7 @@ let test_execution_trust_surfaces_latest_receipt () =
             check string "execution row exposes cascade outcome"
               "passed_to_next_model"
               (execution_row |> member "trust" |> member "execution_summary"
-             |> member "cascade_outcome" |> to_string);
+             |> member "runtime_outcome" |> to_string);
             check (list string) "execution row exposes unexpected tools"
               [ "WebSearch" ]
               (execution_row |> member "trust" |> member "execution_summary"

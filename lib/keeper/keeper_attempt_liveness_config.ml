@@ -1,4 +1,4 @@
-(* See cascade_attempt_liveness_config.mli for documentation.
+(* See runtime_attempt_liveness_config.mli for documentation.
 
    RFC-0022 PR-2/4 §2 — tri-state env flag + living budget map. *)
 

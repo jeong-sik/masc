@@ -1,6 +1,6 @@
 (** Provider-attempt provenance and health helpers for keeper turn driver. *)
 
-open Cascade_attempt_fsm
+open Runtime_attempt_fsm
 
 let provider_attempt_status_of_result = function
   | Ok _ -> "provider_returned"
@@ -44,8 +44,8 @@ type provider_attempt_provenance =
 
 let base_provider_attempt_provenance =
   { model_source = "named_cascade"
-  ; resolved_model_source = "cascade_catalog_binding"
-  ; capability_source = "provider_config_from_cascade_catalog"
+  ; resolved_model_source = "runtime_catalog_binding"
+  ; capability_source = "provider_config_from_runtime_catalog"
   ; fallback_authority = "declared_cascade"
   ; provider_source_cascade = None
   }

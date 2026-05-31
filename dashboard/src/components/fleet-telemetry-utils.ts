@@ -152,7 +152,7 @@ function latestCascadeMetric(keeper: Keeper) {
     if (!point) continue
     if (
       normalizeText(point.cascade_name)
-      || normalizeText(point.cascade_selected_model)
+      || normalizeText(point.runtime_selected_model)
       || normalizeText(point.cascade_outcome)
       || typeof point.cascade_attempt_count === 'number'
       || point.fallback_applied

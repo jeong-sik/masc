@@ -113,8 +113,8 @@ let append_keeper_receipt
     ?(tool_contract_result : Keeper_execution_receipt.tool_contract_result =
       Contract_satisfied_completion)
     ?(tool_requirement = Keeper_agent_tool_surface.Required)
-    ?(cascade_outcome : Keeper_execution_receipt.cascade_outcome =
-      Cascade_completed) (config : Coord.config)
+    ?(runtime_outcome : Keeper_execution_receipt.runtime_outcome =
+      Runtime_completed) (config : Coord.config)
     (meta : Keeper_meta_contract.keeper_meta) =
   let started_at = Masc_domain.now_iso () in
   let ended_at = Masc_domain.now_iso () in
@@ -127,7 +127,7 @@ let append_keeper_receipt
       turn_count = Some 7;
       oas_turn_count = None;
       oas_dispatch_mode = None;
-      oas_internal_cascade_disabled = false;
+      oas_internal_runtime_disabled = false;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome;
@@ -160,14 +160,14 @@ let append_keeper_receipt
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
       cascade_name = Cascade_name.of_string_exn (Keeper_meta_contract.cascade_name_of_meta meta);
-      cascade_selected_model = Some "openai:gpt-5.4";
+      runtime_selected_model = Some "openai:gpt-5.4";
       cascade_attempt_count = 1;
-      cascade_fallback_applied = false;
-      cascade_outcome;
+      runtime_fallback_applied = false;
+      runtime_outcome;
       degraded_retry_applied = false;
-      degraded_retry_cascade = None;
+      degraded_retry_runtime_id = None;
       fallback_reason = None;
-      cascade_rotation_attempts = [];
+      runtime_rotation_attempts = [];
       stop_reason = Some Cascade_runner.Completed;
       error_kind = None;
       error_message = None;
@@ -180,7 +180,7 @@ let append_keeper_receipt
       pre_dispatch_compaction_trigger = None;
       pre_dispatch_compaction_before_tokens = None;
       pre_dispatch_compaction_after_tokens = None;
-      oas_internal_cascade_allowed = false;
+      oas_internal_runtime_allowed = false;
     }
   in
   Keeper_execution_receipt.append config receipt

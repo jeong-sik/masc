@@ -1,6 +1,6 @@
 (** Success-path post-processing for [Keeper_unified_turn]. *)
 
-module KCB = Keeper_turn_cascade_budget
+module KCB = Keeper_turn_runtime_budget
 module KEC = Keeper_context_runtime
 module KUM = Keeper_unified_metrics
 module Social = Keeper_social_model
@@ -469,7 +469,7 @@ let handle
       ~latency_ms
       ~semaphore_wait_ms
       ~degraded_retry_applied
-      ~degraded_retry_cascade
+      ~degraded_retry_runtime_id
       ~fallback_reason
       ~last_provider_timeout_budget
       ~current_turn_blocker_info
@@ -551,7 +551,7 @@ let handle
     ~semaphore_wait_ms
     ~outcome:"success"
     ~degraded_retry_applied
-    ?degraded_retry_cascade
+    ?degraded_retry_runtime_id
     ?fallback_reason:(Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
     ~turn_mode
     ~social_state

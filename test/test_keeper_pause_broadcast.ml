@@ -58,14 +58,14 @@ let mk_receipt
       ?(required_tool_candidates = [])
       ?(missing_required_tools = [])
       ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required)
-      ?(cascade_outcome : R.cascade_outcome = Cascade_completed)
+      ?(runtime_outcome : R.runtime_outcome = Runtime_completed)
       ?current_task_id
       ?stop_reason
       ?(goal_ids = [])
       ?(error_kind = None)
       ?(error_message = None)
       ?(degraded_retry_applied = false)
-      ?(cascade_fallback_applied = false)
+      ?(runtime_fallback_applied = false)
       ()
   : R.t
   =
@@ -76,7 +76,7 @@ let mk_receipt
   ; turn_count = Some 1
   ; oas_turn_count = None
   ; oas_dispatch_mode = None
-  ; oas_internal_cascade_disabled = false
+  ; oas_internal_runtime_disabled = false
   ; current_task_id
   ; goal_ids
   ; outcome
@@ -103,14 +103,14 @@ let mk_receipt
   ; approval_profile = None
   ; approval_profile_derived = false
   ; cascade_name = Cascade_name.of_string_exn "cascade.default"
-  ; cascade_selected_model = None
+  ; runtime_selected_model = None
   ; cascade_attempt_count = 1
-  ; cascade_fallback_applied
-  ; cascade_outcome
+  ; runtime_fallback_applied
+  ; runtime_outcome
   ; degraded_retry_applied
-  ; degraded_retry_cascade = None
+  ; degraded_retry_runtime_id = None
   ; fallback_reason = None
-  ; cascade_rotation_attempts = []
+  ; runtime_rotation_attempts = []
   ; stop_reason
   ; error_kind
   ; error_message
@@ -123,7 +123,7 @@ let mk_receipt
   ; pre_dispatch_compaction_trigger = None
   ; pre_dispatch_compaction_before_tokens = None
   ; pre_dispatch_compaction_after_tokens = None
-  ; oas_internal_cascade_allowed = false
+  ; oas_internal_runtime_allowed = false
   }
 ;;
 
@@ -182,8 +182,8 @@ let test_route_failure_uses_recoverable_reason () =
 let test_route_failure_passes_next_when_fallback_available () =
   let r =
     mk_receipt
-      ~cascade_fallback_applied:true
-      ~cascade_outcome:R.Cascade_passed_to_next_model
+      ~runtime_fallback_applied:true
+      ~runtime_outcome:R.Runtime_passed_to_next_model
       ~tool_contract_result:Contract_tool_surface_mismatch
       ()
   in
@@ -204,7 +204,7 @@ let test_route_failure_fail_open_when_degraded_retry_available () =
   check_disp
     "route_failure degraded"
     r
-    "fail_open_next_cascade"
+    "fail_open_next_runtime_id"
     "tool_route_recoverable_failure"
 ;;
 
@@ -217,7 +217,7 @@ let test_pause_human_when_no_tools_used () =
    [terminal_reason="completion_contract_violation:require_tool_use"] while
    the earlier tool_contract classifier reports
    [tool_contract_result="satisfied_completion"]. Before this branch the
-   two-layer disagreement fell through to ("unknown","unmapped_cascade_state")
+   two-layer disagreement fell through to ("unknown","unmapped_runtime_state")
    and tripped the #11651 regression counter. The terminal_reason is
    authoritative — pause_human/tool_required_unsatisfied. *)
 let test_pause_human_for_completion_contract_violation_with_satisfied_inner () =
@@ -268,7 +268,7 @@ let test_internal_error_not_unmapped () =
   let r =
     mk_receipt
       ~outcome:`Error
-      ~cascade_outcome:Cascade_completed
+      ~runtime_outcome:Runtime_completed
       ~terminal_reason_code:"internal_error"
       ~tool_contract_result:Contract_satisfied_completion
       ~error_kind:(Some (R.error_kind_of_string "internal"))
@@ -291,34 +291,34 @@ let test_preflight_config_failure_not_reported_as_tool_unsatisfied () =
 
 (* === Cascade exhausted always alerts ================================ *)
 
-let test_alert_for_cascade_exhausted () =
-  (* Pre-typing: ~cascade_outcome:"exhausted" was paired with
-     terminal_reason_code="cascade_exhausted" to drive operator_disposition's
-     dead "exhausted"/"cascade_exhausted" string-matching branches.  Those
+let test_alert_for_runtime_exhausted () =
+  (* Pre-typing: ~runtime_outcome:"exhausted" was paired with
+     terminal_reason_code="runtime_exhausted" to drive operator_disposition's
+     dead "exhausted"/"runtime_exhausted" string-matching branches.  Those
      branches were unreachable workarounds (producer never emits
-     "exhausted"/"cascade_exhausted" in cascade_outcome); the typed
-     [cascade_outcome] migration drops them.  The remaining live path is
-     terminal_reason_code="cascade_exhausted", which still triggers
-     alert_exhausted regardless of cascade_outcome. *)
-  let r = mk_receipt ~terminal_reason_code:"cascade_exhausted" () in
-  check_disp "cascade_exhausted" r "alert_exhausted" "cascade_exhausted"
+     "exhausted"/"runtime_exhausted" in runtime_outcome); the typed
+     [runtime_outcome] migration drops them.  The remaining live path is
+     terminal_reason_code="runtime_exhausted", which still triggers
+     alert_exhausted regardless of runtime_outcome. *)
+  let r = mk_receipt ~terminal_reason_code:"runtime_exhausted" () in
+  check_disp "runtime_exhausted" r "alert_exhausted" "runtime_exhausted"
 ;;
 
 (* === Unknown / unmapped state must NOT silently look healthy ========= *)
 
 let test_unknown_when_unmapped () =
   let r =
-    (* outcome=`Ok with cascade_outcome ≠ Completed hits operator_disposition's
-       fall-through arm (the previous fixture used ~cascade_outcome:"weird"
+    (* outcome=`Ok with runtime_outcome ≠ Completed hits operator_disposition's
+       fall-through arm (the previous fixture used ~runtime_outcome:"weird"
        drift; typed enum makes that unrepresentable, so use a valid non-Completed
        variant to reach the same path). *)
     mk_receipt
       ~outcome:`Ok
-      ~cascade_outcome:R.Cascade_not_observed
+      ~runtime_outcome:R.Runtime_not_observed
       ~tool_contract_result:Contract_satisfied_completion
       ()
   in
-  check_disp "unmapped" r "unknown" "unmapped_cascade_state"
+  check_disp "unmapped" r "unknown" "unmapped_runtime_state"
 ;;
 
 (* === Forward-progress states do NOT broadcast ======================== *)
@@ -327,7 +327,7 @@ let test_pass_for_healthy () =
   let r =
     mk_receipt
       ~outcome:`Ok
-      ~cascade_outcome:R.Cascade_completed
+      ~runtime_outcome:R.Runtime_completed
       ~tool_contract_result:Contract_satisfied_completion
       ~terminal_reason_code:"completed"
       ()
@@ -339,7 +339,7 @@ let test_pass_for_pre_dispatch_success () =
   let r =
     mk_receipt
       ~outcome:`Ok
-      ~cascade_outcome:R.Cascade_not_dispatched
+      ~runtime_outcome:R.Runtime_not_dispatched
       ~tool_contract_result:Contract_not_dispatched
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.No_tools
       ~tools_used:[]
@@ -353,7 +353,7 @@ let test_pass_for_completed_claim_progress () =
   let r =
     mk_receipt
       ~outcome:`Ok
-      ~cascade_outcome:R.Cascade_completed
+      ~runtime_outcome:R.Runtime_completed
       ~tool_contract_result:Contract_needs_execution_progress
       ~tools_used:[ "keeper_task_claim" ]
       ~required_tools:[ "keeper_task_claim" ]
@@ -367,7 +367,7 @@ let test_pass_for_completed_generic_claim_progress () =
   let r =
     mk_receipt
       ~outcome:`Ok
-      ~cascade_outcome:R.Cascade_completed
+      ~runtime_outcome:R.Runtime_completed
       ~tool_contract_result:Contract_needs_execution_progress
       ~tools_used:[ "keeper_task_claim" ]
       ~terminal_reason_code:"completed"
@@ -380,7 +380,7 @@ let test_pause_when_unrelated_tool_used_for_required_progress () =
   let r =
     mk_receipt
       ~outcome:`Ok
-      ~cascade_outcome:R.Cascade_completed
+      ~runtime_outcome:R.Runtime_completed
       ~tool_contract_result:Contract_needs_execution_progress
       ~tools_used:[ "keeper_task_claim" ]
       ~required_tools:[ "keeper_task_done" ]
@@ -394,15 +394,15 @@ let test_pause_when_unrelated_tool_used_for_required_progress () =
     "tool_required_unsatisfied"
 ;;
 
-let test_pass_next_for_cascade_fallback () =
+let test_pass_next_for_runtime_fallback () =
   let r =
     mk_receipt
-      ~cascade_fallback_applied:true
-      ~cascade_outcome:R.Cascade_passed_to_next_model
+      ~runtime_fallback_applied:true
+      ~runtime_outcome:R.Runtime_passed_to_next_model
       ~tool_contract_result:Contract_satisfied_completion
       ()
   in
-  check_disp "cascade_fallback" r "pass_next_model" "cascade_fallback"
+  check_disp "runtime_fallback" r "pass_next_model" "runtime_fallback"
 ;;
 
 let test_fail_open_for_degraded_retry () =
@@ -412,7 +412,7 @@ let test_fail_open_for_degraded_retry () =
       ~tool_contract_result:Contract_satisfied_completion
       ()
   in
-  check_disp "degraded_retry" r "fail_open_next_cascade" "degraded_retry"
+  check_disp "degraded_retry" r "fail_open_next_runtime_id" "degraded_retry"
 ;;
 
 (* === Trigger predicate ============================================== *)
@@ -433,9 +433,9 @@ let test_needs_broadcast_predicate () =
     (R.needs_operator_broadcast R.Disp_pass_next_model);
   check
     bool
-    "fail_open_next_cascade does not"
+    "fail_open_next_runtime_id does not"
     false
-    (R.needs_operator_broadcast R.Disp_fail_open_next_cascade)
+    (R.needs_operator_broadcast R.Disp_fail_open_next_runtime_id)
 ;;
 
 (* === Symmetric coverage: each broadcast disposition is reachable ===== *)
@@ -446,22 +446,22 @@ let test_each_broadcast_disp_is_reachable () =
   let d1, _ = R.operator_disposition r1 in
   check bool "pause_human reachable" true (R.needs_operator_broadcast d1);
   (* alert_exhausted via terminal_reason_code.  Pre-typing this was driven
-     by cascade_outcome="cascade_exhausted", but that string is not in the
-     producer's closed [cascade_outcome] set; the dead path was dropped
+     by runtime_outcome="runtime_exhausted", but that string is not in the
+     producer's closed [runtime_outcome] set; the dead path was dropped
      with the typed migration.  terminal_reason_code remains the live
      trigger. *)
-  let r2 = mk_receipt ~terminal_reason_code:"cascade_exhausted" () in
+  let r2 = mk_receipt ~terminal_reason_code:"runtime_exhausted" () in
   let d2, _ = R.operator_disposition r2 in
   check bool "alert_exhausted reachable" true (R.needs_operator_broadcast d2);
   (* unknown via unmapped *)
   let r3 =
-    (* outcome=`Ok with cascade_outcome ≠ Completed hits operator_disposition's
-       fall-through arm (the previous fixture used ~cascade_outcome:"weird"
+    (* outcome=`Ok with runtime_outcome ≠ Completed hits operator_disposition's
+       fall-through arm (the previous fixture used ~runtime_outcome:"weird"
        drift; typed enum makes that unrepresentable, so use a valid non-Completed
        variant to reach the same path). *)
     mk_receipt
       ~outcome:`Ok
-      ~cascade_outcome:R.Cascade_not_observed
+      ~runtime_outcome:R.Runtime_not_observed
       ~tool_contract_result:Contract_satisfied_completion
       ()
   in
@@ -509,7 +509,7 @@ let test_receipt_json_omits_provider_model_identity () =
     { (mk_receipt ())
       with
       model_used = Some "provider:model-private"
-    ; cascade_selected_model = Some "provider:model-private"
+    ; runtime_selected_model = Some "provider:model-private"
     }
   in
   let json = R.to_json receipt in
@@ -563,7 +563,7 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
          ; turn_count = Some 605
          ; oas_turn_count = None
          ; oas_dispatch_mode = None
-         ; oas_internal_cascade_disabled = false
+         ; oas_internal_runtime_disabled = false
          ; current_task_id = Some "task-livelock-dedupe"
          }
        in
@@ -586,7 +586,7 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
        R.append
          config
          { receipt with trace_id = "trace-livelock-dedupe-3"; turn_count = Some 606; oas_turn_count = None
-         ; oas_internal_cascade_disabled = false
+         ; oas_internal_runtime_disabled = false
          ; oas_dispatch_mode = None };
        check int "new turn emits again" 2 (operator_broadcast_event_count config))
 ;;
@@ -609,7 +609,7 @@ let test_broadcast_payload_carries_turn_diagnostics () =
   let receipt =
     { receipt with
       model_used = Some "provider:model-private"
-    ; cascade_selected_model = Some "provider:model-private"
+    ; runtime_selected_model = Some "provider:model-private"
     }
   in
   let payload =
@@ -855,7 +855,7 @@ let () =
             `Quick
             test_route_failure_passes_next_when_fallback_available
         ; test_case
-            "route/tool-surface degraded -> fail_open_next_cascade"
+            "route/tool-surface degraded -> fail_open_next_runtime_id"
             `Quick
             test_route_failure_fail_open_when_degraded_retry_available
         ; test_case
@@ -884,9 +884,9 @@ let () =
             `Quick
             test_preflight_config_failure_not_reported_as_tool_unsatisfied
         ; test_case
-            "cascade_exhausted -> alert_exhausted"
+            "runtime_exhausted -> alert_exhausted"
             `Quick
-            test_alert_for_cascade_exhausted
+            test_alert_for_runtime_exhausted
         ; test_case "unmapped -> unknown" `Quick test_unknown_when_unmapped
         ; test_case "ok+completed -> pass" `Quick test_pass_for_healthy
         ; test_case
@@ -908,9 +908,9 @@ let () =
         ; test_case
             "fallback -> pass_next_model"
             `Quick
-            test_pass_next_for_cascade_fallback
+            test_pass_next_for_runtime_fallback
         ; test_case
-            "degraded -> fail_open_next_cascade"
+            "degraded -> fail_open_next_runtime_id"
             `Quick
             test_fail_open_for_degraded_retry
         ] )

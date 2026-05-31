@@ -129,7 +129,7 @@ val record_turn_latency_bucket :
 val record_turn_latency_by_model_bucket :
   keeper:string ->
   channel:string ->
-  cascade_profile:string ->
+  runtime_profile:string ->
   latency_ms:int ->
   unit
 
@@ -186,7 +186,7 @@ val append_decision_record :
   ?semaphore_wait_ms:int ->
   outcome:string ->
   ?degraded_retry_applied:bool ->
-  ?degraded_retry_cascade:string ->
+  ?degraded_retry_runtime_id:string ->
   ?fallback_reason:string ->
   ?turn_mode:turn_mode ->
   ?social_state:Keeper_social_model.social_state ->

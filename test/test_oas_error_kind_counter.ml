@@ -60,8 +60,8 @@ let test_turn_timeout_kind () =
     (before +. 1.0)
     (counter_for kind)
 
-let test_cascade_exhausted_kind () =
-  let kind = "cascade_exhausted" in
+let test_runtime_exhausted_kind () =
+  let kind = "runtime_exhausted" in
   let cascade_name = "primary" in
   let before = counter_for ~cascade_name kind in
   let _ =
@@ -74,7 +74,7 @@ let test_cascade_exhausted_kind () =
          })
   in
   Alcotest.(check (float 0.0001))
-    "cascade_exhausted{runtime_id=primary} counter +1"
+    "runtime_exhausted{runtime_id=primary} counter +1"
     (before +. 1.0)
     (counter_for ~cascade_name kind)
 
@@ -410,8 +410,8 @@ let () =
             test_provider_timeout_kind;
           Alcotest.test_case "turn_timeout" `Quick
             test_turn_timeout_kind;
-          Alcotest.test_case "cascade_exhausted" `Quick
-            test_cascade_exhausted_kind;
+          Alcotest.test_case "runtime_exhausted" `Quick
+            test_runtime_exhausted_kind;
           Alcotest.test_case "capacity_backpressure" `Quick
             test_capacity_backpressure_kind;
           Alcotest.test_case "resumable_cli_session" `Quick

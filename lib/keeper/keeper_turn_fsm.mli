@@ -21,7 +21,7 @@ type cancel_reason =
       (** Agent paused to request human input (InputRequired). *)
 
 type failure_reason =
-  | Failure_cascade_unavailable of {
+  | Failure_runtime_unavailable of {
       base : string;
       resolved : string option;
     }
@@ -53,7 +53,7 @@ type failure_reason =
 type _ turn_state =
   | Idle : [`Idle] turn_state [@tla.idle]
   | Phase_gating : [`Phase_gating] turn_state [@tla.active]
-  | Cascade_routing : [`Cascade_routing] turn_state [@tla.active]
+  | Runtime_routing : [`Runtime_routing] turn_state [@tla.active]
   | Awaiting_provider : [`Awaiting_provider] turn_state [@tla.active]
   | Streaming : [`Streaming] turn_state [@tla.active]
   | Awaiting_tool_result : [`Awaiting_tool_result] turn_state [@tla.symbol "awaiting_tool"] [@tla.active]
@@ -86,8 +86,8 @@ type transition_action =
   | StartTurn
   | PhaseGateSkip
   | PhaseGateOk
-  | CascadeRouted
-  | CascadeUnavailable
+  | RuntimeRouted
+  | RuntimeUnavailable
   | ProviderResponded
   | ProviderTimeout
   | StreamYieldsTool

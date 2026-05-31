@@ -490,7 +490,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         inference_telemetry,
         cascade_name: cascadeObj ? (asString(cascadeObj.cascade_name) ?? asString(cascadeObj.name) ?? null) : null,
         cascade_outcome: cascadeObj ? (asString(cascadeObj.outcome) ?? null) : null,
-        cascade_selected_model: null,
+        runtime_selected_model: null,
         cascade_attempt_count: cascadeObj ? (asNumber(cascadeObj.attempt_count) ?? null) : null,
         cascade_strategy: cascadeObj && typeof cascadeObj.strategy === 'string' ? cascadeObj.strategy : null,
         fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,

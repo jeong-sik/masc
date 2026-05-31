@@ -66,9 +66,9 @@ let record_semaphore_wait_observation
     ~reasons:(semaphore_wait_observation_reasons ?phase_label ~kind ~channel ())
 ;;
 
-type cascade_backpressure_decision =
-  | Cascade_admitted
-  | Cascade_backpressured of {
+type runtime_backpressure_decision =
+  | Runtime_admitted
+  | Runtime_backpressured of {
       cascade_name : string;
       reason : string;
     }
@@ -84,7 +84,7 @@ let strip_prefix ~prefix value =
   else None
 ;;
 
-let cascade_backpressure_class_reason ~reason =
+let runtime_backpressure_class_reason ~reason =
   let component = skip_reason_component reason in
   let label =
     match strip_prefix ~prefix:"failure_ratio_" component with
@@ -97,54 +97,54 @@ let cascade_backpressure_class_reason ~reason =
   | None -> None
 ;;
 
-let cascade_backpressure_observation_reasons ~reason =
+let runtime_backpressure_observation_reasons ~reason =
   let category =
-    if String.starts_with ~prefix:"cascade_resilience_" reason
-    then "cascade_resilience"
+    if String.starts_with ~prefix:"runtime_resilience_" reason
+    then "runtime_resilience"
     else "cascade_unhealthy"
   in
-  let base = [ "cascade_backpressure"; category ] in
+  let base = [ "runtime_backpressure"; category ] in
   let class_reasons =
-    match cascade_backpressure_class_reason ~reason with
+    match runtime_backpressure_class_reason ~reason with
     | Some class_reason -> [ class_reason ]
     | None -> []
   in
   base @ class_reasons @ [ "reason_" ^ skip_reason_component reason ]
 ;;
 
-let cascade_resilience_backpressure_reason
-      (resilience : Keeper_cascade_resilience.cascade_resilience)
+let runtime_resilience_backpressure_reason
+      (resilience : Keeper_runtime_resilience.runtime_resilience)
   =
   Option.map
-    (fun blocker -> "cascade_resilience_" ^ blocker)
+    (fun blocker -> "runtime_resilience_" ^ blocker)
     resilience.blocker
 ;;
 
-let cascade_backpressure_decision
-      ~cascade_resilience
+let runtime_backpressure_decision
+      ~runtime_resilience
       ~should_run_turn
       ~cascade_name
       ~cascade_status
   =
   let resilience_reason =
-    match cascade_resilience with
+    match runtime_resilience with
     | None -> None
-    | Some resilience -> cascade_resilience_backpressure_reason resilience
+    | Some resilience -> runtime_resilience_backpressure_reason resilience
   in
   match should_run_turn, cascade_status, resilience_reason with
   | true, Keeper_health_probe.Unhealthy reason, _ ->
-    Cascade_backpressured { cascade_name; reason }
-  | true, _, Some reason -> Cascade_backpressured { cascade_name; reason }
+    Runtime_backpressured { cascade_name; reason }
+  | true, _, Some reason -> Runtime_backpressured { cascade_name; reason }
   | false, _, _
   | true, Keeper_health_probe.Unknown, None
-  | true, Keeper_health_probe.Healthy, None -> Cascade_admitted
+  | true, Keeper_health_probe.Healthy, None -> Runtime_admitted
 ;;
 
-let record_cascade_backpressure_observation ~base_path ~keeper_name ~reason =
+let record_runtime_backpressure_observation ~base_path ~keeper_name ~reason =
   Keeper_registry.record_skip_reasons
     ~base_path
     keeper_name
-    ~reasons:(cascade_backpressure_observation_reasons ~reason);
+    ~reasons:(runtime_backpressure_observation_reasons ~reason);
   Keeper_registry.touch_last_turn_ts ~base_path keeper_name
 ;;
 

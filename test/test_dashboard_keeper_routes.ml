@@ -584,7 +584,7 @@ let keeper_profile_runtime_id body keeper_name =
   | None -> fail ("keeper profile missing from cascade config: " ^ keeper_name)
 ;;
 
-let cascade_profile_first_candidate body profile_name =
+let runtime_profile_first_candidate body profile_name =
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string body in
   let rows = json |> member "profiles" |> to_list in
@@ -630,7 +630,7 @@ let make_keeper_meta_json
            ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
            ; "trace_id", `String ("trace-" ^ name ^ "-seed")
            ; "goal", `String "Route shadow regression fixture"
-           ; "runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ())
+           ; "runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ())
            ; "updated_at", `String "2026-04-04T00:00:00Z"
            ; "paused", `Bool paused
            ]
@@ -730,12 +730,12 @@ let append_execution_receipt
        Masc_mcp.Keeper_execution_receipt.tool_contract_result =
       Contract_satisfied_completion)
     ?(tools_used = [ "tool_read_file" ])
-    ?(cascade_fallback_applied = true)
-    ?(cascade_outcome : Masc_mcp.Keeper_execution_receipt.cascade_outcome =
-      Cascade_passed_to_next_model)
+    ?(runtime_fallback_applied = true)
+    ?(runtime_outcome : Masc_mcp.Keeper_execution_receipt.runtime_outcome =
+      Runtime_passed_to_next_model)
     ?(degraded_retry_applied = true)
-    ?(degraded_retry_cascade =
-      Some (Masc_mcp.Keeper_config.default_cascade_name ()))
+    ?(degraded_retry_runtime_id =
+      Some (Masc_mcp.Keeper_config.default_runtime_id ()))
     ?(fallback_reason = Some Masc_mcp.Keeper_error_classify.Turn_timeout)
     ?(required_tool_candidates = [])
     ?started_at
@@ -766,7 +766,7 @@ let append_execution_receipt
       turn_count = Some 2;
       oas_turn_count = None;
       oas_dispatch_mode = None;
-      oas_internal_cascade_disabled = false;
+      oas_internal_runtime_disabled = false;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
       outcome = `Ok;
@@ -802,24 +802,24 @@ let append_execution_receipt
       cascade_name =
         Cascade_name.of_string_exn
           (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta);
-      cascade_selected_model = Some "custom:mock";
+      runtime_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
-      cascade_fallback_applied;
-      cascade_outcome;
+      runtime_fallback_applied;
+      runtime_outcome;
       degraded_retry_applied;
-      degraded_retry_cascade =
+      degraded_retry_runtime_id =
         Option.map Cascade_name.of_string_exn
-          degraded_retry_cascade;
+          degraded_retry_runtime_id;
       fallback_reason;
-      cascade_rotation_attempts =
-        (match degraded_retry_cascade, fallback_reason with
+      runtime_rotation_attempts =
+        (match degraded_retry_runtime_id, fallback_reason with
          | Some retry_cascade, Some reason ->
            [
              {
-               from_cascade =
+               from_runtime_id =
                  Cascade_name.of_string_exn
                    (Masc_mcp.Keeper_meta_contract.cascade_name_of_meta meta);
-               to_cascade =
+               to_runtime_id =
                  Cascade_name.of_string_exn
                    retry_cascade;
                reason;
@@ -849,7 +849,7 @@ let append_execution_receipt
       pre_dispatch_compaction_trigger = None;
       pre_dispatch_compaction_before_tokens = None;
       pre_dispatch_compaction_after_tokens = None;
-      oas_internal_cascade_allowed = false;
+      oas_internal_runtime_allowed = false;
     }
   in
   let tm = Unix.gmtime (Unix.gettimeofday ()) in
@@ -1302,10 +1302,10 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
   append_execution_receipt
-    ~cascade_fallback_applied:false
-    ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
+    ~runtime_fallback_applied:false
+    ~runtime_outcome:Masc_mcp.Keeper_execution_receipt.Runtime_completed
     ~degraded_retry_applied:false
-    ~degraded_retry_cascade:None
+    ~degraded_retry_runtime_id:None
     ~fallback_reason:None
     ~required_tool_candidates:[ "keeper_board_comment"; "keeper_board_post" ]
     config ~keeper_name;
@@ -1683,10 +1683,10 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
   wait_for_boot_receipt_side_effects config ~keeper_name;
   append_execution_receipt ~tool_contract_result:Contract_satisfied_execution
     ~tools_used:[ "tool_read_file" ]
-    ~cascade_fallback_applied:false
-    ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
+    ~runtime_fallback_applied:false
+    ~runtime_outcome:Masc_mcp.Keeper_execution_receipt.Runtime_completed
     ~degraded_retry_applied:false
-    ~degraded_retry_cascade:None
+    ~degraded_retry_runtime_id:None
     ~fallback_reason:None config ~keeper_name;
   let path = Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name in
   let result = run_curl_get ~port ~path () in

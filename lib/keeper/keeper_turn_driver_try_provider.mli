@@ -1,8 +1,8 @@
-(** Extracted provider-attempt runner for keeper cascade turns. *)
+(** Extracted provider-attempt runner for keeper runtime turns. *)
 
 type try_provider_ctx =
-  { cascade_name : string
-  ; error_cascade_name : string
+  { runtime_id : string
+  ; error_runtime_id : string
   ; keeper_name : string
   ; name : string
   ; goal : string
@@ -53,7 +53,7 @@ type try_provider_ctx =
   ; on_resume : (unit -> unit) option
   ; agent_ref : Agent_sdk.Agent.t option ref option
   ; event_bus : Agent_sdk.Event_bus.t option
-  ; cascade_engine : Keeper_runtime_engine.t
+  ; runtime_engine : Keeper_runtime_engine.t
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
   ; runtime_manifest_required_tool_names : string list

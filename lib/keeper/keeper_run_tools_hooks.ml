@@ -25,7 +25,7 @@ type agent_setup =
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
-  ; receipt_cascade_observation_ref : Keeper_observation.cascade_observation option ref
+  ; receipt_runtime_observation_ref : Keeper_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
   ; reported_tool_names_ref : string list ref
   ; observed_tool_names_ref : string list ref
@@ -57,7 +57,7 @@ type ctx =
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
-  ; receipt_cascade_observation_ref : Keeper_observation.cascade_observation option ref
+  ; receipt_runtime_observation_ref : Keeper_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
   ; tool_usage_before : (string * int) list
   ; tools : Agent_sdk.Tool.t list
@@ -79,7 +79,7 @@ let assemble_hooks
       ~(turn_affordances : string list)
       ~(required_tool_names : string list)
       ~(config_root : string)
-      ~(cascade_config_path : string option)
+      ~(runtime_config_path : string option)
       ~(gemini_mcp_disabled : bool)
       ~(approval_mode_effective : string option)
       ~(approval_mode_derived : bool)
@@ -108,7 +108,7 @@ let assemble_hooks
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
-  let receipt_cascade_observation_ref = ctx.receipt_cascade_observation_ref in
+  let receipt_runtime_observation_ref = ctx.receipt_runtime_observation_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
   let tool_usage_before = ctx.tool_usage_before in
   let tools = ctx.tools in
@@ -134,7 +134,7 @@ let assemble_hooks
          initial_tool_surface.required_tool_candidate_names
      ; missing_required_tool_names = initial_tool_surface.missing_required_tool_names
      ; config_root
-     ; cascade_config_path
+     ; runtime_config_path
      ; gemini_mcp_disabled
      ; approval_mode_effective
      ; approval_mode_derived
@@ -292,11 +292,11 @@ let assemble_hooks
                          ~retry_count))
                   else None
                 in
-                let cascade_seed =
+                let runtime_seed =
                   Runtime_inference.for_cascade ~name:cascade_name_string
                 in
                 let current_budget =
-                  match cascade_seed.thinking_budget with
+                  match runtime_seed.thinking_budget with
                   | Some _ as v -> v
                   | None -> current_params.thinking_budget
                 in
@@ -320,7 +320,7 @@ let assemble_hooks
                   { current_params with
                     thinking_budget = adaptive_thinking_budget
                   ; enable_thinking =
-                      (match cascade_seed.thinking_enabled with
+                      (match runtime_seed.thinking_enabled with
                        | Some false -> Some false
                        | _ ->
                          (match adaptive_thinking_override with
@@ -592,7 +592,7 @@ let assemble_hooks
                    ; missing_required_tool_names =
                        computed_surface.missing_required_tool_names
                    ; config_root
-                   ; cascade_config_path
+                   ; runtime_config_path
                    ; gemini_mcp_disabled
                    ; approval_mode_effective
                    ; approval_mode_derived
@@ -639,7 +639,7 @@ let assemble_hooks
                   ~required_tool_candidates:
                     computed_surface.required_tool_candidate_names
                   ~missing_required_tools:computed_surface.missing_required_tool_names
-                  ~cascade_profile:cascade_name_string
+                  ~runtime_profile:cascade_name_string
                   ();
                 (let now = Time_compat.now () in
                  let hook_elapsed_ms =
@@ -839,7 +839,7 @@ let assemble_hooks
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref
-      ; receipt_cascade_observation_ref
+      ; receipt_runtime_observation_ref
       ; receipt_response_text_present_ref
       ; reported_tool_names_ref
       ; observed_tool_names_ref

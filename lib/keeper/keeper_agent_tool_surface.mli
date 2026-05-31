@@ -97,7 +97,7 @@ type tool_surface_metrics =
   ; required_tool_candidate_names : string list
   ; missing_required_tool_names : string list
   ; config_root : string
-  ; cascade_config_path : string option
+  ; runtime_config_path : string option
   ; gemini_mcp_disabled : bool
   ; approval_mode_effective : string option
   ; approval_mode_derived : bool

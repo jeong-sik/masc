@@ -420,10 +420,10 @@ let semaphore_wait_seconds_buckets =
   [ 0.001; 0.005; 0.01; 0.025; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ]
 ;;
 
-let observe_semaphore_wait_seconds ~keeper_name ~cascade_profile ~channel seconds =
+let observe_semaphore_wait_seconds ~keeper_name ~runtime_profile ~channel seconds =
   let seconds = if seconds < 0.0 then 0.0 else seconds in
   let labels =
-    [ "keeper_name", keeper_name; "cascade_profile", cascade_profile; "channel", channel ]
+    [ "keeper_name", keeper_name; "runtime_profile", runtime_profile; "channel", channel ]
   in
   Prometheus.observe_histogram
     Keeper_metrics.(to_string SemaphoreWaitSeconds)
@@ -441,7 +441,7 @@ let observe_semaphore_wait_seconds ~keeper_name ~cascade_profile ~channel second
   inc_bucket "+Inf"
 ;;
 
-let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name ~channel f =
+let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~channel f =
   let is_autonomous =
     match channel with
     | Keeper_world_observation.Scheduled_autonomous -> true
@@ -657,7 +657,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name ~c
             let semaphore_wait_sec = Time_compat.now () -. t0 in
             observe_semaphore_wait_seconds
               ~keeper_name
-              ~cascade_profile
+              ~runtime_profile
               ~channel:channel_label
               semaphore_wait_sec;
             let semaphore_wait_ms =
@@ -695,20 +695,20 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name ~c
        | Ok semaphore_wait_ms -> Ok (f ~semaphore_wait_ms ~slot_control))
 ;;
 
-let with_keeper_turn_slot ?cascade_profile ~keeper_name ~channel f =
+let with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f =
   with_keeper_turn_slot_control
-    ?cascade_profile
+    ?runtime_profile
     ~keeper_name
     ~channel
     (fun ~semaphore_wait_ms ~slot_control:_ -> f ~semaphore_wait_ms)
 ;;
 
-let with_keeper_turn_slot_control_for_test ?cascade_profile ~keeper_name ~channel f =
-  with_keeper_turn_slot_control ?cascade_profile ~keeper_name ~channel f
+let with_keeper_turn_slot_control_for_test ?runtime_profile ~keeper_name ~channel f =
+  with_keeper_turn_slot_control ?runtime_profile ~keeper_name ~channel f
 ;;
 
-let with_keeper_turn_slot_for_test ?cascade_profile ~keeper_name ~channel f =
-  with_keeper_turn_slot ?cascade_profile ~keeper_name ~channel f
+let with_keeper_turn_slot_for_test ?runtime_profile ~keeper_name ~channel f =
+  with_keeper_turn_slot ?runtime_profile ~keeper_name ~channel f
 ;;
 
 let wait_for_autonomous_queue_head_for_test ~keeper_name ~ticket ~started_at =

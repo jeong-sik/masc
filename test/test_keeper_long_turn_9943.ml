@@ -43,7 +43,7 @@ let bucket_count ~keeper ~bucket =
     ()
 
 let model_bucket_count ~keeper ~channel ~provider_kind ~model_used
-    ~resolved_model_id ~cascade_profile ~bucket =
+    ~resolved_model_id ~runtime_profile ~bucket =
   Prom.metric_value_or_zero
     Masc_mcp.Keeper_metrics.(to_string TurnLatencyByModelBucket)
     ~labels:
@@ -52,7 +52,7 @@ let model_bucket_count ~keeper ~channel ~provider_kind ~model_used
       ; ("provider_kind", provider_kind)
       ; ("model_used", model_used)
       ; ("resolved_model_id", resolved_model_id)
-      ; ("cascade_profile", cascade_profile)
+      ; ("runtime_profile", runtime_profile)
       ; ("bucket", bucket)
       ]
     ()
@@ -168,13 +168,13 @@ let test_record_by_model_bucket () =
       ~provider_kind:"runtime"
       ~model_used:"runtime"
       ~resolved_model_id:"runtime"
-      ~cascade_profile:"primary"
+      ~runtime_profile:"primary"
       ~bucket:"over_1200s"
   in
   M.record_turn_latency_by_model_bucket
     ~keeper
     ~channel:"scheduled_autonomous"
-    ~cascade_profile:"primary"
+    ~runtime_profile:"primary"
     ~latency_ms:1_200_000;
   Alcotest.(check (float 0.0001))
     "by-model over_1200s bucket +1"
@@ -185,7 +185,7 @@ let test_record_by_model_bucket () =
        ~provider_kind:"runtime"
        ~model_used:"runtime"
        ~resolved_model_id:"runtime"
-       ~cascade_profile:"primary"
+       ~runtime_profile:"primary"
        ~bucket:"over_1200s");
   Alcotest.(check (float 0.0001))
     "different cascade unchanged"
@@ -196,7 +196,7 @@ let test_record_by_model_bucket () =
        ~provider_kind:"runtime"
        ~model_used:"runtime"
        ~resolved_model_id:"runtime"
-       ~cascade_profile:"tool_use_strict"
+       ~runtime_profile:"tool_use_strict"
        ~bucket:"over_1200s")
 
 let () =

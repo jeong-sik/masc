@@ -554,7 +554,7 @@ const OPERATOR_DISPOSITION_LABELS: Record<string, string> = {
   pass: '진행',
   pause_human: '운영자 일시정지',
   alert_exhausted: '경보 소진',
-  fail_open_next_cascade: '다음 cascade 로 fail-open',
+  fail_open_next_runtime_id: '다음 cascade 로 fail-open',
   pass_next_model: '다음 모델로 진행',
   user_cancelled: '사용자 취소',
   skipped: '건너뜀',
@@ -578,7 +578,7 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   cascade_exhausted: '캐스케이드 소진',
   preflight_config_error: '실행 전 설정 오류',
   degraded_retry: '저하 상태 재시도',
-  cascade_fallback: '캐스케이드 폴백',
+  runtime_fallback: '캐스케이드 폴백',
   provider_runtime_error: 'Provider 런타임 오류',
   internal_error: '내부 오류',
   tool_required_unsatisfied: '필수 도구 미충족',
@@ -586,7 +586,7 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   turn_livelock_blocked: '턴 livelock 차단',
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',
-  unmapped_cascade_state: '매핑되지 않은 cascade 상태',
+  unmapped_runtime_state: '매핑되지 않은 cascade 상태',
 }
 
 export function operatorDispositionReasonLabel(

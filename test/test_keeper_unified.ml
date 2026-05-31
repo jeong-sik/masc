@@ -31,27 +31,27 @@ module Keeper_types_support = Masc_mcp.Keeper_types_support
 
 (* #19327 cascade purge: Cascade_name is a plain string alias. *)
 let oas_error_cascade_name raw =
-  Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw
+  Masc_mcp.Keeper_runtime_profile.normalize_declared_name raw
   |> Cascade_name.of_string_exn
 ;;
 
-let phase_recovery_cascade_name () =
-  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
-    Masc_mcp.Keeper_cascade_profile.Phase_recovery
+let phase_recovery_runtime_id () =
+  Masc_mcp.Keeper_runtime_profile.cascade_name_for_use
+    Masc_mcp.Keeper_runtime_profile.Phase_recovery
 ;;
 
 let tool_required_cascade_name () =
-  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
-    Masc_mcp.Keeper_cascade_profile.Tool_required
+  Masc_mcp.Keeper_runtime_profile.cascade_name_for_use
+    Masc_mcp.Keeper_runtime_profile.Tool_required
 ;;
 
 let keeper_turn_cascade_name () =
-  Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
-    Masc_mcp.Keeper_cascade_profile.Keeper_turn
+  Masc_mcp.Keeper_runtime_profile.cascade_name_for_use
+    Masc_mcp.Keeper_runtime_profile.Keeper_turn
 ;;
 
 let normalize_keeper_runtime_declared_name raw =
-  Masc_mcp.Keeper_cascade_profile.normalize_keeper_runtime_declared_name raw
+  Masc_mcp.Keeper_runtime_profile.normalize_keeper_runtime_declared_name raw
 ;;
 
 (* After tier removal a keeper whose declared name is a legacy "tier-group.*"/
@@ -3636,7 +3636,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~output_tok:50
       ~cascade_observation:
         { Masc_mcp.Cascade_observation.cascade_name =
-            oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+            oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
         ; strategy = Some "round_robin"
         ; configured_labels = [ "llama:auto" ]
         ; candidate_models = [ "llama:qwen3.5-35b-a3b-ud-q8-xl"; selected_label ]
@@ -3670,7 +3670,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
             ]
         ; attempt_details_available = true
         ; attempt_details_source = "oas_metrics_callbacks"
-        ; oas_internal_cascade_allowed = false
+        ; oas_internal_runtime_allowed = false
         }
       ()
   in
@@ -4288,7 +4288,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          ; cascade_observation =
              Some
                { Masc_mcp.Cascade_observation.cascade_name =
-                   oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+                   oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
                ; strategy = Some "round_robin"
                ; configured_labels = [ "llama:auto" ]
                ; candidate_models =
@@ -4323,7 +4323,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                    ]
                ; attempt_details_available = true
                ; attempt_details_source = "oas_metrics_callbacks"
-               ; oas_internal_cascade_allowed = false
+               ; oas_internal_runtime_allowed = false
                }
          }
        in
@@ -4397,7 +4397,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
        check
          string
          "cascade name persisted"
-         Masc_mcp.(Keeper_config.default_cascade_name ())
+         Masc_mcp.(Keeper_config.default_runtime_id ())
          Yojson.Safe.Util.(json |> member "cascade" |> member "cascade_name" |> to_string);
        check
          bool
@@ -4972,7 +4972,7 @@ let test_append_decision_record_persists_tool_calls () =
            ~latency_ms:42
            ~outcome:"success"
            ~degraded_retry_applied:true
-           ~degraded_retry_cascade:(KC.default_cascade_name ())
+           ~degraded_retry_runtime_id:(KC.default_runtime_id ())
            ~fallback_reason:"turn_timeout"
            ~turn_mode:UM.Tool_use
            ~result:(Some result)
@@ -5044,8 +5044,8 @@ let test_append_decision_record_persists_tool_calls () =
        check
          (option string)
          "degraded retry cascade persisted"
-         (Some (KC.default_cascade_name ()))
-         Yojson.Safe.Util.(json |> member "degraded_retry_cascade" |> to_string_option);
+         (Some (KC.default_runtime_id ()))
+         Yojson.Safe.Util.(json |> member "degraded_retry_runtime_id" |> to_string_option);
        check
          (option string)
          "fallback reason persisted"
@@ -6179,7 +6179,7 @@ let structured_cascade_max_turns_error () =
   Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
     (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
        { cascade_name =
-           oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+           oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
        ; reason = Keeper_meta_contract.Max_turns_exceeded
        })
 ;;
@@ -6197,7 +6197,7 @@ let required_tool_contract_violation_error () =
 
 let expect_degraded_retry label expected_cascade expected_reason = function
   | Some (retry : EC.degraded_retry) ->
-    check string (label ^ " cascade") expected_cascade retry.next_cascade;
+    check string (label ^ " cascade") expected_cascade retry.next_runtime_id;
     check
       string
       (label ^ " reason")
@@ -6209,13 +6209,13 @@ let expect_degraded_retry label expected_cascade expected_reason = function
 let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_hard_quota () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
     "hard quota degraded retry"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "hard_quota"
     degraded_retry
 ;;
@@ -6225,7 +6225,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
   =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
          (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
@@ -6238,7 +6238,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
   in
   expect_degraded_retry
     "resumable session degraded retry"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "resumable_cli_session"
     degraded_retry
 ;;
@@ -6246,7 +6246,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
 let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
          (Masc_mcp.Keeper_turn_driver.Admission_queue_timeout
@@ -6257,7 +6257,7 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
   in
   expect_degraded_retry
     "admission queue timeout degraded retry"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "admission_queue_timeout"
     degraded_retry
 ;;
@@ -6265,14 +6265,14 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
 let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
          (Masc_mcp.Keeper_turn_driver.Turn_timeout { elapsed_sec = 180.0 }))
   in
   expect_degraded_retry
     "turn timeout degraded retry"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "turn_timeout"
     degraded_retry
 ;;
@@ -6280,7 +6280,7 @@ let test_degraded_retry_after_recoverable_error_includes_turn_timeout () =
 let test_degraded_retry_after_recoverable_error_includes_provider_timeout () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
          (Masc_mcp.Keeper_turn_driver.Provider_timeout
@@ -6295,7 +6295,7 @@ let test_degraded_retry_after_recoverable_error_includes_provider_timeout () =
   in
   expect_degraded_retry
     "provider timeout degraded retry"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "provider_timeout"
     degraded_retry
 ;;
@@ -6303,13 +6303,13 @@ let test_degraded_retry_after_recoverable_error_includes_provider_timeout () =
 let test_degraded_retry_after_recoverable_error_includes_max_turns () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (structured_cascade_max_turns_error ())
   in
   expect_degraded_retry
     "max turns degraded retry"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "max_turns"
     degraded_retry
 ;;
@@ -6317,7 +6317,7 @@ let test_degraded_retry_after_recoverable_error_includes_max_turns () =
 let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
       (wrapped_claude_limit_error ())
   in
@@ -6327,7 +6327,7 @@ let test_degraded_retry_after_recoverable_error_blocks_required_tools () =
 let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:(KC.default_cascade_name ())
+      ~effective_runtime_id:(KC.default_runtime_id ())
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
@@ -6337,7 +6337,7 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_only () =
 let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery () =
   let degraded_retry =
     EC.degraded_retry_after_recoverable_error
-      ~effective_cascade:(KC.default_cascade_name ())
+      ~effective_runtime_id:(KC.default_runtime_id ())
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (wrapped_claude_limit_error ())
   in
@@ -6348,24 +6348,24 @@ let test_degraded_retry_after_recoverable_error_does_not_broaden_local_recovery 
     (Option.is_none degraded_retry)
 ;;
 
-let test_fallback_cascade_for_unavailable_profile_prefers_default () =
+let test_fallback_runtime_for_unavailable_profile_prefers_default () =
   let fallback =
-    EC.fallback_cascade_for_unavailable_profile
-      ~base_cascade:"scoring"
-      ~effective_cascade:"scoring"
+    EC.fallback_runtime_for_unavailable_profile
+      ~base_runtime_id:"scoring"
+      ~effective_runtime_id:"scoring"
   in
   check
     (option string)
     "non-default cascade fallback target is default"
-    (Some (KC.default_cascade_name ()))
+    (Some (KC.default_runtime_id ()))
     fallback
 ;;
 
-let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override () =
+let test_fallback_runtime_for_unavailable_profile_prefers_base_after_phase_override () =
   let fallback =
-    EC.fallback_cascade_for_unavailable_profile
-      ~base_cascade:"scoring"
-      ~effective_cascade:(KC.default_cascade_name ())
+    EC.fallback_runtime_for_unavailable_profile
+      ~base_runtime_id:"scoring"
+      ~effective_runtime_id:(KC.default_runtime_id ())
   in
   check
     (option string)
@@ -6377,10 +6377,10 @@ let test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_overr
 let test_next_fail_open_cascade_for_turn_returns_untried_default_cascade () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"scoring"
-      ~effective_cascade:"scoring"
+      ~base_runtime_id:"scoring"
+      ~effective_runtime_id:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "scoring" ]
+      ~attempted_runtime_ids:[ "scoring" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6393,10 +6393,10 @@ let test_next_fail_open_cascade_for_turn_returns_untried_default_cascade () =
 let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"scoring"
-      ~effective_cascade:"scoring"
+      ~base_runtime_id:"scoring"
+      ~effective_runtime_id:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "scoring"; KC.default_cascade_name () ]
+      ~attempted_runtime_ids:[ "scoring"; KC.default_runtime_id () ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6409,13 +6409,13 @@ let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
 let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"scoring"
-      ~effective_cascade:"scoring"
+      ~base_runtime_id:"scoring"
+      ~effective_runtime_id:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:
+      ~attempted_runtime_ids:
         [ "scoring"
-        ; KC.default_cascade_name ()
-        ; (KC.default_cascade_name ())
+        ; KC.default_runtime_id ()
+        ; (KC.default_runtime_id ())
         ; safe_lane_cascade_name
         ]
       (wrapped_claude_limit_error ())
@@ -6426,10 +6426,10 @@ let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () 
 let test_next_fail_open_cascade_for_required_tool_uses_tool_required_route () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"scoring"
-      ~effective_cascade:"scoring"
+      ~base_runtime_id:"scoring"
+      ~effective_runtime_id:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "scoring" ]
+      ~attempted_runtime_ids:[ "scoring" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6442,10 +6442,10 @@ let test_next_fail_open_cascade_for_required_tool_uses_tool_required_route () =
 let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"scoring"
-      ~effective_cascade:"strict_exec"
+      ~base_runtime_id:"scoring"
+      ~effective_runtime_id:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_exec" ]
+      ~attempted_runtime_ids:[ "strict_exec" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6458,15 +6458,15 @@ let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
 let test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violation () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:(KC.default_cascade_name ())
-      ~effective_cascade:"strict_exec"
+      ~base_runtime_id:(KC.default_runtime_id ())
+      ~effective_runtime_id:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_exec" ]
+      ~attempted_runtime_ids:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry
     "required contract degraded retry"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "required_tool_contract_violation"
     degraded_retry
 ;;
@@ -6474,11 +6474,11 @@ let test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violatio
 let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"scoring"
-      ~effective_cascade:"scoring"
+      ~base_runtime_id:"scoring"
+      ~effective_runtime_id:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:
-        [ "scoring"; KC.default_cascade_name (); (KC.default_cascade_name ()) ]
+      ~attempted_runtime_ids:
+        [ "scoring"; KC.default_runtime_id (); (KC.default_runtime_id ()) ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6491,10 +6491,10 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
 let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_omits_it () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"scoring"
-      ~effective_cascade:"scoring"
+      ~base_runtime_id:"scoring"
+      ~effective_runtime_id:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "scoring" ]
+      ~attempted_runtime_ids:[ "scoring" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6507,15 +6507,15 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
 let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:(KC.default_cascade_name ())
-      ~effective_cascade:"strict_exec"
+      ~base_runtime_id:(KC.default_runtime_id ())
+      ~effective_runtime_id:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_exec" ]
+      ~attempted_runtime_ids:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry
     "required catalog degraded retry"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "required_tool_contract_violation"
     degraded_retry
 ;;
@@ -6523,10 +6523,10 @@ let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog
 let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"strict_exec"
-      ~effective_cascade:"strict_exec"
+      ~base_runtime_id:"strict_exec"
+      ~effective_runtime_id:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_exec" ]
+      ~attempted_runtime_ids:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry
@@ -6541,10 +6541,10 @@ let test_next_fail_open_cascade_for_required_tool_does_not_fall_through_to_manua
   =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~base_cascade:"strict_exec"
-      ~effective_cascade:"strict_exec"
+      ~base_runtime_id:"strict_exec"
+      ~effective_runtime_id:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_exec"; tool_required_cascade_name () ]
+      ~attempted_runtime_ids:[ "strict_exec"; tool_required_cascade_name () ]
       (required_tool_contract_violation_error ())
   in
   check bool
@@ -6556,10 +6556,10 @@ let test_next_fail_open_cascade_for_required_tool_does_not_fall_through_to_manua
 let test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~base_cascade:"strict_exec"
-      ~effective_cascade:"strict_exec"
+      ~base_runtime_id:"strict_exec"
+      ~effective_runtime_id:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_exec" ]
+      ~attempted_runtime_ids:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry
@@ -6573,10 +6573,10 @@ let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_to
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
       ~fallback_hint:"local_recovery"
-      ~base_cascade:"primary_required"
-      ~effective_cascade:"secondary_required"
+      ~base_runtime_id:"primary_required"
+      ~effective_runtime_id:"secondary_required"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "primary_required"; "secondary_required"; "primary" ]
+      ~attempted_runtime_ids:[ "primary_required"; "secondary_required"; "primary" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry
@@ -6589,10 +6589,10 @@ let test_degraded_rotation_preserves_local_recovery_profile_hint_for_required_to
 let test_degraded_rotation_after_recoverable_error_normalizes_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
-      ~base_cascade:" scoring "
-      ~effective_cascade:"scoring"
+      ~base_runtime_id:" scoring "
+      ~effective_runtime_id:"scoring"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "scoring" ]
+      ~attempted_runtime_ids:[ "scoring" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6606,10 +6606,10 @@ let test_degraded_rotation_prefers_fallback_hint_over_catalog () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
       ~fallback_hint:"local_with_kimi_coding_with_glm"
-      ~base_cascade:"ollama_only"
-      ~effective_cascade:"ollama_only"
+      ~base_runtime_id:"ollama_only"
+      ~effective_runtime_id:"ollama_only"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "ollama_only" ]
+      ~attempted_runtime_ids:[ "ollama_only" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
@@ -6623,15 +6623,15 @@ let test_degraded_rotation_skips_already_attempted_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
       ~fallback_hint:"local_with_kimi_coding_with_glm"
-      ~base_cascade:"ollama_only"
-      ~effective_cascade:"ollama_only"
+      ~base_runtime_id:"ollama_only"
+      ~effective_runtime_id:"ollama_only"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "ollama_only"; "local_with_kimi_coding_with_glm" ]
+      ~attempted_runtime_ids:[ "ollama_only"; "local_with_kimi_coding_with_glm" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
     "exhausted hint falls through to catalog"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "hard_quota"
     degraded_retry
 ;;
@@ -6640,15 +6640,15 @@ let test_degraded_rotation_ignores_blank_fallback_hint () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
       ~fallback_hint:"   "
-      ~base_cascade:"ollama_only"
-      ~effective_cascade:"ollama_only"
+      ~base_runtime_id:"ollama_only"
+      ~effective_runtime_id:"ollama_only"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "ollama_only" ]
+      ~attempted_runtime_ids:[ "ollama_only" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry
     "blank hint behaves like no hint"
-    (KC.default_cascade_name ())
+    (KC.default_runtime_id ())
     "hard_quota"
     degraded_retry
 ;;
@@ -7585,7 +7585,7 @@ let test_required_tool_contract_violation_ignores_legacy_internal_error () =
 ;;
 
 (* Rotation-cap threshold: the cap must NOT fire on the very first attempt
-   (attempted_cascades length = 1, meaning no rotation has occurred yet).
+   (attempted_runtime_ids length = 1, meaning no rotation has occurred yet).
    Regression for the >= 1 / >= 2 threshold bug where the fast-fail fired
    before any rotation was tried, causing immediate cycle failure instead of
    offering at least one cascade rotation. *)
@@ -7596,7 +7596,7 @@ let test_should_cap_rotation_does_not_fire_on_first_attempt () =
     "cap must not fire when no rotation has been attempted"
     false
     (EC.should_cap_rotation_for_contract_violation
-       ~attempted_cascades:[ "strict_exec" ]
+       ~attempted_runtime_ids:[ "strict_exec" ]
        ~fallback_not_yet_tried:false
        err)
 ;;
@@ -7608,7 +7608,7 @@ let test_should_cap_rotation_fires_after_one_rotation () =
     "cap fires when one rotation has already been attempted"
     true
     (EC.should_cap_rotation_for_contract_violation
-       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name () ]
+       ~attempted_runtime_ids:[ "strict_exec"; KC.default_runtime_id () ]
        ~fallback_not_yet_tried:false
        err)
 ;;
@@ -7620,7 +7620,7 @@ let test_should_cap_rotation_suppressed_while_fallback_available () =
     "cap is suppressed when an untried fallback cascade exists"
     false
     (EC.should_cap_rotation_for_contract_violation
-       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name () ]
+       ~attempted_runtime_ids:[ "strict_exec"; KC.default_runtime_id () ]
        ~fallback_not_yet_tried:true
        err)
 ;;
@@ -7632,17 +7632,17 @@ let test_should_cap_rotation_ignores_non_contract_violation_error () =
     "cap does not fire for non-contract-violation errors"
     false
     (EC.should_cap_rotation_for_contract_violation
-       ~attempted_cascades:[ "strict_exec"; KC.default_cascade_name () ]
+       ~attempted_runtime_ids:[ "strict_exec"; KC.default_runtime_id () ]
        ~fallback_not_yet_tried:false
        err)
 ;;
 
-let test_cascade_exhausted_error_detected_from_structured_internal_error () =
+let test_runtime_exhausted_error_detected_from_structured_internal_error () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
-             oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+             oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
          ; reason = Masc_mcp.Keeper_meta_contract.All_providers_failed
          })
   in
@@ -7650,10 +7650,10 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
     bool
     "structured cascade exhausted error detected"
     true
-    (EC.is_cascade_exhausted_error err)
+    (EC.is_runtime_exhausted_error err)
 ;;
 
-let test_cascade_exhausted_error_ignores_legacy_internal_error () =
+let test_runtime_exhausted_error_ignores_legacy_internal_error () =
   let err =
     Agent_sdk.Error.Internal
       "cascade keeper_unified: all models failed: no providers available"
@@ -7662,7 +7662,7 @@ let test_cascade_exhausted_error_ignores_legacy_internal_error () =
     bool
     "legacy internal cascade exhaustion ignored"
     false
-    (EC.is_cascade_exhausted_error err)
+    (EC.is_runtime_exhausted_error err)
 ;;
 
 let test_auto_recoverable_turn_error_excludes_required_tool_contract_violation () =
@@ -7701,7 +7701,7 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
-             oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+             oas_error_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
          ; reason = Keeper_meta_contract.Candidates_filtered_after_cycles
          })
   in
@@ -7729,7 +7729,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
     (EC.is_auto_recoverable_turn_error err)
 ;;
 
-let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
+let test_runtime_exhausted_error_includes_resumable_cli_session_error () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
@@ -7743,7 +7743,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
     bool
     "resumable CLI session error is treated as cascade exhaustion surface"
     true
-    (EC.is_cascade_exhausted_error err)
+    (EC.is_runtime_exhausted_error err)
 ;;
 
 let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
@@ -8105,17 +8105,17 @@ let provider_timeout_error () =
 let test_degraded_retry_budget_gate_allows_remaining_budget () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
-      ~base_cascade:"underdog"
-      ~effective_cascade:"underdog"
+      ~base_runtime_id:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "underdog" ]
+      ~attempted_runtime_ids:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:1200.0
       (provider_timeout_error ())
   with
   | UT.Degraded_retry_allowed retry ->
-    check string "retry cascade" (phase_recovery_cascade_name ()) retry.next_cascade;
+    check string "retry cascade" (phase_recovery_runtime_id ()) retry.next_runtime_id;
     check
       string
       "fallback reason"
@@ -8130,10 +8130,10 @@ let test_degraded_retry_budget_gate_allows_remaining_budget () =
 let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
-      ~base_cascade:"underdog"
-      ~effective_cascade:"underdog"
+      ~base_runtime_id:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "underdog" ]
+      ~attempted_runtime_ids:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:0.0
@@ -8143,8 +8143,8 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
     check
       string
       "retry cascade candidate"
-      (phase_recovery_cascade_name ())
-      retry.next_cascade;
+      (phase_recovery_runtime_id ())
+      retry.next_runtime_id;
     check
       string
       "fallback reason"
@@ -8159,10 +8159,10 @@ let test_degraded_retry_budget_gate_blocks_exhausted_budget () =
 let test_degraded_retry_slot_phase_allows_provider_timeout_local_recovery () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
-      ~base_cascade:"underdog"
-      ~effective_cascade:"underdog"
+      ~base_runtime_id:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "underdog" ]
+      ~attempted_runtime_ids:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)
@@ -8173,8 +8173,8 @@ let test_degraded_retry_slot_phase_allows_provider_timeout_local_recovery () =
     check
       string
       "retry cascade candidate"
-      (phase_recovery_cascade_name ())
-      retry.next_cascade;
+      (phase_recovery_runtime_id ())
+      retry.next_runtime_id;
     check
       string
       "fallback reason"
@@ -8189,10 +8189,10 @@ let test_degraded_retry_slot_phase_allows_provider_timeout_local_recovery () =
 let test_degraded_retry_slot_phase_allows_first_contract_rotation () =
   match
     UT.next_fail_open_cascade_for_turn_with_budget
-      ~base_cascade:(KC.default_cascade_name ())
-      ~effective_cascade:"strict_exec"
+      ~base_runtime_id:(KC.default_runtime_id ())
+      ~effective_runtime_id:"strict_exec"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_exec" ]
+      ~attempted_runtime_ids:[ "strict_exec" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)
@@ -8200,7 +8200,7 @@ let test_degraded_retry_slot_phase_allows_first_contract_rotation () =
       (required_tool_contract_violation_error ())
   with
   | UT.Degraded_retry_allowed retry ->
-    check string "retry cascade candidate" (KC.default_cascade_name ()) retry.next_cascade;
+    check string "retry cascade candidate" (KC.default_runtime_id ()) retry.next_runtime_id;
     check
       string
       "fallback reason"
@@ -8292,12 +8292,12 @@ let test_degraded_retry_wall_clock_budget_allows_remaining_turn_time () =
 ;;
 
 let test_degraded_retry_wall_clock_budget_gate_is_one_shot () =
-  let allowed ~degraded_rotation_first_attempt ~attempt ~attempted_cascades =
+  let allowed ~degraded_rotation_first_attempt ~attempt ~attempted_runtime_ids =
     UT.allow_wall_clock_retry_budget_for_attempt
       ~is_retry:true
       ~degraded_rotation_first_attempt
       ~attempt
-      ~attempted_cascades
+      ~attempted_runtime_ids
   in
   let rotated_cascades = [ "local_recovery"; "underdog" ] in
   check
@@ -8307,7 +8307,7 @@ let test_degraded_retry_wall_clock_budget_gate_is_one_shot () =
     (allowed
        ~degraded_rotation_first_attempt:true
        ~attempt:1
-       ~attempted_cascades:rotated_cascades);
+       ~attempted_runtime_ids:rotated_cascades);
   check
     bool
     "same-cascade retry after rotation uses per-attempt budget"
@@ -8315,7 +8315,7 @@ let test_degraded_retry_wall_clock_budget_gate_is_one_shot () =
     (allowed
        ~degraded_rotation_first_attempt:false
        ~attempt:2
-       ~attempted_cascades:rotated_cascades);
+       ~attempted_runtime_ids:rotated_cascades);
   check
     bool
     "attempt counter still blocks later retries"
@@ -8323,7 +8323,7 @@ let test_degraded_retry_wall_clock_budget_gate_is_one_shot () =
     (allowed
        ~degraded_rotation_first_attempt:true
        ~attempt:2
-       ~attempted_cascades:rotated_cascades);
+       ~attempted_runtime_ids:rotated_cascades);
   check
     bool
     "non-rotated retry cannot use wall clock"
@@ -8331,7 +8331,7 @@ let test_degraded_retry_wall_clock_budget_gate_is_one_shot () =
     (allowed
        ~degraded_rotation_first_attempt:true
        ~attempt:1
-       ~attempted_cascades:[ "underdog" ])
+       ~attempted_runtime_ids:[ "underdog" ])
 ;;
 
 let test_non_retry_still_refuses_tiny_budget () =
@@ -8374,10 +8374,10 @@ let test_degraded_retry_budget_gate_allows_retry_with_tiny_remaining () =
      the *candidate* (which is always a retry) with per-attempt semantics. *)
   match
     UT.next_fail_open_cascade_for_turn_with_budget
-      ~base_cascade:"underdog"
-      ~effective_cascade:"underdog"
+      ~base_runtime_id:"underdog"
+      ~effective_runtime_id:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "underdog" ]
+      ~attempted_runtime_ids:[ "underdog" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~remaining_turn_budget_s:3.0
@@ -9426,7 +9426,7 @@ let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
       ~sdk_error:None
       ~reason:
         "Internal error: [masc_oas_error] \
-         {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"tool_use_strict\"}"
+         {\"kind\":\"runtime_exhausted\",\"cascade_name\":\"tool_use_strict\"}"
   in
   check
     string
@@ -9463,7 +9463,7 @@ let test_social_model_bdi_failure_state_rewrites_claim_retry_loop () =
     "blocker keeps failure detail"
     true
     (match state.blocker with
-     | Some blocker -> contains_substring blocker "cascade_exhausted"
+     | Some blocker -> contains_substring blocker "runtime_exhausted"
      | None -> false)
 ;;
 
@@ -11389,11 +11389,11 @@ let () =
         ; test_case
             "structured cascade exhausted error detected"
             `Quick
-            test_cascade_exhausted_error_detected_from_structured_internal_error
+            test_runtime_exhausted_error_detected_from_structured_internal_error
         ; test_case
             "legacy internal cascade exhaustion is ignored"
             `Quick
-            test_cascade_exhausted_error_ignores_legacy_internal_error
+            test_runtime_exhausted_error_ignores_legacy_internal_error
         ; test_case
             "auto-recoverable excludes tool-choice contract violation"
             `Quick
@@ -11417,7 +11417,7 @@ let () =
         ; test_case
             "cascade exhausted surface includes resumable CLI session error"
             `Quick
-            test_cascade_exhausted_error_includes_resumable_cli_session_error
+            test_runtime_exhausted_error_includes_resumable_cli_session_error
         ; test_case
             "bounded OAS timeout keeps adaptive timeout under full budget"
             `Quick
@@ -11624,11 +11624,11 @@ let () =
         ; test_case
             "unavailable profile fallback prefers default"
             `Quick
-            test_fallback_cascade_for_unavailable_profile_prefers_default
+            test_fallback_runtime_for_unavailable_profile_prefers_default
         ; test_case
             "unavailable phase override fallback prefers base"
             `Quick
-            test_fallback_cascade_for_unavailable_profile_prefers_base_after_phase_override
+            test_fallback_runtime_for_unavailable_profile_prefers_base_after_phase_override
         ; test_case
             "next degraded retry returns untried default cascade"
             `Quick

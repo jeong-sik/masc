@@ -10,7 +10,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =
+let degraded_retry_runtime_id_of_wire ?(log_invalid = true) ~keeper_name raw =
   let trimmed = String.trim raw in
   if String.equal trimmed "" then None
   else
@@ -37,7 +37,7 @@ let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =
     | None ->
       if log_invalid then
         Log.Keeper.warn
-          "keeper:%s execution_receipt degraded_retry_cascade %S is not a \
+          "keeper:%s execution_receipt degraded_retry_runtime_id %S is not a \
            qualified or re-qualifiable runtime name; dropping receipt field"
           keeper_name
           raw;
@@ -60,7 +60,7 @@ let finalize
     ~pre_dispatch_compaction_before_tokens
     ~pre_dispatch_compaction_after_tokens
     ~degraded_retry_applied
-    ~degraded_retry_cascade
+    ~degraded_retry_runtime_id
     ~fallback_reason
     ~runtime_rotation_attempts
     ~turn_result
@@ -162,7 +162,7 @@ let finalize
     ; turn_count = !receipt_turn_count_ref
     ; oas_turn_count = !receipt_turn_count_ref
     ; oas_dispatch_mode = Some "single_provider_agent_run"
-    ; oas_internal_cascade_disabled = true
+    ; oas_internal_runtime_disabled = true
     ; current_task_id =
         Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
     ; goal_ids = meta.active_goal_ids
@@ -200,26 +200,26 @@ let finalize
     ; approval_profile = acc.tool_surface.approval_mode_effective
     ; approval_profile_derived = acc.tool_surface.approval_mode_derived
     ; runtime_id
-    ; cascade_selected_model =
+    ; runtime_selected_model =
         Option.bind runtime_observation (fun obs -> obs.selected_model)
     ; runtime_attempt_count =
         (match runtime_observation with
          | Some obs -> List.length obs.attempts
          | None -> 0)
-    ; cascade_fallback_applied =
+    ; runtime_fallback_applied =
         (match runtime_observation with
          | Some obs -> obs.fallback_applied
          | None -> false)
     ; runtime_outcome =
         Keeper_agent_error.runtime_outcome_of_observation runtime_observation
-    ; oas_internal_cascade_allowed =
+    ; oas_internal_runtime_allowed =
         (match runtime_observation with
-         | Some obs -> obs.oas_internal_cascade_allowed
+         | Some obs -> obs.oas_internal_runtime_allowed
          | None -> false)
     ; degraded_retry_applied
-    ; degraded_retry_cascade =
-        Option.bind degraded_retry_cascade
-          (degraded_retry_cascade_of_wire ~keeper_name:meta.name)
+    ; degraded_retry_runtime_id =
+        Option.bind degraded_retry_runtime_id
+          (degraded_retry_runtime_id_of_wire ~keeper_name:meta.name)
     ; fallback_reason
     ; runtime_rotation_attempts
     ; stop_reason = !receipt_stop_reason_ref
@@ -250,7 +250,7 @@ let finalize
         ( "runtime_id",
           `String (receipt.runtime_id) );
         ("runtime_attempt_count", `Int receipt.runtime_attempt_count);
-        ("cascade_fallback_applied", `Bool receipt.cascade_fallback_applied);
+        ("runtime_fallback_applied", `Bool receipt.runtime_fallback_applied);
         ( "runtime_outcome",
           `String
             (Keeper_execution_receipt.runtime_outcome_to_string

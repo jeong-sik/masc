@@ -12,10 +12,10 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 (* cascade→Runtime 숙청: phase-buffer liveness probe 기계 제거.
-   per-phase cascade override 가 사라진 뒤(단일 runtime) effective_cascade 는
-   항상 base_cascade 와 같으므로 decide_phase_buffer_liveness 의 probe 분기
+   per-phase cascade override 가 사라진 뒤(단일 runtime) effective_runtime_id 는
+   항상 base_runtime_id 와 같으므로 decide_phase_buffer_liveness 의 probe 분기
    (effective == phase_buffer && base != phase_buffer 일 때만 발동)는 죽은
-   코드였다. fail_open_phase_buffer_when_unavailable 도 항상 effective_cascade
+   코드였다. fail_open_phase_buffer_when_unavailable 도 항상 effective_runtime_id
    를 그대로 반환 — 호출자(resolve_cascade)가 직접 base 를 쓴다. *)
 
 (** PR-B: saturation pre-skip support (provider-agnostic).

@@ -2,7 +2,7 @@
     two keeper-side metrics:
 
     - [metric_keeper_oas_execution_errors] (8 phases from
-      [keeper_unified_turn], [keeper_turn_cascade_budget],
+      [keeper_unified_turn], [keeper_turn_runtime_budget],
       [keeper_post_turn])
     - [metric_keeper_write_meta_failures] ([turn_start])
 

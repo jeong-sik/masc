@@ -11,7 +11,7 @@ val create : keeper_name:string -> unit -> t
 val drain
   :  ?site:string
   -> t
-  -> Keeper_turn_cascade_budget.turn_event_bus_summary
+  -> Keeper_turn_runtime_budget.turn_event_bus_summary
 
 val committed_mutating_tools : t -> string list
 

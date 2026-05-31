@@ -695,26 +695,26 @@ let test_sse_error_event_ignored () =
 (* ================================================================ *)
 
 let test_default_model_strings_keeper () =
-  let models = Cascade_oas_runner.default_model_strings ~cascade_name:"keeper_turn" in
+  let models = Cascade_oas_runner.default_model_strings ~runtime_id:"keeper_turn" in
   Alcotest.(check bool) "keeper_turn has models" true (models <> [])
 ;;
 
 let test_default_model_strings_heartbeat () =
   let models =
-    Cascade_oas_runner.default_model_strings ~cascade_name:"heartbeat_action"
+    Cascade_oas_runner.default_model_strings ~runtime_id:"heartbeat_action"
   in
   Alcotest.(check bool) "heartbeat has models" true (models <> [])
 ;;
 
 let test_default_model_strings_unknown () =
   let models =
-    Cascade_oas_runner.default_model_strings ~cascade_name:"nonexistent_cascade_xyz"
+    Cascade_oas_runner.default_model_strings ~runtime_id:"nonexistent_cascade_xyz"
   in
   Alcotest.(check bool) "unknown cascade has fallback" true (models <> [])
 ;;
 
 let test_default_model_strings_local_only () =
-  let models = Cascade_oas_runner.default_model_strings ~cascade_name:"local_only" in
+  let models = Cascade_oas_runner.default_model_strings ~runtime_id:"local_only" in
   Alcotest.(check bool) "local_only has models" true (models <> [])
 ;;
 
@@ -783,7 +783,7 @@ let test_cascade_names_produce_models () =
   in
   List.iter
     (fun name ->
-       let models = Cascade_oas_runner.default_model_strings ~cascade_name:name in
+       let models = Cascade_oas_runner.default_model_strings ~runtime_id:name in
        Alcotest.(check bool) (name ^ " has models") true (models <> []))
     cascades
 ;;
@@ -828,7 +828,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
   let observation : Cascade_observation.cascade_observation =
     { cascade_name =
         Cascade_name.of_string_exn
-          Masc_mcp.(Keeper_config.default_cascade_name ())
+          Masc_mcp.(Keeper_config.default_runtime_id ())
     ; strategy = Some "round_robin"
     ; configured_labels = [ "primary:auto"; "secondary:auto" ]
     ; candidate_models = [ "primary:model-alpha"; "secondary:model-beta" ]
@@ -862,13 +862,13 @@ let test_cascade_observation_json_includes_fallback_fields () =
         ]
     ; attempt_details_available = true
     ; attempt_details_source = "oas_metrics_callbacks"
-    ; oas_internal_cascade_allowed = false
+    ; oas_internal_runtime_allowed = false
     }
   in
   let json = Cascade_observation.cascade_observation_to_json observation in
   Alcotest.(check string)
     "cascade name preserved"
-    Masc_mcp.(Keeper_config.default_cascade_name ())
+    Masc_mcp.(Keeper_config.default_runtime_id ())
     Yojson.Safe.Util.(json |> member "cascade_name" |> to_string);
   Alcotest.(check bool)
     "fallback applied preserved"
@@ -918,7 +918,7 @@ let test_cascade_metrics_concurrent_recording () =
             fun () ->
             for _ = 1 to 25 do
               Masc_mcp.Cascade_observation.record_cascade
-                ~cascade_name:(internal_cascade_name "concurrent-cascade")
+                ~runtime_id:(internal_cascade_name "concurrent-cascade")
                 ~observation:None
                 ~outcome:`Success
                 ()
@@ -952,26 +952,26 @@ let test_cascade_metrics_evicts_lowest_call_key () =
     ~finally:(fun () -> Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ())
     (fun () ->
        Masc_mcp.Cascade_observation.record_cascade
-         ~cascade_name:(internal_cascade_name "victim-key")
+         ~runtime_id:(internal_cascade_name "victim-key")
          ~observation:None
          ~outcome:`Success
          ();
        for i = 1 to 254 do
          let name = Printf.sprintf "stable-%03d" i in
          Masc_mcp.Cascade_observation.record_cascade
-           ~cascade_name:(internal_cascade_name name)
+           ~runtime_id:(internal_cascade_name name)
            ~observation:None
            ~outcome:`Success
            ();
          Masc_mcp.Cascade_observation.record_cascade
-           ~cascade_name:(internal_cascade_name name)
+           ~runtime_id:(internal_cascade_name name)
            ~observation:None
            ~outcome:`Success
            ()
        done;
        for _ = 1 to 3 do
          Masc_mcp.Cascade_observation.record_cascade
-           ~cascade_name:(internal_cascade_name "hot-key")
+           ~runtime_id:(internal_cascade_name "hot-key")
            ~observation:None
            ~outcome:`Success
            ()
@@ -981,7 +981,7 @@ let test_cascade_metrics_evicts_lowest_call_key () =
        in
        Alcotest.(check int) "table capped before admit" 256 (List.length before);
        Masc_mcp.Cascade_observation.record_cascade
-         ~cascade_name:(internal_cascade_name "new-key")
+         ~runtime_id:(internal_cascade_name "new-key")
          ~observation:None
          ~outcome:`Success
          ();
@@ -1055,12 +1055,12 @@ let test_cascade_audit_persists_observation () =
              ]
          ; attempt_details_available = true
          ; attempt_details_source = "oas_metrics_callbacks"
-         ; oas_internal_cascade_allowed = false
+         ; oas_internal_runtime_allowed = false
          }
        in
        Masc_mcp.Cascade_observation.record_cascade
          ~keeper_name:"keeper-provider-agent-test"
-         ~cascade_name:(internal_cascade_name "audit-cascade")
+         ~runtime_id:(internal_cascade_name "audit-cascade")
          ~observation:(Some observation)
          ~outcome:`Failure
          ();
@@ -1135,7 +1135,7 @@ let test_enrich_sdk_error_for_provider_auth_includes_env_hint () =
   in
   let rendered =
     Cascade_attempt_fsm.enrich_sdk_error
-      ~cascade_name:(internal_cascade_name "keeper_unified")
+      ~runtime_id:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
     |> Agent_sdk.Error.to_string
@@ -1163,7 +1163,7 @@ let test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint () =
   in
   let rendered =
     Cascade_attempt_fsm.enrich_sdk_error
-      ~cascade_name:(internal_cascade_name "keeper_unified")
+      ~runtime_id:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
     |> Agent_sdk.Error.to_string
@@ -1269,7 +1269,7 @@ let test_run_named_local_per_provider_timeout_uses_liveness_floor () =
     @@ fun () ->
     match
       Keeper_turn_driver.run_named
-        ~cascade_name:"timeout_probe"
+        ~runtime_id:"timeout_probe"
         ~goal:"say hello"
         ~system_prompt:"system"
         ~sw
@@ -1339,7 +1339,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
         Masc_mcp.Cascade_catalog_runtime.resolve_named_providers_strict
           ~sw
           ~net:(require_test_net ())
-          ~cascade_name:"breaker_probe_13318"
+          ~runtime_id:"breaker_probe_13318"
           ()
       with
       | Ok providers -> providers
@@ -1356,23 +1356,23 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
         Alcotest.(check string) "primary base url" primary_url primary.base_url;
         Alcotest.(check string) "fallback base url" fallback_url fallback.base_url;
         let primary_candidate =
-          Masc_mcp.Cascade_runtime_candidate.of_provider_config primary
+          Masc_mcp.Runtime_candidate.of_provider_config primary
         in
         let fallback_candidate =
-          Masc_mcp.Cascade_runtime_candidate.of_provider_config fallback
+          Masc_mcp.Runtime_candidate.of_provider_config fallback
         in
         let primary_model_health_key =
-          Masc_mcp.Cascade_runtime_candidate.model_health_key primary_candidate
+          Masc_mcp.Runtime_candidate.model_health_key primary_candidate
         in
         let fallback_model_health_key =
-          Masc_mcp.Cascade_runtime_candidate.model_health_key fallback_candidate
+          Masc_mcp.Runtime_candidate.model_health_key fallback_candidate
         in
         Alcotest.(check bool)
           "model health keys are isolated"
           true
           (primary_model_health_key <> fallback_model_health_key);
         ( primary_model_health_key
-        , Masc_mcp.Cascade_runtime_candidate.health_key fallback_candidate )
+        , Masc_mcp.Runtime_candidate.health_key fallback_candidate )
       | providers ->
         Alcotest.failf "expected 2 resolved providers, got %d" (List.length providers)
     in
@@ -1394,7 +1394,7 @@ let test_run_named_skips_cooldown_primary_and_falls_back () =
     Alcotest.(check int) "primary has no requests before run_named" 0 (primary_calls ());
     match
       Keeper_turn_driver.run_named
-        ~cascade_name:"breaker_probe_13318"
+        ~runtime_id:"breaker_probe_13318"
         ~goal:"say hello"
         ~system_prompt:"system"
         ~sw
@@ -1456,7 +1456,7 @@ let test_run_named_default_accept_allows_empty_content () =
     @@ fun () ->
     match
       Keeper_turn_driver.run_named
-        ~cascade_name:"empty_content_probe"
+        ~runtime_id:"empty_content_probe"
         ~goal:"return empty content"
         ~system_prompt:"system"
         ~sw
@@ -1520,7 +1520,7 @@ let test_run_named_accept_rejected_does_not_replay_rejected_checkpoint () =
     @@ fun () ->
     match
       Keeper_turn_driver.run_named
-        ~cascade_name:"accept_replay_probe"
+        ~runtime_id:"accept_replay_probe"
         ~goal:"fallback without rejected checkpoint replay"
         ~system_prompt:"system"
         ~sw
@@ -2395,7 +2395,7 @@ let test_classify_masc_internal_error_roundtrip () =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Cascade_exhausted
          { cascade_name =
-             internal_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
+             internal_cascade_name Masc_mcp.(Keeper_config.default_runtime_id ())
          ; reason = Keeper_meta_contract.All_providers_failed
          })
   in
@@ -2403,7 +2403,7 @@ let test_classify_masc_internal_error_roundtrip () =
    | Some (Keeper_turn_driver.Cascade_exhausted { cascade_name; reason }) ->
      Alcotest.(check string)
        "cascade name"
-       Masc_mcp.(Keeper_config.default_cascade_name ())
+       Masc_mcp.(Keeper_config.default_runtime_id ())
        (internal_cascade_name_to_string cascade_name);
      Alcotest.(check string)
        "cascade reason"
@@ -2413,7 +2413,7 @@ let test_classify_masc_internal_error_roundtrip () =
   let accept_err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Accept_rejected
-         { scope = Masc_mcp.(Keeper_config.default_cascade_name ())
+         { scope = Masc_mcp.(Keeper_config.default_runtime_id ())
          ; model = Some "mock-model"
          ; reason = "response rejected by accept (model=mock-model)"
          })
@@ -2422,7 +2422,7 @@ let test_classify_masc_internal_error_roundtrip () =
    | Some (Keeper_turn_driver.Accept_rejected { scope; model; reason }) ->
      Alcotest.(check string)
        "accept scope"
-       Masc_mcp.(Keeper_config.default_cascade_name ())
+       Masc_mcp.(Keeper_config.default_runtime_id ())
        scope;
      Alcotest.(check (option string)) "accept model" (Some "mock-model") model;
      Alcotest.(check bool)
@@ -4610,7 +4610,7 @@ let test_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
     Alcotest.(check bool) "context limit hit" true preflight.hits_context_window;
     Alcotest.(check int)
       "fallback context window"
-      Masc_mcp.Cascade_runtime.fallback_context_window
+      Masc_mcp.Runtime.fallback_context_window
       preflight.context_window_tokens;
     Alcotest.(check bool)
       "retry limit reduced"
@@ -5026,7 +5026,7 @@ let make_keeper_meta
           [ "name", `String name
           ; "agent_name", `String name
           ; "trace_id", `String trace_id
-          ; "cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ())
+          ; "cascade_name", `String Masc_mcp.(Keeper_config.default_runtime_id ())
           ; "last_model_used", `String "llama:auto"
           ])
   with
@@ -5815,7 +5815,7 @@ let test_run_named_circuit_breaker_skips_open_provider () =
     (* 4. Run the named cascade. *)
     match
       Keeper_turn_driver.run_named
-        ~cascade_name:"cb_probe"
+        ~runtime_id:"cb_probe"
         ~goal:"circuit breaker test"
         ~system_prompt:"system"
         ~sw
@@ -6465,7 +6465,7 @@ let () =
         ] )
     ; ( "idle_detail_enrichment"
       , Test_oas_worker_idle_detail.cases )
-    ; ( "circuit_breaker_cascade_fallback"
+    ; ( "circuit_breaker_runtime_fallback"
       , [ Alcotest.test_case
             "P0: open provider is skipped and fallback succeeds at run_named boundary"
             `Quick

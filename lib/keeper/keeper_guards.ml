@@ -314,7 +314,7 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
    dashboard reading only the final outcome ("Turn_gate_rejected") cannot
    distinguish "all gates rejected, cascade=none" from "all cascades
    exhausted" — both surface as terminal failure.  We add a Prometheus
-   counter, an INFO log line, and a [cascade_attempted] payload field so
+   counter, an INFO log line, and a [runtime_attempted] payload field so
    the narrative is observable. *)
 
 (** Prometheus metric: turns terminated by a pre_tool_use gate rejection
@@ -378,7 +378,7 @@ let emit_gate_event
       ("stage_latency_ms", `Float stage_latency_ms);
       ("reason_text", `String reason_text);
       ("source", `String "hook");
-      ("cascade_attempted", `Bool (not is_gate_rejection));
+      ("runtime_attempted", `Bool (not is_gate_rejection));
       ("source_path", Json_util.string_opt_to_json source_path);
       ("source_line", Json_util.int_opt_to_json source_line);
     ] in

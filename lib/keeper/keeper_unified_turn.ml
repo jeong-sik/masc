@@ -12,10 +12,10 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
-module KCP = Keeper_cascade_profile
+module KCP = Keeper_runtime_profile
 include Keeper_turn_helpers
 include Keeper_turn_liveness
-include Keeper_turn_cascade_budget
+include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
 (* RFC-0132 PR-2: removed dead [runtime_lane_label] (0 callers). *)
@@ -44,7 +44,7 @@ let run_keeper_cycle
      this function; an [Error _] branch leaves it false and skips the
      wrap, mirroring the spec's "completed-on-success" semantics. *)
   let cycle_completed = ref false in
-  (* 0. Phase gate + state-aware cascade routing.
+  (* 0. Phase gate + state-aware runtime routing.
      The gate owns turn executability; select_cascade remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
      phases like Overflowed. *)
@@ -131,7 +131,7 @@ let run_keeper_cycle
      the top of the function body, rather than burying early-exits in
      deeply nested match arms.
 
-     State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade)
+     State-aware runtime routing (TLA+ KeeperCoreTriad.SelectCascade)
      resumes inside [main_path]; at that point [phase_opt] is whatever
      the registry returned for an executable phase. *)
   let main_path phase_opt =
@@ -142,7 +142,7 @@ let run_keeper_cycle
          [fail_open_phase_buffer_when_unavailable] hardening.  Returns
          the updated meta + the resolved cascade name. *)
       let { Keeper_unified_turn_cascade_resolution.resolved_meta = meta
-          ; resolved_cascade = effective_cascade_name
+          ; resolved_cascade = effective_runtime_id_name
           }
         =
         Keeper_unified_turn_cascade_resolution.resolve_cascade
@@ -167,12 +167,12 @@ let run_keeper_cycle
          let profile_defaults =
            Keeper_types_profile.load_keeper_profile_defaults meta.name
          in
-         let effective_cascade_runtime_name = effective_cascade_name in
+         let effective_runtime_id_runtime_name = effective_runtime_id_name in
          (match
-            Keeper_unified_turn_pre_dispatch.build_cascade_execution
+            Keeper_unified_turn_pre_dispatch.build_runtime_execution
               ~meta
               ~profile_defaults
-              ~cascade_name:effective_cascade_runtime_name
+              ~cascade_name:effective_runtime_id_runtime_name
           with
           | Error err ->
             let terminal_reason_code =
@@ -185,7 +185,7 @@ let run_keeper_cycle
               ~config
               ~meta
               ~generation
-              ~cascade_name:effective_cascade_runtime_name
+              ~cascade_name:effective_runtime_id_runtime_name
               ~outcome:`Error
               ~terminal_reason_code
               ~activity_kind:"keeper.turn_blocked"
@@ -208,8 +208,8 @@ let run_keeper_cycle
                   ; detail = error_message
                   }
               | _ when EC.is_runtime_exhausted_error err ->
-                Keeper_turn_fsm.Failure_cascade_unavailable
-                  { base = effective_cascade_runtime_name
+                Keeper_turn_fsm.Failure_runtime_unavailable
+                  { base = effective_runtime_id_runtime_name
                   ; resolved = None
                   }
               | _ ->
@@ -219,7 +219,7 @@ let run_keeper_cycle
             Keeper_turn_fsm.emit_transition
               ~keeper_name:meta.name
               ~turn_id:keeper_turn_id
-              ~prev:Keeper_turn_fsm.Cascade_routing
+              ~prev:Keeper_turn_fsm.Runtime_routing
               (Keeper_turn_fsm.Failed failure_reason);
             Error err
           | Ok initial_execution ->
@@ -227,7 +227,7 @@ let run_keeper_cycle
               ~config
               ~meta
               ~generation
-              ~cascade_name:effective_cascade_runtime_name
+              ~cascade_name:effective_runtime_id_runtime_name
               ~outcome:`Ok
               ~terminal_reason_code:"pre_dispatch_success"
               ~activity_kind:"keeper.turn_pre_dispatch_ok"
@@ -256,7 +256,7 @@ let run_keeper_cycle
                Keeper_turn_fsm.emit_transition
                  ~keeper_name:meta.name
                  ~turn_id:keeper_turn_id
-                 ~prev:Keeper_turn_fsm.Cascade_routing
+                 ~prev:Keeper_turn_fsm.Runtime_routing
                  Keeper_turn_fsm.Awaiting_provider;
                (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)
@@ -395,28 +395,28 @@ let run_keeper_cycle
                  ref None
                in
                let degraded_retry_info = ref None in
-               let cascade_rotation_attempts = ref [] in
-               let record_cascade_rotation_attempt
+               let runtime_rotation_attempts = ref [] in
+               let record_runtime_rotation_attempt
                      ?slot_release_at_phase
                      ?productive_phase_elapsed_ms
                      ?retry_phase_elapsed_ms
-                     ~(from_cascade : string)
+                     ~(from_runtime_id : string)
                      ~(retry : EC.degraded_retry)
-                     ~(outcome : Keeper_execution_receipt.cascade_rotation_outcome)
+                     ~(outcome : Keeper_execution_receipt.runtime_rotation_outcome)
                      (err : Agent_sdk.Error.sdk_error)
                  =
-                 let attempt : Keeper_execution_receipt.cascade_rotation_attempt =
+                 let attempt : Keeper_execution_receipt.runtime_rotation_attempt =
                    Keeper_unified_turn_rotation_attempt.build
                      ~recorded_at:(now_iso ())
                      ?slot_release_at_phase
                      ?productive_phase_elapsed_ms
                      ?retry_phase_elapsed_ms
-                     ~from_cascade
+                     ~from_runtime_id
                      ~retry
                      ~outcome
                      err
                  in
-                 cascade_rotation_attempts := attempt :: !cascade_rotation_attempts
+                 runtime_rotation_attempts := attempt :: !runtime_rotation_attempts
                in
                let run_result, latency_ms =
                  (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps cleanup
@@ -481,7 +481,7 @@ let run_keeper_cycle
                           { attempt = 1
                           ; base_dir
                           ; build_turn_prompt
-                          ; cascade_rotation_attempts
+                          ; runtime_rotation_attempts
                           ; channel
                           ; cleanup
                           ; committed_mutating_tools_snapshot
@@ -501,7 +501,7 @@ let run_keeper_cycle
                           ; post_commit_failure_reason
                           ; profile_defaults
                           ; prompt_timeout_estimate_tokens
-                          ; record_cascade_rotation_attempt
+                          ; record_runtime_rotation_attempt
                           ; shared_context
                           ; trajectory_acc
                           ; turn_affordances
@@ -573,9 +573,9 @@ let run_keeper_cycle
                in
                let degraded_retry_info = !degraded_retry_info in
                let degraded_retry_applied = Option.is_some degraded_retry_info in
-               let degraded_retry_cascade =
+               let degraded_retry_runtime_id =
                  Option.map
-                   (fun (retry : EC.degraded_retry) -> retry.next_cascade)
+                   (fun (retry : EC.degraded_retry) -> retry.next_runtime_id)
                    degraded_retry_info
                in
                let fallback_reason =
@@ -845,7 +845,7 @@ let run_keeper_cycle
                     ~semaphore_wait_ms
                     ~outcome:(if is_ambiguous_partial then "partial" else "error")
                     ~degraded_retry_applied
-                    ?degraded_retry_cascade
+                    ?degraded_retry_runtime_id
                     ?fallback_reason:
                       (Option.map EC.degraded_retry_reason_to_string fallback_reason)
                     ~social_state
@@ -949,7 +949,7 @@ let run_keeper_cycle
                       ~latency_ms
                       ~semaphore_wait_ms
                       ~degraded_retry_applied
-                      ~degraded_retry_cascade
+                      ~degraded_retry_runtime_id
                       ~fallback_reason
                       ~last_provider_timeout_budget:!last_provider_timeout_budget
                       ~current_turn_blocker_info:!current_turn_blocker_info

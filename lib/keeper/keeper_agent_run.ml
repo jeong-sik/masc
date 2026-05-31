@@ -95,9 +95,9 @@ let run_turn
       ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
       ?priority
       ?(degraded_retry_applied = false)
-      ?degraded_retry_cascade
+      ?degraded_retry_runtime_id
       ?fallback_reason
-      ?(cascade_rotation_attempts = [])
+      ?(runtime_rotation_attempts = [])
       ?(is_retry = false)
       ?shared_context
       ?event_bus
@@ -189,7 +189,7 @@ let run_turn
   let start_turn_count = ctx.start_turn_count in
   let receipt_started_at = ctx.receipt_started_at in
   let config_root = ctx.config_root in
-  let cascade_config_path = ctx.cascade_config_path in
+  let runtime_config_path = ctx.runtime_config_path in
   let gemini_mcp_disabled = ctx.gemini_mcp_disabled in
   let approval_mode_effective = ctx.approval_mode_effective in
   let approval_mode_derived = ctx.approval_mode_derived in
@@ -334,7 +334,7 @@ let run_turn
       ~turn_affordances
       ~required_tool_names
       ~config_root
-      ~cascade_config_path
+      ~runtime_config_path
       ~gemini_mcp_disabled
       ~approval_mode_effective
       ~approval_mode_derived
@@ -409,8 +409,8 @@ let run_turn
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
     let receipt_stop_reason_ref = s.Keeper_run_tools.receipt_stop_reason_ref in
-    let receipt_cascade_observation_ref =
-      s.Keeper_run_tools.receipt_cascade_observation_ref
+    let receipt_runtime_observation_ref =
+      s.Keeper_run_tools.receipt_runtime_observation_ref
     in
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
@@ -659,7 +659,7 @@ let run_turn
                  receipt_turn_count_ref := Some result.turns;
                  receipt_model_used_ref := Some model;
                  receipt_stop_reason_ref := Some result.stop_reason;
-                 receipt_cascade_observation_ref := result.cascade_observation;
+                 receipt_runtime_observation_ref := result.runtime_observation;
                  Keeper_agent_run_thinking_trajectory.persist_response_content
                    ~keeper_name:meta.name
                    ~trajectory_acc
@@ -904,14 +904,14 @@ let run_turn
          ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
          ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
          ~degraded_retry_applied
-         ~degraded_retry_cascade
+         ~degraded_retry_runtime_id
          ~fallback_reason
-         ~cascade_rotation_attempts
+         ~runtime_rotation_attempts
          ~turn_result
          ~receipt_turn_count_ref
          ~receipt_model_used_ref
          ~receipt_stop_reason_ref
-         ~receipt_cascade_observation_ref
+         ~receipt_runtime_observation_ref
          ~receipt_response_text_present_ref
          ~reported_tool_names_ref
          ~observed_tool_names_ref

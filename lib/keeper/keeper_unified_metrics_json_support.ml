@@ -27,7 +27,7 @@ let provider_context_json ~(meta : keeper_meta)
   match result with
   | Some r ->
       let cascade_name =
-        match r.cascade_observation with
+        match r.runtime_observation with
         | Some observation ->
             observation.cascade_name
         | None -> runtime_id_of_meta meta
@@ -44,8 +44,8 @@ let provider_context_json ~(meta : keeper_meta)
         ; "candidate_models", `List []
         ]
 
-let redacted_cascade_attempt_to_json
-    (attempt : Keeper_observation.cascade_attempt) : Yojson.Safe.t =
+let redacted_runtime_attempt_to_json
+    (attempt : Keeper_observation.runtime_attempt) : Yojson.Safe.t =
   `Assoc
     [ "attempt_index", `Int attempt.attempt_index
     ; ( "latency_ms", Json_util.int_opt_to_json attempt.latency_ms )
@@ -53,13 +53,13 @@ let redacted_cascade_attempt_to_json
     ]
 ;;
 
-let redacted_cascade_fallback_event_to_json
-    (event : Keeper_observation.cascade_fallback_event) : Yojson.Safe.t =
+let redacted_runtime_fallback_event_to_json
+    (event : Keeper_observation.runtime_fallback_event) : Yojson.Safe.t =
   `Assoc [ "reason", `String event.reason ]
 ;;
 
-let redacted_cascade_observation_to_json
-    (obs : Keeper_observation.cascade_observation) : Yojson.Safe.t =
+let redacted_runtime_observation_to_json
+    (obs : Keeper_observation.runtime_observation) : Yojson.Safe.t =
   let cascade_name =
     obs.cascade_name
   in
@@ -75,10 +75,10 @@ let redacted_cascade_observation_to_json
     ; "fallback_hops", Json_util.int_opt_to_json obs.fallback_hops
     ; "fallback_applied", `Bool obs.fallback_applied
     ; ( "attempts"
-      , `List (List.map redacted_cascade_attempt_to_json obs.attempts) )
+      , `List (List.map redacted_runtime_attempt_to_json obs.attempts) )
     ; ( "fallback_events"
       , `List
-          (List.map redacted_cascade_fallback_event_to_json obs.fallback_events)
+          (List.map redacted_runtime_fallback_event_to_json obs.fallback_events)
       )
     ; "attempt_details_available", `Bool obs.attempt_details_available
     ; "attempt_details_source", `String obs.attempt_details_source

@@ -139,7 +139,7 @@ let test_model_field_stored () =
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0
       ~model:"provider_k-4-9b"
-      ~cascade_profile:"local_qwen3_27b_only"
+      ~runtime_profile:"local_qwen3_27b_only"
       ();
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
@@ -151,7 +151,7 @@ let test_model_field_stored () =
       (Safe_ops.json_string_opt "model" (List.hd entries));
     Alcotest.(check (option string)) "cascade profile stored"
       (Some "local_qwen3_27b_only")
-      (Safe_ops.json_string_opt "cascade_profile" (List.hd entries)))
+      (Safe_ops.json_string_opt "runtime_profile" (List.hd entries)))
 
 let test_policy_denied_structured_error_gets_semantic_failure () =
   with_tmp_log (fun () ->
@@ -257,7 +257,7 @@ let test_turn_context_fields_stored () =
       ~required_tools:["tool_execute"]
       ~required_tool_candidates:["tool_execute"; "tool_search_files"]
       ~missing_required_tools:["tool_edit_file"]
-      ~cascade_profile:"tool_use_strict"
+      ~runtime_profile:"tool_use_strict"
       ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
@@ -294,9 +294,9 @@ let test_turn_context_fields_stored () =
       (Safe_ops.json_int ~default:0 "turn" entry);
     Alcotest.(check int) "keeper_turn_id field" 7
       (Safe_ops.json_int ~default:0 "keeper_turn_id" entry);
-    Alcotest.(check (option string)) "cascade_profile field"
+    Alcotest.(check (option string)) "runtime_profile field"
       (Some "tool_use_strict")
-      (Safe_ops.json_string_opt "cascade_profile" entry);
+      (Safe_ops.json_string_opt "runtime_profile" entry);
     Alcotest.(check (option string)) "task_id field"
       (Some "task-runtime-trust")
       (Safe_ops.json_string_opt "task_id" entry);
@@ -341,9 +341,9 @@ let test_turn_context_fields_stored () =
       Yojson.Safe.Util.(
         runtime_contract |> member "missing_required_tools" |> to_list
         |> List.map to_string);
-    Alcotest.(check (option string)) "runtime_contract cascade_profile"
+    Alcotest.(check (option string)) "runtime_contract runtime_profile"
       (Some "tool_use_strict")
-      (Safe_ops.json_string_opt "cascade_profile" runtime_contract);
+      (Safe_ops.json_string_opt "runtime_profile" runtime_contract);
     let action_radius = Yojson.Safe.Util.member "action_radius" entry in
     Alcotest.(check (option string)) "action_radius tool"
       (Some "masc_status")
@@ -661,7 +661,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~model:"provider_k-5.1" ~lane:"tool_required"
       ~tool_choice:"required"
       ~thinking_enabled:false ~thinking_budget:1024
-      ~cascade_profile:"primary" ();
+      ~runtime_profile:"primary" ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k2" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"error: {\"ok\":false,\"error\":\"boom\"}"
@@ -669,7 +669,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~model:"qwen3.5-27b-unified" ~lane:"retry"
       ~tool_choice:"auto"
       ~thinking_enabled:true ~thinking_budget:4096
-      ~cascade_profile:"local_qwen3_27b_only" ();
+      ~runtime_profile:"local_qwen3_27b_only" ();
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
     Alcotest.(check (option string)) "sampling mode present"
       (Some "recent_n")

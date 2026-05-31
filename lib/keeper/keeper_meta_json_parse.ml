@@ -126,7 +126,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       in
       match runtime_id_opt with
       | Some runtime_id when runtime_id <> "" -> Ok runtime_id
-      | _ -> Ok (Keeper_config.default_cascade_name ())
+      | _ -> Ok (Keeper_config.default_runtime_id ())
     in
     (match pk_runtime_id_result with
      | Error e -> Error e
@@ -487,11 +487,11 @@ let parse_keeper_state
 	       | _ -> [])
 	    | _ -> []
 	  in
-	  let last_cascade_attempt =
+	  let last_runtime_attempt =
 	    match json with
 	    | `Assoc fields ->
-	      (match List.assoc_opt "last_cascade_attempt" fields with
-	       | Some raw -> cascade_attempt_record_of_json raw
+	      (match List.assoc_opt "last_runtime_attempt" fields with
+	       | Some raw -> runtime_attempt_record_of_json raw
 	       | None -> None)
 	    | _ -> None
 	  in
@@ -538,7 +538,7 @@ let parse_keeper_state
       ; last_active_desire
 	      ; last_current_intention
 	      ; last_blocker
-	      ; last_cascade_attempt
+	      ; last_runtime_attempt
 	      ; last_need
 	      ; last_turn_tool_calls
 	      }

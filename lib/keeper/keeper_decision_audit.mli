@@ -115,7 +115,7 @@ type provider_health =
 val cascade_fsm_to_mermaid :
   ?provider_health:(string * provider_health) list ->
   ?slot_state:(int * int) ->
-  ?effective_cascade_reason:string ->
+  ?effective_runtime_id_reason:string ->
   models:string list ->
   last_provider_result:string option ->
   unit ->

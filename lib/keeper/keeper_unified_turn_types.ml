@@ -6,7 +6,7 @@
     use [Keeper_unified_turn.<name>] unchanged. *)
 
 let turn_event_bus_manifest_decision
-      (summary : Keeper_turn_cascade_budget.turn_event_bus_summary)
+      (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
   =
   let overflow =
     match summary.overflow_imminent with
@@ -241,10 +241,10 @@ let registry_failure_reason_of_terminal_reason
          ; http_status = None
          ; cascade_name = None
          })
-  | Keeper_turn_disposition.Cascade_attempts_exhausted ->
+  | Keeper_turn_disposition.Runtime_attempts_exhausted ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = "cascade_attempts_exhausted"
+         { code = "runtime_attempts_exhausted"
          ; detail
          ; provider_id = None
          ; http_status = None

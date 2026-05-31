@@ -55,7 +55,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     match p.runtime_id_opt, p.profile_defaults.model with
     | Some name, _ -> name
     | None, Some name -> name
-    | None, None -> Keeper_config.default_cascade_name ()
+    | None, None -> Keeper_config.default_runtime_id ()
   in
   let active_goal_ids_error =
     match p.active_goal_ids_opt with
@@ -522,7 +522,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
 	          last_active_desire = "";
 	          last_current_intention = "";
 	          last_blocker = None;
-	          last_cascade_attempt = None;
+	          last_runtime_attempt = None;
 	          last_need = "";
 	          last_turn_tool_calls = [];
 	        };

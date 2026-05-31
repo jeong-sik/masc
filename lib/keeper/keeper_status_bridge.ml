@@ -30,10 +30,10 @@ let effective_declarative_cascade_name
   (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
   match defaults.model, defaults.manifest_path with
   | Some cascade_name, _ ->
-    Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
-  | None, Some _ -> (Keeper_config.default_cascade_name ())
+    Keeper_runtime_profile.normalize_keeper_runtime_declared_name cascade_name
+  | None, Some _ -> (Keeper_config.default_runtime_id ())
   | None, None ->
-    Keeper_cascade_profile.normalize_keeper_runtime_declared_name
+    Keeper_runtime_profile.normalize_keeper_runtime_declared_name
       (runtime_id_of_meta meta)
 ;;
 
@@ -57,7 +57,7 @@ let maybe_string_option_override =
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : override_field_detail list
   =
-  let effective_cascade_name = effective_declarative_cascade_name defaults meta in
+  let effective_runtime_id_name = effective_declarative_cascade_name defaults meta in
   []
   |> maybe_string_override
        "prompt.goal"
@@ -81,11 +81,11 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
        meta.tool_denylist
   |> (fun acc ->
   let cascade_name = runtime_id_of_meta meta in
-  if effective_cascade_name <> cascade_name
+  if effective_runtime_id_name <> cascade_name
   then
     override_field
       "model.runtime_id"
-      ~default_value:(`String effective_cascade_name)
+      ~default_value:(`String effective_runtime_id_name)
       ~live_value:(`String cascade_name)
     :: acc
   else acc)
@@ -295,32 +295,32 @@ let runtime_blocker_surface_opt (config : Coord_utils.config) (meta : keeper_met
   derived
 ;;
 
-let cascade_attempt_outcome_json = function
+let runtime_attempt_outcome_json = function
   | `Success -> `Assoc [ "kind", `String "success"; "detail", `Null ]
   | `Failure detail ->
     `Assoc [ "kind", `String "failure"; "detail", `String detail ]
 ;;
 
-let cascade_attempt_record_json (attempt : cascade_attempt_record) =
+let runtime_attempt_record_json (attempt : runtime_attempt_record) =
   `Assoc
     [ "provider_id", `String attempt.provider_id
     ; "http_status", Json_util.int_opt_to_json attempt.http_status
-    ; "outcome", cascade_attempt_outcome_json attempt.outcome
+    ; "outcome", runtime_attempt_outcome_json attempt.outcome
     ; "timestamp_unix", `Float attempt.timestamp
     ]
 ;;
 
-let last_cascade_attempt_json (meta : keeper_meta) =
-  match meta.runtime.last_cascade_attempt with
+let last_runtime_attempt_json (meta : keeper_meta) =
+  match meta.runtime.last_runtime_attempt with
   | None -> `Null
-  | Some attempt -> cascade_attempt_record_json attempt
+  | Some attempt -> runtime_attempt_record_json attempt
 ;;
 
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
-    [ "source", `String "keeper_runtime.last_cascade_attempt"
+    [ "source", `String "keeper_runtime.last_runtime_attempt"
     ; "runtime_id", `String (runtime_id_of_meta meta)
-    ; "last_cascade_attempt", last_cascade_attempt_json meta
+    ; "last_runtime_attempt", last_runtime_attempt_json meta
     ]
 ;;
 
@@ -370,7 +370,7 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
       | Some _ when meta.paused ->
         true, Some "paused", Some "inspect_blocker_before_resume"
       | Some blocker when is_runtime_exhausted_blocker_class blocker.blocker_class ->
-        true, Some "cascade_attempts_exhausted", Some "inspect_cascade_attempts"
+        true, Some "runtime_attempts_exhausted", Some "inspect_runtime_attempts"
       | Some blocker when is_no_tool_capable_blocker_class blocker.blocker_class ->
         true, Some "provider_tool_capability_missing", Some "inspect_provider_tool_lane"
       | Some blocker when is_completion_contract_blocker_class blocker.blocker_class ->
@@ -508,7 +508,7 @@ let runtime_surface_json config (meta : keeper_meta) =
      ; "keepalive_running", `Bool keepalive_running
      ; ( "phase", Json_util.string_opt_to_json phase )
      ; "fiber_health", `String (Keeper_status_runtime.string_of_fiber_health fiber_health)
-     ; "last_cascade_attempt", last_cascade_attempt_json meta
+     ; "last_runtime_attempt", last_runtime_attempt_json meta
      ]
      @ social_runtime_fields_json meta
      @ runtime_state_fields_json config meta
@@ -536,13 +536,13 @@ let optional_existing_path_json ?source = function
    dropped from the status payload because there is no runtime JSON
    sibling to point at. Source identity is now fully described by the
    TOML path + the single-arm [source_kind]. *)
-let cascade_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
+let runtime_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
   let source =
     Cascade_toml_materializer.source_info ~config_path:resolution.cascade.path
   in
-  [ ( "cascade_catalog_source_kind"
+  [ ( "runtime_catalog_source_kind"
     , `String (Cascade_toml_materializer.source_kind_to_string source.kind) )
-  ; "cascade_catalog_source_path", `String source.source_path
+  ; "runtime_catalog_source_path", `String source.source_path
   ]
 ;;
 
@@ -599,7 +599,7 @@ let source_provenance_json config (meta : keeper_meta) =
      ; "config_resolution", Config_dir_resolver.to_json resolution
      ; "precedence", `List [ `String "live_meta"; `String "toml"; `String "persona" ]
      ]
-     @ cascade_catalog_source_fields resolution
+     @ runtime_catalog_source_fields resolution
      @ [ "has_live_override", `Bool (override_fields <> [])
        ; "override_fields", Json_util.json_string_list override_fields
        ; ( "override_field_sources"

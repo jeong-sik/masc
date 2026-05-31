@@ -96,7 +96,7 @@ let test_provider_attempt_records_manifest_decision_contract () =
   let provenance : KRun.provider_attempt_provenance =
     { model_source = "named_cascade"
     ; resolved_model_source = "cascade_catalog_binding"
-    ; capability_source = "provider_config_from_cascade_catalog"
+    ; capability_source = "provider_config_from_runtime_id_catalog"
     ; fallback_authority = "declared_cascade"
     ; provider_source_cascade = Some "phase_buffer"
     }
@@ -185,7 +185,7 @@ let test_provider_attempt_records_manifest_decision_contract () =
 
 let test_rotation_attempt_builder_records_retry_decision () =
   let retry : EC.degraded_retry =
-    { next_cascade = "cascade.tool_required_fallback"
+    { next_runtime_id = "cascade.tool_required_fallback"
     ; fallback_reason = EC.Required_tool_contract_violation
     }
   in
@@ -196,7 +196,7 @@ let test_rotation_attempt_builder_records_retry_decision () =
       ~slot_release_at_phase:Receipt.Retry_scheduled
       ~productive_phase_elapsed_ms:1234
       ~retry_phase_elapsed_ms:56
-      ~from_cascade:(Cascade_name.of_string_exn "cascade.default")
+      ~from_runtime_id:(Cascade_name.of_string_exn "cascade.default")
       ~retry
       ~outcome:Receipt.Rotation_retry_scheduled
       err
@@ -205,12 +205,12 @@ let test_rotation_attempt_builder_records_retry_decision () =
     string
     "from cascade"
     "cascade.default"
-    (Cascade_name.to_string attempt.from_cascade);
+    (Cascade_name.to_string attempt.from_runtime_id);
   check
     string
     "to cascade"
     "cascade.tool_required_fallback"
-    (Cascade_name.to_string attempt.to_cascade);
+    (Cascade_name.to_string attempt.to_runtime_id);
   check
     string
     "fallback reason"
@@ -220,7 +220,7 @@ let test_rotation_attempt_builder_records_retry_decision () =
     string
     "outcome"
     "retry_scheduled"
-    (Receipt.cascade_rotation_outcome_to_string attempt.outcome);
+    (Receipt.runtime_rotation_outcome_to_string attempt.outcome);
   check
     (option string)
     "slot release phase"
@@ -245,9 +245,9 @@ let test_rotation_attempt_builder_records_retry_decision () =
   check string "recorded at" "2026-05-20T00:00:00Z" attempt.recorded_at
 ;;
 
-let test_receipt_degraded_retry_cascade_requalifies_bare_name () =
+let test_receipt_degraded_retry_runtime_id_requalifies_bare_name () =
   match
-    Run_receipt.degraded_retry_cascade_of_wire
+    Run_receipt.degraded_retry_runtime_id_of_wire
       ~log_invalid:false
       ~keeper_name:"receipt-test"
       "local_llama"
@@ -276,7 +276,7 @@ let () =
         ; test_case
             "execution receipt re-qualifies bare degraded retry cascade"
             `Quick
-            test_receipt_degraded_retry_cascade_requalifies_bare_name
+            test_receipt_degraded_retry_runtime_id_requalifies_bare_name
         ] )
     ]
 ;;

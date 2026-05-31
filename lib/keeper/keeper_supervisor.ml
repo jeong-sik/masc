@@ -248,7 +248,7 @@ let sweep_and_recover (ctx : _ context) =
 	    if Keeper_registry.try_resolve_done entry (`Crashed msg)
 	    then (
 	      let outcome =
-	        Keeper_registry_cascade_attempt.enrich_fiber_unresolved_outcome
+	        Keeper_registry_runtime_attempt.enrich_fiber_unresolved_outcome
 	          ~base_path
 	          ~keeper_name:entry.name
 	          msg

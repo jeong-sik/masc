@@ -29,12 +29,12 @@ let queue_depth_for ~channel =
     ~labels:[ ("channel", channel) ]
     ()
 
-let semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le =
+let semaphore_wait_bucket_for ~keeper_name ~runtime_profile ~channel ~le =
   Masc_mcp.Prometheus.metric_value_or_zero
     Masc_mcp.Keeper_metrics.(to_string SemaphoreWaitSecondsBucket)
     ~labels:[
       ("keeper_name", keeper_name);
-      ("cascade_profile", cascade_profile);
+      ("runtime_profile", runtime_profile);
       ("channel", channel);
       ("le", le);
     ]
@@ -126,19 +126,19 @@ let test_successful_acquire_emits_wait_seconds_buckets () =
   Eio_main.run @@ fun _env ->
   let module KK = Masc_mcp.Keeper_keepalive in
   let keeper_name = "wait-histogram-keeper-0506" in
-  let cascade_profile = "wait-histogram-cascade-0506" in
+  let runtime_profile = "wait-histogram-cascade-0506" in
   let channel = "scheduled_autonomous" in
   KK.reset_autonomous_completion_for_test ();
   KK.reset_autonomous_turn_queue_for_test ();
   let before_inf =
-    semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le:"+Inf"
+    semaphore_wait_bucket_for ~keeper_name ~runtime_profile ~channel ~le:"+Inf"
   in
   let before_60 =
-    semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le:"60"
+    semaphore_wait_bucket_for ~keeper_name ~runtime_profile ~channel ~le:"60"
   in
   (match
      KK.with_keeper_turn_slot_for_test
-       ~cascade_profile
+       ~runtime_profile
        ~keeper_name
        ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
        (fun ~semaphore_wait_ms:_ -> ())
@@ -149,11 +149,11 @@ let test_successful_acquire_emits_wait_seconds_buckets () =
   Alcotest.(check (float 0.0001))
     "+Inf bucket increments"
     (before_inf +. 1.0)
-    (semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le:"+Inf");
+    (semaphore_wait_bucket_for ~keeper_name ~runtime_profile ~channel ~le:"+Inf");
   Alcotest.(check (float 0.0001))
     "60s bucket increments"
     (before_60 +. 1.0)
-    (semaphore_wait_bucket_for ~keeper_name ~cascade_profile ~channel ~le:"60")
+    (semaphore_wait_bucket_for ~keeper_name ~runtime_profile ~channel ~le:"60")
 
 let test_increments_per_channel () =
   let keeper = "sangsu-test-9771" in

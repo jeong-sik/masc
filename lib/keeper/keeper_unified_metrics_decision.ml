@@ -21,7 +21,7 @@ let append_decision_record
     ?(semaphore_wait_ms : int = 0)
     ~(outcome : string)
     ?(degraded_retry_applied = false)
-    ?degraded_retry_cascade
+    ?degraded_retry_runtime_id
     ?fallback_reason
     ?turn_mode
     ?social_state
@@ -168,8 +168,8 @@ let append_decision_record
         ("channel", `String (decision_channel_of_observation observation));
         ("outcome", `String outcome);
         ("degraded_retry_applied", `Bool degraded_retry_applied);
-        ( "degraded_retry_cascade",
-          Json_util.string_opt_to_json degraded_retry_cascade );
+        ( "degraded_retry_runtime_id",
+          Json_util.string_opt_to_json degraded_retry_runtime_id );
         ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
         ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);
@@ -257,7 +257,7 @@ let append_decision_record
                 | None -> []
               in
               let cascade_fields =
-                match r.cascade_observation with
+                match r.runtime_observation with
                 | Some co ->
                     let cascade_name =
                       co.cascade_name
@@ -297,8 +297,8 @@ let append_decision_record
                          (fun name -> `String name)
                          r.tool_surface.missing_required_tool_names) );
                   ("config_root", `String r.tool_surface.config_root);
-                  ( "cascade_config_path",
-                    Json_util.string_opt_to_json r.tool_surface.cascade_config_path );
+                  ( "runtime_config_path",
+                    Json_util.string_opt_to_json r.tool_surface.runtime_config_path );
                   ("gemini_mcp_disabled", `Bool r.tool_surface.gemini_mcp_disabled);
                   ( "approval_mode_effective",
                     Json_util.string_opt_to_json r.tool_surface.approval_mode_effective );

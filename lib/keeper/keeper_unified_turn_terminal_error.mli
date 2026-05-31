@@ -15,12 +15,12 @@
     Side effects only.  The function is unit-returning to keep the 9
     retry-loop call sites unchanged: they invoke a [mark_terminal_error]
     closure that adapts {!handle} to the loop-scoped [attempt] /
-    [attempted_cascades] values.  Cycle 52 narrative behavior preserved. *)
+    [attempted_runtime_ids] values.  Cycle 52 narrative behavior preserved. *)
 
 val handle
   :  config:Coord.config
   -> keeper_name:string
   -> attempt:int
-  -> attempted_cascades:string list
+  -> attempted_runtime_ids:string list
   -> Agent_sdk.Error.sdk_error
   -> unit

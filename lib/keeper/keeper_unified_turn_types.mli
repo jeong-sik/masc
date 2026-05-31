@@ -7,7 +7,7 @@
     to use [Keeper_unified_turn.<name>] unchanged. *)
 
 val turn_event_bus_manifest_decision :
-  Keeper_turn_cascade_budget.turn_event_bus_summary -> Yojson.Safe.t
+  Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t
 
 val should_auto_pause_required_tool_contract_violation :
   paused:bool ->

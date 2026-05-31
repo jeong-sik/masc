@@ -891,7 +891,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            ("context_budget", `Assoc [
              ("requested_override", Json_util.int_opt_to_json max_context_resolution.requested_override);
              ("primary_budget", `Int max_context_resolution.primary_budget);
-             ("cascade_budget", `Int max_context_resolution.cascade_budget);
+             ("runtime_budget", `Int max_context_resolution.runtime_budget);
              ("turn_budget", `Int max_context_resolution.turn_budget);
              ("effective_budget", `Int max_context_resolution.effective_budget);
            ]);

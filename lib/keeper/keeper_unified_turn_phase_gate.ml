@@ -3,7 +3,7 @@
    Extracted from keeper_unified_turn.ml (L129-L255) during the
    run_keeper_cycle stage decomposition. The gate owns the three
    pre-dispatch early-exit paths plus the FSM transition into
-   Cascade_routing on the proceed path. *)
+   Runtime_routing on the proceed path. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -157,5 +157,5 @@ let decide_and_record
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id
         ~prev:Keeper_turn_fsm.Phase_gating
-        Keeper_turn_fsm.Cascade_routing;
+        Keeper_turn_fsm.Runtime_routing;
       Phase_gate_proceed phase_opt)

@@ -510,7 +510,7 @@ let handle_keeper_get_subroutes state req request reqd =
           in
           let models = [ "candidate" ] in
           let provider_health = [] in
-          (* Slot occupancy from the local runtime pool. The cascade FSM
+          (* Slot occupancy from the local runtime pool. The runtime FSM
              shares these slots across all keepers, so rendering the
              fleet-global (used, capacity) is the honest value — a
              per-cascade split would claim an isolation the runtime does

@@ -389,7 +389,7 @@ export interface KeeperMetricPoint {
   inference_telemetry: InferenceTelemetry | null
   cascade_name?: string | null
   cascade_outcome?: string | null
-  cascade_selected_model?: string | null
+  runtime_selected_model?: string | null
   cascade_attempt_count?: number | null
   cascade_strategy?: string | null
   fallback_applied: boolean

@@ -273,57 +273,57 @@ let degraded_retry_reason_to_string = function
   | Auth_error -> "auth_error"
 
 type degraded_retry =
-  { next_cascade : string
+  { next_runtime_id : string
   ; fallback_reason : degraded_retry_reason
   }
 
 let is_declared_phase_alias raw phase_name =
   String.equal (String.trim raw) phase_name
 
-let fallback_cascade_for_unavailable_profile
-    ~(base_cascade : string)
-    ~(effective_cascade : string) : string option =
+let fallback_runtime_for_unavailable_profile
+    ~(base_runtime_id : string)
+    ~(effective_runtime_id : string) : string option =
   let normalized_base =
-    String.trim base_cascade
+    String.trim base_runtime_id
   in
   let normalized_effective =
-    String.trim effective_cascade
+    String.trim effective_runtime_id
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
   else if
-    String.equal normalized_effective (Keeper_config.default_cascade_name ())
-    || String.equal normalized_effective (Keeper_config.default_cascade_name ())
+    String.equal normalized_effective (Keeper_config.default_runtime_id ())
+    || String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
-  else Some (Keeper_config.default_cascade_name ())
+  else Some (Keeper_config.default_runtime_id ())
 
 let degraded_retry_after_recoverable_error
-    ~(effective_cascade : string)
+    ~(effective_runtime_id : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   let normalized_effective =
-    String.trim effective_cascade
+    String.trim effective_runtime_id
   in
   let effective_is_declared_phase_buffer =
-    is_declared_phase_alias effective_cascade (Keeper_config.default_cascade_name ())
+    is_declared_phase_alias effective_runtime_id (Keeper_config.default_runtime_id ())
   in
   let effective_is_declared_phase_recovery =
     is_declared_phase_alias
-      effective_cascade
-      (Keeper_config.default_cascade_name ())
+      effective_runtime_id
+      (Keeper_config.default_runtime_id ())
   in
   let phase_recovery_retry fallback_reason =
     Some
       {
-        next_cascade = (Keeper_config.default_cascade_name ());
+        next_runtime_id = (Keeper_config.default_runtime_id ());
         fallback_reason;
       }
   in
   if tool_requirement = Required
      || effective_is_declared_phase_buffer
      || effective_is_declared_phase_recovery
-     || String.equal normalized_effective (Keeper_config.default_cascade_name ())
-     || String.equal normalized_effective (Keeper_config.default_cascade_name ())
+     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
+     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
     phase_recovery_retry Hard_quota
@@ -500,13 +500,13 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.A2a _
          | Agent_sdk.Error.Internal _ -> None)
 
-let normalized_cascade_name ~catalog_names name =
+let normalized_runtime_id ~catalog_names name =
   let trimmed = String.trim name in
   if List.exists (String.equal trimmed) catalog_names then trimmed
   else if
-    String.equal trimmed (Keeper_config.default_cascade_name ())
-    || String.equal trimmed (Keeper_config.default_cascade_name ())
-    || String.equal trimmed (Keeper_config.default_cascade_name ())
+    String.equal trimmed (Keeper_config.default_runtime_id ())
+    || String.equal trimmed (Keeper_config.default_runtime_id ())
+    || String.equal trimmed (Keeper_config.default_runtime_id ())
   then trimmed
   else String.trim trimmed
 
@@ -515,12 +515,12 @@ let required_tool_rotation_candidate
     ~catalog_names
     name
   =
-  let normalized = normalized_cascade_name ~catalog_names name in
+  let normalized = normalized_runtime_id ~catalog_names name in
   let routed_phase_buffer_is_distinct =
     not
       (String.equal
-         (Keeper_config.default_cascade_name ())
-         (Keeper_config.default_cascade_name ()))
+         (Keeper_config.default_runtime_id ())
+         (Keeper_config.default_runtime_id ()))
   in
   (* Required-tool turns may still use the phase-recovery route when the catalog
      declares it as an explicit fallback profile. Do not take it from generic
@@ -528,30 +528,30 @@ let required_tool_rotation_candidate
      required-tool turns into a control/recovery lane. *)
   not
     ((routed_phase_buffer_is_distinct
-      && String.equal normalized (Keeper_config.default_cascade_name ())))
+      && String.equal normalized (Keeper_config.default_runtime_id ())))
   && (allow_phase_recovery
       || not
-           (String.equal normalized (Keeper_config.default_cascade_name ())))
+           (String.equal normalized (Keeper_config.default_runtime_id ())))
   && not (Runtime_capability_profile.is_system_cascade_name normalized)
 
-let tool_required_rotation_cascade_name () =
+let tool_required_rotation_runtime_id () =
   try
     Runtime.get_default_runtime_id ()
-  with Failure _ -> (Keeper_config.default_cascade_name ())
+  with Failure _ -> (Keeper_config.default_runtime_id ())
 
 let default_degraded_rotation_candidates
     ~catalog_names
-    ~(base_cascade : string)
+    ~(base_runtime_id : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
-  let normalized_base = normalized_cascade_name ~catalog_names base_cascade in
+  let normalized_base = normalized_runtime_id ~catalog_names base_runtime_id in
   let default_cascade =
-    normalized_cascade_name ~catalog_names (Keeper_config.default_cascade_name ())
+    normalized_runtime_id ~catalog_names (Keeper_config.default_runtime_id ())
   in
   let tool_required_cascade =
-    normalized_cascade_name ~catalog_names (tool_required_rotation_cascade_name ())
+    normalized_runtime_id ~catalog_names (tool_required_rotation_runtime_id ())
   in
   let phase_recovery_cascade =
-    normalized_cascade_name ~catalog_names
+    normalized_runtime_id ~catalog_names
       (Runtime.get_default_runtime_id ())
   in
   match tool_requirement with
@@ -564,20 +564,20 @@ let normalize_rotation_candidates ~catalog_names candidates =
   |> List.filter_map (fun candidate ->
          let trimmed = String.trim candidate in
          if String.equal trimmed "" then None
-         else Some (normalized_cascade_name ~catalog_names trimmed))
+         else Some (normalized_runtime_id ~catalog_names trimmed))
   |> dedupe_keep_order
 
 let degraded_rotation_candidates
     ~catalog_names
     ~(fallback_hint : string option)
-    ~(base_cascade : string)
-    ~(effective_cascade : string)
+    ~(base_runtime_id : string)
+    ~(effective_runtime_id : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
   let normalized_effective =
-    normalized_cascade_name ~catalog_names effective_cascade
+    normalized_runtime_id ~catalog_names effective_runtime_id
   in
   let raw_candidates =
-    default_degraded_rotation_candidates ~catalog_names ~base_cascade
+    default_degraded_rotation_candidates ~catalog_names ~base_runtime_id
       ~tool_requirement
   in
   let fallback_hint_candidate =
@@ -586,7 +586,7 @@ let degraded_rotation_candidates
     | Some hint ->
         let trimmed = String.trim hint in
         if String.equal trimmed "" then None
-        else Some (normalized_cascade_name ~catalog_names trimmed)
+        else Some (normalized_runtime_id ~catalog_names trimmed)
   in
   let candidates =
     match fallback_hint_candidate with
@@ -612,10 +612,10 @@ let degraded_rotation_candidates
 
 let degraded_rotation_after_recoverable_error
     ?fallback_hint
-    ~(base_cascade : string)
-    ~(effective_cascade : string)
+    ~(base_runtime_id : string)
+    ~(effective_runtime_id : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
-    ~(attempted_cascades : string list)
+    ~(attempted_runtime_ids : string list)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   match recoverable_cascade_failure_reason err with
   | None -> None
@@ -623,19 +623,19 @@ let degraded_rotation_after_recoverable_error
       (* Load the live catalog once at the degraded-rotation boundary and pass
          the snapshot through normalization/filter helpers.  This preserves
          concrete profile names without adding per-candidate catalog I/O. *)
-      let catalog_names = Keeper_cascade_profile.catalog_lookup_names () in
+      let catalog_names = Keeper_runtime_profile.catalog_lookup_names () in
       let attempted =
-        attempted_cascades
-        |> List.map (normalized_cascade_name ~catalog_names)
+        attempted_runtime_ids
+        |> List.map (normalized_runtime_id ~catalog_names)
         |> dedupe_keep_order
       in
       degraded_rotation_candidates
         ~catalog_names
         ~fallback_hint
-        ~base_cascade ~effective_cascade ~tool_requirement
+        ~base_runtime_id ~effective_runtime_id ~tool_requirement
       |> List.find_opt (fun candidate ->
              not (List.exists (String.equal candidate) attempted))
-      |> Option.map (fun next_cascade -> { next_cascade; fallback_reason })
+      |> Option.map (fun next_runtime_id -> { next_runtime_id; fallback_reason })
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
@@ -788,7 +788,7 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
 (** [true] when the rotation-cap fast-fail should fire for a
     [required_tool_contract_violation] error.  The cap prevents runaway
     rotation chains where the LLM calls no keeper tools: we allow at most one
-    rotation (so [attempted_cascades] must have at least 2 entries before the
+    rotation (so [attempted_runtime_ids] must have at least 2 entries before the
     cap fires), unless a fresh fallback cascade is still available
     ([fallback_not_yet_tried = true]).
 
@@ -797,9 +797,9 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
     - length = 1  ⇒ no rotation has been attempted yet → do not cap
     - length ≥ 2  ⇒ at least one rotation was tried → cap (unless fallback available) *)
 let should_cap_rotation_for_contract_violation
-    ~(attempted_cascades : string list)
+    ~(attempted_runtime_ids : string list)
     ~(fallback_not_yet_tried : bool)
     (err : Agent_sdk.Error.sdk_error) : bool =
   is_required_tool_contract_violation err
-  && List.length attempted_cascades >= 2
+  && List.length attempted_runtime_ids >= 2
   && not fallback_not_yet_tried

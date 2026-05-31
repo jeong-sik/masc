@@ -43,7 +43,7 @@ let run_model_by_label
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
-    Cascade_config_builder.config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
+    Runtime_config_builder.config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer ?memory
       ?tool_retry_policy
@@ -61,15 +61,15 @@ let run_model_by_label
       in
       let config = { config with transport = transport_resolved } in
       match
-        let admission_cascade_name =
+        let admission_runtime_id =
           model_label
         in
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-label-model"
-          ~cascade_name:admission_cascade_name
+          ~runtime_id:admission_runtime_id
           (fun () ->
-            Cascade_config_builder.with_cli_preflight
+            Runtime_config_builder.with_cli_preflight
               ~scope:(Printf.sprintf "model_label:%s" model_label)
               ~config ~goal
               (fun () ->
@@ -102,7 +102,7 @@ let run_model_by_label
                (Admission_queue_rejected { keeper_name = "oas-label-model"; reason }))
 
 let run_named_with_masc_tools
-    ~cascade_name
+    ~runtime_id
     ~goal
     ?priority
     ?(system_prompt = "")
@@ -140,7 +140,7 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  Keeper_turn_driver.run_named ~cascade_name ~goal ?priority ~system_prompt ~tools:oas_tools
+  Keeper_turn_driver.run_named ~runtime_id ~goal ?priority ~system_prompt ~tools:oas_tools
     ~require_tool_support:(masc_tools <> [])
     ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
     ?stream_idle_timeout_s ?wait_timeout_sec ?guardrails ?hooks ?memory
@@ -180,7 +180,7 @@ let run_model_with_masc_tools
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
-    Cascade_config_builder.config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
+    Runtime_config_builder.config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
       ?stream_idle_timeout_s ?guardrails ?hooks ?memory ?tool_retry_policy ?enable_thinking
       ?compact_ratio
@@ -196,15 +196,15 @@ let run_model_with_masc_tools
       in
       let config = { config with raw_trace; transport = transport_resolved } in
       match
-        let admission_cascade_name =
+        let admission_runtime_id =
           model_label
         in
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-explicit-model"
-          ~cascade_name:admission_cascade_name
+          ~runtime_id:admission_runtime_id
           (fun () ->
-            Cascade_config_builder.with_cli_preflight
+            Runtime_config_builder.with_cli_preflight
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->

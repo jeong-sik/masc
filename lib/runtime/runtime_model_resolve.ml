@@ -1,4 +1,4 @@
-(** Model ID resolution for cascade provider labels.
+(** Model ID resolution for runtime provider labels.
 
     Pure functions that map user-facing [auto] selectors through the OAS
     provider runtime binding projection. Provider-specific alias/catalog truth
@@ -96,7 +96,7 @@ let default_auto_models_for_profile (profile : Provider_runtime_projection.provi
     None
 ;;
 
-let auto_models_for_cascade_prefix ?getenv provider_name =
+let auto_models_for_runtime_prefix ?getenv provider_name =
   match Provider_runtime_projection.provider_profile_for_cascade_prefix provider_name with
   | None -> None
   | Some profile ->

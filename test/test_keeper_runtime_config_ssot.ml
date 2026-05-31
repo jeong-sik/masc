@@ -110,7 +110,7 @@ target = "cascade.primary"
       Config_dir_resolver.reset ();
       Cascade_catalog_runtime.install_snapshot_for_tests
         ~source_path:cascade_path
-        ~profile_names:[ (Keeper_config.default_cascade_name ()) ];
+        ~profile_names:[ (Keeper_config.default_runtime_id ()) ];
       f config_dir)
 
 (** Test: TOML personality fields overwrite stale runtime JSON values. *)
@@ -804,7 +804,7 @@ preset = "social"
   | Ok updated ->
       check string "goal" "TOML goal" updated.Keeper_meta_contract.goal;
       check string "cascade_name reset to keeper default"
-        ((Keeper_config.default_cascade_name ())) (Keeper_meta_contract.cascade_name_of_meta updated)
+        ((Keeper_config.default_runtime_id ())) (Keeper_meta_contract.cascade_name_of_meta updated)
 
 ;;
 let test_social_model_resynced_from_declarative_defaults () =

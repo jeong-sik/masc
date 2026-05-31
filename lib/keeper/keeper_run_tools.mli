@@ -99,7 +99,7 @@ type agent_setup =
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
-  ; receipt_cascade_observation_ref : Keeper_observation.cascade_observation option ref
+  ; receipt_runtime_observation_ref : Keeper_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
   ; reported_tool_names_ref : string list ref
   ; observed_tool_names_ref : string list ref
@@ -129,7 +129,7 @@ val prepare_agent_setup
   -> turn_affordances:string list
   -> required_tool_names:string list
   -> config_root:string
-  -> cascade_config_path:string option
+  -> runtime_config_path:string option
   -> gemini_mcp_disabled:bool
   -> approval_mode_effective:string option
   -> approval_mode_derived:bool

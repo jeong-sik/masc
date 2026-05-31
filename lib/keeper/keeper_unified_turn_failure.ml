@@ -25,7 +25,7 @@ let record_failure_and_maybe_escalate
   let threshold =
     Runtime_params.get Governance_registry.keeper_max_turn_failures
   in
-  Keeper_turn_cascade_budget.record_turn_failure_stress
+  Keeper_turn_runtime_budget.record_turn_failure_stress
     ~meta
     ~is_auto_recoverable
     ~consecutive:count
@@ -62,7 +62,7 @@ let record_failure_and_maybe_escalate
         else updated_meta
       in
       match
-        Keeper_turn_cascade_budget.sync_keeper_paused_state_with_resume_policy
+        Keeper_turn_runtime_budget.sync_keeper_paused_state_with_resume_policy
           ~config
           ~meta:pause_meta
           ~paused:true

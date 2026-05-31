@@ -11,8 +11,8 @@ val provider_context_json :
   Keeper_agent_run.run_result option ->
   Yojson.Safe.t
 
-val redacted_cascade_observation_to_json :
-  Keeper_observation.cascade_observation -> Yojson.Safe.t
+val redacted_runtime_observation_to_json :
+  Keeper_observation.runtime_observation -> Yojson.Safe.t
 
 val tool_contract_json :
   tool_call_count:int ->

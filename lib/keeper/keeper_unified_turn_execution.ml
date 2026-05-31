@@ -11,20 +11,20 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 open Result.Syntax
-module KCP = Keeper_cascade_profile
+module KCP = Keeper_runtime_profile
 include Keeper_turn_helpers
 include Keeper_turn_liveness
-include Keeper_turn_cascade_budget
+include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
 type retry_loop_input =
   { run_meta : keeper_meta
-  ; execution : cascade_execution
+  ; execution : runtime_execution
   ; run_generation : int
   ; attempt : int
   ; is_retry : bool
   ; allow_degraded_wall_clock_retry_budget : bool
-  ; attempted_cascades : string list
+  ; attempted_runtime_ids : string list
   }
 
 type ctx =
@@ -33,19 +33,19 @@ type ctx =
   ; build_turn_prompt :
       base_system_prompt:string -> messages:Agent_sdk.Types.message list ->
       Keeper_agent_run.turn_prompt
-  ; cascade_rotation_attempts : Keeper_execution_receipt.cascade_rotation_attempt list ref
+  ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list ref
   ; channel : Keeper_world_observation.keeper_cycle_channel
   ; cleanup : unit -> unit
   ; committed_mutating_tools_snapshot : unit -> string list
   ; config : Coord.config
   ; current_turn_blocker_info : blocker_info option ref
   ; degraded_retry_info : EC.degraded_retry option ref
-  ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_cascade_budget.turn_event_bus_summary
+  ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
   ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
   ; failure_reason : Keeper_turn_fsm.failure_reason option ref
   ; generation : int
   ; keeper_turn_id : int
-  ; last_execution : cascade_execution ref
+  ; last_execution : runtime_execution ref
   ; last_provider_timeout_budget : provider_timeout_budget option ref
   ; max_cost_usd : float option
   ; meta : keeper_meta
@@ -53,13 +53,13 @@ type ctx =
   ; post_commit_failure_reason : Keeper_registry.failure_reason option ref
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; prompt_timeout_estimate_tokens : int
-  ; record_cascade_rotation_attempt
+  ; record_runtime_rotation_attempt
       : ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
       -> ?productive_phase_elapsed_ms:int
       -> ?retry_phase_elapsed_ms:int
-      -> from_cascade:string
+      -> from_runtime_id:string
       -> retry:EC.degraded_retry
-      -> outcome:Keeper_execution_receipt.cascade_rotation_outcome
+      -> outcome:Keeper_execution_receipt.runtime_rotation_outcome
       -> Agent_sdk.Error.sdk_error
       -> unit
   ; shared_context : Agent_sdk.Context.t option
@@ -70,7 +70,7 @@ type ctx =
   }
 
 let run (ctx : ctx)
-      ~(initial_execution : cascade_execution)
+      ~(initial_execution : runtime_execution)
       ~(timeout_sec : float)
       ~(remaining_turn_budget_s : unit -> float)
       ~(retry_phase_started_at : float option ref)
@@ -104,7 +104,7 @@ let run (ctx : ctx)
       ; last_execution
       ; last_provider_timeout_budget
       ; degraded_retry_info
-      ; cascade_rotation_attempts
+      ; runtime_rotation_attempts
       ; current_turn_blocker_info
       ; post_commit_failure_reason
       ; profile_defaults
@@ -113,7 +113,7 @@ let run (ctx : ctx)
       ; drain_turn_event_bus
       ; event_bus_integrity_error_snapshot
       ; committed_mutating_tools_snapshot
-      ; record_cascade_rotation_attempt
+      ; record_runtime_rotation_attempt
       ; failure_reason
       ; attempt = _attempt
       } =
@@ -123,7 +123,7 @@ let run (ctx : ctx)
    | Error msg -> Error (Agent_sdk.Error.Internal msg)
    | Ok clock ->
    let do_run
-        ~(execution : cascade_execution)
+        ~(execution : runtime_execution)
         ~run_meta
         ~run_generation
         ~is_retry
@@ -188,18 +188,18 @@ let run (ctx : ctx)
                ~history_assistant_source:"internal_assistant"
                ~degraded_retry_applied:
                  (Option.is_some !degraded_retry_info)
-               ?degraded_retry_cascade:
+               ?degraded_retry_runtime_id:
                  (Option.map
                     (fun (retry : EC.degraded_retry) ->
-                       retry.next_cascade)
+                       retry.next_runtime_id)
                     !degraded_retry_info)
                ?fallback_reason:
                  (Option.map
                     (fun (retry : EC.degraded_retry) ->
                        retry.fallback_reason)
                     !degraded_retry_info)
-               ~cascade_rotation_attempts:
-                 (List.rev !cascade_rotation_attempts)
+               ~runtime_rotation_attempts:
+                 (List.rev !runtime_rotation_attempts)
                ~temperature:execution.temperature
                ~max_tokens:execution.max_tokens
                ~oas_timeout_s
@@ -218,7 +218,7 @@ let run (ctx : ctx)
         ; attempt
         ; is_retry
         ; allow_degraded_wall_clock_retry_budget
-        ; attempted_cascades
+        ; attempted_runtime_ids
         }
       =
       input
@@ -252,7 +252,7 @@ let run (ctx : ctx)
           ~config
           ~keeper_name:meta.name
           ~attempt
-          ~attempted_cascades
+          ~attempted_runtime_ids
           err
     in
     let attempt_provider_timeout_budget = ref None in
@@ -273,7 +273,7 @@ let run (ctx : ctx)
           ~degraded_rotation_first_attempt:
             allow_degraded_wall_clock_retry_budget
           ~attempt
-          ~attempted_cascades
+          ~attempted_runtime_ids
       in
       match
         resolve_bounded_provider_timeout_budget_with_turn_budget
@@ -289,11 +289,11 @@ let run (ctx : ctx)
         in
         let attempt_kind =
           if is_retry
-          then Keeper_turn_cascade_budget.Retry_attempt
-          else Keeper_turn_cascade_budget.First_attempt
+          then Keeper_turn_runtime_budget.Retry_attempt
+          else Keeper_turn_runtime_budget.First_attempt
         in
         (match
-           Keeper_turn_cascade_budget.decide_retry_admission_for_turn
+           Keeper_turn_runtime_budget.decide_retry_admission_for_turn
              ~remaining_turn_budget_s:remaining_turn_budget_sec
              ~attempt_kind
              ~allow_wall_clock_retry_budget
@@ -336,7 +336,7 @@ let run (ctx : ctx)
     match attempt_result with
     | Ok result ->
       let selected_model =
-        match result.cascade_observation with
+        match result.runtime_observation with
         | Some observation -> observation.selected_model
         | None -> None
       in
@@ -451,12 +451,12 @@ let run (ctx : ctx)
         let fallback_not_yet_tried =
           match KCP.fallback_cascade_for execution_cascade_name with
           | Some fb ->
-            (not (List.exists (String.equal fb) attempted_cascades))
+            (not (List.exists (String.equal fb) attempted_runtime_ids))
             && not (String.equal fb execution_cascade_name)
           | None -> false
         in
         EC.should_cap_rotation_for_contract_violation
-          ~attempted_cascades
+          ~attempted_runtime_ids
           ~fallback_not_yet_tried
           err
       then (
@@ -467,7 +467,7 @@ let run (ctx : ctx)
            tool-use choice. Error: %s"
           meta.name
           execution_cascade_name
-          (List.length attempted_cascades)
+          (List.length attempted_runtime_ids)
           (short_preview (Agent_sdk.Error.to_string err));
         Prometheus.inc_counter
           "masc_keeper_contract_violation_rotation_capped_total"
@@ -478,10 +478,10 @@ let run (ctx : ctx)
       else (
         match
           next_fail_open_cascade_for_turn_with_budget
-            ~base_cascade:(runtime_id_of_meta meta)
-            ~effective_cascade:execution_cascade_name
+            ~base_runtime_id:(runtime_id_of_meta meta)
+            ~effective_runtime_id:execution_cascade_name
             ~tool_requirement:initial_tool_requirement
-            ~attempted_cascades
+            ~attempted_runtime_ids
             ~estimated_input_tokens:prompt_timeout_estimate_tokens
             ~max_turns
             ~time_spent_in_turn_s:
@@ -492,26 +492,26 @@ let run (ctx : ctx)
         | Degraded_retry_allowed degraded_retry ->
           (match
              Keeper_unified_turn_pre_dispatch
-             .build_cascade_execution
+             .build_runtime_execution
                ~meta
                ~profile_defaults
                ~cascade_name:
                  (* RFC-0206: raw runtime id (no prefix validation); keep the
                     empty→fallback behaviour only. *)
-                 (if String.trim degraded_retry.next_cascade = ""
+                 (if String.trim degraded_retry.next_runtime_id = ""
                   then execution.cascade_name
-                  else degraded_retry.next_cascade)
+                  else degraded_retry.next_runtime_id)
            with
            | Error fail_open_err ->
              let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
                current_turn_phase_elapsed_ms ()
              in
-             record_cascade_rotation_attempt
+             record_runtime_rotation_attempt
                ~slot_release_at_phase:
                  Keeper_execution_receipt.Retry_setup_failed
                ~productive_phase_elapsed_ms
                ?retry_phase_elapsed_ms
-               ~from_cascade:execution.cascade_name
+               ~from_runtime_id:execution.cascade_name
                ~retry:degraded_retry
                ~outcome:
                  Keeper_execution_receipt.Rotation_setup_failed
@@ -522,7 +522,7 @@ let run (ctx : ctx)
                 failed: %s"
                meta.name
                execution_cascade_name
-               degraded_retry.next_cascade
+               degraded_retry.next_runtime_id
                (EC.degraded_retry_reason_to_string
                   degraded_retry.fallback_reason)
                (short_preview
@@ -545,11 +545,11 @@ let run (ctx : ctx)
                  Some Keeper_execution_receipt.Retry_scheduled
                | None -> None
              in
-             record_cascade_rotation_attempt
+             record_runtime_rotation_attempt
                ?slot_release_at_phase
                ~productive_phase_elapsed_ms
                ?retry_phase_elapsed_ms
-               ~from_cascade:execution.cascade_name
+               ~from_runtime_id:execution.cascade_name
                ~retry:degraded_retry
                ~outcome:
                  Keeper_execution_receipt.Rotation_retry_scheduled
@@ -584,8 +584,8 @@ let run (ctx : ctx)
                  ; attempt = 1
                  ; is_retry = true
                  ; allow_degraded_wall_clock_retry_budget = true
-                 ; attempted_cascades =
-                     next_execution_cascade_name :: attempted_cascades
+                 ; attempted_runtime_ids =
+                     next_execution_cascade_name :: attempted_runtime_ids
                  }
              in
              (match turn_slot_control with
@@ -623,12 +623,12 @@ let run (ctx : ctx)
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
             current_turn_phase_elapsed_ms ()
           in
-          record_cascade_rotation_attempt
+          record_runtime_rotation_attempt
             ~slot_release_at_phase:
               Keeper_execution_receipt.Retry_budget_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
-            ~from_cascade:execution.cascade_name
+            ~from_runtime_id:execution.cascade_name
             ~retry:degraded_retry
             ~outcome:
               Keeper_execution_receipt.Rotation_budget_exhausted
@@ -640,7 +640,7 @@ let run (ctx : ctx)
              ending this cycle: %s"
             meta.name
             execution_cascade_name
-            degraded_retry.next_cascade
+            degraded_retry.next_runtime_id
             (EC.degraded_retry_reason_to_string
                degraded_retry.fallback_reason)
             (remaining_turn_budget_s ())
@@ -651,12 +651,12 @@ let run (ctx : ctx)
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
             current_turn_phase_elapsed_ms ()
           in
-          record_cascade_rotation_attempt
+          record_runtime_rotation_attempt
             ~slot_release_at_phase:
               Keeper_execution_receipt.Productive_phase_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
-            ~from_cascade:execution.cascade_name
+            ~from_runtime_id:execution.cascade_name
             ~retry:degraded_retry
             ~outcome:
               Keeper_execution_receipt.Rotation_slot_phase_exhausted
@@ -668,7 +668,7 @@ let run (ctx : ctx)
              this cycle to release the outer turn slot: %s"
             meta.name
             execution_cascade_name
-            degraded_retry.next_cascade
+            degraded_retry.next_runtime_id
             (EC.degraded_retry_reason_to_string
                degraded_retry.fallback_reason)
             degraded_retry_slot_phase_budget_sec
@@ -713,7 +713,7 @@ let run (ctx : ctx)
             ; attempt = attempt + 1
             ; is_retry = true
             ; allow_degraded_wall_clock_retry_budget = false
-            ; attempted_cascades
+            ; attempted_runtime_ids
             }
         | No_degraded_retry when EC.is_context_overflow err ->
           let current_turn_event_bus =
@@ -763,7 +763,7 @@ let run (ctx : ctx)
         ; attempt = 1
         ; is_retry = false
         ; allow_degraded_wall_clock_retry_budget = false
-        ; attempted_cascades =
+        ; attempted_runtime_ids =
             [ initial_execution.cascade_name
             ]
         })

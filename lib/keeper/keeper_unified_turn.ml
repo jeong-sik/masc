@@ -66,7 +66,7 @@ let run_keeper_cycle
   in
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
-  let append_manifest ?status ?decision ?cascade_name ?clock_refs ~site event =
+  let append_manifest ?status ?decision ?runtime_id ?clock_refs ~site event =
     let decision =
       let decision =
         match decision with
@@ -95,7 +95,7 @@ let run_keeper_cycle
            decision)
     in
     Keeper_runtime_manifest.make_for_context runtime_manifest_context ~event
-      ?cascade_name ?status ?decision ()
+      ?runtime_id ?status ?decision ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in
   let append_phase_gate_decision turn_plan =
@@ -150,7 +150,7 @@ let run_keeper_cycle
           ~phase_opt
           ~append_cascade_routed_manifest:(fun ~cascade_name ~decision ->
             append_manifest ~site:"cascade_routed"
-              ~cascade_name
+              ~runtime_id:cascade_name
               ~decision
               Keeper_runtime_manifest.Cascade_routed)
       in

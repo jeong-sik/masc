@@ -189,7 +189,7 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
            decision)
   in
   Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id ~generation
-    ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ~cascade_name ?status
+    ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ~runtime_id:cascade_name ?status
     ?decision ?checkpoint_path ?receipt_path ()
   |> Keeper_runtime_manifest.append_best_effort ~site config
 

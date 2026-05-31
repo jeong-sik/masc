@@ -11,7 +11,6 @@ val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
-val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
 val legacy_provider_filter_name : string
@@ -110,7 +109,6 @@ val keeper_slot_id : string -> int option
 val keeper_enable_thinking : unit -> bool
 val keeper_adaptive_thinking_enabled : unit -> bool
 val keeper_adaptive_thinking_mode : unit -> bool
-val keeper_room_signal_prompt_enabled_override : unit -> bool option
 val ensure_runtime_params_init : unit -> unit
 type sandbox_profile =
   Keeper_types_profile_sandbox.sandbox_profile =
@@ -164,7 +162,6 @@ type keeper_profile_defaults =
   proactive_enabled : bool option;
   proactive_idle_sec : int option;
   proactive_cooldown_sec : int option;
-  room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
   sandbox_profile :

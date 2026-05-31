@@ -452,7 +452,6 @@ mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 proactive_idle_sec = 300
 proactive_cooldown_sec = 60
-room_signal_prompt_enabled = true
 autoboot_enabled = false
 repo_cli_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
@@ -471,8 +470,6 @@ active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
       check (option string) "will" (Some "detect issues") d.will;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
-      check (option bool) "room signal prompt" (Some true)
-        d.room_signal_prompt_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
       check (option string) "repo_cli_identity" (Some "anyang-keepers")
         d.repo_cli_identity;

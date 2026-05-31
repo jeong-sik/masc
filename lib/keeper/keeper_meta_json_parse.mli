@@ -35,7 +35,6 @@ type parsed_keeper_policy =
   ; pp_tool_access : string list
   ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
-  ; pp_room_signal_prompt_enabled : bool
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
   ; pp_auto_handoff : bool

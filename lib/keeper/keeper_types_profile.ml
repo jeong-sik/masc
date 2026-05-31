@@ -202,8 +202,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
                 proactive_idle_sec = Safe_ops.json_int_opt "proactive_idle_sec" keeper_json;
                 proactive_cooldown_sec = Safe_ops.json_int_opt "proactive_cooldown_sec" keeper_json;
-                room_signal_prompt_enabled =
-                  Safe_ops.json_bool_opt "room_signal_prompt_enabled" keeper_json;
                 shards =
                   (match Safe_ops.json_string_list "shards" keeper_json with
                    | [] -> None

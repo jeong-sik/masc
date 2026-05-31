@@ -16,12 +16,6 @@ let tool_names_include_board name_list =
     name_list
 ;;
 
-(** Keep [room_signal_prompt] on when [default] is set or the allowlist
-    contains any board tool. *)
-let tool_access_default_room_signal_prompt_enabled ~default tool_names =
-  default || tool_names_include_board tool_names
-;;
-
 let normalize_tool_names names =
   names
   |> List.map String.trim
@@ -171,11 +165,6 @@ let tool_access_to_string_list tools =
 (** Typed variant of [tool_names_include_board]. *)
 let tool_names_include_board_typed tools =
   List.exists Tool_name.Keeper.is_board tools
-;;
-
-(** Typed variant of [tool_access_default_room_signal_prompt_enabled]. *)
-let tool_access_default_room_signal_prompt_enabled_typed ~default tools =
-  default || tool_names_include_board_typed tools
 ;;
 
 (** Deduplicate a typed tool list preserving first-seen order. *)

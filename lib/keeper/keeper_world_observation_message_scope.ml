@@ -6,10 +6,6 @@ open Keeper_types_profile
 open Keeper_memory
 open Keeper_context_runtime
 
-let scope_message_feed_enabled (meta : keeper_meta) : bool =
-  meta.room_signal_prompt_enabled
-;;
-
 let message_feed_targets (meta : keeper_meta) =
   if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
 ;;

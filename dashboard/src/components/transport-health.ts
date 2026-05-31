@@ -484,7 +484,7 @@ export function TransportHealthPanel() {
             <${SectionCard} label="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} 활성`}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
-                <${MetricRow} label="코디네이터" value=${data.sse.sessions_workspaceSession} />
+                <${MetricRow} label="코디네이터" value=${data.sse.sessions_agentStream} />
                 <${MetricRow} label="프레즌스" value=${data.sse.sessions_presence} />
                 <${MetricRow} label="외부 팬아웃" value=${data.sse.external_subscribers} />
                 <${MetricRow} label="큐" value=${data.sse.queue_max_depth} sub=${`최대 / 평균 ${formatFloat(data.sse.queue_avg_depth)}`} />

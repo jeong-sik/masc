@@ -163,7 +163,7 @@ let save_file_unix (path : string) (content : string) : unit =
    removed cache folded three syscalls (open/output_string/close)
    into one cached output_string under 64-keeper telemetry. Fresh
    fd per call restores those three syscalls. A future domain-safe
-   cache (per-domain fd, or a single-writer workspace_session fiber) can
+   cache (per-domain fd, or a single-writer agent_stream fiber) can
    reinstate the optimization without giving up correctness. *)
 let append_path_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
   Hashtbl.create 32

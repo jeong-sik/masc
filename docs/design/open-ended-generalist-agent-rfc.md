@@ -207,7 +207,7 @@ This artifact can inform future verifier or benchmark work, but it cannot write 
 - Reward advice carries `authority = advisory_only`.
 - Tests cover that advisory artifacts cannot change `contract_verdict`.
 - Dashboard or operator surfaces visually separate verdict, friction, advice, and candidate queues.
-- OAS remains workspaceSession-agnostic; MASC-specific state stays in MASC adapters and workspace collaboration surfaces.
+- OAS remains agent-stream-agnostic; MASC-specific state stays in MASC adapters and workspace collaboration surfaces.
 
 ## 8. Evidence
 

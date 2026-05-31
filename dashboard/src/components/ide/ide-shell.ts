@@ -7,7 +7,7 @@ import {
   type IdeContextFocus,
   type IdeContextFocusRouteLink,
 } from './ide-state'
-import { createIdeDataWorkspaceSession } from './ide-data-workspace-session'
+import { createIdeDataWorkspaceStore } from './ide-data-workspace-store'
 import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
@@ -407,28 +407,28 @@ function paramsWithRails(
 }
 
 export function IdeShell() {
-  const workspaceSession = useMemo(() => createIdeDataWorkspaceSession(), [])
+  const agentStream = useMemo(() => createIdeDataWorkspaceStore(), [])
 
-  useEffect(() => () => workspaceSession.dispose(), [workspaceSession])
+  useEffect(() => () => agentStream.dispose(), [agentStream])
   const annotations = useSubscribedSnapshot(
-    workspaceSession.annotations,
-    workspaceSession.subscribeAnnotations,
+    agentStream.annotations,
+    agentStream.subscribeAnnotations,
   )
   const diffRows = useSubscribedSnapshot(
-    workspaceSession.diffRows,
-    workspaceSession.subscribeDiffRows,
+    agentStream.diffRows,
+    agentStream.subscribeDiffRows,
   )
   const repositories = useSubscribedValue(
-    workspaceSession.repositories,
-    workspaceSession.subscribeRepositories,
+    agentStream.repositories,
+    agentStream.subscribeRepositories,
   )
   const activeRepositoryId = useSubscribedValue(
-    workspaceSession.activeRepositoryId,
-    workspaceSession.subscribeActiveRepositoryId,
+    agentStream.activeRepositoryId,
+    agentStream.subscribeActiveRepositoryId,
   )
   const workspaceSource = useSubscribedValue(
-    workspaceSession.workspaceSource,
-    workspaceSession.subscribeWorkspaceSource,
+    agentStream.workspaceSource,
+    agentStream.subscribeWorkspaceSource,
   )
   const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
 
@@ -656,14 +656,14 @@ export function IdeShell() {
       >
         <div class="ide-plane-tree">
           <${IdeExplorer}
-            fileTreeStore=${workspaceSession.fileTreeStore}
-            workspaceSource=${workspaceSession.workspaceSource}
-            subscribeWorkspaceSource=${workspaceSession.subscribeWorkspaceSource}
-            repositories=${workspaceSession.repositories}
-            activeRepositoryId=${workspaceSession.activeRepositoryId}
-            onRepositoryChange=${workspaceSession.setActiveRepositoryId}
-            onRepositoryScan=${workspaceSession.scanRepositories}
-            subscribeRepositories=${workspaceSession.subscribeRepositories}
+            fileTreeStore=${agentStream.fileTreeStore}
+            workspaceSource=${agentStream.workspaceSource}
+            subscribeWorkspaceSource=${agentStream.subscribeWorkspaceSource}
+            repositories=${agentStream.repositories}
+            activeRepositoryId=${agentStream.activeRepositoryId}
+            onRepositoryChange=${agentStream.setActiveRepositoryId}
+            onRepositoryScan=${agentStream.scanRepositories}
+            subscribeRepositories=${agentStream.subscribeRepositories}
           />
         </div>
         <div
@@ -672,8 +672,8 @@ export function IdeShell() {
           <${IdeEditor}
             activeView=${activeView}
             activeLayers=${activeLayers}
-            documentStore=${workspaceSession.documentStore}
-            ownershipStore=${workspaceSession.ownershipStore}
+            documentStore=${agentStream.documentStore}
+            ownershipStore=${agentStream.ownershipStore}
             diffRows=${() => diffRows}
             findOpen=${findOpen}
             onFindOpen=${handleFindOpen}
@@ -695,8 +695,8 @@ export function IdeShell() {
                 data-testid="ide-right-context-stack"
               >
                 <${IdeBranchContextPanel}
-                  activeRepositoryId=${workspaceSession.activeRepositoryId}
-                  subscribeActiveRepositoryId=${workspaceSession.subscribeActiveRepositoryId}
+                  activeRepositoryId=${agentStream.activeRepositoryId}
+                  subscribeActiveRepositoryId=${agentStream.subscribeActiveRepositoryId}
                 />
                 <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                 <${IdePersistencePanel} keeperName=${terminalKeeper} />

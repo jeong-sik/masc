@@ -90,12 +90,12 @@ Implications:
 The dependency direction is strictly unidirectional:
 
 ```text
-MCP Protocol SDK  <--  OAS (Agent SDK)  <--  MASC (Workspace session)
+MCP Protocol SDK  <--  OAS (Agent SDK)  <--  MASC (Agent stream)
      (wire)              (execution)           (supervision)
 ```
 
 - MCP SDK does not know OAS or MASC exist. It owns wire protocol semantics only.
-- OAS does not know MASC exists. It is a general-purpose agent execution SDK. Any workspace session can consume its proof bundles.
+- OAS does not know MASC exists. It is a general-purpose agent execution SDK. Any agent stream can consume its proof bundles.
 - MASC depends on OAS (via opam `agent_sdk`) and MCP SDK (via `mcp_protocol`). It is the consumer, not the definition authority for execution or protocol semantics.
 
 Module ownership:

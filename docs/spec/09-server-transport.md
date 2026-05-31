@@ -251,12 +251,12 @@ SSE 세션은 두 종류로 분류된다:
 | Kind | 대상 | 수신 이벤트 |
 |------|------|-----------|
 | `Observer` | Dashboard, 읽기 전용 뷰어 | dashboard snapshot |
-| `Workspace session` | MCP 에이전트 연결 | heartbeat, task event |
+| `Agent stream` | MCP 에이전트 연결 | heartbeat, task event |
 
 `broadcast_to` 함수로 대상을 지정할 수 있다:
 
 ```ocaml
-type broadcast_target = All | Observers | Workspace sessions
+type broadcast_target = All | Observers | Agent streams
 ```
 
 `broadcast json`은 `broadcast_to All json`과 동일하다 (하위 호환).
@@ -329,7 +329,7 @@ Sse.subscribe_external ~id:"ws-123"
 | Method | Path | Handler | 설명 |
 |--------|------|---------|------|
 | POST | `/mcp` | `handle_post_mcp ~profile:Full` | MCP JSON-RPC (전체 도구) |
-| GET | `/mcp` | `handle_get_mcp` | SSE 스트림 (Workspace session) |
+| GET | `/mcp` | `handle_get_mcp` | SSE 스트림 (Agent stream) |
 | DELETE | `/mcp` | `handle_delete_mcp` | MCP 세션 종료 |
 | POST | `/mcp/managed` | `handle_post_mcp ~profile:Managed_agent` | 관리 에이전트 MCP |
 | GET | `/mcp/managed` | `handle_get_mcp` | 관리 에이전트 SSE |

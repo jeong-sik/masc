@@ -362,7 +362,7 @@ MASC 조율 이벤트를 OAS `Event_bus`에 `Custom("masc:<type>", json)` 형식
 2. 배경 fiber가 `drain_interval_s` (기본 0.25초) 간격으로 poll
 3. native/custom event를 `oas:*` envelope JSON으로 직렬화하고 `correlation_id`, `run_id`, `ts_unix`를 포함
 4. `.masc/oas-events/`에 durable append
-5. `Sse.broadcast_to Workspace sessions`로 dashboard 클라이언트에 전달
+5. `Sse.broadcast_to Agent streams`로 dashboard 클라이언트에 전달
 
 환경변수: `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` (범위: 0.05-5.0초)
 

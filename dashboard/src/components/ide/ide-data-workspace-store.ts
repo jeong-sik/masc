@@ -34,7 +34,7 @@ import {
   type IdeAnnotation,
 } from '../../api/ide'
 
-export interface IdeDataWorkspaceSession {
+export interface IdeDataWorkspaceStore {
   readonly documentStore: CodeDocumentStore
   readonly ownershipStore: KeeperLineOwnershipStore
   readonly fileTreeStore: FileTreeStore
@@ -100,7 +100,7 @@ export function selectPreferredIdeRepositoryId(
     ?? null
 }
 
-export function createIdeDataWorkspaceSession(): IdeDataWorkspaceSession {
+export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const documentStore = createCodeDocumentStore({
     file_path: activeIdeFile.value,
     language: DEFAULT_LANGUAGE_ID,

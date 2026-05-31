@@ -32,19 +32,19 @@ let all_decision_stages : Keeper_registry.packed_decision_stage list =
   ; Keeper_registry.Packed Decision_tool_policy_selected
   ]
 
-type cascade_state = Keeper_registry.cascade_state =
-  | Cascade_idle
-  | Cascade_selecting
-  | Cascade_trying
-  | Cascade_done
-  | Cascade_exhausted
+type runtime_state = Keeper_registry.runtime_state =
+  | Runtime_idle
+  | Runtime_selecting
+  | Runtime_trying
+  | Runtime_done
+  | Runtime_exhausted
 
-let all_cascade_states : Keeper_registry.packed_cascade_state list =
-  [ Keeper_registry.Packed Cascade_idle
-  ; Keeper_registry.Packed Cascade_selecting
-  ; Keeper_registry.Packed Cascade_trying
-  ; Keeper_registry.Packed Cascade_done
-  ; Keeper_registry.Packed Cascade_exhausted
+let all_runtime_states : Keeper_registry.packed_runtime_state list =
+  [ Keeper_registry.Packed Runtime_idle
+  ; Keeper_registry.Packed Runtime_selecting
+  ; Keeper_registry.Packed Runtime_trying
+  ; Keeper_registry.Packed Runtime_done
+  ; Keeper_registry.Packed Runtime_exhausted
   ]
 
 type compaction_stage = Keeper_registry.compaction_stage =
@@ -86,21 +86,21 @@ let all_tla_actions =
 
 type invariant_key =
   | Invariant_phase_turn_alignment
-  | Invariant_no_cascade_before_measurement
+  | Invariant_no_runtime_before_measurement
   | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
 
 let all_invariant_keys =
   [
-    Invariant_phase_turn_alignment; Invariant_no_cascade_before_measurement;
+    Invariant_phase_turn_alignment; Invariant_no_runtime_before_measurement;
     Invariant_compaction_atomicity; Invariant_event_priority_monotone;
     Invariant_phase_derivation_agreement;
   ]
 
 type invariants_check = {
   phase_turn_alignment : bool;
-  no_cascade_before_measurement : bool;
+  no_runtime_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
   phase_derivation_agreement : bool;
@@ -110,7 +110,7 @@ type last_outcome = {
   turn_id : int;
   ended_at : float;
   decision_stage : Keeper_registry.packed_decision_stage;
-  cascade_state : Keeper_registry.packed_cascade_state;
+  runtime_state : Keeper_registry.packed_runtime_state;
   selected_model : string option;
 }
 
@@ -135,7 +135,7 @@ type snapshot = {
   phase : Keeper_state_machine.phase;
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;
-  kcl_cascade_state : Keeper_registry.packed_cascade_state;
+  kcl_runtime_state : Keeper_registry.packed_runtime_state;
   kmc_compaction : Keeper_registry.packed_compaction_stage;
   kcb_state : Keeper_failure_circuit_breaker.display_state;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
@@ -217,20 +217,20 @@ let decision_stage_of_string = function
   | "tool_policy_selected" -> Some Decision_tool_policy_selected
   | _ -> None
 
-let cascade_state_to_string (s : Keeper_registry.packed_cascade_state) =
+let runtime_state_to_string (s : Keeper_registry.packed_runtime_state) =
   match s with
-  | Keeper_registry.Packed Cascade_idle -> "idle"
-  | Keeper_registry.Packed Cascade_selecting -> "selecting"
-  | Keeper_registry.Packed Cascade_trying -> "trying"
-  | Keeper_registry.Packed Cascade_done -> "done"
-  | Keeper_registry.Packed Cascade_exhausted -> "exhausted"
+  | Keeper_registry.Packed Runtime_idle -> "idle"
+  | Keeper_registry.Packed Runtime_selecting -> "selecting"
+  | Keeper_registry.Packed Runtime_trying -> "trying"
+  | Keeper_registry.Packed Runtime_done -> "done"
+  | Keeper_registry.Packed Runtime_exhausted -> "exhausted"
 
-let cascade_state_of_string = function
-  | "idle" -> Some Cascade_idle
-  | "selecting" -> Some Cascade_selecting
-  | "trying" -> Some Cascade_trying
-  | "done" -> Some Cascade_done
-  | "exhausted" -> Some Cascade_exhausted
+let runtime_state_of_string = function
+  | "idle" -> Some Runtime_idle
+  | "selecting" -> Some Runtime_selecting
+  | "trying" -> Some Runtime_trying
+  | "done" -> Some Runtime_done
+  | "exhausted" -> Some Runtime_exhausted
   | _ -> None
 
 let compaction_stage_to_string (s : Keeper_registry.packed_compaction_stage) =
@@ -284,14 +284,14 @@ let tla_action_of_string = function
 
 let invariant_key_to_string = function
   | Invariant_phase_turn_alignment -> "PhaseTurnAlignment"
-  | Invariant_no_cascade_before_measurement -> "NoCascadeBeforeMeasurement"
+  | Invariant_no_runtime_before_measurement -> "NoRuntimeBeforeMeasurement"
   | Invariant_compaction_atomicity -> "CompactionAtomicity"
   | Invariant_event_priority_monotone -> "EventPriorityMonotone"
   | Invariant_phase_derivation_agreement -> "PhaseDerivationAgreement"
 
 let invariant_key_of_string = function
   | "PhaseTurnAlignment" -> Some Invariant_phase_turn_alignment
-  | "NoCascadeBeforeMeasurement" -> Some Invariant_no_cascade_before_measurement
+  | "NoRuntimeBeforeMeasurement" -> Some Invariant_no_runtime_before_measurement
   | "CompactionAtomicity" -> Some Invariant_compaction_atomicity
   | "EventPriorityMonotone" -> Some Invariant_event_priority_monotone
   | "PhaseDerivationAgreement" -> Some Invariant_phase_derivation_agreement
@@ -331,10 +331,10 @@ let live_decision_stage (entry : Keeper_registry.registry_entry) =
   | Some obs -> obs.decision_stage
   | None -> Keeper_registry.Packed Decision_undecided
 
-let live_cascade_state (entry : Keeper_registry.registry_entry) =
+let live_runtime_state (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
-  | Some obs -> obs.cascade_state
-  | None -> Keeper_registry.Packed Cascade_idle
+  | Some obs -> obs.runtime_state
+  | None -> Keeper_registry.Packed Runtime_idle
 
 let live_measurement (entry : Keeper_registry.registry_entry) =
   match entry.current_turn_observation with
@@ -369,13 +369,13 @@ let check_compaction_atomicity
   | Keeper_registry.Packed Compaction_done ->
       not (phase = Keeper_state_machine.Compacting)
 
-let check_no_cascade_before_measurement
-    ~(cascade_state : Keeper_registry.packed_cascade_state)
+let check_no_runtime_before_measurement
+    ~(runtime_state : Keeper_registry.packed_runtime_state)
     ~(measurement_captured : bool)
     : bool =
-  match cascade_state with
-  | Packed Cascade_idle -> true
-  | Packed (Cascade_selecting | Cascade_trying | Cascade_done | Cascade_exhausted) ->
+  match runtime_state with
+  | Packed Runtime_idle -> true
+  | Packed (Runtime_selecting | Runtime_trying | Runtime_done | Runtime_exhausted) ->
       measurement_captured
 
 type event_priority_state = {
@@ -411,15 +411,15 @@ let compute_invariants
     (entry : Keeper_registry.registry_entry)
     ~(phase : Keeper_state_machine.phase)
     ~(turn_phase : Keeper_registry.packed_turn_phase)
-    ~(cascade_state : Keeper_registry.packed_cascade_state)
+    ~(runtime_state : Keeper_registry.packed_runtime_state)
     ~(compaction_stage : Keeper_registry.packed_compaction_stage)
     ~(measurement_captured : bool)
     : invariants_check =
   {
     phase_turn_alignment = check_phase_turn_alignment phase turn_phase;
-    no_cascade_before_measurement =
-      check_no_cascade_before_measurement
-        ~cascade_state
+    no_runtime_before_measurement =
+      check_no_runtime_before_measurement
+        ~runtime_state
         ~measurement_captured;
     compaction_atomicity = check_compaction_atomicity phase compaction_stage;
     event_priority_monotone = check_event_priority_monotone entry;
@@ -442,7 +442,7 @@ let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
         ()
   in
   bump Invariant_phase_turn_alignment inv.phase_turn_alignment;
-  bump Invariant_no_cascade_before_measurement inv.no_cascade_before_measurement;
+  bump Invariant_no_runtime_before_measurement inv.no_runtime_before_measurement;
   bump Invariant_compaction_atomicity inv.compaction_atomicity;
   bump Invariant_event_priority_monotone inv.event_priority_monotone;
   bump Invariant_phase_derivation_agreement inv.phase_derivation_agreement
@@ -479,7 +479,7 @@ let observe
   let turn_phase = live_turn_phase entry in
   let compaction_stage = entry.compaction_stage in
   let decision_stage = live_decision_stage entry in
-  let cascade_state = live_cascade_state entry in
+  let runtime_state = live_runtime_state entry in
   let measurement = live_measurement entry in
   let measurement_captured = Option.is_some measurement in
   let invariants =
@@ -487,7 +487,7 @@ let observe
       entry
       ~phase:entry.phase
       ~turn_phase
-      ~cascade_state
+      ~runtime_state
       ~compaction_stage
       ~measurement_captured
   in
@@ -504,7 +504,7 @@ let observe
     phase = entry.phase;
     ktc_turn_phase = turn_phase;
     kdp_decision = decision_stage;
-    kcl_cascade_state = cascade_state;
+    kcl_runtime_state = runtime_state;
     kmc_compaction = compaction_stage;
     kcb_state;
     shared_measurement = measurement;
@@ -529,7 +529,7 @@ let observe
            turn_id = lc.ct_turn_id;
            ended_at = lc.ct_ended_at;
            decision_stage = lc.ct_decision_stage;
-           cascade_state = lc.ct_cascade_state;
+           runtime_state = lc.ct_runtime_state;
            selected_model = lc.ct_selected_model;
          }
        | None -> None);
@@ -562,7 +562,7 @@ let all_snapshots ~(base_path : string) () : snapshot list =
 let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
   `Assoc [
     "phase_turn_alignment", `Bool inv.phase_turn_alignment;
-    "no_cascade_before_measurement", `Bool inv.no_cascade_before_measurement;
+    "no_runtime_before_measurement", `Bool inv.no_runtime_before_measurement;
     "compaction_atomicity", `Bool inv.compaction_atomicity;
     "event_priority_monotone", `Bool inv.event_priority_monotone;
     "phase_derivation_agreement", `Bool inv.phase_derivation_agreement;
@@ -686,7 +686,7 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
       "stage", `String (decision_stage_to_string s.kdp_decision);
     ];
     "cascade", `Assoc [
-      "state", `String (cascade_state_to_string s.kcl_cascade_state);
+      "state", `String (runtime_state_to_string s.kcl_runtime_state);
     ];
     "compaction", `Assoc [
       "stage", `String (compaction_stage_to_string s.kmc_compaction);
@@ -725,8 +725,8 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           "ended_at", `Float lo.ended_at;
           "decision_stage",
             `String (decision_stage_to_string lo.decision_stage);
-          "cascade_state",
-            `String (cascade_state_to_string lo.cascade_state);
+          "runtime_state",
+            `String (runtime_state_to_string lo.runtime_state);
           "selected_model",
             Json_util.string_opt_to_json lo.selected_model;
         ]

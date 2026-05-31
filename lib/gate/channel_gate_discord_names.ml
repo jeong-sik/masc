@@ -27,13 +27,6 @@ let configured_write_path env_name ~default =
   | Some raw -> resolve_path raw
   | None -> resolve_path default
 
-let configured_read_path env_name ~default ~legacy =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None ->
-      ignore legacy;
-      resolve_path default
-
 let names_write_path () =
   configured_write_path "MASC_DISCORD_NAMES_PATH" ~default:default_names_path
 

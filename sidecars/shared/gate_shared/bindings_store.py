@@ -1,8 +1,8 @@
 """Shared bindings-store helpers for Channel Gate sidecars.
 
-Load and persist ``{channel_id: keeper_name}`` JSON with 1-tier legacy
-fallback.  Discord's richer ``BindingStore`` class (audit coupling +
-mtime tracking) is intentionally separate.
+Load and persist ``{channel_id: keeper_name}`` JSON. Discord's richer
+``BindingStore`` class (audit coupling + mtime tracking) is intentionally
+separate.
 """
 
 from __future__ import annotations
@@ -16,27 +16,18 @@ from pathlib import Path
 def load_bindings(
     default_path: str | Path,
     *,
-    legacy_path: str | Path | None = None,
     logger: logging.Logger | None = None,
 ) -> dict[str, str]:
-    """Load channel-to-keeper bindings from disk with optional legacy fallback.
+    """Load channel-to-keeper bindings from disk.
 
-    Returns an empty dict if neither file exists, if the file is not a
-    JSON object, or on parse/IO errors. Non-string values are silently
-    dropped to preserve the `str -> str` contract.
+    Returns an empty dict if the file does not exist, if the file is not a JSON
+    object, or on parse/IO errors. Non-string values are silently dropped to
+    preserve the `str -> str` contract.
     """
     log = logger or logging.getLogger(__name__)
     path = Path(default_path)
-    source = "default"
     if not path.exists():
-        if legacy_path is None:
-            return {}
-        legacy = Path(legacy_path)
-        if legacy.exists():
-            path = legacy
-            source = "legacy"
-        else:
-            return {}
+        return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
@@ -47,15 +38,7 @@ def load_bindings(
     bindings = {
         str(k): str(v) for k, v in data.items() if isinstance(v, str)
     }
-    if source == "legacy":
-        log.info(
-            "Loaded %d binding(s) from legacy store %s; next write goes to %s",
-            len(bindings),
-            path,
-            default_path,
-        )
-    else:
-        log.info("Loaded %d binding(s)", len(bindings))
+    log.info("Loaded %d binding(s)", len(bindings))
     return bindings
 
 

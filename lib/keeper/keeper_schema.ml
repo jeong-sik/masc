@@ -119,7 +119,10 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("runtime_id", `Assoc [
           ("type", `String "string");
-          ("default", `String (Lazy.force Persona_contract.default_generation_runtime_id));
+          (* No static [default]: the default runtime id is resolved at request
+             time by the persona-generate handler (after [Runtime.init_default]).
+             A module-level schema list cannot evaluate it without crashing boot
+             (RFC-0206 §2.1 fail-fast). Mirrors the keeper_create runtime_id schema. *)
           ("description", `String "Runtime id used to draft the persona.");
         ]);
         ("temperature", `Assoc [

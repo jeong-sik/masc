@@ -774,7 +774,7 @@ let keeper_cycle_decision
         let provider_cooldown_fail_open =
           match provider_cooldown_remaining_sec with
           | Some _ ->
-            fallback_cascade_for_provider_cooldown
+            fallback_runtime_for_provider_cooldown
               ~base_runtime_id:runtime_id
               ~effective_runtime_id:runtime_id
           | None -> None

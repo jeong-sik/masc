@@ -2,7 +2,7 @@
 
     Re-homed from the deleted [Cascade_declarative_adapter], keeping only the
     binding materialization path. Routing layers — aliases, routes,
-    system_targets, capability profiles, [Cascade_strategy] mapping, the
+    system_targets, capability profiles, strategy mapping, the
     [adapted_catalog] aggregate, and the typed [adapter_error] list — are
     intentionally dropped (a Runtime is one pre-selected binding, not a
     routed catalog). Types are owned by {!Runtime_schema}.

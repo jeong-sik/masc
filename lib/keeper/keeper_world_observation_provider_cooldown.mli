@@ -1,4 +1,4 @@
-val fallback_cascade_for_provider_cooldown :
+val fallback_runtime_for_provider_cooldown :
   base_runtime_id:string ->
   effective_runtime_id:string ->
   string option

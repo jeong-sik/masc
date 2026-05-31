@@ -185,14 +185,11 @@ let status_summary_string
       0 agents_with_state
   in
   let shown_active_tasks = take_items max_active_tasks_display active_tasks in
-  let current_room = "default" in
-
   let buf = Buffer.create 256 in
   Printf.bprintf buf "🏢 Cluster: %s\n" effective_cluster_name;
   if not (String.equal effective_cluster_name state.project) then
     Printf.bprintf buf "Project: %s\n" state.project;
-  Buffer.add_string buf
-    (Printf.sprintf "📍 Scope: %s (flattened)\n" current_room);
+  Buffer.add_string buf "📍 Workspace: root\n";
   Printf.bprintf buf "📁 Path: %s\n" ctx.config.base_path;
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf

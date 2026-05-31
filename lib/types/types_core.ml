@@ -223,27 +223,6 @@ let agent_of_yojson json =
           | None -> Error (annotated_error ()))
       | _ -> Error original_error)
 
-(* ============================================ *)
-(* Multi-Coord Types                             *)
-(* ============================================ *)
-
-(** Coord metadata - information about a coordination room *)
-type room_info = {
-  id: string;                                 (* unique ID: slugified name *)
-  name: string;                               (* display name *)
-  description: string option; [@default None] (* optional description *)
-  created_at: string;                         (* ISO timestamp *)
-  created_by: string option; [@default None]  (* agent who created the room *)
-  agent_count: int; [@default 0]              (* current agent count *)
-  task_count: int; [@default 0]               (* active task count *)
-} [@@deriving yojson { strict = false }, show]
-
-(** Coord registry - tracks all available rooms *)
-type room_registry = {
-  rooms: room_info list; [@default []]        (* list of rooms *)
-  default_room: string; [@default "default"]  (* default room ID *)
-} [@@deriving yojson { strict = false }, show]
-
 (** Task status - state transitions enforced by types *)
 type task_action =
   | Claim

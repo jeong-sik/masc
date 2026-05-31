@@ -28,10 +28,6 @@ let masc_root_dir config =
 let masc_dir_from_base_path ~base_path =
   masc_root_dir_from ~base_path ~cluster_name:"default"
 
-(** Compatibility helper for callers not yet renamed away from room terminology.
-    The runtime layout is single-root, so every scope resolves to [.masc/]. *)
-let room_dir_for config _room_id = masc_root_dir config
-
 (** Directory resolution. Always resolves to the root .masc/ directory. *)
 let masc_dir config = masc_root_dir config
 
@@ -181,7 +177,7 @@ let key_of_path_from_root config ~root path =
     None
 
 (* Key mapping is always relative to the .masc root so room paths
-   are preserved in the backend key (e.g., rooms:my-room:state.json). *)
+   are preserved in the backend key (e.g., workspace:state.json). *)
 let key_of_path config path = key_of_path_from_root config ~root:(masc_root_dir config) path
 let root_key_of_path config path = key_of_path_from_root config ~root:(masc_root_dir config) path
 

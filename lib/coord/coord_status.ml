@@ -17,7 +17,6 @@ let status config =
   let active_task_assignees =
     Coord_task_schedule.active_task_assignees_by_task_id backlog
   in
-  let current_room = "default" in
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
 
@@ -30,7 +29,7 @@ let status config =
   Printf.bprintf buf "🏢 Cluster: %s\n" cluster_name;
   if cluster_name <> state.project then
     Printf.bprintf buf "Project: %s\n" state.project;
-  Printf.bprintf buf "📍 Namespace: %s (flattened)\n" current_room;
+  Buffer.add_string buf "📍 Workspace: root\n";
   Printf.bprintf buf "📁 Path: %s\n" config.base_path;
   Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n";
   Buffer.add_string buf "Players:\n";

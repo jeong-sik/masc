@@ -1,7 +1,7 @@
 (** Dashboard HTTP handler bodies, extracted from
     [server_routes_http_routes_dashboard.ml]. Holds the four
     request-handler bodies wired into the route table: agent broadcast,
-    link previews, task history, and rooms listing. *)
+    link previews, task history, and workspace timeline. *)
 
 module Http = Http_server_eio
 
@@ -88,7 +88,7 @@ let handle_dashboard_task_history state req reqd =
     in
     Http.Response.json_value ~compress:true ~request:req json reqd
 
-let handle_dashboard_rooms state req reqd =
+let handle_dashboard_workspace state req reqd =
   let limit =
     Server_utils.int_query_param req "limit" ~default:50
     |> Server_utils.clamp ~min_v:1 ~max_v:200
@@ -98,16 +98,16 @@ let handle_dashboard_rooms state req reqd =
     | Some _ as value -> value
     | None -> trimmed_query_param req "agent"
   in
-  (* Dashboard_rooms.json queries up to ~1000 messages from Coord per request
+  (* Dashboard_workspace.json queries up to ~1000 messages from Coord per request
      (uncached, ~4.7s measured solo; under a parallel dashboard burst it held
      the single Eio HTTP domain and dragged co-fired requests to ~3.4s). Cache
      + offload via respond_cached_read; cache_key carries limit + actor so
-     param variants stay distinct. Shared by /dashboard/rooms and /rooms. *)
+     param variants stay distinct. Shared by /dashboard/workspace and /rooms. *)
   let cache_key =
-    Printf.sprintf "rooms:%s:%d:%s"
+    Printf.sprintf "workspace:%s:%d:%s"
       state.Mcp_server.room_config.base_path limit
       (Option.value ~default:"" me)
   in
   Server_routes_http_common.respond_cached_read ~request:req ~reqd ~cache_key
     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s (fun () ->
-      Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me ~limit ())
+      Dashboard_workspace.json ~config:state.Mcp_server.room_config ?me ~limit ())

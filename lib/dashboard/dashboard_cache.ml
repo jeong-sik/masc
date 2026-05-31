@@ -56,7 +56,7 @@ let table : slot SMap.t Atomic.t = Atomic.make SMap.empty
     occupied by a single [operator:keeper-runtime-trust:compact:...]
     prefix whose key embeds an ISO timestamp — every refresh creates
     a fresh entry and LRU eviction repeatedly purges genuinely hot
-    keys like [dashboard.branches], [dashboard.rooms], [board:memory]
+    keys like [dashboard.branches], [dashboard.workspace], [board:memory]
     before they can be reused.  Result: hit_ratio ~31% on a workload
     that should be cache-bound.
 

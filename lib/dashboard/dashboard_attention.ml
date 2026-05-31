@@ -1,6 +1,6 @@
 (** Dashboard Attention — Collect actionable items that require operator intervention.
 
-    Pure functions. Scans room snapshots to produce a sorted list
+    Pure functions. Scans workspace snapshots to produce a sorted list
     of items the operator should act on. Each item includes a suggested MCP tool. *)
 
 (* ===== Masc_domain ===== *)
@@ -36,9 +36,9 @@ let to_severity : severity -> Severity.t = function
 
 (** Detect stuck agents: Active/Busy but last_seen > threshold *)
 let detect_stuck_agents ~(now : float)
-    (snapshots : Dashboard_labels.room_snapshot list) : attention_item list =
+    (snapshots : Dashboard_labels.workspace_snapshot list) : attention_item list =
   let all_agents =
-    List.concat_map (fun (s : Dashboard_labels.room_snapshot) -> s.agents) snapshots
+    List.concat_map (fun (s : Dashboard_labels.workspace_snapshot) -> s.agents) snapshots
   in
   all_agents
   |> List.filter_map (fun (agent : Masc_domain.agent) ->
@@ -76,12 +76,12 @@ let detect_stuck_agents ~(now : float)
 
 (** Detect idle agents when pending tasks exist *)
 let detect_idle_with_pending ~(now : float)
-    (snapshots : Dashboard_labels.room_snapshot list) : attention_item list =
+    (snapshots : Dashboard_labels.workspace_snapshot list) : attention_item list =
   let all_agents =
-    List.concat_map (fun (s : Dashboard_labels.room_snapshot) -> s.agents) snapshots
+    List.concat_map (fun (s : Dashboard_labels.workspace_snapshot) -> s.agents) snapshots
   in
   let all_tasks =
-    List.concat_map (fun (s : Dashboard_labels.room_snapshot) -> s.tasks) snapshots
+    List.concat_map (fun (s : Dashboard_labels.workspace_snapshot) -> s.tasks) snapshots
   in
   let idle_count =
     List.length
@@ -120,7 +120,7 @@ let detect_idle_with_pending ~(now : float)
 (* ===== Main Collection ===== *)
 
 (** Collect all attention items, sorted by severity (critical first). *)
-let collect ~(now : float) (snapshots : Dashboard_labels.room_snapshot list)
+let collect ~(now : float) (snapshots : Dashboard_labels.workspace_snapshot list)
     : attention_item list =
   let items =
     detect_stuck_agents ~now snapshots

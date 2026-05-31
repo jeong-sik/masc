@@ -1,7 +1,7 @@
 let clamp_limit limit = Server_utils.clamp ~min_v:1 ~max_v:200 limit
 let fetch_limit limit = Server_utils.clamp ~min_v:limit ~max_v:1000 (limit * 5)
-let default_room_id = "default"
-let default_room_name = "Room timeline"
+let workspace_id = "root"
+let workspace_name = "Workspace timeline"
 
 let take = List.take
 
@@ -98,7 +98,7 @@ let mentions_of_message (msg : Masc_domain.message) =
 
 let message_id (msg : Masc_domain.message) = Printf.sprintf "msg-%09d" msg.seq
 
-let is_room_message (msg : Masc_domain.message) =
+let is_workspace_message (msg : Masc_domain.message) =
   let msg_type = String.lowercase_ascii (String.trim msg.msg_type) in
   not (String.starts_with ~prefix:"lifecycle_" msg_type)
 ;;
@@ -133,7 +133,7 @@ let message_json (msg : Masc_domain.message) =
   let mentions = mentions_of_message msg in
   let base =
     [ "id", `String (message_id msg)
-    ; "room_id", `String default_room_id
+    ; "workspace_id", `String workspace_id
     ; "ts", `String msg.timestamp
     ; "sender", `String msg.from_agent
     ; "type", `String msg.msg_type
@@ -171,7 +171,7 @@ let mention_inbox_json ?me (msg : Masc_domain.message) =
     Some
       (`Assoc
           [ "message_id", `String (message_id msg)
-          ; "room_id", `String default_room_id
+          ; "workspace_id", `String workspace_id
           ; "ts", `String msg.timestamp
           ; "sender", `String msg.from_agent
           ; "snippet", `String (decode_message_entities msg.content |> snippet)
@@ -186,7 +186,7 @@ let active_agent_names config =
     try
       (* Use [get_active_agents] (filtered to currently-active agents)
          instead of [get_agents_raw] which also returned tombstones /
-         left agents. The function name and the rooms participants
+         left agents. The function name and the workspace participants
          contract both expect "active only". *)
       Coord.get_active_agents config
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
@@ -195,7 +195,7 @@ let active_agent_names config =
     | _ -> [])
 ;;
 
-let room_json ~config messages =
+let workspace_json ~config messages =
   let participants =
     let senders = List.map (fun (msg : Masc_domain.message) -> msg.from_agent) messages in
     let mentions = messages |> List.concat_map mentions_of_message in
@@ -207,8 +207,8 @@ let room_json ~config messages =
     | [] -> `Null
   in
   `Assoc
-    [ "id", `String default_room_id
-    ; "name", `String default_room_name
+    [ "id", `String workspace_id
+    ; "name", `String workspace_name
     ; "participants", `List (List.map (fun name -> `String name) participants)
     ; "last_message_at", last_message_at
     ]
@@ -218,7 +218,7 @@ let compute_json ~config ?me ~limit () =
   let limit = clamp_limit limit in
   let recent_desc =
     Coord.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
-    |> List.filter is_room_message
+    |> List.filter is_workspace_message
     |> take limit
   in
   let timeline = List.rev recent_desc in
@@ -230,13 +230,13 @@ let compute_json ~config ?me ~limit () =
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; "limit", `Int limit
     ; ( "me", Json_util.string_opt_to_json me )
-    ; "rooms", `List [ room_json ~config recent_desc ]
+    ; "workspace", workspace_json ~config recent_desc
     ; "messages", `List messages_json
     ; "mentions_inbox", `List mentions_inbox
     ]
 ;;
 
-(* /api/v1/dashboard/rooms was measured at 8-9s under live load.
+(* /api/v1/dashboard/workspace was measured at 8-9s under live load.
    [Coord.get_messages_raw] is a synchronous scan over the message
    store and was being executed on the Eio main domain, so other
    HTTP fibers sharing the domain stalled for the duration.  Cache
@@ -247,7 +247,7 @@ let cache_ttl_sec = 5.0
 let json ~config ?me ~limit () =
   let key =
     Printf.sprintf
-      "dashboard.rooms:%s;%s;%d"
+      "dashboard.workspace:%s;%s;%d"
       config.Coord.base_path
       (Option.value ~default:"-" me)
       limit

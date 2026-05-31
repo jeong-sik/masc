@@ -63,7 +63,7 @@ let parse_broadcast (json : Yojson.Safe.t) =
 let tool = Typed_tool_masc.create
   ~name:"masc_broadcast_typed"
   ~description:"[Typed PoC] Send a message visible to ALL agents via SSE push."
-  ~module_tag:Tool_dispatch.Mod_coord
+  ~module_tag:Tool_dispatch.Mod_state
   ~params:(Sg.to_params broadcast_schema)
   ~parse:parse_broadcast
   ~handler:handle_broadcast

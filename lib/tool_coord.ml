@@ -749,7 +749,7 @@ let () =
          (Tool_spec.create
             ~name:s.name
             ~description:s.description
-            ~module_tag:Tool_dispatch.Mod_coord
+            ~module_tag:Tool_dispatch.Mod_state
             ~input_schema:s.input_schema
             ~handler_binding:Tag_dispatch
             ~is_read_only:(List.mem s.name tool_spec_read_only)

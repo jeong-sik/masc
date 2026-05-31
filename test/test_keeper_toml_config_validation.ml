@@ -420,39 +420,39 @@ let test_base_config_avoids_hidden_shell_tool_names () =
         false
         (contains ~needle:"tool_search_files" instructions)
 
-let test_cascade_name_rejects_unknown () =
+let test_runtime_id_rejects_unknown () =
   let result =
     with_temp_toml
-      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"definitely_missing_profile\"\n"
+      "[keeper]\nname = \"testkeeper\"\nruntime_id = \"definitely_missing_profile\"\n"
       KTP.load_keeper_toml
   in
   match result with
-  | Ok _ -> fail "definitely_missing_profile cascade_name should be rejected"
+  | Ok _ -> fail "definitely_missing_profile runtime_id should be rejected"
   | Error e ->
-      check bool "error mentions cascade_name" true
-        (contains ~needle:"invalid cascade_name" e)
+      check bool "error mentions runtime_id" true
+        (contains ~needle:"invalid runtime_id" e)
 
-let test_cascade_name_accepts_known () =
+let test_runtime_id_accepts_known () =
   with_repo_config_dir @@ fun () ->
-  let check_ok label cascade_name =
+  let check_ok label runtime_id =
     let result =
       with_temp_toml
-        (Printf.sprintf "[keeper]\nname = \"testkeeper\"\ncascade_name = \"%s\"\n"
-           cascade_name)
+        (Printf.sprintf "[keeper]\nname = \"testkeeper\"\nruntime_id = \"%s\"\n"
+           runtime_id)
         KTP.load_keeper_toml
     in
     match result with
     | Ok _ -> ()
     | Error e ->
         fail (Printf.sprintf "%s: '%s' should be accepted but got: %s" label
-                cascade_name e)
+                runtime_id e)
   in
   check_ok "primary variant" "primary";
   check_ok "local_only phase-routing" "local_only";
   check_ok "local_recovery phase-routing" "local_recovery";
   check_ok "tool_use_strict reserved tool lane" "tool_use_strict"
 
-let test_cascade_name_accepts_tool_lane_without_catalog () =
+let test_runtime_id_accepts_tool_lane_without_catalog () =
   let missing_dir =
     Filename.concat (Filename.get_temp_dir_name ())
       "missing-masc-config-for-tool-use-strict"
@@ -469,7 +469,7 @@ let test_cascade_name_accepts_tool_lane_without_catalog () =
     (fun () ->
       let result =
         with_temp_toml
-          "[keeper]\nname = \"testkeeper\"\ncascade_name = \"tool_use_strict\"\n"
+          "[keeper]\nname = \"testkeeper\"\nruntime_id = \"tool_use_strict\"\n"
           KTP.load_keeper_toml
       in
       match result with
@@ -481,7 +481,7 @@ let test_cascade_name_accepts_tool_lane_without_catalog () =
                 a readable live catalog: %s"
                e))
 
-let test_cascade_name_accepts_catalog_entry () =
+let test_runtime_id_accepts_catalog_entry () =
   with_repo_config_dir @@ fun () ->
   (* Tests that the live declarative catalog is consulted during
      validation. *)
@@ -503,7 +503,7 @@ let test_cascade_name_accepts_catalog_entry () =
   in
   let result =
     with_temp_toml
-      (Printf.sprintf "[keeper]\nname = \"testkeeper\"\ncascade_name = \"%s\"\n"
+      (Printf.sprintf "[keeper]\nname = \"testkeeper\"\nruntime_id = \"%s\"\n"
          test_name)
       KTP.load_keeper_toml
   in
@@ -514,12 +514,12 @@ let test_cascade_name_accepts_catalog_entry () =
       if catalog = [] then ()
       else fail (Printf.sprintf "%s should be accepted: %s" test_name e)
 
-let test_cascade_name_accepts_unrouted_assignable_catalog_entry () =
+let test_runtime_id_accepts_unrouted_assignable_catalog_entry () =
   with_temp_config_dir minimal_cascade_profile_metadata_toml
   @@ fun ~config_root:_ ~cascade_path:_ ->
   let result =
     with_temp_toml
-      "[keeper]\nname = \"testkeeper\"\ncascade_name = \"backup\"\n"
+      "[keeper]\nname = \"testkeeper\"\nruntime_id = \"backup\"\n"
       KTP.load_keeper_toml
   in
   match result with
@@ -767,18 +767,18 @@ let () =
               with_repo_config_dir
                 test_verifier_config_hides_worker_lifecycle_tools);
         ] );
-      ( "cascade_name validation",
+      ( "runtime_id validation",
         [
-          test_case "rejects unknown cascade_name" `Quick
-            test_cascade_name_rejects_unknown;
-          test_case "accepts known cascade names" `Quick
-            test_cascade_name_accepts_known;
+          test_case "rejects unknown runtime_id" `Quick
+            test_runtime_id_rejects_unknown;
+          test_case "accepts known runtime ids" `Quick
+            test_runtime_id_accepts_known;
           test_case "accepts reserved tool lane without live catalog" `Quick
-            test_cascade_name_accepts_tool_lane_without_catalog;
+            test_runtime_id_accepts_tool_lane_without_catalog;
           test_case "accepts live catalog entry" `Quick
-            test_cascade_name_accepts_catalog_entry;
+            test_runtime_id_accepts_catalog_entry;
           test_case "accepts unrouted assignable catalog entry" `Quick
-            test_cascade_name_accepts_unrouted_assignable_catalog_entry;
+            test_runtime_id_accepts_unrouted_assignable_catalog_entry;
           test_case "keeper runtime ignores non-keeper route target" `Quick
             test_keeper_runtime_declared_name_ignores_non_keeper_route_target;
           test_case "runtime rejects declarative parse errors" `Quick

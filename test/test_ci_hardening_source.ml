@@ -2413,23 +2413,6 @@ let test_oas_worker_capability_threading_contracts () =
     (file_contains_pattern "lib/oas_worker.mli"
        "?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->")
 
-let test_oas_capacity_restore_contracts () =
-  check bool "operator judge backoff uses OAS local capacity" true
-    (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
-       "Cascade_runtime.local_capacity_for_selections ~sw ~net");
-  check bool "operator judge selection is routed through cascade config" true
-    (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
-       "Keeper_cascade_profile.Operator_judge");
-  check bool "governance judge backoff uses OAS local capacity" true
-    (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
-       "Cascade_runtime.local_capacity_for_selections ~sw ~net");
-  check bool "governance judge selection is routed through cascade config" true
-    (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
-       "Keeper_cascade_profile.Governance_judge");
-  check bool "cascade config no longer exposes legacy local capacity parser" true
-    (file_not_contains_pattern "lib/cascade/cascade_config.mli"
-       "val local_capacity_for_selections")
-
 let test_dashboard_timeout_guard_contracts () =
   check bool "http transport health route uses cached dashboard helper" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
@@ -2902,8 +2885,6 @@ let () =
             test_legacy_worktree_surface_removed;
            test_case "oas worker capability threading contracts" `Quick
              test_oas_worker_capability_threading_contracts;
-           test_case "oas capacity restore contracts" `Quick
-             test_oas_capacity_restore_contracts;
            test_case "dashboard timeout guard contracts" `Quick
              test_dashboard_timeout_guard_contracts;
            test_case "namespace-truth adaptive timeout contracts" `Quick

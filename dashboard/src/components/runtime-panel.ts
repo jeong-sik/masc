@@ -1,6 +1,6 @@
-// RuntimePanel — Monitor "Cascade & Runtime" lane.
+// RuntimePanel — Monitor "Runtime" lane.
 // Renders OasHealthChip / RuntimeMonitor / PrometheusMetrics /
-// VerificationSpecsPanel / CascadeInspector inline, and delegates the four
+// VerificationSpecsPanel inline, and delegates the four
 // telemetry views to TelemetryPanel (cost / audit / heuristics / stress).
 //
 // Progressive-disclosure default view (density reduction, 2026-04):

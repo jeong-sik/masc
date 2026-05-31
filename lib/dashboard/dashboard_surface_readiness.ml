@@ -182,13 +182,13 @@ let all_entries =
       ()
   ; entry
       ~id:"monitoring.runtime"
-      ~label:"Cascade & Runtime"
+      ~label:"Runtime"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
-      ~rationale:"Canonical runtime surface for cascade routing and provider health."
+      ~rationale:"Canonical runtime surface for provider health."
       ~route_hash:"#monitoring?section=runtime"
-      ~live_spotcheck:"/api/v1/cascade/health"
+      ~live_spotcheck:"/api/v1/providers"
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry

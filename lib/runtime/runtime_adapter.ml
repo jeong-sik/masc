@@ -36,11 +36,10 @@ let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_
   then base
   else (
     match kind with
-    | Provider_a | Provider_c ->
+    | Anthropic ->
       ("x-api-key", api_key) :: ("provider_a-version", "2023-06-01") :: base
-    | Provider_d_compat | Ollama | Provider_f | Provider_k | Cli_tool_d | Provider_h ->
-      ("Authorization", "Bearer " ^ api_key) :: base
-    | Cli_tool_b | Cli_tool_c | Cli_tool_a -> [])
+    | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope ->
+      ("Authorization", "Bearer " ^ api_key) :: base)
 ;;
 
 let trim_trailing_slash path =
@@ -168,18 +167,12 @@ let api_key_of_credential ?registry_entry (credential : Runtime_schema.credentia
 
 (* --- Provider kind resolution --- *)
 
-let provider_kind_of_cli_provider (provider : Runtime_schema.provider)
+(* CLI subprocess provider kinds were removed in the agent_sdk pin bump
+   (oas service-name migration). No provider kind is a subprocess CLI, so
+   CLI-schema providers no longer resolve to a provider kind. *)
+let provider_kind_of_cli_provider (_provider : Runtime_schema.provider)
     : Llm_provider.Provider_config.provider_kind option =
-  let resolve_kind raw = Llm_provider.Provider_config.provider_kind_of_string raw in
-  match resolve_kind provider.id with
-  | Some kind when Llm_provider.Provider_config.is_subprocess_cli kind -> Some kind
-  | _ ->
-    (match resolve_provider_prefix provider.id with
-     | Some prefix ->
-       (match resolve_kind prefix with
-        | Some kind when Llm_provider.Provider_config.is_subprocess_cli kind -> Some kind
-        | _ -> None)
-     | None -> None)
+  None
 ;;
 
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
@@ -192,9 +185,9 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
        | Some entry ->
          let kind = entry.Llm_provider.Provider_registry.defaults.kind in
          if kind = Llm_provider.Provider_config.Ollama
-         then Llm_provider.Provider_config.Provider_d_compat
+         then Llm_provider.Provider_config.OpenAI_compat
          else kind
-       | None -> Llm_provider.Provider_config.Provider_d_compat)
+       | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api -> None
 ;;
 
@@ -202,7 +195,7 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
     ~base_url =
   let request_path =
     match provider.api_format, kind with
-    | Runtime_schema.Chat_completions_api, Llm_provider.Provider_config.Provider_d_compat ->
+    | Runtime_schema.Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
       Masc_network_defaults.chat_completions_path
     | _ ->
       (match registry_entry with
@@ -210,7 +203,7 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
        | None -> Llm_provider.Provider_config.request_path_default_for_kind kind)
   in
   match kind with
-  | Llm_provider.Provider_config.Provider_d_compat ->
+  | Llm_provider.Provider_config.OpenAI_compat ->
     normalize_openai_compat_request_path ~base_url ~request_path
   | _ -> request_path
 ;;

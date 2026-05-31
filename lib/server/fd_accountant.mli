@@ -30,7 +30,7 @@ type kind =
           in-flight call. *)
   | Provider_cli
       (** Outbound LLM provider subprocess attempt (Claude Code,
-          Provider_f CLI, Codex CLI, Provider_c CLI). OAS owns the subprocess
+          Gemini CLI, Codex CLI, Anthropic CLI). OAS owns the subprocess
           implementation; MASC accounts the call at the transport
           boundary so CLI fan-out shares FD-pressure backpressure. *)
   | Sandbox_exec

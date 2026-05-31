@@ -57,7 +57,6 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
   | Runtime_binding.Api_key_env _
-  | Runtime_binding.Cli_cached_login
   | Runtime_binding.Oauth_cached_login
   | Runtime_binding.Setup_token_env _
   | Runtime_binding.File _
@@ -66,8 +65,7 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
 
 let runtime_kind_of_binding (binding : Runtime_binding.t) =
   match binding.Runtime_binding.transport with
-  | Runtime_binding.Cli -> Cli_agent
-  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_provider_d_compat ->
+  | Runtime_binding.Http | Runtime_binding.Managed ->
     if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
     then Local
     else Direct_api
@@ -209,10 +207,6 @@ let default_local_fallback_label () =
 let binding_auth_available (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
-  | Runtime_binding.Cli_cached_login ->
-    (match binding.Runtime_binding.command with
-     | Some command -> Llm_provider.Provider_registry.command_in_path command
-     | None -> false)
   | Runtime_binding.Api_key_env env_name | Runtime_binding.Setup_token_env env_name ->
     env_present env_name
   | Runtime_binding.Oauth_cached_login

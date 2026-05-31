@@ -2,7 +2,7 @@
     guarantees.
 
     Termination, safety, and soundness properties from MAGI review
-    (Provider_f + Qwen3 formal verification):
+    (Gemini + Qwen3 formal verification):
 
     - {b Termination}: always terminates via
       {!constraints.hard_max_iterations}.

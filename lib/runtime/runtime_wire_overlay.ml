@@ -23,24 +23,21 @@ let auth_headers_for_provider_cfg
   then headers
   else (
     match provider_cfg.kind with
-    | Provider_a | Provider_c -> ("x-api-key", api_key) :: headers
-    | Provider_f | Cli_tool_d | Cli_tool_b | Cli_tool_c | Cli_tool_a -> headers
-    | Provider_d_compat | Ollama | Provider_k | Provider_h ->
+    | Anthropic -> ("x-api-key", api_key) :: headers
+    | Gemini -> headers
+    | OpenAI_compat | Ollama | Glm | Kimi | DashScope ->
       ("Authorization", "Bearer " ^ api_key) :: headers)
 ;;
 
 let request_kind_of_provider_cfg (provider_cfg : Llm_provider.Provider_config.t) =
   match provider_cfg.kind with
-  | Provider_a | Provider_c -> Agent_sdk.Provider.Provider_a_messages
-  | Provider_d_compat
+  | Anthropic -> Agent_sdk.Provider.Anthropic_messages
+  | OpenAI_compat
   | Ollama
-  | Provider_f
-  | Provider_k
-  | Provider_h
-  | Cli_tool_d
-  | Cli_tool_b
-  | Cli_tool_c
-  | Cli_tool_a -> Agent_sdk.Provider.Openai_chat_completions
+  | Gemini
+  | Glm
+  | Kimi
+  | DashScope -> Agent_sdk.Provider.Openai_chat_completions
 ;;
 
 let agent_capabilities_of_llm_capabilities
@@ -141,7 +138,7 @@ let apply
   =
   let provider =
     match provider_cfg.kind, provider.provider with
-    | ( Llm_provider.Provider_config.Provider_d_compat
+    | ( Llm_provider.Provider_config.OpenAI_compat
       , Agent_sdk.Provider.Local { base_url } )
       when not
              (String.equal

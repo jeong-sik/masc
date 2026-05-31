@@ -44,7 +44,7 @@ let make_custom_config
   else
     Some
       (Llm_provider.Provider_config.make
-         ~kind:Provider_d_compat
+         ~kind:OpenAI_compat
          ~model_id:actual_model
          ~base_url
          ~request_path:
@@ -133,7 +133,7 @@ let make_registry_config
   in
   let request_path =
     match defaults.kind with
-    | Provider_d_compat ->
+    | OpenAI_compat ->
       Binding.normalize_openai_compat_request_path
         ~base_url
         ~request_path:defaults.request_path
@@ -170,7 +170,7 @@ let make_registry_config
     provider config, or [None] when the provider is unregistered, unavailable,
     or the spec is malformed. Kind classification goes through the sum-typed
     {!Provider_kind_resolver} (Provider_registry as SSOT) — unknown specs are
-    never flattened to [Provider_d_compat]. *)
+    never flattened to [OpenAI_compat]. *)
 let parse_model_string
   ?(temperature = Llm_provider.Constants.Inference.default_temperature)
   ?(max_tokens = Llm_provider.Constants.Inference.default_max_tokens)

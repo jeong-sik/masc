@@ -165,7 +165,7 @@ val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 (** Drop orphan [tool_result] blocks (those without a matching
     preceding [tool_use]) so a checkpoint payload satisfies the
-    Provider_a API invariant that every tool_result references a known
+    Anthropic API invariant that every tool_result references a known
     tool_use. Public so [Keeper_rollover] / [Keeper_post_turn] can
     reuse it before persisting a checkpoint. *)
 val repair_orphan_tool_result_messages :
@@ -194,7 +194,7 @@ val checkpoint_sanitize_changed : checkpoint_sanitize_stats -> bool
 
 val default_max_checkpoint_tool_result_chars : int
 (** Per-tool-result text cap (in chars) applied when projecting
-    Provider_a [tool_result] blocks into a checkpoint. Beyond this
+    Anthropic [tool_result] blocks into a checkpoint. Beyond this
     threshold the payload collapses to a stub so a single
     orphan-repair pass cannot inflate one block to multi-MB. *)
 

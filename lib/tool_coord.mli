@@ -47,8 +47,6 @@ type context = Coord_types.context =
     {!Coord_assertions} (the SSOT) and propagates here
     automatically. *)
 type assertion_kind = Coord_assertions.assertion_kind =
-  | Room_set
-  | Joined
   | Task_claimed
   | Current_task_set
 

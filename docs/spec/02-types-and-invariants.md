@@ -527,20 +527,19 @@ type agent_role = Worker | Admin
 
 ```ocaml
 type permission =
-  | CanInit | CanReset | CanJoin | CanLeave
+  | CanInit | CanReset
   | CanReadState | CanAddTask | CanClaimTask | CanCompleteTask
   | CanBroadcast
-  | CanOpenPortal | CanSendPortal
-  | CanVote | CanInterrupt | CanApprove
+  | CanOpenPortal | CanSendPortal | CanVote
   | CanAdmin
 ```
 
-17개 variant. 각 `agent_role`에 허용된 permission 목록:
+11개 variant. 각 `agent_role`에 허용된 permission 목록:
 
 | Role | Permissions |
 |------|------------|
-| Worker | `CanReadState`, `CanJoin`, `CanLeave`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanVote` |
-| Admin | Worker + `CanInit`, `CanReset`, `CanInterrupt`, `CanApprove`, `CanAdmin` (전체) |
+| Worker | `CanReadState`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanVote` |
+| Admin | Worker + `CanInit`, `CanReset`, `CanAdmin` (전체) |
 
 ### 9.3 Agent Credential
 

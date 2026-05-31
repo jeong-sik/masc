@@ -34,10 +34,10 @@ let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
    [filter (visibility = Public_mcp) all_descriptors], deleting the hand
    list entirely.
 
-   Until RFC-0190 P1-P3 land, 9 surface entries have no descriptor at all
+   Until RFC-0190 P1-P3 land, 6 surface entries have no descriptor at all
    because their handlers live in [Tool_inline_dispatch] (MCP server-level
    inline path), not in the [runtime_handler] enum the descriptor system
-   dispatches through.  These 9 are enumerated below as the
+   dispatches through.  These 6 are enumerated below as the
    [rfc_0190_pending_inline_migration] allowlist.
 
    This invariant test exists to ratchet that allowlist toward empty:
@@ -51,11 +51,8 @@ let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
    forbid any pending entries. *)
 let rfc_0190_pending_inline_migration =
   [ "masc_start"
-  ; "masc_join"
-  ; "masc_leave"
   ; "masc_broadcast"
   ; "masc_messages"
-  ; "masc_who"
   ; "masc_keeper_sandbox_status"
   ; "masc_persona_generate"
   ; "masc_keeper_create_from_persona"

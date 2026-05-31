@@ -1,8 +1,8 @@
 (** MCP tool schemas for inline-dispatched tools.
     Split into sub-modules by functional group. *)
 
-(* RFC-0057 PR-2d: inline_coord tools (masc_start/join/leave/broadcast/
-   messages/who) moved to Tool_descriptors_gen. They flow through
+(* RFC-0057 PR-2d: inline_coord tools (masc_start/broadcast/messages)
+   moved to Tool_descriptors_gen. They flow through
    Tool_schemas_misc.schemas, but downstream consumers still identify
    inline-dispatched tools by membership in this list — so we re-include
    them here by filtering Tool_schemas_misc.schemas to the inline_coord

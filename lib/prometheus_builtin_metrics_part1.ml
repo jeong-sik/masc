@@ -216,6 +216,7 @@ let register
     "Wall-clock unixtime of the most recent successful supervisor sweep beat (labels: \
      base_path).  Stale (> 2 × interval) means the sweep stalled."
     `Gauge;
+  add
     metric_tool_metrics_persist_dropped
     "Total JSONL records dropped by tool_metrics_persist because the bounded \
      write queue is full. No labels."

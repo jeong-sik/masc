@@ -12,6 +12,7 @@ open Coord_backlog
 
 (** Initialize MASC room *)
 let init config ~agent_name =
+  invalidate_initialized_cache ();
   (* Ensure root .masc structure exists even when initializing a non-default room. *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
@@ -89,6 +90,7 @@ let init config ~agent_name =
       }
     in
     write_state config state;
+    invalidate_initialized_cache ();
     (* Preserve a migrated backlog when blocking bootstrap has already
        promoted legacy room state into the flattened root namespace. *)
     if not (path_exists config (backlog_path config))
@@ -160,5 +162,6 @@ let reset config =
       else Sys.remove path
     in
     rm_rf (masc_dir config);
+    invalidate_initialized_cache ();
     Printf.sprintf "MASC room reset! (.masc/ deleted at %s)" config.base_path)
 ;;

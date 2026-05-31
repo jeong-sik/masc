@@ -1,4 +1,4 @@
-(** Tool_schemas_coord_core — MCP tool schemas for room management
+(** Tool_schemas_coord_core — MCP tool schemas for coord management
     (core subset).
 
     Only schemas dispatched by {!Tool_coord} live here. Other

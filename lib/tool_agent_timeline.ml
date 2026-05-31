@@ -123,7 +123,7 @@ let agent_events (config : Coord.config) ~agent_name :
                  detail =
                    `Assoc
                      [
-                       ("room", `String "default");
+                       ("coord", `String "default");
                        ( "status",
                          `String (Masc_domain.agent_status_to_string a.status) );
                        ( "current_task", Json_util.string_opt_to_json a.current_task );
@@ -250,7 +250,7 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
     | n, x :: rest -> x :: take (n - 1) rest
   in
   (* `list_events` limits globally before we filter by actor, so fetch a
-     wider bounded window to reduce the chance that busy-room activity from
+     wider bounded window to reduce the chance that busy-coord activity from
      other agents crowds out this agent's tool events. *)
   let scan_limit =
     let expanded = if limit <= 0 then 0 else limit * 10 in
@@ -562,7 +562,7 @@ let schemas : Masc_domain.tool_schema list =
     {
       name = "masc_agent_timeline";
       description =
-        "Unified timeline of an agent's activity in the currently selected room \
+        "Unified timeline of an agent's activity in the currently selected coord \
          across tasks, messages, and joins.";
       input_schema =
         `Assoc

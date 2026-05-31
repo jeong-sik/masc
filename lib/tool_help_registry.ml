@@ -319,7 +319,7 @@ let manual_help_entry name =
             "Use to discover what tasks exist before claiming. For coordination-level task lookup (cross-keeper), masc_tasks is the equivalent on the meta surface.";
           key_constraints =
             [
-              "Visibility honours the caller's role and any room scoping.";
+              "Visibility honours the caller's role and any coord scoping.";
               "Default format is human-readable; pass format='json' for structured output.";
             ];
           details_markdown =

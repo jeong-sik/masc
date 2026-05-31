@@ -281,22 +281,22 @@ let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0)
     match agent_opt with
     | Some a -> [a]
     | None ->
-      (* Merge agents from metrics store AND room state.
+      (* Merge agents from metrics store AND coord state.
          Without this, agents active on the board but without task metrics
          are invisible to fitness queries (Issue #1861). *)
       let metrics_agents = Metrics_store_eio.get_all_agents ctx.config in
-      let room_agents =
+      let coord_agents =
         try
           Coord.get_agents_raw ctx.config
           |> List.map (fun (a : Masc_domain.agent) -> a.name)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-          Log.Misc.warn "room agents fallback (metrics_store still used): %s"
+          Log.Misc.warn "coord agents fallback (metrics_store still used): %s"
             (Stdlib.Printexc.to_string exn);
           []
       in
-      List.sort_uniq String.compare (metrics_agents @ room_agents)
+      List.sort_uniq String.compare (metrics_agents @ coord_agents)
   in
   if Stdlib.List.length agents = 0 then
     json_ok ~tool_name ~start_time

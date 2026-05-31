@@ -67,11 +67,11 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
   let state = ctx.state in
   let path =
     let p = arg_get_string ctx "path" "" in
-    if String.equal p "" then arg_get_string ctx "room" "" else p
+    if String.equal p "" then arg_get_string ctx "coord" "" else p
   in
   let task_title = arg_get_string ctx "task_title" "" in
   (* Step 1: set project root *)
-  let room_result =
+  let coord_result =
     if String.equal path "" then begin
       if Coord.is_initialized state.Mcp_server.coord_config then
         Ok config
@@ -104,9 +104,9 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
       end
     end
   in
-  match room_result with
+  match coord_result with
   | Error e ->
-      (* room_result Error sources are all caller-input rejections:
+      (* coord_result Error sources are all caller-input rejections:
          missing [path] argument or non-existent directory. *)
       Some
         (inline_err_workflow ~tool_name ~start_time

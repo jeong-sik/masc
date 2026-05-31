@@ -664,17 +664,17 @@ let test_handle_request_tools_list () =
     false
     (List.mem "experiment_start" names);
   Alcotest.(check bool)
-    "named room list hidden from list"
+    "named coord list hidden from list"
     false
-    (List.mem "masc_rooms_list" names);
+    (List.mem "masc_coords_list" names);
   Alcotest.(check bool)
-    "named room create hidden from list"
+    "named coord create hidden from list"
     false
-    (List.mem "masc_room_create" names);
+    (List.mem "masc_coord_create" names);
   Alcotest.(check bool)
-    "named room enter hidden from list"
+    "named coord enter hidden from list"
     false
-    (List.mem "masc_room_enter" names);
+    (List.mem "masc_coord_enter" names);
   Alcotest.(check bool)
     "removed ghost tool absent from list"
     false
@@ -910,8 +910,8 @@ let test_handle_request_tools_list_managed_profile () =
                    (List.mem "masc_tasks" names);
                  Alcotest.(check bool) "has canonical managed transition" true
                    (List.mem "masc_transition" names);
-                 Alcotest.(check bool) "omits managed room status alias" false
-                   (List.mem "masc_room_status" names);
+                 Alcotest.(check bool) "omits managed coord status alias" false
+                   (List.mem "masc_coord_status" names);
                  Alcotest.(check bool) "omits managed list tasks alias" false
                    (List.mem "masc_list_tasks" names);
                  Alcotest.(check bool) "omits managed release alias" false
@@ -945,7 +945,7 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init and setup join are not under test here; initialise the room
+  (* masc_init and setup join are not under test here; initialise the coord
      fixture directly so downstream managed-profile assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.coord_config ~agent_name:None in
@@ -990,7 +990,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init and setup join are not under test here; initialise the room
+  (* masc_init and setup join are not under test here; initialise the coord
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.coord_config ~agent_name:None in
@@ -1045,7 +1045,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init and setup join are not under test here; initialise the room
+  (* masc_init and setup join are not under test here; initialise the coord
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.coord_config ~agent_name:None in
@@ -1112,7 +1112,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init and setup join are not under test here; initialise the room
+  (* masc_init and setup join are not under test here; initialise the coord
      fixture directly so transition guidance assertions are isolated. *)
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.coord_config ~agent_name:None in
@@ -1328,7 +1328,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
       ~tool_name:"masc_join" ~arguments ~identity
       ~cached_resolved_agent:(Some "cached-stale-nickname")
       ~auth_token:None ~internal_keeper_runtime:false
-      ~room_initialized:(fun () -> false)
+      ~coord_initialized:(fun () -> false)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   let agent_code =
@@ -1368,7 +1368,7 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
       ~arguments:(`Assoc [ ("agent_name", `String "alpha-agent") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
-      ~room_initialized:(fun () -> true)
+      ~coord_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)
@@ -1676,7 +1676,7 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
       ~identity ~cached_resolved_agent:None
       ~auth_token:(Some "http-auth-token")
       ~internal_keeper_runtime:false
-      ~room_initialized:(fun () -> true)
+      ~coord_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
@@ -1699,7 +1699,7 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
       ~arguments:(`Assoc [ ("token", `String "legacy-argument-token") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
-      ~room_initialized:(fun () -> true)
+      ~coord_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
@@ -1722,7 +1722,7 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
       ~arguments:(`Assoc [ ("message", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
-      ~room_initialized:(fun () -> true)
+      ~coord_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check string)
@@ -1732,7 +1732,7 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
 
   cleanup_dir base_path
 
-(* Legacy governance convo tools are stubs; room-scoped test removed *)
+(* Legacy governance convo tools are stubs; coord-scoped test removed *)
 
 let test_handle_request_invalid_json () =
   Eio_main.run @@ fun env ->
@@ -2860,7 +2860,7 @@ let eio_tests = [
     test_execute_tool_legacy_argument_token_ignored_without_http_auth;
   "without mcp session uses generated identity", `Quick,
     test_execute_tool_without_mcp_session_uses_generated_identity;
-  (* Legacy governance convo room test removed *)
+  (* Legacy governance convo coord test removed *)
 ]
 
 let () =

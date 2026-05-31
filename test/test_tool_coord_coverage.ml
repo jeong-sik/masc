@@ -87,7 +87,7 @@ let make_test_ctx () =
     Filename.concat
       (Filename.get_temp_dir_name ())
       (Printf.sprintf
-         "masc-room-test-%d-%d"
+         "masc-coord-test-%d-%d"
          (int_of_float (Unix.gettimeofday () *. 1000.0))
          !test_counter)
   in
@@ -405,12 +405,12 @@ let () =
 ;;
 
 let () =
-  test "dispatch_removed_named_room_tools" (fun () ->
+  test "dispatch_removed_named_coord_tools" (fun () ->
     let ctx = make_test_ctx () in
     let args = `Assoc [] in
-    assert (Tool_coord.dispatch ctx ~name:"masc_rooms_list" ~args = None);
-    assert (Tool_coord.dispatch ctx ~name:"masc_room_create" ~args = None);
-    assert (Tool_coord.dispatch ctx ~name:"masc_room_enter" ~args = None))
+    assert (Tool_coord.dispatch ctx ~name:"masc_coords_list" ~args = None);
+    assert (Tool_coord.dispatch ctx ~name:"masc_coord_create" ~args = None);
+    assert (Tool_coord.dispatch ctx ~name:"masc_coord_enter" ~args = None))
 ;;
 
 let () =
@@ -792,14 +792,14 @@ let () =
 ;;
 
 let () =
-  test "dispatch_check_room_set" (fun () ->
+  test "dispatch_check_coord_set" (fun () ->
     let ctx = make_test_ctx () in
     let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
     match
       Tool_coord.dispatch
         ctx
         ~name:"masc_check"
-        ~args:(`Assoc [ "assertions", `List [ `String "room_set" ] ])
+        ~args:(`Assoc [ "assertions", `List [ `String "coord_set" ] ])
     with
     | Some result ->
       assert (Tool_result.is_success result);

@@ -296,7 +296,7 @@ let execute_tool_ok fixture ~name ~arguments =
   else failwith (Printf.sprintf "setup tool failed for %s: %s" name ((Tool_result.message result)))
 
 let ensure_initialized fixture =
-  (* masc_init pruned from registry. Initialise the room state
+  (* masc_init pruned from registry. Initialise the coord state
      directly so downstream masc_join and other tools can work. *)
   ignore
     (Masc_mcp.Coord.init fixture.state.coord_config
@@ -576,7 +576,7 @@ let field_value fixture ~tool_name field_name schema =
   match field_name with
   | "agent_name" | "author" | "owner" | "worker" | "agent" | "leader_id" ->
       `String fixture.agent_name
-  | "path" when tool_name = "masc_set_room" || tool_name = "masc_start" ->
+  | "path" when tool_name = "masc_set_coord" || tool_name = "masc_start" ->
       `String fixture.base_path
   | "path"
     when List.mem tool_name
@@ -778,7 +778,7 @@ let state_guard_fragments =
     "invalid";
     "must be";
     "join required";
-    "room not initialized";
+    "coord not initialized";
     "already exists";
     "no active";
     "unknown";
@@ -843,7 +843,7 @@ let guard_fragments_for_name name =
 let case_for_name name =
   let init_mode =
     match name with
-    | "masc_init" | "masc_start" | "masc_set_room" -> Fresh
+    | "masc_init" | "masc_start" | "masc_set_coord" -> Fresh
     | "masc_join" -> Init_only
     | _ -> Init_joined
   in

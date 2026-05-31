@@ -34,7 +34,7 @@ let arg_get_string ctx key default =
 let arg_get_int ctx key default =
   Safe_ops.json_int ~default key ctx.arguments
 
-(** masc_broadcast — broadcast a message to the room *)
+(** masc_broadcast — broadcast a message to the coord *)
 let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in

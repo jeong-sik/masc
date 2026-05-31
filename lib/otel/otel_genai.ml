@@ -37,7 +37,7 @@ module Attr_key = struct
   ;;
 
   let masc_gen_ai_runtime_id =
-    register Masc_extension "masc.gen_ai.runtime.name"
+    register Masc_extension "masc.gen_ai.runtime_id"
   ;;
 
   let keeper_name = register Legacy "keeper.name"

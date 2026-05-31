@@ -3,7 +3,6 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/cdal/
-  - lib/keeper/keeper_cdal_contract.ml
   - lib/keeper/keeper_accountability.ml
 ---
 

@@ -2,8 +2,8 @@
 status: runbook
 last_verified: 2026-05-12
 code_refs:
-  - lib/runtime/runtime_events.ml
-  - lib/runtime/runtime_event_bridge.ml
+  - lib/core/masc_runtime_events.ml
+  - lib/keeper/keeper_event_bridge.ml
   - lib/telemetry_unified.ml
 ---
 

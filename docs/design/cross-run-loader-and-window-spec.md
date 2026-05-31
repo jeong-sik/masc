@@ -3,7 +3,6 @@ status: reference
 last_verified: 2026-05-12
 code_refs:
   - lib/cdal/
-  - lib/cdal/proof_artifact_reader.ml
   - lib/keeper/keeper_agent_run.ml
 ---
 

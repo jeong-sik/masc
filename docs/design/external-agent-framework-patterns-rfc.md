@@ -4,7 +4,6 @@ last_verified: 2026-05-12
 code_refs:
   - lib/keeper/
   - lib/keeper/keeper_agent_run.ml
-  - lib/cdal/proof_artifact_reader.ml
 ---
 
 # External Agent Framework Patterns RFC

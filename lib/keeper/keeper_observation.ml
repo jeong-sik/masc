@@ -1,6 +1,6 @@
-(** Keeper_observation — Cascade metrics types, observation building, and recording.
+(** Keeper_observation — Runtime metrics types, observation building, and recording.
 
-    Tracks per-cascade call counts, model selection distribution, fallback
+    Tracks per-runtime call counts, model selection distribution, fallback
     hops, and per-attempt latency/error detail. Aggregate counters stay
     in-process (mutable Hashtbl), while per-call observations are also
     appended to a dated JSONL audit log under [.masc/cascade_audit].
@@ -8,11 +8,11 @@
     @since God file decomposition — extracted from oas_worker.ml *)
 
 (* ================================================================ *)
-(* Cascade types                                                     *)
+(* Runtime types                                                     *)
 (* ================================================================ *)
 
-type cascade_observation = {
-  cascade_name : string;
+type runtime_observation = {
+  runtime_id : string;
   strategy : string option;
   configured_labels : string list;
   candidate_models : string list;
@@ -22,14 +22,14 @@ type cascade_observation = {
   selected_index : int option;
   fallback_hops : int option;
   fallback_applied : bool;
-  attempts : cascade_attempt list;
-  fallback_events : cascade_fallback_event list;
+  attempts : runtime_attempt list;
+  fallback_events : runtime_fallback_event list;
   attempt_details_available : bool;
   attempt_details_source : string;
   oas_internal_cascade_allowed : bool;
 }
 
-and cascade_attempt = {
+and runtime_attempt = {
   attempt_index : int;
   model_id : string;
   model_label : string option;
@@ -37,7 +37,7 @@ and cascade_attempt = {
   error : string option;
 }
 
-and cascade_fallback_event = {
+and runtime_fallback_event = {
   from_model_id : string;
   from_model_label : string option;
   to_model_id : string;
@@ -47,11 +47,11 @@ and cascade_fallback_event = {
 
 module StringMap = Set_util.StringMap
 
-(* RFC-0132 PR-2: cascade observation OAS/dashboard surface = external boundary; redact via SSOT. *)
+(* RFC-0132 PR-2: runtime observation OAS/dashboard surface = external boundary; redact via SSOT. *)
 let public_runtime_model_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
-type cascade_counter = {
+type runtime_counter = {
   calls : int;
   successes : int;
   failures : int;
@@ -62,8 +62,8 @@ type cascade_counter = {
   last_selected_model : string option;
   last_selected_index : int option;
   last_candidate_models : string list;
-  last_attempts : cascade_attempt list;
-  last_fallback_events : cascade_fallback_event list;
+  last_attempts : runtime_attempt list;
+  last_fallback_events : runtime_fallback_event list;
   last_attempt_details_available : bool;
   last_attempt_details_source : string option;
   last_used_at : float;
@@ -74,7 +74,7 @@ type cascade_counter = {
 
 let cascade_max_keys = 256
 
-let create_cascade_counter ~now () =
+let create_runtime_counter ~now () =
   {
     calls = 0;
     successes = 0;
@@ -96,15 +96,15 @@ let create_cascade_counter ~now () =
     errored_models = StringMap.empty;
   }
 
-type cascade_eviction = {
+type runtime_eviction = {
   name : string;
   calls : int;
   last_used_at : float;
 }
 
-let find_cascade_eviction_candidate counters =
+let find_runtime_eviction_candidate counters =
   StringMap.fold
-    (fun name (counter : cascade_counter) best ->
+    (fun name (counter : runtime_counter) best ->
       match best with
       | None ->
           Some { name; calls = counter.calls; last_used_at = counter.last_used_at }
@@ -124,7 +124,7 @@ let find_cascade_eviction_candidate counters =
 (* Provider label helpers                                            *)
 (* ================================================================ *)
 
-(** Map provider_kind to a cascade-label prefix. Delegates to the
+(** Map provider_kind to a runtime-label prefix. Delegates to the
     current OAS registry helper so endpoint-distinct providers track
     the pinned agent_sdk behavior. The function does not enumerate
     specific providers; the registry resolves them. *)
@@ -150,7 +150,7 @@ let strip_latest_suffix s =
 (* Observation building                                              *)
 (* ================================================================ *)
 
-let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
+let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     ~(candidate_count : int)
     ~(selected_model_raw : string option)
     ?(attempts = [])
@@ -158,7 +158,7 @@ let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     ?(attempt_details_available = false)
     ?(attempt_details_source = "opaque_named_cascade")
     ?(oas_internal_cascade_allowed = false)
-    () : cascade_observation =
+    () : runtime_observation =
   let candidate_models =
     List.init (max 0 candidate_count) (fun _ -> public_runtime_model_label)
   in
@@ -181,7 +181,7 @@ let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
     | None -> false
   in
   {
-    cascade_name;
+    runtime_id;
     strategy;
     configured_labels = [];
     candidate_models;
@@ -202,14 +202,14 @@ let cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
 (* Metrics capture callbacks                                         *)
 (* ================================================================ *)
 
-type cascade_metrics_capture = {
+type runtime_metrics_capture = {
   mutable next_attempt_index : int;
-  mutable attempts_rev : cascade_attempt list;
-  mutable fallback_events_rev : cascade_fallback_event list;
+  mutable attempts_rev : runtime_attempt list;
+  mutable fallback_events_rev : runtime_fallback_event list;
 }
 
 (* Non-redacted JSON encoders for the internal audit log
-   (cascade_observation_to_json → record_cascade_audit). Sibling fields
+   (runtime_observation_to_json → record_cascade_audit). Sibling fields
    in the same observation envelope (selected_model, primary_model,
    candidate_models) are already emitted as real strings; the per-attempt
    and per-fallback model_id were the only fields collapsed to the
@@ -217,9 +217,9 @@ type cascade_metrics_capture = {
 
    The redacted variants for external boundaries (keeper metrics consumed
    by dashboard/OAS) live in lib/keeper/keeper_unified_metrics.ml as
-   [redacted_cascade_attempt_to_json] etc. and intentionally omit
+   [redacted_runtime_attempt_to_json] etc. and intentionally omit
    model_id/model_label entirely. Those are not touched here. *)
-let cascade_attempt_to_json (attempt : cascade_attempt) : Yojson.Safe.t =
+let runtime_attempt_to_json (attempt : runtime_attempt) : Yojson.Safe.t =
   `Assoc
     [
       ("attempt_index", `Int attempt.attempt_index);
@@ -229,7 +229,7 @@ let cascade_attempt_to_json (attempt : cascade_attempt) : Yojson.Safe.t =
       ("error", Json_util.string_opt_to_json attempt.error);
     ]
 
-let cascade_fallback_event_to_json (event : cascade_fallback_event) :
+let runtime_fallback_event_to_json (event : runtime_fallback_event) :
     Yojson.Safe.t =
   `Assoc
     [
@@ -249,7 +249,7 @@ let update_first_attempt_if ~predicate ~update attempts_rev =
   in
   loop attempts_rev
 
-let record_attempt_start (capture : cascade_metrics_capture) ~model_id:_ =
+let record_attempt_start (capture : runtime_metrics_capture) ~model_id:_ =
   let attempt_index = capture.next_attempt_index in
   capture.next_attempt_index <- capture.next_attempt_index + 1;
   capture.attempts_rev <-
@@ -262,21 +262,21 @@ let record_attempt_start (capture : cascade_metrics_capture) ~model_id:_ =
     }
     :: capture.attempts_rev
 
-(** [cascade_attempt_terminal_event_json] builds the structured details payload
+(** [runtime_attempt_terminal_event_json] builds the structured details payload
     emitted to system_log when a runtime candidate reaches its terminal state
     (success: latency_ms set, error none; failure: error set). The shape is the
     contract for downstream log analysers and external operators looking for
-    "why did the cascade exhaust" signals. Errors are recorded verbatim — no
+    "why did the runtime exhaust" signals. Errors are recorded verbatim — no
     string-based classification at this layer (see #12817 spirit and the
     project memory rule "no string matching for classification"). *)
-let cascade_attempt_terminal_event_json ?slot_release_at_phase
+let runtime_attempt_terminal_event_json ?slot_release_at_phase
     ?productive_phase_elapsed_ms ?retry_phase_elapsed_ms ~model_id:_
     ~model_label:_
     ~latency_ms ~error () =
   let outcome = if Option.is_some error then "failure" else "success" in
   `Assoc
     [
-      ("event", `String "cascade_attempt_terminal");
+      ("event", `String "runtime_attempt_terminal");
       ("model_id", `String public_runtime_model_label);
       ("model_label", `Null);
       ( "latency_ms", Json_util.int_opt_to_json latency_ms );
@@ -287,10 +287,10 @@ let cascade_attempt_terminal_event_json ?slot_release_at_phase
       ( "retry_phase_elapsed_ms", Json_util.int_opt_to_json retry_phase_elapsed_ms );
     ]
 
-let log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
+let log_runtime_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
   let outcome = if Option.is_some error then "failure" else "success" in
   let details =
-    cascade_attempt_terminal_event_json ~model_id ~model_label ~latency_ms
+    runtime_attempt_terminal_event_json ~model_id ~model_label ~latency_ms
       ~error ()
   in
   let summary =
@@ -301,7 +301,7 @@ let log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error =
   in
   Log.Telemetry.emit Log.Info ~details summary
 
-let ensure_terminal_attempt (capture : cascade_metrics_capture)
+let ensure_terminal_attempt (capture : runtime_metrics_capture)
     ~model_id:_ ~(latency_ms : int option) ~(error : string option) =
   let model_id = public_runtime_model_label in
   let is_open attempt =
@@ -325,11 +325,11 @@ let ensure_terminal_attempt (capture : cascade_metrics_capture)
           error;
         }
         :: capture.attempts_rev);
-  log_cascade_attempt_terminal ~model_id ~model_label ~latency_ms ~error
+  log_runtime_attempt_terminal ~model_id ~model_label ~latency_ms ~error
 
 let record_attempt_terminal = ensure_terminal_attempt
 
-let record_fallback_event (capture : cascade_metrics_capture)
+let record_fallback_event (capture : runtime_metrics_capture)
     ~from_model:_ ~to_model:_ ~(reason : string) =
   capture.fallback_events_rev <-
     {
@@ -341,7 +341,7 @@ let record_fallback_event (capture : cascade_metrics_capture)
     }
     :: capture.fallback_events_rev
 
-let cascade_metrics_for_candidates ~candidate_count:(_ : int) () =
+let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
   let capture =
     { next_attempt_index = 0; attempts_rev = []; fallback_events_rev = [] }
   in
@@ -357,7 +357,7 @@ let cascade_metrics_for_candidates ~candidate_count:(_ : int) () =
       on_request_end = (fun ~model_id ~latency_ms ->
         ensure_terminal_attempt capture ~model_id ~latency_ms ~error:None;
         (* Forward to Prometheus so per-model latency is visible on
-           the dashboard. Without this, the cascade capture records
+           the dashboard. Without this, the runtime capture records
            latency internally but never exports it — the global
            Llm_metric_bridge sink is not consulted because this
            per-call metrics object takes precedence. *)
@@ -401,12 +401,12 @@ let cascade_metrics_for_candidates ~candidate_count:(_ : int) () =
   in
   (capture, metrics)
 
-let cascade_observation_with_metrics ~cascade_name ?strategy ~configured_labels
+let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     ~(candidate_count : int)
-    ~(selected_model_raw : string option) ~(capture : cascade_metrics_capture)
+    ~(selected_model_raw : string option) ~(capture : runtime_metrics_capture)
     ?(oas_internal_cascade_allowed = false)
     () =
-  cascade_observation_of_candidates ~cascade_name ?strategy ~configured_labels
+  runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     ~candidate_count ~selected_model_raw
     ~attempts:(List.rev capture.attempts_rev)
     ~fallback_events:(List.rev capture.fallback_events_rev)
@@ -419,13 +419,13 @@ let cascade_observation_with_metrics ~cascade_name ?strategy ~configured_labels
 (* JSON serialization                                                *)
 (* ================================================================ *)
 
-let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
-  let cascade_name =
-    obs.cascade_name
+let runtime_observation_to_json (obs : runtime_observation) : Yojson.Safe.t =
+  let runtime_id =
+    obs.runtime_id
   in
   `Assoc
     [
-      ("runtime_id", `String cascade_name);
+      ("runtime_id", `String runtime_id);
       ("strategy", Json_util.string_opt_to_json obs.strategy);
       ( "configured_labels",
         `List (List.map (fun label -> `String label) obs.configured_labels) );
@@ -438,10 +438,10 @@ let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
       ("fallback_hops", Json_util.int_opt_to_json obs.fallback_hops);
       ("fallback_applied", `Bool obs.fallback_applied);
       ( "attempts",
-        `List (List.map cascade_attempt_to_json obs.attempts) );
+        `List (List.map runtime_attempt_to_json obs.attempts) );
       ( "fallback_events",
         `List
-          (List.map cascade_fallback_event_to_json obs.fallback_events) );
+          (List.map runtime_fallback_event_to_json obs.fallback_events) );
       ("attempt_details_available", `Bool obs.attempt_details_available);
       ("attempt_details_source", `String obs.attempt_details_source);
       ("oas_internal_cascade_allowed", `Bool obs.oas_internal_cascade_allowed);
@@ -465,11 +465,11 @@ let get_cascade_audit_store store_opt =
              observable.  Audit failure here disables the subsystem
              for the process lifetime — operators need to know. *)
           Runtime_metrics.on_cascade_audit_failure ~stage:"store_creation";
-          Log.Misc.warn "cascade audit store creation failed: %s"
+          Log.Misc.warn "runtime audit store creation failed: %s"
             (Printexc.to_string exn);
           None)
 
-let cascade_outcome_to_string = function
+let runtime_outcome_to_string = function
   | `Success -> "success"
   | `Failure -> "failure"
   | `Rejected -> "rejected"
@@ -479,7 +479,7 @@ let cascade_outcome_to_string = function
    is chosen because for terminal Failure/Rejected outcomes the final event's
    reason is the actual cause of exhaustion; the first event reflects only
    the initial fallback trigger.  Empty list -> null. *)
-let top_level_reason_of_observation (observation : cascade_observation option) =
+let top_level_reason_of_observation (observation : runtime_observation option) =
   match observation with
   | None -> `Null
   | Some obs ->
@@ -492,34 +492,34 @@ let keeper_name_to_json keeper_name =
   | Some name when String.trim name <> "" -> `String name
   | _ -> `Null
 
-let cascade_audit_json ~now ~keeper_name ~cascade_name ~observation ~outcome =
-  let cascade_name =
-    cascade_name
+let cascade_audit_json ~now ~keeper_name ~runtime_id ~observation ~outcome =
+  let runtime_id =
+    runtime_id
   in
   `Assoc
     [
       ("ts", `Float now);
       ("keeper_name", keeper_name_to_json keeper_name);
-      ("runtime_id", `String cascade_name);
-      ("outcome", `String (cascade_outcome_to_string outcome));
+      ("runtime_id", `String runtime_id);
+      ("outcome", `String (runtime_outcome_to_string outcome));
       ("top_level_reason", top_level_reason_of_observation observation);
       ( "observation",
         match observation with
-        | Some obs -> cascade_observation_to_json obs
+        | Some obs -> runtime_observation_to_json obs
         | None -> `Null );
     ]
 
-let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
+let record_cascade_audit store_opt ~now ~keeper_name ~runtime_id ~observation
     ~outcome =
-  let cascade_name_string =
-    cascade_name
+  let runtime_id_string =
+    runtime_id
   in
   match store_opt with
   | None -> ()
   | Some store ->
       (try
          Dated_jsonl.append store
-           (cascade_audit_json ~now ~keeper_name ~cascade_name ~observation
+           (cascade_audit_json ~now ~keeper_name ~runtime_id ~observation
               ~outcome)
        with
       | Eio.Cancel.Cancelled _ as e -> raise e
@@ -528,8 +528,8 @@ let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
              alertable.  Single-event audit loss compounds over
              time for post-incident analysis. *)
           Runtime_metrics.on_cascade_audit_failure ~stage:"append";
-          Log.Misc.warn "cascade audit append failed cascade=%s error=%s"
-            cascade_name_string (Printexc.to_string exn))
+          Log.Misc.warn "runtime audit append failed runtime=%s error=%s"
+            runtime_id_string (Printexc.to_string exn))
 
 (* ================================================================ *)
 (* Aggregate metrics recording                                       *)
@@ -554,7 +554,7 @@ let distribution_json map =
          in
          Int.compare (count_of right) (count_of left))
 
-let attempt_model_display (attempt : cascade_attempt) =
+let attempt_model_display (attempt : runtime_attempt) =
   match attempt.model_label with
   | Some label when String.trim label <> "" -> label
   | _ -> attempt.model_id
@@ -562,8 +562,8 @@ let attempt_model_display (attempt : cascade_attempt) =
 type msg =
   | Record_cascade of {
       keeper_name : string option;
-      cascade_name : string;
-      observation : cascade_observation option;
+      runtime_id : string;
+      observation : runtime_observation option;
       outcome : [ `Success | `Failure | `Rejected ];
       now : float;
     }
@@ -571,30 +571,30 @@ type msg =
   | Reset_counters_for_test
 
 type state = {
-  counters : cascade_counter StringMap.t;
+  counters : runtime_counter StringMap.t;
   audit_store : Dated_jsonl.t option;
 }
 
 let stream = Eio.Stream.create 1024
 
-let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
-  let cascade_name_string =
-    cascade_name
+let handle_record state ~now ~keeper_name ~runtime_id ~observation ~outcome =
+  let runtime_id_string =
+    runtime_id
   in
   let counters = state.counters in
   let counter, counters, evicted =
-    match StringMap.find_opt cascade_name_string counters with
+    match StringMap.find_opt runtime_id_string counters with
     | Some c -> (c, counters, None)
     | None ->
         let (counters_after_evict, evicted) =
           if StringMap.cardinal counters >= cascade_max_keys then
-            match find_cascade_eviction_candidate counters with
+            match find_runtime_eviction_candidate counters with
             | Some candidate -> (StringMap.remove candidate.name counters, Some candidate)
             | None -> (counters, None)
           else (counters, None)
         in
-        let c = create_cascade_counter ~now () in
-        (c, StringMap.add cascade_name_string c counters_after_evict, evicted)
+        let c = create_runtime_counter ~now () in
+        (c, StringMap.add runtime_id_string c counters_after_evict, evicted)
   in
   let counter = { counter with calls = counter.calls + 1; last_used_at = now } in
   let counter =
@@ -637,19 +637,19 @@ let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
     (fun candidate ->
       (* Iter 45: counter ticks on every eviction so the rate is
          alertable.  WARN log already prints per-eviction detail
-         (cascade name, age, etc.); metric makes rate aggregation
+         (runtime name, age, etc.); metric makes rate aggregation
          tractable. *)
-      Runtime_metrics.on_cascade_metrics_eviction ();
+      Runtime_metrics.on_runtime_metrics_eviction ();
       Log.Misc.warn
-        "cascade metrics evicted key=%s calls=%d last_used_at=%.3f to admit %s (limit=%d)"
-        candidate.name candidate.calls candidate.last_used_at cascade_name_string
+        "runtime metrics evicted key=%s calls=%d last_used_at=%.3f to admit %s (limit=%d)"
+        candidate.name candidate.calls candidate.last_used_at runtime_id_string
         cascade_max_keys)
     evicted;
   let audit_store_next = get_cascade_audit_store state.audit_store in
-  record_cascade_audit audit_store_next ~now ~keeper_name ~cascade_name
+  record_cascade_audit audit_store_next ~now ~keeper_name ~runtime_id
     ~observation ~outcome;
   {
-    counters = StringMap.add cascade_name_string counter counters;
+    counters = StringMap.add runtime_id_string counter counters;
     audit_store = audit_store_next;
   }
 
@@ -657,7 +657,7 @@ let handle_get_metrics state p =
   let counters = state.counters in
   let entries =
     StringMap.fold
-      (fun name (c : cascade_counter) acc ->
+      (fun name (c : runtime_counter) acc ->
         let error_rate =
           if c.calls > 0 then
             float_of_int (c.failures + c.rejected) /. float_of_int c.calls
@@ -679,10 +679,10 @@ let handle_get_metrics state p =
             ( "last_candidate_models",
               `List (List.map (fun model -> `String model) c.last_candidate_models) );
             ( "last_attempts",
-              `List (List.map cascade_attempt_to_json c.last_attempts) );
+              `List (List.map runtime_attempt_to_json c.last_attempts) );
             ( "last_fallback_events",
               `List
-                (List.map cascade_fallback_event_to_json c.last_fallback_events) );
+                (List.map runtime_fallback_event_to_json c.last_fallback_events) );
             ("last_attempt_details_available", `Bool c.last_attempt_details_available);
             ( "last_attempt_details_source",
               Json_util.string_opt_to_json c.last_attempt_details_source );
@@ -706,9 +706,9 @@ let handle_get_metrics state p =
 let run_actor () =
   let rec loop state =
     match Eio.Stream.take stream with
-    | Record_cascade { keeper_name; cascade_name; observation; outcome; now } ->
+    | Record_cascade { keeper_name; runtime_id; observation; outcome; now } ->
         loop
-          (handle_record state ~now ~keeper_name ~cascade_name ~observation
+          (handle_record state ~now ~keeper_name ~runtime_id ~observation
              ~outcome)
     | Get_metrics_json p ->
         handle_get_metrics state p;
@@ -721,15 +721,15 @@ let run_actor () =
 let start_actor_if_needed ~sw =
   Eio.Fiber.fork_daemon ~sw run_actor
 
-let record_cascade ?keeper_name ~observation ~cascade_name ~outcome () =
+let record_cascade ?keeper_name ~observation ~runtime_id ~outcome () =
   let now = Time_compat.now () in
   Eio.Stream.add stream
-    (Record_cascade { keeper_name; cascade_name; observation; outcome; now })
+    (Record_cascade { keeper_name; runtime_id; observation; outcome; now })
 
-let cascade_metrics_json () =
+let runtime_metrics_json () =
   let p, u = Eio.Promise.create () in
   Eio.Stream.add stream (Get_metrics_json u);
   Eio.Promise.await p
 
-let reset_cascade_counters_for_test () =
+let reset_runtime_counters_for_test () =
   Eio.Stream.add stream Reset_counters_for_test

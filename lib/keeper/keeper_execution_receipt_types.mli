@@ -44,18 +44,18 @@ val is_terminal : slot_release_phase -> bool
 val is_active : slot_release_phase -> bool
 val is_idle : slot_release_phase -> bool
 val slot_release_phase_to_string : slot_release_phase -> string
-type cascade_rotation_outcome =
+type runtime_rotation_outcome =
     Rotation_setup_failed
   | Rotation_retry_scheduled
   | Rotation_budget_exhausted
   | Rotation_slot_phase_exhausted
-val cascade_rotation_outcome_to_string : cascade_rotation_outcome -> string
-type cascade_outcome =
-    Cascade_passed_to_next_model
-  | Cascade_completed
-  | Cascade_not_observed
-  | Cascade_not_dispatched
-val cascade_outcome_to_string : cascade_outcome -> string
+val runtime_rotation_outcome_to_string : runtime_rotation_outcome -> string
+type runtime_outcome =
+    Runtime_passed_to_next_model
+  | Runtime_completed
+  | Runtime_not_observed
+  | Runtime_not_dispatched
+val runtime_outcome_to_string : runtime_outcome -> string
 type tool_contract_result =
     Contract_unknown
   | Contract_not_dispatched
@@ -78,11 +78,11 @@ val encode_contract_violation_reason :
 val decode_tool_list : string -> string list option
 val decode_contract_violation_reason :
   string -> (string * string list * string list) option
-type cascade_rotation_attempt = {
+type runtime_rotation_attempt = {
   from_cascade : string;
   to_cascade : string;
   reason : Keeper_error_classify.degraded_retry_reason;
-  outcome : cascade_rotation_outcome;
+  outcome : runtime_rotation_outcome;
   slot_release_at_phase : slot_release_phase option;
   productive_phase_elapsed_ms : int option;
   retry_phase_elapsed_ms : int option;
@@ -118,17 +118,17 @@ type t = {
   network_mode : Keeper_types_profile_sandbox.network_mode;
   approval_profile : string option;
   approval_profile_derived : bool;
-  cascade_name : string;
+  runtime_id : string;
   cascade_selected_model : string option;
-  cascade_attempt_count : int;
+  runtime_attempt_count : int;
   cascade_fallback_applied : bool;
-  cascade_outcome : cascade_outcome;
+  runtime_outcome : runtime_outcome;
   oas_internal_cascade_allowed : bool;
   degraded_retry_applied : bool;
   degraded_retry_cascade : string option;
   fallback_reason :
     Keeper_error_classify.degraded_retry_reason option;
-  cascade_rotation_attempts : cascade_rotation_attempt list;
+  runtime_rotation_attempts : runtime_rotation_attempt list;
   stop_reason : Runtime_agent.stop_reason option;
   error_kind : error_kind option;
   error_message : string option;

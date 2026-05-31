@@ -27,13 +27,13 @@ let last_tool_name receipt =
     ]
 ;;
 
-let cascade_rotation_attempt_to_json attempt =
+let runtime_rotation_attempt_to_json attempt =
   `Assoc
     [ "from_cascade", `String (attempt.from_cascade)
     ; "to_cascade", `String (attempt.to_cascade)
     ; ( "reason"
       , `String (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason) )
-    ; "outcome", `String (cascade_rotation_outcome_to_string attempt.outcome)
+    ; "outcome", `String (runtime_rotation_outcome_to_string attempt.outcome)
     ; ( "slot_release_at_phase"
       , string_opt_json
           (Option.map slot_release_phase_to_string attempt.slot_release_at_phase) )
@@ -164,12 +164,12 @@ let () =
   Prometheus.register_counter
     ~name:Keeper_metrics.(to_string ReceiptUnmappedDisposition)
     ~help:
-      "Total receipts whose (outcome, cascade_outcome) tuple did not match any branch of \
+      "Total receipts whose (outcome, runtime_outcome) tuple did not match any branch of \
        operator_disposition and fell through to the typed catch-all \
        (Disp_unknown, Reason_unmapped_cascade_state).  PR #11651 fixed the historical \
        'blocked' -> 'unknown' silent path; this counter alerts operators if a future \
        refactor reintroduces such a path. A non-zero rate is a regression signal — \
-       investigate which receipt.outcome / cascade_outcome / terminal_reason_code \
+       investigate which receipt.outcome / runtime_outcome / terminal_reason_code \
        combination is unclassified.  Labels are intentionally omitted: receipt fields \
        are high-cardinality free-form strings; structured detail goes to the WARN log \
        line at the firing site."
@@ -256,11 +256,11 @@ let operator_disposition (receipt : t)
       string_contains_ci terminal_reason "config"
       || string_contains_ci terminal_reason "auth"
   in
-  (* Pre-typing, this branch also matched cascade_outcome="runtime_exhausted"
-     and "exhausted" — neither is in the producer's closed [cascade_outcome]
-     set ([Cascade_passed_to_next_model] / [_completed] / [_not_observed] /
+  (* Pre-typing, this branch also matched runtime_outcome="runtime_exhausted"
+     and "exhausted" — neither is in the producer's closed [runtime_outcome]
+     set ([Runtime_passed_to_next_model] / [_completed] / [_not_observed] /
      [_not_dispatched]).  Those branches were unreachable workarounds; the
-     typed migration drops them.  Cascade exhaustion still reaches this
+     typed migration drops them.  Runtime exhaustion still reaches this
      branch via [terminal_reason="runtime_exhausted"]. *)
   if String.equal terminal_reason "runtime_exhausted"
   then Disp_alert_exhausted, Reason_runtime_exhausted
@@ -273,7 +273,7 @@ let operator_disposition (receipt : t)
   else if
     provider_runtime_failure
     && (receipt.cascade_fallback_applied
-        || receipt.cascade_outcome = Cascade_passed_to_next_model)
+        || receipt.runtime_outcome = Runtime_passed_to_next_model)
   then Disp_pass_next_model, Reason_cascade_fallback
   else if provider_runtime_failure
   then Disp_pause_human, Reason_provider_runtime_error
@@ -331,7 +331,7 @@ let operator_disposition (receipt : t)
     in
     let ok_followup_progress =
       receipt.outcome = `Ok
-      && receipt.cascade_outcome = Cascade_completed
+      && receipt.runtime_outcome = Runtime_completed
       && receipt.tool_contract_result = Contract_needs_execution_progress
       && (required_tools_satisfied || generic_claim_context_progress)
     in
@@ -362,7 +362,7 @@ let operator_disposition (receipt : t)
       then Disp_fail_open_next_cascade, Reason_tool_route_recoverable_failure
       else if
         receipt.cascade_fallback_applied
-        || receipt.cascade_outcome = Cascade_passed_to_next_model
+        || receipt.runtime_outcome = Runtime_passed_to_next_model
       then Disp_pass_next_model, Reason_tool_route_recoverable_failure
       else Disp_pause_human, Reason_tool_route_recoverable_failure
     else if required_tool_contract_unsatisfied
@@ -386,24 +386,24 @@ let operator_disposition (receipt : t)
     then Disp_fail_open_next_cascade, Reason_degraded_retry
     else if
       receipt.cascade_fallback_applied
-      || receipt.cascade_outcome = Cascade_passed_to_next_model
+      || receipt.runtime_outcome = Runtime_passed_to_next_model
     then Disp_pass_next_model, Reason_cascade_fallback
     else if
       receipt.outcome = `Ok
-      && receipt.cascade_outcome = Cascade_not_dispatched
+      && receipt.runtime_outcome = Runtime_not_dispatched
       && receipt.tool_contract_result = Contract_not_dispatched
       && String.equal terminal_reason "pre_dispatch_success"
     then Disp_pass, Reason_healthy
     (* "healthy" requires an explicit success signal: turn completed without
-       error AND cascade reached the configured terminal. Any other fallthrough
-       is an unmapped state — surface it as "unknown" so a new cascade_outcome
+       error AND runtime reached the configured terminal. Any other fallthrough
+       is an unmapped state — surface it as "unknown" so a new runtime_outcome
        or terminal_reason_code does not silently display as "healthy" on the
        dashboard. See #9900 and CLAUDE.md anti-pattern #2.
 
        Cancelled is split out from the legacy binary outcome so dashboards
        and replay decoders can distinguish a user-initiated cancellation
        from a true failure. Skipped corresponds to the TLA+ [PhaseGateSkip]
-       action: a turn that intentionally never dispatched, so cascade
+       action: a turn that intentionally never dispatched, so runtime
        never engaged. It is a successful no-op rather than a failure or
        an unmapped state. Spec parity with [ReceiptOutcomeSet] in
        [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
@@ -411,12 +411,12 @@ let operator_disposition (receipt : t)
       match receipt.outcome with
       | `Cancelled -> Disp_user_cancelled, Reason_cancelled
       | `Skipped -> Disp_skipped, Reason_phase_skipped
-      | `Ok when receipt.cascade_outcome = Cascade_completed -> Disp_pass, Reason_healthy
-      | `Ok when receipt.cascade_outcome = Cascade_not_dispatched ->
+      | `Ok when receipt.runtime_outcome = Runtime_completed -> Disp_pass, Reason_healthy
+      | `Ok when receipt.runtime_outcome = Runtime_not_dispatched ->
         (* Pre-dispatch shortcut: the turn completed successfully without
            dispatching to the LLM (cached response, immediate tool result,
            or pre-dispatch check resolved the turn).  Treated as healthy
-           because the outcome is success — the cascade was simply not
+           because the outcome is success — the runtime was simply not
            needed.  Previously unmapped (1062 WARN/day on 2026-05-24). *)
         Disp_pass, Reason_healthy
       | _ ->
@@ -426,11 +426,11 @@ let operator_disposition (receipt : t)
           ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Unmapped_disposition) ]
           ();
         Log.Keeper.warn
-          "operator_disposition: unmapped (outcome=%s cascade_outcome=%s \
+          "operator_disposition: unmapped (outcome=%s runtime_outcome=%s \
            terminal_reason=%s tool_contract_result=%s error_kind=%s) — investigate \
            regression of #11651 silent-path fix"
           (outcome_kind_to_string receipt.outcome)
-          (cascade_outcome_to_string receipt.cascade_outcome)
+          (runtime_outcome_to_string receipt.runtime_outcome)
           terminal_reason
           (tool_contract_result_to_string receipt.tool_contract_result)
           (Option.value
@@ -477,7 +477,7 @@ let to_json (receipt : t) =
       ~required_tools:receipt.tool_surface.required_tools
       ~required_tool_candidates:receipt.tool_surface.required_tool_candidates
       ~missing_required_tools:receipt.tool_surface.missing_required_tools
-      ~cascade_profile:(receipt.cascade_name)
+      ~runtime_profile:(receipt.runtime_id)
       ()
   in
   let action_radius =
@@ -561,13 +561,13 @@ let to_json (receipt : t) =
           [ ( "profile", string_opt_json receipt.approval_profile )
           ; "derived", `Bool receipt.approval_profile_derived
           ] )
-    ; ( "cascade"
+    ; ( "runtime"
       , `Assoc
-          [ "name", `String (receipt.cascade_name)
+          [ "name", `String (receipt.runtime_id)
           ; "selected_model", `Null
-          ; "attempt_count", `Int receipt.cascade_attempt_count
+          ; "attempt_count", `Int receipt.runtime_attempt_count
           ; "fallback_applied", `Bool receipt.cascade_fallback_applied
-          ; "outcome", `String (cascade_outcome_to_string receipt.cascade_outcome)
+          ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
           ; "oas_internal_cascade_allowed", `Bool receipt.oas_internal_cascade_allowed
           ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
           ; ( "degraded_retry_cascade"
@@ -582,8 +582,8 @@ let to_json (receipt : t) =
           ; ( "rotation_attempts"
             , `List
                 (List.map
-                   cascade_rotation_attempt_to_json
-                   receipt.cascade_rotation_attempts) )
+                   runtime_rotation_attempt_to_json
+                   receipt.runtime_rotation_attempts) )
           ] )
     ; ( "stop_reason"
       , match receipt.stop_reason with
@@ -647,7 +647,7 @@ let to_json (receipt : t) =
                                   [needs_operator_broadcast] is true and
                                   the receipt is not a duplicate livelock
                                   notification, inside a [try] so a single
-                                  failure does not cascade — the spec's
+                                  failure does not runtime — the spec's
                                   clean model.
 
    Bug model (would be violated if a future refactor dropped the first
@@ -726,8 +726,8 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
-    ; "cascade_name", `String (receipt.cascade_name)
-    ; "cascade_outcome", `String (cascade_outcome_to_string receipt.cascade_outcome)
+    ; "runtime_id", `String (receipt.runtime_id)
+    ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
     ; ( "tool_contract_result"
       , `String (tool_contract_result_to_string receipt.tool_contract_result) )
     ; ( "last_tool_name", string_opt_json (last_tool_name receipt) )
@@ -921,21 +921,21 @@ let stale_turn_bucket stale_seconds =
 let stale_broadcast_payload
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_id
       ~trace_id
       ~generation
       ~failure_reason
       ~stale_seconds
       ~last_turn_ts
   =
-  let cascade_name_string = cascade_name in
+  let runtime_id_string = runtime_id in
   let failure_reason_text = stale_broadcast_failure_reason_text failure_reason in
   let failure_reason_cohort = stale_broadcast_failure_cohort failure_reason in
   `Assoc
     [ "schema", `String "keeper.operator_broadcast_required.v1"
     ; "keeper_name", `String keeper_name
     ; "agent_name", `String agent_name
-    ; "cascade_name", `String cascade_name_string
+    ; "runtime_id", `String runtime_id_string
     ; "trace_id", `String trace_id
     ; "generation", `Int generation
     ; "disposition", `String "stalled"
@@ -958,19 +958,19 @@ let emit_stale_keeper_broadcast
       config
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_id
       ~trace_id
       ~generation
       ~failure_reason
       ~stale_seconds
       ~last_turn_ts
   =
-  let cascade_name_string = cascade_name in
+  let runtime_id_string = runtime_id in
   let payload =
     stale_broadcast_payload
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_id
       ~trace_id
       ~generation
       ~stale_seconds
@@ -990,10 +990,10 @@ let emit_stale_keeper_broadcast
     ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
     ();
   Log.Keeper.warn
-    "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago cascade=%s seq=%d"
+    "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago runtime=%s seq=%d"
     keeper_name
     stale_seconds
-    cascade_name_string
+    runtime_id_string
     event.seq
 ;;
 

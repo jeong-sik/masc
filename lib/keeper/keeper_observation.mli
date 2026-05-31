@@ -1,13 +1,13 @@
-(** Keeper_observation — cascade observation, metrics
-    capture, and a single-actor cascade-counter store.
+(** Keeper_observation — runtime observation, metrics
+    capture, and a single-actor runtime-counter store.
 
     The .ml splits into two concerns:
-    - {b Cascade observation}: the {!cascade_observation}
+    - {b Runtime observation}: the {!runtime_observation}
       record + companion attempt / fallback events,
       built per-turn in {!Keeper_turn_driver} via the
-      {!cascade_metrics_for_candidates} +
-      {!cascade_observation_with_metrics} pair.
-    - {b Cascade audit actor}: a single-fiber consumer
+      {!runtime_metrics_for_candidates} +
+      {!runtime_observation_with_metrics} pair.
+    - {b Runtime audit actor}: a single-fiber consumer
       ({!start_actor_if_needed}) that drains an
       [Eio.Stream] of {!record_cascade} /
       {!record_fallback_event} requests so concurrent
@@ -15,34 +15,34 @@
       maps.
 
     Dotted callers ({!Keeper_observation.X}) and the
-    cascade-include consumer rely on the surface pinned here.
+    runtime-include consumer rely on the surface pinned here.
 
     Internal helpers stay private at this boundary
-    ([cascade_attempt] / [cascade_fallback_event] type
-    bodies (exposed as part of {!cascade_observation}'s
+    ([runtime_attempt] / [runtime_fallback_event] type
+    bodies (exposed as part of {!runtime_observation}'s
     [attempts] / [fallback_events] fields with their full
     record shape),
-    [cascade_counter] type, [StringMap],
-    [cascade_max_keys], [create_cascade_counter],
-    [cascade_eviction] type, [find_cascade_eviction_candidate],
+    [runtime_counter] type, [StringMap],
+    [cascade_max_keys], [create_runtime_counter],
+    [runtime_eviction] type, [find_runtime_eviction_candidate],
     [display_provider_name_of_config], [strip_latest_suffix],
-    [cascade_observation_of_candidates],
-    [cascade_attempt_to_json], [cascade_fallback_event_to_json],
+    [runtime_observation_of_candidates],
+    [runtime_attempt_to_json], [runtime_fallback_event_to_json],
     [update_first_attempt_if], [record_attempt_start],
     [ensure_terminal_attempt],
-    [cascade_observation_to_json], [get_cascade_audit_store],
-    [cascade_outcome_to_string],
+    [runtime_observation_to_json], [get_cascade_audit_store],
+    [runtime_outcome_to_string],
     [top_level_reason_of_observation],
     [keeper_name_to_json], [cascade_audit_json],
     [record_cascade_audit], [increment_counter],
     [distribution_json], [attempt_model_display],
     [msg], [state] types, the [stream] queue,
     [handle_record], [handle_get_metrics], [run_actor],
-    [cascade_metrics_json]). *)
+    [runtime_metrics_json]). *)
 
-(** {1 Cascade observation types} *)
+(** {1 Runtime observation types} *)
 
-type cascade_attempt = {
+type runtime_attempt = {
   attempt_index : int;
   model_id : string;
   model_label : string option;
@@ -50,7 +50,7 @@ type cascade_attempt = {
   error : string option;
 }
 
-type cascade_fallback_event = {
+type runtime_fallback_event = {
   from_model_id : string;
   from_model_label : string option;
   to_model_id : string;
@@ -58,8 +58,8 @@ type cascade_fallback_event = {
   reason : string;
 }
 
-type cascade_observation = {
-  cascade_name : string;
+type runtime_observation = {
+  runtime_id : string;
   strategy : string option;
   configured_labels : string list;
   candidate_models : string list;
@@ -69,15 +69,15 @@ type cascade_observation = {
   selected_index : int option;
   fallback_hops : int option;
   fallback_applied : bool;
-  attempts : cascade_attempt list;
-  fallback_events : cascade_fallback_event list;
+  attempts : runtime_attempt list;
+  fallback_events : runtime_fallback_event list;
   attempt_details_available : bool;
   attempt_details_source : string;
   oas_internal_cascade_allowed : bool;
 }
-(** Per-turn cascade execution snapshot.  [attempts] is
+(** Per-turn runtime execution snapshot.  [attempts] is
     in chronological order (the internal capture stores
-    it reversed and {!cascade_observation_with_metrics}
+    it reversed and {!runtime_observation_with_metrics}
     flips it on materialise).  [attempt_details_source]
     distinguishes the capture path (the canonical
     [oas_metrics_callbacks] tag vs legacy fallbacks) so
@@ -89,7 +89,7 @@ type cascade_observation = {
 val provider_name_of_config :
   Llm_provider.Provider_config.t -> string
 (** Canonical provider slug from a config. Free-form string used as
-    the cascade counter key; the function does not enumerate
+    the runtime counter key; the function does not enumerate
     specific providers. *)
 
 val model_label_of_config :
@@ -99,20 +99,20 @@ val model_label_of_config :
     tests and callers; current public attempt/fallback projections use
     runtime-lane labels instead. *)
 
-(** {1 Cascade metrics capture} *)
+(** {1 Runtime metrics capture} *)
 
-type cascade_metrics_capture
+type runtime_metrics_capture
 (** Mutable accumulator threaded through OAS's per-call
     metrics sink to record per-attempt latency / errors
     and per-fallback events.  Held abstract because
     callers do not pattern-match on the internal
     counter / list state — they construct one via
-    {!cascade_metrics_for_candidates}, hand it to OAS
+    {!runtime_metrics_for_candidates}, hand it to OAS
     through a direct [Llm_provider.Metrics.t] record, then materialise
-    a {!cascade_observation} via
-    {!cascade_observation_with_metrics}. *)
+    a {!runtime_observation} via
+    {!runtime_observation_with_metrics}. *)
 
-val cascade_attempt_terminal_event_json :
+val runtime_attempt_terminal_event_json :
   ?slot_release_at_phase:string ->
   ?productive_phase_elapsed_ms:int ->
   ?retry_phase_elapsed_ms:int ->
@@ -128,24 +128,24 @@ val cascade_attempt_terminal_event_json :
     `error_message`, `slot_release_at_phase`,
     `productive_phase_elapsed_ms`, `retry_phase_elapsed_ms`) is locked
     against silent drift; downstream operators grep on these field names
-    when tracing why a cascade exhausted or why a keeper released its turn
+    when tracing why a runtime exhausted or why a keeper released its turn
     slot instead of scheduling another degraded retry. *)
 
 val record_attempt_terminal :
-  cascade_metrics_capture ->
+  runtime_metrics_capture ->
   model_id:string ->
   latency_ms:int option ->
   error:string option ->
   unit
 (** Records one terminal provider attempt in [capture]. This is for
-    named-cascade runners that receive provider-attempt completion
+    named-runtime runners that receive provider-attempt completion
     directly but cannot thread OAS's per-call metrics sink through the
     provider invocation path. *)
 
-val cascade_metrics_for_candidates :
+val runtime_metrics_for_candidates :
   candidate_count:int ->
   unit ->
-  cascade_metrics_capture * Llm_provider.Metrics.t
+  runtime_metrics_capture * Llm_provider.Metrics.t
 (** Builds the [(capture, metrics)] pair the per-call
     metrics path consumes.  Wires
     [Llm_metric_bridge.emit_request_latency] and
@@ -154,17 +154,17 @@ val cascade_metrics_for_candidates :
     turns (the per-call sink takes precedence over the
     global [Llm_metric_bridge] when both are wired). *)
 
-val cascade_observation_with_metrics :
-  cascade_name:string ->
+val runtime_observation_with_metrics :
+  runtime_id:string ->
   ?strategy:string ->
   configured_labels:string list ->
   candidate_count:int ->
   selected_model_raw:string option ->
-  capture:cascade_metrics_capture ->
+  capture:runtime_metrics_capture ->
   ?oas_internal_cascade_allowed:bool ->
   unit ->
-  cascade_observation
-(** Materialises a {!cascade_observation} from a finished
+  runtime_observation
+(** Materialises a {!runtime_observation} from a finished
     capture.  [attempts] / [fallback_events] are flipped
     into chronological order;
     [attempt_details_source] is set to
@@ -174,7 +174,7 @@ val cascade_observation_with_metrics :
 (** {1 Fallback recorder} *)
 
 val record_fallback_event :
-  cascade_metrics_capture ->
+  runtime_metrics_capture ->
   from_model:string ->
   to_model:string ->
   reason:string ->
@@ -183,7 +183,7 @@ val record_fallback_event :
     historical field names but records runtime-lane labels rather than
     concrete provider/model identities. *)
 
-(** {1 Cascade audit actor} *)
+(** {1 Runtime audit actor} *)
 
 val start_actor_if_needed : sw:Eio.Switch.t -> unit
 (** Spawns the single audit-actor fiber under [sw] if it
@@ -193,34 +193,34 @@ val start_actor_if_needed : sw:Eio.Switch.t -> unit
 
 val record_cascade :
   ?keeper_name:string ->
-  observation:cascade_observation option ->
-  cascade_name:string ->
+  observation:runtime_observation option ->
+  runtime_id:string ->
   outcome:[ `Success | `Failure | `Rejected ] ->
   unit ->
   unit
-(** Posts a record-cascade message onto the audit stream.
+(** Posts a record-runtime message onto the audit stream.
     The actor consumes it asynchronously, bumping the
-    per-cascade counters and persisting the audit JSON
+    per-runtime counters and persisting the audit JSON
     via {!record_cascade_audit}.  Non-blocking — the
     caller does not wait for the actor to drain. *)
 
-val reset_cascade_counters_for_test : unit -> unit
+val reset_runtime_counters_for_test : unit -> unit
 (** Posts a reset message onto the stream.  Test-only
     isolator; no-op outside the actor's lifetime. *)
 
-(** {1 JSON projections (cascade-include consumers)} *)
+(** {1 JSON projections (runtime-include consumers)} *)
 
-val cascade_metrics_json : unit -> Yojson.Safe.t
+val runtime_metrics_json : unit -> Yojson.Safe.t
 (** Posts a [Get_metrics_json] request to the actor and
     waits on the resulting promise.  Returns the
-    aggregated cascade-counter JSON snapshot for the
+    aggregated runtime-counter JSON snapshot for the
     operator dashboard.  Pinned because
     [lib/oas_worker.mli] re-exposes it via the
-    [include Keeper_observation] cascade. *)
+    [include Keeper_observation] runtime. *)
 
-val cascade_observation_to_json :
-  cascade_observation -> Yojson.Safe.t
-(** Wire encoder for {!cascade_observation} — flattens
+val runtime_observation_to_json :
+  runtime_observation -> Yojson.Safe.t
+(** Wire encoder for {!runtime_observation} — flattens
     [attempts] / [fallback_events] / outcome metadata
-    into a single [`Assoc].  Pinned because the cascade-
+    into a single [`Assoc].  Pinned because the runtime-
     include consumer ([oas_worker.mli]) re-exposes it. *)

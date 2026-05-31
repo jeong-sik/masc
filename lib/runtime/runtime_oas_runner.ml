@@ -148,7 +148,7 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
 
 (* #10681: per-provider rejection reason produced by the runtime filter.
    When the filter empties the runtime, operators previously saw only a
-   flat list of provider names; root-cause classification required
+    flat list of provider names; root-cause classification required
    re-running each predicate by hand. The reason is now attached to the
    provider in the WARN log so the next [no_tool_capable_provider] event
    pinpoints the failing check on the first read.
@@ -164,8 +164,8 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
       returned [Error], typically transport/auth/capability mismatch
       surfaced by [Runtime_agent].
    3. [Required_tool_use { reason }] — the inline-tool-choice / runtime
-      MCP capability gate from [Provider_tool_support]. Re-uses the
-      existing [rejection_reason] so dashboards stay consistent with
+       MCP capability gate from [Provider_tool_support]. Re-uses the
+       existing [rejection_reason] so dashboards stay consistent with
       [masc_runtime_filter_rejection_total]. *)
 type filter_rejection_reason =
   | Capability_profile_mismatch of string

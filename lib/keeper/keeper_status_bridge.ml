@@ -593,7 +593,6 @@ let source_provenance_json config (meta : keeper_meta) =
      ; "config_resolution", Config_dir_resolver.to_json resolution
      ; "precedence", `List [ `String "live_meta"; `String "toml"; `String "persona" ]
      ]
-     @ runtime_catalog_source_fields resolution
      @ [ "has_live_override", `Bool (override_fields <> [])
        ; "override_fields", Json_util.json_string_list override_fields
        ; ( "override_field_sources"

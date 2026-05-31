@@ -376,11 +376,18 @@ type keeper_meta = {
   meta_version : int;
 }
 
-(** {1 Cascade name derivation} *)
+(** {1 Runtime id derivation} *)
+
+val runtime_id_of_meta : keeper_meta -> string
+(** [runtime_id_of_meta m] returns the default runtime id.
+    Ignores [m] because keeper-level provider/model selection has been
+    collapsed to the single default Runtime binding. *)
+
+(** {1 Legacy cascade compatibility} *)
 
 val cascade_name_of_meta : keeper_meta -> string
-(** [cascade_name_of_meta m] returns the default runtime id.
-    Ignores [m] — kept for signature compatibility. *)
+(** Compatibility alias for {!runtime_id_of_meta}.
+    Kept while older JSON fields and call sites still use [cascade_name]. *)
 
 (** {1 Outcome <-> string} *)
 
@@ -455,5 +462,5 @@ val keeper_legacy_model_arg_names : string list
 val reject_legacy_model_args :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 (** Reject retired keeper model-selection input fields at tool/API boundaries.
-    Model and provider identity is resolved from [cascade_name] and the cascade
-    catalog, not per-call keeper arguments. *)
+    Model and provider identity is resolved from the default Runtime binding,
+    not per-call keeper arguments. *)

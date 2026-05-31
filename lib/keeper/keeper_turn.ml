@@ -98,15 +98,12 @@ let direct_turn_observation ~(config : Coord.config) (meta : keeper_meta) :
     ~config
     ~meta
 
-let resolve_turn_cascade_name (meta : keeper_meta) =
-  let raw_name = String.trim (Keeper_meta_contract.cascade_name_of_meta meta) in
-  match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
-  | Ok cascade_name -> Ok cascade_name
-  | Error detail ->
-      Error
-        (Printf.sprintf
-           "invalid cascade_name %S for keeper %s: %s"
-           raw_name meta.name detail)
+let resolve_turn_runtime_id (meta : keeper_meta) =
+  let runtime_id = String.trim (Keeper_meta_contract.runtime_id_of_meta meta) in
+  if runtime_id = "" then
+    Error (Printf.sprintf "invalid runtime_id for keeper %s: empty" meta.name)
+  else
+    Ok runtime_id
 
 let keeper_msg_timeout_override args =
   match get_float_opt args "timeout_sec" with
@@ -144,20 +141,20 @@ let preflight_keeper_msg ctx args : (unit, string) result =
     match ensure_keeper_exists ~ctx ~name with
     | Error e -> Error e
     | Ok meta ->
-      match resolve_turn_cascade_name meta with
+      match resolve_turn_runtime_id meta with
       | Error e -> Error e
-      | Ok turn_cascade_name ->
+      | Ok turn_runtime_id ->
         (match
            Keeper_cascade_resilience.cascade_resilience_error_message
              (Keeper_cascade_resilience.cascade_resilience_of_name
-                (turn_cascade_name))
+                (turn_runtime_id))
          with
          | Some e -> Error e
          | None ->
         let effective_models =
           if direct_reply then
             Provider_runtime_projection.default_execution_model_strings
-              (                 (turn_cascade_name))
+              (                 (turn_runtime_id))
           else
             effective_model_labels_for_turn meta
         in
@@ -221,15 +218,15 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
       let meta = meta0 in
-      match resolve_turn_cascade_name meta with
+      match resolve_turn_runtime_id meta with
       | Error e ->
         Progress.stop_tracking turn_task_id;
         tool_result_error ("" ^ e)
-      | Ok turn_cascade_name ->
+      | Ok turn_runtime_id ->
       (match
          Keeper_cascade_resilience.cascade_resilience_error_message
            (Keeper_cascade_resilience.cascade_resilience_of_name
-              (turn_cascade_name))
+              (turn_runtime_id))
        with
        | Some e ->
          Progress.stop_tracking turn_task_id;
@@ -251,7 +248,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       let effective_models =
         if direct_reply then
           Provider_runtime_projection.default_execution_model_strings
-            (               (turn_cascade_name))
+            (               (turn_runtime_id))
               else
           effective_model_labels_for_turn meta
       in
@@ -496,7 +493,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     ~build_turn_prompt
                     ~user_message:message
                     ~cascade_name:
-                      (                         (turn_cascade_name))
+                      (                         (turn_runtime_id))
                     ~world_observation
                     ~turn_affordances
                     ~required_tool_names

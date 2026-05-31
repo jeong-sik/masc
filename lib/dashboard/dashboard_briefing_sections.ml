@@ -15,7 +15,7 @@ let briefing_sections_criteria =
     "no_model_status_inference";
     "communication_from_message_and_session_counts";
     "alignment_from_active_agents_and_focus_bindings";
-    "watch_from_coord_health_and_incident_counts";
+    "watch_from_workspace_health_and_incident_counts";
     "metadata_gaps_reported_separately";
   ]
 
@@ -197,7 +197,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       let summary = member_assoc "summary" briefing_json in
       `Assoc
         [
-          ("coord_health", member_assoc "coord_health" summary);
+          ("workspace_health", member_assoc "workspace_health" summary);
           ("active_agents", member_assoc "active_agents" summary);
           ("keeper_pressure", member_assoc "keeper_pressure" summary);
           ("active_operations", member_assoc "active_operations" summary);

@@ -30,11 +30,11 @@ module S = Masc_mcp.Briefing_sections
 
 let s_str s = `String s
 
-let briefing_summary ?(coord_health = "ok") ?(incidents = 0)
+let briefing_summary ?(workspace_health = "ok") ?(incidents = 0)
     ?(recommended = 0) ?(top_attention = "") () : Yojson.Safe.t =
   `Assoc
     [
-      ("coord_health", s_str coord_health);
+      ("workspace_health", s_str workspace_health);
       ("incident_count", `Int incidents);
       ("recommended_action_count", `Int recommended);
       ("top_attention_summary", s_str top_attention);
@@ -168,10 +168,10 @@ let test_watch_summary_matches_watch_section () =
 
 (* ── (2) Watch section branches ────────────────────────────── *)
 
-let test_watch_risky_coord () =
+let test_watch_risky_workspace () =
   let _ws, sections =
     S.build_briefing_sections
-      ~briefing_summary_json:(briefing_summary ~coord_health:"critical" ())
+      ~briefing_summary_json:(briefing_summary ~workspace_health:"critical" ())
       ~sessions:[] ~agents:[] ~recent_messages:[]
       ~metadata_gaps:[]
   in
@@ -366,7 +366,7 @@ let () =
   test_output_shape_section_attribute_keys ();
   test_provenance_and_authoritative_pinned ();
   test_watch_summary_matches_watch_section ();
-  test_watch_risky_coord ();
+  test_watch_risky_workspace ();
   test_watch_incidents_only ();
   test_watch_recommended_actions_only ();
   test_watch_clean_state_ok ();

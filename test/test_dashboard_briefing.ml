@@ -232,7 +232,7 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
         (json |> member "projection_diagnostics" |> member "last_success_at"
          <> `Null);
       check bool "default mission leaves initializing placeholder" true
-        (json |> member "summary" |> member "coord_health" |> to_string
+        (json |> member "summary" |> member "workspace_health" |> to_string
          <> "initializing");
       check bool "mission summary namespace_id removed" true
         (json |> member "summary" |> member "namespace_id" = `Null);
@@ -266,7 +266,7 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
         (json |> member "projection_diagnostics" |> member "last_success_at"
          <> `Null);
       check bool "default mission leaves initializing placeholder" true
-        (json |> member "summary" |> member "coord_health" |> to_string
+        (json |> member "summary" |> member "workspace_health" |> to_string
          <> "initializing");
       check bool "mission summary namespace_id removed" true
         (json |> member "summary" |> member "namespace_id" = `Null);

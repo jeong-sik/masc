@@ -367,7 +367,7 @@ let test_build_briefing_sections_demotes_metadata_only_communication () =
   let briefing_summary_json =
     `Assoc
       [
-        ("coord_health", `String "ok");
+        ("workspace_health", `String "ok");
         ("incident_count", `Int 0);
         ("recommended_action_count", `Int 0);
         ("top_attention_summary", `String "");
@@ -401,7 +401,7 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
   let briefing_summary_json =
     `Assoc
       [
-        ("coord_health", `String "ok");
+        ("workspace_health", `String "ok");
         ("incident_count", `Int 0);
         ("recommended_action_count", `Int 0);
         ("top_attention_summary", `String "");
@@ -462,7 +462,7 @@ let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
   let briefing_summary_json =
     `Assoc
       [
-        ("coord_health", `String "bad");
+        ("workspace_health", `String "bad");
         ("incident_count", `Int 0);
         ("recommended_action_count", `Int 0);
         ("top_attention_summary", `String "");

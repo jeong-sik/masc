@@ -94,7 +94,7 @@ let mission_cache =
   create_cached_surface
     (`Assoc
         [ "generated_at", `String (Masc_domain.now_iso ())
-        ; "summary", `Assoc [ "coord_health", `String "initializing" ]
+        ; "summary", `Assoc [ "workspace_health", `String "initializing" ]
         ; "incidents", `List []
         ; "recommended_actions", `List []
         ; "command_focus", `Assoc []

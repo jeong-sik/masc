@@ -449,7 +449,7 @@ let run (ctx : ctx)
         Error reclassified)
       else if
         let fallback_not_yet_tried =
-          match KCP.fallback_cascade_for execution_cascade_name with
+          match KCP.fallback_runtime_for execution_cascade_name with
           | Some fb ->
             (not (List.exists (String.equal fb) attempted_runtime_ids))
             && not (String.equal fb execution_cascade_name)
@@ -462,7 +462,7 @@ let run (ctx : ctx)
       then (
         Log.Keeper.warn
           "%s: required_tool_contract_violation after rotation (%s, \
-           %d cascade(s) attempted) — skipping further rotation; \
+           %d runtime(s) attempted) — skipping further rotation; \
            rotating again is unlikely to change the model's \
            tool-use choice. Error: %s"
           meta.name

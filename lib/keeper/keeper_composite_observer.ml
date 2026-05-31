@@ -63,11 +63,11 @@ type tla_action =
   | Action_measurement_broadcast
   | Action_decide_guard
   | Action_select_tool_policy
-  | Action_start_cascade_selection
-  | Action_select_cascade
+  | Action_start_runtime_selection
+  | Action_select_runtime
   | Action_gate_rejected
-  | Action_cascade_done
-  | Action_cascade_exhausted
+  | Action_runtime_done
+  | Action_runtime_exhausted
   | Action_finish_turn
   | Action_start_compaction
   | Action_finish_compaction
@@ -79,8 +79,8 @@ type tla_action =
 let all_tla_actions =
   [
     Action_start_turn; Action_measurement_broadcast; Action_decide_guard; Action_select_tool_policy;
-    Action_start_cascade_selection; Action_select_cascade; Action_gate_rejected; Action_cascade_done;
-    Action_cascade_exhausted; Action_finish_turn; Action_start_compaction; Action_finish_compaction;
+    Action_start_runtime_selection; Action_select_runtime; Action_gate_rejected; Action_runtime_done;
+    Action_runtime_exhausted; Action_finish_turn; Action_start_compaction; Action_finish_compaction;
     Action_enter_failing; Action_clear_failing; Action_enter_overflowed; Action_overflowed_auto_compact;
   ]
 
@@ -250,11 +250,11 @@ let tla_action_to_string = function
   | Action_measurement_broadcast -> "MeasurementBroadcast"
   | Action_decide_guard -> "DecideGuard"
   | Action_select_tool_policy -> "SelectToolPolicy"
-  | Action_start_cascade_selection -> "StartCascadeSelection"
-  | Action_select_cascade -> "SelectCascade"
+  | Action_start_runtime_selection -> "StartRuntimeSelection"
+  | Action_select_runtime -> "SelectRuntime"
   | Action_gate_rejected -> "GateRejected"
-  | Action_cascade_done -> "CascadeDone"
-  | Action_cascade_exhausted -> "CascadeExhausted"
+  | Action_runtime_done -> "RuntimeDone"
+  | Action_runtime_exhausted -> "RuntimeExhausted"
   | Action_finish_turn -> "FinishTurn"
   | Action_start_compaction -> "StartCompaction"
   | Action_finish_compaction -> "FinishCompaction"
@@ -268,11 +268,11 @@ let tla_action_of_string = function
   | "MeasurementBroadcast" -> Some Action_measurement_broadcast
   | "DecideGuard" -> Some Action_decide_guard
   | "SelectToolPolicy" -> Some Action_select_tool_policy
-  | "StartCascadeSelection" -> Some Action_start_cascade_selection
-  | "SelectCascade" -> Some Action_select_cascade
+  | "StartRuntimeSelection" -> Some Action_start_runtime_selection
+  | "SelectRuntime" -> Some Action_select_runtime
   | "GateRejected" -> Some Action_gate_rejected
-  | "CascadeDone" -> Some Action_cascade_done
-  | "CascadeExhausted" -> Some Action_cascade_exhausted
+  | "RuntimeDone" -> Some Action_runtime_done
+  | "RuntimeExhausted" -> Some Action_runtime_exhausted
   | "FinishTurn" -> Some Action_finish_turn
   | "StartCompaction" -> Some Action_start_compaction
   | "FinishCompaction" -> Some Action_finish_compaction

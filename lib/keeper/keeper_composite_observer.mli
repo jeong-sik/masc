@@ -8,7 +8,7 @@
     Contract:
     - Pure read. No mutation, no I/O, no event emission.
     - Never calls [Keeper_state_machine.apply_event],
-      [Keeper_cascade_routing.select_cascade], or any routine that would
+      runtime selection, or any routine that would
       shift keeper lifecycle state.
     - Does not read provider names, token counts, or context bytes —
       those belong to OAS (see [feedback_masc-oas-layer-boundary]).
@@ -61,11 +61,11 @@ type tla_action =
   | Action_measurement_broadcast
   | Action_decide_guard
   | Action_select_tool_policy
-  | Action_start_cascade_selection
-  | Action_select_cascade
+  | Action_start_runtime_selection
+  | Action_select_runtime
   | Action_gate_rejected
-  | Action_cascade_done
-  | Action_cascade_exhausted
+  | Action_runtime_done
+  | Action_runtime_exhausted
   | Action_finish_turn
   | Action_start_compaction
   | Action_finish_compaction

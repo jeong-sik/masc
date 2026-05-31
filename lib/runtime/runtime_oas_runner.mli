@@ -1,19 +1,19 @@
 (** Runtime_oas_runner — Eio context, cascade resolution, runtime MCP policy.
 
     Extracted from oas_worker_named.ml (God file decomposition).
-    Provides cascade profile defaults, Eio context validation,
+    Provides runtime profile defaults, Eio context validation,
     provider resolution, and tool-support filtering.
 
     This module is [include]d by {!Keeper_turn_driver}; all bindings are
     re-exported by the facade.  @since God file decomposition *)
 
-(** {1 Cascade profile defaults} *)
+(** {1 Runtime profile defaults} *)
 
 val default_config_path : unit -> string option
 (** Alias for [Runtime.config_path]. *)
 
-val default_model_strings : cascade_name:string -> string list
-(** Alias for [Cascade_runtime.default_model_strings]. *)
+val default_model_strings : runtime_id:string -> string list
+(** Alias for [Runtime.default_model_strings]. *)
 
 (** {1 Eio context validation} *)
 
@@ -29,19 +29,19 @@ val eio_context_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
     error with field ["eio_context"]. *)
 
 val runtime_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
-(** Lift a cascade-catalog diagnostic into an [Agent_sdk.Error.Config]
+(** Lift a runtime-catalog diagnostic into an [Agent_sdk.Error.Config]
     error with field ["runtime_id"]. *)
 
 (** {1 Provider resolution} *)
 
-val resolve_cascade_providers :
+val resolve_runtime_providers :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  cascade_name:string -> unit ->
+  runtime_id:string -> unit ->
   (Llm_provider.Provider_config.t list, string) result
-(** Resolve cascade provider configs via MASC Cascade_config. *)
+(** Resolve runtime provider configs via MASC Cascade_config. *)
 
 val keeper_agent_name_opt : string -> string option
 (** Derive the agent name from a keeper name; [None] when the name is empty. *)

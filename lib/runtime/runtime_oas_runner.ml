@@ -1,17 +1,17 @@
 (** Runtime_oas_runner — Eio context, cascade resolution, runtime MCP policy.
 
     Extracted from oas_worker_named.ml (God file decomposition).
-    Provides cascade profile defaults, Eio context validation,
+    Provides runtime profile defaults, Eio context validation,
     provider resolution, and tool-support filtering.
 
     @since God file decomposition *)
 
-(* Cascade profile defaults (moved from Cascade module) *)
+(* Runtime profile defaults (moved from Cascade module) *)
 
 let default_config_path = Runtime.config_path
 
-let default_model_strings ~cascade_name =
-  Provider_runtime_projection.default_execution_model_strings cascade_name
+let default_model_strings ~runtime_id =
+  Provider_runtime_projection.default_execution_model_strings runtime_id
 
 (* Named model execution *)
 
@@ -38,15 +38,15 @@ let runtime_catalog_error_to_sdk_error detail =
   Agent_sdk.Error.Config
     (Agent_sdk.Error.InvalidConfig { field = "runtime_id"; detail })
 
-(** Resolve cascade provider configs via MASC Cascade_config.
+(** Resolve runtime provider configs via MASC Cascade_config.
     Returns Provider_config.t list for the downstream OAS runtime,
     bypassing the old Model_spec facade. *)
-let resolve_cascade_providers
+let resolve_runtime_providers
       ?provider_filter:_
       ?(require_tool_choice_support = false)
       ?(require_tool_support = false)
       ?runtime_mcp_policy
-      ~cascade_name:_
+      ~runtime_id:_
       ()
   =
   (* RFC-0206 single-binding: runtime catalog resolution removed. The providers

@@ -247,7 +247,7 @@ let finalize
           `String
             (Keeper_execution_receipt.outcome_kind_to_string receipt.outcome) );
         ("terminal_reason_code", `String receipt.terminal_reason_code);
-        ( "cascade_name",
+        ( "runtime_id",
           `String (receipt.cascade_name) );
         ("cascade_attempt_count", `Int receipt.cascade_attempt_count);
         ("cascade_fallback_applied", `Bool receipt.cascade_fallback_applied);

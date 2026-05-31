@@ -205,7 +205,6 @@
   provider_runtime_projection
   voice_bridge_transport
   keeper_oas_checkpoint
-  keeper_turn_driver_named_resolution
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
   keeper_turn_driver_helpers

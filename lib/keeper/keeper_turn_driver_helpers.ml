@@ -5,7 +5,7 @@
     that compute provider-attempt timeout bounds, health-key derivations,
     tool-name aggregations, etc. Lifting them out of the 1459-LOC
     [keeper_turn_driver.ml] is a foundation step toward the eventual
-    A/B/C decomposition (Agent SDK call / runtime strategy / keeper
+    A/B/C decomposition (Agent SDK call / cascade strategy / keeper
     bookkeeping) deferred from RFC-0047 Phase 4.
 
     No behavior change. Mechanical extraction.
@@ -114,7 +114,7 @@ let provider_rejection_for_required_tool_unsupported ~provider_label
    }
     : Keeper_internal_error.provider_rejection)
 
-let no_tool_capable_provider_of_pre_dispatch_rejections ~runtime_id
+let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
     ~configured_labels ~runtime_manifest_required_tool_names ~runtime_mcp_policy
     ~tools ~required_lane_provider_rejections ~pre_dispatch_provider_rejections =
   match runtime_manifest_required_tool_names, pre_dispatch_provider_rejections with
@@ -139,9 +139,9 @@ let no_tool_capable_provider_of_pre_dispatch_rejections ~runtime_id
         }
       in
       Some
-        (Keeper_internal_error.Runtime_exhausted
+        (Keeper_internal_error.Cascade_exhausted
            {
-             runtime_id;
+             cascade_name;
              reason = Keeper_meta_contract.No_tool_capable (Some detail);
            })
 
@@ -170,25 +170,8 @@ let fail_open_health_filtered_candidates
   | [] when tool_filtered_candidates <> [] -> tool_filtered_candidates, true
   | _ -> health_filtered_candidates, false
 
-let provider_rejections_for_no_tool_error
-    ~keeper_name ?runtime_mcp_policy ~tools
-    ~require_tool_choice_support ~require_tool_support candidates =
-  candidates
-  |> List.filter_map (fun candidate ->
-       match
-         Runtime_candidate.tool_filter_rejection_label
-           ~keeper_name ?runtime_mcp_policy ~tools
-           ~require_tool_choice_support ~require_tool_support candidate
-       with
-       | None -> None
-       | Some reason ->
-           Some
-             ({
-                provider_label =
-                  Runtime_candidate.provider_label candidate;
-                reason;
-              }
-               : Keeper_internal_error.provider_rejection))
+(* RFC-0206: provider_rejections_for_no_tool_error deleted — multi-candidate
+   tool-filter rejection lists have no meaning under single-runtime dispatch. *)
 
 let apply_stream_idle_timeout_default = function
   | Some _ as v -> v

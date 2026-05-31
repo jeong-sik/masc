@@ -1,6 +1,6 @@
-(** Keeper_turn_driver — MASC named-runtime and model-label execution entry points.
+(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
 
-    Public API for running OAS agents through MASC-managed named runtime
+    Public API for running OAS agents through MASC-managed named cascade
     profiles ([run_named]) or explicit model label ([run_model_by_label]),
     with optional MASC tool bridging variants.
 
@@ -18,22 +18,14 @@
 
 include module type of Keeper_internal_error
 
-(** {1 Runtime error helpers} *)
-
-val sdk_error_to_runtime_outcome :
-  Agent_sdk.Error.sdk_error -> Runtime_attempt_fsm.provider_outcome option
+(** {1 Provider error helpers} *)
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 
 val message_looks_like_capacity_backpressure : string -> bool
 
-val sdk_error_is_resumable_cli_session : Agent_sdk.Error.sdk_error -> bool
-(** [true] only for typed [Resumable_cli_session] envelopes. *)
-
 val sdk_error_is_terminal_provider_runtime_failure :
   Agent_sdk.Error.sdk_error -> bool
-
-val sdk_error_is_model_access_denied : Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_is_required_tool_contract_violation :
   Agent_sdk.Error.sdk_error -> bool
@@ -45,7 +37,7 @@ val sdk_error_soft_rate_limited :
 
 val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
-val sdk_error_runtime_fallback_class :
+val sdk_error_cascade_fallback_class :
   Agent_sdk.Error.sdk_error -> string option
 
 (** [apply_stream_idle_timeout_default opt] returns [opt] when the caller
@@ -63,7 +55,7 @@ type provider_attempt_provenance =
   ; resolved_model_source : string
   ; capability_source : string
   ; fallback_authority : string
-  ; provider_source_runtime : string option
+  ; provider_source_cascade : string option
   }
 
 type provider_attempt_started_record =
@@ -91,10 +83,10 @@ val provider_attempt_started_decision :
 val provider_attempt_finished_decision :
   provider_attempt_finished_record -> Yojson.Safe.t
 
-(** {1 Named runtime execution} *)
+(** {1 Named cascade execution} *)
 
 val run_named :
-  runtime_id:string ->
+  cascade_name:string ->
   ?base_path:string ->
   ?keeper_name:string ->
   goal:string ->
@@ -152,10 +144,10 @@ val run_named :
   ?per_provider_timeout_s:float ->
   unit ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
-(** Run a single [Agent.run] call with MASC-driven runtime model fallback.
-    MASC drives the runtime FSM directly: resolves runtime providers,
-    tries each with OAS, and uses [Runtime_fsm.decide] on failure.
-    The runtime loop runs inside a capacity-managed queue permit. *)
+(** Run a single [Agent.run] call with MASC-driven cascade model fallback.
+    MASC drives the cascade FSM directly: resolves cascade providers,
+    tries each with OAS, and uses [Cascade_fsm.decide] on failure.
+    The cascade loop runs inside a capacity-managed queue permit. *)
 
 module For_testing : sig
   val checkpoint_after_attempt :

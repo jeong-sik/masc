@@ -52,7 +52,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_local_runtime -> "local_runtime"
   | Mod_run -> "run"
   | Mod_agent -> "agent"
-  | Mod_room -> "room"
+  | Mod_coord -> "coord"
   | Mod_control -> "control"
   | Mod_agent_timeline -> "agent_timeline"
   | Mod_misc -> "misc"
@@ -112,7 +112,7 @@ let dispatch
         ~args
     | Mod_run -> Tool_run.dispatch { Tool_run.config } ~name ~args
     | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
-    | Mod_room -> Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args
+    | Mod_coord -> Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args
     | Mod_control ->
       if name = "masc_pause_status"
       then Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args

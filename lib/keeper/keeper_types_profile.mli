@@ -35,8 +35,8 @@ val normalize_git_identity_mode_opt : string option -> string option
 val normalize_social_model_opt : string option -> string option
 val valid_social_model_strings : string list
 val lower_string_list_opt : string list -> string list option
-val room_seq_map_to_json : (string * int) list -> Yojson.Safe.t
-val room_seq_map_of_json : Yojson.Safe.t -> (string * int) list
+val coord_seq_map_to_json : (string * int) list -> Yojson.Safe.t
+val coord_seq_map_of_json : Yojson.Safe.t -> (string * int) list
 
 include module type of Keeper_types_profile_defaults
 

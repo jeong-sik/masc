@@ -110,7 +110,7 @@ val docker_config_container_root : container_root:'a -> string
 val docker_config_available : string -> bool
 val docker_config_mount_args :
   base_path:string -> container_root:'a -> string list
-type coord_state_mount_kind = Room_state_file | Room_state_dir
+type coord_state_mount_kind = Coord_state_file | Coord_state_dir
 val docker_coord_state_mounts : (coord_state_mount_kind * string) list
 val coord_state_path_available : coord_state_mount_kind -> string -> bool
 val unique_preserving_order : 'a list -> 'a list

@@ -79,10 +79,10 @@ include Keeper_types_profile_toml
 
 (* ── JSON room-seq helpers ───────────────────────────────────────── *)
 
-let room_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
+let coord_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (coord_id, seq) -> (coord_id, `Int seq)) items)
 
-let room_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
+let coord_seq_map_of_json (json : Yojson.Safe.t) : (string * int) list =
   match json with
   | `Assoc fields ->
       fields

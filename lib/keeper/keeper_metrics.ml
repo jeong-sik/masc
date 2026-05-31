@@ -124,7 +124,7 @@ type t =
   | ClaimAutoProvision
   | TomlInvalid
   | PersonaDriftMissing
-  | RoomInitFailures
+  | CoordInitFailures
   | PresenceSyncFailures
   | SelfPreservationUniversal
   | StaleStormPaused
@@ -134,7 +134,7 @@ type t =
   | StateSnapshotSkippedNoState
   | ProgressUpdatedLineFailures
   | SseBroadcastFailures
-  | RoomHeartbeatFailures
+  | CoordHeartbeatFailures
   | TurnMetricsSnapshotFailures
   | OasExecutionErrors
   | EpisodeCreateFailures
@@ -360,7 +360,7 @@ let to_string = function
   | ClaimAutoProvision -> "masc_keeper_claim_auto_provision_total"
   | TomlInvalid -> "masc_keeper_toml_invalid_total"
   | PersonaDriftMissing -> "masc_keeper_persona_drift_missing_total"
-  | RoomInitFailures -> "masc_keeper_room_init_failures_total"
+  | CoordInitFailures -> "masc_keeper_coord_init_failures_total"
   | PresenceSyncFailures -> "masc_keeper_presence_sync_failures_total"
   | SelfPreservationUniversal -> "masc_keeper_self_preservation_universal_total"
   | StaleStormPaused -> "masc_keeper_stale_storm_paused_total"
@@ -371,7 +371,7 @@ let to_string = function
     "masc_keeper_state_snapshot_skipped_no_state_total"
   | ProgressUpdatedLineFailures -> "masc_keeper_progress_updated_line_failures_total"
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
-  | RoomHeartbeatFailures -> "masc_keeper_room_heartbeat_failures_total"
+  | CoordHeartbeatFailures -> "masc_keeper_coord_heartbeat_failures_total"
   | TurnMetricsSnapshotFailures -> "masc_keeper_turn_metrics_snapshot_failures_total"
   | OasExecutionErrors -> "masc_keeper_oas_execution_errors_total"
   | EpisodeCreateFailures -> "masc_keeper_episode_create_failures_total"

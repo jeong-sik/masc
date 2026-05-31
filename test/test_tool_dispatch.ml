@@ -139,15 +139,15 @@ let () =
               check bool "masc_board_delete -> Mod_inline" true
                 (Tool_dispatch.lookup_tag "masc_board_delete"
                  = Some Tool_dispatch.Mod_inline);
-              check bool "masc_status -> Mod_room" true
+              check bool "masc_status -> Mod_coord" true
                 (Tool_dispatch.lookup_tag "masc_status"
-                 = Some Tool_dispatch.Mod_room);
-              check bool "masc_check -> Mod_room" true
+                 = Some Tool_dispatch.Mod_coord);
+              check bool "masc_check -> Mod_coord" true
                 (Tool_dispatch.lookup_tag "masc_check"
-                 = Some Tool_dispatch.Mod_room);
-              check bool "masc_goal_list -> Mod_room" true
+                 = Some Tool_dispatch.Mod_coord);
+              check bool "masc_goal_list -> Mod_coord" true
                 (Tool_dispatch.lookup_tag "masc_goal_list"
-                 = Some Tool_dispatch.Mod_room);
+                 = Some Tool_dispatch.Mod_coord);
               check bool "tool_execute -> Mod_shard" true
                 (Tool_dispatch.lookup_tag "tool_execute"
                  = Some Tool_dispatch.Mod_shard));

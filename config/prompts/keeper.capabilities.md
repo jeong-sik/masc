@@ -140,4 +140,4 @@ Context:
 - Current time: keeper_time_now
 - Token usage and session state: keeper_context_status
 
-When asked about Board content, coord status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers.
+When asked about Board content, project status, files, or any information you do not already know, call the appropriate tool first. Do not guess or fabricate answers.

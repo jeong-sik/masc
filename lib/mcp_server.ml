@@ -99,7 +99,7 @@ let server_info =
       ("version", `String Version.version);
       ( "description",
         `String
-          "Multi-agent MCP server exposing MASC coordination, tools, prompts, and resources." );
+          "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources." );
       ("websiteUrl", `String "https://github.com/yousleepwhen/masc-mcp");
       ("icons", `List (List.map icon_to_json server_icons));
     ]
@@ -213,12 +213,12 @@ let make_resource_template ?title ?annotations ~uri_template ~name ~description
 
 let resources : mcp_resource list = [
   make_resource ~uri:"masc://status" ~name:"MASC Status"
-    ~title:"Coord Status"
-    ~description:"Current coord status snapshot (same as masc_status)"
+    ~title:"Project Status"
+    ~description:"Current project status snapshot (same as masc_status)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://status.json" ~name:"MASC Status (JSON)"
-    ~title:"Coord Status (JSON)"
-    ~description:"Current coord status snapshot as JSON (for data collection)"
+    ~title:"Project Status (JSON)"
+    ~description:"Current project status snapshot as JSON (for data collection)"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://tasks" ~name:"Quest Board"
     ~title:"Task Board"

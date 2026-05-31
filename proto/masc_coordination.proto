@@ -1,6 +1,6 @@
-// MASC Coordination gRPC Service Definition
+// MASC Workspace gRPC Service Definition
 //
-// Transport layer for 50+ agent coordination.
+// Transport layer for 50+ agents.
 // Replaces SSE/HTTP polling with bidirectional streaming.
 //
 // This proto file serves as the canonical API contract.
@@ -10,24 +10,24 @@ syntax = "proto3";
 
 package masc.coordination.v1;
 
-// Agent lifecycle and coordination service.
+// Agent lifecycle and workspace service.
 service MascCoordination {
   // Bidirectional heartbeat stream.
-  // Agent sends periodic pings; server responds with acks containing coord state.
+  // Agent sends periodic pings; server responds with acks containing project state.
   rpc Heartbeat(stream HeartbeatPing) returns (stream HeartbeatAck);
 
   // Server-streaming event subscription (replaces SSE for agents).
-  // Returns a stream of coord events: broadcasts, task changes, agent session changes.
+  // Returns a stream of workspace events: broadcasts, task changes, agent session changes.
   rpc Subscribe(SubscribeRequest) returns (stream Event);
 
   // Unary tool call (replaces POST /mcp tools/call).
   // Dispatches any MCP tool and returns the result.
   rpc ToolCall(ToolCallRequest) returns (ToolCallResponse);
 
-  // Broadcast a message to all agents in the coord.
+  // Broadcast a message to all active agents.
   rpc Broadcast(BroadcastRequest) returns (BroadcastResponse);
 
-  // Get current coord status.
+  // Get current project status.
   rpc GetStatus(StatusRequest) returns (StatusResponse);
 
   // LSP proxy call: forwards a JSON-RPC LSP request to the language server

@@ -130,14 +130,14 @@ let resolve_auth_fallback_agent_name
           agent_name)
   | _ -> agent_name
 
-let resolve_explicit_bound_alias ~config ~room_initialized ~log_mcp_exn
+let resolve_explicit_bound_alias ~config ~coord_initialized ~log_mcp_exn
     ~has_explicit_agent_name agent_name =
   if has_explicit_agent_name && not (Nickname.is_generated_nickname agent_name)
   then (
     let resolved = Coord.resolve_agent_name config agent_name in
     if resolved <> agent_name then (
       try
-        if room_initialized () then (
+        if coord_initialized () then (
           try
             if Coord.is_agent_session_bound config ~agent_name:resolved then
               resolved
@@ -161,7 +161,7 @@ let resolve_explicit_bound_alias ~config ~room_initialized ~log_mcp_exn
     agent_name
 
 let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~identity
-    ~cached_resolved_agent ~auth_token ~internal_keeper_runtime ~room_initialized
+    ~cached_resolved_agent ~auth_token ~internal_keeper_runtime ~coord_initialized
     ~log_mcp_exn =
   let explicit_agent_name = caller_agent_name_from_arguments arguments in
   let has_explicit_agent_name = Option.is_some explicit_agent_name in
@@ -206,7 +206,7 @@ let resolve ~(config : Coord_utils_backend_setup.config) ~tool_name ~arguments ~
       agent_name
   in
   let agent_name =
-    resolve_explicit_bound_alias ~config ~room_initialized ~log_mcp_exn
+    resolve_explicit_bound_alias ~config ~coord_initialized ~log_mcp_exn
       ~has_explicit_agent_name agent_name
   in
   {

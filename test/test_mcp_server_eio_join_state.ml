@@ -2,7 +2,7 @@ let test_resolve_join_state_skips_read_only_lookup () =
   let called = ref false in
   let joined =
     Masc_mcp.Mcp_server_eio_execute.resolve_join_state
-      ~room_initialized:true
+      ~coord_initialized:true
       ~join_required:false
       ~agent_name:"agent_code"
       ~check_join:(fun _candidate ->
@@ -16,7 +16,7 @@ let test_resolve_join_state_checks_join_required_tools () =
   let called = ref false in
   let joined =
     Masc_mcp.Mcp_server_eio_execute.resolve_join_state
-      ~room_initialized:true
+      ~coord_initialized:true
       ~join_required:true
       ~agent_name:"agent_code"
       ~check_join:(fun _candidate ->
@@ -30,7 +30,7 @@ let test_resolve_join_state_skips_unknown_agent () =
   let called = ref false in
   let joined =
     Masc_mcp.Mcp_server_eio_execute.resolve_join_state
-      ~room_initialized:true
+      ~coord_initialized:true
       ~join_required:true
       ~agent_name:"unknown"
       ~check_join:(fun _candidate ->
@@ -44,7 +44,7 @@ let test_resolve_join_state_alias_does_not_probe_canonical () =
   let candidates = ref [] in
   let joined =
     Masc_mcp.Mcp_server_eio_execute.resolve_join_state
-      ~room_initialized:true
+      ~coord_initialized:true
       ~join_required:true
       ~agent_name:"agent_code-rotated"
       ~check_join:(fun candidate ->
@@ -61,7 +61,7 @@ let test_resolve_join_state_alias_does_not_probe_canonical () =
 let test_resolve_join_state_unknown_alias_stays_false () =
   let joined =
     Masc_mcp.Mcp_server_eio_execute.resolve_join_state
-      ~room_initialized:true
+      ~coord_initialized:true
       ~join_required:true
       ~agent_name:"a-b"
       ~check_join:(fun _candidate -> false)

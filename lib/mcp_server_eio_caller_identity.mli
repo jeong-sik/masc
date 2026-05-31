@@ -20,6 +20,6 @@ val resolve :
   cached_resolved_agent:string option ->
   auth_token:string option ->
   internal_keeper_runtime:bool ->
-  room_initialized:(unit -> bool) ->
+  coord_initialized:(unit -> bool) ->
   log_mcp_exn:(label:string -> exn -> unit) ->
   t

@@ -386,9 +386,9 @@ let test_summary_json_contains_provider_error_counts () =
       "runtime"
       (count |> Json.member "provider_id" |> Json.to_string);
     Alcotest.(check string)
-      "cascade"
+      "runtime id"
       "primary"
-      (count |> Json.member "cascade_name" |> Json.to_string);
+      (count |> Json.member "runtime_id" |> Json.to_string);
     Alcotest.(check string)
       "kind"
       "auth_error"

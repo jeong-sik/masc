@@ -597,15 +597,8 @@ let test_list_dir_prefers_backend_for_memory_keys () =
       check (list string) "memory backend ignores local-only stale files"
         [ "backend.json" ] listed)
 
-let test_read_current_room_always_returns_default () =
-  let scratch = Filename.temp_dir "room-utils-current" "" in
-  Fun.protect
-    ~finally:(fun () -> rm_rf scratch)
-    (fun () ->
-      let cfg = make_test_config ~base_path:scratch ~cluster_name:"default" in
-      check (option string) "always returns default" (Some "default")
-        (Coord_utils.read_current_room cfg))
-
+(* ============================================================
+   Test Runners
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -729,7 +722,5 @@ let () =
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
       test_case "list_dir prefers backend for memory keys" `Quick
         test_list_dir_prefers_backend_for_memory_keys;
-      test_case "read_current_room always default" `Quick
-        test_read_current_room_always_returns_default;
     ];
   ]

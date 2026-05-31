@@ -24,9 +24,6 @@ type t = {
   env_masc_base_path : string option;
   resolution_source : string option;
   effective_has_masc_dir : bool;
-  effective_legacy_dirs : string list;
-      (** Subset of {["perpetual"; "resident-keepers"; "rooms"]} present
-          under [effective_masc_root]. *)
   roots_diverge : bool;
       (** [true] when the normalised process cwd differs from
           [effective_base_path]. *)

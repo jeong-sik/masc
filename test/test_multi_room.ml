@@ -27,34 +27,7 @@ let with_config f =
       ignore (Coord.init config ~agent_name:None);
       f config)
 
-let select_room config _room_id =
-  Coord.ensure_room_bootstrap config;
-  config
-
-let test_current_room_defaults_to_default () =
-  with_config (fun config ->
-      check (option string) "default room" (Some "default")
-        (Coord.read_current_room config))
-
-let test_current_room_write_and_resolve_scope () =
-  with_config (fun config ->
-      let focused = select_room config "focus-room" in
-      check (option string) "compat pointer stays default" (Some "default")
-        (Coord.read_current_room focused);
-      check string "resolved scope stays default" "default"
-        focused.backend_config.Backend_types.cluster_name;
-      check bool "focused scope initialized" true (Coord.is_initialized focused))
-
-let test_current_room_writes_stay_canonical () =
-  with_config (fun config ->
-      let focused = select_room config "focus-room" in
-      ignore (Coord.add_task focused ~title:"focus task" ~priority:1 ~description:"");
-      check int "default namespace task count" 1
-        (List.length (Coord.get_tasks_raw config));
-      (* All rooms are flattened to default — get_tasks_safe is the single path *)
-      check int "same tasks regardless of former room" 1
-        (List.length (Coord.get_tasks_safe config)))
-
+let read_lines path =
 let read_lines path =
   let ic = open_in path in
   Fun.protect
@@ -123,16 +96,10 @@ let test_join_uses_default_namespace () =
           check string "event type is agent_join" "agent_join" event_type))
 
 let () =
-  run "current_room_compat"
+  run "flat_namespace"
     [
-      ( "current_room",
+      ( "agent_lifecycle",
         [
-          test_case "defaults to default" `Quick
-            test_current_room_defaults_to_default;
-          test_case "write and resolve scope" `Quick
-            test_current_room_write_and_resolve_scope;
-          test_case "writes stay canonical" `Quick
-            test_current_room_writes_stay_canonical;
           test_case "join uses default namespace" `Quick
             test_join_uses_default_namespace;
         ] );

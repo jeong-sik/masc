@@ -242,7 +242,6 @@ type room_info = {
 type room_registry = {
   rooms: room_info list; [@default []]        (* list of rooms *)
   default_room: string; [@default "default"]  (* default room ID *)
-  current_room: string option; [@default None] (* currently active room *)
 } [@@deriving yojson { strict = false }, show]
 
 (** Task status - state transitions enforced by types *)

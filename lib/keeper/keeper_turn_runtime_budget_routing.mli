@@ -11,11 +11,3 @@ val next_fail_open_runtime_for_turn
   -> EC.degraded_retry option
 
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
-
-val record_turn_failure_stress
-  :  meta:Keeper_meta_contract.keeper_meta
-  -> is_auto_recoverable:bool
-  -> consecutive:int
-  -> threshold:int
-  -> err:Agent_sdk.Error.sdk_error
-  -> unit

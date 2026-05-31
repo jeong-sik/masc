@@ -32,26 +32,3 @@ let sdk_error_kind = function
   | Agent_sdk.Error.Orchestration _ -> "orchestration"
   | Agent_sdk.Error.A2a _ -> "a2a"
   | Agent_sdk.Error.Internal _ -> "internal"
-
-let record_turn_failure_stress
-      ~(meta : keeper_meta)
-      ~(is_auto_recoverable : bool)
-      ~(consecutive : int)
-      ~(threshold : int)
-      ~(err : Agent_sdk.Error.sdk_error)
-  : unit
-  =
-  Agent_stress.record
-    { agent_name = meta.name
-    ; kind =
-        Turn_failure
-          { consecutive
-          ; threshold
-          ; counted_toward_crash = not is_auto_recoverable
-          ; recoverable = is_auto_recoverable
-          ; error_kind = Some (Agent_stress.error_kind_of_string (sdk_error_kind err))
-          }
-    ; (* NDT-OK: stress telemetry records wall-clock observation time only;
-         failure classification is derived above. *)
-      timestamp = Unix.gettimeofday ()
-    }

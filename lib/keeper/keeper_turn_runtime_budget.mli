@@ -33,14 +33,6 @@ val next_fail_open_runtime_for_turn :
 
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
-val record_turn_failure_stress :
-  meta:keeper_meta ->
-  is_auto_recoverable:bool ->
-  consecutive:int ->
-  threshold:int ->
-  err:Agent_sdk.Error.sdk_error ->
-  unit
-
 val provider_timeout_guard_sec : float
 (** Retry guard floor (seconds). *)
 

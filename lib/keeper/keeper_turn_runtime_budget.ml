@@ -23,9 +23,6 @@ let next_fail_open_runtime_for_turn =
   Keeper_turn_runtime_budget_routing.next_fail_open_runtime_for_turn
 
 let sdk_error_kind = Keeper_turn_runtime_budget_routing.sdk_error_kind
-let record_turn_failure_stress =
-  Keeper_turn_runtime_budget_routing.record_turn_failure_stress
-
 include Keeper_turn_runtime_budget_provider_timeout
 
 (* RFC-OAS-XXX (Team JJ §6) POC, 2026-05-21

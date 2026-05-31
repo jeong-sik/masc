@@ -428,8 +428,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         tool_denylist;
         mention_targets;
         room_signal_prompt_enabled;
-        joined_room_ids = [];
-        last_seen_seq_by_room = [];
         proactive = {
           enabled = proactive_enabled;
           idle_sec = proactive_idle_sec;

@@ -19,7 +19,6 @@ let config_field_names =
   ; "sandbox_profile"; "sandbox_image"; "network_mode"; "allowed_paths"
   ; "tool_access"; "tool_denylist"
   ; "mention_targets"; "room_signal_prompt_enabled"
-  ; "joined_room_ids"
   ; "proactive_enabled"; "proactive_idle_sec"; "proactive_cooldown_sec"
   ; "compaction_profile"; "compaction_ratio_gate"
   ; "compaction_message_gate"; "compaction_token_gate"

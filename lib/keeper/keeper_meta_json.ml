@@ -18,7 +18,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "agent_name", `String m.agent_name
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
-    ; "last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room
     ; "generation", `Int rt.generation
     ; "last_handoff_ts", `Float rt.last_handoff_ts
     ; "created_at", `String m.created_at
@@ -104,7 +103,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "agent_name"
   ; "trace_id"
   ; "trace_history"
-  ; "last_seen_seq_by_room"
   ; "generation"
   ; "last_handoff_ts"
   ; "created_at"

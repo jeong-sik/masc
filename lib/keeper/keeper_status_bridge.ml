@@ -19,7 +19,6 @@ let auto_execution_session_surface_json () =
 let coordination_surface_json (meta : keeper_meta) =
   `Assoc
     [ "mention_targets", Json_util.json_string_list meta.mention_targets
-    ; "joined_room_ids", Json_util.json_string_list meta.joined_room_ids
     ]
 ;;
 

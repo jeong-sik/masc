@@ -34,8 +34,6 @@ type parsed_keeper_policy =
   ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
   ; pp_room_signal_prompt_enabled : bool
-  ; pp_joined_room_ids : string list
-  ; pp_last_seen_seq_by_room : (string * int) list
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
   ; pp_auto_handoff : bool
@@ -194,16 +192,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
         "room_signal_prompt_enabled"
         json
     in
-    let pp_joined_room_ids =
-      Safe_ops.json_string_list "joined_room_ids" json
-      |> List.filter validate_name
-      |> dedupe_keep_order
-    in
-    let pp_last_seen_seq_by_room =
-      (match Json_util.assoc_member_opt "last_seen_seq_by_room" json with
-       | Some json -> room_seq_map_of_json json
-       | None -> room_seq_map_of_json `Null)
-    in
+    let proactive_enabled =
     let proactive_enabled =
       Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
     in
@@ -606,8 +595,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; tool_denylist = policy.pp_tool_denylist
                    ; mention_targets = policy.pp_mention_targets
                    ; room_signal_prompt_enabled = policy.pp_room_signal_prompt_enabled
-                   ; joined_room_ids = policy.pp_joined_room_ids
-                   ; last_seen_seq_by_room = policy.pp_last_seen_seq_by_room
                    ; proactive = policy.pp_proactive
                    ; compaction = policy.pp_compaction
                    ; auto_handoff = policy.pp_auto_handoff

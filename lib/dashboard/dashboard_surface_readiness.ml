@@ -214,17 +214,6 @@ let all_entries =
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
-      ~id:"monitoring.doctor"
-      ~label:"Doctor"
-      ~exposure_status:"diagnostic"
-      ~hidden_from_nav:true
-      ~meets_main_gate:false
-      ~rationale:"Sidecar and config doctor diagnostics promoted to Monitor."
-      ~route_hash:"#monitoring?section=doctor"
-      ~live_spotcheck:"/api/v1/dashboard/doctor"
-      ~tool_name:"masc_operator_snapshot"
-      ()
-  ; entry
       ~id:"monitoring.transport-health"
       ~label:"Transport Health"
       ~exposure_status:"diagnostic"

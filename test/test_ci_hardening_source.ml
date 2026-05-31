@@ -2405,23 +2405,6 @@ let test_legacy_worktree_surface_removed () =
   (* research dispatch assertions removed — lib/research/ subsystem deleted (#4715) *)
   ()
 
-let test_dashboard_doctor_route_process_contracts () =
-  check bool "dashboard doctor route uses argv process" true
-    (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-       "With_process.with_process_args_in"
-    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-         {|[| self_bin; "doctor"; "all"; "--json" |]|}
-    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-         "dashboard_doctor_degraded_json"
-    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-         {|MASC_MAIN_EIO_EXE|}
-    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-         {|"summary"|}
-    && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-         {|"doctors"|}
-    && file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-         {|doctor all --json|})
-
 let test_oas_worker_capability_threading_contracts () =
   check bool "oas worker model-by-label accepts threaded sw capability" true
     (file_contains_pattern "lib/oas_worker.mli"
@@ -2917,8 +2900,6 @@ let () =
              test_http_cancel_response_contracts;
           test_case "legacy worktree surface removed" `Quick
             test_legacy_worktree_surface_removed;
-           test_case "dashboard doctor route process contracts" `Quick
-             test_dashboard_doctor_route_process_contracts;
            test_case "oas worker capability threading contracts" `Quick
              test_oas_worker_capability_threading_contracts;
            test_case "oas capacity restore contracts" `Quick

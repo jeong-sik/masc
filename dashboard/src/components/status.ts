@@ -10,7 +10,7 @@ import { LoadingState } from './common/feedback-state'
 
 export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime'
-  | 'fleet-health' | 'doctor' | 'transport-health'
+  | 'fleet-health' | 'transport-health'
   | 'feature-health'
   | 'cognition'
 
@@ -40,9 +40,6 @@ const LazyRuntimePanel = lazy(async () => ({
 }))
 const LazyFleetHealthPanel = lazy(async () => ({
   default: (await import('./fleet-health-panel')).FleetHealthPanel,
-}))
-const LazyDoctorPanel = lazy(async () => ({
-  default: (await import('./doctor-panel')).DoctorPanel,
 }))
 const LazyTransportHealthPanel = lazy(async () => ({
   default: (await import('./transport-health')).TransportHealthPanel,
@@ -78,8 +75,6 @@ function renderSection(section: StatusSection) {
       return html`<${LazyRuntimePanel} />`
     case 'fleet-health':
       return html`<${LazyFleetHealthPanel} />`
-    case 'doctor':
-      return html`<${LazyDoctorPanel} />`
     case 'transport-health':
       return html`<${LazyTransportHealthPanel} />`
     case 'feature-health':

@@ -136,11 +136,11 @@ check_json \
   "surface-readiness has canonical surface count" \
   "$BASE/api/v1/dashboard/surface-readiness" \
   "len(d.get('surfaces', []))" \
-  '^24$'
+  '^23$'
 check_json \
   "surface-readiness matches canonical surface ids" \
   "$BASE/api/v1/dashboard/surface-readiness" \
-  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.cascade-config', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.doctor', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.harness', 'code.ide-shell', 'logs'])" \
+  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.cascade-config', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.harness', 'code.ide-shell', 'logs'])" \
   '^True$'
 check_json \
   "surface-readiness dropped retired surfaces" \
@@ -300,8 +300,6 @@ check_json "harness health exposes overview" "$BASE/api/v1/dashboard/harness-hea
 echo "[6/7] Code + Logs"
 check_http "audit ledger 200" "$BASE/api/v1/audit?limit=1" "200"
 check_json "audit ledger exposes entries" "$BASE/api/v1/audit?limit=1" "'entries' in d and 'count' in d" '^True$'
-check_http "dashboard doctor 200" "$BASE/api/v1/dashboard/doctor" "200"
-check_json "dashboard doctor exposes doctor summary" "$BASE/api/v1/dashboard/doctor" "'summary' in d and 'doctors' in d" '^True$'
 check_http "IDE presence 200" "$BASE/api/v1/ide/presence" "200"
 check_json "IDE presence exposes connected state" "$BASE/api/v1/ide/presence" "d.get('data', {}).get('connected')" '^True$'
 check_http "IDE annotations 200" "$BASE/api/v1/ide/annotations" "200"

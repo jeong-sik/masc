@@ -80,7 +80,6 @@ describe('RuntimePanel', () => {
       .map(link => link.getAttribute('data-section'))
     expect(routeLinks).toEqual([
       'transport-health',
-      'doctor',
       'feature-health',
     ])
     expect(container.textContent).toContain('Diagnostics')

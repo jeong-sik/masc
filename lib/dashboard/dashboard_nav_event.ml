@@ -33,7 +33,6 @@ let valid_sections =
       ; "runtime"
       ; "cascade-config"
       ; "fleet-health"
-      ; "doctor"
       ; "transport-health"
       ; "feature-health"
       ] )

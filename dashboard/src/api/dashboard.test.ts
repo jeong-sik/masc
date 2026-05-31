@@ -1390,8 +1390,6 @@ describe('fetchKeeperConfig', () => {
         precedence: 'live_meta',
         has_live_override: 'true',
         override_fields: 'goal',
-        cascade_catalog_source_kind: 'toml',
-        cascade_catalog_source_path: '/tmp/config/cascade.toml',
       },
       metrics: {
         generation: '3',
@@ -1448,8 +1446,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
     expect(result.sources.precedence).toEqual(['live_meta'])
-    expect(result.sources.cascade_catalog_source_kind).toBe('toml')
-    expect(result.sources.cascade_catalog_source_path).toBe('/tmp/config/cascade.toml')
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.presence_keepalive_sec).toBe(30)
     expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')

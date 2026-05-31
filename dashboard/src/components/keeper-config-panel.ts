@@ -541,33 +541,18 @@ function dockerStatusLabel(c: KeeperConfig): string {
   return 'local'
 }
 
-function cascadeCatalogSourceLabel(c: KeeperConfig): string {
-  switch (c.sources.cascade_catalog_source_kind) {
-    case 'toml':
-      return 'cascade.toml (authoring SSOT)'
-    case 'json':
-      return 'retired json source'
-    default:
-      return MISSING_DATA_DASH
-  }
-}
-
 function cascadeSelectionSummary(c: KeeperConfig): string {
   const selected = c.execution.selected_cascade_name || MISSING_DATA_DASH
   const canonical = c.execution.selected_cascade_canonical || selected
   const manifest = c.sources.default_manifest_path
-  const catalog = c.sources.cascade_catalog_source_path
   const selectionPart = manifest
     ? `선택은 ${manifest} 에서 관리됩니다.`
     : '선택 source 경로를 확인할 수 없습니다.'
-  const catalogPart = catalog
-    ? `profile 정의는 ${catalog} 에서 materialize됩니다.`
-    : 'profile catalog source 경로를 확인할 수 없습니다.'
   const canonicalPart =
     canonical !== '' && canonical !== selected
       ? ` 현재 값 ${selected} 는 runtime에서 ${canonical} 으로 정규화됩니다.`
       : ''
-  return `이 keeper는 cascade profile ${selected} 를 사용합니다. ${selectionPart} ${catalogPart}${canonicalPart}`
+  return `이 keeper는 runtime profile ${selected} 를 사용합니다. ${selectionPart}${canonicalPart}`
 }
 
 // ── Main component ───────────────────────────────────────
@@ -773,17 +758,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             value=${c.execution.selected_cascade_canonical}
           />`
         : null}
-      <${ConfigRow} label="catalog source" value=${cascadeCatalogSourceLabel(c)} />
       <${BoolRow} label="라이브 오버라이드" value=${c.sources.has_live_override} />
       <${SectionHeader} size="xs" class="mt-2 mb-0.5">라이브 메타 경로</${SectionHeader}>
       <${LongText} text=${c.sources.live_meta_path} />
       ${c.sources.default_manifest_path ? html`
         <${SectionHeader} size="xs" class="mt-2 mb-0.5">기본 매니페스트 경로</${SectionHeader}>
         <${LongText} text=${c.sources.default_manifest_path} />
-      ` : null}
-      ${c.sources.cascade_catalog_source_path ? html`
-        <${SectionHeader} size="xs" class="mt-2 mb-0.5">캐스케이드 카탈로그 출처</${SectionHeader}>
-        <${LongText} text=${c.sources.cascade_catalog_source_path} />
       ` : null}
       <div class="mt-1.5">
         <${SectionHeader} size="xs" class="mb-1">우선순위</${SectionHeader}>

@@ -403,7 +403,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Runtime_exhausted _) ->
         (* Generic runtime exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative
-           [fallback_cascade] hints declared in cascade.toml actually
+           [fallback_runtime] hints declared in runtime config actually
            escalate. Receipt-derived data on 2026-04-25 showed 31/39
            silent turns ended with [(null)] fallback_reason because this
            arm previously returned [None]. Other arms below remain

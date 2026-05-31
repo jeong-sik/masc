@@ -149,6 +149,7 @@ let run_model_by_label
                               reason =
                                 Printf.sprintf
                                   "response rejected by accept (runtime=%s)"
+                                  (* RFC-0132-EXEMPT: internal observability — rejection reason label, not a redacted public surface *)
                                   "runtime";
                             }))
                 | Error e -> Error e))

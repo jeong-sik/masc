@@ -26,8 +26,8 @@ include module type of Coord_gc
 include module type of Coord_agent
 (** {1 Coord lifecycle (overrides)} *)
 
-(** Initialize MASC room with optional auto-join.
-    Wraps [Coord_init.init] and calls [join] when [agent_name] is provided. *)
+(** Initialize MASC room with optional session binding.
+    Wraps [Coord_init.init] and calls [bind_session] when [agent_name] is provided. *)
 val init : config -> agent_name:string option -> string
 
 (** {1 Test hooks} *)

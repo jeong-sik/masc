@@ -30,8 +30,6 @@ type governance_audit_decision =
 [@@deriving tla]
 
 type action =
-  | Join [@tla.symbol "join"]
-  | Leave [@tla.symbol "leave"]
   | ClaimTask [@tla.symbol "claim_task"]
   | StartTask [@tla.symbol "start_task"]
   | DoneTask [@tla.symbol "done_task"]
@@ -89,8 +87,6 @@ let governance_audit_decision_of_string = function
   | value -> Governance_other value
 
 let action_to_string = function
-  | Join -> "join"
-  | Leave -> "leave"
   | ClaimTask -> "claim_task"
   | StartTask -> "start_task"
   | DoneTask -> "done_task"
@@ -109,8 +105,6 @@ let action_to_string = function
   | Custom name -> "custom:" ^ name
 
 let string_to_action = function
-  | "join" -> Join
-  | "leave" -> Leave
   | "claim_task" -> ClaimTask
   | "start_task" -> StartTask
   | "done_task" -> DoneTask
@@ -469,14 +463,6 @@ let log_action
     ~summary ~severity ?payload:payload_opt ()
 
 (** Convenience functions for common events *)
-
-let log_join config ~agent_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:Join
-    ?cost_estimate ?token_count ~outcome:Success ()
-
-let log_leave config ~agent_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:Leave
-    ?cost_estimate ?token_count ~outcome:Success ()
 
 let log_claim_task config ~agent_id ~task_id ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:ClaimTask

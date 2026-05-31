@@ -75,7 +75,7 @@ let execute_tool_eio
   let room_init_cached = ref (Coord.is_initialized config) in
   (* Fix 4: Check resolved-name cache for fast identity resolution.
      On 2nd+ call in the same MCP session, the cached name preserves the
-     nickname selected by the prior join without relying on sidecar files. *)
+     nickname selected by the prior session binding without relying on sidecar files. *)
   let cached_resolved_agent =
     Option.bind mcp_session_id Agent_registry_eio.get_resolved_name
   in
@@ -280,7 +280,7 @@ let execute_tool_eio
             then true
             else (
               (* If per-agent tokens are required, only auto-bind when agent_name already
-         looks like a stable nickname. Otherwise Coord.join would generate a new
+         looks like a stable nickname. Otherwise Coord.bind_session would generate a new
          nickname, breaking token verification for subsequent calls. *)
               let auth_cfg = Auth.load_auth_config config.base_path in
               if auth_cfg.require_token && not (Nickname.is_generated_nickname agent_name)
@@ -303,9 +303,9 @@ let execute_tool_eio
               let is_joined =
                 if !room_init_cached
                 then (
-                  (* Auto-join gate hides the failure mode that distinguishes
-                     "agent really isn't joined yet" from "we can't read the
-                     join state". Invalid_argument is kept because
+                  (* Auto-bind gate hides the failure mode that distinguishes
+                     "agent really isn't bound yet" from "we can't read the
+                     binding state". Invalid_argument is kept because
                      [Coord.is_agent_joined] surface formerly raised it on
                      malformed agent_name input; dropping it changes scope. *)
                   try Coord.is_agent_joined config ~agent_name with
@@ -314,7 +314,7 @@ let execute_tool_eio
                     ->
                     Log.Mcp.warn
                       "[is_agent_joined gate] read failed for %s: %s; \
-                       treating as not-joined"
+                       treating as not-bound"
                       agent_name
                       (Printexc.to_string exn);
                     false)
@@ -324,7 +324,7 @@ let execute_tool_eio
               then agent_name
               else (
                 let session_binding_result =
-                  Coord.join
+                  Coord.bind_session
                     config
                     ~agent_name
                     ~capabilities:[]
@@ -409,7 +409,7 @@ let execute_tool_eio
                   agent_name
                   name
                   (Printexc.to_string exn)));
-          (* Check if agent must join first — Fix 3: use cached value *)
+          (* Check if agent must be session-bound first — Fix 3: use cached value *)
           let room_initialized = !room_init_cached in
           let is_joined =
             resolve_join_state
@@ -419,7 +419,7 @@ let execute_tool_eio
               ~check_join:(fun candidate ->
                 Coord.is_agent_joined config ~agent_name:candidate)
           in
-          (* Debug: log join check *)
+          (* Debug: log session binding check *)
           Log.Misc.debug
             "tool=%s agent_name=%s join_required=%b room_initialized=%b is_joined=%b"
             name
@@ -442,7 +442,7 @@ let execute_tool_eio
               (runtime_error_result
                  (Printf.sprintf
                     "MASC room not initialized.\n\n\
-                     Fastest: masc_start(path=\"<project>\") — one-step init+join, then \
+                     Fastest: masc_start(path=\"<project>\") — one-step init+session binding, then \
                      call %s.\n\
                      Alternative: masc_init → masc_start → masc_status → %s\n\
                      📚 See: @~/me/instructions/masc-workflow.md\n\

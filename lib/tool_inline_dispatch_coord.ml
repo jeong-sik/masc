@@ -60,7 +60,7 @@ let arg_get_string ctx key default =
 let arg_get_string_list ctx key =
   Safe_ops.json_string_list key ctx.arguments
 
-(** masc_start — compound onboarding (set project root + join + optional task) *)
+(** masc_start — compound onboarding (set project root + bind session + optional task) *)
 let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
@@ -112,18 +112,18 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
         (inline_err_workflow ~tool_name ~start_time
            (Printf.sprintf "masc_start failed while setting project scope: %s" e))
   | Ok active_config ->
-    (* Step 2: join (idempotent — skip if already joined) *)
-    let join_result =
+    (* Step 2: bind session (idempotent) *)
+    let session_binding_result =
       try
-        let _msg = Coord.join active_config ~agent_name ~capabilities:[] () in
+        let _msg = Coord.bind_session active_config ~agent_name ~capabilities:[] () in
         Ok ()
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let msg = Tool_error.to_string (Tool_error.of_exn exn) in
-        if String.length msg > 0 then Error msg else Error "join failed"
+        if String.length msg > 0 then Error msg else Error "session binding failed"
     in
-    match join_result with
+    match session_binding_result with
     | Error e ->
-      (* join exception caught from [Coord.join] — internal failure. *)
+      (* Session binding exception caught from [Coord.bind_session] — internal failure. *)
       Some
         (inline_err_runtime ~tool_name ~start_time
            (Printf.sprintf "masc_start failed while binding agent session: %s" e))
@@ -133,7 +133,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
         Some
           (inline_ok ~tool_name ~start_time
              (Printf.sprintf
-                "masc_start complete (project scope set + joined as %s). No task created — use %s to create one."
+                "masc_start complete (project scope set + session bound as %s). No task created — use %s to create one."
                 agent_name
                 masc_add_task_name))
       else begin
@@ -166,7 +166,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
           Some
             (inline_ok ~tool_name ~start_time
                (Printf.sprintf
-                  "masc_start partial: joined as %s, but task creation failed: %s"
+                  "masc_start partial: session bound as %s, but task creation failed: %s"
                   agent_name add_result))
         else begin
           let _claim_msg = Coord_task.claim_task active_config ~agent_name ~task_id in
@@ -178,7 +178,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
               Some
                 (inline_ok ~tool_name ~start_time
                    (Printf.sprintf
-                      "masc_start complete: project scope set, joined as %s, task %s created+claimed+set as current."
+                      "masc_start complete: project scope set, session bound as %s, task %s created+claimed+set as current."
                       agent_name task_id))
         end
       end

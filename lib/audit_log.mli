@@ -42,8 +42,6 @@ type governance_audit_decision =
 [@@deriving tla]
 
 type action =
-  | Join
-  | Leave
   | ClaimTask
   | StartTask
   | DoneTask
@@ -144,20 +142,6 @@ val log_action :
     delegate to this. *)
 
 (** {1 Logging — per-action helpers} *)
-
-val log_join :
-  config ->
-  agent_id:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
-
-val log_leave :
-  config ->
-  agent_id:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
 
 val log_claim_task :
   config ->

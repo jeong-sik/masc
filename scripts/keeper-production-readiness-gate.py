@@ -692,7 +692,7 @@ def write_fixture_turn(
         "generation": 1,
         "keeper_turn_id": turn,
         "oas_turn_count": turn,
-        "cascade_name": "fixture",
+        "runtime_id": "fixture",
         "status": "ok",
         "decision": {},
         "links": {

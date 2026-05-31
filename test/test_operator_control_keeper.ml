@@ -81,7 +81,7 @@ let seed_keeper_meta_exn config keeper_name ~goal =
             ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
             ("trace_id", `String trace_id);
             ("goal", `String goal);
-            ("cascade_name", `String (Keeper_config.default_cascade_name ()));
+            ("runtime_id", `String (Keeper_config.default_cascade_name ()));
             ("sandbox_profile", `String "local");
             ("network_mode", `String "inherit");
           ])
@@ -2024,7 +2024,7 @@ let test_keeper_status_exposes_model_observability () =
             ( "cascade",
               `Assoc
                 [
-                  ("cascade_name", `String "stale-cascade");
+                  ("runtime_id", `String "stale-cascade");
                   ( "configured_labels",
                     `List [ `String "stale:old-path"; `String "stale:fallback" ] );
                   ( "candidate_models",
@@ -2044,7 +2044,7 @@ let test_keeper_status_exposes_model_observability () =
             ( "cascade",
               `Assoc
                 [
-                  ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+                  ("runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
                   ( "configured_labels",
                     `List [ `String "llama:auto"; `String "provider_k:auto" ] );
                   ( "candidate_models",
@@ -2203,7 +2203,7 @@ let test_keeper_status_ignores_stale_cascade_observation () =
             ( "cascade",
               `Assoc
                 [
-                  ("cascade_name", `String "stale-cascade");
+                  ("runtime_id", `String "stale-cascade");
                   ( "configured_labels",
                     `List [ `String "stale:old-path"; `String "stale:fallback" ] );
                   ( "candidate_models",

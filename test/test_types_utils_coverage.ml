@@ -653,7 +653,6 @@ let test_validate_task_id_r_valid () =
   check bool "ok result" true (is_ok result)
 
 let test_validate_file_path_valid () =
-let test_validate_file_path_valid () =
   let result = Coord_utils.validate_file_path "src/main.ml" in
   check bool "valid" true (is_ok result)
 

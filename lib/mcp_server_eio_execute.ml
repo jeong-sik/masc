@@ -330,7 +330,7 @@ let execute_tool_eio
                      { Tool_task.config; agent_name; sw = Some sw }
                      ~name
                      ~args:coerced_args
-                 | Mod_room ->
+                 | Mod_coord ->
                    Tool_coord.dispatch
                      { Tool_coord.config; agent_name }
                      ~name

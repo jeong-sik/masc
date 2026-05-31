@@ -404,11 +404,11 @@ let rec policy_labels_of_action = function
 let has_board_signal (obs : world_observation) =
   obs.board_new_post_count > 0 || obs.board_mention_count > 0
 
-let has_room_signal (obs : world_observation) =
+let has_coord_signal (obs : world_observation) =
   obs.direct_mention || obs.has_question
 
 let has_operational_signal (obs : world_observation) =
-  has_room_signal obs
+  has_coord_signal obs
   || obs.failed_task_count > 0
   || obs.unclaimed_task_count > 0
   || obs.agent_count_changed

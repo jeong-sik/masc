@@ -163,13 +163,13 @@ let register
      keeper."
     `Counter;
   add
-    Keeper_metrics.(to_string RoomInitFailures)
-    "Total supervisor room initialization failures during keeper bootstrap. Labeled by \
+    Keeper_metrics.(to_string CoordInitFailures)
+    "Total supervisor coord initialization failures during keeper bootstrap. Labeled by \
      keeper."
     `Counter;
   add
     Keeper_metrics.(to_string PresenceSyncFailures)
-    "Total supervisor presence sync failures after room init. Labeled by keeper."
+    "Total supervisor presence sync failures after coord init. Labeled by keeper."
     `Counter;
   add
     Keeper_metrics.(to_string SelfPreservationUniversal)
@@ -204,8 +204,8 @@ let register
     "Total keeper SSE broadcast failures. Labeled by keeper and site when available."
     `Counter;
   add
-    Keeper_metrics.(to_string RoomHeartbeatFailures)
-    "Total room heartbeat failures (consecutive, leads to crash). Labeled by keeper."
+    Keeper_metrics.(to_string CoordHeartbeatFailures)
+    "Total coord heartbeat failures (consecutive, leads to crash). Labeled by keeper."
     `Counter;
   add
     Keeper_metrics.(to_string TurnMetricsSnapshotFailures)

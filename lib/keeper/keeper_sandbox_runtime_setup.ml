@@ -348,29 +348,29 @@ let docker_config_mount_args ~base_path ~container_root =
 ;;
 
 type coord_state_mount_kind =
-  | Room_state_file
-  | Room_state_dir
+  | Coord_state_file
+  | Coord_state_dir
 
 let docker_coord_state_mounts =
-  [ Room_state_dir, "tasks"
-  ; Room_state_file, "tasks.json"
-  ; Room_state_file, "backlog.json"
-  ; Room_state_file, "board_posts.jsonl"
-  ; Room_state_file, "board_comments.jsonl"
-  ; Room_state_file, "board_votes.jsonl"
-  ; Room_state_file, "board_reactions.jsonl"
-  ; Room_state_file, "current_task"
-  ; Room_state_file, "goals.json"
-  ; Room_state_file, "goal_events.jsonl"
-  ; Room_state_file, "goal_verifications.json"
+  [ Coord_state_dir, "tasks"
+  ; Coord_state_file, "tasks.json"
+  ; Coord_state_file, "backlog.json"
+  ; Coord_state_file, "board_posts.jsonl"
+  ; Coord_state_file, "board_comments.jsonl"
+  ; Coord_state_file, "board_votes.jsonl"
+  ; Coord_state_file, "board_reactions.jsonl"
+  ; Coord_state_file, "current_task"
+  ; Coord_state_file, "goals.json"
+  ; Coord_state_file, "goal_events.jsonl"
+  ; Coord_state_file, "goal_verifications.json"
   ]
 ;;
 
 let coord_state_path_available kind path =
   try
     match kind with
-    | Room_state_file -> Sys.file_exists path && not (Sys.is_directory path)
-    | Room_state_dir -> Sys.file_exists path && Sys.is_directory path
+    | Coord_state_file -> Sys.file_exists path && not (Sys.is_directory path)
+    | Coord_state_dir -> Sys.file_exists path && Sys.is_directory path
   with
   | Sys_error _ -> false
 ;;

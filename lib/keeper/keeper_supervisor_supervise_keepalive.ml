@@ -78,10 +78,10 @@ let supervise_keepalive
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Prometheus.inc_counter
-         Keeper_metrics.(to_string RoomInitFailures)
+         Keeper_metrics.(to_string CoordInitFailures)
          ~labels:[ "keeper", meta.name ]
          ();
-       Log.Keeper.error "supervisor room init failed: %s" (Printexc.to_string exn));
+       Log.Keeper.error "supervisor coord init failed: %s" (Printexc.to_string exn));
     let live_meta =
       try
         let synced = meta in

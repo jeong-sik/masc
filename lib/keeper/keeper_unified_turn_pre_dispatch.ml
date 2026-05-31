@@ -68,8 +68,8 @@ let build_runtime_execution
          None
        in
        (match
-          Runtime_inference.validate_max_tokens_within_ceiling
-            ~runtime_id
+         Runtime_inference.validate_max_tokens_within_ceiling
+           ~runtime_id
             ~provider_ceiling:max_output_ceiling
             raw_max_tokens
         with

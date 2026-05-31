@@ -10,12 +10,10 @@
        was pulled and [outcome=empty] otherwise.
 
     The wrappers themselves live inside heavyweight functions that
-    require a full keeper turn harness to invoke. The validator
-    script + PR-H joint tests cover end-to-end semantics; this file
-    is the thin layer that asserts the metric mechanics work — the
-    counter constants are stable, label cardinality stays bounded,
-    and distinct labels are isolated. The same shape as
-    [test/test_keeper_fsm_edges.ml] from PR-I. *)
+    require a full keeper turn harness to invoke. This file is the
+    thin layer that asserts the metric mechanics work — the counter
+    constants are stable, label cardinality stays bounded, and
+    distinct labels are isolated. *)
 
 module P = Masc_mcp.Prometheus
 

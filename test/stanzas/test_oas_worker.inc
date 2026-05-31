@@ -7,7 +7,6 @@
  (modules
   test_oas_worker
   test_oas_worker_idle_detail
-  test_oas_worker_provider_labels
   test_oas_worker_sdk_error)
  (ocamlopt_flags (:standard -w -32))
  (action

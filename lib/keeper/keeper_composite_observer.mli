@@ -109,9 +109,8 @@ val bump_invariant_violations :
 
     The [check_*] functions below mirror the composite TLA+
     [SafetyInvariant] conjuncts and the runtime phase-derivation
-    agreement check. They are exposed so cross-FSM joint tests
-    ([test/test_keeper_fsm_joints.ml]) can drive realistic state
-    combinations through the same predicates that production
+    agreement check. They are exposed so focused tests can drive
+    realistic state combinations through the same predicates that production
     [compute_invariants] uses, without having to construct a full
     {!Keeper_registry.registry_entry} value.
 

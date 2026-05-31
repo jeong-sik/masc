@@ -378,8 +378,8 @@ type keeper_meta = {
 
 (** {1 Cascade name derivation} *)
 
-val cascade_name_of_meta : keeper_meta -> string
-(** [cascade_name_of_meta m] returns the default runtime id.
+val runtime_name_of_meta : keeper_meta -> string
+(** [runtime_name_of_meta m] returns the default runtime id.
     Ignores [m] — kept for signature compatibility. *)
 
 (** {1 Outcome <-> string} *)
@@ -444,7 +444,7 @@ val map_proactive_rt :
 
 val keeper_legacy_model_arg_names : string list
 (** Names of legacy keeper-creation tool arguments that have
-    been retired in favour of the [cascade_name] field
+    been retired in favour of the [runtime_name] field
     (["models"], ["allowed_models"], ["active_model"]).
     Consumed by {!reject_legacy_model_args} which
     surfaces operator-readable rejection messages instead of
@@ -455,5 +455,5 @@ val keeper_legacy_model_arg_names : string list
 val reject_legacy_model_args :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 (** Reject retired keeper model-selection input fields at tool/API boundaries.
-    Model and provider identity is resolved from [cascade_name] and the cascade
+    Model and provider identity is resolved from [runtime_name] and the cascade
     catalog, not per-call keeper arguments. *)

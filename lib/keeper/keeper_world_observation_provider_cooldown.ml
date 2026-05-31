@@ -20,16 +20,16 @@ let fallback_cascade_for_provider_cooldown
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
-  else if String.equal normalized_effective (Keeper_config.default_cascade_name ())
+  else if String.equal normalized_effective (Keeper_config.default_runtime_name ())
   then None
-  else Some (Keeper_config.default_cascade_name ())
+  else Some (Keeper_config.default_runtime_name ())
 
 let provider_cooldown_remaining_sec_for_cascade
-      ~(cascade_name : string)
+      ~(runtime_name : string)
   : int option
   =
   let runtime_health_keys =
-    Provider_runtime_projection.default_execution_model_strings cascade_name
+    Provider_runtime_projection.default_execution_model_strings runtime_name
     |> Cascade_runtime_candidate.runtime_health_keys_of_labels
   in
   match runtime_health_keys with
@@ -72,15 +72,15 @@ let provider_capacity_blocked_task_count
   if claimable_task_count <= 0
   then 0
   else (
-    let cascade_name = cascade_name_of_meta meta in
+    let runtime_name = runtime_name_of_meta meta in
     match
       provider_cooldown_remaining_sec
-        ~cascade_name:(cascade_name)
+        ~runtime_name:(runtime_name)
     with
     | Some _
       when Option.is_none
              (fallback_cascade_for_provider_cooldown
-                ~base_cascade:cascade_name
-                ~effective_cascade:cascade_name) ->
+                ~base_cascade:runtime_name
+                ~effective_cascade:runtime_name) ->
       claimable_task_count
     | Some _ | None -> 0)

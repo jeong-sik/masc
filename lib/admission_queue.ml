@@ -22,7 +22,7 @@
 
 type waiter_info =
   { keeper_name : string
-  ; cascade_name : string
+  ; runtime_name : string
   ; enqueue_ts : float
   ; priority : Llm_provider.Request_priority.t
   }
@@ -100,16 +100,16 @@ let bump_active delta =
     global.active <- max 0 (global.active + delta))
 ;;
 
-let with_inflight_observation ~keeper_name ~cascade_name f =
+let with_inflight_observation ~keeper_name ~runtime_name f =
   bump_active 1;
-  (match Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0 with
+  (match Admission_queue_metrics.on_acquire ~keeper_name ~runtime_name ~wait_ms:0 with
    | () -> ()
    | exception exn ->
      bump_active (-1);
      raise exn);
   Eio_guard.protect
     ~finally:(fun () ->
-      (match Admission_queue_metrics.on_release ~keeper_name ~cascade_name with
+      (match Admission_queue_metrics.on_release ~keeper_name ~runtime_name with
        | () -> ()
        | exception exn ->
          bump_active (-1);
@@ -187,7 +187,7 @@ let check_host_resources ~surface ~keeper_name =
   check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold
 ;;
 
-let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
+let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~runtime_name f =
   match
     check_host_resources ~surface:Admission_queue_metrics.With_permit ~keeper_name
   with
@@ -201,15 +201,15 @@ let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
          Metric and snapshot observation track real inflight even though
          gating is off.
          RFC-0026 PR-E-1.6/1.7; audit response 2026-05-05 §3.1. *)
-    Ok (with_inflight_observation ~keeper_name ~cascade_name f)
+    Ok (with_inflight_observation ~keeper_name ~runtime_name f)
 ;;
 
-let try_with_permit ~priority:_ ~keeper_name ~cascade_name f =
+let try_with_permit ~priority:_ ~keeper_name ~runtime_name f =
   match
     check_host_resources ~surface:Admission_queue_metrics.Try_with_permit ~keeper_name
   with
   | Error _ -> None
-  | Ok () -> Some (with_inflight_observation ~keeper_name ~cascade_name f)
+  | Ok () -> Some (with_inflight_observation ~keeper_name ~runtime_name f)
 ;;
 
 let snapshot () =
@@ -239,9 +239,9 @@ let snapshot_json () =
              (fun (w : waiter_info) ->
                 `Assoc
                   [ "keeper_name", `String w.keeper_name
-                  ; ( "cascade_name"
+                  ; ( "runtime_name"
                     , `String
-                        (w.cascade_name) )
+                        (w.runtime_name) )
                   ; ( "priority"
                     , `String (Llm_provider.Request_priority.to_string w.priority) )
                   ; "wait_seconds", `Float (now -. w.enqueue_ts)

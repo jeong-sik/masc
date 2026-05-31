@@ -92,12 +92,12 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
           ~start_time
           (sprintf "Invalid verdict format: %s" msg)
     in
-    let cascade_name =
+    let runtime_name =
       Runtime.get_default_runtime_id ()
     in
     match
       Keeper_turn_driver_wrappers.run_named_with_masc_tools
-        ~cascade_name
+        ~runtime_name
         ~goal:prompt
         ~masc_tools:[ Core.report_verdict_schema ]
         ~dispatch

@@ -56,10 +56,10 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "active_model", field_or_null "active_model"
                  ; "active_model_label", field_or_null "active_model_label"
                  ; "last_model_used_label", field_or_null "last_model_used_label"
-                 ; "cascade_name", field_or_null "cascade_name"
-                 ; "cascade_canonical", field_or_null "cascade_canonical"
-                 ; ( "selected_cascade_canonical"
-                   , field_or_null "selected_cascade_canonical" )
+                 ; "runtime_name", field_or_null "runtime_name"
+                 ; "runtime_canonical", field_or_null "runtime_canonical"
+                 ; ( "selected_runtime_canonical"
+                   , field_or_null "selected_runtime_canonical" )
                  ; "primary_model", field_or_null "primary_model"
                  ; "next_model_hint", field_or_null "next_model_hint"
                  ; "active_goal_ids", field_or_null "active_goal_ids"

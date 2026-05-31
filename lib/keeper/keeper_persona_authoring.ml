@@ -227,7 +227,7 @@ let field_catalog_entries =
         ~field_effect:"Optional social-model runtime for speech or ledger behavior."
         ()
     ; field_catalog_entry
-        ~path:"keeper.cascade_name"
+        ~path:"keeper.runtime_name"
         ~typ:"string"
         ~field_effect:
           "Optional named cascade override. Must resolve to a known cascade at runtime."
@@ -374,7 +374,7 @@ let normalize_cascade_name raw =
     | _ -> []
   in
   let known =
-    [ Keeper_config.default_cascade_name () ]
+    [ Keeper_config.default_runtime_name () ]
     @ catalog
   in
   if List.mem (String.lowercase_ascii normalized) known
@@ -382,7 +382,7 @@ let normalize_cascade_name raw =
   else
     Error
       (Printf.sprintf
-         "invalid keeper.cascade_name '%s' (known: %s)"
+         "invalid keeper.runtime_name '%s' (known: %s)"
          raw
          (String.concat ", " known))
 ;;
@@ -443,13 +443,13 @@ let normalize_keeper_json ~handle keeper_json =
           in
           Result.bind social_model_result (fun social_model ->
             let cascade_name_result =
-              match json_trimmed_string_opt "cascade_name" keeper_json with
+              match json_trimmed_string_opt "runtime_name" keeper_json with
               | None -> Ok None
               | Some raw ->
                 Result.map (fun value -> Some value) (normalize_cascade_name raw)
             in
             Result.map
-              (fun cascade_name ->
+              (fun runtime_name ->
                  let mention_targets =
                    match json_string_list_normalized "mention_targets" keeper_json with
                    | [] -> [ handle ]
@@ -513,9 +513,9 @@ let normalize_keeper_json ~handle keeper_json =
                    | None -> assoc_without "social_model" fields
                  in
                  let fields =
-                   match cascade_name with
-                   | Some value -> assoc_set "cascade_name" (`String value) fields
-                   | None -> assoc_without "cascade_name" fields
+                   match runtime_name with
+                   | Some value -> assoc_set "runtime_name" (`String value) fields
+                   | None -> assoc_without "runtime_name" fields
                  in
                  `Assoc (List.rev fields))
               cascade_name_result)))
@@ -842,14 +842,14 @@ let handle_persona_generate ctx args =
       | Error msg ->
         Keeper_types_profile.tool_result_error (error_response_typed ~code:Validation_error msg)
       | Ok archetype_axes ->
-           let cascade_name =
-             get_string args "cascade_name" Archetypes.default_generation_cascade_name
+           let runtime_name =
+             get_string args "runtime_name" Archetypes.default_generation_cascade_name
              |> String.trim
            in
-           let cascade_name =
-             if cascade_name = ""
+           let runtime_name =
+             if runtime_name = ""
              then Archetypes.default_generation_cascade_name
-             else cascade_name
+             else runtime_name
            in
            let temperature =
              get_float_opt args "temperature"
@@ -881,7 +881,7 @@ let handle_persona_generate ctx args =
                ~caller:Env_config_oas_bridge.Keeper_persona_authoring
                (fun () ->
                  Keeper_turn_driver.run_named
-                   ~cascade_name
+                   ~runtime_name
                    ~goal:prompt
                    ~max_turns:1
                    ~temperature

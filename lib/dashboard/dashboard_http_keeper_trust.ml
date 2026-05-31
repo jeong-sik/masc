@@ -33,7 +33,7 @@ let keeper_trust_json ?(include_receipt = false)
     | None ->
         `Assoc
           [
-            ("name", `String (Keeper_meta_contract.cascade_name_of_meta meta));
+            ("name", `String (Keeper_meta_contract.runtime_name_of_meta meta));
             ("selected_model", `Null);
             ("attempt_count", `Int 0);
             ("fallback_applied", `Bool false);

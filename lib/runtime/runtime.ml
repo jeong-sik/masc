@@ -1,6 +1,6 @@
 (** Runtime = Provider + Model + Spec(binding).
 
-    cascade→Runtime 전환 (RFC-0206). cascade 의 routes/cascade_name/tier/profile
+    cascade→Runtime 전환 (RFC-0206). cascade 의 routes/runtime_name/tier/profile
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
 

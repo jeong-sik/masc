@@ -21,10 +21,10 @@ import {
 import { normalizeStopCause } from './lib/stop-cause'
 import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
-import type { CascadeRef } from './types'
+import type { RuntimeRef } from './types'
 
-/** Normalize a raw cascade_ref JSON object into a typed CascadeRef. */
-function normalizeCascadeRef(raw: unknown): CascadeRef | null {
+/** Normalize a raw runtime_ref JSON object into a typed RuntimeRef. */
+function normalizeCascadeRef(raw: unknown): RuntimeRef | null {
   if (!isRecord(raw)) return null
   const group = asString(raw.group)
   if (!group) return null
@@ -488,7 +488,7 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         total_tokens: totalTokens,
         wall_tokens_per_second: wallTokensPerSecond,
         inference_telemetry,
-        cascade_name: cascadeObj ? (asString(cascadeObj.cascade_name) ?? asString(cascadeObj.name) ?? null) : null,
+        runtime_name: cascadeObj ? (asString(cascadeObj.runtime_name) ?? asString(cascadeObj.name) ?? null) : null,
         cascade_outcome: cascadeObj ? (asString(cascadeObj.outcome) ?? null) : null,
         cascade_selected_model: null,
         cascade_attempt_count: cascadeObj ? (asNumber(cascadeObj.attempt_count) ?? null) : null,
@@ -647,10 +647,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_model_used: undefined,
         last_model_used_label: null,
         next_model_hint: null,
-        cascade_name: asString(row.cascade_name) ?? null,
-        cascade_ref: normalizeCascadeRef(row.cascade_ref),
-        cascade_canonical: asString(row.cascade_canonical) ?? asString(row.selected_cascade_canonical) ?? null,
-        selected_cascade_canonical: asString(row.selected_cascade_canonical) ?? null,
+        runtime_name: asString(row.runtime_name) ?? null,
+        runtime_ref: normalizeCascadeRef(row.runtime_ref),
+        runtime_canonical: asString(row.runtime_canonical) ?? asString(row.selected_runtime_canonical) ?? null,
+        selected_runtime_canonical: asString(row.selected_runtime_canonical) ?? null,
         status: normalizeKeeperAgentStatus(statusRaw),
         presence_keepalive:
           typeof row.presence_keepalive === 'boolean' ? row.presence_keepalive : undefined,

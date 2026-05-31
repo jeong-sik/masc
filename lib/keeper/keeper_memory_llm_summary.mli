@@ -24,7 +24,7 @@ val make :
   ?complete:complete_fn ->
   ?provider_filter:string list ->
   ?timeout_sec:float ->
-  cascade_name:string ->
+  runtime_name:string ->
   keeper_name:string ->
   unit ->
   Keeper_memory_bank.memory_consolidation_summarizer option

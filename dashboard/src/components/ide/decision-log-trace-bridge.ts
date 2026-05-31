@@ -29,7 +29,7 @@ import {
  *   tsMs            ← unixishToMs(decision.ts_unix)  (NaN-guarded; null/
  *                     non-finite skip)
  *   keeperName      ← decision.keeper_name  (real keeper-level — unlike
- *                     cascade-hop which uses cascade_name as a logical
+ *                     cascade-hop which uses runtime_name as a logical
  *                     bucket)
  *   source          ← 'decision-log'
  *   decisionId      ← same as id (RFC-0026 KeeperDecision has no

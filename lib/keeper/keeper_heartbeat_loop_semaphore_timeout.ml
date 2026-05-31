@@ -27,7 +27,7 @@ let semaphore_wait_timeout_blocker_class
 ;;
 
 let semaphore_wait_timeout_diagnostics
-      ~cascade_name
+      ~runtime_name
       (timeout : Keeper_turn_slot.semaphore_wait_timeout)
   =
   let phase_label =
@@ -48,7 +48,7 @@ let semaphore_wait_timeout_diagnostics
        autonomous_available=%d reactive_available=%d turn_available=%d)"
       timeout.timeout_wait_sec
       phase_label
-      cascade_name
+      runtime_name
       queue_ahead_text
       timeout.timeout_queue_depth
       timeout.timeout_autonomous_available
@@ -103,7 +103,7 @@ let handle_semaphore_wait_timeout
     ();
   let persisted_blocker, log_diagnostic =
     semaphore_wait_timeout_diagnostics
-      ~cascade_name:(cascade_name_of_meta meta_after_triage)
+      ~runtime_name:(runtime_name_of_meta meta_after_triage)
       timeout
   in
   let blocker_class = semaphore_wait_timeout_blocker_class timeout in

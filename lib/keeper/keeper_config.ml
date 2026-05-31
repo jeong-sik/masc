@@ -19,10 +19,10 @@ let one_day_seconds_int = Masc_time_constants.day_int
 (* cascade→Runtime 숙청: per-phase cascade name 구분 제거. cascade 세계의
    phase_recovery / phase_buffer / tool_required / routing 은 서로 다른 route
    였으나, Runtime 모델에서는 모든 phase 가 동일한 default Runtime 을 쓴다 —
-   넷 다 default_cascade_name () 으로 수렴하는 죽은 구분이었다. 단일 함수로
+   넷 다 default_runtime_name () 으로 수렴하는 죽은 구분이었다. 단일 함수로
    collapse 하고, eager 모듈-레벨 baking(module-init 시점 미초기화 싱글톤 읽기)
    도 함께 제거한다. *)
-let default_cascade_name () = Runtime.get_default_runtime_id ()
+let default_runtime_name () = Runtime.get_default_runtime_id ()
 
 (** Minimum context window (tokens) for any keeper turn.
     64k-class local models are valid keeper backends; do not clamp them upward
@@ -464,7 +464,7 @@ let keeper_llm_rerank_enabled () : bool =
 let keeper_llm_rerank_cascade () : string =
   match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_CASCADE" with
   | Some v when String.trim v <> "" -> String.trim v
-  | _ -> default_cascade_name ()
+  | _ -> default_runtime_name ()
 
 include Keeper_config_rule_thresholds
 

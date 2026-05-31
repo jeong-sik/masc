@@ -1736,7 +1736,7 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
   const agentName = asString(raw.agent_name)
   const sandboxProfile = asString(raw.sandbox_profile)
   const networkMode = asString(raw.network_mode)
-  const cascadeName = asString(raw.cascade_name)
+  const cascadeName = asString(raw.runtime_name)
   if (!name || !agentName || !sandboxProfile || !networkMode || !cascadeName) return null
   return {
     name,
@@ -1745,7 +1745,7 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
     active_goal_ids: asStringArray(raw.active_goal_ids),
     sandbox_profile: sandboxProfile,
     network_mode: networkMode,
-    cascade_name: cascadeName,
+    runtime_name: cascadeName,
     approval_profile: asNullableString(raw.approval_profile),
     cascade_outcome: asNullableString(raw.cascade_outcome),
     latest_execution_outcome: asNullableString(raw.latest_execution_outcome),
@@ -2239,15 +2239,15 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       last_model_used_label: null,
       per_provider_timeout_sec: perProviderTimeoutSec,
       per_provider_timeout_mode:
-        asNullableString(execution.per_provider_timeout_mode)
+        (asNullableString(execution.per_provider_timeout_mode) as 'override' | 'turn_budget_heuristic' | null)
         ?? (perProviderTimeoutSec != null
             ? 'override'
             : 'turn_budget_heuristic'),
       verify: asLooseBoolean(execution.verify),
-      selected_cascade_name: asNullableString(execution.selected_cascade_name) ?? '',
-      selected_cascade_canonical:
-        asNullableString(execution.selected_cascade_canonical)
-        ?? asNullableString(execution.selected_cascade_name)
+      selected_runtime_name: asNullableString(execution.selected_runtime_name) ?? '',
+      selected_runtime_canonical:
+        asNullableString(execution.selected_runtime_canonical)
+        ?? asNullableString(execution.selected_runtime_name)
         ?? '',
     },
     compaction: {

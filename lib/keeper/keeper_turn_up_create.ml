@@ -48,12 +48,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Some ids -> ids
     | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
   in
-  let selected_cascade_name =
-    (* WORKAROUND (#19327 follow-up): cascade_name→model field rename. *)
+  let selected_runtime_name =
+    (* WORKAROUND (#19327 follow-up): runtime_name→model field rename. *)
     match p.cascade_name_opt, p.profile_defaults.model with
     | Some name, _ -> name
     | None, Some name -> name
-    | None, None -> Keeper_config.default_cascade_name ()
+    | None, None -> Keeper_config.default_runtime_name ()
   in
   let active_goal_ids_error =
     match p.active_goal_ids_opt with
@@ -284,7 +284,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               in
               let cascade_models =
                 Provider_runtime_projection.default_execution_model_strings
-                  (selected_cascade_name)
+                  (selected_runtime_name)
               in
               (match
                  Keeper_turn_helpers.ensure_local_discovery_ready
@@ -604,7 +604,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("needs", `String meta.needs);
           ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
-          ("cascade_name", `String (cascade_name_of_meta meta));
+          ("runtime_name", `String (runtime_name_of_meta meta));
           ("social_model", `String meta.social_model);
           ("tool_access", tool_access_to_json meta.tool_access);
           ("tool_denylist",

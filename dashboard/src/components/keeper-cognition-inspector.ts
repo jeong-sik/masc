@@ -82,7 +82,7 @@ export function toolAccessRowsForKeeper(keeper: Keeper): ToolAccessRow[] {
   return [
     {
       label: 'cascade',
-      value: displayValue(keeper.cascade_name ?? keeper.cascade_canonical ?? keeper.selected_cascade_canonical),
+      value: displayValue(keeper.runtime_name ?? keeper.runtime_canonical ?? keeper.selected_runtime_canonical),
     },
     {
       label: 'sandbox',

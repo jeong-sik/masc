@@ -290,7 +290,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
-            ("cascade_name", `String (Keeper_meta_contract.cascade_name_of_meta meta));
+            ("runtime_name", `String (Keeper_meta_contract.runtime_name_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]
           @ Keeper_status_bridge.social_model_resolution_fields_json meta

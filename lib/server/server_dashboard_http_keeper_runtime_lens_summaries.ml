@@ -76,7 +76,7 @@ let config_drift_summary_json ~config ~keeper_name =
       ; ("has_live_override", `Bool false)
       ; ("cascade_override", `Bool false)
       ; ("override_fields", `List [])
-      ; ("default_cascade_name", `Null)
+      ; ("default_runtime_name", `Null)
       ; ("live_cascade_name", `Null)
       ; ("active_config_root", `Null)
       ; ("active_config_root_source", `Null)
@@ -89,7 +89,7 @@ let config_drift_summary_json ~config ~keeper_name =
       ; ("has_live_override", `Bool false)
       ; ("cascade_override", `Bool false)
       ; ("override_fields", `List [])
-      ; ("default_cascade_name", `Null)
+      ; ("default_runtime_name", `Null)
       ; ("live_cascade_name", `Null)
       ; ("active_config_root", `Null)
       ; ("active_config_root_source", `Null)
@@ -97,8 +97,8 @@ let config_drift_summary_json ~config ~keeper_name =
   | Ok (Some meta) ->
     let sources = Keeper_status_bridge.source_provenance_json config meta in
     let override_fields = Json_util.get_string_list sources "override_fields" in
-    let cascade_detail = find_override_field_source "model.cascade_name" sources in
-    let default_cascade_name, live_cascade_name =
+    let cascade_detail = find_override_field_source "model.runtime_name" sources in
+    let default_runtime_name, live_cascade_name =
       match cascade_detail with
       | Some detail ->
         ( Json_util.get_string detail "default_value",
@@ -117,7 +117,7 @@ let config_drift_summary_json ~config ~keeper_name =
                ~default:false) )
       ; ("cascade_override", `Bool cascade_override)
       ; ("override_fields", Json_util.json_string_list override_fields)
-      ; ("default_cascade_name", Json_util.string_opt_to_json default_cascade_name)
+      ; ("default_runtime_name", Json_util.string_opt_to_json default_runtime_name)
       ; ("live_cascade_name", Json_util.string_opt_to_json live_cascade_name)
       ; ( "active_config_root",
           Json_util.string_opt_to_json (Json_util.get_string sources "active_config_root") )

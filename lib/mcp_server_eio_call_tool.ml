@@ -257,7 +257,7 @@ let runtime_mcp_keeper_log_context_of_entry
     visible_tool_count = Some (List.length allowed_tool_names);
     required_tools = Some required_tools;
     missing_required_tools = Some missing_required_tools;
-    cascade_profile = Some (Keeper_meta_contract.cascade_name_of_meta entry.meta);
+    cascade_profile = Some (Keeper_meta_contract.runtime_name_of_meta entry.meta);
   }
 
 let runtime_mcp_keeper_error_preview message =

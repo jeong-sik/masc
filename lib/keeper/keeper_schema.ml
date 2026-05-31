@@ -117,7 +117,7 @@ let keeper_schemas : tool_schema list = [
           ("default", `Bool Persona_contract.default_generation_proactive_enabled);
           ("description", `String "Default keeper.proactive_enabled for the draft.");
         ]);
-        ("cascade_name", `Assoc [
+        ("runtime_name", `Assoc [
           ("type", `String "string");
           ("default", `String Persona_contract.default_generation_cascade_name);
           ("description", `String "Named cascade used to draft the persona.");
@@ -286,7 +286,7 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "Optional: long-term goal horizon (default: goal).");
         ]);
-        ("cascade_name", `Assoc [
+        ("runtime_name", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: keeper-assignable cascade profile. Replaces legacy models/allowed_models/active_model inputs.");
         ]);

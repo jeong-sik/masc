@@ -73,7 +73,7 @@ let keeper_turn_span_name ~keeper_name = "invoke_agent " ^ keeper_name
 let keeper_turn_attrs
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_name
       ~trace_id
       ~generation
       ~max_context
@@ -83,7 +83,7 @@ let keeper_turn_attrs
       ~is_retry
       ~current_task_id
   =
-  let cascade_name = cascade_name in
+  let runtime_name = runtime_name in
   let optional_attrs =
     match current_task_id with
     | None -> []
@@ -104,7 +104,7 @@ let keeper_turn_attrs
   ; Attr_key.gen_ai_agent_id, `String agent_name
   ; Attr_key.gen_ai_conversation_id, `String trace_id
   ; Attr_key.masc_gen_ai_keeper_name, `String keeper_name
-  ; Attr_key.masc_gen_ai_cascade_name, `String cascade_name
+  ; Attr_key.masc_gen_ai_cascade_name, `String runtime_name
   ]
   @ optional_attrs
 ;;
@@ -118,7 +118,7 @@ let tool_execution_attrs ~tool_name =
 let with_keeper_turn_span
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_name
       ~trace_id
       ~generation
       ~max_context
@@ -136,7 +136,7 @@ let with_keeper_turn_span
       keeper_turn_attrs
         ~keeper_name
         ~agent_name
-        ~cascade_name
+        ~runtime_name
         ~trace_id
         ~generation
         ~max_context

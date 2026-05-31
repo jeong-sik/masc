@@ -332,7 +332,7 @@ let tool_lineage ?searched_tool_names ?visible_tool_names
        ])
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
-    ?generation ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ?cascade_name
+    ?generation ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ?runtime_name
     ?(status = "ok") ?(decision = `Assoc []) ?receipt_path ?checkpoint_path
     ?tool_call_log_path () =
   {
@@ -346,19 +346,19 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     oas_turn_count;
     logical_seq;
     event;
-    cascade_name;
+    runtime_name;
     status;
     decision;
     links = { receipt_path; checkpoint_path; tool_call_log_path };
   }
 
-let make_for_context ctx ~event ?oas_turn_count ?logical_seq ?cascade_name
+let make_for_context ctx ~event ?oas_turn_count ?logical_seq ?runtime_name
     ?status ?decision ?receipt_path ?checkpoint_path ?tool_call_log_path () =
   make ~keeper_name:ctx.manifest_keeper_name
     ?agent_name:ctx.manifest_agent_name ~trace_id:ctx.manifest_trace_id
     ?generation:ctx.manifest_generation
     ?keeper_turn_id:ctx.manifest_keeper_turn_id ?oas_turn_count ?logical_seq
-    ~event ?cascade_name ?status ?decision ?receipt_path ?checkpoint_path
+    ~event ?runtime_name ?status ?decision ?receipt_path ?checkpoint_path
     ?tool_call_log_path ()
 
 let json_of_string_opt = function
@@ -385,7 +385,7 @@ let manifest_top_level_allowlist =
   StringSet.of_list
     [ "schema_version"; "ts"; "keeper_name"; "agent_name"; "trace_id"
     ; "generation"; "keeper_turn_id"; "oas_turn_count"; "logical_seq"; "event"
-    ; "cascade_name"; "status"; "decision"; "links"
+    ; "runtime_name"; "status"; "decision"; "links"
     ]
 
 let decision_public_allowlist =
@@ -510,7 +510,7 @@ let to_json manifest =
       ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
       ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
-      ("cascade_name", json_of_string_opt manifest.cascade_name);
+      ("runtime_name", json_of_string_opt manifest.runtime_name);
       ("status", `String manifest.status);
       ("decision", manifest.decision);
       ("links", links_to_json manifest.links);
@@ -529,7 +529,7 @@ let public_to_json manifest =
       ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
       ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
-      ("cascade_name", json_of_string_opt manifest.cascade_name);
+      ("runtime_name", json_of_string_opt manifest.runtime_name);
       ("status", `String manifest.status);
       ("decision", public_projection_of_decision manifest.decision);
       ("links", links_to_json manifest.links);
@@ -619,7 +619,7 @@ let of_json = function
             | None -> Error (Printf.sprintf "unknown event: %S" event_string)
             | Some event -> Ok event)
             >>= fun event ->
-            optional_string "cascade_name" fields >>= fun cascade_name ->
+            optional_string "runtime_name" fields >>= fun runtime_name ->
             required_string "status" fields >>= fun status ->
             field "decision" fields >>= fun decision ->
             field "links" fields >>= fun links_json ->
@@ -636,7 +636,7 @@ let of_json = function
                 oas_turn_count;
                 logical_seq;
                 event;
-                cascade_name;
+                runtime_name;
                 status;
                 decision;
                 links;
@@ -835,7 +835,7 @@ let append_unfinished_provider_attempt_finished_best_effort
     let clock_refs = clock_refs_for_context ctx ~event:Provider_attempt_finished () in
     let decision = with_clock_refs ~clock_refs decision in
     make_for_context ctx ~event:Provider_attempt_finished
-      ?cascade_name:started.cascade_name
+      ?runtime_name:started.runtime_name
       ~status
       ~decision
       ()

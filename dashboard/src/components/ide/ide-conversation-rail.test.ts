@@ -210,7 +210,7 @@ describe('IdeConversationRail', () => {
       }],
       [{
         ts: Date.UTC(2026, 4, 5, 10, 2, 0) / 1000,
-        cascade_name: 'primary',
+        runtime_name: 'primary',
         strategy: 'ranked',
         cycle: 1,
         candidates_in: 3,
@@ -274,7 +274,7 @@ describe('IdeConversationRail', () => {
           total_events: 1,
           events: [{
             ts: Date.UTC(2026, 4, 5, 10, 2, 0) / 1000,
-            cascade_name: 'primary',
+            runtime_name: 'primary',
             strategy: 'ranked',
             cycle: 1,
             candidates_in: 3,
@@ -365,7 +365,7 @@ describe('IdeConversationRail', () => {
           total_events: 1,
           events: [{
             ts: cascadeTs,
-            cascade_name: 'primary',
+            runtime_name: 'primary',
             strategy: 'ranked',
             cycle: 1,
             candidates_in: 3,

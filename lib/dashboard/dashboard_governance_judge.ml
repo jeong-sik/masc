@@ -647,7 +647,7 @@ let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~build_facts =
-  let cascade_name =
+  let runtime_name =
     Runtime.get_default_runtime_id ()
   in
   match
@@ -661,7 +661,7 @@ let compute_judgments
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
       let prompt = prompt_for_facts factual_json in
-      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_name
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve

@@ -763,20 +763,20 @@ let keeper_cycle_decision
                   || backlog_elapsed
                   || (idle_gate_elapsed && cooldown_elapsed)))
         in
-        let cascade_name = cascade_name_of_meta meta in
+        let runtime_name = runtime_name_of_meta meta in
         let provider_cooldown_remaining_sec =
           if should_run
           then
             provider_cooldown_remaining_sec
-              ~cascade_name:(cascade_name)
+              ~runtime_name:(runtime_name)
           else None
         in
         let provider_cooldown_fail_open =
           match provider_cooldown_remaining_sec with
           | Some _ ->
             fallback_cascade_for_provider_cooldown
-              ~base_cascade:cascade_name
-              ~effective_cascade:cascade_name
+              ~base_cascade:runtime_name
+              ~effective_cascade:runtime_name
           | None -> None
         in
         let verdict =

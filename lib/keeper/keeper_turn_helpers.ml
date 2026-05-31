@@ -201,7 +201,7 @@ let record_pre_dispatch_terminal_observation
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(generation : int)
-      ~(cascade_name : string)
+      ~(runtime_name : string)
       ~(outcome : Keeper_execution_receipt.outcome_kind)
       ~(terminal_reason_code : string)
       ~(activity_kind : string)
@@ -213,7 +213,7 @@ let record_pre_dispatch_terminal_observation
   : unit
   =
   let cascade_name_string =
-    cascade_name
+    runtime_name
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in
@@ -254,7 +254,7 @@ let record_pre_dispatch_terminal_observation
     ; network_mode = meta.network_mode
     ; approval_profile = None
     ; approval_profile_derived = false
-    ; cascade_name
+    ; runtime_name
     ; cascade_selected_model = None
     ; cascade_attempt_count = 0
     ; cascade_fallback_applied = false
@@ -290,7 +290,7 @@ let record_pre_dispatch_terminal_observation
     in
     Keeper_runtime_manifest.make ~ts:ended_at ~keeper_name:meta.name
       ~agent_name:meta.agent_name ~trace_id ~generation ?keeper_turn_id ~event
-      ~cascade_name:cascade_name_string ~status ?decision ~receipt_path ()
+      ~runtime_name:cascade_name_string ~status ?decision ~receipt_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in
   append_manifest
@@ -303,7 +303,7 @@ let record_pre_dispatch_terminal_observation
             `String (Keeper_execution_receipt.outcome_kind_to_string outcome)
           );
           ("terminal_reason_code", `String terminal_reason_code);
-          ("cascade_name", `String cascade_name_string);
+          ("runtime_name", `String cascade_name_string);
           ( "error_message",
             match error_message with
             | None -> `Null
@@ -366,7 +366,7 @@ let record_pre_dispatch_terminal_observation
                 , `String (Keeper_execution_receipt.outcome_kind_to_string outcome)
                 )
               ; "terminal_reason_code", `String terminal_reason_code
-              ; "cascade_name", `String cascade_name_string
+              ; "runtime_name", `String cascade_name_string
               ])
         ()
     in

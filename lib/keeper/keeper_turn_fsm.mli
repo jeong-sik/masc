@@ -26,7 +26,7 @@ type failure_reason =
       resolved : string option;
     }
   | Failure_no_tool_capable_provider of {
-      cascade_name : string;
+      runtime_name : string;
       detail : string;
     }
   | Failure_provider_error of { kind : string; detail : string }

@@ -151,7 +151,7 @@ function latestCascadeMetric(keeper: Keeper) {
     const point = series[index]
     if (!point) continue
     if (
-      normalizeText(point.cascade_name)
+      normalizeText(point.runtime_name)
       || normalizeText(point.cascade_selected_model)
       || normalizeText(point.cascade_outcome)
       || typeof point.cascade_attempt_count === 'number'
@@ -166,8 +166,8 @@ function latestCascadeMetric(keeper: Keeper) {
 }
 
 function keeperCascadeLabel(keeper: Keeper): string | null {
-  const raw = normalizeText(keeper.cascade_name)
-  const canonical = normalizeText(keeper.cascade_canonical ?? keeper.selected_cascade_canonical)
+  const raw = normalizeText(keeper.runtime_name)
+  const canonical = normalizeText(keeper.runtime_canonical ?? keeper.selected_runtime_canonical)
   if (raw && canonical && raw !== canonical) return `${raw} -> ${canonical}`
   return raw ?? canonical
 }

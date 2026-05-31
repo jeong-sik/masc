@@ -158,8 +158,8 @@ describe('buildFleetRows runtime labels', () => {
         name: 'cascade-keeper',
         status: 'active',
         keepalive_running: true,
-        cascade_name: 'oas-keeper_unified',
-        cascade_canonical: 'primary',
+        runtime_name: 'oas-keeper_unified',
+        runtime_canonical: 'primary',
         active_model_label: 'cli-tool-a:auto',
         trust: {
           execution_summary: {
@@ -195,7 +195,7 @@ describe('buildFleetRows runtime labels', () => {
             total_tokens: null,
             wall_tokens_per_second: null,
             inference_telemetry: null,
-            cascade_name: 'primary',
+            runtime_name: 'primary',
             cascade_selected_model: 'provider-a:model-a-sonnet',
             cascade_attempt_count: 2,
             cascade_outcome: 'passed_to_next_model',

@@ -301,7 +301,7 @@ type t =
   ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; approval_profile : string option
   ; approval_profile_derived : bool
-  ; cascade_name : string
+  ; runtime_name : string
   ; cascade_selected_model : string option
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool

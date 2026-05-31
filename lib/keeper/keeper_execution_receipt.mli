@@ -218,7 +218,7 @@ type t =
   ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; approval_profile : string option
   ; approval_profile_derived : bool
-  ; cascade_name : string
+  ; runtime_name : string
   ; cascade_selected_model : string option
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
@@ -313,7 +313,7 @@ val operator_broadcast_payload
 val stale_broadcast_payload
   :  keeper_name:string
   -> agent_name:string
-  -> cascade_name:string
+  -> runtime_name:string
   -> trace_id:string
   -> generation:int
   -> failure_reason:Keeper_registry.failure_reason option
@@ -334,7 +334,7 @@ val emit_stale_keeper_broadcast
   :  Coord.config
   -> keeper_name:string
   -> agent_name:string
-  -> cascade_name:string
+  -> runtime_name:string
   -> trace_id:string
   -> generation:int
   -> failure_reason:Keeper_registry.failure_reason option

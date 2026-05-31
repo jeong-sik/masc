@@ -72,11 +72,11 @@ let project_compact_runtime_trust runtime_trust =
 ;;
 
 let degraded_keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
-  let cascade_name = non_empty_trimmed_string_opt (Keeper_meta_contract.cascade_name_of_meta meta) in
-  let cascade_json = Json_util.string_opt_to_json cascade_name in
-  [ "cascade_name", cascade_json
-  ; "cascade_canonical", cascade_json
-  ; "selected_cascade_canonical", cascade_json
+  let runtime_name = non_empty_trimmed_string_opt (Keeper_meta_contract.runtime_name_of_meta meta) in
+  let cascade_json = Json_util.string_opt_to_json runtime_name in
+  [ "runtime_name", cascade_json
+  ; "runtime_canonical", cascade_json
+  ; "selected_runtime_canonical", cascade_json
   ; "primary_model", `Null
   ; "active_model", `Null
   ; "active_model_label", `Null

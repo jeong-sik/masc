@@ -126,7 +126,7 @@ let finalize
          Log.Keeper.error
            "keeper:%s cascade=%s OAS checkpoint save failed: %s"
            meta.name
-           (Keeper_meta_contract.cascade_name_of_meta meta)
+           (Keeper_meta_contract.runtime_name_of_meta meta)
            e;
          Prometheus.inc_counter
            Keeper_metrics.(to_string CheckpointFailures)
@@ -140,7 +140,7 @@ let finalize
       Log.Keeper.error
         "keeper:%s cascade=%s missing OAS checkpoint after run"
         meta.name
-        (Keeper_meta_contract.cascade_name_of_meta meta);
+        (Keeper_meta_contract.runtime_name_of_meta meta);
       Prometheus.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", meta.name; "site", "missing" ]
@@ -167,7 +167,7 @@ let finalize
       ~state_snapshot
       ~post_turn_t0
       ?provider_filter
-      ~cascade_name:cascade_name_string
+      ~runtime_name:cascade_name_string
       ~inference_telemetry:result.response.telemetry
       ();
     Ok

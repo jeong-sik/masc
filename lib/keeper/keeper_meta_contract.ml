@@ -609,7 +609,7 @@ type keeper_meta =
   ; meta_version : int
   }
 
-let cascade_name_of_meta (_m : keeper_meta) : string =
+let runtime_name_of_meta (_m : keeper_meta) : string =
   Runtime.get_default_runtime_id ()
 ;;
 
@@ -731,7 +731,7 @@ let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
   | fields ->
     Error
       (Printf.sprintf
-         "legacy keeper model args removed for %s: %s. Use cascade_name; concrete \
+         "legacy keeper model args removed for %s: %s. Use runtime_name; concrete \
           provider/model identity is OAS-owned."
          tool_name
          (String.concat ", " fields))

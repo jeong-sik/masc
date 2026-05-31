@@ -13,7 +13,7 @@ module Observations = Keeper_heartbeat_loop_observations
 type cascade_backpressure_decision = Observations.cascade_backpressure_decision =
   | Cascade_admitted
   | Cascade_backpressured of {
-      cascade_name : string;
+      runtime_name : string;
       reason : string;
     }
 
@@ -37,7 +37,7 @@ let decide_keepalive_scheduling
       ?(cascade_resilience_of_name =
         Keeper_cascade_resilience.cascade_resilience_of_name)
       ?(cascade_status_of_name =
-        fun ~cascade_name -> Keeper_health_probe.get_cascade_status ~cascade_name)
+        fun ~runtime_name -> Keeper_health_probe.get_cascade_status ~runtime_name)
       ~stop
       ~meta
       obs
@@ -46,14 +46,14 @@ let decide_keepalive_scheduling
   let requested_should_run_turn =
     (not (Atomic.get stop)) && turn_decision.should_run
   in
-  let cascade_name = cascade_name_of_meta meta in
-  let cascade_resilience = cascade_resilience_of_name cascade_name in
+  let runtime_name = runtime_name_of_meta meta in
+  let cascade_resilience = cascade_resilience_of_name runtime_name in
   let cascade_backpressure =
     cascade_backpressure_decision
       ~cascade_resilience:(Some cascade_resilience)
       ~should_run_turn:requested_should_run_turn
-      ~cascade_name
-      ~cascade_status:(cascade_status_of_name ~cascade_name)
+      ~runtime_name
+      ~cascade_status:(cascade_status_of_name ~runtime_name)
   in
   let should_run_turn =
     match cascade_backpressure with

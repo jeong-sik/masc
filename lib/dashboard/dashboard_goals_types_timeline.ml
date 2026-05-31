@@ -171,7 +171,7 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
       ( "sandbox_profile",
         `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) );
       ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode));
-      ("cascade_name", `String (Keeper_meta_contract.cascade_name_of_meta meta));
+      ("runtime_name", `String (Keeper_meta_contract.runtime_name_of_meta meta));
       ( "approval_profile",
         Json_util.string_opt_to_json (Option.bind latest_receipt receipt_approval_profile) );
       ( "cascade_outcome",
@@ -392,7 +392,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                               (Printf.sprintf "%s · %s"
                                  outcome
                                  (receipt_cascade_name receipt
-                                  |> Option.value ~default:(Keeper_meta_contract.cascade_name_of_meta detail.meta)))
+                                  |> Option.value ~default:(Keeper_meta_contract.runtime_name_of_meta detail.meta)))
                             ~severity)))
   in
   let goal_events = List.map goal_event_timeline_json goal_events in

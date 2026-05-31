@@ -12,7 +12,7 @@
 val default_config_path : unit -> string option
 (** Alias for [Runtime.config_path]. *)
 
-val default_model_strings : cascade_name:string -> string list
+val default_model_strings : runtime_name:string -> string list
 (** Alias for [Cascade_runtime.default_model_strings]. *)
 
 (** {1 Eio context validation} *)
@@ -30,7 +30,7 @@ val eio_context_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 
 val cascade_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 (** Lift a cascade-catalog diagnostic into an [Agent_sdk.Error.Config]
-    error with field ["cascade_name"]. *)
+    error with field ["runtime_name"]. *)
 
 (** {1 Provider resolution} *)
 
@@ -39,7 +39,7 @@ val resolve_cascade_providers :
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  cascade_name:string -> unit ->
+  runtime_name:string -> unit ->
   (Llm_provider.Provider_config.t list, string) result
 (** Resolve cascade provider configs via MASC Cascade_config. *)
 

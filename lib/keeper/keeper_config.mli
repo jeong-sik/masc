@@ -15,7 +15,7 @@
     @since v2.128.0
     @since RFC-0066 Phase 1: changed from a string value to a thunk
     (issue #14624). *)
-val default_cascade_name : unit -> string
+val default_runtime_name : unit -> string
 
 (** Minimum context window (tokens) for any keeper turn. *)
 val min_keeper_context_tokens : int

@@ -82,8 +82,8 @@ let run (ctx : ctx)
       ~(user_message : string)
       ~(registry_base_path : string)
       ~(degraded_retry_slot_phase_budget_sec : float)
-      ~(record_streaming_cancelled_observation : config:Coord.config -> run_meta:keeper_meta -> run_generation:int -> cascade_name:string -> keeper_turn_id:int -> unit -> unit)
-      ~(cascade_name_of_meta : keeper_meta -> string)
+      ~(record_streaming_cancelled_observation : config:Coord.config -> run_meta:keeper_meta -> run_generation:int -> runtime_name:string -> keeper_turn_id:int -> unit -> unit)
+      ~(runtime_name_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
   : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result
 =
@@ -134,7 +134,7 @@ let run (ctx : ctx)
     Otel_genai.with_keeper_turn_span
       ~keeper_name:run_meta.name
       ~agent_name:run_meta.agent_name
-      ~cascade_name:execution.cascade_name
+      ~runtime_name:execution.runtime_name
       ~trace_id:
         (Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
       ~generation:run_generation
@@ -165,7 +165,7 @@ let run (ctx : ctx)
                ~config
                ~run_meta
                ~run_generation
-               ~cascade_name:execution.cascade_name
+               ~runtime_name:execution.runtime_name
                ~keeper_turn_id
                ())
            ~run:(fun () ->
@@ -176,7 +176,7 @@ let run (ctx : ctx)
                ~max_context:execution.max_context
                ~build_turn_prompt
                ~user_message
-               ~cascade_name:execution.cascade_name
+               ~runtime_name:execution.runtime_name
                ~world_observation:observation
                ~turn_affordances
                ?provider_filter:
@@ -224,7 +224,7 @@ let run (ctx : ctx)
       input
     in
     let execution_cascade_name =
-      execution.cascade_name
+      execution.runtime_name
     in
     let mark_terminal_error err =
       match EC.extract_input_required err with
@@ -478,7 +478,7 @@ let run (ctx : ctx)
       else (
         match
           next_fail_open_cascade_for_turn_with_budget
-            ~base_cascade:(cascade_name_of_meta meta)
+            ~base_cascade:(runtime_name_of_meta meta)
             ~effective_cascade:execution_cascade_name
             ~tool_requirement:initial_tool_requirement
             ~attempted_cascades
@@ -495,11 +495,11 @@ let run (ctx : ctx)
              .build_cascade_execution
                ~meta
                ~profile_defaults
-               ~cascade_name:
+               ~runtime_name:
                  (* RFC-0206: raw runtime id (no prefix validation); keep the
                     empty→fallback behaviour only. *)
                  (if String.trim degraded_retry.next_cascade = ""
-                  then execution.cascade_name
+                  then execution.runtime_name
                   else degraded_retry.next_cascade)
            with
            | Error fail_open_err ->
@@ -511,7 +511,7 @@ let run (ctx : ctx)
                  Keeper_execution_receipt.Retry_setup_failed
                ~productive_phase_elapsed_ms
                ?retry_phase_elapsed_ms
-               ~from_cascade:execution.cascade_name
+               ~from_cascade:execution.runtime_name
                ~retry:degraded_retry
                ~outcome:
                  Keeper_execution_receipt.Rotation_setup_failed
@@ -531,7 +531,7 @@ let run (ctx : ctx)
              Error fail_open_err
            | Ok next_execution ->
              let next_execution_cascade_name =
-               next_execution.cascade_name
+               next_execution.runtime_name
              in
              if Option.is_none !retry_phase_started_at
              then retry_phase_started_at := Some (Eio.Time.now clock);
@@ -549,7 +549,7 @@ let run (ctx : ctx)
                ?slot_release_at_phase
                ~productive_phase_elapsed_ms
                ?retry_phase_elapsed_ms
-               ~from_cascade:execution.cascade_name
+               ~from_cascade:execution.runtime_name
                ~retry:degraded_retry
                ~outcome:
                  Keeper_execution_receipt.Rotation_retry_scheduled
@@ -628,7 +628,7 @@ let run (ctx : ctx)
               Keeper_execution_receipt.Retry_budget_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
-            ~from_cascade:execution.cascade_name
+            ~from_cascade:execution.runtime_name
             ~retry:degraded_retry
             ~outcome:
               Keeper_execution_receipt.Rotation_budget_exhausted
@@ -656,7 +656,7 @@ let run (ctx : ctx)
               Keeper_execution_receipt.Productive_phase_exhausted
             ~productive_phase_elapsed_ms
             ?retry_phase_elapsed_ms
-            ~from_cascade:execution.cascade_name
+            ~from_cascade:execution.runtime_name
             ~retry:degraded_retry
             ~outcome:
               Keeper_execution_receipt.Rotation_slot_phase_exhausted
@@ -764,7 +764,7 @@ let run (ctx : ctx)
         ; is_retry = false
         ; allow_degraded_wall_clock_retry_budget = false
         ; attempted_cascades =
-            [ initial_execution.cascade_name
+            [ initial_execution.runtime_name
             ]
         })
   with

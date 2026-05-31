@@ -74,7 +74,7 @@ let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 type cascade_backpressure_decision = Observations.cascade_backpressure_decision =
   | Cascade_admitted
   | Cascade_backpressured of {
-      cascade_name : string;
+      runtime_name : string;
       reason : string;
     }
 
@@ -233,7 +233,7 @@ let run_keepalive_unified_turn
              ~base_path:ctx.config.base_path
              meta_after_triage.name
              ~reasons:admission_reason_strs
-         | Cascade_backpressured { cascade_name; reason } ->
+         | Cascade_backpressured { runtime_name; reason } ->
            record_cascade_backpressure_observation
              ~base_path:ctx.config.base_path
              ~keeper_name:meta_after_triage.name
@@ -241,7 +241,7 @@ let run_keepalive_unified_turn
            Log.Keeper.info
              "keepalive turn backpressured for %s: cascade=%s reason=%s requested=[%s]"
              meta_after_triage.name
-             cascade_name
+             runtime_name
              reason
              (String.concat "," verdict_strs));
         let paused_info =
@@ -387,7 +387,7 @@ let run_keepalive_unified_turn
           ();
         match
           Keeper_turn_slot.with_keeper_turn_slot_control
-            ~cascade_profile:(cascade_name_of_meta meta_after_triage)
+            ~cascade_profile:(runtime_name_of_meta meta_after_triage)
             ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel
             (fun ~semaphore_wait_ms ~slot_control ->

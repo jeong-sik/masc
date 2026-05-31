@@ -82,7 +82,7 @@ let write_heartbeat_snapshot
   in
   let cascade_models =
     Provider_runtime_projection.default_execution_model_strings
-      ((Keeper_meta_contract.cascade_name_of_meta meta_current))
+      ((Keeper_meta_contract.runtime_name_of_meta meta_current))
   in
   let max_cascade_context =
     let resolution =

@@ -278,6 +278,6 @@ let default_execution_model_strings _cascade_name =
   | labels -> labels
 ;;
 
-let default_execution_model_strings_result cascade_name =
-  Ok (default_execution_model_strings cascade_name)
+let default_execution_model_strings_result runtime_name =
+  Ok (default_execution_model_strings runtime_name)
 ;;

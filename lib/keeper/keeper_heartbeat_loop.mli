@@ -74,7 +74,7 @@ val record_semaphore_wait_observation :
 type cascade_backpressure_decision =
   | Cascade_admitted
   | Cascade_backpressured of {
-      cascade_name : string;
+      runtime_name : string;
       reason : string;
     }
 
@@ -102,7 +102,7 @@ type keepalive_scheduling_decision = {
 val decide_keepalive_scheduling :
   ?cascade_resilience_of_name:(string -> Keeper_cascade_resilience.cascade_resilience) ->
   ?cascade_status_of_name:
-    (cascade_name:string -> Keeper_health_probe.health_status) ->
+    (runtime_name:string -> Keeper_health_probe.health_status) ->
   stop:bool Atomic.t ->
   meta:keeper_meta ->
   Keeper_world_observation.world_observation ->
@@ -111,7 +111,7 @@ val decide_keepalive_scheduling :
 val cascade_backpressure_decision :
   cascade_resilience:Keeper_cascade_resilience.cascade_resilience option ->
   should_run_turn:bool ->
-  cascade_name:string ->
+  runtime_name:string ->
   cascade_status:Keeper_health_probe.health_status ->
   cascade_backpressure_decision
 
@@ -124,7 +124,7 @@ val semaphore_wait_timeout_blocker_class :
   Keeper_turn_slot.semaphore_wait_timeout -> blocker_class
 
 val semaphore_wait_timeout_diagnostics :
-  cascade_name:string -> Keeper_turn_slot.semaphore_wait_timeout -> string * string
+  runtime_name:string -> Keeper_turn_slot.semaphore_wait_timeout -> string * string
 
 val provider_timeout_observation_reasons : string list
 

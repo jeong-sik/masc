@@ -119,7 +119,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
   (* No_tool_capable specific cases first — more specific than generic Cascade_exhausted *)
   | Some
       (Keeper_meta_contract.Cascade_exhausted
-         { cascade_name = ntcp_cascade_name
+         { runtime_name = ntcp_cascade_name
          ; reason = Keeper_meta_contract.No_tool_capable (Some detail)
          ; _
          }) ->
@@ -150,11 +150,11 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
                rejection_summary
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (ntcp_cascade_name)
+         ; runtime_name = Some (ntcp_cascade_name)
          })
   | Some
       (Keeper_meta_contract.Cascade_exhausted
-         { cascade_name = ntcp_cascade_name
+         { runtime_name = ntcp_cascade_name
          ; reason = Keeper_meta_contract.No_tool_capable None
          ; _
          }) ->
@@ -164,17 +164,17 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; detail = "no tool-capable provider found"
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (ntcp_cascade_name)
+         ; runtime_name = Some (ntcp_cascade_name)
          })
   (* Generic Cascade_exhausted catch-all — after No_tool_capable specifics *)
-  | Some (Keeper_meta_contract.Cascade_exhausted { reason; cascade_name }) ->
+  | Some (Keeper_meta_contract.Cascade_exhausted { reason; runtime_name }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = cascade_exhaustion_reason_code reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (cascade_name)
+         ; runtime_name = Some (runtime_name)
          })
   | Some (Keeper_meta_contract.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
@@ -183,7 +183,7 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; detail = capacity_detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_name = None
          })
   | Some
       ( Keeper_meta_contract.Resumable_cli_session _
@@ -239,7 +239,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_name = None
          })
   | Keeper_turn_disposition.Cascade_attempts_exhausted ->
     Some
@@ -248,7 +248,7 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_name = None
          })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
@@ -380,7 +380,7 @@ let record_streaming_cancelled_observation
       ~(config : Coord.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
-      ~(cascade_name : string)
+      ~(runtime_name : string)
       ~(keeper_turn_id : int)
       ()
   : unit
@@ -406,7 +406,7 @@ let record_streaming_cancelled_observation
     ~config
     ~meta:run_meta
     ~generation:run_generation
-    ~cascade_name
+    ~runtime_name
     ~outcome:`Cancelled
     ~terminal_reason_code
     ~activity_kind:"keeper.turn_cancelled"

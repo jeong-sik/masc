@@ -12,13 +12,13 @@ let rejection_surface_label = function
 let rejection_reason_label = function
   | Host_resource_saturated -> "host_resource_saturated"
 
-let on_acquire ~keeper_name:_ ~cascade_name:_ ~wait_ms =
+let on_acquire ~keeper_name:_ ~runtime_name:_ ~wait_ms =
   Prometheus.inc_gauge Prometheus.metric_inference_queue_inflight ();
   Prometheus.inc_counter Prometheus.metric_inference_queue_acquired ();
   let wait_sec = Float.of_int wait_ms /. 1000.0 in
   Prometheus.observe_histogram Prometheus.metric_inference_queue_wait wait_sec
 
-let on_release ~keeper_name:_ ~cascade_name:_ =
+let on_release ~keeper_name:_ ~runtime_name:_ =
   Prometheus.dec_gauge Prometheus.metric_inference_queue_inflight ()
 
 let on_reject ~surface ~reason =

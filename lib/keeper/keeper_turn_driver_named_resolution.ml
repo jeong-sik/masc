@@ -11,11 +11,11 @@ type t = {
   secondary_resolver : secondary_resolver option;
 }
 
-let resolve ~sw ~net ?provider_filter ~cascade_name ~runtime_cascade_name () =
+let resolve ~sw ~net ?provider_filter ~runtime_name ~runtime_cascade_name () =
   let named_resolution =
     Cascade_catalog_runtime
     .resolve_named_providers_strict_with_secondary_resolver
-      ~sw ~net ?provider_filter ~cascade_name ()
+      ~sw ~net ?provider_filter ~runtime_name ()
   in
   let candidate_cfgs_result =
     match named_resolution with

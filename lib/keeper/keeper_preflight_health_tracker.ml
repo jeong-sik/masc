@@ -9,7 +9,7 @@ type reason =
   | Rate_limited_long_window
 
 type fingerprint = {
-  cascade_name : string;
+  runtime_name : string;
   provider : string;
   reason : reason;
 }
@@ -50,18 +50,18 @@ let metric_provider_re_enabled = "masc_cascade_provider_re_enabled_total"
 (* ── State ──────────────────────────────────────────────────────── *)
 
 (* [Hashtbl] keyed by an opaque triple to avoid string interpolation
-   collisions when cascade_name or provider contain separators. *)
+   collisions when runtime_name or provider contain separators. *)
 module Key = struct
   type t = fingerprint
 
   let equal (a : t) (b : t) =
-    String.equal a.cascade_name b.cascade_name
+    String.equal a.runtime_name b.runtime_name
     && String.equal a.provider b.provider
     && a.reason = b.reason
   ;;
 
   let hash (k : t) =
-    Hashtbl.hash (k.cascade_name, k.provider, reason_slug k.reason)
+    Hashtbl.hash (k.runtime_name, k.provider, reason_slug k.reason)
   ;;
 end
 
@@ -79,7 +79,7 @@ end)
 type t = {
   counts : int FpTbl.t;
   disabled : (float * string) StrTbl.t;
-      (** Maps provider → (disabled_at_timestamp, cascade_name).
+      (** Maps provider → (disabled_at_timestamp, runtime_name).
           The timestamp enables TTL-based auto-expiry so providers
           don't stay disabled forever (GitHub #18502). *)
   mu : Stdlib.Mutex.t;
@@ -107,14 +107,14 @@ let with_lock t f =
 
 (* ── Public API ─────────────────────────────────────────────────── *)
 
-let record ?(clock = Time_compat.now) t ~cascade_name ~provider ~reason : record_outcome =
-  let fp = { cascade_name; provider; reason } in
+let record ?(clock = Time_compat.now) t ~runtime_name ~provider ~reason : record_outcome =
+  let fp = { runtime_name; provider; reason } in
   with_lock t (fun () ->
     (* Always tick the per-call counter so dashboards see absolute
        skip volume (independent of disable transitions). *)
     Prometheus.inc_counter metric_preflight_unhealthy_skip
       ~labels:
-        [ ("cascade", cascade_name)
+        [ ("cascade", runtime_name)
         ; ("provider", provider)
         ; ("reason", reason_slug reason)
         ]
@@ -129,10 +129,10 @@ let record ?(clock = Time_compat.now) t ~cascade_name ~provider ~reason : record
       then `First
       else if next >= t.threshold
       then (
-        StrTbl.replace t.disabled provider (clock (), cascade_name);
+        StrTbl.replace t.disabled provider (clock (), runtime_name);
         Prometheus.inc_counter metric_provider_disabled
           ~labels:
-            [ ("cascade", cascade_name)
+            [ ("cascade", runtime_name)
             ; ("provider", provider)
             ; ("reason", reason_slug reason)
             ]

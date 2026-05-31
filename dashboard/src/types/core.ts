@@ -387,7 +387,7 @@ export interface KeeperMetricPoint {
   total_tokens: number | null
   wall_tokens_per_second: number | null
   inference_telemetry: InferenceTelemetry | null
-  cascade_name?: string | null
+  runtime_name?: string | null
   cascade_outcome?: string | null
   cascade_selected_model?: string | null
   cascade_attempt_count?: number | null
@@ -928,10 +928,10 @@ export interface Keeper {
   last_model_used?: string
   last_model_used_label?: string | null
   next_model_hint?: string | null
-  cascade_name?: string | null
-  cascade_ref?: CascadeRef | null
-  cascade_canonical?: string | null
-  selected_cascade_canonical?: string | null
+  runtime_name?: string | null
+  runtime_ref?: RuntimeRef | null
+  runtime_canonical?: string | null
+  selected_runtime_canonical?: string | null
   status: string
   presence_keepalive?: boolean
   presence_keepalive_sec?: number
@@ -1212,9 +1212,9 @@ interface KeeperConfigExecution {
   per_provider_timeout_sec?: number | null
   per_provider_timeout_mode: 'override' | 'turn_budget_heuristic'
   verify: boolean
-  selected_cascade_name: string
-  selected_cascade_canonical: string
-  cascade_ref?: CascadeRef | null
+  selected_runtime_name: string
+  selected_runtime_canonical: string
+  runtime_ref?: RuntimeRef | null
 }
 
 interface KeeperConfigCompaction {
@@ -1231,7 +1231,7 @@ interface KeeperConfigProactive {
   cooldown_sec: number
 }
 
-export interface CascadeRef {
+export interface RuntimeRef {
   group: string
   item: string | null
 }

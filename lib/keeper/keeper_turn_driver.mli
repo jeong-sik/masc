@@ -95,7 +95,7 @@ val provider_attempt_finished_decision :
 (** {1 Named cascade execution} *)
 
 val run_named :
-  cascade_name:string ->
+  runtime_name:string ->
   ?base_path:string ->
   ?keeper_name:string ->
   goal:string ->

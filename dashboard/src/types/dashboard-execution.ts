@@ -997,7 +997,7 @@ export interface GoalDetailKeeper {
   active_goal_ids: string[]
   sandbox_profile: string
   network_mode: string
-  cascade_name: string
+  runtime_name: string
   approval_profile: string | null
   cascade_outcome: string | null
   latest_execution_outcome: string | null

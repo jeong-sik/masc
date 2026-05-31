@@ -66,7 +66,7 @@ let run_keeper_cycle
   in
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
-  let append_manifest ?status ?decision ?cascade_name ?clock_refs ~site event =
+  let append_manifest ?status ?decision ?runtime_name ?clock_refs ~site event =
     let decision =
       let decision =
         match decision with
@@ -95,7 +95,7 @@ let run_keeper_cycle
            decision)
     in
     Keeper_runtime_manifest.make_for_context runtime_manifest_context ~event
-      ?cascade_name ?status ?decision ()
+      ?runtime_name ?status ?decision ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in
   let append_phase_gate_decision turn_plan =
@@ -137,7 +137,7 @@ let run_keeper_cycle
   let main_path phase_opt =
       (* RFC-0136 PR-2: cascade resolution stage extracted to
          [Keeper_unified_turn_cascade_resolution].  The stage owns the
-         [selected_item] override of [meta.cascade_ref], the
+         [selected_item] override of [meta.runtime_ref], the
          [Keeper_cascade_routing.select_cascade] call, and the
          [fail_open_phase_buffer_when_unavailable] hardening.  Returns
          the updated meta + the resolved cascade name. *)
@@ -148,9 +148,9 @@ let run_keeper_cycle
         Keeper_unified_turn_cascade_resolution.resolve_cascade
           ~meta
           ~phase_opt
-          ~append_cascade_routed_manifest:(fun ~cascade_name ~decision ->
+          ~append_cascade_routed_manifest:(fun ~runtime_name ~decision ->
             append_manifest ~site:"cascade_routed"
-              ~cascade_name
+              ~runtime_name
               ~decision
               Keeper_runtime_manifest.Cascade_routed)
       in
@@ -172,7 +172,7 @@ let run_keeper_cycle
             Keeper_unified_turn_pre_dispatch.build_cascade_execution
               ~meta
               ~profile_defaults
-              ~cascade_name:effective_cascade_runtime_name
+              ~runtime_name:effective_cascade_runtime_name
           with
           | Error err ->
             let terminal_reason_code =
@@ -185,7 +185,7 @@ let run_keeper_cycle
               ~config
               ~meta
               ~generation
-              ~cascade_name:effective_cascade_runtime_name
+              ~runtime_name:effective_cascade_runtime_name
               ~outcome:`Error
               ~terminal_reason_code
               ~activity_kind:"keeper.turn_blocked"
@@ -199,12 +199,12 @@ let run_keeper_cycle
               match Keeper_turn_driver.classify_masc_internal_error err with
               | Some
                   (Keeper_turn_driver.Cascade_exhausted
-                     { cascade_name
+                     { runtime_name
                      ; reason = Keeper_meta_contract.No_tool_capable _
                      ; _
                      }) ->
                 Keeper_turn_fsm.Failure_no_tool_capable_provider
-                  { cascade_name = cascade_name
+                  { runtime_name = runtime_name
                   ; detail = error_message
                   }
               | _ when EC.is_cascade_exhausted_error err ->
@@ -227,7 +227,7 @@ let run_keeper_cycle
               ~config
               ~meta
               ~generation
-              ~cascade_name:effective_cascade_runtime_name
+              ~runtime_name:effective_cascade_runtime_name
               ~outcome:`Ok
               ~terminal_reason_code:"pre_dispatch_success"
               ~activity_kind:"keeper.turn_pre_dispatch_ok"
@@ -521,7 +521,7 @@ let run_keeper_cycle
                           ~registry_base_path
                           ~degraded_retry_slot_phase_budget_sec
                           ~record_streaming_cancelled_observation
-                          ~cascade_name_of_meta
+                          ~runtime_name_of_meta
                           ~start_background_turn_event_bus_drain
                     )
                  with
@@ -665,12 +665,12 @@ let run_keeper_cycle
                          match Keeper_turn_driver.classify_masc_internal_error err with
                          | Some
                              (Keeper_turn_driver.Cascade_exhausted
-                                { cascade_name
+                                { runtime_name
                                 ; reason = Keeper_meta_contract.No_tool_capable _
                                 ; _
                                 }) ->
                            Keeper_turn_fsm.Failure_no_tool_capable_provider
-                             { cascade_name = cascade_name
+                             { runtime_name = runtime_name
                              ; detail = short_preview e_str
                              }
                          | _ ->
@@ -691,7 +691,7 @@ let run_keeper_cycle
                     "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s latency=%dms%s error=%s"
                     meta.name
-                    (final_execution.cascade_name)
+                    (final_execution.runtime_name)
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
                     final_execution.max_context_resolution.primary_budget

@@ -477,7 +477,7 @@ let to_json (receipt : t) =
       ~required_tools:receipt.tool_surface.required_tools
       ~required_tool_candidates:receipt.tool_surface.required_tool_candidates
       ~missing_required_tools:receipt.tool_surface.missing_required_tools
-      ~cascade_profile:(receipt.cascade_name)
+      ~cascade_profile:(receipt.runtime_name)
       ()
   in
   let action_radius =
@@ -563,7 +563,7 @@ let to_json (receipt : t) =
           ] )
     ; ( "cascade"
       , `Assoc
-          [ "name", `String (receipt.cascade_name)
+          [ "name", `String (receipt.runtime_name)
           ; "selected_model", `Null
           ; "attempt_count", `Int receipt.cascade_attempt_count
           ; "fallback_applied", `Bool receipt.cascade_fallback_applied
@@ -726,7 +726,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
-    ; "cascade_name", `String (receipt.cascade_name)
+    ; "runtime_name", `String (receipt.runtime_name)
     ; "cascade_outcome", `String (cascade_outcome_to_string receipt.cascade_outcome)
     ; ( "tool_contract_result"
       , `String (tool_contract_result_to_string receipt.tool_contract_result) )
@@ -921,21 +921,21 @@ let stale_turn_bucket stale_seconds =
 let stale_broadcast_payload
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_name
       ~trace_id
       ~generation
       ~failure_reason
       ~stale_seconds
       ~last_turn_ts
   =
-  let cascade_name_string = cascade_name in
+  let cascade_name_string = runtime_name in
   let failure_reason_text = stale_broadcast_failure_reason_text failure_reason in
   let failure_reason_cohort = stale_broadcast_failure_cohort failure_reason in
   `Assoc
     [ "schema", `String "keeper.operator_broadcast_required.v1"
     ; "keeper_name", `String keeper_name
     ; "agent_name", `String agent_name
-    ; "cascade_name", `String cascade_name_string
+    ; "runtime_name", `String cascade_name_string
     ; "trace_id", `String trace_id
     ; "generation", `Int generation
     ; "disposition", `String "stalled"
@@ -958,19 +958,19 @@ let emit_stale_keeper_broadcast
       config
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_name
       ~trace_id
       ~generation
       ~failure_reason
       ~stale_seconds
       ~last_turn_ts
   =
-  let cascade_name_string = cascade_name in
+  let cascade_name_string = runtime_name in
   let payload =
     stale_broadcast_payload
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_name
       ~trace_id
       ~generation
       ~stale_seconds

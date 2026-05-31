@@ -69,7 +69,7 @@ let record_semaphore_wait_observation
 type cascade_backpressure_decision =
   | Cascade_admitted
   | Cascade_backpressured of {
-      cascade_name : string;
+      runtime_name : string;
       reason : string;
     }
 
@@ -123,7 +123,7 @@ let cascade_resilience_backpressure_reason
 let cascade_backpressure_decision
       ~cascade_resilience
       ~should_run_turn
-      ~cascade_name
+      ~runtime_name
       ~cascade_status
   =
   let resilience_reason =
@@ -133,8 +133,8 @@ let cascade_backpressure_decision
   in
   match should_run_turn, cascade_status, resilience_reason with
   | true, Keeper_health_probe.Unhealthy reason, _ ->
-    Cascade_backpressured { cascade_name; reason }
-  | true, _, Some reason -> Cascade_backpressured { cascade_name; reason }
+    Cascade_backpressured { runtime_name; reason }
+  | true, _, Some reason -> Cascade_backpressured { runtime_name; reason }
   | false, _, _
   | true, Keeper_health_probe.Unknown, None
   | true, Keeper_health_probe.Healthy, None -> Cascade_admitted

@@ -42,7 +42,7 @@ val run_model_by_label :
 (** {1 MASC tool bridging} *)
 
 val run_named_with_masc_tools :
-  cascade_name:string ->
+  runtime_name:string ->
   goal:string ->
   ?priority:Llm_provider.Request_priority.t ->
   ?system_prompt:string ->

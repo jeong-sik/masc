@@ -54,7 +54,7 @@ end
     @param build_turn_prompt Callback: receives the base keeper system prompt
            and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
-    @param cascade_name Runtime cascade profile name for model selection
+    @param runtime_name Runtime cascade profile name for model selection
     @param generation Current generation counter
     @param max_turns Maximum agent turns (default from keeper runtime config)
     @param guardrails Optional OAS guardrails for tool safety gates
@@ -73,7 +73,7 @@ let run_turn
       ~(build_turn_prompt :
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
-      ~(cascade_name : string)
+      ~(runtime_name : string)
       ?world_observation
       ?(turn_affordances = [])
       ?(required_tool_names = [])
@@ -139,7 +139,7 @@ let run_turn
   Eio.Switch.run @@ fun turn_sw ->
   Eio_context.with_turn_switch turn_sw
   @@ fun () ->
-  let cascade_name_string = cascade_name in
+  let cascade_name_string = runtime_name in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   let ctx =
@@ -148,7 +148,7 @@ let run_turn
       ~meta
       ~base_dir
       ~max_context
-      ~cascade_name
+      ~runtime_name
       ?temperature
       ?max_tokens
       ?shared_context
@@ -163,7 +163,7 @@ let run_turn
   let max_tokens, pre_dispatch_max_tokens_error =
     match
       Cascade_inference.validate_max_tokens_within_ceiling
-        ~cascade_name
+        ~runtime_name
         ~provider_ceiling:max_output_ceiling
         ctx.max_tokens
     with
@@ -217,7 +217,7 @@ let run_turn
       ~agent_name:meta.agent_name
       ~trace_id
       ~generation
-      ~cascade_name:cascade_name_string
+      ~runtime_name:cascade_name_string
       ~turn_start
       ~seq_ref
   in
@@ -329,7 +329,7 @@ let run_turn
       ~start_turn_count
       ~generation
       ~max_turns
-      ~cascade_name
+      ~runtime_name
       ~is_retry
       ~turn_affordances
       ~required_tool_names
@@ -531,7 +531,7 @@ let run_turn
                   ~timeout_s:bridge_timeout_s
                   (fun () ->
                           Keeper_turn_driver.run_named
-                            ~cascade_name:cascade_name_string
+                            ~runtime_name:cascade_name_string
                             ~base_path:config.base_path
                             ~keeper_name:meta.name
                     ?provider_filter
@@ -723,7 +723,7 @@ let run_turn
                    Error
                      (Keeper_agent_run_tool_surface_violation.to_sdk_error
                         ~keeper_name:meta.name
-                        ~cascade_name:(Keeper_meta_contract.cascade_name_of_meta meta)
+                        ~runtime_name:(Keeper_meta_contract.runtime_name_of_meta meta)
                         ~requested_tool_names_seen:acc.requested_tool_names_seen
                         ~unexpected_tool_names))
                  else (
@@ -892,7 +892,7 @@ let run_turn
          ~meta
          ~generation
          ~manifest_keeper_turn_id
-         ~cascade_name
+         ~runtime_name
          ~keeper_visible_sandbox_root
          ~receipt_started_at
          ~runtime_manifest_context

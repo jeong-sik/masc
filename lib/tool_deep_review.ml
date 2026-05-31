@@ -151,14 +151,14 @@ let handle_deep_review
         error_workflow_json ~tool_name ~start_time
           (`Assoc [ ("error", `String msg) ])
     | Ok prompt ->
-        let cascade_name =
+        let runtime_name =
           Runtime.get_default_runtime_id ()
         in
         match
           Masc_oas_bridge.run_with_caller
             ~caller:Env_config_oas_bridge.Tool_deep_review (fun () ->
             Keeper_turn_driver.run_named
-              ~cascade_name
+              ~runtime_name
               ~goal:prompt
               ~max_turns:1
               ~temperature:0.5

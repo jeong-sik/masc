@@ -15,7 +15,7 @@ val resolve :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?provider_filter:string list ->
-  cascade_name:string ->
+  runtime_name:string ->
   runtime_cascade_name:string ->
   unit ->
   t

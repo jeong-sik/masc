@@ -353,10 +353,10 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const providerAttempts = executionSummary?.provider_attempt_count
   const providerFallback = executionSummary?.provider_fallback_applied
   const cascadeOutcome = executionSummary?.cascade_outcome?.trim() || null
-  const cascadeName = keeper.cascade_name?.trim() || null
+  const cascadeName = keeper.runtime_name?.trim() || null
   const cascadeCanonical =
-    keeper.cascade_canonical?.trim()
-    || keeper.selected_cascade_canonical?.trim()
+    keeper.runtime_canonical?.trim()
+    || keeper.selected_runtime_canonical?.trim()
     || null
   const cascadeLabel =
     cascadeName && cascadeCanonical && cascadeName !== cascadeCanonical
@@ -370,7 +370,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
       if (
         point.fallback_applied
         || point.cascade_outcome?.trim()
-        || point.cascade_name?.trim()
+        || point.runtime_name?.trim()
         || typeof point.cascade_attempt_count === 'number'
       ) return point
     }

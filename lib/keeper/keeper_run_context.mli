@@ -37,7 +37,7 @@ val prepare_run_context :
   -> meta:keeper_meta
   -> base_dir:string
   -> max_context:int
-  -> cascade_name:string
+  -> runtime_name:string
   -> ?temperature:float
   -> ?max_tokens:int
   -> ?shared_context:Agent_sdk.Context.t

@@ -73,7 +73,7 @@ val max_failed_allowed_for_cascade : total:int -> int
 
 (** [check_cascade_health ~base_path] scans the registry and computes
     the health status of each active cascade.  Returns a list of
-    (cascade_name, is_healthy) pairs.  A keeper is counted as failed
+    (runtime_name, is_healthy) pairs.  A keeper is counted as failed
     only when its phase is Dead, Zombie, or Crashed — not based on
     restart_count, which is monotonic and would cause permanent
     cascade pollution.  Healthy iff
@@ -82,7 +82,7 @@ val max_failed_allowed_for_cascade : total:int -> int
     supervisor sweep. *)
 val check_cascade_health : base_path:string -> (string * bool) list
 
-(** [get_cascade_status ~cascade_name] returns the cached cascade-level
+(** [get_cascade_status ~runtime_name] returns the cached cascade-level
     [health_status] written by [run_once].  This preserves the [Unknown]
     case so the supervisor's auto-resume guard can distinguish
     "no probe data yet" from
@@ -93,7 +93,7 @@ val check_cascade_health : base_path:string -> (string * bool) list
     Phase 3.5 guard collapsed [Unknown] and [Unhealthy] to the same
     boolean result — turning the boot-time cold-cache window into a
     permanent auto-resume lockout for every cascade. *)
-val get_cascade_status : cascade_name:string -> health_status
+val get_cascade_status : runtime_name:string -> health_status
 
 (** [run_once ~base_path] runs [check_cascade_health] and writes the
     results into the cascade cache.  Idempotent and bounded (registry

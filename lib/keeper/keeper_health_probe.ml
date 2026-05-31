@@ -52,7 +52,7 @@ let runtime_pressure_class_of_label label =
   | _ -> None
 ;;
 
-let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
+let provider_runtime_pressure_class ~code ~detail ~http_status ~runtime_name =
   let contains needle =
     String_util.contains_substring_ci code needle
     || String_util.contains_substring_ci detail needle
@@ -70,7 +70,7 @@ let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
   else if
     contains "admission_capacity"
     || contains "inflight_capacity_full"
-    || Option.is_some cascade_name
+    || Option.is_some runtime_name
     || contains "admission="
   then Cascade_admission_full
   else if
@@ -103,8 +103,8 @@ let provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name =
 
 let runtime_pressure_class_of_failure_reason = function
   | Some (Keeper_registry.Provider_timeout_loop _) -> Some Provider_timeout
-  | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; cascade_name }) ->
-    Some (provider_runtime_pressure_class ~code ~detail ~http_status ~cascade_name)
+  | Some (Keeper_registry.Provider_runtime_error { code; detail; http_status; runtime_name }) ->
+    Some (provider_runtime_pressure_class ~code ~detail ~http_status ~runtime_name)
   | Some (Keeper_registry.Stale_turn_timeout _) -> Some Turn_stale_timeout
   | Some
       ( Keeper_registry.Heartbeat_consecutive_failures _
@@ -157,21 +157,21 @@ let record_item_result ~keeper_name ~item_id ~success =
   set_item_health ~keeper_name ~item_id status
 ;;
 
-let set_cascade_status ~cascade_name status =
+let set_cascade_status ~runtime_name status =
   Eio.Mutex.use_rw ~protect:true health_cache_mu (fun () ->
-    Hashtbl.replace health_cache (cascade_name, "") (status, Time_compat.now ()))
+    Hashtbl.replace health_cache (runtime_name, "") (status, Time_compat.now ()))
 ;;
 
-(** [get_cascade_status ~cascade_name] reads the cascade-level entry
+(** [get_cascade_status ~runtime_name] reads the cascade-level entry
     written by [run_once].  Three-valued:
       - [Healthy]    : last probe saw the cascade at < threshold ratio.
       - [Unhealthy r]: last probe saw the cascade at >= threshold ratio.
       - [Unknown]    : probe never wrote this cascade (e.g. boot before
                        first sweep, or no running keepers in the cascade
                        at the time of the last scan). *)
-let get_cascade_status ~cascade_name =
+let get_cascade_status ~runtime_name =
   Eio.Mutex.use_ro health_cache_mu (fun () ->
-    match Hashtbl.find_opt health_cache (cascade_name, "") with
+    match Hashtbl.find_opt health_cache (runtime_name, "") with
     | Some (status, _) -> status
     | None -> Unknown)
 ;;
@@ -259,7 +259,7 @@ let scan_cascade_health ~base_path =
   let by_cascade = Hashtbl.create 8 in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
-       let cascade = Keeper_meta_contract.cascade_name_of_meta entry.meta in
+       let cascade = Keeper_meta_contract.runtime_name_of_meta entry.meta in
        let acc =
          match Hashtbl.find_opt by_cascade cascade with
          | Some acc -> acc
@@ -289,7 +289,7 @@ let scan_cascade_health ~base_path =
 ;;
 
 (** Compute health per cascade from registry entries.
-    Returns (cascade_name, is_healthy).
+    Returns (runtime_name, is_healthy).
 
     A keeper is counted as "failed" only when its phase is a terminal
     unhealthy state (Dead, Zombie, or Crashed).  Past restarts
@@ -316,7 +316,7 @@ let run_once ~base_path =
        let status =
          if healthy then Healthy else Unhealthy (cascade_failure_reason acc)
        in
-       set_cascade_status ~cascade_name:cascade status)
+       set_cascade_status ~runtime_name:cascade status)
     results
 ;;
 

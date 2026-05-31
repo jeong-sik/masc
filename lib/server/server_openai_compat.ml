@@ -107,14 +107,14 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
     classification from the underlying [Agent_sdk.Error.t]. *)
 let route_cascade ~message ~system_prompt ~max_tokens ~temperature
   : (string, Openai_compat_error_map.t) result =
-  let cascade_name =
+  let runtime_name =
     Runtime.get_default_runtime_id ()
   in
   match
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Server_openai_compat (fun () ->
       Keeper_turn_driver.run_named
-        ~cascade_name
+        ~runtime_name
         ~goal:message
         ~system_prompt
         ~max_turns:1

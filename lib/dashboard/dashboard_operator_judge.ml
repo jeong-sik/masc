@@ -214,7 +214,7 @@ let compute_judgments
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~facts_json =
   let prompt = prompt_for_facts facts_json in
-  let cascade_name =
+  let runtime_name =
     Runtime.get_default_runtime_id ()
   in
   match
@@ -223,7 +223,7 @@ let compute_judgments
        Prometheus counter. *)
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
-      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_name
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve

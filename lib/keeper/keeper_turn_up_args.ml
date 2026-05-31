@@ -114,13 +114,13 @@ let parse_enum_string_opt args key of_string ~allowed_values =
            (Json_util.kind_name other))
 
 let parse_cascade_name_opt args =
-  match get_string_opt args "cascade_name" with
+  match get_string_opt args "runtime_name" with
   | None -> Ok None
   | Some raw ->
       let normalized =
         String.trim raw |> String.trim
       in
-      if normalized = "" then Error "cascade_name must not be empty"
+      if normalized = "" then Error "runtime_name must not be empty"
       else
         (* keeper-assignable guardrail removed 2026-05-28 — validate existence only. *)
         match
@@ -129,7 +129,7 @@ let parse_cascade_name_opt args =
         with
         | Ok _ -> Ok (Some normalized)
         | Error detail ->
-            Error (Printf.sprintf "invalid cascade_name '%s': %s" raw detail)
+            Error (Printf.sprintf "invalid runtime_name '%s': %s" raw detail)
 
 let resolve_tool_name_list ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback

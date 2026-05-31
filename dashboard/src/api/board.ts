@@ -182,7 +182,7 @@ export function normalizeGovernanceDecisionItem(raw: unknown): GovernanceDecisio
   if (!id || !topic) return null
   const context = normalizeGovernanceContextRef(raw.context)
   return {
-    kind: asString(raw.kind, 'case'),
+    kind: asString(raw.kind, 'case') as GovernanceDecisionItem['kind'],
     id,
     topic,
     status: asString(raw.status ?? raw.state, 'open'),
@@ -233,8 +233,8 @@ export function normalizeGovernanceJudgeSummary(raw: unknown): GovernanceJudgeSu
   return {
     judge_online: typeof raw.judge_online === 'boolean' ? raw.judge_online : undefined,
     refreshing: typeof raw.refreshing === 'boolean' ? raw.refreshing : undefined,
-    status: asNullableString(raw.status) ?? undefined,
-    degraded_reason: asNullableString(raw.degraded_reason),
+    status: (asNullableString(raw.status) as GovernanceJudgeSummary['status']) ?? undefined,
+    degraded_reason: asNullableString(raw.degraded_reason) as GovernanceJudgeSummary['degraded_reason'],
     cached_judgments_visible: typeof raw.cached_judgments_visible === 'boolean'
       ? raw.cached_judgments_visible
       : undefined,
@@ -324,7 +324,7 @@ function normalizeBoardActorIdentity(
     key,
     display_name: displayName,
     raw: original,
-    source: source || undefined,
+    source: source as BoardActorIdentity['source'] || undefined,
     runtime_agent_name: runtimeAgentName || undefined,
   }
 }
@@ -354,7 +354,7 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
   if (score === undefined) return null
   return {
     score,
-    band: asString(raw.band, '').trim() || undefined,
+    band: (asString(raw.band, '').trim() as BoardContributorQuality['band']) || undefined,
     source: asString(raw.source, '').trim() || undefined,
     completion_rate: asNumber(raw.completion_rate),
     response_rate: asNumber(raw.response_rate),
@@ -606,7 +606,7 @@ function normalizeBoardKarmaLedgerEvent(raw: unknown): BoardKarmaLedgerEvent | n
   return {
     recipient,
     voter,
-    target_kind: targetKind,
+    target_kind: targetKind as BoardKarmaLedgerEvent['target_kind'],
     target_id: targetId,
     delta: asNumber(raw.delta, 0),
     ts: asNumber(raw.ts, 0),

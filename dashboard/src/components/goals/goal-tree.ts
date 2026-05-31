@@ -1233,7 +1233,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div>승인</div>
         <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
         <div>캐스케이드</div>
-        <div class="text-right text-text-body">${keeper.cascade_name ?? executionCascadeOutcome ?? '-'}</div>
+        <div class="text-right text-text-body">${keeper.runtime_name ?? executionCascadeOutcome ?? '-'}</div>
         <div>결과</div>
         <div class="text-right text-text-body" title=${keeper.cascade_outcome ?? executionCascadeOutcome ?? ''}>${cascadeOutcomeLabel(keeper.cascade_outcome ?? executionCascadeOutcome) ?? '-'}</div>
       </div>

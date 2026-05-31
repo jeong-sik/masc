@@ -553,8 +553,8 @@ function cascadeCatalogSourceLabel(c: KeeperConfig): string {
 }
 
 function cascadeSelectionSummary(c: KeeperConfig): string {
-  const selected = c.execution.selected_cascade_name || MISSING_DATA_DASH
-  const canonical = c.execution.selected_cascade_canonical || selected
+  const selected = c.execution.selected_runtime_name || MISSING_DATA_DASH
+  const canonical = c.execution.selected_runtime_canonical || selected
   const manifest = c.sources.default_manifest_path
   const catalog = c.sources.cascade_catalog_source_path
   const selectionPart = manifest
@@ -765,12 +765,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         body=${cascadeSelectionSummary(c)}
       />
       <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || MISSING_DATA_DASH} />
-      <${ConfigRow} label="선택 cascade" value=${c.execution.selected_cascade_name || MISSING_DATA_DASH} />
-      ${c.execution.selected_cascade_canonical
-        && c.execution.selected_cascade_canonical !== c.execution.selected_cascade_name
+      <${ConfigRow} label="선택 cascade" value=${c.execution.selected_runtime_name || MISSING_DATA_DASH} />
+      ${c.execution.selected_runtime_canonical
+        && c.execution.selected_runtime_canonical !== c.execution.selected_runtime_name
         ? html`<${ConfigRow}
             label="정규화 cascade"
-            value=${c.execution.selected_cascade_canonical}
+            value=${c.execution.selected_runtime_canonical}
           />`
         : null}
       <${ConfigRow} label="catalog source" value=${cascadeCatalogSourceLabel(c)} />

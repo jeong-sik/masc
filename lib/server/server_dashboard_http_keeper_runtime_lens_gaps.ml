@@ -151,7 +151,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
                Some
                  (Printf.sprintf "default=%s live=%s"
                     (Option.value
-                       (Json_util.get_string config_drift "default_cascade_name")
+                       (Json_util.get_string config_drift "default_runtime_name")
                        ~default:"unknown")
                     (Option.value
                        (Json_util.get_string config_drift "live_cascade_name")

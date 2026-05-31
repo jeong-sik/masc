@@ -48,7 +48,7 @@ let finalize
     ~meta
     ~generation
     ~manifest_keeper_turn_id
-    ~cascade_name
+    ~runtime_name
     ~keeper_visible_sandbox_root
     ~receipt_started_at
     ~runtime_manifest_context
@@ -199,7 +199,7 @@ let finalize
     ; network_mode = meta.network_mode
     ; approval_profile = acc.tool_surface.approval_mode_effective
     ; approval_profile_derived = acc.tool_surface.approval_mode_derived
-    ; cascade_name
+    ; runtime_name
     ; cascade_selected_model =
         Option.bind cascade_observation (fun obs -> obs.selected_model)
     ; cascade_attempt_count =
@@ -247,8 +247,8 @@ let finalize
           `String
             (Keeper_execution_receipt.outcome_kind_to_string receipt.outcome) );
         ("terminal_reason_code", `String receipt.terminal_reason_code);
-        ( "cascade_name",
-          `String (receipt.cascade_name) );
+        ( "runtime_name",
+          `String (receipt.runtime_name) );
         ("cascade_attempt_count", `Int receipt.cascade_attempt_count);
         ("cascade_fallback_applied", `Bool receipt.cascade_fallback_applied);
         ( "cascade_outcome",
@@ -296,7 +296,7 @@ let finalize
       ~trace_id:receipt.trace_id ~generation:receipt.generation
       ~keeper_turn_id:manifest_keeper_turn_id ~event
       ?oas_turn_count
-      ~cascade_name:(receipt.cascade_name)
+      ~runtime_name:(receipt.runtime_name)
       ~status ~decision ~receipt_path ?tool_call_log_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in

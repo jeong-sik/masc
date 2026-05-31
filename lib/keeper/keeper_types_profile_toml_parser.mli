@@ -1,4 +1,4 @@
-val default_cascade_name : unit -> string
+val default_runtime_name : unit -> string
 val min_keeper_context_tokens : int
 val max_keeper_context_tokens : int
 val alert_error_detail_max_chars : int

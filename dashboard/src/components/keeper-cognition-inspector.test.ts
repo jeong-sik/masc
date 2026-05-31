@@ -47,7 +47,7 @@ describe('KeeperCognitionInspector', () => {
 
   it('formats live tool access rows from keeper runtime fields', () => {
     const rows = toolAccessRowsForKeeper(keeper({
-      cascade_name: 'primary',
+      runtime_name: 'primary',
       sandbox_profile: 'docker',
       proactive_enabled: false,
       proactive_idle_sec: 120,
@@ -71,7 +71,7 @@ describe('KeeperCognitionInspector', () => {
       keeper({
         name: 'beta',
         status: 'active',
-        cascade_name: 'primary',
+        runtime_name: 'primary',
         latest_tool_names: ['keeper_task_done'],
       }),
     ]

@@ -19,7 +19,7 @@ val semaphore_wait_timeout_blocker_class
   -> Keeper_meta_contract.blocker_class
 
 val semaphore_wait_timeout_diagnostics
-  :  cascade_name:string
+  :  runtime_name:string
   -> Keeper_turn_slot.semaphore_wait_timeout
   -> string * string
 

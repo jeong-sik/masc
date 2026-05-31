@@ -506,7 +506,7 @@ let handle_keeper_get_subroutes state req request reqd =
         | Ok (Some m) ->
           let routing =
             Keeper_cascade_routing.select_cascade
-              ~base_cascade:(Keeper_meta_contract.cascade_name_of_meta m) ~phase:current
+              ~base_cascade:(Keeper_meta_contract.runtime_name_of_meta m) ~phase:current
           in
           let models = [ "candidate" ] in
           let provider_health = [] in

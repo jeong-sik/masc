@@ -26,20 +26,20 @@ let provider_context_json ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result option) =
   match result with
   | Some r ->
-      let cascade_name =
+      let runtime_name =
         match r.cascade_observation with
         | Some observation ->
-            observation.cascade_name
-        | None -> cascade_name_of_meta meta
+            observation.runtime_name
+        | None -> runtime_name_of_meta meta
       in
       `Assoc
-        [ ("cascade_name", `String cascade_name)
+        [ ("runtime_name", `String runtime_name)
         ; "selected_model", `Null
         ; "candidate_models", `List []
         ]
   | None ->
       `Assoc
-        [ ("cascade_name", `String (cascade_name_of_meta meta))
+        [ ("runtime_name", `String (runtime_name_of_meta meta))
         ; ("selected_model", `Null)
         ; "candidate_models", `List []
         ]
@@ -60,11 +60,11 @@ let redacted_cascade_fallback_event_to_json
 
 let redacted_cascade_observation_to_json
     (obs : Keeper_observation.cascade_observation) : Yojson.Safe.t =
-  let cascade_name =
-    obs.cascade_name
+  let runtime_name =
+    obs.runtime_name
   in
   `Assoc
-    [ "cascade_name", `String cascade_name
+    [ "runtime_name", `String runtime_name
     ; "strategy", Json_util.string_opt_to_json obs.strategy
     ; "configured_labels", `List []
     ; "candidate_models", `List []

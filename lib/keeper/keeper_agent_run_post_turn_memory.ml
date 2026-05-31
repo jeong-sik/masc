@@ -13,7 +13,7 @@ let run
   ~state_snapshot
   ~post_turn_t0
   ?provider_filter
-  ~cascade_name
+  ~runtime_name
   ~inference_telemetry
   ()
   =
@@ -88,7 +88,7 @@ let run
      let memory_summarizer =
        Keeper_memory_llm_summary.make
          ?provider_filter
-         ~cascade_name
+         ~runtime_name
          ~keeper_name:meta.name
          ()
      in
@@ -116,7 +116,7 @@ let run
      Log.Keeper.warn
        "keeper:%s cascade=%s compaction failed: %s"
        meta.name
-       (Keeper_meta_contract.cascade_name_of_meta meta)
+       (Keeper_meta_contract.runtime_name_of_meta meta)
        (Printexc.to_string exn));
 
   (* Post-turn quality metrics — goal alignment + memory recall.

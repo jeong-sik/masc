@@ -722,7 +722,7 @@ export interface KeeperRuntimeTraceMemorySummary {
 export interface KeeperRuntimeTraceProviderAttempt {
   ts: string
   event: string
-  cascade_name: string | null
+  runtime_name: string | null
   status: string
   error: string | null
   exception_kind: string | null
@@ -1122,7 +1122,7 @@ function parseRuntimeTraceProviderAttempt(raw: unknown): KeeperRuntimeTraceProvi
   return {
     ts: stringField(obj, 'ts'),
     event: stringField(obj, 'event'),
-    cascade_name: nullableStringField(obj, 'cascade_name'),
+    runtime_name: nullableStringField(obj, 'runtime_name'),
     status: stringField(obj, 'status'),
     error: nullableStringField(obj, 'error'),
     exception_kind: nullableStringField(obj, 'exception_kind'),

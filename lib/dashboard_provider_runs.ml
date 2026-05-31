@@ -529,10 +529,10 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
                 ~system_prompt:(run_system_prompt provider)
                 ~max_turns:4
                 ~max_tokens:(Cascade_inference.resolve_max_tokens
-                  ~cascade_name:inference_cascade_name
+                  ~runtime_name:inference_cascade_name
                   ~fallback:(fun () -> 2048))
                 ~temperature:(Cascade_inference.resolve_temperature
-                  ~cascade_name:inference_cascade_name
+                  ~runtime_name:inference_cascade_name
                   ~fallback:(fun () -> 0.2))
                 ~sw ?net
                 ()

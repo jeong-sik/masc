@@ -27,14 +27,14 @@ let effective_declarative_cascade_name
       (defaults : keeper_profile_defaults)
       (meta : keeper_meta)
   =
-  (* WORKAROUND (#19327 follow-up): field renamed cascade_name→model. *)
+  (* WORKAROUND (#19327 follow-up): field renamed runtime_name→model. *)
   match defaults.model, defaults.manifest_path with
-  | Some cascade_name, _ ->
-    Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
-  | None, Some _ -> (Keeper_config.default_cascade_name ())
+  | Some runtime_name, _ ->
+    Keeper_cascade_profile.normalize_keeper_runtime_declared_name runtime_name
+  | None, Some _ -> (Keeper_config.default_runtime_name ())
   | None, None ->
     Keeper_cascade_profile.normalize_keeper_runtime_declared_name
-      (cascade_name_of_meta meta)
+      (runtime_name_of_meta meta)
 ;;
 
 type override_field_detail =
@@ -80,13 +80,13 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
        defaults.tool_denylist
        meta.tool_denylist
   |> (fun acc ->
-  let cascade_name = cascade_name_of_meta meta in
-  if effective_cascade_name <> cascade_name
+  let runtime_name = runtime_name_of_meta meta in
+  if effective_cascade_name <> runtime_name
   then
     override_field
-      "model.cascade_name"
+      "model.runtime_name"
       ~default_value:(`String effective_cascade_name)
-      ~live_value:(`String cascade_name)
+      ~live_value:(`String runtime_name)
     :: acc
   else acc)
   |> maybe_bool_override
@@ -319,7 +319,7 @@ let last_cascade_attempt_json (meta : keeper_meta) =
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
     [ "source", `String "keeper_runtime.last_cascade_attempt"
-    ; "cascade_name", `String (cascade_name_of_meta meta)
+    ; "runtime_name", `String (runtime_name_of_meta meta)
     ; "last_cascade_attempt", last_cascade_attempt_json meta
     ]
 ;;

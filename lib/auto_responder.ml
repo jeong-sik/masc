@@ -112,12 +112,12 @@ let model_response_is_valid (resp : Agent_sdk_response.api_response) =
       | Agent_sdk.Types.Unknown _ -> true)
 
 let call_model_direct_sync ~agent_type ~prompt =
-  let cascade_name = cascade_name_for_agent_type agent_type in
+  let runtime_name = cascade_name_for_agent_type agent_type in
   try
     match
       Masc_oas_bridge.run_with_caller
         ~caller:Env_config_oas_bridge.Auto_responder (fun () ->
-        Keeper_turn_driver.run_named ~cascade_name
+        Keeper_turn_driver.run_named ~runtime_name
           ~goal:prompt ~max_turns:1
           ~accept:model_response_is_valid ~max_tokens:500
           ~approval:Approval_callbacks.auto_approve

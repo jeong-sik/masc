@@ -10,8 +10,8 @@
 
 let default_config_path = Runtime.config_path
 
-let default_model_strings ~cascade_name =
-  Provider_runtime_projection.default_execution_model_strings cascade_name
+let default_model_strings ~runtime_name =
+  Provider_runtime_projection.default_execution_model_strings runtime_name
 
 (* Named model execution *)
 
@@ -36,7 +36,7 @@ let eio_context_error_to_sdk_error detail =
 
 let cascade_catalog_error_to_sdk_error detail =
   Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig { field = "cascade_name"; detail })
+    (Agent_sdk.Error.InvalidConfig { field = "runtime_name"; detail })
 
 (** Resolve cascade provider configs via MASC Cascade_config.
     Returns Provider_config.t list for the downstream OAS runtime,
@@ -46,7 +46,7 @@ let resolve_cascade_providers
       ?(require_tool_choice_support = false)
       ?(require_tool_support = false)
       ?runtime_mcp_policy
-      ~cascade_name:_
+      ~runtime_name:_
       ()
   =
   (* RFC-0206 single-binding: cascade catalog resolution removed. The providers

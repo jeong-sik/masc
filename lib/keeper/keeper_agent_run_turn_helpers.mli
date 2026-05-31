@@ -51,7 +51,7 @@ val append_runtime_manifest :
   agent_name:string ->
   trace_id:string ->
   generation:int ->
-  cascade_name:string ->
+  runtime_name:string ->
   ?status:string ->
   ?decision:Yojson.Safe.t ->
   ?keeper_turn_id:int ->
@@ -76,7 +76,7 @@ val make_append_manifest :
   agent_name:string ->
   trace_id:string ->
   generation:int ->
-  cascade_name:string ->
+  runtime_name:string ->
   turn_start:Mtime.t ->
   seq_ref:int ref ->
   Keeper_agent_run_sidecar.append_manifest_fn

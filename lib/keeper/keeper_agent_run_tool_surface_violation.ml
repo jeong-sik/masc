@@ -1,6 +1,6 @@
 let to_sdk_error
       ~keeper_name
-      ~cascade_name
+      ~runtime_name
       ~requested_tool_names_seen
       ~unexpected_tool_names
   =
@@ -35,7 +35,7 @@ let to_sdk_error
   Log.Keeper.error
     "keeper:%s cascade=%s %s"
     keeper_name
-    cascade_name
+    runtime_name
     reason;
   Agent_sdk.Error.Internal reason
 ;;

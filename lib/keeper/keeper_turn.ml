@@ -99,13 +99,13 @@ let direct_turn_observation ~(config : Coord.config) (meta : keeper_meta) :
     ~meta
 
 let resolve_turn_cascade_name (meta : keeper_meta) =
-  let raw_name = String.trim (Keeper_meta_contract.cascade_name_of_meta meta) in
+  let raw_name = String.trim (Keeper_meta_contract.runtime_name_of_meta meta) in
   match Cascade_catalog_runtime.resolve_declared_name ~raw_name () with
-  | Ok cascade_name -> Ok cascade_name
+  | Ok runtime_name -> Ok runtime_name
   | Error detail ->
       Error
         (Printf.sprintf
-           "invalid cascade_name %S for keeper %s: %s"
+           "invalid runtime_name %S for keeper %s: %s"
            raw_name meta.name detail)
 
 let keeper_msg_timeout_override args =
@@ -495,7 +495,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     ~max_context:max_cascade_context
                     ~build_turn_prompt
                     ~user_message:message
-                    ~cascade_name:
+                    ~runtime_name:
                       (                         (turn_cascade_name))
                     ~world_observation
                     ~turn_affordances

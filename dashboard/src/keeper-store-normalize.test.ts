@@ -530,8 +530,8 @@ describe('normalizeKeepers lifecycle metrics', () => {
       {
         name: 'cascade-keeper',
         status: 'active',
-        cascade_name: 'oas-keeper_unified',
-        selected_cascade_canonical: 'primary',
+        runtime_name: 'oas-keeper_unified',
+        selected_runtime_canonical: 'primary',
         primary_model: 'provider-d:gpt-5.4',
         active_model: 'gpt-5.4',
         active_model_label: 'provider-d:gpt-5.4',
@@ -548,7 +548,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             channel: 'turn',
             model_used: 'provider-a:model-a-sonnet',
             cascade: {
-              cascade_name: 'primary',
+              runtime_name: 'primary',
               selected_model: 'provider-a:model-a-sonnet',
               attempt_count: 2,
               outcome: 'passed_to_next_model',
@@ -569,9 +569,9 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper).toMatchObject({
-      cascade_name: 'oas-keeper_unified',
-      cascade_canonical: 'primary',
-      selected_cascade_canonical: 'primary',
+      runtime_name: 'oas-keeper_unified',
+      runtime_canonical: 'primary',
+      selected_runtime_canonical: 'primary',
       active_model_label: null,
       last_model_used_label: null,
     })
@@ -579,7 +579,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.active_model).toBeUndefined()
     expect(keeper?.last_model_used).toBeUndefined()
     expect(keeper?.metrics_series?.[0]).toMatchObject({
-      cascade_name: 'primary',
+      runtime_name: 'primary',
       cascade_selected_model: null,
       cascade_attempt_count: 2,
       cascade_outcome: 'passed_to_next_model',

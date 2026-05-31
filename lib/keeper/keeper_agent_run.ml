@@ -95,7 +95,7 @@ let run_turn
       ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
       ?priority
       ?(degraded_retry_applied = false)
-      ?degraded_retry_cascade
+      ?degraded_retry_runtime_id
       ?fallback_reason
       ?(cascade_rotation_attempts = [])
       ?(is_retry = false)
@@ -904,7 +904,7 @@ let run_turn
          ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
          ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
          ~degraded_retry_applied
-         ~degraded_retry_cascade
+         ~degraded_retry_runtime_id
          ~fallback_reason
          ~cascade_rotation_attempts
          ~turn_result

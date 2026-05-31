@@ -199,14 +199,14 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
   let err = make_cascade_exhausted Keeper_meta_contract.All_providers_failed in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~base_cascade:"base_only"
-      ~effective_cascade:"tool_use_strict"
+      ~base_runtime_id:"base_only"
+      ~effective_runtime_id:"tool_use_strict"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "tool_use_strict" ]
+      ~attempted_runtime_ids:[ "tool_use_strict" ]
       err
   with
   | Some retry ->
-    check string "catalog order wins" "catalog_first" retry.next_cascade;
+    check string "catalog order wins" "catalog_first" retry.next_runtime_id;
     check string "fallback reason" "cascade_exhausted"
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail "Expected catalog-ordered degraded retry"
@@ -215,10 +215,10 @@ let test_rotation_skips_direct_tier_after_attempted_cascade () =
   let err = make_cascade_exhausted Keeper_meta_contract.Candidates_filtered_after_cycles in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~base_cascade:"cascade.strict_tool_candidates"
-      ~effective_cascade:"cascade.strict_tool_candidates"
+      ~base_runtime_id:"cascade.strict_tool_candidates"
+      ~effective_runtime_id:"cascade.strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "cascade.strict_tool_candidates" ]
+      ~attempted_runtime_ids:[ "cascade.strict_tool_candidates" ]
       err
   with
   | Some retry ->
@@ -226,7 +226,7 @@ let test_rotation_skips_direct_tier_after_attempted_cascade () =
       string
       "skip direct cascade duplicate"
       "cascade.provider_k-coding-with-spark"
-      retry.next_cascade
+      retry.next_runtime_id
   | None -> fail "Expected rotation to skip duplicate direct cascade candidate"
 
 let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
@@ -244,15 +244,15 @@ let test_required_tool_rotation_prioritizes_tool_route_before_fallback_hint () =
   match
     KEC.degraded_rotation_after_recoverable_error
       ~fallback_hint:"ollama_cloud_stable"
-      ~base_cascade:"strict_tool_candidates"
-      ~effective_cascade:"strict_tool_candidates"
+      ~base_runtime_id:"strict_tool_candidates"
+      ~effective_runtime_id:"strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_tool_candidates" ]
+      ~attempted_runtime_ids:[ "strict_tool_candidates" ]
       err
   with
   | Some retry ->
     check string "tool-required route wins" "provider_k-coding-with-spark"
-      retry.next_cascade;
+      retry.next_runtime_id;
     check string "reason is resumable_cli_session" "resumable_cli_session"
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail "Required-tool resumable session should use tool route"
@@ -272,15 +272,15 @@ let test_required_tool_rotation_uses_fallback_hint_after_tool_route_attempted ()
   match
     KEC.degraded_rotation_after_recoverable_error
       ~fallback_hint:"ollama_cloud_stable"
-      ~base_cascade:"strict_tool_candidates"
-      ~effective_cascade:"strict_tool_candidates"
+      ~base_runtime_id:"strict_tool_candidates"
+      ~effective_runtime_id:"strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_tool_candidates"; "provider_k-coding-with-spark" ]
+      ~attempted_runtime_ids:[ "strict_tool_candidates"; "provider_k-coding-with-spark" ]
       err
   with
   | Some retry ->
     check string "explicit fallback hint remains terminal fallback"
-      "ollama_cloud_stable" retry.next_cascade;
+      "ollama_cloud_stable" retry.next_runtime_id;
     check string "reason is resumable_cli_session" "resumable_cli_session"
       (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None -> fail "Required-tool resumable session should use terminal fallback"
@@ -420,7 +420,7 @@ let test_server_error_400_not_recoverable_by_new_arm () =
      fail "400 should NOT be classified as server_error by rotation arm"
    | _ -> ())
 
-let test_rotation_finds_next_cascade_for_rate_limit () =
+let test_rotation_finds_next_runtime_id_for_rate_limit () =
   (* End-to-end: soft rate limit on primary cascade should rotate to the
      next available candidate. *)
   let err =
@@ -429,65 +429,65 @@ let test_rotation_finds_next_cascade_for_rate_limit () =
   in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~base_cascade:"primary"
-      ~effective_cascade:"primary"
+      ~base_runtime_id:"primary"
+      ~effective_runtime_id:"primary"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "primary" ]
+      ~attempted_runtime_ids:[ "primary" ]
       err
   with
   | Some retry ->
-    check string "rotation goes to fallback" "fallback_cascade" retry.next_cascade;
+    check string "rotation goes to fallback" "fallback_cascade" retry.next_runtime_id;
     check string "reason is rate_limit" "rate_limit" (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None ->
     fail "Soft rate-limit should trigger rotation to next cascade"
 
-let test_rotation_finds_next_cascade_for_auth_error () =
+let test_rotation_finds_next_runtime_id_for_auth_error () =
   let err =
     Agent_sdk.Error.Api
       (Retry.AuthError { message = "unauthorized" })
   in
   match
     KEC.degraded_rotation_after_recoverable_error
-      ~base_cascade:"primary"
-      ~effective_cascade:"primary"
+      ~base_runtime_id:"primary"
+      ~effective_runtime_id:"primary"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      ~attempted_cascades:[ "primary" ]
+      ~attempted_runtime_ids:[ "primary" ]
       err
   with
   | Some retry ->
-    check string "auth rotation goes to fallback" "fallback_cascade" retry.next_cascade;
+    check string "auth rotation goes to fallback" "fallback_cascade" retry.next_runtime_id;
     check string "reason is auth_error" "auth_error" (KEC.degraded_retry_reason_to_string retry.fallback_reason)
   | None ->
     fail "AuthError should trigger rotation to next cascade"
 
 (* ---- Bare-name requalification tests (cascade-name-prefix-mismatch fix) ---- *)
 
-(* #19327 cascade purge: test_normalized_cascade_name_requalifies_bare_tier_name
+(* #19327 cascade purge: test_normalized_runtime_id_requalifies_bare_tier_name
    removed.  It asserted bare "strict_tool_candidates" was rewritten to
    "cascade.strict_tool_candidates" using the prefix canonical form, which is
-   no longer the semantics of [normalized_cascade_name]. *)
+   no longer the semantics of [normalized_runtime_id]. *)
 
-let test_normalized_cascade_name_passes_through_already_qualified () =
+let test_normalized_runtime_id_passes_through_already_qualified () =
   let catalog_names = [ "strict_tool_candidates"; "primary" ] in
   let result =
-    KEC.normalized_cascade_name ~catalog_names "cascade.strict_tool_candidates"
+    KEC.normalized_runtime_id ~catalog_names "cascade.strict_tool_candidates"
   in
   check string "already-qualified passes through"
     "cascade.strict_tool_candidates" result
 
-let test_normalized_cascade_name_preserves_config_special_names () =
+let test_normalized_runtime_id_preserves_config_special_names () =
   let catalog_names = [] in
   let result =
-    KEC.normalized_cascade_name ~catalog_names
+    KEC.normalized_runtime_id ~catalog_names
       (Masc_mcp.Keeper_config.default_runtime_id ())
   in
   check string "phase_buffer preserved as-is"
     (Masc_mcp.Keeper_config.default_runtime_id ()) result
 
-let test_normalized_cascade_name_falls_through_to_declared_name () =
+let test_normalized_runtime_id_falls_through_to_declared_name () =
   let catalog_names = [ "primary" ] in
   let result =
-    KEC.normalized_cascade_name ~catalog_names "nonexistent_cascade"
+    KEC.normalized_runtime_id ~catalog_names "nonexistent_cascade"
   in
   check string "unknown name falls through" "nonexistent_cascade" result
 
@@ -552,18 +552,18 @@ let () =
           test_case "required-tool rotation keeps fallback hint after tool route" `Quick
             test_required_tool_rotation_uses_fallback_hint_after_tool_route_attempted;
           test_case "soft rate-limit rotates to next cascade" `Quick
-            test_rotation_finds_next_cascade_for_rate_limit;
+            test_rotation_finds_next_runtime_id_for_rate_limit;
           test_case "auth error rotates to next cascade" `Quick
-            test_rotation_finds_next_cascade_for_auth_error;
+            test_rotation_finds_next_runtime_id_for_auth_error;
         ] );
-      ( "normalized_cascade_name_bare_requalify",
+      ( "normalized_runtime_id_bare_requalify",
         [
           (* #19327: "bare cascade name requalified with prefix" test removed. *)
           test_case "already-qualified name passes through" `Quick
-            test_normalized_cascade_name_passes_through_already_qualified;
+            test_normalized_runtime_id_passes_through_already_qualified;
           test_case "config special names preserved" `Quick
-            test_normalized_cascade_name_preserves_config_special_names;
+            test_normalized_runtime_id_preserves_config_special_names;
           test_case "unknown name falls through to declared name" `Quick
-            test_normalized_cascade_name_falls_through_to_declared_name;
+            test_normalized_runtime_id_falls_through_to_declared_name;
         ] );
     ]

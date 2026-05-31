@@ -142,7 +142,7 @@ let run_keeper_cycle
          [fail_open_phase_buffer_when_unavailable] hardening.  Returns
          the updated meta + the resolved cascade name. *)
       let { Keeper_unified_turn_cascade_resolution.resolved_meta = meta
-          ; resolved_cascade = effective_cascade_name
+          ; resolved_cascade = effective_runtime_id_name
           }
         =
         Keeper_unified_turn_cascade_resolution.resolve_cascade
@@ -167,12 +167,12 @@ let run_keeper_cycle
          let profile_defaults =
            Keeper_types_profile.load_keeper_profile_defaults meta.name
          in
-         let effective_cascade_runtime_name = effective_cascade_name in
+         let effective_runtime_id_runtime_name = effective_runtime_id_name in
          (match
             Keeper_unified_turn_pre_dispatch.build_runtime_execution
               ~meta
               ~profile_defaults
-              ~cascade_name:effective_cascade_runtime_name
+              ~cascade_name:effective_runtime_id_runtime_name
           with
           | Error err ->
             let terminal_reason_code =
@@ -185,7 +185,7 @@ let run_keeper_cycle
               ~config
               ~meta
               ~generation
-              ~cascade_name:effective_cascade_runtime_name
+              ~cascade_name:effective_runtime_id_runtime_name
               ~outcome:`Error
               ~terminal_reason_code
               ~activity_kind:"keeper.turn_blocked"
@@ -209,7 +209,7 @@ let run_keeper_cycle
                   }
               | _ when EC.is_runtime_exhausted_error err ->
                 Keeper_turn_fsm.Failure_runtime_unavailable
-                  { base = effective_cascade_runtime_name
+                  { base = effective_runtime_id_runtime_name
                   ; resolved = None
                   }
               | _ ->
@@ -227,7 +227,7 @@ let run_keeper_cycle
               ~config
               ~meta
               ~generation
-              ~cascade_name:effective_cascade_runtime_name
+              ~cascade_name:effective_runtime_id_runtime_name
               ~outcome:`Ok
               ~terminal_reason_code:"pre_dispatch_success"
               ~activity_kind:"keeper.turn_pre_dispatch_ok"
@@ -573,9 +573,9 @@ let run_keeper_cycle
                in
                let degraded_retry_info = !degraded_retry_info in
                let degraded_retry_applied = Option.is_some degraded_retry_info in
-               let degraded_retry_cascade =
+               let degraded_retry_runtime_id =
                  Option.map
-                   (fun (retry : EC.degraded_retry) -> retry.next_cascade)
+                   (fun (retry : EC.degraded_retry) -> retry.next_runtime_id)
                    degraded_retry_info
                in
                let fallback_reason =
@@ -845,7 +845,7 @@ let run_keeper_cycle
                     ~semaphore_wait_ms
                     ~outcome:(if is_ambiguous_partial then "partial" else "error")
                     ~degraded_retry_applied
-                    ?degraded_retry_cascade
+                    ?degraded_retry_runtime_id
                     ?fallback_reason:
                       (Option.map EC.degraded_retry_reason_to_string fallback_reason)
                     ~social_state
@@ -949,7 +949,7 @@ let run_keeper_cycle
                       ~latency_ms
                       ~semaphore_wait_ms
                       ~degraded_retry_applied
-                      ~degraded_retry_cascade
+                      ~degraded_retry_runtime_id
                       ~fallback_reason
                       ~last_provider_timeout_budget:!last_provider_timeout_budget
                       ~current_turn_blocker_info:!current_turn_blocker_info

@@ -185,7 +185,7 @@ let test_provider_attempt_records_manifest_decision_contract () =
 
 let test_rotation_attempt_builder_records_retry_decision () =
   let retry : EC.degraded_retry =
-    { next_cascade = "cascade.tool_required_fallback"
+    { next_runtime_id = "cascade.tool_required_fallback"
     ; fallback_reason = EC.Required_tool_contract_violation
     }
   in
@@ -245,9 +245,9 @@ let test_rotation_attempt_builder_records_retry_decision () =
   check string "recorded at" "2026-05-20T00:00:00Z" attempt.recorded_at
 ;;
 
-let test_receipt_degraded_retry_cascade_requalifies_bare_name () =
+let test_receipt_degraded_retry_runtime_id_requalifies_bare_name () =
   match
-    Run_receipt.degraded_retry_cascade_of_wire
+    Run_receipt.degraded_retry_runtime_id_of_wire
       ~log_invalid:false
       ~keeper_name:"receipt-test"
       "local_llama"
@@ -276,7 +276,7 @@ let () =
         ; test_case
             "execution receipt re-qualifies bare degraded retry cascade"
             `Quick
-            test_receipt_degraded_retry_cascade_requalifies_bare_name
+            test_receipt_degraded_retry_runtime_id_requalifies_bare_name
         ] )
     ]
 ;;

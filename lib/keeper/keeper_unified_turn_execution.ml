@@ -24,7 +24,7 @@ type retry_loop_input =
   ; attempt : int
   ; is_retry : bool
   ; allow_degraded_wall_clock_retry_budget : bool
-  ; attempted_cascades : string list
+  ; attempted_runtime_ids : string list
   }
 
 type ctx =
@@ -188,10 +188,10 @@ let run (ctx : ctx)
                ~history_assistant_source:"internal_assistant"
                ~degraded_retry_applied:
                  (Option.is_some !degraded_retry_info)
-               ?degraded_retry_cascade:
+               ?degraded_retry_runtime_id:
                  (Option.map
                     (fun (retry : EC.degraded_retry) ->
-                       retry.next_cascade)
+                       retry.next_runtime_id)
                     !degraded_retry_info)
                ?fallback_reason:
                  (Option.map
@@ -218,7 +218,7 @@ let run (ctx : ctx)
         ; attempt
         ; is_retry
         ; allow_degraded_wall_clock_retry_budget
-        ; attempted_cascades
+        ; attempted_runtime_ids
         }
       =
       input
@@ -252,7 +252,7 @@ let run (ctx : ctx)
           ~config
           ~keeper_name:meta.name
           ~attempt
-          ~attempted_cascades
+          ~attempted_runtime_ids
           err
     in
     let attempt_provider_timeout_budget = ref None in
@@ -273,7 +273,7 @@ let run (ctx : ctx)
           ~degraded_rotation_first_attempt:
             allow_degraded_wall_clock_retry_budget
           ~attempt
-          ~attempted_cascades
+          ~attempted_runtime_ids
       in
       match
         resolve_bounded_provider_timeout_budget_with_turn_budget
@@ -451,12 +451,12 @@ let run (ctx : ctx)
         let fallback_not_yet_tried =
           match KCP.fallback_cascade_for execution_cascade_name with
           | Some fb ->
-            (not (List.exists (String.equal fb) attempted_cascades))
+            (not (List.exists (String.equal fb) attempted_runtime_ids))
             && not (String.equal fb execution_cascade_name)
           | None -> false
         in
         EC.should_cap_rotation_for_contract_violation
-          ~attempted_cascades
+          ~attempted_runtime_ids
           ~fallback_not_yet_tried
           err
       then (
@@ -467,7 +467,7 @@ let run (ctx : ctx)
            tool-use choice. Error: %s"
           meta.name
           execution_cascade_name
-          (List.length attempted_cascades)
+          (List.length attempted_runtime_ids)
           (short_preview (Agent_sdk.Error.to_string err));
         Prometheus.inc_counter
           "masc_keeper_contract_violation_rotation_capped_total"
@@ -478,10 +478,10 @@ let run (ctx : ctx)
       else (
         match
           next_fail_open_cascade_for_turn_with_budget
-            ~base_cascade:(runtime_id_of_meta meta)
-            ~effective_cascade:execution_cascade_name
+            ~base_runtime_id:(runtime_id_of_meta meta)
+            ~effective_runtime_id:execution_cascade_name
             ~tool_requirement:initial_tool_requirement
-            ~attempted_cascades
+            ~attempted_runtime_ids
             ~estimated_input_tokens:prompt_timeout_estimate_tokens
             ~max_turns
             ~time_spent_in_turn_s:
@@ -498,9 +498,9 @@ let run (ctx : ctx)
                ~cascade_name:
                  (* RFC-0206: raw runtime id (no prefix validation); keep the
                     empty→fallback behaviour only. *)
-                 (if String.trim degraded_retry.next_cascade = ""
+                 (if String.trim degraded_retry.next_runtime_id = ""
                   then execution.cascade_name
-                  else degraded_retry.next_cascade)
+                  else degraded_retry.next_runtime_id)
            with
            | Error fail_open_err ->
              let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
@@ -522,7 +522,7 @@ let run (ctx : ctx)
                 failed: %s"
                meta.name
                execution_cascade_name
-               degraded_retry.next_cascade
+               degraded_retry.next_runtime_id
                (EC.degraded_retry_reason_to_string
                   degraded_retry.fallback_reason)
                (short_preview
@@ -584,8 +584,8 @@ let run (ctx : ctx)
                  ; attempt = 1
                  ; is_retry = true
                  ; allow_degraded_wall_clock_retry_budget = true
-                 ; attempted_cascades =
-                     next_execution_cascade_name :: attempted_cascades
+                 ; attempted_runtime_ids =
+                     next_execution_cascade_name :: attempted_runtime_ids
                  }
              in
              (match turn_slot_control with
@@ -640,7 +640,7 @@ let run (ctx : ctx)
              ending this cycle: %s"
             meta.name
             execution_cascade_name
-            degraded_retry.next_cascade
+            degraded_retry.next_runtime_id
             (EC.degraded_retry_reason_to_string
                degraded_retry.fallback_reason)
             (remaining_turn_budget_s ())
@@ -668,7 +668,7 @@ let run (ctx : ctx)
              this cycle to release the outer turn slot: %s"
             meta.name
             execution_cascade_name
-            degraded_retry.next_cascade
+            degraded_retry.next_runtime_id
             (EC.degraded_retry_reason_to_string
                degraded_retry.fallback_reason)
             degraded_retry_slot_phase_budget_sec
@@ -713,7 +713,7 @@ let run (ctx : ctx)
             ; attempt = attempt + 1
             ; is_retry = true
             ; allow_degraded_wall_clock_retry_budget = false
-            ; attempted_cascades
+            ; attempted_runtime_ids
             }
         | No_degraded_retry when EC.is_context_overflow err ->
           let current_turn_event_bus =
@@ -763,7 +763,7 @@ let run (ctx : ctx)
         ; attempt = 1
         ; is_retry = false
         ; allow_degraded_wall_clock_retry_budget = false
-        ; attempted_cascades =
+        ; attempted_runtime_ids =
             [ initial_execution.cascade_name
             ]
         })

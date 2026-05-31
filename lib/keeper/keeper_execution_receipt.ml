@@ -180,7 +180,7 @@ type operator_disposition_kind =
   | Disp_pass
   | Disp_pause_human
   | Disp_alert_exhausted
-  | Disp_fail_open_next_cascade
+  | Disp_fail_open_next_runtime_id
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
@@ -190,7 +190,7 @@ let operator_disposition_kind_to_string = function
   | Disp_pass -> "pass"
   | Disp_pause_human -> "pause_human"
   | Disp_alert_exhausted -> "alert_exhausted"
-  | Disp_fail_open_next_cascade -> "fail_open_next_cascade"
+  | Disp_fail_open_next_runtime_id -> "fail_open_next_runtime_id"
   | Disp_pass_next_model -> "pass_next_model"
   | Disp_user_cancelled -> "user_cancelled"
   | Disp_skipped -> "skipped"
@@ -268,8 +268,8 @@ let operator_disposition (receipt : t)
   then Disp_pause_human, Reason_preflight_config_error
   else if
     provider_runtime_failure
-    && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade)
-  then Disp_fail_open_next_cascade, Reason_degraded_retry
+    && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime_id)
+  then Disp_fail_open_next_runtime_id, Reason_degraded_retry
   else if
     provider_runtime_failure
     && (receipt.cascade_fallback_applied
@@ -358,8 +358,8 @@ let operator_disposition (receipt : t)
     in
     if required_tool_contract_unsatisfied && required_tool_route_failure
     then
-      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
-      then Disp_fail_open_next_cascade, Reason_tool_route_recoverable_failure
+      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime_id
+      then Disp_fail_open_next_runtime_id, Reason_tool_route_recoverable_failure
       else if
         receipt.cascade_fallback_applied
         || receipt.runtime_outcome = Runtime_passed_to_next_model
@@ -382,8 +382,8 @@ let operator_disposition (receipt : t)
           ();
       Disp_pause_human, Reason_tool_required_unsatisfied)
     else if
-      receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
-    then Disp_fail_open_next_cascade, Reason_degraded_retry
+      receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime_id
+    then Disp_fail_open_next_runtime_id, Reason_degraded_retry
     else if
       receipt.cascade_fallback_applied
       || receipt.runtime_outcome = Runtime_passed_to_next_model
@@ -570,8 +570,8 @@ let to_json (receipt : t) =
           ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
           ; "oas_internal_cascade_allowed", `Bool receipt.oas_internal_cascade_allowed
           ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
-          ; ( "degraded_retry_cascade"
-            , match receipt.degraded_retry_cascade with
+          ; ( "degraded_retry_runtime_id"
+            , match receipt.degraded_retry_runtime_id with
               | Some value -> `String (value)
               | None -> `Null )
           ; ( "fallback_reason"
@@ -660,7 +660,7 @@ let to_json (receipt : t) =
 let needs_operator_broadcast = function
   | Disp_pause_human | Disp_alert_exhausted | Disp_unknown -> true
   | Disp_pass
-  | Disp_fail_open_next_cascade
+  | Disp_fail_open_next_runtime_id
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped -> false

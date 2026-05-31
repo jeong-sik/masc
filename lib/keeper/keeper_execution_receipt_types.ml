@@ -308,7 +308,7 @@ type t =
   ; runtime_outcome : runtime_outcome
   ; oas_internal_cascade_allowed : bool
   ; degraded_retry_applied : bool
-  ; degraded_retry_cascade : string option
+  ; degraded_retry_runtime_id : string option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
   ; runtime_rotation_attempts : runtime_rotation_attempt list
   ; stop_reason : Runtime_agent.stop_reason option

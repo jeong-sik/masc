@@ -108,7 +108,7 @@ let mk_receipt
   ; cascade_fallback_applied
   ; cascade_outcome
   ; degraded_retry_applied
-  ; degraded_retry_cascade = None
+  ; degraded_retry_runtime_id = None
   ; fallback_reason = None
   ; cascade_rotation_attempts = []
   ; stop_reason
@@ -204,7 +204,7 @@ let test_route_failure_fail_open_when_degraded_retry_available () =
   check_disp
     "route_failure degraded"
     r
-    "fail_open_next_cascade"
+    "fail_open_next_runtime_id"
     "tool_route_recoverable_failure"
 ;;
 
@@ -412,7 +412,7 @@ let test_fail_open_for_degraded_retry () =
       ~tool_contract_result:Contract_satisfied_completion
       ()
   in
-  check_disp "degraded_retry" r "fail_open_next_cascade" "degraded_retry"
+  check_disp "degraded_retry" r "fail_open_next_runtime_id" "degraded_retry"
 ;;
 
 (* === Trigger predicate ============================================== *)
@@ -433,9 +433,9 @@ let test_needs_broadcast_predicate () =
     (R.needs_operator_broadcast R.Disp_pass_next_model);
   check
     bool
-    "fail_open_next_cascade does not"
+    "fail_open_next_runtime_id does not"
     false
-    (R.needs_operator_broadcast R.Disp_fail_open_next_cascade)
+    (R.needs_operator_broadcast R.Disp_fail_open_next_runtime_id)
 ;;
 
 (* === Symmetric coverage: each broadcast disposition is reachable ===== *)
@@ -855,7 +855,7 @@ let () =
             `Quick
             test_route_failure_passes_next_when_fallback_available
         ; test_case
-            "route/tool-surface degraded -> fail_open_next_cascade"
+            "route/tool-surface degraded -> fail_open_next_runtime_id"
             `Quick
             test_route_failure_fail_open_when_degraded_retry_available
         ; test_case
@@ -910,7 +910,7 @@ let () =
             `Quick
             test_pass_next_for_cascade_fallback
         ; test_case
-            "degraded -> fail_open_next_cascade"
+            "degraded -> fail_open_next_runtime_id"
             `Quick
             test_fail_open_for_degraded_retry
         ] )

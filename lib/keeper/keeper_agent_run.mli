@@ -112,7 +112,7 @@ val run_turn
   -> ?tool_overlay:Agent_sdk.Tool_op.t ref
   -> ?priority:Llm_provider.Request_priority.t
   -> ?degraded_retry_applied:bool
-  -> ?degraded_retry_cascade:string
+  -> ?degraded_retry_runtime_id:string
   -> ?fallback_reason:Keeper_error_classify.degraded_retry_reason
   -> ?cascade_rotation_attempts:Keeper_execution_receipt.cascade_rotation_attempt list
   -> ?is_retry:bool

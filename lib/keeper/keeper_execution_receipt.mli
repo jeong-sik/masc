@@ -225,7 +225,7 @@ type t =
   ; runtime_outcome : runtime_outcome
   ; oas_internal_cascade_allowed : bool
   ; degraded_retry_applied : bool
-  ; degraded_retry_cascade : string option
+  ; degraded_retry_runtime_id : string option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
   ; runtime_rotation_attempts : runtime_rotation_attempt list
   ; stop_reason : Runtime_agent.stop_reason option
@@ -263,7 +263,7 @@ type operator_disposition_kind =
   | Disp_pass
   | Disp_pause_human
   | Disp_alert_exhausted
-  | Disp_fail_open_next_cascade
+  | Disp_fail_open_next_runtime_id
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped

@@ -186,7 +186,7 @@ val append_decision_record :
   ?semaphore_wait_ms:int ->
   outcome:string ->
   ?degraded_retry_applied:bool ->
-  ?degraded_retry_cascade:string ->
+  ?degraded_retry_runtime_id:string ->
   ?fallback_reason:string ->
   ?turn_mode:turn_mode ->
   ?social_state:Keeper_social_model.social_state ->

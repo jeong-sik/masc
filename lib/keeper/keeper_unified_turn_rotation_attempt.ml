@@ -12,7 +12,7 @@ let build
   { from_cascade
   ; (* RFC-0206: cascade-name validation moved to the TOML load boundary; a
        runtime id is a raw string accepted as-is (no prefix check here). *)
-    to_cascade = retry.next_cascade
+    to_cascade = retry.next_runtime_id
   ; reason = retry.fallback_reason
   ; outcome
   ; slot_release_at_phase

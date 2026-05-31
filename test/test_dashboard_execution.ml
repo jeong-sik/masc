@@ -523,7 +523,7 @@ let append_execution_receipt
       cascade_fallback_applied = true;
       cascade_outcome = Lib.Keeper_execution_receipt.Cascade_passed_to_next_model;
       degraded_retry_applied = true;
-      degraded_retry_cascade =
+      degraded_retry_runtime_id =
         Some
           (Cascade_name.of_string_exn
              (Lib.Keeper_config.default_runtime_id ()));
@@ -851,7 +851,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "outcome" |> to_string);
             check string "execution trust row exposes operator disposition"
-              "fail_open_next_cascade"
+              "fail_open_next_runtime_id"
               (trust_row |> member "trust" |> member "operator_disposition"
              |> to_string);
             check string "execution trust row exposes operator disposition reason"
@@ -864,7 +864,7 @@ let test_execution_trust_surfaces_latest_receipt () =
             check (option string) "execution trust row preserves degraded retry lane"
               (Some (Lib.Keeper_config.default_runtime_id ()))
               (trust_row |> member "trust" |> member "cascade"
-             |> member "degraded_retry_cascade" |> to_string_option);
+             |> member "degraded_retry_runtime_id" |> to_string_option);
             check (option string) "execution trust row preserves fallback reason"
               (Some "turn_timeout")
               (trust_row |> member "trust" |> member "cascade"

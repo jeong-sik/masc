@@ -1,6 +1,6 @@
 val fallback_cascade_for_provider_cooldown :
-  base_cascade:string ->
-  effective_cascade:string ->
+  base_runtime_id:string ->
+  effective_runtime_id:string ->
   string option
 
 val provider_cooldown_remaining_sec_for_cascade :

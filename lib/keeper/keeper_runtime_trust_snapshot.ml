@@ -239,7 +239,7 @@ let display_disposition_of_operator ~operator_disposition
   | "pass_next_model" -> ("Pass", "cascade_fallback")
   | "blocked" | "blocked_runtime" -> ("Blocked", reason "runtime_blocked")
   | "pause_human" -> ("Blocked", reason "needs_human_attention")
-  | "fail_open_next_cascade" -> ("Blocked", reason "degraded_retry")
+  | "fail_open_next_runtime_id" -> ("Blocked", reason "degraded_retry")
   | "user_cancelled" -> ("Blocked", reason "cancelled")
   | "alert_exhausted" -> ("Alert", reason "runtime_exhausted")
   | "unknown" -> ("Alert", reason "unmapped_cascade_state")

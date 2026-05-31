@@ -57,7 +57,7 @@ let maybe_string_option_override =
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : override_field_detail list
   =
-  let effective_cascade_name = effective_declarative_cascade_name defaults meta in
+  let effective_runtime_id_name = effective_declarative_cascade_name defaults meta in
   []
   |> maybe_string_override
        "prompt.goal"
@@ -81,11 +81,11 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
        meta.tool_denylist
   |> (fun acc ->
   let cascade_name = runtime_id_of_meta meta in
-  if effective_cascade_name <> cascade_name
+  if effective_runtime_id_name <> cascade_name
   then
     override_field
       "model.runtime_id"
-      ~default_value:(`String effective_cascade_name)
+      ~default_value:(`String effective_runtime_id_name)
       ~live_value:(`String cascade_name)
     :: acc
   else acc)

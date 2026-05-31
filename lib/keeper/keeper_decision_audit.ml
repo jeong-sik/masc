@@ -340,7 +340,7 @@ let unhealthy_reason_label = function
 let cascade_fsm_to_mermaid
     ?(provider_health : (string * provider_health) list option)
     ?(slot_state : (int * int) option)
-    ?(effective_cascade_reason : string option)
+    ?(effective_runtime_id_reason : string option)
     ~(models : string list)
     ~(last_provider_result : string option)
     ()
@@ -412,7 +412,7 @@ let cascade_fsm_to_mermaid
   (match slot_state with
    | Some (used, max) -> p "      Slots: %d / %d\n" used max
    | None -> ());
-  (match effective_cascade_reason with
+  (match effective_runtime_id_reason with
    | Some r when String.length r > 0 -> p "      Reason: %s\n" r
    | _ -> ());
   p "    end note\n";

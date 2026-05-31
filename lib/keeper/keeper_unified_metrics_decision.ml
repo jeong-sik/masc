@@ -21,7 +21,7 @@ let append_decision_record
     ?(semaphore_wait_ms : int = 0)
     ~(outcome : string)
     ?(degraded_retry_applied = false)
-    ?degraded_retry_cascade
+    ?degraded_retry_runtime_id
     ?fallback_reason
     ?turn_mode
     ?social_state
@@ -168,8 +168,8 @@ let append_decision_record
         ("channel", `String (decision_channel_of_observation observation));
         ("outcome", `String outcome);
         ("degraded_retry_applied", `Bool degraded_retry_applied);
-        ( "degraded_retry_cascade",
-          Json_util.string_opt_to_json degraded_retry_cascade );
+        ( "degraded_retry_runtime_id",
+          Json_util.string_opt_to_json degraded_retry_runtime_id );
         ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
         ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);

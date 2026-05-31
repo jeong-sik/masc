@@ -10,13 +10,13 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 let fallback_cascade_for_provider_cooldown
-      ~(base_cascade : string)
-      ~(effective_cascade : string)
+      ~(base_runtime_id : string)
+      ~(effective_runtime_id : string)
   : string option
   =
-  let normalized_base = String.trim base_cascade in
+  let normalized_base = String.trim base_runtime_id in
   let normalized_effective =
-    String.trim effective_cascade
+    String.trim effective_runtime_id
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
@@ -80,7 +80,7 @@ let provider_capacity_blocked_task_count
     | Some _
       when Option.is_none
              (fallback_cascade_for_provider_cooldown
-                ~base_cascade:cascade_name
-                ~effective_cascade:cascade_name) ->
+                ~base_runtime_id:cascade_name
+                ~effective_runtime_id:cascade_name) ->
       claimable_task_count
     | Some _ | None -> 0)

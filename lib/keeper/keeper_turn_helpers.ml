@@ -260,7 +260,7 @@ let record_pre_dispatch_terminal_observation
     ; cascade_fallback_applied = false
     ; cascade_outcome = Keeper_execution_receipt.Cascade_not_dispatched
     ; degraded_retry_applied = false
-    ; degraded_retry_cascade = None
+    ; degraded_retry_runtime_id = None
     ; fallback_reason = None
     ; cascade_rotation_attempts = []
     ; stop_reason = None

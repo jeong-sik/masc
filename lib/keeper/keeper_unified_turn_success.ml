@@ -469,7 +469,7 @@ let handle
       ~latency_ms
       ~semaphore_wait_ms
       ~degraded_retry_applied
-      ~degraded_retry_cascade
+      ~degraded_retry_runtime_id
       ~fallback_reason
       ~last_provider_timeout_budget
       ~current_turn_blocker_info
@@ -551,7 +551,7 @@ let handle
     ~semaphore_wait_ms
     ~outcome:"success"
     ~degraded_retry_applied
-    ?degraded_retry_cascade
+    ?degraded_retry_runtime_id
     ?fallback_reason:(Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
     ~turn_mode
     ~social_state

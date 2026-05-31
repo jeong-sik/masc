@@ -734,7 +734,7 @@ let append_execution_receipt
     ?(cascade_outcome : Masc_mcp.Keeper_execution_receipt.cascade_outcome =
       Cascade_passed_to_next_model)
     ?(degraded_retry_applied = true)
-    ?(degraded_retry_cascade =
+    ?(degraded_retry_runtime_id =
       Some (Masc_mcp.Keeper_config.default_runtime_id ()))
     ?(fallback_reason = Some Masc_mcp.Keeper_error_classify.Turn_timeout)
     ?(required_tool_candidates = [])
@@ -807,12 +807,12 @@ let append_execution_receipt
       cascade_fallback_applied;
       cascade_outcome;
       degraded_retry_applied;
-      degraded_retry_cascade =
+      degraded_retry_runtime_id =
         Option.map Cascade_name.of_string_exn
-          degraded_retry_cascade;
+          degraded_retry_runtime_id;
       fallback_reason;
       cascade_rotation_attempts =
-        (match degraded_retry_cascade, fallback_reason with
+        (match degraded_retry_runtime_id, fallback_reason with
          | Some retry_cascade, Some reason ->
            [
              {
@@ -1305,7 +1305,7 @@ let test_execution_trust_route_surfaces_trust_summary_fields () =
     ~cascade_fallback_applied:false
     ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
     ~degraded_retry_applied:false
-    ~degraded_retry_cascade:None
+    ~degraded_retry_runtime_id:None
     ~fallback_reason:None
     ~required_tool_candidates:[ "keeper_board_comment"; "keeper_board_post" ]
     config ~keeper_name;
@@ -1686,7 +1686,7 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
     ~cascade_fallback_applied:false
     ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
     ~degraded_retry_applied:false
-    ~degraded_retry_cascade:None
+    ~degraded_retry_runtime_id:None
     ~fallback_reason:None config ~keeper_name;
   let path = Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name in
   let result = run_curl_get ~port ~path () in

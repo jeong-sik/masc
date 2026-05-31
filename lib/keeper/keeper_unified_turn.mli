@@ -40,7 +40,7 @@ val allow_wall_clock_retry_budget_for_attempt
   :  is_retry:bool
   -> degraded_rotation_first_attempt:bool
   -> attempt:int
-  -> attempted_cascades:string list
+  -> attempted_runtime_ids:string list
   -> bool
 
 val provider_retry_budget_available_for_turn
@@ -70,10 +70,10 @@ type degraded_retry_budget_decision =
   | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
 
 val next_fail_open_cascade_for_turn_with_budget
-  :  base_cascade:string
-  -> effective_cascade:string
+  :  base_runtime_id:string
+  -> effective_runtime_id:string
   -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
-  -> attempted_cascades:string list
+  -> attempted_runtime_ids:string list
   -> estimated_input_tokens:int
   -> max_turns:int
   -> ?time_spent_in_turn_s:float
@@ -210,10 +210,10 @@ val turn_plan_manifest_decision : turn_plan -> Yojson.Safe.t
     that would loop back to a cascade already attempted during the current
     turn. Exposed for targeted tests. *)
 val next_fail_open_cascade_for_turn
-  :  base_cascade:string
-  -> effective_cascade:string
+  :  base_runtime_id:string
+  -> effective_runtime_id:string
   -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
-  -> attempted_cascades:string list
+  -> attempted_runtime_ids:string list
   -> Agent_sdk.Error.sdk_error
   -> Keeper_error_classify.degraded_retry option
 

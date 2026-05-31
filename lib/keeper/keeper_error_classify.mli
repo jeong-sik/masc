@@ -70,11 +70,11 @@ val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the rotation-cap fast-fail should fire: the error is a
     [required_tool_contract_violation], at least one cascade rotation has
-    already been attempted ([List.length attempted_cascades >= 2]; the list is
+    already been attempted ([List.length attempted_runtime_ids >= 2]; the list is
     seeded with the initial cascade name so length=1 means no rotations yet),
     and no untried fallback cascade remains. *)
 val should_cap_rotation_for_contract_violation :
-  attempted_cascades:string list ->
+  attempted_runtime_ids:string list ->
   fallback_not_yet_tried:bool ->
   Agent_sdk.Error.sdk_error ->
   bool
@@ -99,21 +99,21 @@ type degraded_retry_reason =
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 
-val normalized_cascade_name : catalog_names:string list -> string -> string
+val normalized_runtime_id : catalog_names:string list -> string -> string
 (** Normalize a cascade name for rotation matching.
     All cascade names are plain provider:model strings. *)
 
 type degraded_retry =
-  { next_cascade : string
+  { next_runtime_id : string
   ; fallback_reason : degraded_retry_reason
   }
 
 (** Opportunistically fail open to a broader cascade when the current
     effective cascade is temporarily unavailable (for example cooldown /
     phase-buffer bootstrap fallback). *)
-val fallback_cascade_for_unavailable_profile :
-  base_cascade:string ->
-  effective_cascade:string ->
+val fallback_runtime_for_unavailable_profile :
+  base_runtime_id:string ->
+  effective_runtime_id:string ->
   string option
 
 (** Classifies an SDK error into a fallback reason label when the cascade
@@ -138,7 +138,7 @@ val recoverable_cascade_failure_reason :
     failures. Required-tool turns stay terminal, and already-degraded lanes
     do not broaden further. *)
 val degraded_retry_after_recoverable_error :
-  effective_cascade:string ->
+  effective_runtime_id:string ->
   tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
@@ -157,10 +157,10 @@ val degraded_retry_after_recoverable_error :
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?fallback_hint:string ->
-  base_cascade:string ->
-  effective_cascade:string ->
+  base_runtime_id:string ->
+  effective_runtime_id:string ->
   tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
-  attempted_cascades:string list ->
+  attempted_runtime_ids:string list ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
 

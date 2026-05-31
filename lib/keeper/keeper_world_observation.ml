@@ -775,8 +775,8 @@ let keeper_cycle_decision
           match provider_cooldown_remaining_sec with
           | Some _ ->
             fallback_cascade_for_provider_cooldown
-              ~base_cascade:cascade_name
-              ~effective_cascade:cascade_name
+              ~base_runtime_id:cascade_name
+              ~effective_runtime_id:cascade_name
           | None -> None
         in
         let verdict =

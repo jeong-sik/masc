@@ -3,8 +3,8 @@ open Alcotest
 (** RFC-0084 PR-4 — [Tool_capability] typed sum + Set tests.
 
     Verifies:
-    - All 5 [kind] variants round-trip through [to_string] / [of_string]
-    - [all_kinds] enumerates exactly 5 variants
+    - All 4 [kind] variants round-trip through [to_string] / [of_string]
+    - [all_kinds] enumerates exactly 4 variants
     - [Set.diff] semantics for [check]
     - [has] reads [Tool_catalog] metadata
     - [granted] of an unknown tool returns the empty set
@@ -24,8 +24,8 @@ let test_round_trip_all_kinds () =
 
 let test_all_kinds_cardinality () =
   (check int)
-    "Tool_capability.all_kinds enumerates 5 variants"
-    5
+    "Tool_capability.all_kinds enumerates 4 variants"
+    4
     (List.length Masc_mcp.Tool_capability.all_kinds)
 ;;
 
@@ -50,7 +50,6 @@ let test_has_catalog_metadata () =
   Masc_mcp.Tool_catalog.register_metadata name
     { Masc_mcp.Tool_catalog.default_metadata with
       readonly = Some true;
-      requires_join = Some true;
       mcp_context_required = Some true;
       destructive = Some true;
       idempotent = Some true;

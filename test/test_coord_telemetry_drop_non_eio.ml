@@ -22,7 +22,7 @@ let counter_value ~event_family ~event_kind =
 
 let test_lifecycle_drop_increments_counter () =
   let event : Coord_telemetry_drop_event.t =
-    Agent_lifecycle Lifecycle_leave
+    Agent_lifecycle Session_ended
   in
   let event_family = Coord_telemetry_drop_event.family_to_wire event in
   let event_kind = Coord_telemetry_drop_event.kind_to_wire event in
@@ -39,7 +39,7 @@ let test_lifecycle_drop_increments_counter () =
    would still pass the test above. *)
 let test_lifecycle_drop_join_label () =
   let event : Coord_telemetry_drop_event.t =
-    Agent_lifecycle Lifecycle_join
+    Agent_lifecycle Session_bound
   in
   let event_family = Coord_telemetry_drop_event.family_to_wire event in
   let event_kind = Coord_telemetry_drop_event.kind_to_wire event in
@@ -61,12 +61,12 @@ let test_wire_mapping_stable () =
     "agent_lifecycle family"
     "agent_lifecycle"
     (Coord_telemetry_drop_event.family_to_wire
-       (Agent_lifecycle Lifecycle_leave));
+       (Agent_lifecycle Session_ended));
   Alcotest.(check string)
-    "agent_lifecycle / leave kind"
-    "leave"
+    "agent_lifecycle / session_ended kind"
+    "session_ended"
     (Coord_telemetry_drop_event.kind_to_wire
-       (Agent_lifecycle Lifecycle_leave));
+       (Agent_lifecycle Session_ended));
   Alcotest.(check string)
     "task_transition family"
     "task_transition"

@@ -137,7 +137,7 @@ let test_agent_of_yojson_accepts_numeric_last_seen () =
         ("status", `String "active");
         ("capabilities", `List []);
         ("current_task", `Null);
-        ("joined_at", `String "2026-03-26T00:00:00Z");
+        ("session_bound_at", `String "2026-03-26T00:00:00Z");
         ("last_seen", `Float 1711411200.0);
       ]
   in
@@ -148,8 +148,8 @@ let test_agent_of_yojson_accepts_numeric_last_seen () =
         (String.length agent.last_seen > 0 && String.contains agent.last_seen 'T')
   | Error msg -> fail ("expected numeric last_seen compatibility: " ^ msg)
 
-let test_agent_of_yojson_bootstraps_null_last_seen_from_joined_at () =
-  (* #7947 Layer 2: null last_seen must be repaired from joined_at rather than
+let test_agent_of_yojson_bootstraps_null_last_seen_from_session_bound_at () =
+  (* #7947 Layer 2: null last_seen must be repaired from session_bound_at rather than
      dropping the whole agent record (which loses current_task/meta). *)
   let json =
     `Assoc
@@ -159,7 +159,7 @@ let test_agent_of_yojson_bootstraps_null_last_seen_from_joined_at () =
         ("status", `String "busy");
         ("capabilities", `List []);
         ("current_task", `String "task-208");
-        ("joined_at", `String "2026-04-15T03:00:00Z");
+        ("session_bound_at", `String "2026-04-15T03:00:00Z");
         ("last_seen", `Null);
       ]
   in
@@ -168,10 +168,10 @@ let test_agent_of_yojson_bootstraps_null_last_seen_from_joined_at () =
       check string "agent parsed" "provider_f-cool-whale" agent.name;
       check (option string) "current_task preserved"
         (Some "task-208") agent.current_task;
-      check string "last_seen bootstrapped from joined_at"
+      check string "last_seen bootstrapped from session_bound_at"
         "2026-04-15T03:00:00Z" agent.last_seen
   | Error msg ->
-      fail ("null last_seen should bootstrap from joined_at: " ^ msg)
+      fail ("null last_seen should bootstrap from session_bound_at: " ^ msg)
 
 let test_agent_of_yojson_annotates_invalid_last_seen () =
   (* #7947 Layer 1: when repair is not possible, the error message must
@@ -185,12 +185,12 @@ let test_agent_of_yojson_annotates_invalid_last_seen () =
         ("status", `String "busy");
         ("capabilities", `List []);
         ("current_task", `Null);
-        ("joined_at", `Bool true);
+        ("session_bound_at", `Bool true);
         ("last_seen", `Bool false);
       ]
   in
   match Masc_domain.agent_of_yojson json with
-  | Ok _ -> fail "bool last_seen should not succeed without a usable joined_at"
+  | Ok _ -> fail "bool last_seen should not succeed without a usable session_bound_at"
   | Error msg ->
       let contains needle =
         let n = String.length needle in
@@ -206,7 +206,7 @@ let test_agent_of_yojson_annotates_invalid_last_seen () =
         (contains "last_seen=")
 
 let test_agent_of_yojson_missing_last_seen_falls_back_to_now () =
-  (* #9751: when last_seen is entirely absent AND joined_at is not a usable
+  (* #9751: when last_seen is entirely absent AND session_bound_at is not a usable
      string, fall back to a current-wall-clock timestamp rather than
      failing the whole record. last_seen is a liveness marker, not
      identity-critical. *)
@@ -218,19 +218,19 @@ let test_agent_of_yojson_missing_last_seen_falls_back_to_now () =
         ("status", `String "active");
         ("capabilities", `List []);
         ("current_task", `Null);
-        (* no joined_at, no last_seen *)
+        (* no session_bound_at, no last_seen *)
       ]
   in
   match Masc_domain.agent_of_yojson json with
   | Ok agent ->
-      check string "agent parsed without last_seen or joined_at"
+      check string "agent parsed without last_seen or session_bound_at"
         "keeper-orphan" agent.name;
       check bool "last_seen populated with ISO timestamp" true
         (String.length agent.last_seen > 0
          && String.contains agent.last_seen 'T'
          && String.contains agent.last_seen 'Z')
   | Error msg ->
-      fail ("missing last_seen+joined_at should fall back, not error: " ^ msg)
+      fail ("missing last_seen+session_bound_at should fall back, not error: " ^ msg)
 
 let test_read_agent_with_repair_rewrites_missing_last_seen () =
   Eio_main.run @@ fun env ->
@@ -249,7 +249,7 @@ let test_read_agent_with_repair_rewrites_missing_last_seen () =
             ("status", `String "active");
             ("capabilities", `List []);
             ("current_task", `Null);
-            ("joined_at", `String "2026-03-26T00:00:00Z");
+            ("session_bound_at", `String "2026-03-26T00:00:00Z");
           ]
       in
       write_text_file (agent_path config "keeper-orphan")
@@ -258,7 +258,7 @@ let test_read_agent_with_repair_rewrites_missing_last_seen () =
       match Coord.read_agent_with_repair config (agent_path config "keeper-orphan") with
       | Error msg -> fail ("missing last_seen should repair: " ^ msg)
       | Ok agent ->
-          check string "last_seen bootstrapped from joined_at"
+          check string "last_seen bootstrapped from session_bound_at"
             "2026-03-26T00:00:00Z" agent.last_seen;
           let repaired_json =
             match Safe_ops.read_file_safe (agent_path config "keeper-orphan") with
@@ -290,7 +290,7 @@ let test_heartbeat_repairs_legacy_agent_last_seen () =
             ("status", `String "active");
             ("capabilities", `List [ `String "heartbeat" ]);
             ("current_task", `Null);
-            ("joined_at", `String "2026-03-26T00:00:00Z");
+            ("session_bound_at", `String "2026-03-26T00:00:00Z");
             ("last_seen", `Int 1711411200);
           ]
       in
@@ -325,11 +325,11 @@ let () =
             test_read_state_filters_invalid_active_agent_entries;
           test_case "agent parser accepts numeric last_seen" `Quick
             test_agent_of_yojson_accepts_numeric_last_seen;
-          test_case "agent parser bootstraps null last_seen from joined_at (#7947)" `Quick
-            test_agent_of_yojson_bootstraps_null_last_seen_from_joined_at;
+          test_case "agent parser bootstraps null last_seen from session_bound_at (#7947)" `Quick
+            test_agent_of_yojson_bootstraps_null_last_seen_from_session_bound_at;
           test_case "agent parser error annotates invalid last_seen (#7947)" `Quick
             test_agent_of_yojson_annotates_invalid_last_seen;
-          test_case "agent parser falls back when both last_seen and joined_at missing (#9751)" `Quick
+          test_case "agent parser falls back when both last_seen and session_bound_at missing (#9751)" `Quick
             test_agent_of_yojson_missing_last_seen_falls_back_to_now;
           test_case "read_agent_with_repair rewrites missing last_seen" `Quick
             test_read_agent_with_repair_rewrites_missing_last_seen;

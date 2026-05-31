@@ -70,7 +70,7 @@ let with_temp_config f =
    variant-tag (the camelcase constructor name from yojson). *)
 let event_kind_tag (e : T.event) =
   match e with
-  | T.Agent_joined _ -> "Agent_joined"
+  | T.Agent_session_bound _ -> "Agent_session_bound"
   | T.Agent_left _ -> "Agent_left"
   | T.Task_started _ -> "Task_started"
   | T.Task_completed _ -> "Task_completed"
@@ -79,7 +79,7 @@ let event_kind_tag (e : T.event) =
   | T.Tool_called _ -> "Tool_called"
   | T.Tool_assigned _ -> "Tool_assigned"
 
-(* [Coord.init] emits an [Agent_joined] event during setup; filter
+(* [Coord.init] emits an [Agent_session_bound] event during setup; filter
    it out so test assertions only see the events explicitly emitted
    by [track_tool_called]. *)
 let recent_events_kinds config _n =
@@ -87,7 +87,7 @@ let recent_events_kinds config _n =
   records
   |> List.filter_map (fun (r : T.event_record) ->
          match event_kind_tag r.event with
-         | "Agent_joined" -> None
+         | "Agent_session_bound" -> None
          | tag -> Some tag)
 
 (* --- 1. success=true + error_kind: only Tool_called ------------ *)
@@ -134,7 +134,7 @@ let test_failure_with_error_kind_pairs () =
     [ "Tool_called"; "Error_occurred" ] kinds;
   match T.read_all_events config |> List.filter (fun (r : T.event_record) ->
     match r.event with
-    | T.Agent_joined _ -> false
+    | T.Agent_session_bound _ -> false
     | _ -> true)
   with
   | { T.event = T.Tool_called tool; _ } :: _ ->

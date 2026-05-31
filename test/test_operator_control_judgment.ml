@@ -13,7 +13,7 @@ let test_digest_room_prefers_fresh_operator_judgment () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "operator"));
-      ignore (Coord.join config ~agent_name:"operator" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"operator" ~capabilities:[] ());
       record_operator_judgment config ~surface:"command.namespace"
         ~target_type:Operator_judgment.Coord ~target_id:None
         ~summary:"Pause the namespace before taking any destructive action."
@@ -70,7 +70,7 @@ let test_digest_room_ignores_stale_operator_judgment () =
     (fun () ->
       let config = Coord.default_config base_dir in
       ignore (Coord.init config ~agent_name:(Some "operator"));
-      ignore (Coord.join config ~agent_name:"operator" ~capabilities:[] ());
+      ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"operator" ~capabilities:[] ());
       record_operator_judgment config ~surface:"command.namespace"
         ~target_type:Operator_judgment.Coord ~target_id:None
         ~summary:"This judgment is stale." ~fresh_for_sec:(-5.0) ();

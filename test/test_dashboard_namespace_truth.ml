@@ -265,7 +265,7 @@ let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
       let config = state.Mcp_server.coord_config in
       ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Coord.join config
+        (Lib.Coord.bind_session config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -307,13 +307,13 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       let config = state.Mcp_server.coord_config in
       ignore (Lib.Coord.init config ~agent_name:None);
       ignore
-        (Lib.Coord.join config
+        (Lib.Coord.bind_session config
            ~agent_name:"agent_code-test-agent"
            ~agent_type_override:(Some "agent_code")
            ~capabilities:["typescript"]
            ());
       ignore
-        (Lib.Coord.join config
+        (Lib.Coord.bind_session config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]

@@ -228,7 +228,7 @@ let test_compact_agent_json_uses_current_focus () =
       capabilities = [ "ops"; "review"; "debug" ];
       current_task = None;
       status = Masc_domain.Active;
-      joined_at = "2026-03-11T08:00:00Z";
+      session_bound_at = "2026-03-11T08:00:00Z";
       last_seen = "2026-03-11T08:05:00Z";
       meta = None;
     }
@@ -318,7 +318,7 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
       capabilities = [];
       current_task = None;
       status = Masc_domain.Active;
-      joined_at = "2026-03-11T08:00:00Z";
+      session_bound_at = "2026-03-11T08:00:00Z";
       last_seen = "2026-03-11T08:05:00Z";
       meta = None;
     }
@@ -338,7 +338,7 @@ let test_collect_metadata_gaps_ignores_inactive_agents () =
       capabilities = [];
       current_task = None;
       status = Masc_domain.Inactive;
-      joined_at = "2026-03-11T08:00:00Z";
+      session_bound_at = "2026-03-11T08:00:00Z";
       last_seen = "2026-03-11T08:05:00Z";
       meta = None;
     }

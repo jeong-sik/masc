@@ -60,35 +60,6 @@ let test_activity_log_file_ends_with_log () =
      String.sub path (String.length path - 4) 4 = ".log")
 
 (* ============================================================
-   extract_nickname Tests
-   ============================================================ *)
-
-let test_extract_nickname_returns_option () =
-  let response = "Some text\n  Nickname: agent_llm_a-rare-beaver\nMore text" in
-  let nick = Auto_responder.extract_nickname response in
-  check (option string) "returns parsed nickname"
-    (Some "agent_llm_a-rare-beaver") nick
-
-let test_extract_nickname_empty () =
-  let nick = Auto_responder.extract_nickname "" in
-  check (option string) "empty" None nick
-
-let test_extract_nickname_no_match () =
-  let response = "No nickname here\nJust some text" in
-  let nick = Auto_responder.extract_nickname response in
-  check (option string) "no match" None nick
-
-let test_extract_nickname_wrong_format () =
-  let response = "Nickname: test" in  (* Missing leading spaces *)
-  let nick = Auto_responder.extract_nickname response in
-  check (option string) "wrong format still accepted" (Some "test") nick
-
-let test_extract_nickname_multiline () =
-  let response = "Line1\nLine2\nLine3" in
-  let nick = Auto_responder.extract_nickname response in
-  check (option string) "multiline" None nick
-
-(* ============================================================
    Re-exports Tests (from Mention)
    ============================================================ *)
 
@@ -152,13 +123,6 @@ let () =
     "activity_log_file", [
       test_case "nonempty" `Quick test_activity_log_file_nonempty;
       test_case "ends with .log" `Quick test_activity_log_file_ends_with_log;
-    ];
-    "extract_nickname", [
-      test_case "returns option" `Quick test_extract_nickname_returns_option;
-      test_case "empty" `Quick test_extract_nickname_empty;
-      test_case "no match" `Quick test_extract_nickname_no_match;
-      test_case "wrong format" `Quick test_extract_nickname_wrong_format;
-      test_case "multiline" `Quick test_extract_nickname_multiline;
     ];
     "re-exports", [
       test_case "agent_type_of_mention agent_llm_a" `Quick test_agent_type_of_mention_claude;

@@ -211,7 +211,7 @@ let test_classify_inactive_is_offline () =
       status = Masc_domain.Inactive;
       capabilities = [];
       current_task = None;
-      joined_at = "2026-01-01T00:00:00Z";
+      session_bound_at = "2026-01-01T00:00:00Z";
       last_seen = "2026-01-01T00:00:00Z";
       meta = None;
     }
@@ -230,7 +230,7 @@ let test_classify_listening_is_idle () =
       status = Masc_domain.Listening;
       capabilities = [];
       current_task = None;
-      joined_at = "2026-01-01T00:00:00Z";
+      session_bound_at = "2026-01-01T00:00:00Z";
       last_seen = "2026-01-01T00:00:00Z";
       meta = None;
     }
@@ -250,7 +250,7 @@ let test_classify_uses_stuck_threshold_override () =
       status = Masc_domain.Active;
       capabilities = [];
       current_task = None;
-      joined_at = "2026-01-01T00:00:00Z";
+      session_bound_at = "2026-01-01T00:00:00Z";
       last_seen = stuck_iso;
       meta = None;
     }

@@ -1,20 +1,22 @@
 ---- MODULE SessionRegistryGhost ----
-\* Bug Model: Session registry ghost entry from leave/reconnect race.
+\* Bug Model: Session registry ghost entry from end/reconnect race.
 \*
-\* Models lib/session.ml + lib/tool_inline_dispatch_coord.ml:handle_leave.
+\* Models lib/session.ml:register + lib/session.ml:unregister +
+\* lib/coord/coord_lifecycle.ml:end_session.
 \*
-\* handle_leave performs two non-atomic steps:
-\*   1. Coord.leave(agent)         — removes from room/coord
-\*   2. Session.unregister(agent)  — removes from session
+\* The historical end-session path performed two non-atomic steps:
+\*   1. Coord.end_session(agent)   — removed active namespace binding
+\*   2. Session.unregister(agent)  — removed from session registry
 \*
 \* If a reconnect (register) fires between steps 1 and 2:
-\*   1. Coord.leave removes agent from room
+\*   1. Coord.end_session removes the active namespace binding
 \*   2. register (with mutex) adds session entry
 \*   3. unregister removes the entry register just created
 \*   Result: agent thinks it reconnected, but session is gone.
 \*
-\* Reverse: if register fires AFTER unregister but Coord still says
-\* "not joined", the session registry has a ghost entry for a non-member.
+\* Reverse: if register fires AFTER unregister but Coord still says the
+\* agent is not active, the session registry has a ghost entry for a
+\* non-active agent.
 \*
 \* ── Status (2026-04-20) ──
 \* The historical bug class this spec models (no-mutex `unregister_sync`
@@ -26,8 +28,8 @@
 \* Actual code:
 \*   lib/session.ml:register   — Hashtbl.replace inside with_lock
 \*   lib/session.ml:unregister — Hashtbl.remove inside with_lock
-\*   lib/tool_inline_dispatch_coord.ml:200-201
-\*                           Coord.leave then Session.unregister
+\*   lib/coord/coord_lifecycle.ml:end_session
+\*                           end active namespace session
 \* (Both formerly: `lib/session/session.ml` + `tool_inline_dispatch_room.ml`
 \*  and the no-lock `unregister_sync`. Path/symbol drift recorded here for
 \*  future cross-reference.)
@@ -54,9 +56,9 @@ Init ==
     /\ leave_phase = "idle"
     /\ reconnect_phase = "idle"
 
-\* ── Leave flow (2 non-atomic steps) ─────────────
+\* ── End-session flow (2 non-atomic steps) ───────
 
-\* Step 1: Coord.leave — agent leaves room (Coord_lifecycle.leave)
+\* Step 1: Coord.end_session — agent leaves active namespace set
 LeaveStep1_RoomLeave ==
     /\ leave_phase = "idle"
     /\ room_status = "joined"
@@ -64,7 +66,7 @@ LeaveStep1_RoomLeave ==
     /\ leave_phase' = "room_left"
     /\ UNCHANGED <<session_status, reconnect_phase>>
 
-\* Step 2: unregister_sync — remove session (no mutex)
+\* Step 2: historical unregister_sync — remove session (no mutex)
 LeaveStep2_Unregister ==
     /\ leave_phase = "room_left"
     /\ session_status' = "unregistered"
@@ -73,7 +75,7 @@ LeaveStep2_Unregister ==
 
 \* ── Reconnect flow (atomic — under mutex) ───────
 
-\* Agent reconnects: Coord.join + register (both succeed atomically)
+\* Agent reconnects: Coord.bind_session + register (both succeed atomically)
 ReconnectJoinAndRegister ==
     /\ reconnect_phase = "idle"
     /\ room_status' = "joined"
@@ -122,7 +124,7 @@ ConsistencyInvariant ==
 \*   After Reconnect:  room=joined, session=registered, reconnect_phase=done
 \*   After LeaveStep2: room=joined, session=UNREGISTERED <- ORPHAN!
 \*
-\* The leave's unregister_sync destroys the reconnect's fresh session.
+\* The end-session unregister_sync destroys the reconnect's fresh session.
 \*
 \* Clean model: leave is atomic (both steps in one action).
 

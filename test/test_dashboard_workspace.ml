@@ -41,7 +41,7 @@ let string_list_field key json =
 let test_workspace_projection_includes_messages_and_mentions () =
   with_workspace
   @@ fun config ->
-  ignore (Coord.join config ~agent_name:"sangsu" ~capabilities:[] ());
+  ignore ((* fire-and-forget: test fixture session setup. *) Coord.bind_session config ~agent_name:"sangsu" ~capabilities:[] ());
   ignore (Coord.broadcast config ~from_agent:"operator" ~content:"hello @sangsu");
   ignore
     (Coord.broadcast

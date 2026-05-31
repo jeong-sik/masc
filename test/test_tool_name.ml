@@ -25,12 +25,12 @@ let all_masc : Tool_name.Masc.t list =
   ; Board_profile; Board_search
   ; Board_stats; Board_vote; Broadcast; Check; Claim_next
   ; Cleanup_zombies; Dashboard; Deliver
-  ; Heartbeat; Join; Leave; Messages; Note_add
+  ; Heartbeat; Messages; Note_add
   ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
   ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
   ; Plan_update; Reset
   ; Status; Task_history; Tasks; Tool_grant; Tool_help
-  ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
+  ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search
   ; Approval_pending; Approval_get; Config; Gc; Get_metrics; Mcp_session
   ; Pause; Resume; Start; Tool_admin_snapshot; Tool_admin_update
   ; Tool_stats ]

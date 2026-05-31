@@ -939,7 +939,7 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
         ; "agent_type", `String agent_type
         ; "status", `String status
         ; "capabilities", `List []
-        ; "joined_at", `String "2026-05-20T00:00:00Z"
+        ; "session_bound_at", `String "2026-05-20T00:00:00Z"
         ; "last_seen", `String "2026-05-20T00:00:00Z"
         ])
   in

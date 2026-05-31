@@ -112,8 +112,7 @@ let test_e2e_handler_error () =
 
 let test_to_spec () =
   let spec = Typed_tool_masc.to_spec Tool_broadcast_typed.tool in
-  Alcotest.(check string) "name" "masc_broadcast_typed" spec.name;
-  Alcotest.(check bool) "requires_join" true spec.requires_join
+  Alcotest.(check string) "name" "masc_broadcast_typed" spec.name
 
 let test_params () =
   (* Issue #8595: was 2 (message + dead format). Now 1 — schema reflects

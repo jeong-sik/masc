@@ -11,7 +11,7 @@ type failure_reason =
       resolved : string option;
     }
   | Failure_no_tool_capable_provider of {
-      cascade_name : string;
+      runtime_id : string;
       detail : string;
     }
   | Failure_provider_error of { kind : string; detail : string }
@@ -109,9 +109,9 @@ let pp_failure_reason fmt = function
       Format.fprintf fmt "runtime_unavailable(base=%s,resolved=%s)"
         base
         (Option.value resolved ~default:"-")
-  | Failure_no_tool_capable_provider { cascade_name; detail } ->
-      Format.fprintf fmt "no_tool_capable_provider(cascade=%s,detail=%s)"
-        cascade_name detail
+  | Failure_no_tool_capable_provider { runtime_id; detail } ->
+      Format.fprintf fmt "no_tool_capable_provider(runtime=%s,detail=%s)"
+        runtime_id detail
   | Failure_provider_error { kind; detail } ->
       Format.fprintf fmt "provider_error(kind=%s,detail=%s)" kind detail
   | Failure_tool_contract_violation { reason_code } ->

@@ -25,7 +25,7 @@ type run_context =
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
-  ; cascade_config_path : string option
+  ; runtime_config_path : string option
   ; gemini_mcp_disabled : bool
   ; approval_mode_effective : string option
   ; approval_mode_derived : bool

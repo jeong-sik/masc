@@ -129,7 +129,7 @@ val prepare_agent_setup
   -> turn_affordances:string list
   -> required_tool_names:string list
   -> config_root:string
-  -> cascade_config_path:string option
+  -> runtime_config_path:string option
   -> gemini_mcp_disabled:bool
   -> approval_mode_effective:string option
   -> approval_mode_derived:bool

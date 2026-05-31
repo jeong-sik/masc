@@ -79,7 +79,7 @@ let assemble_hooks
       ~(turn_affordances : string list)
       ~(required_tool_names : string list)
       ~(config_root : string)
-      ~(cascade_config_path : string option)
+      ~(runtime_config_path : string option)
       ~(gemini_mcp_disabled : bool)
       ~(approval_mode_effective : string option)
       ~(approval_mode_derived : bool)
@@ -134,7 +134,7 @@ let assemble_hooks
          initial_tool_surface.required_tool_candidate_names
      ; missing_required_tool_names = initial_tool_surface.missing_required_tool_names
      ; config_root
-     ; cascade_config_path
+     ; runtime_config_path
      ; gemini_mcp_disabled
      ; approval_mode_effective
      ; approval_mode_derived
@@ -592,7 +592,7 @@ let assemble_hooks
                    ; missing_required_tool_names =
                        computed_surface.missing_required_tool_names
                    ; config_root
-                   ; cascade_config_path
+                   ; runtime_config_path
                    ; gemini_mcp_disabled
                    ; approval_mode_effective
                    ; approval_mode_derived

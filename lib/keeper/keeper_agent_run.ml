@@ -189,7 +189,7 @@ let run_turn
   let start_turn_count = ctx.start_turn_count in
   let receipt_started_at = ctx.receipt_started_at in
   let config_root = ctx.config_root in
-  let cascade_config_path = ctx.cascade_config_path in
+  let runtime_config_path = ctx.runtime_config_path in
   let gemini_mcp_disabled = ctx.gemini_mcp_disabled in
   let approval_mode_effective = ctx.approval_mode_effective in
   let approval_mode_derived = ctx.approval_mode_derived in
@@ -334,7 +334,7 @@ let run_turn
       ~turn_affordances
       ~required_tool_names
       ~config_root
-      ~cascade_config_path
+      ~runtime_config_path
       ~gemini_mcp_disabled
       ~approval_mode_effective
       ~approval_mode_derived

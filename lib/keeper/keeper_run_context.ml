@@ -28,7 +28,7 @@ type run_context =
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
-  ; cascade_config_path : string option
+  ; runtime_config_path : string option
   ; gemini_mcp_disabled : bool
   ; approval_mode_effective : string option
   ; approval_mode_derived : bool
@@ -114,7 +114,7 @@ let prepare_run_context
     in
     resolution.Config_dir_resolver.config_root.path
   in
-  let cascade_config_path = Runtime.config_path () in
+  let runtime_config_path = Runtime.config_path () in
   let gemini_mcp_disabled = keeper_oas_context.gemini_mcp_disabled in
   let approval_mode_effective = keeper_oas_context.gemini_approval_mode in
   let approval_mode_derived = keeper_oas_context.gemini_approval_mode_derived in
@@ -259,7 +259,7 @@ let prepare_run_context
   ; start_turn_count
   ; receipt_started_at
   ; config_root
-  ; cascade_config_path
+  ; runtime_config_path
   ; gemini_mcp_disabled
   ; approval_mode_effective
   ; approval_mode_derived

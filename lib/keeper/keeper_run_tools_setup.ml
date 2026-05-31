@@ -30,7 +30,7 @@ let prepare_agent_setup
       ~(turn_affordances : string list)
       ~(required_tool_names : string list)
       ~(config_root : string)
-      ~(cascade_config_path : string option)
+      ~(runtime_config_path : string option)
       ~(gemini_mcp_disabled : bool)
       ~(approval_mode_effective : string option)
       ~(approval_mode_derived : bool)
@@ -91,7 +91,7 @@ let prepare_agent_setup
         ; required_tool_candidate_names = []
         ; missing_required_tool_names = []
         ; config_root
-        ; cascade_config_path
+        ; runtime_config_path
         ; gemini_mcp_disabled
         ; approval_mode_effective
         ; approval_mode_derived
@@ -960,7 +960,7 @@ let prepare_agent_setup
     ~history_messages ~prompt_metrics ~shared_context
     ~start_turn_count ~generation ~max_turns
     ~cascade_name_string ~is_retry ~turn_affordances
-    ~required_tool_names ~config_root ~cascade_config_path
+    ~required_tool_names ~config_root ~runtime_config_path
     ~gemini_mcp_disabled ~approval_mode_effective
     ~approval_mode_derived ~actionable_signal
     ?max_cost_usd ~trajectory_acc

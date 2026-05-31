@@ -46,7 +46,7 @@ let validate_target_files target_files =
         match kind with
         | Adversarial_eval.Readme -> "README"
         | Adversarial_eval.Design_doc -> "design_doc"
-        | Adversarial_eval.Coord_history -> "room_history"
+        | Adversarial_eval.Coord_history -> "coord_history"
         | Adversarial_eval.Task_history -> "task_history"
         | Adversarial_eval.Governance_history -> "governance_history"
       in

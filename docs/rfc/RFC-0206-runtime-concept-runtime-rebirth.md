@@ -131,7 +131,7 @@ P1-P3(자립 schema/parser/adapter + runtime.ml 재배선 + `tool_strict` 제거
 | cluster | dangling 모듈 | 전략 |
 |---------|--------------|------|
 | dispatch | Runtime_runner/oas_runner/agent_context/transport(+14 sub)/wire_overlay | **restore-rename → Runtime_***; selection 2건 외과 제거 |
-| catalog-config-types | Runtime_catalog_runtime/runtime/runtime_candidate/config/decl/declarative_* | 이미 구축된 lib/runtime(Runtime/Runtime_schema/Runtime_toml/Runtime_adapter)로 mechanical 치환 |
+| catalog-config-types | legacy runtime catalog/runtime_candidate/config/decl/declarative_* | 이미 구축된 lib/runtime(Runtime/Runtime_schema/Runtime_toml/Runtime_adapter)로 mechanical 치환 |
 | error-events | Runtime_error_classify/internal_error/event_bridge/events/inference | 생존 keeper_meta_contract 재사용 / 일부 re-home |
 | health-capacity-obs | Runtime_health_tracker/observation/saturation_signal/capacity_probe/slot | DISCARD 싱글톤, observation→single attempt metadata demote |
 | fsm-liveness-preflight | Runtime_fsm/attempt_fsm/preflight_state/attempt_liveness*/deadline | keeper_turn_phase substrate / delete |
@@ -166,7 +166,7 @@ P1-P3(자립 schema/parser/adapter + runtime.ml 재배선 + `tool_strict` 제거
 
 ### DISCARD / DELETE-CALLSITE (substrate 0)
 
-- **catalog**: `Runtime_catalog_runtime.{snapshot,Validated,Validated_with_rejections,Serving_last_known_good,state_to_yojson,rejection_*,resolve_strategy,resolve_*_max_concurrent,resolve_declared_name}` — routing 아티팩트, callsite 삭제.
+- **catalog**: legacy runtime catalog snapshot/validation/resolution APIs — routing 아티팩트, callsite 삭제.
 - **routing**: `Runtime_routes.logical_use`→string literal("keeper_turn"), `Runtime_routes_resolve.runtime_id_for_use`→`Runtime.get_default_runtime_id ()`, `Runtime_strategy.*`/`Runtime_strategy_trace.record` → **callsite에서 identity/no-op inline** (⚠️ 저자 override: U 에이전트가 제안한 `Runtime_strategy` 신규 모듈은 multi-candidate 재성장이므로 **거부**. single binding에서 order_candidates는 항등, record_choice는 no-op).
 - **misc**: `Runtime_trust_persist.start_snapshot_fiber` → 삭제(JSONL 스냅샷 불요, 관측은 Neo4j/Prometheus).
 

@@ -26,9 +26,9 @@
   `catch_all_arms`/`contains_substring_defs` lose automated tracking and are
   now handled at PR review per the CLAUDE.md workaround-rejection bar.
 - RFC-0203 Phase 3: `sidecars/discord-bot/` (Python connector, ~5000
-  LoC) deleted. `Doctor_dispatch.known_sidecars` no longer lists
-  "discord" — the doctor dispatcher only manages remaining external
-  sidecars (slack/telegram/imessage/cli). The Channel Gate HTTP
+  LoC) deleted. The external sidecar diagnostics surface no longer lists
+  "discord"; only remaining external sidecars
+  (slack/telegram/imessage/cli) stay routeable. The Channel Gate HTTP
   routes (`/api/v1/gate/message` etc.) remain unchanged and continue
   to serve the other external connectors.
 
@@ -1868,80 +1868,6 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 
 ### Changed
 
-- **Doctor phase 1 — 시스템 전반 진단.** MASC 전체(서버 + 5 sidecar)를
-  동일한 `Check/Severity/AutoFix` 모델로 진단하는 Doctor 축을 CLI · HTTP ·
-  Dashboard 3계층으로 일괄 구축. `flutter doctor` / `brew doctor` 외형 참고.
-  - **CLI** — `masc-mcp doctor [config|sidecar <name>|all] [--json]`
-    (`bin/main_eio.ml` 의 `Cmd.group` 으로 backward-compat 유지, 무인자 호출
-    은 기존 `config` 와 동일).
-  - **Fan-out** — `doctor all` 은 config + `discord|slack|telegram|imessage|cli`
-    sidecar 를 순차 실행하고 Korean aggregate summary (`정상/경고/오류`) +
-    per-doctor breakdown 을 출력. `--json` 은 envelope 형태
-    (`{title, doctors[{name, kind, exit_code, payload}], summary, exit_code}`)
-    로 CI · 대시보드 contract 제공. `Doctor_dispatch.aggregate_exit_code` 는
-    `error > warn > ok` 우선순위와 unknown rc → error 상향을 보장.
-  - **HTTP endpoint** — `GET /api/v1/dashboard/doctor` (phase 1: self-subprocess
-    forward, `with_public_read` 권한). 실패 시 5xx + `{error, hint}` 로 운영자
-    원인 안내.
-  - **Dashboard UI** — Lab 탭 → inspector → **Doctor** sub-tab. `<DoctorPanel />`
-    이 envelope 을 poll 해 summary header + 3-column grid 로 렌더. 카드 클릭
-    시 drill-down 으로 sidecar `checks[]` 또는 config `warnings[]` 표시, 자동
-    치유 가능한 check 에는 accent 배지 (실제 `--fix` 실행은 CLI 유지).
-  - **Observability** — `doctor --fix` 가 `FixOutcome` 리스트를 캡처해
-    "자가 치유 실행:" 블록으로 실패 격리(try/except)와 결과 렌더. 세 상태
-    (fix 성공·환경 미해결 / fix 예외 / fix 미정의) 를 구분 가능.
-  - **출력 polish** — sidecar `render_pretty` 제목을 markdown `#` 대신
-    underline 스타일로 전환해 `doctor all` divider 와 시각적 일관성 확보.
-
-  관련 PR (모두 2026-04-19 merge):
-  - Framework (이전 배포): #8375 / #8406 / #8410 / #8432 / #8442 / #8452 / #8457 / #8468
-  - Observability: #8478 (FixOutcome)
-  - CLI dispatch/fan-out: #8481 #8502 #8518
-  - Backend endpoint: #8525
-  - Dashboard UI: #8533 #8534 #8535 #8540 #8541
-  - Polish / docs: #8539 #8536
-
-  Docs: `docs/DOCTOR-ARCHITECTURE.md`, `docs/CONFIG-DOCTOR.md`.
-
-  후속 (phase 2 / 축 9): server endpoint in-process 전환(Eio.Process ~cwd),
-  `--fix` 버튼 HITL approval, 실제 callback 확장.
-
-- **CDAL verdict attribution on verification approve/reject legs (#8731).**
-  `tool_task.ml` 의 `Approve_verification` / `Reject_verification` 핸들러에
-  `Cdal_verdict_gate.gate_check` 호출을 추가. FSM-enabled 경로는
-  `Done_action` 를 우회하기 때문에 기존 CDAL gate 가 verification 승인
-  시점에 동작하지 않아 `/api/v1/attribution/summary` 에 `cdal_verdict`
-  gate 가 0 entries 로 남았다. 이제 `Env_config_runtime.Cdal.gate_enabled()`
-  (default true) 가 켜진 환경에서 approve/reject 양쪽이 verdict lookup +
-  `Dashboard_attribution` ring 기록을 남긴다.
-
-- **Verifier-role affordance gating (#8715).**
-  `keeper_unified_turn.ml` 의 `observed_triggers_of_observation` /
-  `observed_affordances_of_observation` 에 `?meta` optional param 을 추가하고
-  `pending_verification` trigger 및 `task_verify` affordance 를
-  `is_verifier_role_keeper` 가 참인 keeper 에만 노출한다. 그 외 persona 는
-  world observation 에서 verification 관련 신호를 보지 않으므로 fleet 노이즈
-  감소. `?meta=None` 호출은 legacy surface-to-all 유지 (diagnostics / snapshot
-  caller 호환).
-
-### Changed
-
-- **OAS pin bump → `main@54f4aeab` (v0.162.0 + Gemini policy fix).**
-  Carries upstream OAS `#1048 fix(gemini_cli): use sentinel name to
-  disable MCP, avoiding empty-string policy crash`. Gemini CLI 0.38
-  introduced a Policy Engine that rejects empty `--allowed-mcp-server-names`
-  entries, which crashed every keeper turn that set
-  `OAS_GEMINI_NO_MCP=1` (i.e. all 4 built-in keepers — scholar / analyst
-  / executor / verifier — and any runtime vendoring Gemini). OAS now
-  passes the sentinel name `__oas_no_mcp__`. Dependency floor and
-  declared base version remain `0.162.0`.
-- **OAS pin bump → `v0.162.0`.** Raises the `agent_sdk` dependency floor
-  from `0.161.0` to `0.162.0` and pins OAS `main@3b0409d2`, pulling in
-  the provider-registry context-window fix (#1040) plus the 0.162.0
-  release rollup (#1042) without leaving `check-oas-pin` drift warnings.
-
-### Reliability
-
 - **FD leak SSOT (#8538 Tier 2).** PR #8543 이 3 hot-path call site 에 inline
   try/with 으로 pipe fd leak 을 막았지만, 같은 패턴을 여러 곳에서 재유도하면
   drift 가 발생한다. 공통 combinator `With_process.with_process_in` /
@@ -2977,7 +2903,7 @@ had the full Phase 2 release to migrate.
 - Tool spec handler_binding required variant for type-safe dispatch (#6073)
 - OAS pin bump to 120710a with Uncertain.t (#6114)
 - Hardened OAS ownership boundaries (#6101)
-- OAS pin SSOT and doctor checks relaxation (#6113)
+- OAS pin SSOT and diagnostics checks relaxation (#6113)
 
 ### Fixed
 - Discord keeper session isolation per room (#6094)
@@ -3031,7 +2957,7 @@ had the full Phase 2 release to migrate.
 ### Added
 - Genuine HITL approval pipeline — Eio.Promise fiber suspension, MCP approval tools (#5907 Phase 1, #5955)
 - Graduated boring-turn guard — 5-level tool_choice escalation to cut idle token waste (#5968)
-- OAS pin drift doctor — local switch validation in Makefile build/test targets (#5958)
+- OAS pin drift diagnostics — local switch validation in Makefile build/test targets (#5958)
 - Spawn stderr capture + cloexec pipes — child process observability and hang prevention (#5960)
 - Approval audit log — persistent JSONL records for pending/resolved/expired events (#5969)
 - Git clone sandboxing in keeper_shell (#5930)

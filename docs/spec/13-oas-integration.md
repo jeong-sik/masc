@@ -175,8 +175,8 @@ type run_result = {
 
 `run_named`가 runtime 이름 기반 MODEL 호출을 제공한다:
 
-1. `keeper_runtime.toml`의 `[routes.*]` 대상 또는 호출자가 지정한 프로필 이름을 RFC-0058 declarative catalog에서 해석한다.
-2. 대상은 `[tier.<name>]` / `[runtime.<name>]` / binding alias로 resolve되고, `Runtime_catalog_runtime`이 ordered weighted entries를 `Provider_config.t list`로 변환한다.
+1. `keeper_runtime.toml`의 `[routes.*]` 대상 또는 호출자가 지정한 runtime 이름을 active runtime config에서 해석한다.
+2. 대상은 `[tier.<name>]` / `[runtime.<name>]` / binding alias로 resolve되고, runtime resolution이 ordered weighted entries를 `Provider_config.t list`로 변환한다.
 3. MASC가 `Runtime_fsm.decide`로 runtime FSM을 직접 구동한다.
 4. 각 provider에 대해 OAS single-provider `Agent.run`을 호출한다.
 5. `accept` 콜백으로 응답 유효성을 검증한다.
@@ -256,22 +256,22 @@ MASC Types.tool_schema
 ### 6.1 Runtime Name Resolution
 
 MASC owns runtime name resolution. The keeper path resolves `runtime_id`
-through the active MASC catalog and then calls OAS as a single-provider runtime
-for each selected attempt. OAS provider catalog and capability manifests are
+through active MASC runtime resolution and then calls OAS as a single-provider runtime
+for each selected attempt. OAS provider registry and capability manifests are
 generic execution contracts; they are not the MASC runtime plane.
 
 ```
 runtime_id (e.g. "keeper", "verifier", "context_router")
   -> config/keeper_runtime.toml [routes] / profile lookup
-  -> MASC catalog model labels
-  -> MASC/OAS adapter resolves labels against OAS Provider_registry/catalog
+  -> MASC runtime labels
+  -> MASC/OAS adapter resolves labels against OAS Provider_registry
   -> Provider_config.t list (ordered by MASC policy)
   -> OAS Agent.run single provider per attempt
 ```
 
 Provider/model-free here means MASC policy code does not branch on vendor or
 model literals. Provider/model ids remain operator-authored config data and may
-come from an OAS provider catalog for cloud APIs, local Provider-D-compatible
+come from an OAS provider registry for cloud APIs, local Provider-D-compatible
 servers, or non-interactive subscription CLI runtimes.
 
 ### 6.2 Runtime Inference Parameters
@@ -462,7 +462,7 @@ Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate
 | Checkpoint | Partial | shared worker/runtime paths는 OAS Checkpoint를 사용한다. Public `Oas_worker` surface의 extra checkpoint JSON은 neutral `checkpoint_sidecar` 이름을 쓰지만 keeper 경로는 여전히 `lib/keeper/keeper_context_runtime.ml`의 wrapper + serialized context를 유지 |
 | Memory bridge | Partial | Long_term + Episodic + Procedural bridged. Working/Scratchpad는 OAS 내부. 전체 통합은 미완 |
 | Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |
-| Runtime config | Complete | runtime_id -> MASC catalog/profile -> OAS Provider_registry/catalog -> Provider_config.t |
+| Runtime config | Complete | runtime_id -> MASC runtime config/profile -> OAS Provider_registry -> Provider_config.t |
 | Verifier | Complete | PreToolUse hook + Guardrails adapter |
 | Model resolution | Complete | oas_model_resolve.ml이 Provider_Registry SSOT 사용 |
 | Tool bridge | Complete | MASC tool_schema -> OAS Tool.t 변환 |
@@ -528,7 +528,7 @@ Detailed implementation checklist lives in
 1. **의존 방향은 단방향이다**: MASC -> OAS. OAS 코드에 MASC import가 존재하면 설계 위반이다.
 2. **MASC는 OAS Agent.run을 사용한다**: 에이전트 생명주기를 자체 재구현하지 않는다. `Runtime.call` 직접 사용은 금지.
 3. **Message 타입은 공유한다**: `Agent_sdk.Types.message`가 MASC와 OAS 모두의 메시지 타입이다. 변환 레이어 없음.
-4. **Runtime name이 model을 추상화한다**: MASC policy code에 구체적 provider/model 이름이 하드코딩되지 않는다. runtime_id -> keeper_runtime.toml/catalog -> Provider_registry/catalog 체인.
+4. **Runtime name이 model을 추상화한다**: MASC policy code에 구체적 provider/model 이름이 하드코딩되지 않는다. runtime_id -> keeper_runtime.toml runtime config -> Provider_registry 체인.
 5. **Event_bus prefix는 `masc:`이다**: MASC 이벤트는 반드시 이 prefix를 사용한다. SSE bridge가 이 prefix로 필터링한다.
 6. **Verifier는 read-only를 건너뛴다**: read/grep/search/status 류 도구는 MODEL 호출 없이 Pass를 반환한다.
 7. **Checkpoint는 session_id로 네임스페이스된다**: 동일 agent의 다른 세션 checkpoint와 충돌하지 않는다.

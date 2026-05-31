@@ -6,7 +6,6 @@ code_refs:
   - lib/provider_tool_support.ml
   - scripts/lint/provider-adapter-removal-ratchet.sh
   - docs/OAS-MASC-BOUNDARY.md
-  - docs/rfc/RFC-0058-declarative-runtime-config.md
 ---
 
 # Provider Adapter Removal Record

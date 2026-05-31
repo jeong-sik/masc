@@ -55,7 +55,7 @@ call site and (b) a case-split in an existing fail-open policy.
 | Strict provider filter (returns rejection) | `Runtime_health_filter.filter_healthy_strict` | `lib/runtime/runtime_health_filter.mli:64` |
 | Per-provider cooldown read | `Runtime_health_tracker.is_in_cooldown : t -> provider_key:string -> bool` | `lib/runtime/runtime_health_tracker.mli:276` |
 | `Phase_gating → Done(Skipped)` emission template (with `record_pre_dispatch_terminal_observation` + `Trajectory.Gated`) | already in 4 arms (`supervisor_stop`, `non_executable_phase`, etc.) | `lib/keeper/keeper_unified_turn.ml:155,164,195,204,235,415,466,479` |
-| Runtime-recovery probe (already in production) | `runtime_recovered` closure using `Runtime_catalog_runtime.resolve_named_providers_strict` + `Runtime_health_filter.filter_healthy_strict` | `lib/keeper/keeper_stale_watchdog.ml:749-770` |
+| Runtime-recovery probe (already in production) | `runtime_recovered` closure using named-provider runtime resolution + `Runtime_health_filter.filter_healthy_strict` | `lib/keeper/keeper_stale_watchdog.ml:749-770` |
 | Current fail-open policy site (decision point) | `fail_open_health_filtered_candidates` + the `health_cooldown_fail_open` branch | `lib/keeper/keeper_turn_driver.ml:325-345` |
 
 The watchdog and the (to-be-added) phase_gating gate need the **same**

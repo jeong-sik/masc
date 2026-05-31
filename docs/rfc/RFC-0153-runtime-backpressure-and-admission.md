@@ -451,7 +451,7 @@ Phase B/C/E는 세 framework 모두 안 함. **완화**: tower::limit::Concurren
 
 ### 6.8 공격 #8 (post-merge, Q7 audit 기반): Phase B 무차별 admission → side task starvation
 
-**증상**: Phase A.1 merge (PR #16965) 후 Q7 audit에서 `Runtime_catalog_runtime.resolve_named_providers_strict` 의 *4-5개 독립 entry point* 가 발견됨:
+**증상**: Phase A.1 merge (PR #16965) 후 Q7 audit에서 runtime named-provider resolution의 *4-5개 독립 entry point* 가 발견됨:
 - `keeper_turn_driver` (main keeper turn — main production traffic)
 - `keeper_stale_watchdog:692` (runtime health probe — *production이 saturated일 때 더 자주 호출되어야 함*)
 - `keeper_run_tools:757` (tool execution)

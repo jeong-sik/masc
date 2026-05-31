@@ -89,7 +89,7 @@ flowchart TD
     A[keeper_msg args] --> B[preflight_keeper_msg]
     B --> C{name/message/direct_reply valid? keeper exists?}
     C -- no --> X[typed error JSON]
-    C -- yes --> D[resolve runtime name from live catalog]
+    C -- yes --> D[resolve runtime name from active runtime config]
     D --> E[resilience/API-key/local endpoint preflight]
     E --> F[build prompt callback]
     F --> G[dynamic context: recovery snapshot, long-term memory, skills, worktree changes, telemetry, turn instructions, required tools]
@@ -151,7 +151,7 @@ sequenceDiagram
         alt preflight fails
             D-->>D: typed error JSON
         else preflight ok
-            D->>C: resolve runtime from live catalog
+            D->>C: resolve runtime from active runtime config
             C->>R: Keeper_agent_run.run_turn (bypass phase gate)
         end
     end
@@ -269,7 +269,7 @@ correlator the receipt does.
   a structured outcome before the runtime fires HTTP.  401-after-silent-
   fall-back is no longer the first signal an operator sees.
 
-- **`Runtime_catalog_validator.codex_with_bound_actor_only_issue`** (#11164)
+- **runtime validation issue carrier** (#11164)
   — boot-time warn for runtimes that include `cli-tool-a` without a
   bound-actor-tolerant fallback.  Surfaces the misconfiguration once
   instead of paying per-turn `no_tool_capable_provider` events.

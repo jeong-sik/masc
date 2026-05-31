@@ -70,7 +70,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~base_path:state.room_config.base_path
     ~cluster_name:state.room_config.backend_config.Backend_types.cluster_name
     ();
-  Tool_usage_log.install ();
+  (* Inject keeper FD/disk pressure handling at the boundary so the generic
+     Tool_usage_log surface does not reference the keeper subsystem directly
+     (Tool->Keeper dependency direction; this server module is the right place
+     to name keeper, since the server orchestrates keepers). *)
+  Tool_usage_log.install ~on_io_failure:(fun ~site exn ->
+    Keeper_fd_pressure.note_exception ~site exn;
+    Keeper_disk_pressure.note_exception ~site exn);
   (* Keeper tool call I/O log: full input/output for dashboard inspector *)
   Keeper_tool_call_log.init
     ~base_path:state.room_config.base_path

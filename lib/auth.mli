@@ -284,10 +284,10 @@ val authorize_tool_v2 :
   string -> agent_name:string -> token:string option ->
   tool_name:string -> (unit, masc_error) result
 
-(** {1 Room Secret} *)
+(** {1 Coord Secret} *)
 
 val init_coord_secret : string -> string
-(** [init_coord_secret config] generates and persists a room secret.
+(** [init_coord_secret config] generates and persists a coord secret.
     Returns the raw secret (shown once). *)
 
 val verify_coord_secret : string -> string -> bool

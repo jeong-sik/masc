@@ -160,7 +160,7 @@ type blocker_class =
         cohort during a fleet stall (observed: 6/14 keepers in
         cohort=stale_turn_timeout). *)
   | Stale_fleet_batch
-    (** Legacy blocker class for pre-existing fleet-batch state. Current
+    (** Retired blocker class for pre-existing fleet-batch state. Current
         fleet-batch detection is observation-only and should not stamp keeper
         meta; stale keepers use their per-keeper watchdog blocker instead. *)
   | Oas_agent_execution_timeout
@@ -442,7 +442,7 @@ let runtime_attempt_outcome_of_json = function
      | Some (`String "failure") ->
        (match List.assoc_opt "message" fields with
         | Some (`String message) -> Some (`Failure message)
-        (* DET-OK: legacy attempt rows encoded failure without a message;
+        (* DET-OK: retired attempt rows encoded failure without a message;
            keep the lossy historical record instead of dropping it. *)
         | _ -> Some (`Failure ""))
      | _ -> None)
@@ -720,11 +720,11 @@ let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_me
   { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
 ;;
 
-let keeper_legacy_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
+let removed_keeper_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
 
-let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
+let reject_removed_model_args ~tool_name (args : Yojson.Safe.t) =
   let present =
-    keeper_legacy_model_arg_names
+    removed_keeper_model_arg_names
     |> List.filter (fun key ->
       match Json_util.assoc_member_opt key args with
       | Some `Null -> false
@@ -735,7 +735,7 @@ let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
   | fields ->
     Error
       (Printf.sprintf
-         "legacy keeper model args removed for %s: %s. Use runtime_id; concrete \
+         "removed keeper model args for %s: %s. Use runtime_id; concrete \
           provider/model identity is resolved from the default runtime."
          tool_name
          (String.concat ", " fields))

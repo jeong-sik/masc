@@ -128,30 +128,18 @@ let parse_runtime_id_field_opt args key =
             Error (Printf.sprintf "invalid %s '%s': %s" key raw detail)
 
 let parse_runtime_id_opt args =
-  match
-    parse_runtime_id_field_opt args "runtime_id",
-    parse_runtime_id_field_opt args "runtime_id"
-  with
-  | Error msg, _ | _, Error msg -> Error msg
-  | Ok (Some runtime_id), Ok (Some legacy_runtime_id)
-    when runtime_id <> legacy_runtime_id ->
-      Error
-        (Printf.sprintf
-           "runtime_id (%s) and legacy runtime_id (%s) must match"
-           runtime_id legacy_runtime_id)
-  | Ok (Some runtime_id), _ -> Ok (Some runtime_id)
-  | Ok None, Ok legacy_runtime_id_opt -> Ok legacy_runtime_id_opt
+  parse_runtime_id_field_opt args "runtime_id"
 
 let resolve_tool_name_list ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback
   |> Option.value ~default:[]
   |> normalize_tool_name_list
 
-let reject_legacy_tool_access_kind access_json =
+let reject_removed_tool_access_kind access_json =
   match Json_util.assoc_member_opt "kind" access_json with
   | Some (`String ("restricted" | "unrestricted")) ->
       Error
-        "tool_access.kind must be \"preset\" or \"custom\"; legacy kinds \"restricted\" and \"unrestricted\" are not supported for this endpoint"
+        "tool_access.kind must be \"preset\" or \"custom\"; removed kinds \"restricted\" and \"unrestricted\" are not supported for this endpoint"
   | _ -> Ok ()
 
 let parse_tool_access_input (args : Yojson.Safe.t) :
@@ -169,7 +157,7 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
   else
     match Json_util.assoc_member_opt "tool_access" args with
     | Some ((`Assoc _) as access_json) -> (
-        match reject_legacy_tool_access_kind access_json with
+        match reject_removed_tool_access_kind access_json with
         | Error msg -> Error msg
         | Ok () -> (
             match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
@@ -187,7 +175,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
   if not (validate_name name) then
     Error (tool_result_error "invalid keeper name (allowed: [A-Za-z0-9._-])")
   else
-    match Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_up" args with
+    match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_up" args with
     | Error e -> Error (tool_result_error e)
     | Ok () ->
     match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_up" args with

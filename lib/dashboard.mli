@@ -26,9 +26,8 @@ type scope =
   | All
   | Current
 
-type room_snapshot = Dashboard_labels.room_snapshot = {
-  room_id : string;
-  is_current : bool;
+type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
+  workspace_id : string;
   agents : Masc_domain.agent list;
   tasks : Masc_domain.task list;
   messages : Masc_domain.message list;

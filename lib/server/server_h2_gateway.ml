@@ -581,8 +581,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/rooms"
-      | `GET, "/api/v1/rooms" ->
+      | `GET, "/api/v1/dashboard/workspace" ->
           with_server_state h2_reqd (fun state ->
             let limit =
               Server_utils.int_query_param httpun_request "limit" ~default:50
@@ -594,7 +593,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               | None -> trimmed_query_param httpun_request "agent"
             in
             let json =
-              Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me
+              Dashboard_workspace.json ~config:state.Mcp_server.room_config ?me
                 ~limit ()
             in
             h2_respond_json_value h2_reqd json

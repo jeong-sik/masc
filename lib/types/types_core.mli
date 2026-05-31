@@ -55,23 +55,7 @@ val iso8601_of_unix_seconds : float -> string
 val normalize_agent_last_seen : joined_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
 val short_json_repr : Yojson.Safe.t -> string
 
-type room_info =
-  { id : string
-  ; name : string
-  ; description : string option [@default None]
-  ; created_at : string
-  ; created_by : string option [@default None]
-  ; agent_count : int [@default 0]
-  ; task_count : int [@default 0]
-  }
-[@@deriving yojson { strict = false }, show]
-
-type room_registry =
-  { rooms : room_info list [@default []]
-  ; default_room : string [@default "default"]
-  }
-[@@deriving yojson { strict = false }, show]
-
+type task_action =
 type task_action =
   | Claim
   | Start

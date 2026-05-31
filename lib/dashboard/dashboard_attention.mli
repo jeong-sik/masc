@@ -1,7 +1,7 @@
 (** Dashboard Attention — Collect actionable items that require
     operator intervention.
 
-    Pure functions. Scans {!Dashboard_labels.room_snapshot} values
+    Pure functions. Scans {!Dashboard_labels.workspace_snapshot} values
     to produce a sorted list of items the operator should act on.
     Each item includes a suggested MCP tool name. *)
 
@@ -32,7 +32,7 @@ val to_severity : severity -> Severity.t
     (Critical first). *)
 val collect :
   now:float ->
-  Dashboard_labels.room_snapshot list ->
+  Dashboard_labels.workspace_snapshot list ->
   attention_item list
 
 (** {1 Presentation} *)

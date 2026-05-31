@@ -1,5 +1,5 @@
 (** Keeper_context_runtime — shared keeper context utilities: working context,
-    checkpoint management, compaction, room presence, system prompts,
+    checkpoint management, compaction, system prompts,
     text processing, proactive prompt helpers, and proactive generation.
 
     Working context types live in {!Keeper_types}.
@@ -285,16 +285,6 @@ val resolve_max_context_resolution
   -> max_context_resolution
 
 val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
-type room_presence_error = {
-  room_id : string;
-  exn_msg : string;
-}
-
-val ensure_keeper_room_presence
-  :  Coord.config
-  -> keeper_meta
-  -> keeper_meta * room_presence_error list
-
 (** {1 Mention Detection} *)
 (** {1 Mention Detection} *)
 

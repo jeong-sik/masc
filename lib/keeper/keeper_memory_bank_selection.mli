@@ -11,7 +11,6 @@ type keeper_policy_observation =
   message_chars : int;
   total_turns : int;
   active_goal_count : int;
-  joined_room_count : int;
   last_turn_ago_s : float;
 }
 val observation_has_question : string -> bool

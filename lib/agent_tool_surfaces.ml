@@ -163,7 +163,7 @@ let local_worker_tool_schemas ?names () :
 let admin_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Admin
 
-(** Role-catalog candidates for agent_streams and fleet leaders.
+(** Role-catalog candidates for workspace leads and fleet leaders.
     SSOT: Tool_catalog_surfaces.workspace_role_tools.
     [build_tool_catalog] filters against surfaced tool names so stale
     entries cannot escape into prompts. *)

@@ -7,7 +7,7 @@
  * the code document store + workspace-file response fallback).
  * Both branches use the LSP "plain text" identifier `'text'`; a drift
  * here would silently change the fallback language between the
- * agentStream's optimistic open and the client's actual didOpen.
+ * workspace store's optimistic open and the client's actual didOpen.
  *
  * Keep this module dependency-free so it can grow into the natural
  * owner for LSP-related constants (file-extension → language id maps,

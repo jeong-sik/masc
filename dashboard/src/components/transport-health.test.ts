@@ -44,7 +44,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
     },
     sse: {
       sessions_observer: 1,
-      sessions_agentStream: 0,
+      sessions_agent_stream: 0,
       sessions_presence: 0,
       sessions_total: 1,
       external_subscribers: 0,
@@ -290,7 +290,7 @@ describe('TransportHealthPanel', () => {
         },
         sse: {
           sessions_observer: 1,
-          sessions_agentStream: 0,
+          sessions_agent_stream: 0,
           sessions_presence: 1,
           sessions_total: 2,
           external_subscribers: 0,
@@ -409,7 +409,7 @@ describe('TransportHealthPanel', () => {
 describe('filterHotSessions', () => {
   const sessions: HotSession[] = [
     { session_id: 'aaaa1111-2222-3333-4444-555566667777', kind: 'observer', queue_depth: 5, last_event_id: 101, idle_seconds: 3 },
-    { session_id: 'bbbb9999-8888-7777-6666-555544443333', kind: 'agentStream', queue_depth: 12, last_event_id: 202, idle_seconds: 9 },
+    { session_id: 'bbbb9999-8888-7777-6666-555544443333', kind: 'agent_stream', queue_depth: 12, last_event_id: 202, idle_seconds: 9 },
     { session_id: 'cccc0000-1111-2222-3333-444455556666', kind: 'external', queue_depth: 3, last_event_id: 303, idle_seconds: 30 },
   ]
 
@@ -433,7 +433,7 @@ describe('filterHotSessions', () => {
   it('matches substring of kind', () => {
     const result = filterHotSessions(sessions, 'workspace')
     expect(result).toHaveLength(1)
-    expect(result[0]!.kind).toBe('agentStream')
+    expect(result[0]!.kind).toBe('agent_stream')
   })
 
   it('matches last_event_id by numeric-string substring', () => {
@@ -451,9 +451,9 @@ describe('filterHotSessions', () => {
   })
 
   it('trims the query before matching', () => {
-    const result = filterHotSessions(sessions, '  agentStream  ')
+    const result = filterHotSessions(sessions, '  agent_stream  ')
     expect(result).toHaveLength(1)
-    expect(result[0]!.kind).toBe('agentStream')
+    expect(result[0]!.kind).toBe('agent_stream')
   })
 
   it('returns an empty array when nothing matches', () => {
@@ -680,7 +680,7 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
     },
     sse: {
       sessions_observer: 1,
-      sessions_agentStream: 0,
+      sessions_agent_stream: 0,
       sessions_presence: 0,
       sessions_total: 1,
       external_subscribers: 0,

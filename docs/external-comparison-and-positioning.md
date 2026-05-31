@@ -21,7 +21,7 @@
 
 - **Single-turn latency**: MASC adds pre-dispatch gates (phase, livelock, runtime build) that a direct SDK runner skips. The tradeoff is determinism over speed.
 - **Agent autonomy**: Keepers run supervised cycles, not self-driven loops. The tradeoff is operator visibility over agent initiative.
-- **Minimal setup**: MASC requires keeper_runtime.toml, keeper personas, and a running agentStream. The tradeoff is multi-tenant governance over single-user convenience.
+- **Minimal setup**: MASC requires keeper_runtime.toml, keeper personas, and a running agent stream. The tradeoff is multi-tenant governance over single-user convenience.
 
 ### What MASC optimizes for
 
@@ -43,7 +43,7 @@
 |---|---|---|
 | One-shot script, single provider, developer machine | Direct SDK call is sufficient | Overhead exceeds value |
 | Multi-step workflow with tool failure retry | SDK runner with retry config | Keeper turn FSM handles retry as runtime rotation with receipt proof |
-| Fleet of agents with different policies | Manage N SDK clients externally | Single agentStream with per-keeper phase and runtime rules |
+| Fleet of agents with different policies | Manage N SDK clients externally | Single agent stream with per-keeper phase and runtime rules |
 | Operator must approve or audit every action | Not supported natively | Phase gate blocks autonomous turns until operator releases |
 | Cross-provider failover (Provider-D down → Provider-K) | Manual fallback code | Runtime router materializes alternatives automatically |
 

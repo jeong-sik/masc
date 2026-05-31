@@ -20,7 +20,7 @@
 
 이 surface는 다음을 한 번에 보여준다.
 
-- live SSE observer/agentStream 수
+- live SSE observer/agent stream 수
 - gRPC subscriber/heartbeat 상태
 - WebSocket/WebRTC 활성도
 - queue/backpressure hot session

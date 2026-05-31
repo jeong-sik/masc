@@ -20,8 +20,11 @@ type archetype_axis =
   }
 
 let default_generation_language = "ko"
+(* Lazy: [Runtime.get_default_runtime_id] fail-fasts until [Runtime.init_default]
+   runs at startup (RFC-0206 §2.1). A module-level eager binding evaluates before
+   that, crashing boot; defer to first use so it resolves post-init. *)
 let default_generation_runtime_id =
-  Runtime.get_default_runtime_id ()
+  lazy (Runtime.get_default_runtime_id ())
 let default_temperature = 0.7
 let default_max_tokens = 2500
 let default_generation_proactive_enabled = false

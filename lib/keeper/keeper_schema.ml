@@ -119,7 +119,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("runtime_id", `Assoc [
           ("type", `String "string");
-          ("default", `String Persona_contract.default_generation_runtime_id);
+          ("default", `String (Lazy.force Persona_contract.default_generation_runtime_id));
           ("description", `String "Runtime id used to draft the persona.");
         ]);
         ("temperature", `Assoc [

@@ -14,7 +14,7 @@ include Coord_broadcast
 open Coord_backlog
 open Coord_identity
 
-(* activity_room_id removed — namespace retired (#unify-namespace). *)
+(* activity_coord_id removed — namespace retired (#unify-namespace). *)
 
 (* #9795: FSM drift observability. [masc_coord] sits below the
    [masc_mcp] library in the dep graph, so it cannot call

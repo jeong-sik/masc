@@ -31,7 +31,7 @@ let node_status_to_string = function
   | Approved -> "approved" | Denied -> "denied"
   | Running -> "running" | Paused -> "paused"
   | Stopped -> "stopped" | Finalized -> "finalized"
-  | Observed -> "observed" | Coord -> "room" | Unset -> ""
+  | Observed -> "observed" | Coord -> "coord" | Unset -> ""
 
 (** Span status: separate from node_status (different lifecycle).
     @since 7182 *)
@@ -69,7 +69,7 @@ type event = {
   seq : int;
   ts_ms : int;
   ts_iso : string;
-  room_id : string;
+  coord_id : string;
   kind : string;
   actor : entity_ref option;
   subject : entity_ref option;
@@ -284,7 +284,7 @@ let event_to_yojson (value : event) =
       ("seq", `Int value.seq);
       ("ts_ms", `Int value.ts_ms);
       ("ts_iso", `String value.ts_iso);
-      ("room_id", `String value.room_id);
+      ("coord_id", `String value.coord_id);
       ("kind", `String value.kind);
       ( "actor",
         match value.actor with
@@ -306,14 +306,14 @@ let event_of_yojson (json : Yojson.Safe.t) : event option =
   match Safe_ops.json_int_opt "seq" json,
         Safe_ops.json_int_opt "ts_ms" json,
         Safe_ops.json_string_opt "ts_iso" json,
-        Safe_ops.json_string_opt "room_id" json,
+        Safe_ops.json_string_opt "coord_id" json,
         Safe_ops.json_string_opt "kind" json with
-  | Some seq, Some ts_ms, Some ts_iso, Some room_id, Some kind ->
+  | Some seq, Some ts_ms, Some ts_iso, Some coord_id, Some kind ->
     let actor = Option.bind (Safe_ops.json_member_opt "actor" json) entity_of_yojson in
     let subject = Option.bind (Safe_ops.json_member_opt "subject" json) entity_of_yojson in
     let payload = Safe_ops.json_member_opt "payload" json |> Option.value ~default:(`Assoc []) in
     let tags = Safe_ops.json_string_list "tags" json in
-    Some { seq; ts_ms; ts_iso; room_id; kind; actor; subject; payload; tags }
+    Some { seq; ts_ms; ts_iso; coord_id; kind; actor; subject; payload; tags }
   | _ -> None
 
 let graph_node_to_yojson (value : graph_node) =

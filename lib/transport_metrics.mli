@@ -17,7 +17,7 @@
     [grpc_port] / [ws_port] (env-derived), [set_agent_heartbeat_age]
     / [inc_agent_stale] (per-agent labels, internal-only), the
     JSON helpers (\[assoc_field], [int_field], [int_field_opt],
-    [int_option_json], [room_id_from_config], [cluster_summary_json]),
+    [int_option_json], [coord_id_from_config], [cluster_summary_json]),
     [http_listener_mode], [primary_path], [queue_pressure],
     [tcp_port_reachable], [hot_session_json], the
     [ws_delivery_metric_names] data table + its type.  All

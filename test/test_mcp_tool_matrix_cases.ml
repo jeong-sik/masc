@@ -688,7 +688,7 @@ let field_value fixture ~tool_name field_name schema =
   | "search" -> `String "tool matrix"
   | "prompt" -> `String "tool matrix"
   | "topic_id" -> `String "topic-001"
-  | "room_id" -> `String "default"
+  | "coord_id" -> `String "default"
   | "checkpoint_ref" -> `String "checkpoint-001"
   | "intent_id" -> `String "intent-001"
   | "operation_id" -> `String "operation-001"

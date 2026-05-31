@@ -1998,11 +1998,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_interna
       let keeper_name = "sangsu" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       let tool_access =
-        `Assoc
-          [
-            ("kind", `String "custom");
-            ("tools", `List [ `String "tool_execute"; `String "keeper_time_now" ]);
-          ]
+        `List [ `String "tool_execute"; `String "keeper_time_now" ]
       in
       ignore
         (Keeper_registry.register ~base_path keeper_name

@@ -26,7 +26,7 @@ val persona_axis_schema : Persona_contract.archetype_axis -> Yojson.Safe.t
 (** Schema fragment for one archetype axis (ranged enum + description). *)
 
 val tool_access_schema : string -> Yojson.Safe.t
-(** Schema fragment for [meta.tool_access] (preset + per-tool overrides);
+(** Schema fragment for [meta.tool_access] (string-array tool allowlist);
     parameterised on the property description so create vs update tools
     can vary the surface without duplicating the body. *)
 

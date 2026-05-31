@@ -959,8 +959,11 @@ let test_persona_resolver_defaults_to_research_tool_access () =
   | Error e -> fail ("resolver failed: " ^ e)
   | Ok (_, resolved) ->
       let tool_access = Yojson.Safe.Util.member "tool_access" resolved in
-      check string "persona default tool_access kind" "custom"
-        (Yojson.Safe.Util.member "kind" tool_access |> Yojson.Safe.Util.to_string)
+      (match tool_access with
+       | `List items ->
+           check bool "persona default tool_access is non-empty list" true
+             (List.length items > 0)
+       | _ -> fail "persona default tool_access should be a list")
 
 let test_persona_resolver_rejects_operator_todo_profile () =
   with_personas_dir @@ fun personas_dir ->
@@ -1151,11 +1154,7 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
           ("persona_name", `String "probe");
           ("allowed_paths", `List [ `String "/tmp/demo" ]);
           ( "tool_access",
-            `Assoc
-              [
-                ("kind", `String "custom");
-                ("tools", `List [ `String "masc_status" ]);
-              ] );
+            `List [ `String "masc_status" ] );
         ])
   with
   | Error e -> fail ("resolver failed: " ^ e)
@@ -1189,12 +1188,7 @@ let test_persona_resolver_renders_durable_keeper_toml () =
         ("proactive_cooldown_sec", `Int 60);
         ("allowed_paths", `List [ `String "/tmp/probe" ]);
         ( "tool_access",
-          `Assoc
-            [
-              ("kind", `String "custom");
-              ("tools", `List []);
-              ("also_allow", `List [ `String "masc_status" ]);
-            ] );
+          `List [ `String "masc_status" ] );
         ("tool_denylist", `List [ `String "masc_keeper_reset" ]);
       ]
   in
@@ -1221,10 +1215,12 @@ let test_persona_resolver_renders_durable_keeper_toml () =
                 [ "probe"; "@probe" ] defaults.mention_targets;
               check (option (list string)) "allowed_paths"
                 (Some [ "/tmp/probe" ]) defaults.allowed_paths;
+              check (option (list string)) "tool_access"
+                (Some [ "masc_status" ]) defaults.tool_custom_list;
               check (option (list string)) "tool_denylist"
                 (Some [ "masc_keeper_reset" ]) defaults.tool_denylist))
 
-let test_persona_resolver_rejects_custom_tool_access_durable_toml () =
+let test_persona_resolver_renders_tool_access_array_durable_toml () =
   let resolved =
     `Assoc
       [
@@ -1233,18 +1229,14 @@ let test_persona_resolver_rejects_custom_tool_access_durable_toml () =
         ("goal", `String "test");
         ("mention_targets", `List [ `String "probe" ]);
         ( "tool_access",
-          `Assoc
-            [
-              ("kind", `String "custom");
-              ("tools", `List [ `String "masc_status" ]);
-            ] );
+          `List [ `String "masc_status" ] );
       ]
   in
   match KEP.render_keeper_toml_from_resolved_args resolved with
-  | Ok _ -> fail "expected custom tool_access durable TOML rejection"
-  | Error e ->
-      check bool "mentions custom tool_access" true
-        (contains_substring e "tool_access.kind=custom")
+  | Error e -> fail ("render failed: " ^ e)
+  | Ok toml ->
+      check bool "renders tools array" true
+        (contains_substring toml "tools = [\"masc_status\"]")
 
 let authoring_minimal_profile =
   `Assoc
@@ -1445,8 +1437,6 @@ runtime_id = "primary"
 repo_cli_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]
-
-also_allow = ["x"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1474,6 +1464,8 @@ let test_detect_unknown_keys_accepts_tool_access_table () =
 [keeper]
 goal = "g"
 
+[keeper.tool_access]
+tools = ["masc_status"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -2022,8 +2014,8 @@ let () =
             test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths;
           test_case "persona resolver renders durable keeper TOML" `Quick
             test_persona_resolver_renders_durable_keeper_toml;
-          test_case "persona resolver rejects custom tool_access durable TOML" `Quick
-            test_persona_resolver_rejects_custom_tool_access_durable_toml;
+          test_case "persona resolver renders tool_access durable TOML" `Quick
+            test_persona_resolver_renders_tool_access_array_durable_toml;
           test_case "persona authoring schema explains effects" `Quick
             test_persona_authoring_schema_explains_effects;
           test_case "persona authoring social_model choices follow variant SSOT" `Quick

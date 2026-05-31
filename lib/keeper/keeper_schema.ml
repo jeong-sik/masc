@@ -40,22 +40,10 @@ let persona_axis_schema (axis : Persona_contract.archetype_axis) =
     ]
 
 let tool_access_schema description =
-  let custom_shape =
-    `Assoc [
-      ("type", `String "object");
-      ("description", `String "Custom tool allowlist policy.");
-      ("properties", `Assoc [
-        ("kind", `Assoc [ ("const", `String "custom") ]);
-        ("tools", string_array_schema);
-      ]);
-      ("required", `List [ `String "kind"; `String "tools" ]);
-      ("additionalProperties", `Bool false);
-    ]
-  in
   `Assoc [
-    ("type", `String "object");
+    ("type", `String "array");
     ("description", `String description);
-    ("oneOf", `List [ custom_shape ]);
+    ("items", `Assoc [ ("type", `String "string") ]);
   ]
 
 let keeper_schemas : tool_schema list = [
@@ -214,7 +202,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
+            "Canonical tool allowlist, e.g. ['masc_status', 'tool_execute'].");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -388,7 +376,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
+            "Canonical tool allowlist, e.g. ['masc_status', 'tool_execute'].");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);

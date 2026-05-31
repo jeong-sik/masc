@@ -1394,7 +1394,7 @@ let () =
     assert (not (Tool_result.is_success result));
     assert (str_contains (Tool_result.message result) "Error:"))
 
-let () = test "handle_claim_next_ignores_keeper_preset_for_open_claims" (fun () ->
+let () = test "handle_claim_next_ignores_keeper_tool_access_for_open_claims" (fun () ->
   let agent_name = "keeper-social-sync-agent" in
   let keeper_name = "social-sync" in
   let ctx = make_test_ctx_with_agent agent_name in
@@ -1408,12 +1408,7 @@ let () = test "handle_claim_next_ignores_keeper_preset_for_open_claims" (fun () 
             ("name", `String keeper_name);
             ("agent_name", `String agent_name);
             ("trace_id", `String "trace-social-sync");
-            ( "tool_access",
-              `Assoc
-                [
-                  ("kind", `String "preset");
-                  ("preset", `String "social");
-                ] );
+            ("tool_access", `List [ `String "masc_status" ]);
           ])
     with
     | Ok meta -> meta

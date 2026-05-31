@@ -1430,48 +1430,46 @@ let test_oneof_null_const_matches_non_null_branch () =
 (* Production schema regression: Keeper_schema.tool_access_schema   *)
 (* ================================================================ *)
 
-let test_keeper_schema_tool_access_preset () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("kind", `String "preset"); ("preset", `String "minimal")] in
+let keeper_tool_access_parent_schema () =
+  `Assoc
+    [
+      ("type", `String "object");
+      ( "properties",
+        `Assoc [ ("tool_access", Keeper_schema.tool_access_schema "test") ] );
+      ("required", `List [ `String "tool_access" ]);
+    ]
+;;
+
+let test_keeper_schema_tool_access_array () =
+  let schema = keeper_tool_access_parent_schema () in
+  let args =
+    `Assoc
+      [ ("tool_access", `List [`String "masc_status"; `String "tool_execute"]) ]
+  in
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
   | Ok _ -> ()
   | Error result ->
     Alcotest.failf
-      "expected preset branch to pass: %s"
+      "expected tool_access array to pass: %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
-let test_keeper_schema_tool_access_custom () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("kind", `String "custom"); ("tools", `List [`String "rg"])] in
+let test_keeper_schema_tool_access_rejects_object () =
+  let schema = keeper_tool_access_parent_schema () in
+  let args =
+    `Assoc [ ("tool_access", `Assoc [("tools", `List [`String "rg"])]) ]
+  in
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> ()
-  | Error result ->
-    Alcotest.failf
-      "expected custom branch to pass: %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
+  | Ok _ -> Alcotest.fail "expected object form to fail"
+  | Error _ -> ()
 ;;
 
-let test_keeper_schema_tool_access_rejects_missing_kind () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("preset", `String "minimal")] in
+let test_keeper_schema_tool_access_rejects_string_value () =
+  let schema = keeper_tool_access_parent_schema () in
+  let args = `Assoc [ ("tool_access", `String "masc_status") ] in
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected missing kind to fail"
-  | Error result ->
-    let msg = (Tool_result.message result) in
-    Alcotest.(check bool) "error mentions branches" true
-      (string_contains msg "exactly one of")
-;;
-
-let test_keeper_schema_tool_access_rejects_unknown_kind () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("kind", `String "unknown"); ("preset", `String "minimal")] in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected unknown kind to fail"
-  | Error result ->
-    let msg = (Tool_result.message result) in
-    Alcotest.(check bool) "error mentions preset/custom branches" true
-      (string_contains msg "preset" && string_contains msg "custom")
+  | Ok _ -> Alcotest.fail "expected string value to fail"
+  | Error _ -> ()
 ;;
 
 (* ================================================================ *)
@@ -1599,13 +1597,11 @@ let () =
         test_oneof_null_const_matches_non_null_branch;
     ]);
     ("keeper_schema_tool_access", [
-      Alcotest.test_case "preset branch passes" `Quick
-        test_keeper_schema_tool_access_preset;
-      Alcotest.test_case "custom branch passes" `Quick
-        test_keeper_schema_tool_access_custom;
-      Alcotest.test_case "missing kind rejected" `Quick
-        test_keeper_schema_tool_access_rejects_missing_kind;
-      Alcotest.test_case "unknown kind rejected" `Quick
-        test_keeper_schema_tool_access_rejects_unknown_kind;
+      Alcotest.test_case "array passes" `Quick
+        test_keeper_schema_tool_access_array;
+      Alcotest.test_case "object rejected" `Quick
+        test_keeper_schema_tool_access_rejects_object;
+      Alcotest.test_case "string value rejected" `Quick
+        test_keeper_schema_tool_access_rejects_string_value;
     ]);
   ]

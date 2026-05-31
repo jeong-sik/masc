@@ -19,19 +19,20 @@ let make_meta
       ()
   : Keeper_meta_contract.keeper_meta
   =
-  let tool_access =
+  let tool_access_field =
     match tool_access with
-    | Some access -> access
+    | Some access ->
+      [ "tool_access", Keeper_meta_tool_access.tool_access_to_json access ]
     | None -> []
   in
   let json =
     `Assoc
-      [ "name", `String name
+      ([ "name", `String name
       ; "agent_name", `String name
       ; "trace_id", `String "test-trace-exposure"
       ; "policy_voice_enabled", `Bool policy_voice_enabled
-      ; "tool_access", Keeper_meta_tool_access.tool_access_to_json tool_access
       ]
+      @ tool_access_field)
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
@@ -1478,7 +1479,7 @@ let () =
     ; ( "tool_access_of_meta_json_validation"
       , [ test_case "string tools field returns error" `Quick (fun () ->
             let json =
-              `Assoc [ "kind", `String "custom"; "tools", `String "masc_status" ]
+              `Assoc [ "tools", `String "masc_status" ]
             in
             let outer = `Assoc [ "tool_access", json ] in
             match Keeper_meta_tool_access.tool_access_of_meta_json outer with
@@ -1497,10 +1498,7 @@ let () =
             | Ok _ -> fail "expected Error for string tools field")
         ; test_case "valid list tools parses ok" `Quick (fun () ->
             let json =
-              `Assoc
-                [ "kind", `String "custom"
-                ; "tools", `List [ `String "masc_status"; `String "masc_broadcast" ]
-                ]
+              `List [ `String "masc_status"; `String "masc_broadcast" ]
             in
             let outer = `Assoc [ "tool_access", json ] in
             match Keeper_meta_tool_access.tool_access_of_meta_json outer with
@@ -1509,23 +1507,20 @@ let () =
               check bool "has masc_broadcast" true (List.mem "masc_broadcast" tools)
             | Error msg -> fail ("unexpected error: " ^ msg))
         ; test_case "null tools field returns error" `Quick (fun () ->
-            let json = `Assoc [ "kind", `String "custom"; "tools", `Null ] in
+            let json = `Assoc [ "tools", `Null ] in
             let outer = `Assoc [ "tool_access", json ] in
             match Keeper_meta_tool_access.tool_access_of_meta_json outer with
             | Error _ -> ()
             | Ok _ -> fail "expected Error for null tools field")
         ; test_case "integer tools field returns error" `Quick (fun () ->
-            let json = `Assoc [ "kind", `String "custom"; "tools", `Int 42 ] in
+            let json = `Assoc [ "tools", `Int 42 ] in
             let outer = `Assoc [ "tool_access", json ] in
             match Keeper_meta_tool_access.tool_access_of_meta_json outer with
             | Error _ -> ()
             | Ok _ -> fail "expected Error for integer tools field")
         ; test_case "non-string tool member returns error" `Quick (fun () ->
             let json =
-              `Assoc
-                [ "kind", `String "custom"
-                ; "tools", `List [ `String "masc_status"; `Int 42 ]
-                ]
+              `List [ `String "masc_status"; `Int 42 ]
             in
             let outer = `Assoc [ "tool_access", json ] in
             match Keeper_meta_tool_access.tool_access_of_meta_json outer with

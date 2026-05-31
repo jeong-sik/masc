@@ -71,6 +71,7 @@ let removed_keeper_input_key_names =
     "initiative_cooldown_sec";
     "policy_mode";
     "policy_shell_mode";
+    "also_allow";
     "tool_preset";
     "tool_also_allow";
     "tool_custom_allowlist";

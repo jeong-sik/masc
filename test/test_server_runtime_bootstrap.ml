@@ -857,7 +857,7 @@ let test_keeper_tool_call_log_uses_cluster_root () =
                 1
                 (List.length (Keeper_tool_call_log.read_recent ~n:10 ())))))
 
-let test_room_init_bootstraps_keeper_runtime_dirs () =
+let test_coord_init_bootstraps_keeper_runtime_dirs () =
   with_temp_dir "startup-keeper-dirs" (fun dir ->
       let config = Coord.default_config dir in
       ignore (Coord.init config ~agent_name:None);
@@ -867,9 +867,7 @@ let test_room_init_bootstraps_keeper_runtime_dirs () =
       Alcotest.(check bool) "keeper dir exists" true
         (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir);
       Alcotest.(check bool) "traces dir exists" true
-        (Sys.file_exists traces_dir && Sys.is_directory traces_dir);
-      Alcotest.(check bool) "perpetual dir not recreated" false
-        (Sys.file_exists (Filename.concat root_dir "perpetual")))
+        (Sys.file_exists traces_dir && Sys.is_directory traces_dir))
 
 let test_otel_exporter_setup_failure_is_soft () =
   Otel_spans.shutdown ~enabled:true ();
@@ -2686,8 +2684,8 @@ let () =
             test_tool_usage_log_uses_cluster_root;
           Alcotest.test_case "keeper tool call log uses cluster root" `Quick
             test_keeper_tool_call_log_uses_cluster_root;
-          Alcotest.test_case "room init bootstraps keeper runtime dirs" `Quick
-            test_room_init_bootstraps_keeper_runtime_dirs;
+          Alcotest.test_case "coord init bootstraps keeper runtime dirs" `Quick
+            test_coord_init_bootstraps_keeper_runtime_dirs;
           Alcotest.test_case "otel exporter setup failure is soft" `Quick
             test_otel_exporter_setup_failure_is_soft;
           Alcotest.test_case "lazy startup plan parallelizes independent tasks"

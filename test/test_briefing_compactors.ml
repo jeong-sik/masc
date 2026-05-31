@@ -162,8 +162,8 @@ let int_of j = match j with `Int n -> n | _ -> -1
 
 let test_relevant_empty_namespace_matches_all () =
   (* When current_namespace is "" (or whitespace), trim_to_option
-     returns None, and room_matches always returns true. *)
-  let s = session_fixture ~project:"any-room" () in
+     returns None, and coord_matches always returns true. *)
+  let s = session_fixture ~project:"any-coord" () in
   let result =
     C.relevant_sessions_for_briefing ~current_namespace:""
       ~now_ts:0.0 [ s ]
@@ -171,18 +171,18 @@ let test_relevant_empty_namespace_matches_all () =
   assert (List.length result = 1)
 
 let test_relevant_namespace_matching_keeps () =
-  let s = session_fixture ~project:"room-X" ~status:"active"
+  let s = session_fixture ~project:"coord-X" ~status:"active"
               ~summary_status:"active" () in
   let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"room-X"
+    C.relevant_sessions_for_briefing ~current_namespace:"coord-X"
       ~now_ts:0.0 [ s ]
   in
   assert (List.length result = 1)
 
 let test_relevant_namespace_mismatch_drops () =
-  let s = session_fixture ~project:"room-X" ~status:"active" () in
+  let s = session_fixture ~project:"coord-X" ~status:"active" () in
   let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"room-Y"
+    C.relevant_sessions_for_briefing ~current_namespace:"coord-Y"
       ~now_ts:0.0 [ s ]
   in
   assert (result = [])

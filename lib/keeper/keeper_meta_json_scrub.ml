@@ -46,13 +46,13 @@ let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
     Error (Printf.sprintf "removed keeper meta fields: %s" (String.concat ", " fields))
 ;;
 
-let legacy_keeper_meta_tool_policy_key_names =
+let rejected_keeper_meta_tool_policy_key_names =
   [ "tool_preset"; "tool_preset_source"; "tool_also_allow"; "tool_custom_allowlist"; "tool_allowlist" ]
 ;;
 
-let legacy_keeper_meta_key_names =
+let strict_rejected_keeper_meta_key_names =
   [ "allowed_providers"; "last_blocker_class"; "repo_cli_identity" ]
-  @ legacy_keeper_meta_tool_policy_key_names
+  @ rejected_keeper_meta_tool_policy_key_names
 ;;
 
 let persisted_retired_keeper_meta_key_names =
@@ -68,14 +68,14 @@ let persisted_retired_keeper_meta_key_names =
   ]
 ;;
 
-let reject_legacy_keeper_meta_fields (json : Yojson.Safe.t) =
-  let present = Keeper_config_text.present_json_keys legacy_keeper_meta_key_names json in
+let reject_strict_keeper_meta_fields (json : Yojson.Safe.t) =
+  let present = Keeper_config_text.present_json_keys strict_rejected_keeper_meta_key_names json in
   match present with
   | [] -> Ok ()
   | fields ->
     Error
       (Printf.sprintf
-         "legacy keeper meta fields are no longer supported: %s"
+         "removed keeper meta fields are no longer supported: %s"
          (String.concat ", " fields))
 ;;
 
@@ -95,7 +95,7 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
     let removed_to_scrub =
       removed_present
       |> List.filter (fun key ->
-        (not (List.mem key legacy_keeper_meta_key_names))
+        (not (List.mem key strict_rejected_keeper_meta_key_names))
         || List.mem key persisted_retired_keeper_meta_key_names)
     in
     if removed_to_scrub = []
@@ -119,7 +119,7 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
       (try
          Fs_compat.save_file path content;
          Log.Keeper.info
-           "scrubbed legacy keeper meta fields for %s: %s%s"
+           "scrubbed removed keeper meta fields for %s: %s%s"
            path
            (String.concat ", " removed_to_scrub)
            (if migrate_legacy_disabled_keepalive

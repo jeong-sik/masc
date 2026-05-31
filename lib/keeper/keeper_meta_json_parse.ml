@@ -119,28 +119,8 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_desires = personality.desires in
     let pk_instructions = personality.instructions in
     let pk_runtime_id_result =
-      (* RFC-0206: [runtime_id] is the canonical persisted/input name if a
-         pre-scrub JSON payload still carries model-selection state.
-         [runtime_id] is accepted only as a legacy alias for older files.
-         If both appear with different non-empty values, fail loud instead of
-         silently choosing one model-selection identity. *)
-      let runtime_id_opt =
-        Safe_ops.json_string_opt "runtime_id" json |> Option.map String.trim
-      in
-      let legacy_runtime_id_opt =
-        Safe_ops.json_string_opt "runtime_id" json |> Option.map String.trim
-      in
-      match runtime_id_opt, legacy_runtime_id_opt with
-      | Some runtime_id, Some legacy_runtime_id
-        when runtime_id <> "" && legacy_runtime_id <> ""
-             && runtime_id <> legacy_runtime_id ->
-        Error
-          (Printf.sprintf
-             "keeper meta parse error: runtime_id (%s) and legacy runtime_id (%s) \
-              disagree"
-             runtime_id legacy_runtime_id)
-      | Some runtime_id, _ when runtime_id <> "" -> Ok runtime_id
-      | _, Some legacy_runtime_id when legacy_runtime_id <> "" -> Ok legacy_runtime_id
+      match Safe_ops.json_string_opt "runtime_id" json |> Option.map String.trim with
+      | Some runtime_id when runtime_id <> "" -> Ok runtime_id
       | _ -> Ok (Keeper_config.default_runtime_id ())
     in
     (match pk_runtime_id_result with
@@ -560,13 +540,13 @@ let parse_keeper_state
   }
 ;;
 
-let reject_legacy_keeper_meta_shapes (json : Yojson.Safe.t) =
+let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
     (match List.assoc_opt "last_blocker" fields with
      | Some (`String _) ->
        Error
-         "legacy keeper meta field shape is no longer supported: \
+         "removed keeper meta field shape is no longer supported: \
           last_blocker:string. Use structured last_blocker object."
      | Some _ | None -> Ok ())
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> Ok ()
@@ -577,10 +557,10 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
     match reject_removed_keeper_meta_fields json with
     | Error e -> Error e
     | Ok () ->
-      (match reject_legacy_keeper_meta_fields json with
+      (match reject_strict_keeper_meta_fields json with
        | Error e -> Error e
        | Ok () ->
-         (match reject_legacy_keeper_meta_shapes json with
+         (match reject_removed_keeper_meta_shapes json with
           | Error e -> Error e
           | Ok () ->
          (match parse_keeper_identity json with

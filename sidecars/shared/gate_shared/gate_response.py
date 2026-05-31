@@ -33,12 +33,7 @@ class GateResponse:
             if isinstance(raw_structured, dict)
             else None
         )
-        # Read priority for the routing identifier: prefer destination_id
-        # (introduced in B2 Phase 2) and fall back to the legacy keeper_name
-        # key so sidecars handle both old and new gate emit shapes. Pairs
-        # with gate_protocol.outbound_to_json which currently emits both.
-        destination = str(data.get("destination_id", ""))
-        keeper_name = destination if destination else str(data.get("keeper_name", ""))
+        keeper_name = str(data.get("destination_id", ""))
         return GateResponse(
             ok=bool(data.get("ok", False)),
             keeper_name=keeper_name,

@@ -11,7 +11,7 @@ class TestFromJson:
     def test_parses_full_response(self) -> None:
         data = {
             "ok": True,
-            "keeper_name": "sangsu",
+            "destination_id": "sangsu",
             "reply": "hello world",
             "turn_stats": {
                 "model_used": "qwen3.5:35b",
@@ -31,7 +31,7 @@ class TestFromJson:
         assert resp.error == ""
 
     def test_handles_missing_turn_stats(self) -> None:
-        data = {"ok": True, "keeper_name": "test", "reply": "hi"}
+        data = {"ok": True, "destination_id": "test", "reply": "hi"}
         resp = GateResponse.from_json(data)
         assert resp.ok is True
         assert resp.model_used == ""
@@ -55,15 +55,15 @@ class TestFromJson:
         assert resp.reply == ""
         assert resp.error == ""
 
-    def test_prefers_destination_id_when_present(self) -> None:
-        data = {"ok": True, "destination_id": "new-key", "keeper_name": "legacy", "reply": "hi"}
+    def test_uses_destination_id_when_present(self) -> None:
+        data = {"ok": True, "destination_id": "new-key", "keeper_name": "old-key", "reply": "hi"}
         resp = GateResponse.from_json(data)
         assert resp.keeper_name == "new-key"
 
-    def test_falls_back_to_keeper_name_when_destination_id_missing(self) -> None:
-        data = {"ok": True, "keeper_name": "legacy-only", "reply": "hi"}
+    def test_ignores_keeper_name_when_destination_id_missing(self) -> None:
+        data = {"ok": True, "keeper_name": "old-only", "reply": "hi"}
         resp = GateResponse.from_json(data)
-        assert resp.keeper_name == "legacy-only"
+        assert resp.keeper_name == ""
 
     def test_accepts_destination_id_without_keeper_name(self) -> None:
         data = {"ok": True, "destination_id": "future-only", "reply": "hi"}

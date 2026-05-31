@@ -18,23 +18,23 @@ val drop_assoc_keys : string list -> Yojson.Safe.t -> Yojson.Safe.t
 val reject_removed_keeper_meta_fields :
   Yojson.Safe.t -> (unit, string) result
 
-(** Legacy tool-policy keys that are no longer supported. *)
-val legacy_keeper_meta_tool_policy_key_names : string list
+(** Removed tool-policy keys that are no longer supported. *)
+val rejected_keeper_meta_tool_policy_key_names : string list
 
-(** Combined legacy key names that remain rejected by strict runtime
+(** Combined removed key names that remain rejected by strict runtime
     meta decoding. *)
-val legacy_keeper_meta_key_names : string list
+val strict_rejected_keeper_meta_key_names : string list
 
-(** Returns [Error msg] if any legacy key is present. *)
-val reject_legacy_keeper_meta_fields :
+(** Returns [Error msg] if any strictly rejected key is present. *)
+val reject_strict_keeper_meta_fields :
   Yojson.Safe.t -> (unit, string) result
 
 (** [scrub_persisted_keeper_meta_json ~path json] migrates persisted
     keeper meta to the current schema for removed non-tool fields and
     stale persisted-only runtime fields (including
     presence_keepalive=false→paused=true) and writes the scrubbed
-    content back to [path] when changes were needed. Legacy tool policy
-    fields and other strict legacy fields are intentionally not
+    content back to [path] when changes were needed. Removed tool policy
+    fields and other strict removed fields are intentionally not
     rewritten. Returns the scrubbed JSON and a [bool] indicating whether
     the file was rewritten. *)
 val scrub_persisted_keeper_meta_json :

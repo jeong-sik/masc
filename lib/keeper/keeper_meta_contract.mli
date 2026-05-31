@@ -16,9 +16,7 @@
     only by JSON parsing), \[map_compaction_rt] /
     \[map_proactive_rt]
     (nested-record updaters that callers reach via the higher-level
-    {!map_runtime} / {!map_usage}), \[keeper_legacy_model_arg_names]
-    (data table consumed by the legacy-arg rejector in
-    {!Keeper_types}).  All consumed only via the include
+    {!map_runtime} / {!map_usage}).  All consumed only via the include
     runtime or the JSON pipeline. *)
 
 (** {1 Tool-access runtime re-export} *)
@@ -383,12 +381,6 @@ val runtime_id_of_meta : keeper_meta -> string
     Ignores [m] because keeper-level provider/model selection has been
     collapsed to the single default Runtime binding. *)
 
-(** {1 Legacy runtime compatibility} *)
-
-val runtime_id_of_meta : keeper_meta -> string
-(** Compatibility alias for {!runtime_id_of_meta}.
-    Kept while older JSON fields and call sites still use [runtime_id]. *)
-
 (** {1 Outcome <-> string} *)
 
 val proactive_cycle_outcome_to_string :
@@ -447,19 +439,19 @@ val map_proactive_rt :
   keeper_meta
 (** Nested update of [m.runtime.proactive_rt]. *)
 
-(** {1 Legacy model-arg sentinel list} *)
+(** {1 Removed model-arg sentinel list} *)
 
-val keeper_legacy_model_arg_names : string list
-(** Names of legacy keeper-creation tool arguments that have
+val removed_keeper_model_arg_names : string list
+(** Names of removed keeper-creation tool arguments that have
     been retired in favour of the [runtime_id] field
     (["models"], ["allowed_models"], ["active_model"]).
-    Consumed by {!reject_legacy_model_args} which
+    Consumed by {!reject_removed_model_args} which
     surfaces operator-readable rejection messages instead of
-    silently ignoring deprecated args.  Pinned data table —
-    drift would either re-accept retired args silently or
+    silently ignoring removed args.  Pinned data table —
+    drift would either re-accept removed args silently or
     reject newly added args by mistake. *)
 
-val reject_legacy_model_args :
+val reject_removed_model_args :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 (** Reject retired keeper model-selection input fields at tool/API boundaries.
     Model and provider identity is resolved from the default Runtime binding,

@@ -25,7 +25,7 @@ let session_recent_enough ~now_ts session_json =
   | [] -> false
 
 let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
-  let room_matches session_json =
+  let coord_matches session_json =
     match String_util.option_trim (Some current_namespace) with
     | None -> true
     | Some project ->
@@ -42,7 +42,7 @@ let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
   in
   sessions
   |> List.filter (fun session_json ->
-         room_matches session_json
+         coord_matches session_json
          &&
          let status_detail = member_assoc "status" session_json in
          let status =

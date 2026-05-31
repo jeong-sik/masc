@@ -102,7 +102,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_by", Json_util.string_opt_to_json by);
             ("pause_reason", Json_util.string_opt_to_json reason);
             ("paused_at", Json_util.string_opt_to_json at);
-            ("pause_scope", `String "coord_room");
+            ("pause_scope", `String "coord");
             ("any_pause_active", `Bool true);
             ("keeper_pause", keeper_pause);
             ("message", `String "Server is paused");
@@ -117,7 +117,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("pause_scope", `String "coord_room");
+            ("pause_scope", `String "coord");
             ("any_pause_active", `Bool keeper_paused);
             ("keeper_pause", keeper_pause);
             ( "message",
@@ -136,7 +136,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("pause_scope", `String "coord_room");
+            ("pause_scope", `String "coord");
             ("any_pause_active", `Null);
             ("keeper_pause", keeper_pause);
             ( "message",

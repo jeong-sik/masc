@@ -1709,7 +1709,7 @@ let render_response
       (response : Logs_types.response)
     : Node.t =
   let runtime_name =
-    match keepers.room with
+    match keepers.coord with
     | Some name when String.length name > 0 -> name
     | _ -> "local"
   in

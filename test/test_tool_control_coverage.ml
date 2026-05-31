@@ -131,7 +131,7 @@ let () =
       | None -> failwith "dispatch returned None")
 
 let () =
-  test "dispatch_pause_status_surfaces_keeper_pause_when_room_running" (fun () ->
+  test "dispatch_pause_status_surfaces_keeper_pause_when_coord_running" (fun () ->
       with_ctx @@ fun ctx ->
       seed_keeper_meta ctx "paused-keeper" ~paused:true;
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
@@ -156,7 +156,7 @@ let () =
       with_ctx @@ fun ctx ->
       match
         Tool_control.dispatch ctx ~name:"masc_pause_status"
-          ~args:(`Assoc [ ("namespace_id", `String "focus-room") ])
+          ~args:(`Assoc [ ("namespace_id", `String "focus-coord") ])
       with
       | Some result ->
           assert (Tool_result.is_success result);
@@ -167,7 +167,7 @@ let () =
       | None -> failwith "dispatch returned None")
 
 let () =
-  test "dispatch_pause_status_uninitialized_room_is_safe" (fun () ->
+  test "dispatch_pause_status_uninitialized_coord_is_safe" (fun () ->
       with_ctx ~initialize:false @@ fun ctx ->
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
       | Some result ->

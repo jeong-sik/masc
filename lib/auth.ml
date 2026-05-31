@@ -526,10 +526,10 @@ let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) 
 ;;
 
 (* ============================================ *)
-(* Coord secret (for room-level auth)            *)
+(* Coord secret                                  *)
 (* ============================================ *)
 
-(** Initialize room secret *)
+(** Initialize coord secret *)
 let init_coord_secret config : string =
   ensure_auth_dirs config;
   let secret = generate_token () in
@@ -541,7 +541,7 @@ let init_coord_secret config : string =
   secret (* Return raw secret to show user once *)
 ;;
 
-(** Verify room secret *)
+(** Verify coord secret *)
 let verify_coord_secret config secret : bool =
   let hash = sha256_hash secret in
   let file = coord_secret_file config in
@@ -556,7 +556,7 @@ let verify_coord_secret config secret : bool =
 (* High-level auth operations                   *)
 (* ============================================ *)
 
-(** Enable authentication for a room.
+(** Enable authentication for a coord.
     Creates a bootstrap admin token for the enabling agent to prevent
     circular permission deadlock (BUG-025). *)
 let enable_auth config ~require_token ~agent_name : string * string option =

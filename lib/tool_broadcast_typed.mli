@@ -6,7 +6,7 @@
 
 type broadcast_output = {
   delivered : bool;
-  room_message : string;
+  coord_message : string;
   mention : string option;
 }
 

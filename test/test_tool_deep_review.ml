@@ -95,13 +95,13 @@ let test_build_prompt_rejects_rfc_docs_outside_docs_dir () =
             (String.length msg > 0)
       | Ok _ -> fail "expected RFC doc to be rejected")
 
-let test_build_prompt_rejects_room_task_history_paths () =
+let test_build_prompt_rejects_coord_task_history_paths () =
   with_temp_dir (fun base ->
-      let file = Filename.concat base "memory/room-task-history.jsonl" in
+      let file = Filename.concat base "memory/coord-task-history.jsonl" in
       write_file file "{}\n";
       match
         TDR.build_prompt
-          ~target_files:[ "memory/room-task-history.jsonl" ]
+          ~target_files:[ "memory/coord-task-history.jsonl" ]
           ~question:"Find issues"
           ~base_path:base
       with
@@ -122,7 +122,7 @@ let () =
             test_build_prompt_rejects_design_docs_by_full_path;
           test_case "reject rfc docs outside docs dir" `Quick
             test_build_prompt_rejects_rfc_docs_outside_docs_dir;
-          test_case "reject room/task history" `Quick
-            test_build_prompt_rejects_room_task_history_paths;
+          test_case "reject coord/task history" `Quick
+            test_build_prompt_rejects_coord_task_history_paths;
         ] );
     ]

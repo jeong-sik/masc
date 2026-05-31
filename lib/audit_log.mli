@@ -182,7 +182,7 @@ val log_suspend :
   agent_id:string ->
   target_agent:string ->
   reason:string ->
-  rooms_affected:int ->
+  coords_affected:int ->
   ?cost_estimate:float ->
   ?token_count:int ->
   unit -> unit

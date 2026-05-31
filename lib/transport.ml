@@ -177,7 +177,7 @@ module Rest = struct
     | Public ->
         "No bearer token is required for this route."
     | Conditional_bearer ->
-        "Bearer token auth is required when room auth/token enforcement is active; loopback-local development may allow access without a bearer."
+        "Bearer token auth is required when coord auth/token enforcement is active; loopback-local development may allow access without a bearer."
     | Same_origin_or_bearer ->
         "Loopback browser requests may use same-origin checks; non-browser clients should use Authorization: Bearer <token>."
     | Bearer_required ->
@@ -656,7 +656,7 @@ module Rest = struct
                           ("bearerFormat", `String "opaque-token");
                           ( "description",
                             `String
-                              "MASC room bearer token. Some loopback-local routes may additionally permit same-origin browser access." );
+                              "MASC coord bearer token. Some loopback-local routes may additionally permit same-origin browser access." );
                         ] );
                   ] );
             ] );

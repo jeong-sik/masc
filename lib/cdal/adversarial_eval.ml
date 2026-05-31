@@ -121,14 +121,14 @@ let classify_path path =
   let has_room_history =
     has_history_artifact_extension lower
     && List.exists (String_util.contains_substring normalized)
-         [ "room_history"; "room-history"; "roomtaskhistory"; "room_task_history";
-           "room-task-history" ]
+         [ "coord_history"; "coord-history"; "coordhistory"; "coord_task_history";
+           "coord-task-history" ]
   in
   let has_task_history =
     has_history_artifact_extension lower
     && List.exists (String_util.contains_substring normalized)
-         [ "task_history"; "task-history"; "taskhistory"; "room/task_history";
-           "room/task-history" ]
+         [ "task_history"; "task-history"; "taskhistory"; "coord/task_history";
+           "coord/task-history" ]
   in
   let has_governance_history =
     (List.mem "governance" basename_tokens

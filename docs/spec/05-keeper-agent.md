@@ -16,13 +16,13 @@ code_refs:
 | Modules | 67 (.ml) + 5 (.mli-only) |
 | LOC | ~17.8K |
 | MCP Tools | `tool_keeper` |
-| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Room`, `Runtime_inference`, `Verifier_oas` |
+| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Coord`, `Runtime_inference`, `Verifier_oas` |
 
 ---
 
 ## 1. Purpose
 
-Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행(perpetual) 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession), 검증(verification)을 담당한다.
+Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession), 검증(verification)을 담당한다.
 
 Keeper 하나는 다음을 소유한다:
 - **identity**: `keeper_meta` 레코드 (이름, 목표, will/needs/desires)

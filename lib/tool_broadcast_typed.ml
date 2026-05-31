@@ -32,14 +32,14 @@ let broadcast_schema = Sg.one message_field
 
 type broadcast_output = {
   delivered : bool;
-  room_message : string;
+  coord_message : string;
   mention : string option;
 }
 
 let encode_broadcast (output : broadcast_output) : Yojson.Safe.t =
   `Assoc ([
     ("delivered", `Bool output.delivered);
-    ("room_message", `String output.room_message);
+    ("coord_message", `String output.coord_message);
   ] @ match output.mention with
     | Some m -> [("mention", `String m)]
     | None -> [])
@@ -50,7 +50,7 @@ let handle_broadcast (message : string)
   if String.equal trimmed "" then Error "Broadcast message cannot be empty"
   else
     let mention = Mention.extract trimmed in
-    Ok { delivered = true; room_message = trimmed; mention }
+    Ok { delivered = true; coord_message = trimmed; mention }
 
 let parse_broadcast (json : Yojson.Safe.t) =
   match Sg.parse broadcast_schema json with

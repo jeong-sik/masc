@@ -25,10 +25,10 @@ let test_metric_name_stable () =
     "masc_tool_join_required_guard_total"
     Masc_mcp.Prometheus.metric_tool_join_required_guard
 
-let test_increments_room_uninitialized () =
+let test_increments_coord_uninitialized () =
   let tool = "masc_claim_next" in
   let agent_name = "san-test-9770" in
-  let reason = "room_uninitialized" in
+  let reason = "coord_uninitialized" in
   let before = counter_for ~tool ~agent_name ~reason in
   Masc_mcp.Prometheus.inc_counter
     Masc_mcp.Prometheus.metric_tool_join_required_guard
@@ -37,7 +37,7 @@ let test_increments_room_uninitialized () =
               ("reason", reason) ]
     ();
   Alcotest.(check (float 0.0001))
-    "room_uninitialized +1"
+    "coord_uninitialized +1"
     (before +. 1.0)
     (counter_for ~tool ~agent_name ~reason)
 
@@ -63,8 +63,8 @@ let test_label_isolation_across_reasons () =
      failure modes in operator dashboards. *)
   let tool = "masc_status" in
   let agent_name = "isolation-test-9770" in
-  let before_room =
-    counter_for ~tool ~agent_name ~reason:"room_uninitialized"
+  let before_coord =
+    counter_for ~tool ~agent_name ~reason:"coord_uninitialized"
   in
   Masc_mcp.Prometheus.inc_counter
     Masc_mcp.Prometheus.metric_tool_join_required_guard
@@ -73,9 +73,9 @@ let test_label_isolation_across_reasons () =
               ("reason", "agent_not_joined") ]
     ();
   Alcotest.(check (float 0.0001))
-    "room_uninitialized counter unchanged when agent_not_joined fires"
-    before_room
-    (counter_for ~tool ~agent_name ~reason:"room_uninitialized")
+    "coord_uninitialized counter unchanged when agent_not_joined fires"
+    before_coord
+    (counter_for ~tool ~agent_name ~reason:"coord_uninitialized")
 
 let test_label_isolation_across_agents () =
   let tool = "masc_claim_next" in
@@ -101,8 +101,8 @@ let () =
         test_metric_name_stable;
     ];
     "counter", [
-      Alcotest.test_case "room_uninitialized increments" `Quick
-        test_increments_room_uninitialized;
+      Alcotest.test_case "coord_uninitialized increments" `Quick
+        test_increments_coord_uninitialized;
       Alcotest.test_case "agent_not_joined increments" `Quick
         test_increments_agent_not_joined;
     ];

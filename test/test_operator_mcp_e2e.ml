@@ -478,7 +478,7 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
   let result = call_until_ready 40 in
   Alcotest.(check (option int)) "returns unauthorized" (Some 401) result.status;
   check bool "strict auth message" true
-    (contains_substr "requires room auth enabled with require_token=true"
+    (contains_substr "requires coord auth enabled with require_token=true"
        result.body)
 
 let test_agent_json_route_served_on_canonical_path () =

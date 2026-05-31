@@ -215,7 +215,7 @@ let test_coord_secret_saved_private () =
     ~finally:(fun () -> cleanup_test_room dir)
     (fun () ->
       ignore (Auth.init_coord_secret dir);
-      check int "room secret mode 0600" 0o600
+      check int "coord secret mode 0600" 0o600
         (permission_bits (Auth.coord_secret_file dir)))
 
 let test_verify_token () =
@@ -1533,6 +1533,6 @@ let () =
     ];
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;
-      test_case "room secret saved private" `Quick test_coord_secret_saved_private;
+      test_case "coord secret saved private" `Quick test_coord_secret_saved_private;
     ];
   ]

@@ -11,7 +11,7 @@ type mention_record = {
   id: string;              (** Unique ID: "m-" prefix + timestamp + random *)
   target_agent: string;    (** Who was mentioned *)
   source_agent: string;    (** Who mentioned them *)
-  source_kind: string;     (** "room_message" | "board_post" | "board_comment" *)
+  source_kind: string;     (** "coord_message" | "board_post" | "board_comment" *)
   source_id: string;       (** coord_id or post_id *)
   content_preview: string; (** First ~200 chars of the content *)
   created_at: float;       (** Unix timestamp *)

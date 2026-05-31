@@ -170,13 +170,12 @@ let runtime_trace_keeps_provider_attempt_provenance_key = function
   | "capability_source"
   | "fallback_authority"
   | "provider_source_runtime"
-  | "provider_source_cascade"
   | "terminal_model_source"
   | "terminal_resolved_model_source"
   | "terminal_capability_source"
   | "terminal_fallback_authority"
   | "terminal_provider_source_runtime"
-  | "terminal_provider_source_cascade" ->
+  ->
     true
   | _ -> false
 

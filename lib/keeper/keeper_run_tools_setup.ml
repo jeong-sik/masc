@@ -414,8 +414,8 @@ let prepare_agent_setup
   let receipt_stop_reason_ref : Runtime_agent.stop_reason option ref =
     ref None
   in
-  let receipt_cascade_observation_ref
-    : Keeper_observation.cascade_observation option ref
+  let receipt_runtime_observation_ref
+    : Keeper_observation.runtime_observation option ref
     =
     ref None
   in
@@ -949,7 +949,7 @@ let prepare_agent_setup
     ; receipt_turn_count_ref
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref
-    ; receipt_cascade_observation_ref
+    ; receipt_runtime_observation_ref
     ; receipt_response_text_present_ref
     ; tool_usage_before
     ; tools

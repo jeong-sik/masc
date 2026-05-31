@@ -79,7 +79,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
      counter rate matches the JSONL row rate. *)
   record_turn_latency_bucket ~keeper:meta.name ~latency_ms;
   let cascade_profile =
-    match result.cascade_observation with
+    match result.runtime_observation with
     | Some observation ->
         observation.Keeper_observation.cascade_name
     | None -> (runtime_id_of_meta meta)
@@ -167,8 +167,8 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
               Keeper_deliberation.execution_result_to_json execution
           | None -> `Null );
         ("cascade",
-         match result.cascade_observation with
-         | Some observation -> redacted_cascade_observation_to_json observation
+         match result.runtime_observation with
+         | Some observation -> redacted_runtime_observation_to_json observation
          | None -> `Null);
         ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());

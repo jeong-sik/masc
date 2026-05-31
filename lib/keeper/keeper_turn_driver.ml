@@ -581,7 +581,7 @@ let run_named
   | _ ->
   let candidate_count = List.length candidates in
   let capture, _metrics =
-    Keeper_observation.cascade_metrics_for_candidates ~candidate_count ()
+    Keeper_observation.runtime_metrics_for_candidates ~candidate_count ()
   in
   let cascade_strategy_name_ref = ref None in
   let name = Printf.sprintf "oas-%s" cascade_name in
@@ -803,7 +803,7 @@ let run_named
   in
   let runtime_exhausted_after_filter ~cycle =
     let observation =
-      Keeper_observation.cascade_observation_with_metrics
+      Keeper_observation.runtime_observation_with_metrics
         ~cascade_name:error_cascade_name
         ?strategy:!cascade_strategy_name_ref ~configured_labels
         ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()

@@ -336,7 +336,7 @@ let run (ctx : ctx)
     match attempt_result with
     | Ok result ->
       let selected_model =
-        match result.cascade_observation with
+        match result.runtime_observation with
         | Some observation -> observation.selected_model
         | None -> None
       in

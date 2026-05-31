@@ -257,7 +257,7 @@ let append_decision_record
                 | None -> []
               in
               let cascade_fields =
-                match r.cascade_observation with
+                match r.runtime_observation with
                 | Some co ->
                     let cascade_name =
                       co.cascade_name

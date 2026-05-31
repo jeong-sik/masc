@@ -25,7 +25,7 @@ type agent_setup =
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
-  ; receipt_cascade_observation_ref : Keeper_observation.cascade_observation option ref
+  ; receipt_runtime_observation_ref : Keeper_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
   ; reported_tool_names_ref : string list ref
   ; observed_tool_names_ref : string list ref
@@ -57,7 +57,7 @@ type ctx =
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
-  ; receipt_cascade_observation_ref : Keeper_observation.cascade_observation option ref
+  ; receipt_runtime_observation_ref : Keeper_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
   ; tool_usage_before : (string * int) list
   ; tools : Agent_sdk.Tool.t list
@@ -108,7 +108,7 @@ let assemble_hooks
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
-  let receipt_cascade_observation_ref = ctx.receipt_cascade_observation_ref in
+  let receipt_runtime_observation_ref = ctx.receipt_runtime_observation_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
   let tool_usage_before = ctx.tool_usage_before in
   let tools = ctx.tools in
@@ -839,7 +839,7 @@ let assemble_hooks
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref
-      ; receipt_cascade_observation_ref
+      ; receipt_runtime_observation_ref
       ; receipt_response_text_present_ref
       ; reported_tool_names_ref
       ; observed_tool_names_ref

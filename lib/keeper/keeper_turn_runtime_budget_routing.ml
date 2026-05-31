@@ -43,7 +43,6 @@ let record_turn_failure_stress
   =
   let room_id = "" in
   Agent_stress.record
-  Agent_stress.record
     { agent_name = meta.name
     ; room_id
     ; kind =

@@ -34,9 +34,8 @@ let resume_keeper_after_reconcile_gate
   (* #9733: same race shape as keeper_msg/overflow-pause/sync paths
      already migrated by #10135 / #10145.  The supervisor reconcile
      fiber clears [paused] and [runtime.last_blocker] (cycle-owned
-     fields); a heartbeat fiber bumping [joined_room_ids] /
-     [last_seen_seq_by_room] in parallel can still steal the CAS
-     write and silently leave the keeper paused while
+     fields); a heartbeat fiber bumping heartbeat-owned metadata in
+     parallel can still steal the CAS write and silently leave the keeper paused while
      [Keeper_registry.update_meta] applies the resume in-memory —
      a registry/disk split that hides the failure. *)
   (match

@@ -99,12 +99,17 @@ let get_default_runtime_id () =
        Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
 ;;
 
-(* Path to the runtime config TOML (re-homed from deleted
-   [Runtime.config_path]). Delegates to the surviving
-   [Config_dir_resolver]; the file is still [cascade.toml] (rename deferred). *)
 let config_path () : string option =
   Config_dir_resolver.log_warnings ~context:"Runtime" ();
-  Config_dir_resolver.cascade_path_opt ()
+  let resolution = Config_dir_resolver.resolve () in
+  match resolution.config_root.source with
+  | Env | Local_masc ->
+      let path =
+        Filename.concat resolution.config_root.path
+          Config_dir_resolver.keeper_runtime_toml_filename
+      in
+      if Sys.file_exists path then Some path else None
+  | Invalid_env | Missing -> None
 ;;
 
 (* RFC-0206 single-binding: the deleted [Cascade_runtime.resolve_*_max_context]

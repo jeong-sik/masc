@@ -251,8 +251,6 @@ let test_env_override_valid () =
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "env"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade authoring exists" true resolution.cascade_authoring.exists;
-  check bool "cascade exists" true resolution.cascade.exists;
   check bool "prompts exists" true resolution.prompts.exists
 
 let test_env_override_valid_with_toml_only_root () =
@@ -266,14 +264,7 @@ let test_env_override_valid_with_toml_only_root () =
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "env"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade authoring exists" true resolution.cascade_authoring.exists;
-  check string "cascade authoring path targets toml"
-    (Filename.concat config "cascade.toml")
-    resolution.cascade_authoring.path;
-  check bool "cascade points at toml" true resolution.cascade.exists;
-  check string "cascade path targets toml"
-    (Filename.concat config "cascade.toml")
-    resolution.cascade.path
+  check bool "prompts absent in toml-only root" false resolution.prompts.exists
 
 let test_env_override_invalid_no_fallback () =
   let invalid = "/tmp/definitely-missing-masc-config-dir" in
@@ -286,7 +277,6 @@ let test_env_override_invalid_no_fallback () =
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "invalid_env"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade missing" false resolution.cascade.exists;
   check bool "warnings present" true (resolution.warnings <> [])
 
 let test_cwd_config_is_seed_only_not_fallback () =
@@ -300,8 +290,7 @@ let test_cwd_config_is_seed_only_not_fallback () =
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "missing"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade hidden because repo config is seed-only"
-    false resolution.cascade.exists
+  check bool "warnings present" true (resolution.warnings <> [])
 
 let test_cwd_config_remains_seed_only () =
   with_temp_dir "config-dir-cwd-seed-only" @@ fun cwd ->

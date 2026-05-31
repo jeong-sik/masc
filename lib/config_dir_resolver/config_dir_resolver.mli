@@ -31,8 +31,6 @@ type resolution = {
   status : status;
   warnings : string list;
   config_root : path_item;
-  cascade_authoring : path_item;
-  cascade : path_item;
   prompts : path_item;
   keepers : path_item;
   personas : path_item;
@@ -49,7 +47,6 @@ type inputs = {
 (** {1 SSOT filenames}
 
     Documented in [docs/TOML-RELOAD-MATRIX.md]. *)
-val cascade_toml_filename : string
 val tool_policy_toml_filename : string
 val keeper_runtime_toml_filename : string
 
@@ -73,16 +70,6 @@ val reset : unit -> unit
 
     Convenience functions that call [resolve ()] internally. *)
 
-(** Path to the on-disk cascade source ([cascade.toml]) when the config
-    root resolves to a usable directory and the file exists. Returns
-    [None] when the resolver state is [Invalid_env]/[Missing] or the
-    file is absent. *)
-val cascade_path_opt : unit -> string option
-
-(** Candidate path to the on-disk cascade source ([cascade.toml]),
-    independent of whether the file exists. Useful for diagnostics that
-    want to surface the expected path. *)
-val cascade_path_candidate : unit -> string
 val prompts_dir : unit -> string
 val keepers_dir : unit -> string
 val personas_dir_opt : unit -> string option

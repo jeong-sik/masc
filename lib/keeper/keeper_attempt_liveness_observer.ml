@@ -12,7 +12,7 @@ exception Liveness_kill of L.failure
 type t = {
   mode : Cfg.mode;
   budget : L.budget;
-  runtime_label : string;
+  runtime_id : string;
   provider_label : string;
   candidate_key : string option;
   external_wait : (unit -> bool) option;
@@ -70,7 +70,7 @@ let public_provider_label_of_raw raw =
 let create
       ~mode
       ~budget
-      ~runtime_label
+      ~runtime_id
       ?(provider_label = public_runtime_provider_label)
       ?external_wait
       ?candidate_key
@@ -81,7 +81,7 @@ let create
   {
     mode;
     budget;
-    runtime_label;
+    runtime_id;
     provider_label = public_provider_label_of_raw provider_label;
     candidate_key;
     external_wait;
@@ -103,16 +103,16 @@ let current_state_for_test (t : t) : L.state = !(t.state)
 (* -- Prometheus emission ------------------------------------------- *)
 
 let kill_labels (t : t) (failure : L.failure) =
-  [
-    ("mode", Cfg.mode_label t.mode);
-    ("kind", L.failure_kind_label failure);
-    ("runtime", t.runtime_label);
-    ("provider", t.provider_label);
-  ]
+    [
+      ("mode", Cfg.mode_label t.mode);
+      ("kind", L.failure_kind_label failure);
+    ("runtime_id", t.runtime_id);
+      ("provider", t.provider_label);
+    ]
 
 let observed_labels (t : t) ~outcome =
   [
-    ("runtime", t.runtime_label);
+    ("runtime_id", t.runtime_id);
     ("provider", t.provider_label);
     ("outcome", outcome);
   ]
@@ -188,7 +188,7 @@ let react_to_output (t : t) (output : L.output) : unit =
                Log.Misc.warn
                  "runtime_attempt_liveness: enforce mode but no switch \
                   registered (runtime=%s provider=%s); shadowing kill"
-                 t.runtime_label t.provider_label))
+                 t.runtime_id t.provider_label))
 
 (* -- on_event wrapper --------------------------------------------- *)
 
@@ -207,7 +207,7 @@ let observe_chunk_clock (t : t) ~(at : float) : unit =
   t.last_chunk_at := Some at
 
 let prometheus_recorder (t : t) : L.recorder =
-  let _labels = [ ("runtime", t.runtime_label); ("provider", t.provider_label) ] in
+  let _labels = [ ("runtime_id", t.runtime_id); ("provider", t.provider_label) ] in
   {
     L.record_ttft = (fun _seconds -> ());
     record_inter_chunk = (fun _seconds -> ());
@@ -250,10 +250,10 @@ let external_wait_active (t : t) : bool =
     (try f () with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Log.Misc.warn
-         "runtime_attempt_liveness: external_wait predicate raised \
-          (runtime=%s provider=runtime): %s"
-         t.runtime_label
+      Log.Misc.warn
+        "runtime_attempt_liveness: external_wait predicate raised \
+         (runtime=%s provider=runtime): %s"
+         t.runtime_id
          (Printexc.to_string exn);
        false)
 
@@ -274,10 +274,10 @@ let wrap_on_event (t : t)
              try f evt with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->
-                 Log.Misc.warn
-                   "runtime_attempt_liveness: original on_event raised \
-                    (runtime=%s provider=runtime): %s"
-                   t.runtime_label
+                Log.Misc.warn
+                  "runtime_attempt_liveness: original on_event raised \
+                   (runtime=%s provider=runtime): %s"
+                   t.runtime_id
                    (Printexc.to_string exn)));
         Eio_guard.check_if_ready ();
         try step_with_event t evt with
@@ -287,7 +287,7 @@ let wrap_on_event (t : t)
             Log.Misc.warn
               "runtime_attempt_liveness: step raised (runtime=%s \
                provider=runtime): %s"
-              t.runtime_label (Printexc.to_string exn)
+              t.runtime_id (Printexc.to_string exn)
       in
       Some wrapped
 
@@ -363,7 +363,7 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
               Log.Misc.warn
                 "runtime_attempt_liveness tick fiber crashed (runtime=%s \
                  provider=%s): %s"
-                t.runtime_label t.provider_label (Printexc.to_string exn))
+                t.runtime_id t.provider_label (Printexc.to_string exn))
 
 (* -- Finalize ----------------------------------------------------- *)
 

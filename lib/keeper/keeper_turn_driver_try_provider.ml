@@ -383,7 +383,7 @@ let run_try_provider
           Keeper_attempt_liveness_observer.create
             ~mode:liveness_mode
             ~budget:resolved_budget.budget
-            ~runtime_label:ctx.runtime_id
+            ~runtime_id:ctx.runtime_id
             ~provider_label
             ~external_wait:(fun () ->
               Keeper_approval_queue.has_pending_for_keeper

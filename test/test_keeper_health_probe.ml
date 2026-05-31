@@ -35,7 +35,7 @@ let make_meta ?cascade_name name =
   in
   let fields =
     match cascade_name with
-    | Some cascade_name -> ("cascade_name", `String cascade_name) :: fields
+    | Some cascade_name -> ("runtime_id", `String cascade_name) :: fields
     | None -> fields
   in
   match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with

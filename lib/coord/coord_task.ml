@@ -205,7 +205,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
-                  Log.RoomTask.error
+                  Log.CoordTask.error
                     "hebbian task_cancelled hook error: %s"
                     (Printexc.to_string exn));
                Ok (Printf.sprintf "%s cancelled %s" agent_name task_id)))

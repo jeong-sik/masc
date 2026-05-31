@@ -318,7 +318,7 @@ let claim_next_r
                  ; "reason", `String "existing_claim_preserved"
                  ; "ts", `String (now_iso ())
                  ]);
-           Log.RoomTask.info
+           Log.CoordTask.info
              "task_claim_next preserved existing task: agent=%s task=%s from_status=%s — \
               finish or explicitly release before claiming different work (#10421)"
              agent_name

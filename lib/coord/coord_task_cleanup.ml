@@ -11,7 +11,7 @@ let run_done_hooks config ~agent_name ~task_id ~force =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Log.RoomTask.error "transition economy done hook: %s" (Printexc.to_string exn));
+     Log.CoordTask.error "transition economy done hook: %s" (Printexc.to_string exn));
   (try
      let active = (read_state config).active_agents in
      (Atomic.get Coord_hooks.relation_on_task_done_fn)
@@ -22,7 +22,7 @@ let run_done_hooks config ~agent_name ~task_id ~force =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Log.RoomTask.error "transition relation/hebbian done hook: %s" (Printexc.to_string exn))
+     Log.CoordTask.error "transition relation/hebbian done hook: %s" (Printexc.to_string exn))
 
 let run_cancel_hooks config ~agent_name =
   (try
@@ -32,4 +32,4 @@ let run_cancel_hooks config ~agent_name =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Log.RoomTask.error "transition hebbian cancel hook: %s" (Printexc.to_string exn))
+     Log.CoordTask.error "transition hebbian cancel hook: %s" (Printexc.to_string exn))

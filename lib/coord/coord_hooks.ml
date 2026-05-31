@@ -313,6 +313,6 @@ let observe_claim_post_provision_failure ~site ~agent_name ~task_id exn =
     (Atomic.get claim_post_provision_failed_fn)
       ~site ~agent_name ~task_id ~error);
   Safe_ops.protect ~default:() (fun () ->
-    Log.RoomTask.warn
+    Log.CoordTask.warn
       "claim_post_provision failed site=%s agent=%s task=%s err=%s"
       site agent_name task_id error)

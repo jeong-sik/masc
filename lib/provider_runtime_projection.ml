@@ -181,7 +181,7 @@ let configured_default_model_label_result () =
     let labels = split_csv_nonempty raw in
     (match labels with
      | first :: _ -> Ok first
-     | [] -> Error "MASC_DEFAULT_CASCADE is set but empty")
+     | [] -> Error "MASC_DEFAULT_RUNTIME is set but empty")
   | None ->
     (match nonempty_env "MASC_DEFAULT_PROVIDER", nonempty_env "MASC_DEFAULT_MODEL" with
      | Some provider, Some model_id -> Ok (provider ^ ":" ^ model_id)

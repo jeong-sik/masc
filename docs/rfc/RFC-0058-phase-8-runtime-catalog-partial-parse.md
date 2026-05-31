@@ -214,7 +214,7 @@ Phase 8 splits into **5 sub-phases**. Phase 8.1 + 8.2 shipped 2026-05-17 (#15733
 
 ### Phase 8.3 — Boot-gate partial tolerance — **PENDING (PR-C)**
 
-**Scope:** Make `Runtime_catalog_runtime.validate_path_result` explicit about its strict mode. Document that boot remains all-or-nothing by default while live reload is partial. Add a `--runtime-allow-partial-boot` operator flag (off by default) and a corresponding env var (`MASC_CASCADE_PARTIAL_BOOT=1`) for emergency boot with degraded config.
+**Scope:** Make `Runtime_catalog_runtime.validate_path_result` explicit about its strict mode. Document that boot remains all-or-nothing by default while live reload is partial. Add a `--runtime-allow-partial-boot` operator flag (off by default) and a corresponding env var (`MASC_RUNTIME_PARTIAL_BOOT=1`) for emergency boot with degraded config.
 
 **Why this is reclassified from "skipped if 8.2 covers live reload" to "must-have"**: the post-merge audit (§11) corrected the assumption that 8.2 covers the original incident. **It does not.** 8.2 only helps if the server is already running when the operator edits keeper_runtime.toml. The 2026-05-17 incident reproduces equally on **cold boot** with a stale binding, and in that case the boot gate's binary `try_load_declarative` aborts startup before the keeper validators run. 8.3 is the only sub-phase that addresses cold-boot recovery.
 
@@ -224,7 +224,7 @@ Phase 8 splits into **5 sub-phases**. Phase 8.1 + 8.2 shipped 2026-05-17 (#15733
 - `dashboard/src/components/runtime-status` — visible banner when partial-boot mode is active.
 - `docs/operator/runtime-degraded-mode.md` — runbook.
 
-**Acceptance:** With `MASC_CASCADE_PARTIAL_BOOT=1` set, server boots with a mid-edit keeper_runtime.toml; dashboard banner reflects degraded mode; affected keepers boot or wait depending on runtime_id resolvability.
+**Acceptance:** With `MASC_RUNTIME_PARTIAL_BOOT=1` set, server boots with a mid-edit keeper_runtime.toml; dashboard banner reflects degraded mode; affected keepers boot or wait depending on runtime_id resolvability.
 
 **Risk:** Operator footgun if the flag is left on. Mitigations: off-by-default; dashboard banner; structured log on every reload while flag is active.
 

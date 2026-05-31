@@ -181,7 +181,7 @@ Fix 자체는 **production-impacting**. 다음 안전망 적용:
 ## 10. Open questions
 
 1. `Runtime_attempt_liveness_config.current_mode ()` 의 default 값과
-   env override (`MASC_CASCADE_LIVENESS_MODE` 류) 존재 여부. Phase 0
+   env override (`MASC_RUNTIME_LIVENESS_MODE` 류) 존재 여부. Phase 0
    에서 production process 의 *실제* mode 측정 필요 — `Off` 라면
    가설이 무너지고 다른 진단 경로 필요.
 2. Phase 0 의 trace log 가 production 트래픽에 가시적 overhead 를

@@ -1,7 +1,7 @@
 (** Tri-state env flag + living budget selection for the runtime
     attempt-liveness gate (RFC-0022 PR-2/4 §2).
 
-    The flag [MASC_CASCADE_ATTEMPT_LIVENESS] selects one of three modes:
+    The flag [MASC_RUNTIME_ATTEMPT_LIVENESS] selects one of three modes:
 
     - [off]      — wrapper bypassed entirely, baseline behaviour.
     - [observe]  — observer constructed; counters emit; never raises.
@@ -26,7 +26,7 @@ type mode =
 
 val current_mode : unit -> mode
 (** Cached env-flag read. First call reads
-    [MASC_CASCADE_ATTEMPT_LIVENESS] and caches the result. Subsequent
+    [MASC_RUNTIME_ATTEMPT_LIVENESS] and caches the result. Subsequent
     calls return the cached value. *)
 
 val mode_label : mode -> string
@@ -69,11 +69,11 @@ val record_success_sample :
   candidate_key:string -> success_sample -> unit
 (** Append a successful attempt timing sample to the neutral runtime candidate
     lane. Invalid negative/non-finite values are ignored. The runtime lane keeps
-    at most [MASC_CASCADE_LIVENESS_SUCCESS_HISTORY_SIZE] samples. *)
+    at most [MASC_RUNTIME_LIVENESS_SUCCESS_HISTORY_SIZE] samples. *)
 
 val reset_cache_for_test : unit -> unit
 (** Test-only: reset the cached flag read so a new value of
-    [MASC_CASCADE_ATTEMPT_LIVENESS] takes effect. Production callers
+    [MASC_RUNTIME_ATTEMPT_LIVENESS] takes effect. Production callers
     must not invoke this. *)
 
 val reset_success_history_for_test : unit -> unit

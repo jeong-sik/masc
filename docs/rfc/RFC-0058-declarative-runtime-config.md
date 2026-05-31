@@ -597,7 +597,7 @@ ships independently.
 
 ## 11. Related Documents
 
-- `docs/CASCADE-TOML.md` — current TOML authoring guide (to be rewritten)
+- `docs/RUNTIME-TOML.md` — current TOML authoring guide (to be rewritten)
 - `docs/rfc/RFC-0058-terminal-fallback-capability-exemption.md` — terminal fallback semantics
 - `docs/rfc/RFC-0055.md` — GADT runtime tier routing (superseded)
 - `config/keeper_runtime.toml` — current seed config (to be migrated)

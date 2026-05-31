@@ -371,7 +371,7 @@ function RailRuntime() {
   return (
     <aside className="cb-rail" aria-label="Runtime rail">
       <div className="sec">
-        <SectionHeading title="CASCADE" right="runtime-3f19" />
+        <SectionHeading title="RUNTIME" right="runtime-3f19" />
         <div className="cb-runtime" role="region" aria-label={`Runtime trace runtime-3f19 · hit at step 2 · total ${D2.runtime.total_ms}ms`}>
           <span className="id" aria-hidden="true">trace · hit @step=2</span>
           <ol aria-label="Runtime steps" style={{listStyle:'none', margin:0, padding:0}}>

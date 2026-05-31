@@ -27,7 +27,7 @@
     This PR-1 ships the pure FSM module + property tests only.
     Production runtime behaviour is unchanged: no caller in
     [runtime_runtime.ml] consumes [step] yet. Wiring lands in PR-2 of
-    the RFC-0022 stack, behind [MASC_CASCADE_ATTEMPT_LIVENESS=observe]
+    the RFC-0022 stack, behind [MASC_RUNTIME_ATTEMPT_LIVENESS=observe]
     by default (§9 Phase A).
 
     @stability Evolving

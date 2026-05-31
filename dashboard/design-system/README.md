@@ -66,7 +66,7 @@ MASC is **bilingual Korean/English** under the hood — titles, goals and some c
 
 **Tone: terse, diagnostic, ops-flavored.** MASC talks like a mission-control console. Every label is doing a job.
 
-- **Labels are ALL-CAPS mono**, small-caps letterspaced (.06–.08em): `FLEET` · `KEEPERS` · `NOW` · `TOOL USE` · `CASCADE` · `GOAL`.
+- **Labels are ALL-CAPS mono**, small-caps letterspaced (.06–.08em): `FLEET` · `KEEPERS` · `NOW` · `TOOL USE` · `RUNTIME` · `GOAL`.
 - **Headings are numeric-first.** KPI values lead with the number; unit follows in a tiny caption: `1.24s TPS`, `87% PASS`.
 - **IDs are always shown.** Tasks show `t-abc12`, goals show `goal-merge-blockers`, PRs show `#9712`. Mono, dim.
 - **Timestamps are relative-first, absolute on hover.** `3m ago` · `2026-04-24 16:31:27Z`.
@@ -83,7 +83,7 @@ Examples seen in the system:
 ```
 goal-merge-blockers       ACTIVE   3/3    priority 1
 nick0cave  →  t-9f2a  tool.write_file  +18 −4   2m ago
-CASCADE  provider-a > provider-b > provider-d   hit@2   1.24s
+RUNTIME  provider-a > provider-b > provider-d   hit@2   1.24s
 FLAG  @sangsu  drift detected at L187    +2 replies
 ```
 

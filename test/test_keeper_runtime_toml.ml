@@ -197,7 +197,7 @@ let test_applies_turn_execution_overrides () =
     (List.assoc_opt "MASC_KEEPER_LLM_RERANK" overrides);
   check (option string) "llm rerank runtime"
     (Some "tool_rerank_fast")
-    (List.assoc_opt "MASC_KEEPER_LLM_RERANK_CASCADE" overrides);
+    (List.assoc_opt "MASC_KEEPER_LLM_RERANK_RUNTIME" overrides);
   check (option string) "temperature"
     (Some "0.65")
     (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides);

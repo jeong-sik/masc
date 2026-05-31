@@ -452,7 +452,7 @@ export function ObservatoryActivityPanels() {
         <${KeeperPhaseTimeline} />
       <//>
 
-      <${CollapsibleSection} title="캐스케이드 워터폴" mountWhenOpen>
+      <${CollapsibleSection} title="런타임 워터폴" mountWhenOpen>
       <//>
 
       ${data && (data.stats.event_count ?? 0) > 0 ? html`

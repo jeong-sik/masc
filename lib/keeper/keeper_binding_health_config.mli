@@ -14,7 +14,7 @@ val default_capacity_backpressure_backoff_sec : float
     short-window signal that a different provider is probably ready
     sooner — but above zero so the runtime does not immediately rotate
     onto the same degraded provider.  Tunable via
-    [MASC_CASCADE_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
+    [MASC_RUNTIME_CAPACITY_BACKPRESSURE_DEFAULT_BACKOFF_SEC]. *)
 val latency_ring_size : int
 val confidence_ring_size : int
 val cost_ring_size : int

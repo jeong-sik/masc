@@ -156,7 +156,7 @@ export const LANE_LABELS: Record<LaneKey, string> = {
   phase: 'Keeper 생명주기',
   turn: '턴 주기',
   decision: '의사결정',
-  runtime: '캐스케이드',
+  runtime: '런타임',
   compaction: '컨텍스트 압축',
   breaker: '서킷 브레이커',
 }
@@ -575,10 +575,10 @@ export function operatorDispositionLabel(value: string | null | undefined): stri
  *  by #16355. */
 const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   healthy: '정상',
-  runtime_exhausted: '캐스케이드 소진',
+  runtime_exhausted: '런타임 후보 소진',
   preflight_config_error: '실행 전 설정 오류',
   degraded_retry: '저하 상태 재시도',
-  runtime_fallback: '캐스케이드 폴백',
+  runtime_fallback: '런타임 폴백',
   provider_runtime_error: 'Provider 런타임 오류',
   internal_error: '내부 오류',
   tool_required_unsatisfied: '필수 도구 미충족',
@@ -604,7 +604,7 @@ export function operatorDispositionReasonLabel(
  *  `not_observed` are generic tokens other axes may emit (same
  *  isolation pattern as TOOL_CONTRACT_LABELS in #16374 and
  *  OPERATOR_DISPOSITION_LABELS in #16377). */
-const CASCADE_OUTCOME_LABELS: Record<string, string> = {
+const RUNTIME_OUTCOME_LABELS: Record<string, string> = {
   passed_to_next_model: '다음 모델로 진행',
   completed: '완료',
   not_observed: '관측되지 않음',
@@ -613,7 +613,7 @@ const CASCADE_OUTCOME_LABELS: Record<string, string> = {
 
 export function runtimeOutcomeLabel(value: string | null | undefined): string | null {
   if (!value) return null
-  return CASCADE_OUTCOME_LABELS[value] ?? value
+  return RUNTIME_OUTCOME_LABELS[value] ?? value
 }
 
 /** Korean labels for `execution.terminal_reason_code`. Backend emits this

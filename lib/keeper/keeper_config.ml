@@ -459,9 +459,9 @@ let keeper_llm_rerank_enabled () : bool =
   Runtime_params.get keeper_llm_rerank_enabled_rp
 
 (** Named runtime profile for the LLM reranker.
-    Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: same global model. *)
+    Env: [MASC_KEEPER_LLM_RERANK_RUNTIME]. Default: same global model. *)
 let keeper_llm_rerank_runtime () : string =
-  match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_CASCADE" with
+  match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_RUNTIME" with
   | Some v when String.trim v <> "" -> String.trim v
   | _ -> default_runtime_id ()
 

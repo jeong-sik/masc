@@ -12,7 +12,7 @@ let mode_label = function
   | Observe -> "observe"
   | Enforce -> "enforce"
 
-let env_var_name = "MASC_CASCADE_ATTEMPT_LIVENESS"
+let env_var_name = "MASC_RUNTIME_ATTEMPT_LIVENESS"
 
 let parse_mode raw =
   match String.trim raw with
@@ -73,7 +73,7 @@ let with_success_history_lock f =
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock success_history_mu) f
 
 let success_history_limit =
-  match Sys.getenv_opt "MASC_CASCADE_LIVENESS_SUCCESS_HISTORY_SIZE" with
+  match Sys.getenv_opt "MASC_RUNTIME_LIVENESS_SUCCESS_HISTORY_SIZE" with
   | None | Some "" -> 32
   | Some raw ->
     (match int_of_string_opt (String.trim raw) with
@@ -81,7 +81,7 @@ let success_history_limit =
      | None -> 32)
 
 let success_history_candidate_limit =
-  match Sys.getenv_opt "MASC_CASCADE_LIVENESS_SUCCESS_CANDIDATES" with
+  match Sys.getenv_opt "MASC_RUNTIME_LIVENESS_SUCCESS_CANDIDATES" with
   | None | Some "" -> 128
   | Some raw ->
     (match int_of_string_opt (String.trim raw) with

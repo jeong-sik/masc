@@ -610,7 +610,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span class="text-[var(--color-status-err)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`
           : null}
         ${runtimeLabel
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">캐스케이드</strong> · ${runtimeLabel}</span>`
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">런타임</strong> · ${runtimeLabel}</span>`
           : null}
         ${renderRuntimeAttempt ? renderRuntimeAttemptObservation(runtimeAttempt) : null}
         ${latestRuntimeMetric?.fallback_applied === true && (fallbackReason || fallbackHops > 0)

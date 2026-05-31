@@ -120,7 +120,7 @@ let rec try_group ~max_fallbacks ~fallback_count group_name visited =
           next (group_name :: visited)
 ```
 
-`max_fallbacks` 는 environment knob `MASC_CASCADE_MAX_FALLBACKS` 또는 runtime profile 의 명시적 field. Default = TLA+ cfg 의 `MaxFallbacks` 값.
+`max_fallbacks` 는 environment knob `MASC_RUNTIME_MAX_FALLBACKS` 또는 runtime profile 의 명시적 field. Default = TLA+ cfg 의 `MaxFallbacks` 값.
 
 **Layer B — Equivalence test**
 
@@ -136,7 +136,7 @@ let rec try_group ~max_fallbacks ~fallback_count group_name visited =
 |---|---|---|
 | P1 (this PR) | RFC body | Draft → main |
 | P2 | `Keeper_runtime_selector.try_group` 가 `~fallback_count` typed parameter 받음. Default 무한대 (backwards-compat — existing caller unchanged). | dune build PASS, alcotest PASS for existing scenarios |
-| P3 | Caller (`keeper_unified_turn`) 가 `MASC_CASCADE_MAX_FALLBACKS` env (default = TLA+ cfg value) 로 호출 | PBT: profile=5/max=3 시 OCaml = TLA+ 정확히 같은 시점 종료 |
+| P3 | Caller (`keeper_unified_turn`) 가 `MASC_RUNTIME_MAX_FALLBACKS` env (default = TLA+ cfg value) 로 호출 | PBT: profile=5/max=3 시 OCaml = TLA+ 정확히 같은 시점 종료 |
 | P4 | Equivalence PBT (`test_kcr_cap_equivalence.ml`) — 100 random profile-shape × max_fallbacks 조합 | PASS rate 100% |
 | P5 | KCR-buggy.cfg 에 `BuggyOvercountFallback` action 추가 — `fallback_count++` 없이 fallback | KCR.cfg PASS, KCR-buggy.cfg invariant violation (`FallbackCountBounded`) |
 | P6 | `scripts/lint-kcr-max-fallbacks.sh` CI workflow, drift 차단 | KCR.cfg `MaxFallbacks` change PR 이 OCaml default 함께 update 필요 |
@@ -145,7 +145,7 @@ P3 가 핵심 — runtime cap 이 spec metric 으로 align. P5 는 spec-runtime 
 
 ## §4 Open questions
 
-1. **Q1**: `MASC_CASCADE_MAX_FALLBACKS` default = ? TLA+ cfg `MaxFallbacks` 의 정확한 값 확인 필요. **잠정**: spec cfg grep + P3 의 첫 commit 에서 명시. 보수적 default 는 *현 OCaml behavior 보존* 위해 `Int.max_int` (P2 와 같이).
+1. **Q1**: `MASC_RUNTIME_MAX_FALLBACKS` default = ? TLA+ cfg `MaxFallbacks` 의 정확한 값 확인 필요. **잠정**: spec cfg grep + P3 의 첫 commit 에서 명시. 보수적 default 는 *현 OCaml behavior 보존* 위해 `Int.max_int` (P2 와 같이).
 
 2. **Q2**: runtime profile 이 자체 `max_fallbacks` field 가질지? per-profile vs global env? **잠정**: 둘 다 — profile field 가 있으면 우선, 없으면 env, 없으면 default.
 

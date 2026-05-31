@@ -2818,7 +2818,7 @@ had the full Phase 2 release to migrate.
 ## [0.5.4] - 2026-04-11
 
 ### Added
-- `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` env knob for runtime runtime narrowing (#6478)
+- `MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST` env knob for runtime runtime narrowing (#6478)
 - `Config_dir_resolver.log_resolution` startup log with shadow hint (#6478)
 - `test_runtime_config_validity` alcotest suite for runtime.json profiles (#6478)
 - `scripts/sync-version-truth.sh` dry-run version sync helper (#6478)

@@ -12,7 +12,7 @@ implementation_prs: []
 - **Created**: 2026-05-20
 - **Owner**: keeper observability + memory + runtime
 - **Predecessors**: masc-mcp #16771, #16778, #16787 (all MERGED to main 2026-05-19)
-- **Evidence base**: `~/me/memory/masc-mcp-code-flowchart-audit-2026-05-20.html` §3 MEMORY, §4 COMPACT, §6 CASCADE
+- **Evidence base**: `~/me/memory/masc-mcp-code-flowchart-audit-2026-05-20.html` §3 MEMORY, §4 COMPACT, §6 RUNTIME
 - **Related**: RFC-0144 (workaround sunset taxonomy), RFC-0145 (permissive silent fallback elimination)
 
 ## 1. Motivation
@@ -41,8 +41,8 @@ Out of scope (separate RFC candidates from the same audit):
 
 - B1 LIFE: Dead phase entry-action ordering race (`keeper_state_machine.ml:773-778`).
 - B2 MEMORY: RFC-0107 `Jsonl_atomic` adoption for memory bank compaction.
-- B3 CASCADE: keeper_runtime.toml unknown field strict validation.
-- B4 CASCADE: `runtime_inference.ml:59-82` inference param fail-OPEN.
+- B3 RUNTIME: keeper_runtime.toml unknown field strict validation.
+- B4 RUNTIME: `runtime_inference.ml:59-82` inference param fail-OPEN.
 - B6 TURN: `keeper_turn_runtime_budget_routing.ml:11,17` string prefix dispatch → tagged variant.
 
 ## 3. Root-fix (typed boundary) per workaround

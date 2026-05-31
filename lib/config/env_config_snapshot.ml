@@ -469,9 +469,9 @@ let keeper_bootstrap_entries =
 
 let keeper_runtime_entries =
   [
-    entry ~default:"(none)" "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST"
+    entry ~default:"(none)" "MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST"
       "Comma-separated provider allowlist for runtime (None=unfiltered)";
-    entry ~default:"enforce" "MASC_CASCADE_ATTEMPT_LIVENESS"
+    entry ~default:"enforce" "MASC_RUNTIME_ATTEMPT_LIVENESS"
       "Runtime attempt-liveness gate mode (off|observe|enforce). RFC-0022 \
        Explicit values must be canonical; invalid values raise a config error.";
   ]
@@ -554,7 +554,7 @@ let keeper_supervisor_entries =
 
 let keeper_tool_entries =
   [
-    entry ~default:"(none)" "MASC_KEEPER_LLM_RERANK_CASCADE"
+    entry ~default:"(none)" "MASC_KEEPER_LLM_RERANK_RUNTIME"
       "Named runtime profile for LLM reranker";
     entry ~default:"3" "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"
       "Max consecutive failures for same tool+args before blocking (clamped 2-20)";
@@ -598,7 +598,7 @@ let message_gc_entries =
 
 let model_routing_entries =
   [
-    entry ~default:"(none)" "MASC_DEFAULT_CASCADE"
+    entry ~default:"(none)" "MASC_DEFAULT_RUNTIME"
       "Default runtime label; None when unset";
     entry ~default:"(none)" "MASC_DEFAULT_MODEL"
       "Default model id; None when unset";
@@ -608,7 +608,7 @@ let model_routing_entries =
       "Goal dispatch runtime type";
     entry ~default:"(none)" "MASC_GOAL_MODELS"
       "Goal models comma-separated; None when unset";
-    entry ~default:"(none)" "MASC_ROUTING_CASCADE"
+    entry ~default:"(none)" "MASC_ROUTING_RUNTIME"
       "Routing runtime for team session routing";
   ]
 

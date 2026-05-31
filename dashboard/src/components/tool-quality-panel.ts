@@ -451,7 +451,7 @@ export function ToolQualityPanel() {
 
       ${d.by_runtime.length > 0 ? html`
         <div>
-          <div class="text-3xs text-[var(--color-fg-disabled)] uppercase tracking-wider mb-1">캐스케이드별</div>
+          <div class="text-3xs text-[var(--color-fg-disabled)] uppercase tracking-wider mb-1">런타임별</div>
           <${KeeperRateBars} keepers=${d.by_runtime} />
         </div>
       ` : null}

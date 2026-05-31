@@ -495,7 +495,10 @@ let parse_verdict (text : string) : (verdict, string) result =
     Cross-model evaluation is more effective than same-model different-role
     because different model architectures have different blindspots.
     See: Anthropic "Harness Design" blog analysis. *)
-let default_evaluator_runtime =
+(* Function, not a module-level value: [Runtime.get_default_runtime_id] fail-fasts
+   until [Runtime.init_default] runs at startup (RFC-0206 §2.1). A module-level
+   binding evaluates at load time and crashes boot; defer to call time. *)
+let default_evaluator_runtime () =
   Runtime.get_default_runtime_id ()
 ;;
 
@@ -529,7 +532,7 @@ let check_contract ~(notes : string) ~(contract : string list) : string list =
 ;;
 
 let review
-      ?(evaluator_runtime = default_evaluator_runtime)
+      ?(evaluator_runtime = default_evaluator_runtime ())
       ?generator_runtime
       ?(completion_contract : string list option)
       ?(on_verdict : (review_result -> unit) option)

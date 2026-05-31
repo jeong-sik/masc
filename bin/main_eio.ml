@@ -518,7 +518,7 @@ let base_path =
   let doc = "Base path for MASC data (.masc folder location)" in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
-let doctor_json =
+let login_json =
   let doc = "Emit machine-readable JSON instead of text output" in
   Arg.(value & flag & info ["json"] ~doc)
 
@@ -915,7 +915,7 @@ let login_cmd =
   Cmd.v info
     Term.(
       const login_cmd_exit $ base_path $ host $ port $ login_agent
-      $ login_role $ login_client_env $ login_no_expiry $ doctor_json
+      $ login_role $ login_client_env $ login_no_expiry $ login_json
       $ login_shell)
 
 let init_force =

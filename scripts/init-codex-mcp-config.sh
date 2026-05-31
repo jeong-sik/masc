@@ -28,8 +28,8 @@ init-codex-mcp-config.sh — write the canonical [mcp_servers.masc] TOML stanza.
 Usage:
   scripts/init-codex-mcp-config.sh [--base-path PATH] [--host HOST] [--port PORT] [--dry-run]
 
-This script generates the correct [mcp_servers.masc] Codex config entry that
-the MASC auth doctor (doctor auth) expects:
+This script generates the correct [mcp_servers.masc] Codex config entry for
+MASC HTTP auth:
   - bearer_token_env_var = "MASC_MCP_TOKEN"   (no hardcoded Authorization header)
   - http_headers with Accept and X-MASC-Agent  (no Authorization header)
 
@@ -43,7 +43,7 @@ Security notes:
   - Never write the raw bearer token into ~/.codex/config.toml.
   - Use bearer_token_env_var so Codex reads the token from the environment
     at runtime; this avoids persisting the literal token in the config file.
-  - Run `masc-mcp doctor auth` to verify the config is correct.
+  - Restart Codex from a shell that exports MASC_MCP_TOKEN.
 
 Env:
   MASC_BASE_PATH         Base path for the MASC data root (default: MASC_BASE_PATH, then repo root)
@@ -67,7 +67,6 @@ MCP_URL="http://${HOST}:${PORT}/mcp"
 
 # The canonical [mcp_servers.masc] stanza.
 # bearer_token_env_var is used instead of a hardcoded Authorization header.
-# This is what `masc-mcp doctor auth` checks for in codex_mcp.config.stages.
 MASC_STANZA=$(cat <<EOF
 [mcp_servers.masc]
 url = "${MCP_URL}"
@@ -90,7 +89,7 @@ if [ "$DRY_RUN" = "1" ]; then
   echo "  3. Add or replace the stanza with the output above."
   echo "  4. Mint a codex-mcp-client token and export it:"
   echo "     eval \"\$(masc-mcp login --base-path '${BASE_PATH}' --agent codex-mcp-client --role worker --shell)\""
-  echo "  5. Run: masc-mcp doctor auth --base-path '${BASE_PATH}'"
+  echo "  5. Restart Codex from a shell that exports MASC_MCP_TOKEN."
   exit 0
 fi
 
@@ -105,7 +104,6 @@ elif grep -qE '^\[mcp_servers\.masc\]' "$CODEX_CONFIG_PATH" 2>/dev/null; then
   # Stanza already present.
   echo "==> [mcp_servers.masc] already present in ${CODEX_CONFIG_PATH}." >&2
   echo "    Run: MASC_SYNC_CODEX_MCP_CONFIG=1 masc-mcp --base-path '${BASE_PATH}'" >&2
-  echo "    Or:  masc-mcp doctor auth --base-path '${BASE_PATH}'" >&2
   echo "    to check and repair bearer_token_env_var / Authorization drift." >&2
 else
   # Append the stanza to the existing config.
@@ -123,5 +121,4 @@ echo "==> Mint / verify codex-mcp-client bearer token:" >&2
 echo "    eval \"\$(masc-mcp login --base-path '${BASE_PATH}' --agent codex-mcp-client --role worker --shell)\"" >&2
 echo "    export MASC_MCP_TOKEN" >&2
 echo "" >&2
-echo "==> Verify config with auth doctor:" >&2
-echo "    masc-mcp doctor auth --base-path '${BASE_PATH}'" >&2
+echo "==> Restart Codex from a shell that exports MASC_MCP_TOKEN." >&2

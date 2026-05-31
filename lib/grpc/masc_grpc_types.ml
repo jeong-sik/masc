@@ -49,7 +49,7 @@ type agent_info =
   ; status : string
   ; capabilities : string list
   ; last_heartbeat_ms : int64
-  ; joined_at_ms : int64
+  ; session_bound_at_ms : int64
   ; current_task_id : string
   }
 
@@ -67,7 +67,7 @@ let agent_info_to_proto (a : agent_info) : P.AgentInfo.t =
   ; status = a.status
   ; capabilities = a.capabilities
   ; last_heartbeat_ms = a.last_heartbeat_ms
-  ; joined_at_ms = a.joined_at_ms
+  ; session_bound_at_ms = a.session_bound_at_ms
   ; current_task_id = a.current_task_id
   }
 ;;
@@ -77,7 +77,7 @@ let agent_info_of_proto (p : P.AgentInfo.t) : agent_info =
   ; status = p.status
   ; capabilities = p.capabilities
   ; last_heartbeat_ms = p.last_heartbeat_ms
-  ; joined_at_ms = p.joined_at_ms
+  ; session_bound_at_ms = p.session_bound_at_ms
   ; current_task_id = p.current_task_id
   }
 ;;

@@ -133,7 +133,7 @@ let handle_get_status (room_config : Coord_utils_backend_setup.config) (_bytes :
                ; status = status_str
                ; capabilities = agent.capabilities
                ; last_heartbeat_ms = now_ms ()
-               ; joined_at_ms = now_ms ()
+               ; session_bound_at_ms = now_ms ()
                ; current_task_id = Option.value ~default:"" agent.current_task
                }
                : T.agent_info)

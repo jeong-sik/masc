@@ -313,7 +313,7 @@ let execution_smoke_fixture_json () =
                 ("agent_type", `String "llama");
                 ("status", `String "busy");
                 ("current_task", `String "Validate local64 swarm role coverage");
-                ("joined_at", `String generated_at);
+                ("session_bound_at", `String generated_at);
                 ("last_seen", `String generated_at);
                 ("capabilities", `List [ `String "manager"; `String "local64" ]);
                 ("emoji", `String "🤖");
@@ -325,7 +325,7 @@ let execution_smoke_fixture_json () =
                 ("agent_type", `String "llama");
                 ("status", `String "active");
                 ("current_task", `String "Inspect secondary runtime health");
-                ("joined_at", `String generated_at);
+                ("session_bound_at", `String generated_at);
                 ("last_seen", `String "2026-03-11T09:15:00Z");
                 ("capabilities", `List [ `String "metacog"; `String "local64" ]);
                 ("emoji", `String "🤖");
@@ -337,7 +337,7 @@ let execution_smoke_fixture_json () =
                 ("agent_type", `String "llama");
                 ("status", `String "idle");
                 ("current_task", `Null);
-                ("joined_at", `String generated_at);
+                ("session_bound_at", `String generated_at);
                 ("last_seen", `String generated_at);
                 ("capabilities", `List [ `String "executor"; `String "local64" ]);
                 ("emoji", `String "🤖");
@@ -349,7 +349,7 @@ let execution_smoke_fixture_json () =
                 ("agent_type", `String "llama");
                 ("status", `String "inactive");
                 ("current_task", `Null);
-                ("joined_at", `String generated_at);
+                ("session_bound_at", `String generated_at);
                 ("last_seen", `String "2026-03-11T08:55:00Z");
                 ("capabilities", `List [ `String "observer"; `String "local64" ]);
                 ("emoji", `String "🤖");

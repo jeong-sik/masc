@@ -2,7 +2,7 @@
 
     Extracted from mcp_server_eio.ml.
     Contains the main tool dispatch function that resolves agent identity,
-    checks authorization, auto-joins, and delegates to tool modules.
+    checks authorization, session-binds, and delegates to tool modules.
 *)
 
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn

@@ -85,15 +85,15 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
             `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_parse") ]
         | Ok (agent : Masc_domain.agent) ->
             let now_ts = Time_compat.now () in
-            let joined_ts =
-              Coord_resilience.Time.parse_iso8601_opt agent.joined_at
+            let session_bound_ts =
+              Coord_resilience.Time.parse_iso8601_opt agent.session_bound_at
               |> Option.value ~default:0.0
             in
             let last_seen_ts =
               Coord_resilience.Time.parse_iso8601_opt agent.last_seen
               |> Option.value ~default:0.0
             in
-            let age_s = if joined_ts <= 0.0 then 0.0 else now_ts -. joined_ts in
+            let age_s = if session_bound_ts <= 0.0 then 0.0 else now_ts -. session_bound_ts in
             let last_seen_ago_s =
               if last_seen_ts <= 0.0 then 0.0 else now_ts -. last_seen_ts
             in
@@ -106,7 +106,7 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
                 ( "capabilities",
                   `List (List.map (fun s -> `String s) agent.capabilities) );
                 ( "current_task", Json_util.string_opt_to_json agent.current_task );
-                ("joined_at", `String agent.joined_at);
+                ("session_bound_at", `String agent.session_bound_at);
                 ("last_seen", `String agent.last_seen);
                 ("age_s", `Float age_s);
                 ("last_seen_ago_s", `Float last_seen_ago_s);

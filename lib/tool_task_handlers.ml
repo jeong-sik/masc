@@ -329,8 +329,8 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
       ~created_by:ctx.agent_name ctx.config tasks)
 
 let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
-  (* #18965 — removed [is_agent_joined] hard gate.  Keeper-internal tag
-     dispatch path bypasses MCP entry auto-join, so this gate produced
+  (* #18965 — removed [is_agent_session_bound] hard gate.  Keeper-internal tag
+     dispatch path bypasses MCP entry session binding, so this gate produced
      false-negative rejects for every keeper turn (fleet evidence:
      ~/.masc/agents/ empty while keepers run normally; only
      masc_claim/masc_claim_next failed).  Coord.claim_task_r works on
@@ -432,7 +432,7 @@ let format_no_eligible
         diagnostics
 
 let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
-  (* #18965 — removed [is_agent_joined] hard gate (same rationale as
+  (* #18965 — removed [is_agent_session_bound] hard gate (same rationale as
      [handle_claim] above).  Coord.claim_next_r operates on
      [~agent_name] alone; backlog read does not require an entry under
      agents_dir. *)

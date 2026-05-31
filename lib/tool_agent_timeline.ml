@@ -21,7 +21,7 @@ module Float = Stdlib.Float
     a single chronological timeline for a given agent.
 
     Data sources:
-    - Agent join status (Coord.get_agents_raw)
+    - Agent session status (Coord.get_agents_raw)
     - Task state transitions (Coord.get_tasks_raw)
     - Broadcast messages (Coord.get_messages_raw)
 *)
@@ -106,20 +106,20 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
       ("detail", e.detail);
     ]
 
-(* Collect agent join/status events *)
+(* Collect agent session/status events *)
 let agent_events (config : Coord.config) ~agent_name :
     timeline_event list =
   let agents = Coord.get_active_agents config in
   agents
   |> List.filter (fun (a : Masc_domain.agent) -> String.equal a.name agent_name)
   |> List.filter_map (fun (a : Masc_domain.agent) ->
-         match parse_iso_timestamp a.joined_at with
+         match parse_iso_timestamp a.session_bound_at with
          | Some ts ->
              Some
                {
                  ts;
-                 ts_iso = a.joined_at;
-                 event_type = "joined";
+                 ts_iso = a.session_bound_at;
+                 event_type = "session_bound";
                  detail =
                    `Assoc
                      [

@@ -1,7 +1,7 @@
 (** Coord_query -- Task/agent/message query and listing functions.
 
     Read-only operations on room state: raw list retrieval, orphan
-    auditing, message collection, agent-joined checks, and formatted
+    auditing, message collection, agent-session-bound checks, and formatted
     listing.
 
     Inherits types and helpers from {!Coord_utils} and {!Coord_state}. *)
@@ -42,8 +42,8 @@ val audit_orphan_tasks : config -> (Masc_domain.task * string) list
 
 (** {1 Agent Membership} *)
 
-(** Check if an agent has joined the current room. *)
-val is_agent_joined : config -> agent_name:string -> bool
+(** Check if an agent has an active session the current room. *)
+val is_agent_session_bound : config -> agent_name:string -> bool
 
 (** {1 Messages} *)
 

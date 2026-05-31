@@ -176,7 +176,7 @@ let compact_agent_json (agent : Masc_domain.agent) =
       ("assignment_status", `String (if current_focus = "unassigned" then "unassigned" else "assigned"));
       ("current_focus", `String current_focus);
       ("goal_hint", `String current_focus);
-      ("joined_at", `String agent.joined_at);
+      ("session_bound_at", `String agent.session_bound_at);
       ("last_seen", `String agent.last_seen);
       ("capabilities", `List (List.map (fun item -> `String item) (take 2 agent.capabilities)));
     ]

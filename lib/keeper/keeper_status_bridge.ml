@@ -370,7 +370,7 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
       | Some _ when meta.paused ->
         true, Some "paused", Some "inspect_blocker_before_resume"
       | Some blocker when is_runtime_exhausted_blocker_class blocker.blocker_class ->
-        true, Some "cascade_attempts_exhausted", Some "inspect_cascade_attempts"
+        true, Some "runtime_attempts_exhausted", Some "inspect_runtime_attempts"
       | Some blocker when is_no_tool_capable_blocker_class blocker.blocker_class ->
         true, Some "provider_tool_capability_missing", Some "inspect_provider_tool_lane"
       | Some blocker when is_completion_contract_blocker_class blocker.blocker_class ->

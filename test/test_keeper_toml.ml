@@ -833,7 +833,7 @@ let test_profile_rejects_legacy_allowed_providers () =
 [keeper]
 goal = "test"
 allowed_providers = ["Ollama", "GLM"]
-cascade_name = "primary"
+runtime_id = "primary"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1444,7 +1444,7 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 goal = "canonical"
 mention_targets = ["a", "b"]
 autoboot_enabled = false
-cascade_name = "primary"
+runtime_id = "primary"
 repo_cli_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]

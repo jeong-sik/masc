@@ -41,46 +41,6 @@ open Keeper_meta_contract
 let state_start_re = Re.str "[STATE]" |> Re.compile
 let state_end_re = Re.str "[/STATE]" |> Re.compile
 
-type keeper_policy_observation = {
-  source_kind: string;
-  room_id: string option;
-  from_agent: string;
-  message: string;
-  direct_mention: bool;
-  has_question: bool;
-  message_chars: int;
-  total_turns: int;
-  active_goal_count: int;
-  last_turn_ago_s: float;
-}
-
-let observation_has_question (message : string) =
-  String.contains message '?'
-
-let keeper_policy_observation_of_room_message
-    ~(meta : keeper_meta)
-    ~(room_id : string)
-    (msg : Masc_domain.message) : keeper_policy_observation =
-  let now_ts = Time_compat.now () in
-  let mention_targets =
-    if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
-  in
-  let last_turn_ago_s =
-    if meta.runtime.usage.last_turn_ts <= 0.0 then 0.0 else max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts)
-  in
-  {
-    source_kind = "room_message";
-    room_id = Some room_id;
-    from_agent = msg.from_agent;
-    message = msg.content;
-    direct_mention = Mention.any_mentioned ~targets:mention_targets msg.content;
-    has_question = observation_has_question msg.content;
-    message_chars = String.length msg.content;
-    total_turns = meta.runtime.usage.total_turns;
-    active_goal_count = List.length meta.active_goal_ids;
-    last_turn_ago_s;
-  }
-
 type alert_channel_result = {
   channel: string;
   attempted: bool;

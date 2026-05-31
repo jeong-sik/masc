@@ -1,11 +1,11 @@
-.PHONY: doctor-oas-pin doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard doctor-oas-drift dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent check-ssot check-variants ci
+.PHONY: diagnostics-oas-pin diagnostics-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard diagnostics-oas-drift dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent check-ssot check-variants ci
 
-# Fast local-only doctor for OAS/agent_sdk pin drift in the current switch.
-doctor-oas-pin:
+# Fast local-only diagnostics for OAS/agent_sdk pin drift in the current switch.
+diagnostics-oas-pin:
 	bash scripts/check-oas-pin.sh --local-only
 
 # Disk hygiene snapshot for TLC artefacts, Dune cache drift, isolated builds, worktree fan-out.
-doctor-disk-hygiene:
+diagnostics-disk-hygiene:
 	bash scripts/disk-hygiene.sh
 
 # Safe fixes only: TLC artefact cleanup + Dune cache trim.
@@ -20,7 +20,7 @@ fix-disk-hygiene-hard:
 # against scripts/oas-api-surface.json fingerprint. Catches upstream variant/field
 # additions before they surface as scattered non-exhaustive warnings in consumer
 # modules. Regenerate with: bash scripts/oas-drift-check.sh --regenerate
-doctor-oas-drift:
+diagnostics-oas-drift:
 	bash scripts/oas-drift-check.sh
 
 # Dashboard styling-drift ratchet gate — fail if forbidden Tailwind patterns

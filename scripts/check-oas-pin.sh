@@ -43,7 +43,7 @@ min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
 default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
 expected_opam_pin_source="git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
-# Ambient local checkouts are not authoritative for doctor runs.
+# Ambient local checkouts are not authoritative for diagnostics runs.
 # Only validate a local OAS checkout when the caller explicitly opts in.
 local_oas_checkout="${AGENT_SDK_LOCAL_REPO:-}"
 
@@ -304,9 +304,9 @@ else
 fi
 
 # API surface summary (non-fatal). A full drift diff with repair
-# guidance is available via `make doctor-oas-drift` or
+# guidance is available via `make diagnostics-oas-drift` or
 # `bash scripts/oas-drift-check.sh`. Here we emit one line so that
-# every doctor-oas-pin run surfaces surface-level drift without
+# every diagnostics-oas-pin run surfaces surface-level drift without
 # requiring the operator to remember a second command.
 #
 # Skip the surface check entirely under --local-only: oas-drift-check.sh
@@ -324,7 +324,7 @@ if [[ "${LOCAL_ONLY}" -eq 0 && -x "${SCRIPT_DIR}/oas-drift-check.sh" ]]; then
       metadata_n="$(printf '%s\n' "${drift_output}" | grep -c '^      ~ ' || true)"
       added_n="$(printf '%s\n' "${drift_output}" | grep -c '^      + ' || true)"
       removed_n="$(printf '%s\n' "${drift_output}" | grep -c '^      - ' || true)"
-      echo "OAS API surface: ⚠ drift (metadata ${metadata_n}, added ${added_n}, removed ${removed_n}) — run 'make doctor-oas-drift' for detail"
+      echo "OAS API surface: ⚠ drift (metadata ${metadata_n}, added ${added_n}, removed ${removed_n}) — run 'make diagnostics-oas-drift' for detail"
     else
       echo "OAS API surface: (could not compute — ${drift_exit}; run 'bash scripts/oas-drift-check.sh' for detail)"
     fi

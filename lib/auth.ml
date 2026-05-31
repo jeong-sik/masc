@@ -74,7 +74,7 @@ let archive_credential_file config ~agent_name ~reason =
                       that starvation killed every short-form caller.
      PR-#10440        ensure_credential_alias re-creates a bare-form
                       redirect stub on every boot so short-form
-                      load_credential callers (auth_doctor, etc.)
+                      load_credential callers (auth diagnostics, etc.)
                       resolve directly.
 
    PR-3b2 and PR-#10440 contradict: the alias writer puts a stub back

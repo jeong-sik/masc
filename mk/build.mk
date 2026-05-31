@@ -4,7 +4,7 @@
 all: build-all
 
 # Build OCaml + dashboard (dashboard rebuilds only when sources changed)
-build: doctor-oas-pin
+build: diagnostics-oas-pin
 	scripts/dune-local.sh build
 	@scripts/build-dashboard-if-needed.sh
 

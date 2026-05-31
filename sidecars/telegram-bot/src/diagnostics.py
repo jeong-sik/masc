@@ -1,18 +1,19 @@
-"""Slack Sidecar Doctor — 기동 전 건강 점검.
+"""Telegram Sidecar Diagnostics — 기동 전 건강 점검.
 
 사용법::
 
-    python -m src doctor           # 사람용 출력
-    python -m src doctor --json    # 자동화용 JSON
-    python -m src doctor --fix     # 가능한 auto-fix 수행 후 재점검
+    python -m src diagnostics           # 사람용 출력
+    python -m src diagnostics --json    # 자동화용 JSON
+    python -m src diagnostics --fix     # 가능한 auto-fix 수행 후 재점검
 
-체크 목록은 ``run_doctor`` 의 ``register`` 호출이 SSOT.
+체크 목록은 ``run_diagnostics`` 의 ``register`` 호출이 SSOT.
 """
 
 from __future__ import annotations
 
 import importlib.metadata
 import os
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,13 +22,13 @@ _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
-# httpx is required for the doctor itself. pydantic_settings / slack_bolt
-# are NOT imported at module top so the doctor can still run and report
-# them as missing instead of crashing before any check executes.
+# httpx is required for the diagnostics itself. pydantic_settings and
+# python-telegram-bot are NOT imported at module top so the diagnostics can
+# still run and report them as missing instead of crashing.
 import httpx  # noqa: E402
 
-from gate_shared import AutoFix, Check, Doctor, Severity  # noqa: E402
-from gate_shared.doctor import (  # noqa: E402
+from gate_shared import AutoFix, Check, Diagnostics, Severity  # noqa: E402
+from gate_shared.diagnostics import (  # noqa: E402
     NETWORK_TIMEOUT_SEC,
     check_dependencies_installed,
 )
@@ -35,10 +36,11 @@ from gate_shared.doctor import (  # noqa: E402
 if TYPE_CHECKING:
     from .config import BotConfig
 
+# Telegram 봇 토큰은 `<digits>:<base64url-ish>` 규약. BotFather 가 발급하는 포맷.
+_TG_TOKEN_RE = re.compile(r"^\d{6,}:[A-Za-z0-9_-]{30,}$")
 
 _REQUIRED_PACKAGES = (
-    "slack-bolt",
-    "slack-sdk",
+    "python-telegram-bot",
     "pydantic",
     "pydantic-settings",
     "httpx",
@@ -46,17 +48,31 @@ _REQUIRED_PACKAGES = (
 )
 
 
-async def run_doctor() -> Doctor:
-    doc = Doctor("Slack Sidecar Doctor")
+def _config_or_none() -> BotConfig | None:
+    try:
+        from pydantic import ValidationError  # noqa: PLC0415
+
+        from .config import get_config  # noqa: PLC0415
+    except ImportError:
+        return None
+    try:
+        return get_config()
+    except (ValidationError, OSError):
+        return None
+
+
+async def run_diagnostics() -> Diagnostics:
+    doc = Diagnostics("Telegram Sidecar Diagnostics")
     doc.register(check_python_version)
     doc.register(check_dependencies_installed(_REQUIRED_PACKAGES))
-    doc.register(check_slack_bolt_version)
+    doc.register(check_telegram_lib_version)
     doc.register(check_bot_token)
-    doc.register(check_app_token)
     doc.register(check_env_gate_url)
     doc.register(check_env_api_token)
+    doc.register(check_admin_user_ids)
     doc.register(check_default_keeper_exists)
     doc.register(check_gate_reachable)
+    doc.register(check_telegram_api_reachable)
     doc.register(check_binding_paths_writable)
     doc.register(check_legacy_binding_path)
     return doc
@@ -79,32 +95,19 @@ async def check_python_version() -> Check:
     return Check(name="python >= 3.11", severity=Severity.ok, detail=ver, message="")
 
 
-async def check_slack_bolt_version() -> Check:
-    try:
-        ver = importlib.metadata.version("slack-bolt")
-    except importlib.metadata.PackageNotFoundError:
-        return Check(
-            name="slack-bolt installed",
-            severity=Severity.error,
-            message="slack-bolt 미설치.",
-            hint="pip install -r requirements.txt",
-        )
-    return Check(name="slack-bolt installed", severity=Severity.ok, detail=ver, message="")
-
-
-def _config_or_none() -> BotConfig | None:
-    """Lazy config load — survives missing pydantic_settings."""
-
-    try:
-        from pydantic import ValidationError  # noqa: PLC0415
-
-        from .config import get_config  # noqa: PLC0415
-    except ImportError:
-        return None
-    try:
-        return get_config()
-    except (ValidationError, OSError):
-        return None
+async def check_telegram_lib_version() -> Check:
+    for pkg in ("python-telegram-bot", "telegram"):
+        try:
+            ver = importlib.metadata.version(pkg)
+            return Check(name=f"{pkg} installed", severity=Severity.ok, detail=ver, message="")
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    return Check(
+        name="python-telegram-bot installed",
+        severity=Severity.error,
+        message="python-telegram-bot 미설치.",
+        hint="pip install -r requirements.txt",
+    )
 
 
 def _mask(raw: str) -> str:
@@ -115,44 +118,26 @@ def _mask(raw: str) -> str:
 
 
 async def check_bot_token() -> Check:
-    raw = os.getenv("SLACK_BOT_TOKEN", "").strip()
+    raw = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not raw:
         return Check(
-            name="SLACK_BOT_TOKEN",
+            name="TELEGRAM_BOT_TOKEN",
             severity=Severity.error,
-            message="Slack Bot Token 이 설정되지 않았습니다.",
-            hint="Slack App → Install App → Bot User OAuth Token 복사 (xoxb- 로 시작)",
+            message="Telegram Bot Token 이 설정되지 않았습니다.",
+            hint="Telegram @BotFather 에서 /newbot 또는 /token 으로 발급",
         )
-    if not raw.startswith("xoxb-"):
+    if not _TG_TOKEN_RE.match(raw):
         return Check(
-            name="SLACK_BOT_TOKEN",
+            name="TELEGRAM_BOT_TOKEN",
             severity=Severity.warn,
             detail=_mask(raw),
-            message="토큰이 xoxb- 로 시작하지 않습니다. Bot Token 이 맞는지 확인하세요.",
+            message="토큰 형식이 '<digits>:<alphanumeric>' 규약과 다릅니다.",
+            hint="BotFather 가 발급한 원본 토큰을 그대로 복사했는지 확인",
         )
-    return Check(name="SLACK_BOT_TOKEN", severity=Severity.ok, detail=_mask(raw), message="")
+    return Check(name="TELEGRAM_BOT_TOKEN", severity=Severity.ok, detail=_mask(raw), message="")
 
 
-async def check_app_token() -> Check:
-    raw = os.getenv("SLACK_APP_TOKEN", "").strip()
-    if not raw:
-        return Check(
-            name="SLACK_APP_TOKEN",
-            severity=Severity.error,
-            message="Socket Mode 에 필요한 App-Level Token 이 없습니다.",
-            hint="Slack App → Basic Info → App-Level Tokens → Generate (scope: connections:write, xapp- 로 시작)",
-        )
-    if not raw.startswith("xapp-"):
-        return Check(
-            name="SLACK_APP_TOKEN",
-            severity=Severity.warn,
-            detail=_mask(raw),
-            message="토큰이 xapp- 로 시작하지 않습니다. App-Level Token 이 맞는지 확인하세요.",
-        )
-    return Check(name="SLACK_APP_TOKEN", severity=Severity.ok, detail=_mask(raw), message="")
-
-
-# --- gate --------------------------------------------------------------------
+# --- gate + env --------------------------------------------------------------
 
 
 async def check_env_gate_url() -> Check:
@@ -185,9 +170,43 @@ async def check_env_api_token() -> Check:
     )
 
 
-async def _gate_get(path: str) -> tuple[str, httpx.Response | str]:
-    """Returns (url, response_or_error_string)."""
+async def check_admin_user_ids() -> Check:
+    cfg = _config_or_none()
+    if cfg is None:
+        return Check(
+            name="TELEGRAM_ADMIN_USER_IDS",
+            severity=Severity.skip,
+            message="config 로드 실패로 건너뜀",
+        )
+    ids = cfg.admin_ids()
+    raw = cfg.admin_user_ids.strip()
+    if not raw:
+        return Check(
+            name="TELEGRAM_ADMIN_USER_IDS",
+            severity=Severity.warn,
+            message="admin 이 비어 있어 바인딩 명령 권한이 누구에게나 열립니다.",
+            hint="Telegram 에서 @userinfobot 으로 본인 user ID 확인 후 쉼표로 구분해 기록",
+        )
+    # 파싱 손실 감지 — CSV 에 숫자 아닌 토큰이 섞인 경우
+    tokens = [t.strip() for t in raw.split(",") if t.strip()]
+    parsed_count = len(ids)
+    if parsed_count < len(tokens):
+        return Check(
+            name="TELEGRAM_ADMIN_USER_IDS",
+            severity=Severity.warn,
+            detail=f"{parsed_count}/{len(tokens)} parsed",
+            message="일부 항목이 숫자가 아니라 무시되었습니다.",
+            hint="Telegram user ID 는 양의 정수. 공백과 쉼표 이외의 문자를 제거",
+        )
+    return Check(
+        name="TELEGRAM_ADMIN_USER_IDS",
+        severity=Severity.ok,
+        detail=f"{parsed_count} admin(s)",
+        message="",
+    )
 
+
+async def _gate_get(path: str) -> tuple[str, httpx.Response | str]:
     cfg = _config_or_none()
     if cfg is None:
         return ("", "config load failed")
@@ -230,6 +249,68 @@ async def check_gate_reachable() -> Check:
     return Check(name="gate reachable", severity=Severity.ok, detail=f"{url} → {res.status_code}", message="")
 
 
+async def check_telegram_api_reachable() -> Check:
+    """Telegram 은 자체 API 로 토큰 유효성을 getMe 로 확인할 수 있다."""
+
+    raw = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not raw or not _TG_TOKEN_RE.match(raw):
+        return Check(
+            name="Telegram API getMe",
+            severity=Severity.skip,
+            message="토큰이 없거나 형식 오류로 API 호출 생략",
+        )
+    url = f"https://api.telegram.org/bot{raw}/getMe"
+    try:
+        async with httpx.AsyncClient(timeout=NETWORK_TIMEOUT_SEC) as client:
+            res = await client.get(url)
+    except httpx.HTTPError as exc:
+        return Check(
+            name="Telegram API getMe",
+            severity=Severity.warn,
+            detail="api.telegram.org",
+            message=f"연결 실패: {exc}",
+            hint="네트워크 / 방화벽 / VPN 상태 확인",
+        )
+    if res.status_code == 401:
+        return Check(
+            name="Telegram API getMe",
+            severity=Severity.error,
+            detail="401",
+            message="Telegram 이 토큰을 거절했습니다. 만료/재발급/오타 의심.",
+            hint="BotFather /revoke 후 새 토큰 발급",
+        )
+    if res.status_code >= 400:
+        return Check(
+            name="Telegram API getMe",
+            severity=Severity.warn,
+            detail=str(res.status_code),
+            message="Telegram API 가 비정상 응답을 반환했습니다.",
+        )
+    try:
+        body = res.json()
+    except ValueError:
+        return Check(
+            name="Telegram API getMe",
+            severity=Severity.warn,
+            message="getMe 응답을 파싱할 수 없습니다.",
+        )
+    if not isinstance(body, dict) or not body.get("ok"):
+        return Check(
+            name="Telegram API getMe",
+            severity=Severity.warn,
+            message="getMe ok=false",
+            detail=str(body),
+        )
+    result = body.get("result") if isinstance(body, dict) else None
+    username = result.get("username") if isinstance(result, dict) else None
+    return Check(
+        name="Telegram API getMe",
+        severity=Severity.ok,
+        detail=f"@{username}" if username else "ok",
+        message="",
+    )
+
+
 async def check_default_keeper_exists() -> Check:
     cfg = _config_or_none()
     if cfg is None:
@@ -246,7 +327,7 @@ async def check_default_keeper_exists() -> Check:
         return Check(
             name="default_keeper exists",
             severity=Severity.warn,
-            detail=f"{res.status_code}",
+            detail=str(res.status_code),
             message="keepers 엔드포인트 오류 응답. 토큰/권한 확인.",
         )
     try:
@@ -263,7 +344,7 @@ async def check_default_keeper_exists() -> Check:
             name="default_keeper exists",
             severity=Severity.error,
             detail=cfg.default_keeper,
-            message=f"SLACK_DEFAULT_KEEPER='{cfg.default_keeper}' 가 서버에 등록돼 있지 않습니다.",
+            message=f"TELEGRAM_DEFAULT_KEEPER='{cfg.default_keeper}' 가 서버에 등록돼 있지 않습니다.",
             hint="config/keepers/*.toml 또는 runtime 등록 확인",
         )
     return Check(
@@ -337,7 +418,7 @@ async def check_binding_paths_writable() -> Check:
             try:
                 p.chmod(0o755)
             except OSError as exc:
-                print(f"[doctor] chmod 0755 {p} failed: {exc.strerror or exc}", file=sys.stderr)
+                print(f"[diagnostics] chmod 0755 {p} failed: {exc.strerror or exc}", file=sys.stderr)
 
     return Check(
         name="binding paths writable",

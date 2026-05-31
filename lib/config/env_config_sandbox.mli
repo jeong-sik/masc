@@ -119,7 +119,7 @@ end
 (** {1 Preflight — runtime feasibility check} *)
 module Preflight : sig
   val enabled : unit -> bool
-  (** Master switch for keeper_up / doctor preflight.
+  (** Master switch for keeper_up / diagnostics preflight.
       Env: [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED].  Default: [true]. *)
 
   val min_timeout_sec : unit -> float
@@ -140,8 +140,8 @@ module Preflight : sig
       python3; node; npm; make; opam; dune; ssh]).
 
       INTENTIONALLY NOT env-overridable: an operator who removes
-      [gh] from the list would make doctor falsely report green
-      while runtime fails opaquely.  Exposed read-only so doctor
+      [gh] from the list would make diagnostics falsely report green
+      while runtime fails opaquely.  Exposed read-only so diagnostics
       and tests can iterate the canonical list. *)
 end
 
@@ -209,7 +209,7 @@ module Shell_timeout : sig
       5. {!global_default_sec}. *)
 end
 
-(** {1 Doctor / observability surface} *)
+(** {1 Diagnostics / observability surface} *)
 
 val effective_config_json : unit -> Yojson.Safe.t
 (** Returns a snapshot of every sandbox setting under two top-level

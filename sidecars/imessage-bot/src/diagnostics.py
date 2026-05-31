@@ -1,19 +1,19 @@
-"""iMessage Sidecar Doctor — 기동 전 건강 점검 (macOS 전용).
+"""iMessage Sidecar Diagnostics — 기동 전 건강 점검 (macOS 전용).
 
 iMessage 커넥터는 토큰을 쓰지 않는다. 대신 macOS 의 두 가지 권한에 의존한다:
 
 1. **Full Disk Access (FDA)** — `~/Library/Messages/chat.db` 읽기
 2. **Automation (Messages.app)** — `osascript` 로 메시지 전송
 
-Doctor 는 이 두 권한이 실제로 살아있는지까지 한 번에 검증한다.
+Diagnostics 는 이 두 권한이 실제로 살아있는지까지 한 번에 검증한다.
 단순 존재 확인이 아니라 SQLite 열기 시도 / osascript 실행 시도로
 "설정돼 있는 것처럼 보이지만 실제로 안 되는" 케이스를 잡아낸다.
 
 사용법::
 
-    python -m src doctor           # 사람용 출력
-    python -m src doctor --json    # 자동화용 JSON
-    python -m src doctor --fix     # 가능한 auto-fix 후 재점검
+    python -m src diagnostics           # 사람용 출력
+    python -m src diagnostics --json    # 자동화용 JSON
+    python -m src diagnostics --fix     # 가능한 auto-fix 후 재점검
 """
 
 from __future__ import annotations
@@ -31,13 +31,13 @@ _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
-# httpx is required for the doctor itself. pydantic_settings is NOT
-# imported at module top so the doctor can still run and report it
+# httpx is required for the diagnostics itself. pydantic_settings is NOT
+# imported at module top so the diagnostics can still run and report it
 # as missing instead of crashing before any check executes.
 import httpx  # noqa: E402
 
-from gate_shared import AutoFix, Check, Doctor, Severity  # noqa: E402
-from gate_shared.doctor import (  # noqa: E402
+from gate_shared import AutoFix, Check, Diagnostics, Severity  # noqa: E402
+from gate_shared.diagnostics import (  # noqa: E402
     NETWORK_TIMEOUT_SEC,
     check_dependencies_installed,
 )
@@ -67,8 +67,8 @@ def _config_or_none() -> BotConfig | None:
         return None
 
 
-async def run_doctor() -> Doctor:
-    doc = Doctor("iMessage Sidecar Doctor")
+async def run_diagnostics() -> Diagnostics:
+    doc = Diagnostics("iMessage Sidecar Diagnostics")
     doc.register(check_python_version)
     doc.register(check_dependencies_installed(_REQUIRED_PACKAGES))
     doc.register(check_macos_platform)
@@ -408,7 +408,7 @@ async def check_binding_paths_writable() -> Check:
             try:
                 p.chmod(0o755)
             except OSError as exc:
-                print(f"[doctor] chmod 0755 {p} failed: {exc.strerror or exc}", file=sys.stderr)
+                print(f"[diagnostics] chmod 0755 {p} failed: {exc.strerror or exc}", file=sys.stderr)
 
     return Check(
         name="binding paths writable",

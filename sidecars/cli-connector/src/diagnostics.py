@@ -1,7 +1,7 @@
-"""CLI connector Doctor — 대화형 모드 사전 점검.
+"""CLI connector Diagnostics — 대화형 모드 사전 점검.
 
 CLI connector 는 다른 sidecar 와 달리 **stateless** 다. 바인딩도, 상태 파일도,
-토큰도 없다. 따라서 doctor 는 짧다. 대신 다른 sidecar 가 가정하는 "지속적
+토큰도 없다. 따라서 diagnostics 는 짧다. 대신 다른 sidecar 가 가정하는 "지속적
 서비스" 대신 "**사람이 즉시 쓰는 터미널 도구**" 의 관점에서 본다:
 
 - stdin 이 TTY 인가? (파이프 환경에서 interactive loop 는 헛돈다)
@@ -10,8 +10,8 @@ CLI connector 는 다른 sidecar 와 달리 **stateless** 다. 바인딩도, 상
 
 사용법::
 
-    python -m src doctor          # 사람용 출력
-    python -m src doctor --json   # 자동화용 JSON
+    python -m src diagnostics          # 사람용 출력
+    python -m src diagnostics --json   # 자동화용 JSON
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ if str(_shared_root) not in sys.path:
 
 import httpx  # noqa: E402
 
-from gate_shared import AutoFix, Check, Doctor, Severity  # noqa: E402
-from gate_shared.doctor import (  # noqa: E402
+from gate_shared import AutoFix, Check, Diagnostics, Severity  # noqa: E402
+from gate_shared.diagnostics import (  # noqa: E402
     NETWORK_TIMEOUT_SEC,
     check_dependencies_installed,
 )
@@ -36,8 +36,8 @@ from gate_shared.doctor import (  # noqa: E402
 _REQUIRED_PACKAGES = ("httpx",)
 
 
-async def run_doctor() -> Doctor:
-    doc = Doctor("CLI Connector Doctor")
+async def run_diagnostics() -> Diagnostics:
+    doc = Diagnostics("CLI Connector Diagnostics")
     doc.register(check_python_version)
     doc.register(check_dependencies_installed(_REQUIRED_PACKAGES))
     doc.register(check_httpx_installed)

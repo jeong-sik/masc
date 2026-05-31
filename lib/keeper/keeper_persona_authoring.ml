@@ -852,14 +852,20 @@ let handle_persona_generate ctx args =
       | Error msg ->
         Keeper_types_profile.tool_result_error (error_response_typed ~code:Validation_error msg)
       | Ok archetype_axes ->
-           let cascade_name =
-             get_string args "cascade_name" Archetypes.default_generation_cascade_name
-             |> String.trim
-           in
-           let cascade_name =
-             if cascade_name = ""
-             then Archetypes.default_generation_cascade_name
-             else cascade_name
+           let runtime_id =
+             let trimmed_arg key =
+               match get_string_opt args key with
+               | None -> None
+               | Some raw ->
+                 let value = String.trim raw in
+                 if value = "" then None else Some value
+             in
+             match trimmed_arg "runtime_id" with
+             | Some value -> value
+             | None ->
+               (match trimmed_arg "cascade_name" with
+                | Some value -> value
+                | None -> Archetypes.default_generation_cascade_name)
            in
            let temperature =
              get_float_opt args "temperature"
@@ -891,7 +897,7 @@ let handle_persona_generate ctx args =
                ~caller:Env_config_oas_bridge.Keeper_persona_authoring
                (fun () ->
                  Keeper_turn_driver.run_named
-                   ~cascade_name
+                   ~cascade_name:runtime_id
                    ~goal:prompt
                    ~max_turns:1
                    ~temperature

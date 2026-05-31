@@ -901,7 +901,7 @@ let make_keeper_meta_json ?(name = "sangsu")
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
           ("goal", `String ("goal-" ^ name));
-          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");
         ])
@@ -920,7 +920,7 @@ let make_keeper_meta ?(paused = false) ?(name = "sangsu")
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
           ("goal", `String ("goal-" ^ name));
-          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("runtime_id", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");
         ])

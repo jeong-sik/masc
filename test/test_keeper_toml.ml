@@ -670,7 +670,7 @@ let test_load_keeper_toml_inherits_base_defaults () =
     (fun () ->
       write_file base_path {|
 [keeper]
-cascade_name = "route.keeper_turn"
+runtime_id = "route.keeper_turn"
 sandbox_profile = "docker"
 network_mode = "inherit"
 repo_cli_identity = "anyang-keepers"
@@ -686,8 +686,8 @@ persona_name = "sangsu"
       | Error e -> fail e
       | Ok (name, defaults) ->
           check string "name from filename" "sangsu" name;
-          (* #19327: field renamed cascade_name→model. *)
-          check (option string) "base cascade" (Some "route.keeper_turn")
+          (* #19574: [runtime_id] is canonical; [model] is legacy storage. *)
+          check (option string) "base runtime_id" (Some "route.keeper_turn")
             defaults.model;
           check (option string) "base sandbox" (Some "docker")
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);

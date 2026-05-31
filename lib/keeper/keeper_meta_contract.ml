@@ -735,7 +735,7 @@ let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
   | fields ->
     Error
       (Printf.sprintf
-         "legacy keeper model args removed for %s: %s. Use cascade_name; concrete \
+         "legacy keeper model args removed for %s: %s. Use runtime_id; concrete \
           provider/model identity is resolved from the default runtime."
          tool_name
          (String.concat ", " fields))

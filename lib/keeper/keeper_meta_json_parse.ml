@@ -119,10 +119,13 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_desires = personality.desires in
     let pk_instructions = personality.instructions in
     let pk_cascade_name =
-      (* Preserve the raw cascade_name as persisted in runtime JSON so the
-       dashboard can distinguish "declared in TOML" from "canonicalized
-       fallback".  Downstream code canonicalizes at point-of-use. *)
-      Safe_ops.json_string ~default:(Keeper_config.default_cascade_name ()) "cascade_name" json
+      (* RFC-0206: [runtime_id] is the canonical persisted/input name if a
+         pre-scrub JSON payload still carries model-selection state.
+         [cascade_name] is accepted only as a legacy alias for older files. *)
+      match Safe_ops.json_string_opt "runtime_id" json with
+      | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id
+      | Some _ | None ->
+        Safe_ops.json_string ~default:(Keeper_config.default_cascade_name ()) "cascade_name" json
     in
     Ok
       { pk_name

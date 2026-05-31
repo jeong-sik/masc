@@ -583,7 +583,7 @@ let run_named
   let capture, _metrics =
     Keeper_observation.runtime_metrics_for_candidates ~candidate_count ()
   in
-  let cascade_strategy_name_ref = ref None in
+  let runtime_strategy_name_ref = ref None in
   let name = Printf.sprintf "oas-%s" runtime_id in
   let transport_resolved = match transport with
     | Some t -> t
@@ -710,7 +710,7 @@ let run_named
         Some (Runtime_deadline.of_seconds_from_now ~clock turn_budget)
     | None -> None
   in
-  let try_cascade_ctx : Keeper_turn_driver_try_cascade.try_cascade_ctx = {
+  let try_runtime_ctx : Keeper_turn_driver_try_runtime.try_runtime_ctx = {
     runtime_id;
     error_runtime_id;
     keeper_name;
@@ -719,7 +719,7 @@ let run_named
     configured_labels;
     error_selected_model_raw;
     capture;
-    cascade_strategy_name_ref;
+    runtime_strategy_name_ref;
     try_provider_ctx;
     runtime_manifest_required_tool_names;
     runtime_mcp_policy;
@@ -743,30 +743,30 @@ let run_named
     wait_timeout_sec;
     turn_deadline;
   } in
-  let try_cascade
+  let try_runtime
         ?(on_success = fun ~provider_key:_ -> ())
         ?(pre_dispatch_required_tool_rejections_rev = [])
         ?resume_checkpoint ?per_provider_timeout_s ?last_capacity_source
         ?last_capacity_backpressure remaining last_err =
-    Keeper_turn_driver_try_cascade.run
+    Keeper_turn_driver_try_runtime.run
       ~on_success
       ~pre_dispatch_required_tool_rejections_rev
       ?resume_checkpoint ?per_provider_timeout_s ?last_capacity_source
       ?last_capacity_backpressure
-      try_cascade_ctx remaining last_err
+      try_runtime_ctx remaining last_err
   in
   (* Runtime dispatch no longer resolves a cascade strategy catalog.
      Candidate ordering is produced by the runtime candidate resolution layer;
      this driver only applies the health fail-open filter and executes the
      provider attempts in that order. *)
   let runtime_strategy_name = "linear_failover" in
-  let () = cascade_strategy_name_ref := Some runtime_strategy_name in
+  let () = runtime_strategy_name_ref := Some runtime_strategy_name in
   let _ = sw, net in
   let runtime_exhausted_after_filter () =
     let observation =
       Keeper_observation.runtime_observation_with_metrics
         ~runtime_id:error_runtime_id
-        ?strategy:!cascade_strategy_name_ref ~configured_labels
+        ?strategy:!runtime_strategy_name_ref ~configured_labels
         ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
     in
     Keeper_observation.record_cascade ~keeper_name
@@ -788,7 +788,7 @@ let run_named
     match ordered with
     | [] -> runtime_exhausted_after_filter ()
     | _ ->
-      try_cascade ?per_provider_timeout_s ordered None
+      try_runtime ?per_provider_timeout_s ordered None
   in
   let admission_runtime_id =
     runtime_id

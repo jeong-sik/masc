@@ -337,7 +337,7 @@ let local_worker_failure_class_of_error_kind = function
   | Worker_dev_tools.Shell_error ->
     Tool_result.Runtime_failure
 
-let build_local_shell_tools ~room_config ~worker_name ~workdir =
+let build_local_shell_tools ~coord_config ~worker_name ~workdir =
   match Process_eio.get_proc_mgr (), Process_eio.get_clock () with
   | Ok proc_mgr, Ok clock -> (
       (* #10358: forward error_kind / error_message from Worker_dev_tools
@@ -346,7 +346,7 @@ let build_local_shell_tools ~room_config ~worker_name ~workdir =
          worker tool path. *)
       let on_exec ~tool_name ~success ~duration_ms
           ?error_kind ?error_message () =
-        (match room_config, Fs_compat.get_fs_opt () with
+        (match coord_config, Fs_compat.get_fs_opt () with
         | Some config, Some fs -> (
             try
               let kind =

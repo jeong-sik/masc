@@ -31,7 +31,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     try
       let keeper_ctx : _ Tool_keeper.context =
         {
-          config = state.Mcp_server.room_config;
+          config = state.Mcp_server.coord_config;
           agent_name;
           sw;
           clock;
@@ -57,7 +57,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.room_config
+  Audit_log.log_tool_call state.Mcp_server.coord_config
     ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
     Log.emit Log.Error ~module_name:"Keeper"
@@ -80,7 +80,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
+           Telemetry_eio.track_tool_called ~fs state.Mcp_server.coord_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
              ~source:(Tool_registry.string_of_source Keeper_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
@@ -253,7 +253,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
     try
       let keeper_ctx : _ Tool_keeper.context =
         {
-          config = state.Mcp_server.room_config;
+          config = state.Mcp_server.coord_config;
           agent_name;
           sw;
           clock;
@@ -282,7 +282,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.room_config ~agent_id:agent_name
+  Audit_log.log_tool_call state.Mcp_server.coord_config ~agent_id:agent_name
     ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
     Log.emit Log.Error ~module_name:"Keeper"
@@ -305,7 +305,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
+           Telemetry_eio.track_tool_called ~fs state.Mcp_server.coord_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
              ~duration_ms ~source:(Tool_registry.string_of_source Keeper_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
@@ -525,7 +525,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                  | None -> ());
                 (* Persist user + assistant messages in a single write *)
                 Keeper_chat_store.append_pair
-                  ~base_dir:state.Mcp_server.room_config.base_path
+                  ~base_dir:state.Mcp_server.coord_config.base_path
                   ~keeper_name:payload.name
                   ~user_content:payload.message
                   ~assistant_content:visible_reply;

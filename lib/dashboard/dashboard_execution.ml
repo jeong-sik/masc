@@ -3,17 +3,17 @@ include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
 let room_status_json (config : Coord.config) : Yojson.Safe.t =
-  let room_state_opt =
+  let coord_state_opt =
     if Coord.is_initialized config then Some (Coord.read_state config) else None
   in
   let project =
-    match room_state_opt with
-    | Some room_state -> room_state.project
+    match coord_state_opt with
+    | Some coord_state -> coord_state.project
     | None -> "default"
   in
   let paused =
-    match room_state_opt with
-    | Some room_state -> room_state.paused
+    match coord_state_opt with
+    | Some coord_state -> coord_state.paused
     | None -> false
   in
   let tempo = Tempo.get_tempo config in

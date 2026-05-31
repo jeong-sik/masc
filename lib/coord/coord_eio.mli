@@ -25,7 +25,7 @@ type agent_state = {
 }
 
 (** Coord-level state (protocol version, active agents, pause, etc.). *)
-type room_state = {
+type coord_state = {
   protocol_version: string;
   started_at: float;
   last_updated: float;
@@ -41,8 +41,8 @@ type room_state = {
 
 (** Event types for the persistent audit log. *)
 type event_type =
-  | AgentJoin
-  | AgentLeave
+  | AgentSessionBound
+  | AgentSessionEnded
   | Broadcast
   | LockAcquire
   | LockRelease
@@ -122,25 +122,25 @@ val event_key : int -> string
 (** {1 State Management} *)
 
 (** Return a fresh default room state. *)
-val default_room_state : unit -> room_state
+val default_coord_state : unit -> coord_state
 
 (** Serialize room state to JSON. *)
-val room_state_to_json : room_state -> Yojson.Safe.t
+val coord_state_to_json : coord_state -> Yojson.Safe.t
 
 (** Deserialize room state from JSON. *)
-val room_state_of_json : Yojson.Safe.t -> (room_state, string) result
+val coord_state_of_json : Yojson.Safe.t -> (coord_state, string) result
 
 (** Read room state from the backend (defaults if absent). *)
-val read_state : config -> (room_state, string) result
+val read_state : config -> (coord_state, string) result
 
 (** Write room state to the backend. *)
-val write_state : config -> room_state ->
+val write_state : config -> coord_state ->
   (unit, Backend.error) result
 
 (** Atomically read-modify-write room state.
     [f] receives the current state and returns the new state. *)
 val atomic_update_state :
-  config -> f:(room_state -> room_state) -> (room_state, string) result
+  config -> f:(coord_state -> coord_state) -> (coord_state, string) result
 
 (** {1 Agent Operations} *)
 

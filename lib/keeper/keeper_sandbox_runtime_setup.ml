@@ -347,11 +347,11 @@ let docker_config_mount_args ~base_path ~container_root =
     ]
 ;;
 
-type room_state_mount_kind =
+type coord_state_mount_kind =
   | Room_state_file
   | Room_state_dir
 
-let docker_room_state_mounts =
+let docker_coord_state_mounts =
   [ Room_state_dir, "tasks"
   ; Room_state_file, "tasks.json"
   ; Room_state_file, "backlog.json"
@@ -366,7 +366,7 @@ let docker_room_state_mounts =
   ]
 ;;
 
-let room_state_path_available kind path =
+let coord_state_path_available kind path =
   try
     match kind with
     | Room_state_file -> Sys.file_exists path && not (Sys.is_directory path)
@@ -386,16 +386,16 @@ let unique_preserving_order values =
   loop [] [] values
 ;;
 
-let docker_room_state_mount_specs ~base_path ~container_root =
+let docker_coord_state_mount_specs ~base_path ~container_root =
   let host_masc_root = Common.masc_dir_from_base_path ~base_path in
   (* [container_root] is itself a bind-mounted playground. Mounting room-state
      files inside it creates nested bind targets that Docker Desktop can resolve
      through /run/host_virtiofs and reject as outside the container rootfs. *)
   let container_masc_root = container_masc_dir ~container_root in
-  docker_room_state_mounts
+  docker_coord_state_mounts
   |> List.concat_map (fun (kind, rel_path) ->
     let host_path = Filename.concat host_masc_root rel_path in
-    if not (room_state_path_available kind host_path)
+    if not (coord_state_path_available kind host_path)
     then []
     else
       [ Printf.sprintf "%s:%s:ro" host_path (Filename.concat container_masc_root rel_path)
@@ -403,8 +403,8 @@ let docker_room_state_mount_specs ~base_path ~container_root =
   |> unique_preserving_order
 ;;
 
-let docker_room_state_mount_args ~base_path ~container_root =
-  docker_room_state_mount_specs ~base_path ~container_root
+let docker_coord_state_mount_args ~base_path ~container_root =
+  docker_coord_state_mount_specs ~base_path ~container_root
   |> List.concat_map (fun spec -> [ "-v"; spec ])
 ;;
 

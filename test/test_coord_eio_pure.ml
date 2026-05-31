@@ -2,7 +2,7 @@
 
     Covers the deterministic helpers that don't touch Eio fibers, the
     filesystem backend, or any Eio context: key formatters, the
-    [event_type] string mapping, and the [room_state] JSON round-trip. *)
+    [event_type] string mapping, and the [coord_state] JSON round-trip. *)
 
 open Masc_mcp
 module CE = Coord_eio
@@ -43,18 +43,18 @@ let test_event_key_zero_pads () =
 (* ── event_type_to_string ────────────────────────────────────────────── *)
 
 let test_event_type_strings () =
-  check_string "AgentJoin"   "agent_join"   (CE.event_type_to_string CE.AgentJoin);
-  check_string "AgentLeave"  "agent_leave"  (CE.event_type_to_string CE.AgentLeave);
+  check_string "AgentSessionBound"   "agent_session_bound"   (CE.event_type_to_string CE.AgentSessionBound);
+  check_string "AgentSessionEnded"  "agent_session_ended"  (CE.event_type_to_string CE.AgentSessionEnded);
   check_string "Broadcast"   "broadcast"    (CE.event_type_to_string CE.Broadcast);
   check_string "LockAcquire" "lock_acquire" (CE.event_type_to_string CE.LockAcquire);
   check_string "LockRelease" "lock_release" (CE.event_type_to_string CE.LockRelease)
 
-(* ── room_state JSON round-trip ──────────────────────────────────────── *)
+(* ── coord_state JSON round-trip ──────────────────────────────────────── *)
 
-let test_default_room_state_round_trip () =
-  let state = CE.default_room_state () in
-  let json = CE.room_state_to_json state in
-  match CE.room_state_of_json json with
+let test_default_coord_state_round_trip () =
+  let state = CE.default_coord_state () in
+  let json = CE.coord_state_to_json state in
+  match CE.coord_state_of_json json with
   | Error msg -> Alcotest.fail ("default round-trip failed: " ^ msg)
   | Ok decoded ->
     check_string "protocol_version preserved"
@@ -70,8 +70,8 @@ let test_default_room_state_round_trip () =
     check_bool "paused preserved"
       state.paused decoded.paused
 
-let test_paused_room_state_round_trip () =
-  let base = CE.default_room_state () in
+let test_paused_coord_state_round_trip () =
+  let base = CE.default_coord_state () in
   let state =
     { base with
       paused = true;
@@ -83,8 +83,8 @@ let test_paused_room_state_round_trip () =
       event_seq = 7;
     }
   in
-  let json = CE.room_state_to_json state in
-  match CE.room_state_of_json json with
+  let json = CE.coord_state_to_json state in
+  match CE.coord_state_of_json json with
   | Error msg -> Alcotest.fail ("paused round-trip failed: " ^ msg)
   | Ok decoded ->
     check_bool "paused=true preserved" true decoded.paused;
@@ -97,10 +97,10 @@ let test_paused_room_state_round_trip () =
     check_int "message_seq=42 preserved" 42 decoded.message_seq;
     check_int "event_seq=7 preserved" 7 decoded.event_seq
 
-let test_room_state_of_json_missing_event_seq () =
+let test_coord_state_of_json_missing_event_seq () =
   (* Backward-compat path: old state files without event_seq must default
      to 0 instead of failing — explicitly handled by Safe_ops.json_int in
-     room_state_of_json. *)
+     coord_state_of_json. *)
   let json =
     `Assoc
       [
@@ -117,14 +117,14 @@ let test_room_state_of_json_missing_event_seq () =
         ("pause_reason", `Null);
       ]
   in
-  match CE.room_state_of_json json with
+  match CE.coord_state_of_json json with
   | Error msg -> Alcotest.fail ("missing event_seq should default to 0: " ^ msg)
   | Ok decoded -> check_int "event_seq defaults to 0" 0 decoded.event_seq
 
-let test_room_state_of_json_malformed () =
+let test_coord_state_of_json_malformed () =
   let json = `String "not an object" in
-  match CE.room_state_of_json json with
-  | Ok _ -> Alcotest.fail "malformed json should not parse to room_state"
+  match CE.coord_state_of_json json with
+  | Ok _ -> Alcotest.fail "malformed json should not parse to coord_state"
   | Error _ -> ()
 
 (* ── runner ──────────────────────────────────────────────────────────── *)
@@ -144,15 +144,15 @@ let () =
         [
           Alcotest.test_case "all variants" `Quick test_event_type_strings;
         ] );
-      ( "room_state_round_trip",
+      ( "coord_state_round_trip",
         [
           Alcotest.test_case "default state"               `Quick
-            test_default_room_state_round_trip;
+            test_default_coord_state_round_trip;
           Alcotest.test_case "paused state with all opts"  `Quick
-            test_paused_room_state_round_trip;
+            test_paused_coord_state_round_trip;
           Alcotest.test_case "missing event_seq defaults"  `Quick
-            test_room_state_of_json_missing_event_seq;
+            test_coord_state_of_json_missing_event_seq;
           Alcotest.test_case "malformed json fails cleanly" `Quick
-            test_room_state_of_json_malformed;
+            test_coord_state_of_json_malformed;
         ] );
     ]

@@ -1,4 +1,4 @@
-(** Room_protocol exposes the read-side room boundary used by HTTP routes.
+(** Coord_protocol exposes the read-side room boundary used by HTTP routes.
 
     It keeps route modules from depending directly on the Coord implementation
     hub while preserving the existing response shape. *)

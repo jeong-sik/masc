@@ -58,7 +58,7 @@ let handle_dashboard_workspace = Server_routes_http_dashboard_handlers.handle_da
    as part of godfile near-threshold split. *)
 let handle_telemetry request reqd =
   with_public_read (fun state req reqd ->
-    let config = state.Mcp_server.room_config in
+    let config = state.Mcp_server.coord_config in
     let base_path = config.base_path in
     let masc_root = Coord.masc_root_dir config in
     let float_query_param req key =

@@ -521,7 +521,7 @@ let snapshot_json ?hearth ~limit config =
   `Assoc
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
-      ( "room_state",
+      ( "coord_state",
         `Assoc
           [
             ("active_agent_count", `Int (List.length agents));

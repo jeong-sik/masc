@@ -29,13 +29,13 @@ let load_config () =
 let default_config = load_config ()
 
 (** Check if orchestration is needed *)
-let should_orchestrate ~min_priority room_config =
+let should_orchestrate ~min_priority coord_config =
   (* Check if room is paused first *)
-  if Coord.is_paused room_config then begin
+  if Coord.is_paused coord_config then begin
     Log.Orchestrator.debug "room is paused, skipping";
     false
   end else begin
-  match Coord.read_backlog_r room_config with
+  match Coord.read_backlog_r coord_config with
   | Error msg ->
       Log.Orchestrator.error
         "backlog unavailable, skipping orchestration check: %s" msg;
@@ -47,7 +47,7 @@ let should_orchestrate ~min_priority room_config =
       ) backlog.tasks in
 
       (* Get active (non-zombie) agents *)
-      let agents = Coord.get_agents_raw room_config in
+      let agents = Coord.get_agents_raw coord_config in
       let active_agents = List.filter (fun (agent: Masc_domain.agent) ->
         not (Coord_resilience.Zombie.is_zombie agent.last_seen)
       ) agents in
@@ -125,14 +125,14 @@ let with_pulse_ro f = Eio_guard.with_mutex_ro pulse_mu f
 
 (** Build the orchestrator check consumer.
     Checks if orchestration is needed and spawns coordinator if so. *)
-let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config ()
+let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~coord_config ()
     : (module Pulse.Consumer) =
   (module struct
     let name = "orchestrator-check"
     let should_act _beat = config.enabled
     let on_beat _beat =
       try
-        if should_orchestrate ~min_priority:config.min_priority room_config then
+        if should_orchestrate ~min_priority:config.min_priority coord_config then
           Log.Orchestrator.info "orchestration needed but vendor-specific spawn removed";
         Ok ()
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -143,7 +143,7 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
 
 (** Build the zero-zombie cleanup consumer.
     Runs Coord.cleanup_zombies and logs if zombies were found. *)
-let make_zero_zombie_consumer ~sw ~room_config
+let make_zero_zombie_consumer ~sw ~coord_config
     : (module Pulse.Consumer) =
   let cleanup_running = Atomic.make false in
   (module struct
@@ -175,7 +175,7 @@ let make_zero_zombie_consumer ~sw ~room_config
       let release_stale_claims_typed () : Stale_claim_outcome.t =
         let ttl = Env_config_runtime.Claim.ttl_seconds in
         match
-          Coord_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl
+          Coord_task_schedule.release_stale_claims coord_config ~ttl_seconds:ttl
         with
         | exception (Eio.Cancel.Cancelled _ as e) -> raise e
         | exception exn ->
@@ -194,7 +194,7 @@ let make_zero_zombie_consumer ~sw ~room_config
             ~finally:(fun () -> Atomic.set cleanup_running false)
             (fun () ->
               try
-                let zombie_result = Coord.cleanup_zombies room_config in
+                let zombie_result = Coord.cleanup_zombies coord_config in
                 (* Explicit variant match — no catch-all.  Adding a new
                    [cleanup_zombie_result] constructor must surface as a
                    compile error here, not a silent debug. *)
@@ -243,13 +243,13 @@ let make_zero_zombie_consumer ~sw ~room_config
 
 (** Start the orchestrator background services using Pulse.
     Returns a cancel function to gracefully stop both Pulse engines. *)
-let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
+let start ~sw ~proc_mgr ~clock ?domain_mgr coord_config =
   let config = load_config () in
 
   (* Zero-Zombie cleanup: always enabled, configurable interval *)
   let neo4j_interval = Env_config_governance.Timeouts.neo4j_timeout_sec in
   Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
-  let zombie_consumer = make_zero_zombie_consumer ~sw ~room_config in
+  let zombie_consumer = make_zero_zombie_consumer ~sw ~coord_config in
   let dedup_consumer = Channel_gate.make_dedup_cleanup_consumer () in
   let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Always_on ~consumers:[zombie_consumer; dedup_consumer] in
   with_pulse_rw (fun () -> zombie_pulse := Some zp);
@@ -268,7 +268,7 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   else
     Log.Orchestrator.debug "loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)";
 
-  let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config () in
+  let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~coord_config () in
   let op = Pulse.create ~clock ~rhythm:(fixed_rhythm config.check_interval_s) ~lifecycle:Always_on ~consumers:[orch_consumer] in
   with_pulse_rw (fun () -> orchestrator_pulse := Some op);
   Eio.Fiber.fork ~sw (fun () ->

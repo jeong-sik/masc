@@ -60,7 +60,7 @@ let execute_tool_eio
   Eio_context.set_clock clock;
   (* Prometheus: count every inbound tool call *)
   Prometheus.record_request ();
-  let config = state.Mcp_server.room_config in
+  let config = state.Mcp_server.coord_config in
   let registry = state.Mcp_server.session_registry in
   (* Fix 3: Cache room_initialized to avoid repeated stat syscalls.
      Updated after auto-init succeeds. *)

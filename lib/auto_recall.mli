@@ -12,7 +12,7 @@
         () in
 
       (* With Eio runtime context *)
-      let result = Auto_recall.fetch_context_eio ~sw ~env room_config ~config ~query:"error handling" () in
+      let result = Auto_recall.fetch_context_eio ~sw ~env coord_config ~config ~query:"error handling" () in
       let injection = Auto_recall.format_for_injection result in
       (* Use injection as system prompt prefix *)
     ]}
@@ -75,7 +75,7 @@ val estimate_tokens : string -> int
 (** Fetch context from configured sources.
     Results are sorted by relevance and truncated to token budget.
 
-    @param room_config MASC room configuration
+    @param coord_config MASC room configuration
     @param config Recall configuration
     @param query Optional query for relevance ranking
     @return Recall result with items and metadata
@@ -92,7 +92,7 @@ val fetch_context :
 
     @param sw Eio switch
     @param env Eio environment with network access
-    @param room_config MASC room configuration
+    @param coord_config MASC room configuration
     @param config Recall configuration
     @param query Query string for semantic search
     @return Recall result from configured sources

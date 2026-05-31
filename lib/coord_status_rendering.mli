@@ -85,7 +85,7 @@ val status_summary_string :
   planning_state:Coord_types.planning_context_state ->
   suggested_next:string list ->
   attention_items:string list ->
-  state:Masc_domain.room_state ->
+  state:Masc_domain.coord_state ->
   backlog:Masc_domain.backlog ->
   string
 (** [status_summary_string] renders the full [masc_status]

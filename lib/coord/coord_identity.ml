@@ -1,6 +1,6 @@
 (** Coord Identity - Session and agent identity helpers.
 
-    Extracted from room_state.ml. *)
+    Extracted from coord_state.ml. *)
 
 open Coord_utils
 

@@ -39,7 +39,7 @@
   test_dashboard_oas_bridge
   test_masc_runtime_events
   test_room
-  test_room_state_recovery
+  test_coord_state_recovery
   test_exec_tap
   test_auth
   test_auth_credential_index_cache
@@ -310,7 +310,7 @@
   test_dashboard_oas_bridge
   test_masc_runtime_events
   test_room
-  test_room_state_recovery
+  test_coord_state_recovery
   test_exec_tap
   test_auth
   test_auth_credential_index_cache

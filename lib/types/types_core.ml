@@ -733,7 +733,7 @@ type message = {
 } [@@deriving yojson { strict = false }, show]
 
 (** Coord state *)
-type room_state = {
+type coord_state = {
   protocol_version: string;
   project: string;
   started_at: string;

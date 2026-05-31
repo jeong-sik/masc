@@ -69,7 +69,7 @@ let contains_error = contains_problem_result
 let backlog_recovery_path config =
   Coord.backlog_path config ^ ".last-good"
 
-let room_config tmp_dir =
+let coord_config tmp_dir =
   Unix.putenv "MASC_BASE_PATH" tmp_dir;
   Coord.default_config tmp_dir
 
@@ -80,7 +80,7 @@ let test_init_creates_folder () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
 
   (* Initially not initialized *)
   Alcotest.(check bool) "not init" false (Coord.is_initialized config);
@@ -103,7 +103,7 @@ let test_join_creates_agent () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:None in
 
   (* Join - now returns auto-generated nickname like "test_agent-swift-fox" *)
@@ -128,7 +128,7 @@ let test_add_and_claim_task () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:(Some "agent_llm_a") in
 
   (* Add task *)
@@ -154,7 +154,7 @@ let test_add_task_uses_archive_max_id () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:None in
 
   let archive_path = Filename.concat (Filename.concat tmp_dir Common.masc_dirname) "tasks-archive.json" in
@@ -181,7 +181,7 @@ let test_broadcast_message () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:(Some "agent_llm_a") in
 
   (* Broadcast *)
@@ -209,7 +209,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let current_task_for agent_name =
     let agent_opt =
       Coord.get_agents_raw config
@@ -303,7 +303,7 @@ let test_event_log () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:None in
 
   (* Broadcast should create event log *)
@@ -339,7 +339,7 @@ let with_test_env f =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:(Some "agent_llm_a") in
   try
     f config;
@@ -636,7 +636,7 @@ let test_event_log_on_join () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:None in
   let _ = Coord.join config ~agent_name:"test_agent" ~capabilities:["ocaml"] () in
 
@@ -657,7 +657,7 @@ let test_event_log_on_claim_done () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:(Some "agent_llm_a") in
   let _ = Coord.add_task config ~title:"Test" ~priority:1 ~description:"" in
   let _ = Coord.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
@@ -690,7 +690,7 @@ let test_heartbeat_updates_lastseen () =
     Alcotest.(check bool) "heartbeat success" true (contains_heartbeat result)
   )
 
-let test_is_agent_joined_after_default_join () =
+let test_is_agent_session_bounded_after_default_join () =
   with_test_env (fun config ->
     let _ = Coord.join config ~agent_name:"provider_f" ~capabilities:[] () in
     let agents : Masc_domain.agent list = Coord.get_agents_raw config in
@@ -702,12 +702,12 @@ let test_is_agent_joined_after_default_join () =
       | None -> failwith "expected provider_f agent"
     in
     Alcotest.(check bool) "joined agent detected" true
-      (Coord.is_agent_joined config ~agent_name:gemini_name)
+      (Coord.is_agent_session_bounded config ~agent_name:gemini_name)
   )
 
 let test_room_bootstrap_preserves_backend_state () =
   with_memory_test_env (fun config ->
-    Coord.ensure_room_bootstrap config;
+    Coord.ensure_coord_bootstrap config;
     let _ =
       Coord.update_state config (fun state ->
         { state with message_seq = 41 })
@@ -722,7 +722,7 @@ let test_room_bootstrap_preserves_backend_state () =
     Coord_utils.write_json config (Coord.backlog_path config)
       (Masc_domain.backlog_to_yojson backlog);
 
-    Coord.ensure_room_bootstrap config;
+    Coord.ensure_coord_bootstrap config;
 
     let state = Coord.read_state config in
     let saved_backlog = Coord.read_backlog config in
@@ -732,7 +732,7 @@ let test_room_bootstrap_preserves_backend_state () =
 
 let test_room_bootstrap_ignores_invalid_room_id_in_flat_mode () =
   with_memory_test_env (fun config ->
-    Coord.ensure_room_bootstrap config;
+    Coord.ensure_coord_bootstrap config;
     Alcotest.(check bool) "root state initialized" true
       (Coord.is_initialized config)
   )
@@ -1154,7 +1154,7 @@ let test_reset_clears_all_state () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:(Some "agent_llm_a") in
   let _ = Coord.add_task config ~title:"Task" ~priority:1 ~description:"" in
   let _ = Coord.broadcast config ~from_agent:"agent_llm_a" ~content:"Hello" in
@@ -1174,7 +1174,7 @@ let test_reinit_after_reset () =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
 
-  let config = room_config tmp_dir in
+  let config = coord_config tmp_dir in
   let _ = Coord.init config ~agent_name:(Some "agent_llm_a") in
   let _ = Coord.reset config in
   (* Reinit should work *)
@@ -1564,7 +1564,7 @@ let test_rejoin_event_log () =
     (* Read event log and check for rejoin entry *)
     let events = read_event_log config in
     let has_rejoin = List.exists (fun line ->
-      str_contains line "\"rejoin\":true" && str_contains line "agent_join"
+      str_contains line "\"rejoin\":true" && str_contains line "agent_session_bound"
     ) events in
     Alcotest.(check bool) "rejoin event logged" true has_rejoin
   )
@@ -1816,7 +1816,7 @@ let () =
     (* === Heartbeat & Zombie Detection Tests === *)
     "heartbeat", [
       Alcotest.test_case "updates last_seen" `Quick test_heartbeat_updates_lastseen;
-      Alcotest.test_case "default join keeps joined status" `Quick test_is_agent_joined_after_default_join;
+      Alcotest.test_case "default join keeps joined status" `Quick test_is_agent_session_bounded_after_default_join;
       Alcotest.test_case "nonexistent agent" `Quick test_heartbeat_nonexistent_agent;
       Alcotest.test_case "get agents status" `Quick test_get_agents_status;
       Alcotest.test_case "backend bootstrap preserves room state" `Quick test_room_bootstrap_preserves_backend_state;

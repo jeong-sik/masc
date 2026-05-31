@@ -4,11 +4,11 @@
     - State read/write/update with file locking
     - Sequence counter (next_seq)
     - Pause state (is_paused, pause_info)
-    - State recovery (recover_room_state)
+    - State recovery (recover_coord_state)
     - Shared string utilities (String_util.option_trim, normalized_string_list)
 
     Extracted owner modules:
-    - Coord_bootstrap: default_room_state, ensure_room_bootstrap
+    - Coord_bootstrap: default_coord_state, ensure_coord_bootstrap
     - Coord_identity: generate_session_id, get_hostname, get_tty, resolve_agent_name
     - Coord_task_id: task_id_to_int, archive management, next_task_number
     - Coord_backlog: read_backlog, write_backlog
@@ -40,8 +40,8 @@ let recover_active_agent_name = function
   | `String name -> String_util.option_trim (Some name)
   | _ -> None
 
-let recover_room_state config json =
-  let defaults = Coord_bootstrap.default_room_state config in
+let recover_coord_state config json =
+  let defaults = Coord_bootstrap.default_coord_state config in
   let active_agents =
     match Safe_ops.json_list_opt "active_agents" json with
     | Some agents -> List.filter_map recover_active_agent_name agents
@@ -85,15 +85,15 @@ let recover_room_state config json =
 (* ============================================ *)
 
 let write_state config state =
-  let json = room_state_to_yojson state in
+  let json = coord_state_to_yojson state in
   write_json config (state_path config) json
 
 let read_state config =
   let json = read_json config (state_path config) in
-  match room_state_of_yojson json with
+  match coord_state_of_yojson json with
   | Ok state -> state
   | Error msg ->
-      let repaired = recover_room_state config json in
+      let repaired = recover_coord_state config json in
       let raw_snippet =
         let s = Yojson.Safe.to_string json in
         if String.length s <= 500 then s
@@ -143,7 +143,7 @@ let pause_info config =
 
 (* Broadcast moved to Coord_broadcast (exported via Coord aggregator).
    Cannot re-export here — broadcast depends on next_seq, which would
-   create a circular dep room_state <-> room_broadcast. *)
+   create a circular dep coord_state <-> room_broadcast. *)
 
 (* ============================================ *)
 (* Re-exports: Zombie Detection (Resilience)    *)

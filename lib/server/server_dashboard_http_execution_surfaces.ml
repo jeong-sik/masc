@@ -28,10 +28,10 @@ let warm_shell_cache (state : Mcp_server.server_state) =
        let t0 = Time_compat.now () in
        let cache_shell_payload ~light =
          let cache_key =
-           dashboard_shell_cache_key ~light state.Mcp_server.room_config
+           dashboard_shell_cache_key ~light state.Mcp_server.coord_config
          in
          let compute () =
-           dashboard_shell_payload_json ~light state.Mcp_server.room_config
+           dashboard_shell_payload_json ~light state.Mcp_server.coord_config
          in
          match state.Mcp_server.clock with
          | Some clock ->
@@ -589,7 +589,7 @@ let broadcast_namespace_truth_ref : (Mcp_server.server_state -> unit) ref =
     available, each refresh runs in a pool domain with a domain-local Caqti
     pool. Falls back to in-domain compute. *)
 let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
-  let room_config = state.Mcp_server.room_config in
+  let coord_config = state.Mcp_server.coord_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   (* Default keeps timeout < interval (60s) so Proactive_refresh's clamp
      at start does not fire every boot. Env var override can still push
@@ -611,7 +611,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
         ~clock
         ~net
         ~mono_clock
-        ~config:room_config
+        ~config:coord_config
         (fun ~config ~sw ->
            Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
            |> patch_surface_json_for_running_keepers config
@@ -644,7 +644,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
         ~event_type:"execution_snapshot"
         (cached_surface_json execution_cache
          |> with_execution_metadata
-              ~config:room_config
+              ~config:coord_config
               ~query:
                 (execution_query_json
                    ~actor:None
@@ -665,7 +665,7 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   in
   let compute () =
     mark_cached_surface_attempt transport_health_cache;
-    try Transport_metrics.transport_health_json ~config:state.Mcp_server.room_config with
+    try Transport_metrics.transport_health_json ~config:state.Mcp_server.coord_config with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       mark_cached_surface_error transport_health_cache exn;
@@ -688,12 +688,12 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
         ~event_type:"transport_health_snapshot"
         (cached_surface_json transport_health_cache
          |> with_transport_health_metadata
-              ~config:state.Mcp_server.room_config
+              ~config:state.Mcp_server.coord_config
               ~timeout_s))
 ;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
-  let config = state.Mcp_server.room_config in
+  let config = state.Mcp_server.coord_config in
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
   let fixture = query_param request "fixture" in
@@ -789,7 +789,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ?mono_clock:state.Mcp_server.mono_clock
       ~sw
       ~clock
-      ~config:state.Mcp_server.room_config
+      ~config:state.Mcp_server.coord_config
       (fun ~config ~sw:_ ->
          Dashboard_http_keeper.execution_trust_dashboard_json config
          |> with_projection_diagnostics ~surface:"execution_trust" ~started_at ~extra:[])
@@ -828,6 +828,6 @@ let dashboard_transport_health_http_json ~state =
     json
     (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())
   |> with_transport_health_metadata
-       ~config:state.Mcp_server.room_config
+       ~config:state.Mcp_server.coord_config
        ~timeout_s
 ;;

@@ -30,7 +30,7 @@ type agent_state = {
 }
 
 (** Coord state *)
-type room_state = {
+type coord_state = {
   protocol_version: string;
   started_at: float;
   last_updated: float;
@@ -126,15 +126,15 @@ let event_key seq = Printf.sprintf "%s:%06d" events_key seq
 
 (** Event types for audit logging *)
 type event_type =
-  | AgentJoin
-  | AgentLeave
+  | AgentSessionBound
+  | AgentSessionEnded
   | Broadcast
   | LockAcquire
   | LockRelease
 
 let event_type_to_string = function
-  | AgentJoin -> "agent_join"
-  | AgentLeave -> "agent_leave"
+  | AgentSessionBound -> "agent_session_bound"
+  | AgentSessionEnded -> "agent_session_ended"
   | Broadcast -> "broadcast"
   | LockAcquire -> "lock_acquire"
   | LockRelease -> "lock_release"
@@ -219,7 +219,7 @@ let get_recent_events config ~limit =
 
 (** {1 State Management} *)
 
-let default_room_state () = {
+let default_coord_state () = {
   protocol_version = "1.0.0";
   started_at = Time_compat.now ();
   last_updated = Time_compat.now ();
@@ -233,7 +233,7 @@ let default_room_state () = {
   pause_reason = None;
 }
 
-let room_state_to_json state =
+let coord_state_to_json state =
   `Assoc [
     ("protocol_version", `String state.protocol_version);
     ("started_at", `Float state.started_at);
@@ -248,7 +248,7 @@ let room_state_to_json state =
     ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
   ]
 
-let room_state_of_json json =
+let coord_state_of_json json =
   let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
     Ok {
@@ -275,10 +275,10 @@ let read_state config =
   | Ok json_str ->
       (try
         let json = Yojson.Safe.from_string json_str in
-        room_state_of_json json
+        coord_state_of_json json
       with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error (Backend.NotFound _) ->
-      Ok (default_room_state ())
+      Ok (default_coord_state ())
   | Error (Backend.IOError msg) -> Error msg
   | Error (Backend.AlreadyExists k) -> Error ("Already exists: " ^ k)
   | Error (Backend.InvalidKey k) -> Error ("Invalid key: " ^ k)
@@ -288,7 +288,7 @@ let read_state config =
 (** Write room state *)
 let write_state config state =
   let state = { state with last_updated = Time_compat.now () } in
-  let json_str = Yojson.Safe.to_string (room_state_to_json state) in
+  let json_str = Yojson.Safe.to_string (coord_state_to_json state) in
   Backend.FileSystem.set config.backend state_key json_str
 
 (** Atomically update room state with a transform function.
@@ -301,26 +301,26 @@ let atomic_update_state config ~f =
   let transform json_opt =
     let current_state =
       match json_opt with
-      | None -> default_room_state ()
+      | None -> default_coord_state ()
       | Some json_str ->
           (try
             let json = Yojson.Safe.from_string json_str in
-            match room_state_of_json json with
+            match coord_state_of_json json with
             | Ok s -> s
             | Error e ->
                 Log.Coord.warn "update_state: state deserialization failed, resetting: %s" e;
-                default_room_state ()
-          with Eio.Io _ | Yojson.Json_error _ -> default_room_state ())
+                default_coord_state ()
+          with Eio.Io _ | Yojson.Json_error _ -> default_coord_state ())
     in
     let new_state = f current_state in
     let new_state = { new_state with last_updated = Time_compat.now () } in
-    Yojson.Safe.to_string (room_state_to_json new_state)
+    Yojson.Safe.to_string (coord_state_to_json new_state)
   in
   match Backend.FileSystem.atomic_update config.backend state_key ~f:transform with
   | Ok json_str ->
       (try
         let json = Yojson.Safe.from_string json_str in
-        room_state_of_json json
+        coord_state_of_json json
       with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
   | Error e ->
       Atomic.incr state_update_failures;
@@ -359,7 +359,7 @@ let agent_state_of_json json =
 
     Automatically subscribes to Messages for A2A communication.
     This ensures all agents can receive broadcasts immediately after joining.
-    If the agent is already active, updates heartbeat without emitting AgentJoin.
+    If the agent is already active, updates heartbeat without emitting AgentSessionBound.
 *)
 let register_agent config ~name ?(capabilities=[]) () =
   let already_active =
@@ -393,7 +393,7 @@ let register_agent config ~name ?(capabilities=[]) () =
       (* Log join event only for new agents, skip for re-joins *)
       if not already_active then begin
         let _event = log_event config
-          ~event_type:AgentJoin
+          ~event_type:AgentSessionBound
           ~agent:name
           ~payload:(`Assoc [
             ("capabilities", `List (List.map (fun c -> `String c) capabilities))
@@ -436,7 +436,7 @@ let remove_agent config ~name =
 
       (* Log leave event *)
       let _event = log_event config
-        ~event_type:AgentLeave
+        ~event_type:AgentSessionEnded
         ~agent:name
         ~payload:`Null in
 

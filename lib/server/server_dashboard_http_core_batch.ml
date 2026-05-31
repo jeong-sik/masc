@@ -3,7 +3,7 @@
 
     [dashboard_batch_json ?compact config] builds the operator
     dashboard's all-in-one snapshot: room status, monitoring
-    sub-feeds (board / governance / credentials / room_state /
+    sub-feeds (board / governance / credentials / coord_state /
     executor / slots), alert thresholds, tasks list (filtered by
     [compact] flag — Done entries dropped when [compact=true]),
     agents list (with profile enrichment from
@@ -31,7 +31,7 @@ let proactive_similarity_bad = 0.97
 let alert_toast_cooldown_sec = 300
 
 let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Safe.t =
-  let room_state = Coord.read_state config in
+  let coord_state = Coord.read_state config in
   let tempo = Tempo.get_tempo config in
   (* M-17 fix: single-namespace, queries scoped by basepath *)
   let tasks = Coord.get_tasks_safe config in
@@ -51,9 +51,9 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
       ; "workspace_path", `String config.workspace_path
       ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
       ; "cluster", `String (Env_config_core.cluster_name ())
-      ; "project", `String room_state.project
+      ; "project", `String coord_state.project
       ; "tempo_interval_s", `Float tempo.current_interval_s
-      ; "paused", `Bool room_state.paused
+      ; "paused", `Bool coord_state.paused
       ; "tool_call_health", tool_call_health_json config
       ; ( "alert_thresholds"
         , `Assoc
@@ -70,7 +70,7 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
             [ "board", board_monitor_json
             ; "governance", governance_monitor_json
             ; "credentials", credential_monitoring_json ()
-            ; "room_state", Coord_eio.state_health_counters ()
+            ; "coord_state", Coord_eio.state_health_counters ()
             ; "executor", executor_outcomes_json config
             ; "slots", slot_monitoring_json ()
             ] )

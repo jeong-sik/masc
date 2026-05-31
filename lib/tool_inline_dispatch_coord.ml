@@ -73,7 +73,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
   (* Step 1: set project root *)
   let room_result =
     if String.equal path "" then begin
-      if Coord.is_initialized state.Mcp_server.room_config then
+      if Coord.is_initialized state.Mcp_server.coord_config then
         Ok config
       else
         Error "path is required when no project scope is set. Provide the project directory path."
@@ -94,11 +94,11 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
       else begin
         let cfg = Coord.default_config expanded in
         if Coord.is_initialized cfg then begin
-          state.Mcp_server.room_config <- cfg;
+          state.Mcp_server.coord_config <- cfg;
           Ok cfg
         end else begin
           let _msg = Coord.init cfg ~agent_name:None in
-          state.Mcp_server.room_config <- cfg;
+          state.Mcp_server.coord_config <- cfg;
           Ok cfg
         end
       end

@@ -725,7 +725,7 @@ let test_docker_config_mount_and_env_args () =
        ~base_path:base
        ~container_root)
 
-let test_docker_room_state_mount_args_expose_safe_subset () =
+let test_docker_coord_state_mount_args_expose_safe_subset () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let masc_root = Filename.concat base ".masc" in
@@ -736,7 +736,7 @@ let test_docker_room_state_mount_args_expose_safe_subset () =
   write_file (Filename.concat (Filename.concat masc_root "auth") "keeper.token") "secret";
   let container_root = "/home/keeper/playground/minjae" in
   let specs =
-    Keeper_sandbox_runtime.docker_room_state_mount_specs
+    Keeper_sandbox_runtime.docker_coord_state_mount_specs
       ~base_path:base
       ~container_root
   in
@@ -1276,7 +1276,7 @@ let run_tests ~clock () =
           Alcotest.test_case "docker config mount and env args" `Quick
             test_docker_config_mount_and_env_args;
           Alcotest.test_case "docker room state mount exposes safe subset" `Quick
-            test_docker_room_state_mount_args_expose_safe_subset;
+            test_docker_coord_state_mount_args_expose_safe_subset;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick

@@ -148,7 +148,7 @@ let test_get_message () =
 
 (** {1 State Tests} *)
 
-let test_room_state () =
+let test_coord_state () =
   with_eio_env @@ fun config ->
   (* Register some agents *)
   let _ = Coord_eio.register_agent config ~name:"agent_llm_a" () in
@@ -197,7 +197,7 @@ let () =
       Alcotest.test_case "get message" `Quick test_get_message;
     ];
     "state", [
-      Alcotest.test_case "room state" `Quick test_room_state;
+      Alcotest.test_case "room state" `Quick test_coord_state;
       Alcotest.test_case "room status" `Quick test_room_status;
     ];
     "health", [

@@ -31,7 +31,7 @@ let handle_read_resource_eio state id params =
         make_error_typed ~id Mcp_error_code.Invalid_params "Missing uri"
       else begin
         let resource_id, uri = Mcp_server.parse_masc_resource_uri uri_str in
-        let config = state.Mcp_server.room_config in
+        let config = state.Mcp_server.coord_config in
         let registry = state.Mcp_server.session_registry in
 
         let read_messages_json ~since_seq ~limit =
@@ -108,7 +108,7 @@ let handle_read_resource_eio state id params =
               ("text/markdown", text_opt)
           | "status" -> ("text/markdown", Some (Coord.status config))
           | "status.json" ->
-              let state_json = Masc_domain.room_state_to_yojson (Coord.read_state config) in
+              let state_json = Masc_domain.coord_state_to_yojson (Coord.read_state config) in
               let backlog_json = Masc_domain.backlog_to_yojson (Coord.read_backlog config) in
               let connected_agents = Session.get_agent_statuses registry in
               let json = `Assoc [

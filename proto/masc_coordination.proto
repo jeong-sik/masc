@@ -117,7 +117,7 @@ message StatusResponse {
   repeated AgentInfo agents = 1;
   repeated TaskInfo tasks = 2;
   int32 message_count = 3;
-  string room_path = 4;
+  string workspace_path = 4;
 }
 
 // ===== Shared Types =====

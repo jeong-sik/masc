@@ -1622,7 +1622,7 @@ let test_get_messages_raw () =
     Alcotest.(check bool) "has messages" true (List.length msgs >= 2))
 ;;
 
-let test_is_agent_joined () =
+let test_is_agent_session_bounded () =
   with_test_env (fun config ->
     (* agent_llm_a is joined from init *)
     (* Note: agent names are auto-generated with nicknames, so we check by type prefix *)
@@ -1997,7 +1997,7 @@ let () =
         ; Alcotest.test_case "get tasks raw empty" `Quick test_get_tasks_raw_empty
         ; Alcotest.test_case "get agents raw" `Quick test_get_agents_raw
         ; Alcotest.test_case "get messages raw" `Quick test_get_messages_raw
-        ; Alcotest.test_case "is agent joined" `Quick test_is_agent_joined
+        ; Alcotest.test_case "is agent joined" `Quick test_is_agent_session_bounded
         ] )
     ; (* === Result Variants === *)
       ( "result_variants"

@@ -66,7 +66,7 @@ let ensure_required_bearer_auth ~base_path ~agent_name =
   if cfg.enabled && cfg.require_token then
     Ok Auth_already_required
   else if not cfg.enabled then
-    let _room_secret, _bootstrap_token =
+    let _coord_secret, _bootstrap_token =
       Auth.enable_auth base_path ~require_token:true ~agent_name
     in
     Ok Auth_enabled

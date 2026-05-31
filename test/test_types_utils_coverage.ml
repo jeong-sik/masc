@@ -581,7 +581,7 @@ let test_default_auth_config () =
 let test_auth_config_roundtrip () =
   let cfg = Masc_domain.{
     enabled = true;
-    room_secret_hash = Some "sha256:secret";
+    coord_secret_hash = Some "sha256:secret";
     require_token = true;
     token_expiry_hours = 48;
   } in
@@ -683,8 +683,8 @@ let test_contains_substring_empty () =
 (* ============================================================ *)
 
 let test_room_eio_event_type_to_string () =
-  check string "AgentJoin" "agent_join" (Coord_eio.event_type_to_string Coord_eio.AgentJoin);
-  check string "AgentLeave" "agent_leave" (Coord_eio.event_type_to_string Coord_eio.AgentLeave);
+  check string "AgentSessionBound" "agent_session_bound" (Coord_eio.event_type_to_string Coord_eio.AgentSessionBound);
+  check string "AgentSessionEnded" "agent_session_ended" (Coord_eio.event_type_to_string Coord_eio.AgentSessionEnded);
   check string "Broadcast" "broadcast" (Coord_eio.event_type_to_string Coord_eio.Broadcast);
   check string "LockAcquire" "lock_acquire" (Coord_eio.event_type_to_string Coord_eio.LockAcquire);
   check string "LockRelease" "lock_release" (Coord_eio.event_type_to_string Coord_eio.LockRelease)
@@ -701,16 +701,16 @@ let test_room_eio_now_iso () =
   check bool "has ms" true (String.contains ts '.')
 
 (* ============================================================ *)
-(* Coord_eio.room_state JSON Tests                                *)
+(* Coord_eio.coord_state JSON Tests                                *)
 (* ============================================================ *)
 
-let test_room_eio_default_room_state () =
-  let state = Coord_eio.default_room_state () in
+let test_room_eio_default_coord_state () =
+  let state = Coord_eio.default_coord_state () in
   check string "protocol_version" "1.0.0" state.protocol_version;
   check bool "not paused" false state.paused;
   check (list string) "no active agents" [] state.active_agents
 
-let test_room_eio_room_state_roundtrip () =
+let test_room_eio_coord_state_roundtrip () =
   let state = Coord_eio.{
     protocol_version = "1.0.0";
     started_at = 1704067200.0;
@@ -724,8 +724,8 @@ let test_room_eio_room_state_roundtrip () =
     paused_at = Some 1704070000.0;
     pause_reason = Some "Maintenance";
   } in
-  let json = Coord_eio.room_state_to_json state in
-  let result = Coord_eio.room_state_of_json json in
+  let json = Coord_eio.coord_state_to_json state in
+  let result = Coord_eio.coord_state_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
@@ -946,8 +946,8 @@ let room_eio_time_tests = [
 ]
 
 let room_eio_state_tests = [
-  "default_room_state", `Quick, test_room_eio_default_room_state;
-  "room_state roundtrip", `Quick, test_room_eio_room_state_roundtrip;
+  "default_coord_state", `Quick, test_room_eio_default_coord_state;
+  "coord_state roundtrip", `Quick, test_room_eio_coord_state_roundtrip;
 ]
 
 let room_eio_agent_tests = [

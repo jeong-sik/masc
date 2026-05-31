@@ -914,7 +914,7 @@ let test_auth_config_to_yojson () =
 let test_auth_config_of_yojson_ok () =
   let json = `Assoc [
     ("enabled", `Bool true);
-    ("room_secret_hash", `Null);
+    ("coord_secret_hash", `Null);
     ("require_token", `Bool false);
     ("token_expiry_hours", `Int 48);
   ] in

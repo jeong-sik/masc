@@ -1,6 +1,6 @@
 (** Coord Backlog - Backlog I/O.
 
-    Extracted from room_state.ml. *)
+    Extracted from coord_state.ml. *)
 
 open Masc_domain
 open Coord_utils

@@ -337,7 +337,7 @@ let add_delete_action_routes router =
              | None ->
                  respond_error ~request:req reqd (invalid_request "task_id")
              | Some task_id ->
-             let config = state.Mcp_server.room_config in
+             let config = state.Mcp_server.coord_config in
              match Task_dispatch.delete_task config ~task_id with
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->
@@ -359,7 +359,7 @@ let add_delete_action_routes router =
              | None ->
                  respond_error ~request:req reqd (invalid_request "goal_id")
              | Some goal_id ->
-             let config = state.Mcp_server.room_config in
+             let config = state.Mcp_server.coord_config in
              match Goal_store.delete_goal config ~goal_id with
              | Ok () -> respond_ok ~request:req reqd
              | Error msg ->
@@ -379,7 +379,7 @@ let add_delete_action_routes router =
              | None ->
                respond_error ~request:req reqd (invalid_request "agent_name")
              | Some requested_name ->
-               let config = state.Mcp_server.room_config in
+               let config = state.Mcp_server.coord_config in
                (match resolve_keeper_purge_target config requested_name with
                 | Some keeper_target ->
                   let toml_deleted = Option.is_some keeper_target.toml_path in
@@ -432,7 +432,7 @@ let add_delete_action_routes router =
   |> Http.Router.post "/api/v1/dashboard/goals/sweep" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name _req reqd ->
-         let config = state.Mcp_server.room_config in
+         let config = state.Mcp_server.coord_config in
          let sweep_config = Goal_janitor.runtime_config () in
          let result = Goal_janitor.run ~config:sweep_config config in
          Http.Response.json_value ~compress:true ~request

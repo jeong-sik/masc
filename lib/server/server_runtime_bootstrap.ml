@@ -146,8 +146,8 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     Server_base_path_diagnostics.detect
       ?input_base_path
       ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-      ~effective_base_path:state.room_config.base_path
-      ~effective_masc_root:(Coord.masc_root_dir state.room_config)
+      ~effective_base_path:state.coord_config.base_path
+      ~effective_masc_root:(Coord.masc_root_dir state.coord_config)
       ()
     |> Server_base_path_diagnostics.to_yojson
   in
@@ -165,16 +165,16 @@ let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) 
   Server_base_path_diagnostics.detect
     ?input_base_path
     ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-    ~effective_base_path:state.room_config.base_path
-    ~effective_masc_root:(Coord.masc_root_dir state.room_config)
+    ~effective_base_path:state.coord_config.base_path
+    ~effective_masc_root:(Coord.masc_root_dir state.coord_config)
     ()
 
 let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
-    ~agents_path:(Coord.agents_dir state.room_config)
+    ~agents_path:(Coord.agents_dir state.coord_config)
 
 let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
-  Prometheus.reconcile_active_agents_gauge (Coord.masc_dir state.room_config)
+  Prometheus.reconcile_active_agents_gauge (Coord.masc_dir state.coord_config)
 
 
 (* Startup maintenance extracted to
@@ -190,7 +190,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
      direct state constructors used by tests and execute contexts can leave a
      stale process-global config resolution in place. *)
   Config_dir_resolver.reset ();
-  let (_init_msg : string) = Coord.init state.room_config ~agent_name:None in
+  let (_init_msg : string) = Coord.init state.coord_config ~agent_name:None in
   audit_keeper_egress_policies state;
   Mcp_server.set_sse_callback state Sse.broadcast
 
@@ -251,8 +251,8 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
     Prompt_defaults.bootstrap_runtime
-      ~workspace_path:state.room_config.workspace_path
-      ~base_path:state.room_config.base_path
+      ~workspace_path:state.coord_config.workspace_path
+      ~base_path:state.coord_config.base_path
   in
   let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
   if prompt_markdown_dir <> expected_prompt_dir then
@@ -281,7 +281,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
 let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
   (try
      let summary =
-       Telemetry_eio.summarize_tool_usage state.room_config
+       Telemetry_eio.summarize_tool_usage state.coord_config
      in
      if summary.telemetry_available then
        let n = Tool_registry.warm_up summary in
@@ -296,7 +296,7 @@ let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
 let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
   (try
      let n = Tool_metrics_persist.restore
-       ~base_path:state.room_config.base_path in
+       ~base_path:state.coord_config.base_path in
      if n > 0 then
        Log.Misc.info "tool metrics: restored %d records from disk" n
    with
@@ -618,7 +618,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         Log.Server.info "lazy_task_group: finished %s" group.group_name
       in
       Server_startup_state.activate_lazy
-        ~backend_mode:(Coord.backend_name state.room_config)
+        ~backend_mode:(Coord.backend_name state.coord_config)
         ~tasks:task_names;
       Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
     in
@@ -629,7 +629,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       server_state := Some state;
       Server_startup_state.mark_state_ready
-        ~backend_mode:(Coord.backend_name state.room_config);
+        ~backend_mode:(Coord.backend_name state.coord_config);
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
@@ -676,7 +676,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             tool_name (String.length result_str);
         if success then Ok result_str else Error result_str
       in
-      Masc_grpc_server.start ~sw ~env ~room_config:state.room_config
+      Masc_grpc_server.start ~sw ~env ~coord_config:state.coord_config
         ~tool_dispatcher;
       (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
       (match Masc_grpc_transport.from_env () with
@@ -693,7 +693,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "shell" ->
             Some
               (Server_dashboard_http.dashboard_shell_payload_json ~light:true
-                 state.Mcp_server.room_config)
+                 state.Mcp_server.coord_config)
         | "execution" ->
             Some (Server_dashboard_http.dashboard_execution_snapshot_json ())
         | "operator" ->
@@ -714,7 +714,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "composite" ->
             Some
               (Server_dashboard_http.dashboard_fleet_composite_json
-                 ~config:state.Mcp_server.room_config ())
+                 ~config:state.Mcp_server.coord_config ())
         | "board" ->
             Some
               (Server_dashboard_http.dashboard_board_json
@@ -723,7 +723,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "goals" ->
             Some
               (Server_dashboard_http.dashboard_goals_snapshot_json
-                 ~config:state.Mcp_server.room_config)
+                 ~config:state.Mcp_server.coord_config)
         | _ ->
             None);
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)

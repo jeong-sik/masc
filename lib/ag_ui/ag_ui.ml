@@ -194,7 +194,7 @@ let of_tool_call ~agent_name ~tool_name ~call_id ~args_json : event list =
   ]
 
 (** Map MASC room state to AG-UI STATE_SNAPSHOT *)
-let of_room_state (state : Yojson.Safe.t) : event =
+let of_coord_state (state : Yojson.Safe.t) : event =
   make_event ~thread_id:default_thread_id
     ~snapshot:(Some state)
     State_snapshot

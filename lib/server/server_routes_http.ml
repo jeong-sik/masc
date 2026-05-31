@@ -18,7 +18,7 @@ let make_routes ~port ~host ~sw ~clock =
     Multimodal.Workspace_holder.get;
   Http.Router.create ()
   |> Server_routes_http_routes_frontend.add_routes ~port ~host
-  |> Server_routes_http_routes_room.add_routes
+  |> Server_routes_http_routes_coord.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_provider_runs.add_routes ~sw
   |> Server_routes_http_routes_verification.add_routes

@@ -104,14 +104,14 @@ let agent_credential_of_yojson json =
 (** Auth configuration *)
 type auth_config = {
   enabled: bool;
-  room_secret_hash: string option; [@default None]
+  coord_secret_hash: string option; [@default None]
   require_token: bool; [@default false]
   token_expiry_hours: int; [@default 24]
 } [@@deriving show]
 
 let default_auth_config = {
   enabled = true;
-  room_secret_hash = None;
+  coord_secret_hash = None;
   require_token = true;
   token_expiry_hours = 24;
 }
@@ -119,7 +119,7 @@ let default_auth_config = {
 let auth_config_to_yojson c =
   `Assoc [
     ("enabled", `Bool c.enabled);
-    ("room_secret_hash", Json_util.string_opt_to_json c.room_secret_hash);
+    ("coord_secret_hash", Json_util.string_opt_to_json c.coord_secret_hash);
     ("require_token", `Bool c.require_token);
     ("token_expiry_hours", `Int c.token_expiry_hours);
   ]
@@ -127,10 +127,10 @@ let auth_config_to_yojson c =
 let auth_config_of_yojson json =
   try
     let enabled = Json_util.get_bool json "enabled" |> Option.value ~default:true in
-    let room_secret_hash = Json_util.get_string json "room_secret_hash" in
+    let coord_secret_hash = Json_util.get_string json "coord_secret_hash" in
     let require_token = Json_util.get_bool json "require_token" |> Option.value ~default:false in
     let token_expiry_hours = Json_util.get_int json "token_expiry_hours" |> Option.value ~default:24 in
-    Ok { enabled; room_secret_hash; require_token; token_expiry_hours }
+    Ok { enabled; coord_secret_hash; require_token; token_expiry_hours }
   with e -> Error (Printexc.to_string e)
 
 (** Permission matrix - what each role can do *)

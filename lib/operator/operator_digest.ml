@@ -200,7 +200,7 @@ let keeper_attention_projection_items config =
 let room_recommendations _config =
   dedup_recommendations []
 
-let room_state_json config =
+let coord_state_json config =
   if not (Coord.is_initialized config) then
     `Assoc
       [
@@ -252,7 +252,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
   else
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
     let* target_type = normalize_digest_target_type target_type in
-    let room_state_json = room_state_json config in
+    let coord_state_json = coord_state_json config in
     match target_type with
     | "root" ->
         let confirm_scope = pending_confirm_scope ?actor config in
@@ -295,7 +295,7 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
                   (List.map (recommended_action_to_yojson ~actor:actor_name)
                      recommended_actions) );
               ("recommendation_summary", fallback_recommendation_summary);
-              ("root", room_state_json);
+              ("root", coord_state_json);
             ]
             @ [ ("recent_reviews", recent_reviews) ]
             @ active_guidance))

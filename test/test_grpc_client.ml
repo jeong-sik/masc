@@ -139,14 +139,14 @@ let test_status_response_roundtrip () =
       assigned_to = "agent_llm_a"; priority = 2;
     }];
     message_count = 10;
-    room_path = "/tmp/test-room";
+    workspace_path = "/tmp/test-room";
   } in
   let bytes = T.StatusResponse.to_bytes resp in
   let decoded = T.StatusResponse.of_bytes bytes in
   Alcotest.(check int) "agents" 1 (List.length decoded.agents);
   Alcotest.(check int) "tasks" 1 (List.length decoded.tasks);
   Alcotest.(check int) "msg_count" 10 decoded.message_count;
-  Alcotest.(check string) "room_path" "/tmp/test-room" decoded.room_path;
+  Alcotest.(check string) "workspace_path" "/tmp/test-room" decoded.workspace_path;
   let task = List.hd decoded.tasks in
   Alcotest.(check string) "task_id" "T-1" task.T.id;
   Alcotest.(check int) "priority" 2 task.T.priority

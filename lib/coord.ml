@@ -654,7 +654,7 @@ let () =
 ;;
 
 (* Relation materializer — agent session end *)
-let () = Atomic.set Coord_hooks.relation_on_leave_fn Relation_materializer.on_agent_leave
+let () = Atomic.set Coord_hooks.relation_on_leave_fn Relation_materializer.on_agent_session_ended
 
 (* Relation materializer — task done *)
 let () =

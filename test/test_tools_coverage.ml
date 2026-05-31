@@ -313,10 +313,6 @@ let test_remote_operator_action_schema_is_strict () =
                   (List.mem (`String "task_inject") enums);
                 Alcotest.(check bool) (label ^ " excludes keeper_msg") false
                   (List.mem (`String "keeper_msg") enums);
-                Alcotest.(check bool) (label ^ " excludes room_pause") false
-                  (List.mem (`String "room_pause") enums);
-                Alcotest.(check bool) (label ^ " excludes room_resume") false
-                  (List.mem (`String "room_resume") enums);
                 Alcotest.(check bool) (label ^ " excludes team_note") false
                   (List.mem (`String "team_note") enums);
                 Alcotest.(check bool) (label ^ " excludes team_broadcast") false

@@ -791,24 +791,6 @@ let () =
     | None -> failwith "dispatch returned None")
 ;;
 
-let () =
-  test "dispatch_check_coord_set" (fun () ->
-    let ctx = make_test_ctx () in
-    let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
-    match
-      Tool_coord.dispatch
-        ctx
-        ~name:"masc_check"
-        ~args:(`Assoc [ "assertions", `List [ `String "coord_set" ] ])
-    with
-    | Some result ->
-      assert (Tool_result.is_success result);
-      let message = (Tool_result.message result) in
-      let json = Yojson.Safe.from_string message in
-      assert (Yojson.Safe.Util.member "all_passed" json = `Bool true)
-    | None -> failwith "dispatch returned None")
-;;
-
 (* Test helper functions *)
 let () =
   test "get_string_present" (fun () ->

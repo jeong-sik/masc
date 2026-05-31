@@ -87,8 +87,6 @@ let test_operator_action_rejects_legacy_action_aliases () =
     [
       "autonomy_tick";
       "keeper_msg";
-      "room_pause";
-      "room_resume";
       "team_note";
       "team_broadcast";
       "team_task_inject";

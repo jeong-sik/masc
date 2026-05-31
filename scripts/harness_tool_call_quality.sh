@@ -349,7 +349,7 @@ write_benchmark_persona_profile() {
         proactive_enabled: false,
         telemetry_feedback_enabled: false,
         max_turns_per_call: 6,
-        cascade_name: "keeper_unified",
+        runtime_id: "keeper_unified",
         models: [$model]
       }
     }' > "${profile_path}"

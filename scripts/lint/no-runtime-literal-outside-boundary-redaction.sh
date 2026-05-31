@@ -77,8 +77,13 @@ SCAN_FILES=(
 PREAPPROVED=(
   # Debug format string inside Printf.sprintf — internal observability
   # (real provider identity, not boundary redaction). The model field
-  # above it is already routed via Boundary_redaction.
-  "lib/keeper/keeper_turn_driver_wrappers.ml:94"
+  # above it is already routed via Boundary_redaction. Line moved by the
+  # RFC-0206 run_named single-dispatch collapse (#19604).
+  "lib/keeper/keeper_turn_driver_wrappers.ml:152"
+  # Redacted manifest decision reason for the Runtime_routed event —
+  # internal observability; concrete runtime identity is owned by the
+  # OAS/provider adapters, not this boundary surface.
+  "lib/keeper/keeper_unified_turn.ml:142"
 )
 
 violations_tmp="$(mktemp -t rfc0132-pr3.violations.XXXXXX)"

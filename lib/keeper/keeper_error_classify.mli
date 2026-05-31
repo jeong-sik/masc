@@ -116,13 +116,13 @@ val fallback_runtime_for_unavailable_profile :
   effective_runtime_id:string ->
   string option
 
-(** Classifies an SDK error into a fallback reason label when the cascade
-    failure is recoverable via [fallback_cascade] or [degraded_rotation].
+(** Classifies an SDK error into a fallback reason label when the runtime
+    failure is recoverable via [fallback_runtime] or [degraded_rotation].
     Returns [None] for terminal errors (e.g. accept-rejected, ambiguous
     post-commit) that should not trigger same-turn escalation.
 
     Status-code-aware rotation: raw API errors that are not wrapped in a MASC
-    internal error are also classified when a different cascade may succeed:
+    internal error are also classified when a different runtime may succeed:
     - [RateLimited] (non-hard-quota) → ["rate_limit"]
     - [Overloaded] and Cloudflare 524 → ["capacity_backpressure"]
     - [ServerError] with status >= 500 → ["server_error"]
@@ -134,7 +134,7 @@ val fallback_runtime_for_unavailable_profile :
 val recoverable_cascade_failure_reason :
   Agent_sdk.Error.sdk_error -> degraded_retry_reason option
 
-(** Returns the one-shot degraded retry lane for recoverable whole-cascade
+(** Returns the one-shot degraded retry lane for recoverable whole-runtime
     failures. Required-tool turns stay terminal, and already-degraded lanes
     do not broaden further. *)
 val degraded_retry_after_recoverable_error :
@@ -143,16 +143,16 @@ val degraded_retry_after_recoverable_error :
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
 
-(** Returns the next untried cascade in the same-turn recovery group for a
-    whole-cascade failure. Uses the default degraded rotation candidate set
+(** Returns the next untried runtime in the same-turn recovery group for a
+    whole-runtime failure. Uses the default degraded rotation candidate set
     (base/tool_required for required-tool turns, base/default/phase-recovery
     for optional/text turns). Required-tool turns keep the tool requirement
-    and leave concrete provider filtering to the cascade resolver.
+    and leave concrete provider filtering to the runtime resolver.
 
     [fallback_hint], when provided, is prepended to the candidate list so
     that single-provider profiles can declare an immediate escalation
-    target via [cascade.toml]. The hint is normalized and deduplicated like
-    any other candidate; if it duplicates the effective cascade or has
+    target via runtime config. The hint is normalized and deduplicated like
+    any other candidate; if it duplicates the effective runtime or has
     already been attempted, the next legal candidate is returned.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :

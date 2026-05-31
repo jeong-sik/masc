@@ -16,9 +16,8 @@ This document answers four operator questions:
 - Where live state, logs, and audit artifacts land on disk.
 - What the current host is actually using right now.
 
-For day-to-day active-root and init diagnosis, prefer
-[`CONFIG-DOCTOR.md`](./CONFIG-DOCTOR.md). This document is the deeper inventory
-behind that operator flow.
+For day-to-day active-root and init diagnosis, use the launcher/env contract.
+This document is the deeper inventory behind that operator flow.
 
 Scope:
 
@@ -62,7 +61,7 @@ Important boot behavior:
 
 - If `MASC_CONFIG_DIR` is unset, bootstrap initializes `<MASC_BASE_PATH>/.masc/config`.
 - Bootstrap copies only missing files from the versioned `config/` tree; it does not overwrite an existing file.
-- Supported launchers and `main_eio.exe doctor` should be read with a simpler operator contract:
+- Supported launchers and boot diagnostics should be read with a simpler operator contract:
   active config is `MASC_CONFIG_DIR` when set, otherwise `<MASC_BASE_PATH>/.masc/config`.
 - This means a passive base-path config root can exist on disk even when it is not the active config root.
 - There is no secondary operator config fallback. On shared hosts, use an

@@ -305,7 +305,7 @@ spawn 시 인자로 직접 설정하는 필드.
 - Docker 내부에서 더 자유로운 부트스트랩/설치가 필요하면 `MASC_KEEPER_SANDBOX_RELAX_FS=true`로 rootfs writable + executable `/tmp` 조합을 켤 수 있다. 이 경우에도 host mount 범위, `cap-drop=ALL`, `no-new-privileges`, pids/memory limit은 유지된다. hard mode에서는 이 완화가 거부된다.
 - 기본 모드의 git/gh dispatch: `sandbox_profile=docker`에서 network가 필요한 `git`/`gh` 계열 명령은 `Execute`의 typed `executable`/`argv` 경로로 실행된다. `repo_cli_identity`가 바인딩된 keeper는 `.masc/repo-cli-identities/<identity>/gh`만 사용하고, bundle이 없으면 fail-closed 된다. 바인딩이 없는 keeper는 `.masc/repo-cli-identities/root/gh` root bundle만 fallback으로 사용한다. root bundle도 없으면 fail-closed 된다. operator host `~/.config/gh`, `~/.gitconfig`, `~/.ssh`, `GH_TOKEN`, `GITHUB_TOKEN`, `SSH_AUTH_SOCK`, keychain probe는 keeper credential 경로가 아니다. 그 외 명령은 계속 network=none의 hardened container 또는 turn-scoped `docker exec` runtime으로 실행된다. Docker 라우트 응답에는 `via: "docker"`가 들어오고, git credential dispatch가 켜진 경우 `git_creds_enabled: true`도 함께 들어온다. 비활성화하려면 `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false`.
 - hard mode: `MASC_KEEPER_SANDBOX_HARD_MODE=true`는 `sandbox_profile=docker`, `network_mode=none`, selected repo CLI identity bundle을 강제한다. Keeper별 `repo_cli_identity`가 없으면 root bundle을 사용하고, root bundle도 없으면 startup/validation에서 fail-closed 된다. Docker container는 `git`/`gh` 때문에 bridge/host network로 승격되지 않고, ambient operator credential도 비활성화된다. hard mode 라우트 응답은 `via: "brokered"`를 노출한다.
-- hard mode runtime preflight는 Docker `SecurityOptions`에서 `rootless`와 `userns`를 모두 요구한다. 현재 Docker Desktop/rootful daemon처럼 둘 중 하나라도 없으면 `doctor`와 keeper startup에서 fail-closed 된다.
+- hard mode runtime preflight는 Docker `SecurityOptions`에서 `rootless`와 `userns`를 모두 요구한다. 현재 Docker Desktop/rootful daemon처럼 둘 중 하나라도 없으면 keeper startup/runtime validation에서 fail-closed 된다.
 - 기본 sandbox 이미지는 `masc-keeper-sandbox:local`이다. Docker keeper를 올리기 전에 `scripts/build-keeper-sandbox-image.sh`를 실행해 이미지를 만들고, smoke 검증은 `scripts/keeper-sandbox-smoke.sh`를 사용한다.
 - keeper Docker 컨테이너에는 `masc.mcp.component=keeper-sandbox`와 base path hash 라벨이 붙는다. 새 컨테이너 시작 전 같은 base path 범위의 오래된 MASC keeper 컨테이너만 best-effort로 정리한다. 조정값은 `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED`, `MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC`, `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC`이다.
 
@@ -324,7 +324,7 @@ Docker 사용 여부와 컨테이너 유지 방식은 서로 다른 결정이다
 `repo_cli_identity`는 현재 대시보드의 일반 설정 화면에서 수정하는 필드가 아니라 active config root의 `keeper.toml` overlay가 SSOT다. 대시보드에서 찾지 못하면 먼저 active config root를 확인하고 파일을 수정한다.
 
 ```bash
-masc-mcp doctor config --base-path /path/to/base --json | jq -r '.active_config_root'
+printf '%s\n' "${MASC_CONFIG_DIR:-/path/to/base/.masc/config}"
 ```
 
 Keeper가 사용할 identity bundle은 base path 아래에 있어야 한다. 예를 들어 `anyang-keepers`를 쓸 때:
@@ -355,7 +355,7 @@ git_identity_mode = "repo_cli_identity"
 ```bash
 rg -n 'repo_cli_identity|git_identity_mode' <active_config_root>/keepers
 test -s /path/to/base/.masc/repo-cli-identities/anyang-keepers/gh/hosts.yml
-masc-mcp doctor config --base-path /path/to/base --json
+printf 'active_config_root=%s\n' "${MASC_CONFIG_DIR:-/path/to/base/.masc/config}"
 ```
 
 Docker keeper의 실제 사용 여부는 keeper가 sandboxed tool 또는 git/gh 계열 `Execute`를 호출할 때 확정된다. 이 경로는 operator host의 `~/.config/gh`, `GH_TOKEN`, `GITHUB_TOKEN`, SSH agent, keychain으로 fallback하지 않는다. selected bundle이 없으면 fail-closed 된다. token 만료/폐기는 별도 preflight probe가 아니라 첫 scoped git/gh 작업의 실패로 드러난다.
@@ -373,7 +373,7 @@ git_identity_mode = "repo_cli_identity"
 
 ```bash
 export MASC_KEEPER_SANDBOX_HARD_MODE=true
-masc-mcp doctor config
+scripts/keeper-sandbox-smoke.sh
 ```
 
 근거(확인일: 2026-04-23, 신뢰도 High): Docker rootless mode는 Docker daemon과 container를 non-root user namespace에서 실행한다는 공식 Docker 문서 기준이다. Docker userns-remap은 container root를 host의 unprivileged UID range로 remap한다는 공식 Docker 문서 기준이다. GitHub CLI `GH_CONFIG_DIR`는 gh config 저장 디렉터리를 지정한다는 공식 GitHub CLI manual 기준이다. gVisor/runsc는 Docker/Kubernetes와 통합되는 OCI runtime으로 별도 backend 후보이며, hard mode V1에는 아직 구현하지 않았다.
@@ -889,7 +889,7 @@ materialize될 수 있지만, 정식 edit surface는 `profile.json`과 `keeper.t
 
 Definitive source는 코드의 `canonical_keeper_toml_key_names` (`lib/keeper/keeper_types_profile.ml`)와 `removed_keeper_input_key_names` (`lib/keeper/keeper_config.ml`)다.
 
-운영 기준 active config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리이고, 없으면 `<MASC_BASE_PATH>/.masc/config`다. `repo/config`는 체크인된 seed source이며 live root가 아니다. 헷갈리면 `main_eio.exe doctor --base-path ...`를 먼저 사용한다. low-level resolver에는 추가 fallback이 있지만, 운영 진단 기준은 `docs/CONFIG-DOCTOR.md`를 따른다.
+운영 기준 active config root는 `MASC_CONFIG_DIR`가 있으면 그 디렉토리이고, 없으면 `<MASC_BASE_PATH>/.masc/config`다. `repo/config`는 체크인된 seed source이며 live root가 아니다. low-level resolver에는 추가 fallback이 있지만, 운영 기준은 `docs/BOOT-ENV-STATE-INVENTORY.md`를 따른다.
 
 ### 8.2 Template 변경 반영
 
@@ -930,7 +930,7 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 
 | 문서 | 용도 |
 |------|------|
-| [CONFIG-DOCTOR.md](./CONFIG-DOCTOR.md) | active config/init 진단 |
+| [BOOT-ENV-STATE-INVENTORY.md](./BOOT-ENV-STATE-INVENTORY.md) | boot / path / state / active config inventory |
 | [GLOSSARY.md](./GLOSSARY.md) | 용어 정의 |
 | [QUICK-START.md](./QUICK-START.md) | repo coordination 시작 경로 |
 | [COMMAND-PLANE-RUNBOOK.md](./COMMAND-PLANE-RUNBOOK.md) | retired command-plane reference |

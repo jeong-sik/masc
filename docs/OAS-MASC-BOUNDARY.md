@@ -63,7 +63,7 @@ OAS  ──does not know──→ MASC
   on vendor/model literals or surface concrete provider/model ids in keeper
   runtime products; compatibility fields are redacted to `runtime`, `null`, or
   empty collections at MASC boundaries.
-- OAS provider catalog / capability manifest / pricing override는 generic
+- OAS provider capability manifest / pricing override는 generic
   provider runtime contract다. MASC may pass logical runtime intent and
   capability requirements into those OAS contracts, but OAS must not learn MASC routes,
   keeper phases, runtimes, board/governance semantics, or dashboard policy.
@@ -160,8 +160,8 @@ OAS  ──does not know──→ MASC
   labels.
   Cost ledger JSONL keeps status diagnostics but redacts persisted `provider`
   and `model` values to the neutral `runtime` lane. MASC no longer estimates
-  provider/model pricing locally or emits `cost_pricing_model` /
-  `cost_pricing_catalog` compatibility fields; `cost_usd` is trusted only when
+  provider/model pricing locally or emits legacy cost/pricing compatibility
+  fields; `cost_usd` is trusted only when
   OAS reports it, otherwise the row is marked `oas_cost_unreported`.
   No-tool provider rejection records now carry only non-identifying rejection
   reasons in the MASC structured error type; legacy payloads with
@@ -179,7 +179,7 @@ OAS  ──does not know──→ MASC
   variants no longer store provider/model identifiers, and legacy JSON keys
   such as `provider`, `affected`, and `model_name` emit neutral `runtime`
   values only.
-  Runtime catalog runtime probe JSON and provider-health probe metric labels
+  Runtime probe JSON and provider-health probe metric labels
   keep status/error/profile evidence but redact provider kind, model id,
   model string, endpoint, and metric provider/model labels to neutral runtime
   values.
@@ -218,7 +218,7 @@ OAS  ──does not know──→ MASC
 
 These are the next changes that are generic enough to propose upstream:
 
-- generic provider catalog / model capability / pricing manifest contracts for
+- generic provider capability / pricing manifest contracts for
   broad cloud APIs and non-interactive CLI/subscriber runtimes
 - harness case/result/verdict/repair-directive primitives that MASC evaluators can reuse
 - richer swarm `agent_entry` metadata so `planned_worker` routing and telemetry survive end to end
@@ -290,14 +290,14 @@ Without `MASC_STRICT_OAS_INDEPENDENCE=1`, the guard warns and continues when the
 
 ### Layer 1 — Fingerprint gate (`scripts/oas-drift-check.sh`)
 
-Dumps OAS public types at the pinned SHA (Event_bus variants / Http_client error variants / Metrics.t fields) and diffs against `scripts/oas-api-surface.json`. Runs automatically as a one-line summary inside `make doctor-oas-pin`:
+Dumps OAS public types at the pinned SHA (Event_bus variants / Http_client error variants / Metrics.t fields) and diffs against `scripts/oas-api-surface.json`. Runs automatically as a one-line summary inside `make diagnostics-oas-pin`:
 
 ```
 OAS pin verified: main@92c3077a (base version v0.155.1)
 OAS API surface: ✓ matches fingerprint
 ```
 
-Drift shows as `⚠ drift (added N, removed M) — run 'make doctor-oas-drift' for detail`. `make doctor-oas-drift` prints the section-grouped added/removed lists and the repair sequence.
+Drift shows as `⚠ drift (added N, removed M) — run 'make diagnostics-oas-drift' for detail`. `make diagnostics-oas-drift` prints the section-grouped added/removed lists and the repair sequence.
 
 ### Layer 2 — Type adapter (`lib/oas_compat/`)
 
@@ -310,7 +310,7 @@ Consumer-side pattern matches against OAS variants and record literals against O
 
 ```bash
 # 1. Investigate: what actually changed upstream?
-make doctor-oas-drift                  # section-grouped added/removed
+make diagnostics-oas-drift             # section-grouped added/removed
 
 # 2. Fix the consumer side (usually: update lib/oas_compat/oas_compat.ml
 #    so the adapter compiles against the new OAS; migrate any remaining

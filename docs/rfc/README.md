@@ -85,7 +85,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0054 | PPX for Typed Capability Substrate Phase 2 (codegen track) | Active | cea4acd3f3 2026-05-21 | - |
 | 0056 | Incremental Sub-Library Extraction from Flat masc_mcp Library | Active | 56445f606f 2026-05-21 | - |
 | 0057 | Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation | Draft | f0075c3611 2026-05-17 | - |
-| 0058 | Terminal Fallback Capability Exemption | Draft | f0075c3611 2026-05-17 | RFC-0058-phase-5-7-doctor-modules.md, RFC-0058-phase-5-7-inventory.md, RFC-0058-phase-5-erase-provider-variant.md, RFC-0058-phase-8-runtime-catalog-partial-parse.md |
+| 0058 | Terminal Fallback Capability Exemption | Draft | f0075c3611 2026-05-17 | RFC-0058-phase-5-7-inventory.md, RFC-0058-phase-5-erase-provider-variant.md, RFC-0058-phase-8-runtime-catalog-partial-parse.md |
 | 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initi... | Draft | f0075c3611 2026-05-17 | - |
 | 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Draft | f0075c3611 2026-05-17 | - |
 | 0064 | Two-Surface Tool Alias — Replace 3-Tier Classification | Active | cea4acd3f3 2026-05-21 | - |

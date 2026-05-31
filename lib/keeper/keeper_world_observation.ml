@@ -1,6 +1,6 @@
 (** Keeper_world_observation — Structured world state for keeper cycles.
 
-    Extracts and normalizes observation signals from room state, keeper meta,
+    Extracts and normalizes observation signals from coord state, keeper meta,
     and context so the unified prompt and turn runner consume a single snapshot.
 
     @since Unified Keeper Loop *)

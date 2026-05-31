@@ -38,8 +38,8 @@ val interpret :
     3. {!Meta_cognition_types.Operator_desire} — [top_desire]
        [actionability] is one of:
        [operator] / [operator_or_platform] /
-       [operator_or_scheduler] / [room_or_operator]
-    4. {!Meta_cognition_types.Stagnant_room} — [stagnation_score >= 0.65]
+       [operator_or_scheduler] / [coord_or_operator]
+    4. {!Meta_cognition_types.Stagnant_coord} — [stagnation_score >= 0.65]
 
     {2 Threshold pinning}
 
@@ -94,5 +94,5 @@ val summary_signature : Meta_cognition_types.summary_input -> string
     lossy field — every other field round-trips losslessly into
     the digest.  A future "let's use a finer bucket" change must
     coordinate with the digest cache: existing cached digests
-    become invalid for the same room state and the dashboard
+    become invalid for the same coord state and the dashboard
     will see one round of digest churn. *)

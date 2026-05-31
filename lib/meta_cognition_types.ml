@@ -1,4 +1,4 @@
-(** Meta_cognition_types — Types and utilities for room-level meta-cognition.
+(** Meta_cognition_types — Types and utilities for coord-level meta-cognition.
 
     Contains all shared type definitions and leaf utility functions used
     across the meta-cognition sub-modules.
@@ -95,7 +95,7 @@ type salience =
   | Contested_belief
   | Operator_tension
   | Operator_desire
-  | Stagnant_room
+  | Stagnant_coord
 
 type interpretation = {
   primary_salience : salience;
@@ -132,7 +132,7 @@ let salience_to_string = function
   | Contested_belief -> "contested_belief"
   | Operator_tension -> "operator_tension"
   | Operator_desire -> "operator_desire"
-  | Stagnant_room -> "stagnant_room"
+  | Stagnant_coord -> "stagnant_coord"
 
 let preview ?(max_len = 120) text =
   let text =

@@ -24,7 +24,7 @@
     into this lightweight record. *)
 type observation_context = {
   context_ratio : float;          (** [0.0, 1.0] — current context window utilization *)
-  active_agent_count : int;       (** Agents currently active in the room *)
+  active_agent_count : int;       (** Agents currently active in the coord *)
   unclaimed_task_count : int;     (** Pending tasks in the backlog *)
   is_single_focused_task : bool;  (** Keeper working on exactly one task *)
   context_window : int;           (** Model context window in tokens *)
@@ -257,7 +257,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.t =
     OAS Dynamic is turn-scoped and message-scoped — it answers
     "given this conversation state, which single reduction to apply?".
     MASC Dynamic is world-scoped — it answers "given the multi-agent
-    room state, which {i combination} of reductions is appropriate?".
+    coord state, which {i combination} of reductions is appropriate?".
 
     They operate at different abstraction levels:
     - OAS Dynamic:  per-conversation, single strategy, inside [reduce]

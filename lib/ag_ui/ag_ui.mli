@@ -114,7 +114,7 @@ val of_tool_call :
     (with [delta=args_json]), [Tool_call_end]. *)
 
 val of_coord_state : Yojson.Safe.t -> event
-(** Room snapshot → [State_snapshot]. *)
+(** Coord snapshot → [State_snapshot]. *)
 
 val of_custom : name:string -> Yojson.Safe.t -> event
 (** Wrap any MASC event in [Custom] with the given [name]/[value]. *)

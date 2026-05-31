@@ -139,7 +139,7 @@ val provider_timeout_policy_decision :
 
 val persist_message_cursor_updates :
   config:Coord.config -> keeper_meta -> (string * int) list -> keeper_meta
-(** Persist room-message cursor updates immediately after observation.
+(** Persist coord-message cursor updates immediately after observation.
     This is intentionally exposed for the regression that proves a failed
     turn cannot replay the same scoped messages forever. *)
 

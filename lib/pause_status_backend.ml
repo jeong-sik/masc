@@ -1,4 +1,4 @@
-(** Pause-status projection for room/tool surfaces. *)
+(** Pause-status projection for coord/tool surfaces. *)
 
 let keeper_pause_status_json config =
   let names = Keeper_meta_store.keeper_names config in

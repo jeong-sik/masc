@@ -300,7 +300,7 @@ let keeper_schemas : tool_schema list = [
         ("mention_targets", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Exact direct-mention tokens that can wake the keeper in room traffic (for example ['sangsu']).");
+          ("description", `String "Exact direct-mention tokens that can wake the keeper in coord traffic (for example ['sangsu']).");
         ]);
         ("active_goal_ids", `Assoc [
           ("type", `String "array");

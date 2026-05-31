@@ -528,7 +528,7 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", m.name; "phase", "bootstrap-catch" ]
       ();
-    Log.Keeper.error "room presence bootstrap failed: %s" (Printexc.to_string exn);
+    Log.Keeper.error "coord presence bootstrap failed: %s" (Printexc.to_string exn);
     m
 ;;
 

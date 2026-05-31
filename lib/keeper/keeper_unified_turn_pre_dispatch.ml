@@ -9,7 +9,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-module KCP = Keeper_cascade_profile
+module KCP = Keeper_runtime_profile
 
 let resolve_unified_max_tokens_fallback
       ~(meta_name : string)

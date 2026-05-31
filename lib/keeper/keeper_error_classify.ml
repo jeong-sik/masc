@@ -623,7 +623,7 @@ let degraded_rotation_after_recoverable_error
       (* Load the live catalog once at the degraded-rotation boundary and pass
          the snapshot through normalization/filter helpers.  This preserves
          concrete profile names without adding per-candidate catalog I/O. *)
-      let catalog_names = Keeper_cascade_profile.catalog_lookup_names () in
+      let catalog_names = Keeper_runtime_profile.catalog_lookup_names () in
       let attempted =
         attempted_cascades
         |> List.map (normalized_cascade_name ~catalog_names)

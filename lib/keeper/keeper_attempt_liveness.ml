@@ -131,7 +131,7 @@ let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
         (s, Continue)
 
   (* Awaiting × Provider_wire_error: provider failed before any chunk;
-     classify as wire error, not liveness — let cascade FSM decide. *)
+     classify as wire error, not liveness — let runtime FSM decide. *)
   | Awaiting _, Provider_wire_error msg ->
       recorder.record_liveness_outcome (Some (Provider_error msg));
       ( Failed (Provider_error msg)

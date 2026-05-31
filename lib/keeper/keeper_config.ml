@@ -2,7 +2,7 @@
 
 open Tool_args
 include Keeper_config_rp_helpers
-open Keeper_cascade_profile
+open Keeper_runtime_profile
 
 (** Upper bound for keeper time configs expressed in seconds.  Repeated
     seven times as the bare literal [172800] across this file before

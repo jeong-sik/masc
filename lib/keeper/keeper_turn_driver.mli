@@ -12,17 +12,17 @@
 
 (** {1 MASC/OAS structured errors}
 
-    Re-exported from {!Cascade_error_classify} (which itself includes
+    Re-exported from {!Runtime_error_classify} (which itself includes
     {!Cascade_internal_error}). Using [include module type of] instead of a
     manual type copy so the interface stays structurally identical to the
-    implementation's [include Cascade_error_classify]. *)
+    implementation's [include Runtime_error_classify]. *)
 
-include module type of Cascade_error_classify
+include module type of Runtime_error_classify
 
 (** {1 Cascade error helpers} *)
 
 val sdk_error_to_cascade_outcome :
-  Agent_sdk.Error.sdk_error -> Cascade_fsm.provider_outcome option
+  Agent_sdk.Error.sdk_error -> Runtime_fsm.provider_outcome option
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 
@@ -154,8 +154,8 @@ val run_named :
   unit ->
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 (** Run a single [Agent.run] call with MASC-driven cascade model fallback.
-    MASC drives the cascade FSM directly: resolves cascade providers,
-    tries each with OAS, and uses [Cascade_fsm.decide] on failure.
+    MASC drives the runtime FSM directly: resolves cascade providers,
+    tries each with OAS, and uses [Runtime_fsm.decide] on failure.
     The cascade loop runs inside a capacity-managed queue permit. *)
 
 module For_testing : sig

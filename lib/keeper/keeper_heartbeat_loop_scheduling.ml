@@ -8,25 +8,25 @@ open Keeper_meta_contract
 open Keeper_types_profile
 module Observations = Keeper_heartbeat_loop_observations
 
-(* Re-export cascade_backpressure_decision so the record field below
+(* Re-export runtime_backpressure_decision so the record field below
    matches the parent's view byte-identically. *)
-type cascade_backpressure_decision = Observations.cascade_backpressure_decision =
-  | Cascade_admitted
-  | Cascade_backpressured of {
+type runtime_backpressure_decision = Observations.runtime_backpressure_decision =
+  | Runtime_admitted
+  | Runtime_backpressured of {
       cascade_name : string;
       reason : string;
     }
 
-let cascade_backpressure_observation_reasons =
-  Observations.cascade_backpressure_observation_reasons
+let runtime_backpressure_observation_reasons =
+  Observations.runtime_backpressure_observation_reasons
 ;;
 
-let cascade_backpressure_decision = Observations.cascade_backpressure_decision
+let runtime_backpressure_decision = Observations.runtime_backpressure_decision
 
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
-  cascade_backpressure : cascade_backpressure_decision;
+  runtime_backpressure : runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
   admission_reasons : string list;
@@ -34,8 +34,8 @@ type keepalive_scheduling_decision = {
 }
 
 let decide_keepalive_scheduling
-      ?(cascade_resilience_of_name =
-        Keeper_cascade_resilience.cascade_resilience_of_name)
+      ?(runtime_resilience_of_name =
+        Keeper_runtime_resilience.runtime_resilience_of_name)
       ?(cascade_status_of_name =
         fun ~cascade_name -> Keeper_health_probe.get_cascade_status ~cascade_name)
       ~stop
@@ -47,32 +47,32 @@ let decide_keepalive_scheduling
     (not (Atomic.get stop)) && turn_decision.should_run
   in
   let cascade_name = runtime_id_of_meta meta in
-  let cascade_resilience = cascade_resilience_of_name cascade_name in
-  let cascade_backpressure =
-    cascade_backpressure_decision
-      ~cascade_resilience:(Some cascade_resilience)
+  let runtime_resilience = runtime_resilience_of_name cascade_name in
+  let runtime_backpressure =
+    runtime_backpressure_decision
+      ~runtime_resilience:(Some runtime_resilience)
       ~should_run_turn:requested_should_run_turn
       ~cascade_name
       ~cascade_status:(cascade_status_of_name ~cascade_name)
   in
   let should_run_turn =
-    match cascade_backpressure with
-    | Cascade_admitted -> requested_should_run_turn
-    | Cascade_backpressured _ -> false
+    match runtime_backpressure with
+    | Runtime_admitted -> requested_should_run_turn
+    | Runtime_backpressured _ -> false
   in
   let verdict_reasons =
     Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
   in
   let admission_reasons =
-    match cascade_backpressure with
-    | Cascade_admitted -> verdict_reasons
-    | Cascade_backpressured { reason; _ } ->
-      cascade_backpressure_observation_reasons ~reason
+    match runtime_backpressure with
+    | Runtime_admitted -> verdict_reasons
+    | Runtime_backpressured { reason; _ } ->
+      runtime_backpressure_observation_reasons ~reason
   in
   let channel = Keeper_world_observation.channel_to_string turn_decision.channel in
   { turn_decision
   ; requested_should_run_turn
-  ; cascade_backpressure
+  ; runtime_backpressure
   ; should_run_turn
   ; verdict_reasons
   ; admission_reasons

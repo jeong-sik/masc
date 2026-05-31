@@ -11,7 +11,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 open Result.Syntax
-module KCP = Keeper_cascade_profile
+module KCP = Keeper_runtime_profile
 include Keeper_turn_helpers
 include Keeper_turn_liveness
 include Keeper_turn_cascade_budget

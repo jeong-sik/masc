@@ -40,7 +40,7 @@
 exception Liveness_kill of Keeper_attempt_liveness.failure
 (** Raised via [Eio.Switch.fail] in {!Enforce} mode when the FSM
     emits an {!Keeper_attempt_liveness.Outcome}. The argument is the
-    classified failure carried into the cascade FSM by the caller. *)
+    classified failure carried into the runtime FSM by the caller. *)
 
 type t
 (** Opaque per-attempt observer handle. *)

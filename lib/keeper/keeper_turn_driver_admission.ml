@@ -31,11 +31,11 @@ let runtime_candidates_of_providers provider_cfgs =
 
 (** Run a single Agent.run() call with MASC-driven cascade model fallback.
 
-    MASC drives the cascade FSM directly:
+    MASC drives the runtime FSM directly:
     - Resolves cascade providers from cascade.toml
     - For each provider, runs OAS with a single provider
-    - Uses Cascade_fsm.decide to determine next action on failure
+    - Uses Runtime_fsm.decide to determine next action on failure
     - Cascade loop runs inside Admission_queue permit
 
     @param accept Optional response validator. Default accepts all.
-    @since Phase 2 — MASC-driven cascade FSM *)
+    @since Phase 2 — MASC-driven runtime FSM *)

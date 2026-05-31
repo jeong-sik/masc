@@ -8,14 +8,14 @@
     @since God file decomposition — extracted from oas_worker.ml *)
 
 open Result.Syntax
-open Cascade_name
+open Runtime_name
 
 (* Sub-module includes (God file decomposition).
    Each sub-module is self-contained; the facade re-exports everything
    so existing callers do not need qualification. *)
 include Runtime_oas_runner
-include Cascade_error_classify
-include Cascade_attempt_fsm
+include Runtime_error_classify
+include Runtime_attempt_fsm
 include Keeper_turn_driver_helpers
 
 include Keeper_turn_driver_provider_attempt
@@ -131,7 +131,7 @@ let run_named
     runtime_candidates_of_providers original_candidate_cfgs
   in
   let required_capability_profile =
-    Keeper_cascade_profile.required_capability_profile_of_cascade_name cascade_name
+    Keeper_runtime_profile.required_capability_profile_of_cascade_name cascade_name
   in
   let tool_filtered_candidate_cfgs =
     filter_candidate_providers_for_tool_support
@@ -364,11 +364,11 @@ let run_named
     in
     (match cli_max_concurrent with
      | Some max_concurrent ->
-       Cascade_client_capacity.auto_register_cli_with_override
+       Runtime_client_capacity.auto_register_cli_with_override
          ~capacity_keys
          ~max_concurrent
      | None ->
-       Cascade_client_capacity.auto_register_cli_for_candidates ~capacity_keys);
+       Runtime_client_capacity.auto_register_cli_for_candidates ~capacity_keys);
     let http_probe_default_max_concurrent = 1 in
     let http_probe_max_concurrent =
       match
@@ -592,7 +592,7 @@ let run_named
   let queue_priority =
     Option.value priority ~default:Llm_provider.Request_priority.Proactive
   in
-  (* MASC-driven cascade FSM: try each provider, decide on failure.
+  (* MASC-driven runtime FSM: try each provider, decide on failure.
      Extracted to [Keeper_turn_driver_try_provider.run_try_provider] via
      explicit [try_provider_ctx] record (RFC-0051 PR-3a). *)
   let turn_start = Mtime_clock.now () in

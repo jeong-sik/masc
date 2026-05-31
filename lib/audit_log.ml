@@ -489,12 +489,12 @@ let log_broadcast config ~agent_id ~message_preview ?cost_estimate ?token_count 
     ~details:(`Assoc [("preview", `String preview)])
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_suspend config ~agent_id ~target_agent ~reason ~rooms_affected ?cost_estimate ?token_count () =
+let log_suspend config ~agent_id ~target_agent ~reason ~coords_affected ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:Suspend
     ~details:(`Assoc [
       ("target_agent", `String target_agent);
       ("reason", `String reason);
-      ("rooms_affected", `Int rooms_affected);
+      ("coords_affected", `Int coords_affected);
     ])
     ?cost_estimate ?token_count ~outcome:Success ()
 

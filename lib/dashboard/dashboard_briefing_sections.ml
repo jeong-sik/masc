@@ -15,7 +15,7 @@ let briefing_sections_criteria =
     "no_model_status_inference";
     "communication_from_message_and_session_counts";
     "alignment_from_active_agents_and_focus_bindings";
-    "watch_from_room_health_and_incident_counts";
+    "watch_from_coord_health_and_incident_counts";
     "metadata_gaps_reported_separately";
   ]
 
@@ -129,16 +129,16 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
          dashboard surfaces. The briefing only needs session status/events;
          keeper metadata can come from briefing_json. Pulling keepers,
          command-plane, and message payloads here duplicates the heaviest
-         snapshot path and can spike memory on rooms with many keepers. *)
+         snapshot path and can spike memory on coords with many keepers. *)
       Operator_control.snapshot_json ~actor:actor_name ~view:"summary"
         ~include_messages:false ~include_keepers:false
         ~include_summary_fields:false
         ~lightweight_summary:true ctx
     in
     let scope_json =
-      match snapshot_json |> member_assoc "root" with
+      match snapshot_json |> member_assoc "coord" with
       | `Assoc _ as value -> value
-      | _ -> snapshot_json |> member_assoc "room"
+      | _ -> snapshot_json |> member_assoc "coord"
     in
     let current_namespace =
       match String_util.option_trim (Some (scope_json |> string_field "project")) with
@@ -202,7 +202,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       let summary = member_assoc "summary" briefing_json in
       `Assoc
         [
-          ("room_health", member_assoc "room_health" summary);
+          ("coord_health", member_assoc "coord_health" summary);
           ("active_agents", member_assoc "active_agents" summary);
           ("keeper_pressure", member_assoc "keeper_pressure" summary);
           ("active_operations", member_assoc "active_operations" summary);

@@ -17,7 +17,7 @@ let transport_health_timeout_max_s = 30.0
 (* Routed through Env_config_runtime.Dashboard so operators can raise
    the ceiling on slow-disk deployments without a rebuild. The outer
    wrapper at [server_runtime_bootstrap.ml] uses the matching
-   [shell_prewarm_outer_timeout_sec] env to keep the 5s headroom. *)
+   [shell_prewarm_outer_timeout_sec] env to keep the 5s headcoord. *)
 let shell_prewarm_timeout_s = Env_config_runtime.Dashboard.shell_prewarm_inner_timeout_sec
 
 let warm_shell_cache (state : Mcp_server.server_state) =

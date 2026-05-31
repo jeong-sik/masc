@@ -132,7 +132,7 @@ val start_execution_refresh_loop :
 (** Forks the per-process execution-cache refresh fiber.
     Idempotent.  Default refresh interval keeps timeout
     < interval (60 s) so [Proactive_refresh]'s clamp
-    leaves room for the first build window after boot. *)
+    leaves coord for the first build window after boot. *)
 
 val start_transport_health_refresh_loop :
   state:Mcp_server.server_state ->

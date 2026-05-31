@@ -626,7 +626,7 @@ let _snapshot_recent_completed_limit () =
 
 (* sessions_json removed — team session cleanup. Sessions always return []. *)
 
-let room_json = Operator_control_snapshot_room.room_json
+let coord_json = Operator_control_snapshot_coord.coord_json
 
 (* snapshot_view variant + parser extracted to
    [Operator_control_snapshot_view] (godfile decomp). *)
@@ -821,13 +821,13 @@ let snapshot_json
           | Summary | Full -> true
           | Sessions | Keepers | Messages -> false
         then (
-          let room_attention =
-            build_room_attention_items config |> List.sort compare_attention
+          let coord_attention =
+            build_coord_attention_items config |> List.sort compare_attention
           in
-          let room_recommendation_items = room_recommendations config in
-          [ "attention_summary", summary_of_attention_items room_attention
+          let coord_recommendation_items = coord_recommendations config in
+          [ "attention_summary", summary_of_attention_items coord_attention
           ; ( "recommendation_summary"
-            , summary_of_recommendations ~actor:actor_name room_recommendation_items )
+            , summary_of_recommendations ~actor:actor_name coord_recommendation_items )
           ])
         else [])
     in
@@ -847,7 +847,7 @@ let snapshot_json
          ; "judgment_owner", `String "fallback_read_model"
          ; "authoritative_judgment_available", `Bool false
          ; "admission_queue", Admission_queue.snapshot_json ()
-         ; "root", room_json config
+         ; "coord", coord_json config
          ]
          @ ((* Parallelize independent I/O: sessions, keepers, and persistent_agents. *)
             let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in

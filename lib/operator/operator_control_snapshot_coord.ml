@@ -1,10 +1,10 @@
-(** Operator dashboard room descriptor, extracted from
+(** Operator dashboard coord descriptor, extracted from
     [operator_control_snapshot.ml] (godfile decomp).
 
-    [room_json config] produces a minimal room-state summary for the
+    [coord_json config] produces a minimal coord-state summary for the
     operator dashboard:
 
-    - When the room is not yet initialized via [Coord.init], returns
+    - When the coord is not yet initialized via [Coord.init], returns
       `{initialized=false, project=basename(base_path)}` so the
       dashboard can render a placeholder before any keeper has
       bootstrapped the coordination root.
@@ -15,7 +15,7 @@
 
     Pure helper move — local-only function with no .mli surface. *)
 
-let room_json config =
+let coord_json config =
   let initialized = Coord.is_initialized config in
   if not initialized
   then

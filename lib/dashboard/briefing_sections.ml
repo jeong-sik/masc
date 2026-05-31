@@ -13,19 +13,19 @@ let section_label = function
   | Alignment -> "Alignment"
   | Watch -> "Watch Next"
 
-let has_operational_signal ~section ~room_health ~incident_count ~recommended_action_count =
-  let room_risky =
-    Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string room_health)
+let has_operational_signal ~section ~coord_health ~incident_count ~recommended_action_count =
+  let coord_risky =
+    Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string coord_health)
   in
   match section with
-  | Watch -> room_risky || incident_count > 0 || recommended_action_count > 0
-  | Communication | Alignment -> room_risky || incident_count > 0
+  | Watch -> coord_risky || incident_count > 0 || recommended_action_count > 0
+  | Communication | Alignment -> coord_risky || incident_count > 0
 
 let annotate_section ~section ~status ~summary ~evidence ~metadata_gaps
-    ~room_health ~incident_count ~recommended_action_count =
+    ~coord_health ~incident_count ~recommended_action_count =
   let gap_count = count_metadata_gaps_for_section ~section metadata_gaps in
   let operational =
-    has_operational_signal ~section ~room_health ~incident_count
+    has_operational_signal ~section ~coord_health ~incident_count
       ~recommended_action_count
   in
   let signal_class, evidence_quality =
@@ -75,7 +75,7 @@ let evidence_add_if cond text items =
   if cond && text <> "" then text :: items else items
 
 let build_communication_section ~sessions ~recent_messages ~metadata_gaps
-    ~room_health ~incident_count ~recommended_action_count =
+    ~coord_health ~incident_count ~recommended_action_count =
   let live_session_count = List.length sessions in
   let recent_message_count = List.length recent_messages in
   let broadcast_total = sum_int_field "broadcast_count" sessions in
@@ -122,7 +122,7 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
     ("unclear", "Communication metadata is incomplete and no positive activity signal is recorded.", evidence)
   else if known_mode_count = 0 then
     ("unclear", "Communication mode is not recorded for the live sessions.", evidence)
-  else if Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string room_health)
+  else if Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string coord_health)
           || incident_count > 0 || recommended_action_count > 0
   then
     ("watch", "Live sessions exist without recorded communication activity while the namespace still has open operator attention.", evidence)
@@ -176,15 +176,15 @@ let build_alignment_section ~sessions ~agents ~metadata_gaps =
   else
     ("watch", "Some active agents are present without a bound focus.", evidence)
 
-let build_watch_section ~room_health ~incident_count ~recommended_action_count
+let build_watch_section ~coord_health ~incident_count ~recommended_action_count
     ~top_attention_summary =
-  let room_health_level = Dashboard_utils.health_level_of_string room_health in
-  let risky_room =
-    Dashboard_utils.is_health_at_risk room_health_level
+  let coord_health_level = Dashboard_utils.health_level_of_string coord_health in
+  let risky_coord =
+    Dashboard_utils.is_health_at_risk coord_health_level
   in
   let evidence =
     []
-    |> evidence_add_if risky_room (Printf.sprintf "Namespace health is %s" room_health)
+    |> evidence_add_if risky_coord (Printf.sprintf "Namespace health is %s" coord_health)
     |> evidence_add_if (incident_count > 0)
          (Printf.sprintf "Incident count is %d" incident_count)
     |> evidence_add_if (recommended_action_count > 0)
@@ -194,11 +194,11 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
          top_attention_summary
     |> take 2
   in
-  if risky_room then
+  if risky_coord then
     ( "risk",
       Printf.sprintf
         "Namespace health is %s with %d incidents and %d recommended actions."
-        room_health incident_count recommended_action_count,
+        coord_health incident_count recommended_action_count,
       evidence )
   else if incident_count > 0 || recommended_action_count > 0 then
     ( "watch",
@@ -211,7 +211,7 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
 
 let build_briefing_sections ~briefing_summary_json ~sessions ~agents ~recent_messages
     ~metadata_gaps =
-  let room_health = briefing_summary_json |> string_field "room_health" in
+  let coord_health = briefing_summary_json |> string_field "coord_health" in
   let incident_count = Option.value ~default:0 (Json_util.assoc_int_opt "incident_count" briefing_summary_json) in
   let recommended_action_count =
     Option.value ~default:0 (Json_util.assoc_int_opt "recommended_action_count" briefing_summary_json)
@@ -221,24 +221,24 @@ let build_briefing_sections ~briefing_summary_json ~sessions ~agents ~recent_mes
   in
   let communication_status, communication_summary, communication_evidence =
     build_communication_section ~sessions ~recent_messages ~metadata_gaps
-      ~room_health ~incident_count ~recommended_action_count
+      ~coord_health ~incident_count ~recommended_action_count
   in
   let alignment_status, alignment_summary, alignment_evidence =
     build_alignment_section ~sessions ~agents ~metadata_gaps
   in
   let watch_status, watch_summary, watch_evidence =
-    build_watch_section ~room_health ~incident_count ~recommended_action_count
+    build_watch_section ~coord_health ~incident_count ~recommended_action_count
       ~top_attention_summary
   in
   ( watch_summary,
     [
       annotate_section ~section:Communication ~status:communication_status
         ~summary:communication_summary ~evidence:communication_evidence
-        ~metadata_gaps ~room_health ~incident_count ~recommended_action_count;
+        ~metadata_gaps ~coord_health ~incident_count ~recommended_action_count;
       annotate_section ~section:Alignment ~status:alignment_status
         ~summary:alignment_summary ~evidence:alignment_evidence ~metadata_gaps
-        ~room_health ~incident_count ~recommended_action_count;
+        ~coord_health ~incident_count ~recommended_action_count;
       annotate_section ~section:Watch ~status:watch_status
         ~summary:watch_summary ~evidence:watch_evidence ~metadata_gaps
-        ~room_health ~incident_count ~recommended_action_count;
+        ~coord_health ~incident_count ~recommended_action_count;
     ] )

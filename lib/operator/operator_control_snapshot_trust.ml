@@ -15,7 +15,7 @@ let compact_runtime_trust_cache_ttl_sec = 1.0
 
    - Originally embedded [meta.updated_at] (ISO timestamp ticking on
      every meta refresh): 41/64 entries (65%) of the shared LRU
-     belonged to this prefix, evicting hot keys (branches/rooms/board).
+     belonged to this prefix, evicting hot keys (branches/coords/board).
      PR #19010 dropped [meta.updated_at].
    - PR #19010 retained [meta.runtime.usage.total_turns] in the key,
      reasoning that monotonic per-turn invalidation was useful.  On a

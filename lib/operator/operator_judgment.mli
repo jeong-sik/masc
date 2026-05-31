@@ -51,11 +51,11 @@ type record = {
 (** {1 target_type codec} *)
 
 val target_type_to_string : target_type -> string
-(** [Coord -> "root"].  Pinned literal for the on-disk JSONL format. *)
+(** [Coord -> "coord"].  Pinned literal for the on-disk JSONL format. *)
 
 val target_type_of_string : string -> target_type option
-(** Accepts only the canonical [["root"]] target type for [Coord].
-    Historical [["room"]] / [["namespace"]] aliases are rejected at
+(** Accepts only the canonical [["coord"]] target type for [Coord].
+    Historical [["coord"]] / [["namespace"]] aliases are rejected at
     the parse boundary. *)
 
 (** {1 JSON codec} *)
@@ -106,7 +106,7 @@ val load_all : Coord.config -> record list
 
     Records are keyed by [(surface, target_type, target_id)]
     triple.  When [target_id] is [None] or empty/whitespace, the
-    composite key uses the literal [["__room__"]] sentinel —
+    composite key uses the literal [["__coord__"]] sentinel —
     pinned because it must remain stable across runs. *)
 
 val latest_active :

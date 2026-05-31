@@ -2,7 +2,7 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
-let room_status_json (config : Coord.config) : Yojson.Safe.t =
+let coord_status_json (config : Coord.config) : Yojson.Safe.t =
   let coord_state_opt =
     if Coord.is_initialized config then Some (Coord.read_state config) else None
   in
@@ -733,7 +733,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     let base_fields =
       let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
       [ "generated_at", `String (Masc_domain.now_iso ())
-      ; "status", room_status_json config
+      ; "status", coord_status_json config
       ; ( "projection_diagnostics"
         , `Assoc
             [ "surface", `String "execution"
@@ -842,6 +842,6 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
          [ "generated_at", `String (Masc_domain.now_iso ())
          ; ( "error"
            , `String (Printf.sprintf "render timed out after %.0fs" render_timeout_s) )
-         ; "status", room_status_json config
+         ; "status", coord_status_json config
          ])
 ;;

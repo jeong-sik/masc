@@ -102,7 +102,7 @@ let handle_dashboard_workspace state req reqd =
      (uncached, ~4.7s measured solo; under a parallel dashboard burst it held
      the single Eio HTTP domain and dragged co-fired requests to ~3.4s). Cache
      + offload via respond_cached_read; cache_key carries limit + actor so
-     param variants stay distinct. Shared by /dashboard/workspace and /rooms. *)
+     param variants stay distinct. Shared by /dashboard/workspace and /coords. *)
   let cache_key =
     Printf.sprintf "workspace:%s:%d:%s"
       state.Mcp_server.coord_config.base_path limit

@@ -113,7 +113,7 @@ let graphql_playground_html ~nonce =
       </svg>
       <div class="text">Loading <strong>GraphQL Playground</strong></div>
     </div>
-    <div id="root"></div>
+    <div id="coord"></div>
     <script nonce="|};
     nonce;
     {|">
@@ -122,7 +122,7 @@ let graphql_playground_html ~nonce =
         if (loading) {
           loading.classList.add("fadeOut");
         }
-        var root = document.getElementById("root");
+        var root = document.getElementById("coord");
         if (!root) {
           return;
         }
@@ -431,7 +431,7 @@ let keepers_summary_from_registry ~base_path
   K.{
     keepers;
     cycle;
-    room = Some (Filename.basename base_path);
+    coord = Some (Filename.basename base_path);
     generated_at = Masc_domain.now_iso ();
   }
 

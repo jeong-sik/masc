@@ -9,7 +9,7 @@
 
     Internal: 9 helpers (\[build_task_lookup\],
     \[latest_message_from\], \[latest_message_to\],
-    \[read_recent_room_event_lines\], \[is_session_concluded\],
+    \[read_recent_coord_event_lines\], \[is_session_concluded\],
     \[status_of_archived_session\], \[archived_reason_for_session\],
     \[archived_agent_meta_map\], \[keeper_alias_by_agent_name\])
     stay private — none are referenced bare in the runtime
@@ -119,11 +119,11 @@ val build_agent_briefs :
   Yojson.Safe.t ->
   Yojson.Safe.t list ->
   Yojson.Safe.t list
-(** [build_agent_briefs config sessions attention_queue room_json
+(** [build_agent_briefs config sessions attention_queue coord_json
       keepers] aggregates per-agent briefs from session contexts +
     attention queue + keeper list.
 
-    [room_json] is currently unused (placeholder for future room
+    [coord_json] is currently unused (placeholder for future coord
     metadata expansion) — kept in signature for forward compat.
 
     Returns a JSON list, one entry per active / archived agent,

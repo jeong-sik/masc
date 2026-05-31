@@ -71,7 +71,7 @@ let write_pending_confirm config _session_id =
           ];
       ])
 
-let seed_room config session_id =
+let seed_coord config session_id =
   ignore (Lib.Coord.init config ~agent_name:(Some "fixture-root"));
   ignore (Lib.Coord.join config ~agent_name:"mission-local64-smoke"
             ~capabilities:[ "operator"; "fixture"; "local64" ] ());
@@ -90,7 +90,7 @@ let seed_room config session_id =
     (Lib.Coord.broadcast config ~from_agent:"llama-local-alpha"
        ~content:"Spawned worker recovered partial role coverage and runtime visibility.");
 
-  (* Team sessions are retired; mission fixtures now exercise room-level
+  (* Team sessions are retired; mission fixtures now exercise coord-level
      attention and worker/keeper signals without persisting session records. *)
   ignore session_id;
   write_pending_confirm config session_id
@@ -103,7 +103,7 @@ let test_dashboard_briefing_projection () =
       let session_id = "ts-mission-fixture-001" in
       with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
-      seed_room config session_id;
+      seed_coord config session_id;
       (* Simulate delta departing: remove agent file so Dashboard_briefing
          sees delta as departed. *)
       let delta_path =
@@ -163,15 +163,15 @@ let test_dashboard_briefing_projection () =
         (internal_signals
          |> List.exists (fun row ->
               contains (row |> member "summary" |> to_string) "pending confirmation"));
-      (* room broadcast actions require microarch signal tones "warn"/"bad",
+      (* coord broadcast actions require microarch signal tones "warn"/"bad",
          which need non-empty command-plane operations. In a clean test
-         fixture all 9 signals default to "ok", so room_recommendations
+         fixture all 9 signals default to "ok", so coord_recommendations
          returns []. Verify internal_signals carries the pending-confirm
-         incident instead — that is the reachable room-level signal. *)
-      check bool "internal signals are room-scoped" true
+         incident instead — that is the reachable coord-level signal. *)
+      check bool "internal signals are coord-scoped" true
         (internal_signals
          |> List.for_all (fun row ->
-              row |> member "target_type" |> to_string = "root")))
+              row |> member "target_type" |> to_string = "coord")))
 
 let test_dashboard_briefing_http_full_contract () =
   let dir = test_dir () in
@@ -181,7 +181,7 @@ let test_dashboard_briefing_http_full_contract () =
       let session_id = "ts-mission-http-fixture-001" in
       with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
-      seed_room config session_id;
+      seed_coord config session_id;
       (* Clear stale cache entries from prior tests to avoid cross-test pollution.
          Both dashboard-level and operator snapshot caches must be invalidated. *)
       Lib.Dashboard_cache.invalidate_all ();
@@ -210,7 +210,7 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
       with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
       let session_id = "ts-mission-http-default-001" in
-      seed_room config session_id;
+      seed_coord config session_id;
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let json =
         Lib.Server_dashboard_http.dashboard_briefing_http_json
@@ -227,7 +227,7 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
         (json |> member "projection_diagnostics" |> member "last_success_at"
          <> `Null);
       check bool "default mission leaves initializing placeholder" true
-        (json |> member "summary" |> member "room_health" |> to_string
+        (json |> member "summary" |> member "coord_health" |> to_string
          <> "initializing");
       check bool "mission summary namespace_id removed" true
         (json |> member "summary" |> member "namespace_id" = `Null);
@@ -242,7 +242,7 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
       let session_id = "ts-mission-http-default-001" in
       with_test_env @@ fun ~clock ~sw ->
       let config = Coord_utils.default_config dir in
-      seed_room config session_id;
+      seed_coord config session_id;
       Lib.Dashboard_cache.invalidate_all ();
       Lib.Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
@@ -261,7 +261,7 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
         (json |> member "projection_diagnostics" |> member "last_success_at"
          <> `Null);
       check bool "default mission leaves initializing placeholder" true
-        (json |> member "summary" |> member "room_health" |> to_string
+        (json |> member "summary" |> member "coord_health" |> to_string
          <> "initializing");
       check bool "mission summary namespace_id removed" true
         (json |> member "summary" |> member "namespace_id" = `Null);
@@ -282,8 +282,8 @@ let test_dashboard_briefing_http_cache_isolation () =
       with_test_env @@ fun ~clock ~sw ->
       let config_a = Coord_utils.default_config dir_a in
       let config_b = Coord_utils.default_config dir_b in
-      seed_room config_a session_a;
-      seed_room config_b session_b;
+      seed_coord config_a session_a;
+      seed_coord config_b session_b;
       let state_a =
         Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_a ()
       in
@@ -308,9 +308,9 @@ let test_dashboard_briefing_http_cache_isolation () =
           request
       in
       let open Yojson.Safe.Util in
-      check bool "first room namespace_id removed" true
+      check bool "first coord namespace_id removed" true
         (json_a |> member "summary" |> member "namespace_id" = `Null);
-      check bool "second room namespace_id removed" true
+      check bool "second coord namespace_id removed" true
         (json_b |> member "summary" |> member "namespace_id" = `Null))
 
 let test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task () =
@@ -485,7 +485,7 @@ let () =
             `Quick test_dashboard_briefing_http_default_bootstraps_first_success;
           Alcotest.test_case "keeper tool audit fallback" `Quick
             test_dashboard_briefing_keeper_tool_audit_fallback;
-          Alcotest.test_case "http mission cache stays room-scoped" `Quick
+          Alcotest.test_case "http mission cache stays coord-scoped" `Quick
             test_dashboard_briefing_http_cache_isolation;
           Alcotest.test_case "keeper brief prefers heartbeat task" `Quick
             test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task;

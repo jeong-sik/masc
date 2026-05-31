@@ -28,7 +28,7 @@ let kind_filters deps request =
   in
   from_kinds @ from_kind |> List.sort_uniq String.compare
 
-(* room_filter removed — namespace retired (#unify-namespace). *)
+(* coord_filter removed — namespace retired (#unify-namespace). *)
 
 let last_event_id request =
   match Httpun.Headers.get request.Httpun.Request.headers "last-event-id" with

@@ -143,7 +143,7 @@ let latest_message_to agent_name messages =
             if message.seq >= current.seq then Some message else best)
     None messages
 
-let read_recent_room_event_lines config ~limit =
+let read_recent_coord_event_lines config ~limit =
   let events_dir = Filename.concat (Coord.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
@@ -225,7 +225,7 @@ let archived_agent_meta_map config agent_names =
         Hashtbl.add table agent_name row;
         row
   in
-  read_recent_room_event_lines config ~limit:2000
+  read_recent_coord_event_lines config ~limit:2000
   |> List.rev
   |> List.iter (fun line ->
          try
@@ -260,7 +260,7 @@ let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
     keepers;
   table
 
-let build_agent_briefs config sessions attention_queue _room_json (keepers : Yojson.Safe.t list) =
+let build_agent_briefs config sessions attention_queue _coord_json (keepers : Yojson.Safe.t list) =
   let now_ts = Time_compat.now () in
   let task_lookup = build_task_lookup config in
   let messages =
@@ -277,23 +277,23 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
         | Some label -> Some label
         | None -> Some id)
   in
-  let room_agents =
+  let coord_agents =
     if Coord.is_initialized config then Coord.get_agents_raw config else []
   in
-  let room_agent_by_name =
-    room_agents
+  let coord_agent_by_name =
+    coord_agents
     |> List.map (fun (agent : Masc_domain.agent) -> (agent.name, agent))
   in
   let agent_names =
     dedup_strings
-      (List.map (fun (agent : Masc_domain.agent) -> agent.name) room_agents
+      (List.map (fun (agent : Masc_domain.agent) -> agent.name) coord_agents
       @ List.concat_map (fun (session : session_context) -> session.member_names) sessions)
   in
   let archived_meta_by_name = archived_agent_meta_map config agent_names in
   let keeper_aliases = keeper_alias_by_agent_name keepers in
   agent_names
   |> List.map (fun agent_name ->
-         let agent = List.assoc_opt agent_name room_agent_by_name in
+         let agent = List.assoc_opt agent_name coord_agent_by_name in
          let related_session =
            List.find_opt
              (fun (session : session_context) -> List.mem agent_name session.member_names)

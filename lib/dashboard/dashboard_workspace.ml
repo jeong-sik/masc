@@ -1,6 +1,6 @@
 let clamp_limit limit = Server_utils.clamp ~min_v:1 ~max_v:200 limit
 let fetch_limit limit = Server_utils.clamp ~min_v:limit ~max_v:1000 (limit * 5)
-let workspace_id = "root"
+let workspace_id = "coord"
 let workspace_name = "Workspace timeline"
 
 let take = List.take

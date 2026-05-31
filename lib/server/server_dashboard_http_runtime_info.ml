@@ -935,7 +935,7 @@ let runtime_resolution_json (config : Coord.config) =
   in
   let add_repair_warning acc =
     if repair_count > 0
-    then Printf.sprintf "Recent room-state repair events detected (%d)." repair_count :: acc
+    then Printf.sprintf "Recent coord-state repair events detected (%d)." repair_count :: acc
     else acc
   in
   let add_agent_issue_warning acc =

@@ -578,7 +578,7 @@ let rec run_worker_via_oas
            ~raw_trace
            ?worker_run_id
            ~tool_names_ref
-           agent)
+           agent )
 
 and resume_worker_via_oas
       ~(sw : Eio.Switch.t)
@@ -683,7 +683,7 @@ and resume_worker_via_oas
            ~raw_trace
            ?worker_run_id
            ~tool_names_ref
-           agent)
+           agent )
 
 and run_existing_worker_agent
       ~(sw : Eio.Switch.t)

@@ -1,10 +1,10 @@
-//! Actor Join/Leave Panel — claim and release TRPG actors via REST.
+//! Actor Bind/Release Panel — claim and release TRPG actors via REST.
 //!
 //! Binds DOM event listeners on `#join-panel` elements:
 //! - Join button → POST `/api/v1/trpg/actors/claim`
 //! - Leave button → POST `/api/v1/trpg/actors/release`
 //!
-//! On successful claim, hides the join panel and shows the action panel.
+//! On successful claim, hides the bind panel and shows the action panel.
 //! On release, reverses the swap.
 
 use bevy::prelude::*;
@@ -24,32 +24,32 @@ use crate::game::state::{WorkspaceState, TurnProgressState};
 
 // ─── Marker Resource ────────────────────────
 
-/// Inserted on enter, removed on exit — signals that the actor join panel is bound.
+/// Inserted on enter, removed on exit — signals that the actor bind panel is bound.
 #[derive(Resource)]
-pub struct ActorJoinBound;
+pub struct ActorBindBound;
 
 // ─── OnEnter System ─────────────────────────
 
 /// Bind DOM event listeners when entering TRPG mode.
-pub fn bind_actor_join(mut commands: Commands) {
+pub fn bind_actor(mut commands: Commands) {
     #[cfg(target_arch = "wasm32")]
     {
         bind_join_button();
         bind_leave_button();
         restore_join_panel_state(); // Restore UI state from hidden inputs if available
         sync_actor_suggestions();
-        log::info!("ActorJoin: bound");
+        log::info!("ActorBind: bound");
     }
 
-    commands.insert_resource(ActorJoinBound);
+    commands.insert_resource(ActorBindBound);
 }
 
 /// Cleanup when leaving TRPG mode.
-pub fn unbind_actor_join(mut commands: Commands) {
+pub fn unbind_actor(mut commands: Commands) {
     #[cfg(target_arch = "wasm32")]
-    log::info!("ActorJoin: unbound");
+    log::info!("ActorBind: unbound");
 
-    commands.remove_resource::<ActorJoinBound>();
+    commands.remove_resource::<ActorBindBound>();
 }
 
 // ─── Interaction State Sync System ──────────

@@ -650,7 +650,7 @@
   test_board_vote_quarantine
   test_keeper_identity_parse
   test_keeper_identity_normalize
-  test_workspace_join_fail_closed
+  test_workspace_bind_fail_closed
   test_keeper_personality_io_parse
   test_keeper_personality_io_coerce
   test_keeper_personality_io_validate
@@ -717,7 +717,7 @@
   test_keeper_tag_dispatch
   test_mcp_server_eio
   test_mcp_server_eio_call_tool
-  test_mcp_server_eio_join_state
+  test_mcp_server_eio_bind_state
   test_mcp_server_eio_tool_dispatch
   test_code_navigation_eio
   test_backend
@@ -852,7 +852,7 @@
   test_board_vote_quarantine
   test_keeper_identity_parse
   test_keeper_identity_normalize
-  test_workspace_join_fail_closed
+  test_workspace_bind_fail_closed
   test_keeper_personality_io_parse
   test_keeper_personality_io_coerce
   test_keeper_personality_io_validate
@@ -919,7 +919,7 @@
   test_keeper_tag_dispatch
   test_mcp_server_eio
   test_mcp_server_eio_call_tool
-  test_mcp_server_eio_join_state
+  test_mcp_server_eio_bind_state
   test_mcp_server_eio_tool_dispatch
   test_code_navigation_eio
   test_backend
@@ -1414,7 +1414,7 @@
 
 (include stanzas/test_bounded_proc.inc)
 
-(include stanzas/test_join_required_guard_counter.inc)
+(include stanzas/test_bind_required_guard_counter.inc)
 
 (include stanzas/test_jsonl_atomic.inc)
 

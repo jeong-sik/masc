@@ -75,7 +75,7 @@ impl Plugin for DomBridgePlugin {
                 (
                     action_panel::bind_action_panel,
                     action_panel::sync_action_panel_interaction_state,
-                    actor_bind::bind_actor_join,
+                    actor_bind::bind_actor,
                     turn_controls::bind_turn_controls,
                     dm_voice::bind_dm_voice_controls,
                 ),
@@ -84,7 +84,7 @@ impl Plugin for DomBridgePlugin {
                 OnExit(ViewerMode::Trpg),
                 (
                     action_panel::unbind_action_panel,
-                    actor_bind::unbind_actor_join,
+                    actor_bind::unbind_actor,
                     turn_controls::unbind_turn_controls,
                     dm_voice::unbind_dm_voice_controls,
                 ),

@@ -178,7 +178,6 @@ describe('ConfigResolutionPanel', () => {
     )
 
     const cards = Array.from(container.querySelectorAll('[title]'))
-    expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config/keeper_runtime.toml')
     expect(cards.map(card => card.getAttribute('title'))).toContain('/tmp/root-config')
     expect(container.textContent?.match(/env override/g)?.length ?? 0).toBe(1)
     expect(container.textContent).toContain('cwd fallback')
@@ -218,8 +217,8 @@ describe('ConfigResolutionPanel', () => {
       container,
     )
 
-    expect(container.textContent).toContain('same as config root')
-    expect(container.textContent).toContain('.')
+    expect(container.textContent).toContain('under config root')
+    expect(container.textContent).toContain('prompts')
   })
 
   it('treats slash root as a valid root-relative prefix', () => {

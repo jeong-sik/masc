@@ -52,7 +52,7 @@ describe('normalizeNamespaceTruth', () => {
       source: 'namespace_truth_read_model',
       retention: {
         scope: 'dashboard_namespace_truth',
-        workspace collaboration_root: '/Users/dancer/me',
+        workspace_root: '/Users/dancer/me',
         workspace_path: '/Users/dancer/me',
         shell_input: '/api/v1/dashboard/shell',
         execution_input: '/api/v1/dashboard/execution',
@@ -75,7 +75,7 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       root: {
         status: {
-          workspace collaboration_root: '/path/to/root',
+          workspace_root: '/path/to/root',
           workspace_path: '/path/to/ws',
           workspace_differs: true,
           cluster: 'local',
@@ -89,7 +89,7 @@ describe('normalizeNamespaceTruth', () => {
     })
     const status = result.root.status
     expect(status).not.toBeNull()
-    expect(status!.workspace collaboration_root).toBe('/path/to/root')
+    expect(status!.workspace_root).toBe('/path/to/root')
     expect(status!.workspace_differs).toBe(true)
     expect(status!.paused).toBe(false)
     expect(status!.version).toBe('1.0.0')
@@ -99,7 +99,7 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       root: {
         status: {
-          workspace collaboration_root: '/path/to/root',
+          workspace_root: '/path/to/root',
           workspace_path: '/path/to/ws',
           version: '1.0.0',
           generated_at: '2026-04-17T10:00:00Z',
@@ -549,7 +549,7 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       generated_at: '2026-04-17T12:00:00Z',
       root: {
-        status: { workspace collaboration_root: '/root', workspace_path: '/ws' },
+        status: { workspace_root: '/root', workspace_path: '/ws' },
         counts: { agents: 3, tasks: 5, keepers: 2, total_runtimes: 3 },
         configured_keepers: 4,
         provenance: 'fs',

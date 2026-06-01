@@ -41,7 +41,7 @@ export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
   const network = config.network_mode ?? '(unknown network_mode)'
   const handoff = `${config.handoff.auto ? 'on' : 'off'} · threshold ${config.handoff.threshold}`
   const idle = `${config.proactive.idle_sec}s${config.proactive.enabled ? '' : ' (disabled)'}`
-  const mentions = mentionsLabel(config.workspace collaboration.mention_targets)
+  const mentions = mentionsLabel(config.workspace.mention_targets)
   const allowlistCount = config.tools.resolved_allowlist.length
   const denylistCount = config.tools.tool_denylist.length
 

@@ -29,7 +29,6 @@ export const COMPOSITE_FSM_TLA_SPEC_PATHS = [
   'specs/keeper-state-machine/KeeperStateMachine.tla',
   'specs/keeper-state-machine/KeeperTurnCycle.tla',
   'specs/keeper-state-machine/KeeperDecisionPipeline.tla',
-  'specs/keeper-state-machine/KeeperRuntimeLifecycle.tla',
   'specs/keeper-state-machine/KeeperCompactionLifecycle.tla',
   'specs/keeper-state-machine/KeeperCircuitBreaker.tla',
 ] as const

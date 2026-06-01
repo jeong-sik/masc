@@ -3,6 +3,7 @@ import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { DashedNotice } from './common/dashed-notice'
 import { TextInput } from './common/input'
+import { ringFocusClasses } from './common/ring'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 import { unixSecondsToDate } from '../lib/format-time'
 
@@ -236,7 +237,7 @@ export function SwimlaneTimeline({
                       data-lane-key=${lane.key}
                       data-lane-index=${laneIndex}
                       data-seg-index=${segIndex}
-                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-[filter,opacity,box-shadow] duration-[var(--t-med)] border-r border-[var(--color-border-default)] last:border-r-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] focus-visible:ring-inset ${isHovered ? 'ring-1 ring-[var(--color-accent-fg)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
+                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-[filter,opacity,box-shadow] duration-[var(--t-med)] border-r border-[var(--color-border-default)] last:border-r-0 cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, inset: true })} ${isHovered ? 'ring-1 ring-[var(--color-accent-fg)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
                       style=${`width: ${pct.toFixed(2)}%`}
                       title=${`${lane.label} (${lane.short}) · ${displayState(seg.value)} (${seg.value})\n${fmtAbs(seg.from)} → ${fmtAbs(seg.to)} · ${holdFor}`}
                       aria-label=${ariaLabel}

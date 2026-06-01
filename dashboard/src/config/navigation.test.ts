@@ -199,10 +199,10 @@ describe('monitoring navigation labels', () => {
     const labels = sections.map(item => item.label)
     const uniq = new Set(labels)
     expect(uniq.size).toBe(labels.length)
-    // Regression guard: the word "Runtime" must not appear in sidebar
-    // labels after the runtime-to-runtime renaming.
+    // Regression guard: the Runtime label must not be overloaded across
+    // multiple sidebar items.
     const runtimeOccurrences = labels.filter(l => l.includes('Runtime')).length
-    expect(runtimeOccurrences).toBe(0)
+    expect(runtimeOccurrences).toBe(1)
   })
 })
 

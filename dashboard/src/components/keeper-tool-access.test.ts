@@ -12,7 +12,7 @@ function makeConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     network_mode: 'inherit',
     handoff: { auto: true, threshold: 0.8 },
     proactive: { enabled: true, idle_sec: 300 },
-    workspace collaboration: { mention_targets: ['alpha', 'beta'] },
+    workspace: { mention_targets: ['alpha', 'beta'] },
     tools: { resolved_allowlist: ['tool1', 'tool2'], tool_denylist: ['bad1'] },
     ...overrides,
   } as KeeperConfig
@@ -55,7 +55,7 @@ describe('KeeperToolAccessSummary', () => {
 
   it('shows em dash for empty mention targets', () => {
     const container = document.createElement('div')
-    render(h(KeeperToolAccessSummary, { config: makeConfig({ workspace collaboration: { mention_targets: [] } }) }), container)
+    render(h(KeeperToolAccessSummary, { config: makeConfig({ workspace: { mention_targets: [] } }) }), container)
     const dds = container.querySelectorAll('dd')
     expect(dds[5]!.textContent).toBe('—')
   })

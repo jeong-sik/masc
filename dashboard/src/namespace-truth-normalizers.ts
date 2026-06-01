@@ -195,7 +195,7 @@ export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthRe
     retention: retentionBlock
       ? {
           scope: asString(retentionBlock.scope),
-          workspace collaboration_root: asString(retentionBlock.workspace collaboration_root),
+          workspace_root: asString(retentionBlock.workspace_root),
           workspace_path: asString(retentionBlock.workspace_path),
           shell_input: asString(retentionBlock.shell_input),
           execution_input: asString(retentionBlock.execution_input),

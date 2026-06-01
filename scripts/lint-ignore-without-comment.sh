@@ -71,7 +71,7 @@ rg -nP --with-filename '^\s*ignore \(' "$TARGET" 2>/dev/null > "$tmp_all"
 
 # Drop test files unless asked
 if [[ "$INCLUDE_TESTS" -eq 0 ]]; then
-  grep -v '/test/' "$tmp_all" > "$tmp_all.notest" || true
+  grep -Ev '(^|/)test/' "$tmp_all" > "$tmp_all.notest" || true
   mv "$tmp_all.notest" "$tmp_all"
 fi
 

@@ -179,7 +179,7 @@ export function deriveOperationalInsight(
     return {
       tone: 'info',
       headline: 'Compaction 가 현재 턴 소유',
-      detail: 'parent lifecycle 과 memory lane 모두 post-turn compaction 이 active workspace collaboration point 임을 가리킴.',
+      detail: 'parent lifecycle 과 memory lane 모두 post-turn compaction 이 active workspace point 임을 가리킴.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,

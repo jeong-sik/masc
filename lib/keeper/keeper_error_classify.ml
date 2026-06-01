@@ -82,46 +82,33 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
     eligible for same-turn retry.  They ARE eligible for auto-recovery
     when all committed tools are reconcile-safe (idempotent/board-like):
     the keeper's next heartbeat cycle will build a fresh prompt. *)
-let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
+let server_parse_rejection_message_matches message =
+  let lower = String.lowercase_ascii message in
+  (* Compound patterns to avoid false positives on generic messages
+     like "Service closing" or "Can't find the specified tool".
+     Each pattern targets a specific JSON parser error family. *)
+  (string_contains_substring ~needle:"can't find closing" lower
+   || string_contains_substring ~needle:"find end of" lower)
+  || string_contains_substring ~needle:"unexpected character in json" lower
+  || string_contains_substring ~needle:"unterminated" lower
+  || string_contains_substring ~needle:"parse error" lower
+
+let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
-  | Agent_sdk.Error.Api (InvalidRequest { message }) ->
-      let lower = String.lowercase_ascii message in
-      (* Compound patterns to avoid false positives on generic messages
-         like "Service closing" or "Can't find the specified tool".
-         Each pattern targets a specific JSON parser error family. *)
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.InvalidRequest { reason; _ }) ->
-      let lower = String.lowercase_ascii reason in
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
-  (* All other API error variants do not represent server-side parse failures. *)
-  | Agent_sdk.Error.Api (RateLimited _)
-  | Agent_sdk.Error.Api (Overloaded _)
-  | Agent_sdk.Error.Api (ServerError _)
-  | Agent_sdk.Error.Api (AuthError _)
-  | Agent_sdk.Error.Api (NotFound _)
-  | Agent_sdk.Error.Api (ContextOverflow _)
-  | Agent_sdk.Error.Api (NetworkError _)
-  | Agent_sdk.Error.Api (Timeout _) -> false
-  (* Non-API error families. *)
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
-  | Agent_sdk.Error.Internal _ -> false
+      server_parse_rejection_message_matches reason
+  | _ -> false
+
+let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Api (InvalidRequest { message }) ->
+      server_parse_rejection_message_matches message
+  | _ -> false
+
+let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
+  is_provider_rejected_parse_error err || is_model_rejected_parse_error err
 
 let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
   match err with

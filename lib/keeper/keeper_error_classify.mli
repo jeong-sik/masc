@@ -20,6 +20,14 @@ val is_structural_oas_timeout_message : string -> bool
     of requiring manual reconcile. *)
 val is_server_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] for provider/client-side request serialization or provider
+    request-body parse rejections. *)
+val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
+
+(** [true] for model/API-side request-body parse rejections reported as
+    [InvalidRequest]. *)
+val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when the provider/tooling violated a required tool-use contract
     by returning text/no-op where a ToolUse block was required. *)
 val is_required_tool_contract_violation : Agent_sdk.Error.sdk_error -> bool

@@ -378,7 +378,9 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
       | None -> ()
       | Some _ ->
           Alcotest.fail
-            (Printf.sprintf "%s should be absent from schema inventory" name))
+            (Printf.sprintf
+               "%s should be absent from registered schema inventory"
+               name))
     retired_tools
 
 let test_masc_board_post_schema_supports_judgment () =

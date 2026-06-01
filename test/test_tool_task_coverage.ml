@@ -30,23 +30,31 @@ max-concurrent = 1
 ;;
 
 let ensure_test_runtime =
-  let initialized = ref false in
+  let initialized = Atomic.make false in
+  let lock = Stdlib.Mutex.create () in
+  let initialize_once () =
+    let path = Filename.temp_file "tool_task_runtime_" ".toml" in
+    let oc = open_out path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc test_runtime_toml);
+    Fun.protect
+      ~finally:(fun () ->
+        try Sys.remove path with
+        | Sys_error _ -> ())
+      (fun () ->
+         match Runtime.init_default ~config_path:path with
+         | Ok () -> Atomic.set initialized true
+         | Error msg -> failwith msg)
+  in
   fun () ->
-    if not !initialized
+    if not (Atomic.get initialized)
     then (
-      let path = Filename.temp_file "tool_task_runtime_" ".toml" in
-      let oc = open_out path in
+      Stdlib.Mutex.lock lock;
       Fun.protect
-        ~finally:(fun () -> close_out_noerr oc)
-        (fun () -> output_string oc test_runtime_toml);
-      Fun.protect
-        ~finally:(fun () ->
-          try Sys.remove path with
-          | Sys_error _ -> ())
+        ~finally:(fun () -> Stdlib.Mutex.unlock lock)
         (fun () ->
-           match Runtime.init_default ~config_path:path with
-           | Ok () -> initialized := true
-           | Error msg -> failwith msg))
+           if not (Atomic.get initialized) then initialize_once ()))
 ;;
 
 let with_env name value_opt f =

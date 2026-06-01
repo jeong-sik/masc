@@ -36,7 +36,7 @@ let registered_tool_names () =
   Config.raw_all_tool_schemas
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
-let runtime_keeper_tool_names () =
+let registered_tool_name_set () =
   Hashtbl.create 512
   |> add_names (registered_tool_names ())
 
@@ -44,7 +44,7 @@ let validate ?policy_config () : validation_result =
   match policy_config with
   | None -> { orphan_toml = []; uncovered = [] }
   | Some cfg ->
-    let runtime_keeper_tools = runtime_keeper_tool_names () in
+    let registered_tools = registered_tool_name_set () in
     let configured =
       let tbl = Hashtbl.create 256 in
       List.iter (fun n -> Hashtbl.replace tbl n ()) cfg.configured_tools;
@@ -52,7 +52,7 @@ let validate ?policy_config () : validation_result =
     in
     let orphan_toml =
       Hashtbl.fold (fun name () acc ->
-        if not (Hashtbl.mem runtime_keeper_tools name) then name :: acc else acc
+        if not (Hashtbl.mem registered_tools name) then name :: acc else acc
       ) configured []
       |> List.sort String.compare
     in

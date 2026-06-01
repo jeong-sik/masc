@@ -494,12 +494,12 @@ let assemble_hooks
                   | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> None
                   | other -> other
                 in
-                let tool_choice =
+                let provider_tool_choice =
                   clear_inherited_strict_tool_choice current_params.tool_choice
                 in
                 let turn_completion_contract =
                   Keeper_tool_completion_contract.completion_contract_of_tool_choice
-                    tool_choice
+                    current_params.tool_choice
                 in
                 acc.completion_contract <- turn_completion_contract;
                 if turn_completion_contract = Keeper_tool_completion_contract.Require_tool_use
@@ -542,7 +542,7 @@ let assemble_hooks
                        (fun choice ->
                           Yojson.Safe.to_string
                             (Agent_sdk.Types.tool_choice_to_json choice))
-                       tool_choice)
+                       provider_tool_choice)
                   ~thinking_enabled:thinking_enabled_effective
                   ?thinking_budget:current_params.thinking_budget
                   ~prompt_fingerprint:prompt_metrics.fingerprint
@@ -653,7 +653,7 @@ let assemble_hooks
                 Agent_sdk.Hooks.AdjustParams
                   { current_params with
                     extra_system_context = ctx
-                  ; tool_choice
+                  ; tool_choice = provider_tool_choice
                   ; tool_filter_override = Some tool_filter
                   }
               | _event -> Agent_sdk.Hooks.Continue)

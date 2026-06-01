@@ -455,7 +455,6 @@ let run_turn
      with
      | Error e -> Error (Agent_sdk.Error.Internal e)
      | Ok oas_allowed_paths ->
-       ignore world_observation;
        let require_tool_support =
          tools <> [] && initial_tool_surface.tool_requirement = Required
        in

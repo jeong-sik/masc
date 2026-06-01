@@ -1,5 +1,5 @@
-(** Keeper_tool_progress - tool progress classification and required-action
-    contract helpers. *)
+(** Keeper_tool_progress - tool progress classification and retired
+    required-tool contract compatibility helpers. *)
 
 (** Keeper tool progress classes are the shared vocabulary for runtime receipts
     and liveness metrics. Keep these classes

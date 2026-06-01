@@ -39,22 +39,3 @@ let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_resul
   }
 ;;
 
-let truncate_tool_surface_names ~max_tools ~essential_names all_allowed =
-  if List.length all_allowed <= max_tools
-  then all_allowed
-  else (
-    let essential_names = Keeper_types_profile_toml_normalizers.dedupe_keep_order essential_names in
-    let essential =
-      all_allowed
-      |> List.filter (fun name -> List.mem name essential_names)
-      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-    in
-    let non_essential =
-      List.filter (fun name -> not (List.mem name essential_names)) all_allowed
-    in
-    let budget = max 0 (max_tools - List.length essential) in
-    essential
-    @ (non_essential
-       |> List.filteri (fun i _ -> i < budget)
-       |> Keeper_types_profile_toml_normalizers.dedupe_keep_order))
-;;

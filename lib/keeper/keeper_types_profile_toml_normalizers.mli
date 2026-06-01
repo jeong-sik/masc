@@ -88,8 +88,6 @@ val keeper_proactive_task_min_cooldown_sec : unit -> int
 val keeper_batch_limit : unit -> int
 val keeper_board_debounce_window_sec : unit -> float
 val keeper_tool_cost_max_usd : unit -> float option
-val keeper_max_tools_per_turn : unit -> int
-val keeper_retry_max_tools_per_turn : unit -> int
 val keeper_board_event_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_runtime : unit -> string

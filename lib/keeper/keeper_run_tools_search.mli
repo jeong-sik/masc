@@ -12,8 +12,3 @@ val partition_tool_search_hits
   -> max_results:int
   -> tool_search_hit_partition
 
-val truncate_tool_surface_names
-  :  max_tools:int
-  -> essential_names:string list
-  -> string list
-  -> string list

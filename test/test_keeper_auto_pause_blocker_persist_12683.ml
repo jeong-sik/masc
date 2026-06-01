@@ -14,7 +14,6 @@ open Alcotest
 module KT = Masc_mcp.Keeper_types
 module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
-module Keeper_meta_json_scrub = Masc_mcp.Keeper_meta_json_scrub
 module Keeper_meta_json = Masc_mcp.Keeper_meta_json
 module MC = Masc_mcp.Keeper_meta_contract
 
@@ -49,9 +48,7 @@ let test_meta_json_roundtrip_with_auto_pause_blocker () =
     ("name", `String "test-keeper");
     ("agent_name", `String "agent-test");
     ("trace_id", `String "trace-test");
-    ("goal", `String "test");
-    ("sandbox_profile", `String "local");
-    ("network_mode", `String "inherit");
+    ("tool_access", `List []);
   ] in
   let meta = match Keeper_meta_json_parse.meta_of_json base_json with
     | Ok m -> m
@@ -88,9 +85,7 @@ let test_meta_json_roundtrip_with_stale_storm_blocker () =
     ("name", `String "test-keeper2");
     ("agent_name", `String "agent-test2");
     ("trace_id", `String "trace-test2");
-    ("goal", `String "test");
-    ("sandbox_profile", `String "local");
-    ("network_mode", `String "inherit");
+    ("tool_access", `List []);
   ] in
   let meta = match Keeper_meta_json_parse.meta_of_json base_json with
     | Ok m -> m
@@ -125,9 +120,7 @@ let legacy_base_json name =
       "name", `String name;
       "agent_name", `String (name ^ "-agent");
       "trace_id", `String ("trace-" ^ name);
-      "goal", `String "test";
-      "sandbox_profile", `String "local";
-      "network_mode", `String "inherit";
+      "tool_access", `List [];
     ]
 
 let test_legacy_last_blocker_pair_rejected () =
@@ -147,7 +140,7 @@ let test_legacy_last_blocker_pair_rejected () =
   | Error msg ->
     check string
       "rejects legacy blocker class"
-      "legacy keeper meta fields are no longer supported: last_blocker_class"
+      "removed keeper meta fields are no longer supported: last_blocker_class"
       msg
 
 let test_legacy_last_blocker_string_rejected () =
@@ -163,7 +156,7 @@ let test_legacy_last_blocker_string_rejected () =
   | Error msg ->
     check string
       "rejects string last_blocker"
-      "legacy keeper meta field shape is no longer supported: \
+      "removed keeper meta field shape is no longer supported: \
        last_blocker:string. Use structured last_blocker object."
       msg
 
@@ -179,16 +172,12 @@ let test_repo_cli_identity_runtime_meta_rejected () =
   | Error msg ->
     check string
       "rejects repo_cli_identity"
-      "legacy keeper meta fields are no longer supported: repo_cli_identity"
+      "removed keeper meta fields are no longer supported: repo_cli_identity"
       msg
-
-let has_key key = function
-  | `Assoc fields -> List.mem_assoc key fields
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false
 
 let retired_discovery_key suffix = "work_" ^ "discovery" ^ suffix
 
-let test_persisted_retired_runtime_meta_fields_scrubbed () =
+let test_persisted_retired_runtime_meta_fields_rejected () =
   let retired_fields =
     [
       "repo_cli_identity", `String "anyang-keepers";
@@ -205,23 +194,11 @@ let test_persisted_retired_runtime_meta_fields_scrubbed () =
     | `Assoc fields -> `Assoc (fields @ retired_fields)
     | json -> json
   in
-  let path = Filename.temp_file "keeper-retired-meta-" ".json" in
-  Fun.protect
-    ~finally:(fun () -> try Sys.remove path with _ -> ())
-    (fun () ->
-       Yojson.Safe.to_file path legacy_json;
-       let scrubbed, changed = Keeper_meta_json_scrub.scrub_persisted_keeper_meta_json ~path legacy_json in
-       check bool "scrubbed" true changed;
-       List.iter
-         (fun (key, _) -> check bool (key ^ " removed") false (has_key key scrubbed))
-         retired_fields;
-       (match Keeper_meta_json_parse.meta_of_json scrubbed with
-        | Ok _ -> ()
-        | Error err -> fail ("scrubbed meta should parse: " ^ err));
-       let persisted = Yojson.Safe.from_file path in
-       List.iter
-         (fun (key, _) -> check bool (key ^ " persisted removed") false (has_key key persisted))
-         retired_fields)
+  match Keeper_meta_json_parse.meta_of_json legacy_json with
+  | Ok _ -> fail "retired runtime meta fields should be rejected"
+  | Error msg ->
+    check bool "mentions removed fields" true
+      (String.contains msg ':')
 
 let () =
   run "keeper_auto_pause_blocker_persist_12683"
@@ -247,7 +224,7 @@ let () =
             test_legacy_last_blocker_string_rejected;
           test_case "repo_cli_identity stays out of runtime meta" `Quick
             test_repo_cli_identity_runtime_meta_rejected;
-          test_case "retired persisted runtime fields are scrubbed" `Quick
-            test_persisted_retired_runtime_meta_fields_scrubbed;
+          test_case "retired persisted runtime fields are rejected" `Quick
+            test_persisted_retired_runtime_meta_fields_rejected;
         ] );
     ]

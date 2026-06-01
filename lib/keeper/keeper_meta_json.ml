@@ -1,7 +1,7 @@
 (** Keeper meta JSON codec facade.
 
     Included by [Keeper_types] so existing [Keeper_types.*] callers keep
-    their public API while scrubbing, parsing, and serialization stay in
+    their public API while guards, parsing, and serialization stay in
     smaller private modules. *)
 
 open Keeper_types_profile
@@ -10,13 +10,13 @@ include Keeper_meta_json_scrub
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
-  (* Config/personality/policy fields are TOML-only; JSON persists
-     runtime state exclusively.  See [config_field_names] for the
-     full list of excluded keys. *)
+  (* Config/personality/policy fields are TOML-only; JSON persists runtime
+     state plus the canonical tool-access allowlist required to decode it. *)
   `Assoc
     [ "name", `String m.name
     ; "agent_name", `String m.agent_name
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
+    ; "tool_access", tool_access_to_json m.tool_access
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
     ; "generation", `Int rt.generation
     ; "last_handoff_ts", `Float rt.last_handoff_ts
@@ -103,6 +103,7 @@ let fallback_canonical_keeper_meta_key_names =
   [ "name"
   ; "agent_name"
   ; "trace_id"
+  ; "tool_access"
   ; "trace_history"
   ; "generation"
   ; "last_handoff_ts"
@@ -162,16 +163,15 @@ let fallback_canonical_keeper_meta_key_names =
   ]
 ;;
 
-(* Seed round-trip: parse a minimal JSON then serialize to derive the
-   canonical key set.  [parse_sandbox_policy_fields] now defaults to
-   [Local]/[Network_inherit] when config fields are absent, so the seed
-   no longer needs sandbox_profile/network_mode. *)
+(* Seed round-trip: parse a minimal canonical JSON then serialize to derive
+   the canonical key set. *)
 let canonical_keeper_meta_key_names =
   let seed_json =
     `Assoc
       [ "name", `String "__keeper-meta-key-seed__"
       ; "agent_name", `String "__keeper-meta-key-seed__"
       ; "trace_id", `String "__keeper-meta-key-seed__"
+      ; "tool_access", `List []
       ]
   in
   match meta_of_json seed_json with

@@ -4,7 +4,7 @@ let () =
   (* Test 1: Seed round-trip — minimal JSON should parse + serialize *)
   let seed = Yojson.Safe.from_string {|
 {"name": "test-keeper", "agent_name": "test-agent", "trace_id": "trace-001",
- "runtime_id": "test.runtime"}
+ "tool_access": []}
 |} in
   let result = Keeper_meta_json_parse.meta_of_json seed in
   match result with
@@ -25,31 +25,27 @@ let () =
        Printf.printf "test1: PASS — no config keys in output\n"
      | _ -> Printf.printf "FAIL test1: not Assoc\n"; exit 1);
 
-  (* Test 2: Existing JSON with config fields should still parse *)
+  (* Test 2: Runtime JSON with TOML-owned config fields is rejected *)
   let existing = Yojson.Safe.from_string {|
 {"name": "analyst", "agent_name": "keeper-analyst", "trace_id": "trace-001",
  "goal": "test goal", "sandbox_profile": "docker", "network_mode": "inherit",
- "runtime_id": "test.runtime",
  "tool_access": ["masc_status"],
  "compaction_profile": "balanced",
  "total_turns": 42, "total_input_tokens": 1000}
 |} in
   (match Keeper_meta_json_parse.meta_of_json existing with
+   | Ok _ ->
+     Printf.printf "FAIL test2: config fields should be rejected\n"; exit 1
    | Error msg ->
-     Printf.printf "FAIL test2: legacy JSON parse: %s\n" msg; exit 1
-   | Ok meta ->
-     let rt = meta.runtime in
-     Printf.printf "test2: legacy JSON parse OK (turns=%d)\n" rt.usage.total_turns;
-     if rt.usage.total_turns <> 42 then begin
-       Printf.printf "FAIL test2: wrong turns\n"; exit 1
+     if not (String.contains msg ':') then begin
+       Printf.printf "FAIL test2: unexpected rejection: %s\n" msg; exit 1
      end;
-     Printf.printf "test2: PASS — legacy config fields accepted, runtime preserved\n");
+     Printf.printf "test2: PASS — config fields rejected\n");
 
   (* Test 3: meta_to_json output has no config keys *)
   let existing = Yojson.Safe.from_string {|
 {"name": "analyst", "agent_name": "keeper-analyst", "trace_id": "trace-001",
- "sandbox_profile": "docker", "network_mode": "inherit",
- "runtime_id": "test.runtime",
+ "tool_access": ["masc_status"],
  "total_turns": 100}
 |} in
   (match Keeper_meta_json_parse.meta_of_json existing with

@@ -120,22 +120,23 @@ let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list 
 
 let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
   let non_public = present_json_keys non_public_keeper_input_key_names args in
-  (match non_public with
-   | _ :: _ as fields ->
-       Log.Keeper.warn
-         "%s: ignoring non-public keeper args %s (see #7447, #9752 — \
-          accepted for external-client compatibility, no runtime effect)"
-         tool_name (String.concat ", " fields)
-   | [] -> ());
-  let present = present_json_keys removed_keeper_input_key_names args in
-  match present with
-  | [] -> Ok ()
-  | fields ->
-      Error
-        (Printf.sprintf
-           "removed keeper args for %s: %s. Keepers are always-on by definition."
-           tool_name
-           (String.concat ", " fields))
+  match non_public with
+  | _ :: _ as fields ->
+    Error
+      (Printf.sprintf
+         "non-public keeper args for %s: %s. Use persona/TOML configuration."
+         tool_name
+         (String.concat ", " fields))
+  | [] ->
+    let present = present_json_keys removed_keeper_input_key_names args in
+    (match present with
+     | [] -> Ok ()
+     | fields ->
+       Error
+         (Printf.sprintf
+            "removed keeper args for %s: %s. Keepers are always-on by definition."
+            tool_name
+            (String.concat ", " fields)))
 
 let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
   let present = present_json_keys removed_keeper_msg_input_key_names args in

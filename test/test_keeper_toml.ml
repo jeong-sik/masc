@@ -921,7 +921,7 @@ max_turns_per_call_scheduled_autonomous = 0
        check int "zero autonomous falls back" 10
          (KTP.effective_max_turns_per_call_scheduled_autonomous d))
 
-let test_profile_accepts_legacy_runtime_id_alias () =
+let test_profile_accepts_runtime_id () =
   let input = {|
 [keeper]
 goal = "test"
@@ -934,7 +934,7 @@ runtime_id = "oas-coding_first"
      | Error e -> fail e
      | Ok defaults ->
        check (option string)
-         "legacy runtime_id aliases runtime id"
+         "runtime_id"
          (Some "oas-coding_first")
          defaults.model)
 
@@ -1071,7 +1071,7 @@ tool_denylist = ["OPERATOR_TODO: remove before spawn"]
       check bool "reports resolved payload field" true
         (contains_substring e "$.tool_denylist[0]")
 
-let test_persona_resolver_ignores_non_public_social_model_arg () =
+let test_persona_resolver_rejects_non_public_social_model_arg () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -1093,12 +1093,10 @@ let test_persona_resolver_ignores_non_public_social_model_arg () =
           ("social_model", `String "magentic_ledger_v1");
         ])
   with
-  | Error e -> fail ("resolver failed: " ^ e)
-  | Ok (_, resolved) ->
-      check bool "social_model omitted from resolved args" false
-        (match Yojson.Safe.Util.member "social_model" resolved with
-         | `String _ -> true
-         | _ -> false)
+  | Ok _ -> fail "expected social_model arg rejection"
+  | Error e ->
+      check bool "reports non-public arg" true
+        (contains_substring e "non-public keeper args")
 
 let test_persona_resolver_preserves_autoboot_enabled_arg () =
   with_personas_dir @@ fun personas_dir ->
@@ -1927,8 +1925,8 @@ let () =
             test_profile_rejects_removed_initiative_keys;
           test_case "legacy allowed_providers rejected" `Quick
             test_profile_rejects_legacy_allowed_providers;
-          test_case "legacy runtime_id aliases runtime id" `Quick
-            test_profile_accepts_legacy_runtime_id_alias;
+          test_case "runtime_id parsed" `Quick
+            test_profile_accepts_runtime_id;
           test_case "max_turns overrides parsed and applied" `Quick
             test_profile_max_turns_overrides;
           test_case "max_turns defaults when absent" `Quick
@@ -2006,8 +2004,8 @@ let () =
             test_persona_resolver_reports_placeholder_defaults_source;
           test_case "persona resolver rejects placeholder in resolved payload" `Quick
             test_persona_resolver_rejects_placeholder_in_resolved_payload;
-          test_case "persona resolver ignores non-public social_model arg" `Quick
-            test_persona_resolver_ignores_non_public_social_model_arg;
+          test_case "persona resolver rejects non-public social_model arg" `Quick
+            test_persona_resolver_rejects_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick
             test_persona_resolver_preserves_autoboot_enabled_arg;
           test_case "persona resolver preserves canonical tool_access and allowed_paths" `Quick

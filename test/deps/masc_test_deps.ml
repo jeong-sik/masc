@@ -28,12 +28,10 @@ let init_keeper_tool_registry () =
 (** Test fixture parser for [keeper_meta] JSON.
 
     The production parser at [Masc_mcp.Keeper_meta_json_parse.meta_of_json] requires
-    explicit [sandbox_profile] / [network_mode] / [runtime_id] fields (see
-    fail-loud changes in keeper_meta_json_parse.ml and RFC-0206). Test
-    fixtures historically built minimal [`Assoc] payloads that omitted those
-    fields and depended on silent defaults. Rather than thread new fields
-    through every fixture, this helper auto-fills conservative test defaults
-    when absent, then delegates to the strict production parser.
+    explicit [tool_access]. Test fixtures historically built minimal [`Assoc]
+    payloads that omitted it. Rather than thread the field through every
+    fixture, this helper auto-fills a conservative test default when absent,
+    then delegates to the strict production parser.
 
     Production code MUST NOT use this helper — the strict parser exists to
     catch missing fields at the boundary. *)
@@ -44,9 +42,9 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       if has key then fs else fs @ [ (key, v) ]
     in
     fields
-    |> add_if_missing "sandbox_profile" (`String "local")
-    |> add_if_missing "network_mode"    (`String "inherit")
-    |> add_if_missing "runtime_id"      (`String "test.runtime")
+    |> add_if_missing "tool_access"
+         (Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+            (Masc_mcp.Keeper_meta_tool_access.default_tool_access_of_meta_json ()))
   in
   let json' =
     match json with

@@ -30,33 +30,6 @@ let write_tools_typed =
 let write_tools = List.map Tool_name.Keeper.to_string write_tools_typed
 ;;
 
-let legacy_keeper_internal_tool_names =
-  (* Keep legacy masc workspace defaults explicit in
-     [legacy_session_min_tool_names]; new [masc_*] internal tools should not
-     silently expand missing [tool_access] migrations.
-     Write tools are excluded so that keepers without explicit [tool_access]
-     cannot claim write-intent tasks.  Keepers that need write access must
-     list explicit write tool names. *)
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
-  |> List.filter (fun name ->
-         not (String.starts_with ~prefix:"masc_" name)
-         && not (List.exists (String.equal name) write_tools))
-;;
-
-let legacy_session_min_tool_names =
-  (* Legacy keepers historically received canonical masc_* workspace tools,
-     not the SDK alias-heavy Session_min surface. Keep this compatibility list
-     explicit so missing tool_access migration remains stable after tier removal. *)
-  List.map
-    Tool_name.Masc.to_string
-    Tool_name.Masc.
-      [ Status; Tasks; Claim_next; Plan_set_task; Transition; Add_task; Broadcast ]
-;;
-
-let migrate_legacy_restricted_tools names =
-  normalize_tool_names (legacy_keeper_internal_tool_names @ names)
-;;
-
 let normalize_tool_access names = normalize_tool_names names
 
 (** Encode a tool allowlist as a JSON array of tool names. *)
@@ -105,13 +78,10 @@ let default_tool_access_of_meta_json () =
 ;;
 
 (** Parse [tool_access] from persisted meta JSON.
-    Canonical form is a JSON array of tool names.
-    Legacy object forms are accepted only as a migration drain:
-    - [{ "tools": [...] }] -> the [tools] array
-    - objects without [tools] -> default surface *)
+    Canonical form is a JSON array of tool names. *)
 let tool_access_of_meta_json (json : Yojson.Safe.t) =
   match Json_util.assoc_member_opt "tool_access" json with
-  | Some `Null | None -> Ok (default_tool_access_of_meta_json ())
+  | Some `Null | None -> Error "keeper tool_access must be an array of strings"
   | Some (`List _ as list_json) ->
     (match
        string_list_field_result ~field_name:"tool_access"
@@ -119,18 +89,6 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
      with
      | Ok tools -> Ok (normalize_tool_access tools)
      | Error msg -> Error msg)
-  | Some (`Assoc _ as access_json) ->
-    (match Json_util.assoc_member_opt "tools" access_json with
-     | Some _ ->
-       (match
-          string_list_field_result
-            ~field_name:"tools"
-            ~label:"tool_access.tools"
-            access_json
-        with
-        | Ok tools -> Ok (normalize_tool_access tools)
-        | Error msg -> Error msg)
-     | None -> Ok (default_tool_access_of_meta_json ()))
   | Some other ->
     Error
       (Printf.sprintf "keeper tool_access must be an array of strings (received %s)"
@@ -174,11 +132,10 @@ let default_tool_access_of_meta_json_typed () =
 ;;
 
 (** Parse [tool_access] from persisted meta JSON into typed tools.
-    Same migration-drain behavior as [tool_access_of_meta_json] but returns
-    typed variants.  Unknown names are silently dropped at the boundary. *)
+    Unknown names are silently dropped at the boundary. *)
 let tool_access_of_meta_json_typed (json : Yojson.Safe.t) =
   match Json_util.assoc_member_opt "tool_access" json with
-  | Some `Null | None -> Ok (default_tool_access_of_meta_json_typed ())
+  | Some `Null | None -> Error "keeper tool_access must be an array of strings"
   | Some (`List _ as list_json) ->
     (match
        string_list_field_result ~field_name:"tool_access"
@@ -186,18 +143,6 @@ let tool_access_of_meta_json_typed (json : Yojson.Safe.t) =
      with
      | Ok tools -> Ok (tool_access_of_string_list tools)
      | Error msg -> Error msg)
-  | Some (`Assoc _ as access_json) ->
-    (match Json_util.assoc_member_opt "tools" access_json with
-     | Some _ ->
-       (match
-          string_list_field_result
-            ~field_name:"tools"
-            ~label:"tool_access.tools"
-            access_json
-        with
-        | Ok tools -> Ok (tool_access_of_string_list tools)
-        | Error msg -> Error msg)
-     | None -> Ok (default_tool_access_of_meta_json_typed ()))
   | Some other ->
     Error
       (Printf.sprintf "keeper tool_access must be an array of strings (received %s)"

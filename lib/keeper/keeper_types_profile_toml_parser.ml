@@ -128,29 +128,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         let value = String.trim raw in
         if value = "" then None else Some value
     in
-    let runtime_id = trimmed "runtime_id" in
-    let legacy_model = trimmed "model" in
-    let legacy_runtime_id = trimmed "runtime_id" in
-    let conflict left_name left_value right_name right_value =
-      Error
-        (Printf.sprintf
-           "keeper.%s (%s) and legacy keeper.%s (%s) must match"
-           left_name left_value right_name right_value)
-    in
-    match runtime_id, legacy_model, legacy_runtime_id with
-    | Some runtime_id, Some legacy_model, _
-      when runtime_id <> legacy_model ->
-      conflict "runtime_id" runtime_id "model" legacy_model
-    | Some runtime_id, _, Some legacy_runtime_id
-      when runtime_id <> legacy_runtime_id ->
-      conflict "runtime_id" runtime_id "runtime_id" legacy_runtime_id
-    | None, Some legacy_model, Some legacy_runtime_id
-      when legacy_model <> legacy_runtime_id ->
-      conflict "model" legacy_model "runtime_id" legacy_runtime_id
-    | Some runtime_id, _, _ -> Ok (Some runtime_id)
-    | None, Some legacy_model, _ -> Ok (Some legacy_model)
-    | None, None, Some legacy_runtime_id -> Ok (Some legacy_runtime_id)
-    | None, None, None -> Ok None
+    match trimmed "model", trimmed "runtime_id" with
+    | Some _, _ -> Error "removed keeper.model key. Use keeper.runtime_id."
+    | None, runtime_id -> Ok runtime_id
   in
   let result =
     Result.bind result (fun () ->
@@ -271,8 +251,6 @@ let parsed_field_key_names =
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
   ; "runtime_id"
-  ; "model"
-  ; "runtime_id"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -317,8 +295,6 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
-  ; "runtime_id"
-  ; "model"
   ; "runtime_id"
   ]
 

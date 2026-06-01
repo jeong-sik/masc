@@ -41,9 +41,8 @@ val string_list_field_opt_result :
     [Keeper_internal] surface with write tools excluded. *)
 val default_tool_access_of_meta_json : unit -> string list
 
-(** Parse [tool_access] from persisted meta JSON.  Canonical form is a JSON
-    array of tool names; legacy objects with [tools] are accepted as a
-    migration drain. *)
+(** Parse [tool_access] from persisted meta JSON. Canonical form is a JSON
+    array of tool names. *)
 val tool_access_of_meta_json :
   Yojson.Safe.t -> (string list, string) result
 

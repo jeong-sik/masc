@@ -18,7 +18,6 @@ type parsed_keeper_identity =
   ; pk_mid_goal : string
   ; pk_long_goal : string
   ; pk_social_model : string
-  ; pk_runtime_id : string
   ; pk_will : string
   ; pk_needs : string
   ; pk_desires : string
@@ -115,30 +114,21 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_needs = personality.needs in
     let pk_desires = personality.desires in
     let pk_instructions = personality.instructions in
-    let pk_runtime_id_result =
-      match Safe_ops.json_string_opt "runtime_id" json |> Option.map String.trim with
-      | Some runtime_id when runtime_id <> "" -> Ok runtime_id
-      | _ -> Ok (Keeper_config.default_runtime_id ())
-    in
-    (match pk_runtime_id_result with
-     | Error e -> Error e
-     | Ok pk_runtime_id ->
-       Ok
-         { pk_name
-         ; pk_agent_name
-         ; pk_trace_id
-         ; pk_trace_history
-         ; pk_goal
-         ; pk_short_goal
-         ; pk_mid_goal
-         ; pk_long_goal
-         ; pk_social_model
-         ; pk_runtime_id
-         ; pk_will
-         ; pk_needs
-         ; pk_desires
-         ; pk_instructions
-         })
+    Ok
+      { pk_name
+      ; pk_agent_name
+      ; pk_trace_id
+      ; pk_trace_history
+      ; pk_goal
+      ; pk_short_goal
+      ; pk_mid_goal
+      ; pk_long_goal
+      ; pk_social_model
+      ; pk_will
+      ; pk_needs
+      ; pk_desires
+      ; pk_instructions
+      }
 ;;
 
 (* Fail-loud sandbox policy field parsing.
@@ -540,6 +530,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       (match reject_strict_keeper_meta_fields json with
        | Error e -> Error e
        | Ok () ->
+         (match reject_config_keeper_meta_fields json with
+          | Error e -> Error e
+          | Ok () ->
          (match reject_removed_keeper_meta_shapes json with
           | Error e -> Error e
           | Ok () ->
@@ -632,7 +625,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (match Safe_ops.json_int_opt "meta_version" json with
                         | Some v -> v
                         | None -> 0)
-                   }))))
+                   })))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

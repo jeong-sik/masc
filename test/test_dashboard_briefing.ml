@@ -192,7 +192,7 @@ let test_dashboard_briefing_http_full_contract () =
           ~state
           ~sw
           ~clock
-          (request "/api/v1/dashboard/mission?agent_name=test-dashboard-http")
+          (request "/api/v1/dashboard/briefing?agent_name=test-dashboard-http")
       in
       let open Yojson.Safe.Util in
       check bool "operator targets present in mission http payload" true
@@ -217,7 +217,7 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
           ~state
           ~sw
           ~clock
-          (request "/api/v1/dashboard/mission")
+          (request "/api/v1/dashboard/briefing")
       in
       let open Yojson.Safe.Util in
       check string "default mission cache becomes fresh" "fresh"
@@ -251,7 +251,7 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
           ~state
           ~sw
           ~clock
-          (request "/api/v1/dashboard/mission")
+          (request "/api/v1/dashboard/briefing")
       in
       let open Yojson.Safe.Util in
       check string "default mission cache becomes fresh" "fresh"
@@ -291,7 +291,7 @@ let test_dashboard_briefing_http_cache_isolation () =
         Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_b ()
       in
       let request =
-        request ("/api/v1/dashboard/mission?agent_name=" ^ actor)
+        request ("/api/v1/dashboard/briefing?agent_name=" ^ actor)
       in
       let json_a =
         Lib.Server_dashboard_http.dashboard_briefing_http_json

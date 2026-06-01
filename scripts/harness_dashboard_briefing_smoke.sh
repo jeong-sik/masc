@@ -140,8 +140,8 @@ if ! run_with_timeout "$FIXTURE_TIMEOUT_SEC" "fixture setup" \
   exit 1
 fi
 
-if ! wait_for_http "http://${HOST}:${PORT}/api/v1/dashboard/mission" 15; then
-  echo "Dashboard mission endpoint did not become ready after fixture setup. See $SERVER_LOG" >&2
+if ! wait_for_http "http://${HOST}:${PORT}/api/v1/dashboard/briefing" 15; then
+  echo "Dashboard briefing endpoint did not become ready after fixture setup. See $SERVER_LOG" >&2
   exit 1
 fi
 

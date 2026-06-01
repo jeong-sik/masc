@@ -441,7 +441,7 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.task_backlog?.todo).toBe(0)
   })
 
-  it('maps mission not-initialized 5xx to empty mission payload', async () => {
+  it('maps briefing not-initialized 5xx to empty briefing payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"error":"not initialized"}', {
         status: 500,
@@ -456,7 +456,7 @@ describe('get bootstrap warm-up mapping', () => {
       incidents?: unknown[]
       command_focus?: Record<string, unknown>
       operator_targets?: { keepers?: unknown[] }
-    }>('/api/v1/dashboard/mission')
+    }>('/api/v1/dashboard/briefing')
 
     expect(data.generated_at).toBeDefined()
     expect(data.summary?.workspace_health).toBe('initializing')

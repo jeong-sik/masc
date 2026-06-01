@@ -664,9 +664,9 @@ dashboard prefix:
 | Endpoint | Method | 용도 |
 |----------|--------|------|
 | `/api/v1/dashboard/execution` | GET | Historical execution projection (current v1 nav의 primary surface는 아님) |
-| `/api/v1/dashboard/mission` | GET | Historical mission projection |
+| `/api/v1/dashboard/briefing` | GET | Mission briefing projection |
 | `/api/v1/dashboard/session?session_id=X` | GET | Mission session detail |
-| `/api/v1/dashboard/mission/briefing` | GET | Mission briefing (LLM 생성) |
+| `/api/v1/dashboard/briefing/sections` | GET | Mission briefing sections (LLM 생성) |
 | `/api/v1/dashboard/proof?session_id=X` | GET | Historical proof projection |
 | `/api/v1/dashboard/governance` | GET | Historical governance projection |
 | `/api/v1/dashboard/config` | GET | Config introspection snapshot |

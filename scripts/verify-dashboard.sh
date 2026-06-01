@@ -127,10 +127,10 @@ check_http "dashboard execution 200" "$BASE/api/v1/dashboard/execution" "200"
 check_json "dashboard execution exposes provenance" "$BASE/api/v1/dashboard/execution" "'status' in d and 'agents' in d and 'execution_queue' in d and d.get('dashboard_surface') == '/api/v1/dashboard/execution' and d.get('source') == 'dashboard_execution_read_model' and d.get('retention', {}).get('scope') == 'dashboard_execution' and d.get('query', {}).get('default_light_request') is True and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "dashboard execution trust 200" "$BASE/api/v1/dashboard/execution-trust" "200"
 check_json "dashboard execution trust exposes provenance" "$BASE/api/v1/dashboard/execution-trust" "'dashboard_surface' in d and 'keepers' in d and 'coverage_gaps' in d" '^True$'
-check_http "dashboard mission 200" "$BASE/api/v1/dashboard/mission" "200"
-check_json "dashboard mission exposes summary and keepers" "$BASE/api/v1/dashboard/mission" "'summary' in d and 'keeper_briefs' in d" '^True$'
-check_http "dashboard mission briefing 200" "$BASE/api/v1/dashboard/mission/briefing" "200"
-check_json "dashboard mission briefing exposes provenance" "$BASE/api/v1/dashboard/mission/briefing" "'provenance' in d and 'criteria' in d" '^True$'
+check_http "dashboard briefing 200" "$BASE/api/v1/dashboard/briefing" "200"
+check_json "dashboard briefing exposes summary and keepers" "$BASE/api/v1/dashboard/briefing" "'summary' in d and 'keeper_briefs' in d" '^True$'
+check_http "dashboard briefing sections 200" "$BASE/api/v1/dashboard/briefing/sections" "200"
+check_json "dashboard briefing sections exposes provenance" "$BASE/api/v1/dashboard/briefing/sections" "'provenance' in d and 'criteria' in d" '^True$'
 check_http "surface-readiness 200" "$BASE/api/v1/dashboard/surface-readiness" "200"
 check_json \
   "surface-readiness has canonical surface count" \

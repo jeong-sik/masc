@@ -5,10 +5,13 @@ import {
   fetchDashboardGovernance,
   fetchDashboardGoalDetail,
   fetchDashboardGoalsTree,
+  fetchDashboardBriefing,
   fetchDashboardTools,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
   fetchDashboardMemory,
+  fetchDashboardMission,
+  fetchDashboardMissionBriefing,
   fetchCostLatency,
   fetchKeeperConfig,
   fetchKeeperCostMetrics,
@@ -179,6 +182,79 @@ describe('fetchDashboardExecutionTrust', () => {
       keeper_name: 'sangsu',
       trace_id: 'trace-exec-gap',
     })
+  })
+})
+
+describe('dashboard briefing fetchers', () => {
+  it('requests the canonical briefing surface', async () => {
+    const rawResponse = {
+      summary: { workspace_health: 'ok' },
+      incidents: [],
+      recommended_actions: [],
+      command_focus: {},
+      operator_targets: { keepers: [], pending_confirms: [], available_actions: [] },
+      attention_queue: [],
+      sessions: [],
+      agent_briefs: [],
+      keeper_briefs: [],
+      internal_signals: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardBriefing()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/briefing')
+  })
+
+  it('keeps the mission snapshot fetcher as a compatibility alias', async () => {
+    const rawResponse = {
+      summary: { workspace_health: 'ok' },
+      incidents: [],
+      recommended_actions: [],
+      command_focus: {},
+      operator_targets: { keepers: [], pending_confirms: [], available_actions: [] },
+      attention_queue: [],
+      sessions: [],
+      agent_briefs: [],
+      keeper_briefs: [],
+      internal_signals: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardMission()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/briefing')
+  })
+
+  it('requests canonical briefing sections and preserves force', async () => {
+    const rawResponse = {
+      status: 'ok',
+      criteria: [],
+      sections: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardMissionBriefing(true)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/briefing/sections?force=1')
   })
 })
 

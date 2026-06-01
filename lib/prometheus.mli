@@ -267,21 +267,9 @@ include module type of Prometheus_transport_metric_names
     Labels: runtime, provider, source. *)
 (* Centralized metric constants for inline string replacement. *)
 
-(** #13xxx: counter incremented every time the keeper dispatch layer
-    denies a tool call because the tool is not in the keeper's allowlist.
-    Surfaces tool_access drift (e.g. [board_core] group omitted from the
-    keeper's [tool_groups]) and deny-list collisions as a Prometheus
-    alert rather than requiring operators to grep
-    [keepers/*.decisions.jsonl] after the fact.
-    Labels:
-    - [keeper] — keeper name
-    - [tool]   — tool name attempted (bounded by tool registry, ~100)
-    - [reason] — [not_in_candidate_set | denied_by_policy |
-                  not_in_allow_set]
-    Operator alert: [rate(masc_keeper_tool_not_allowed_total[5m]) > 0]
-    on any [(keeper, tool)] pair means that keeper is looping without
-    making progress — its BDI is requesting a tool that its tool_access
-    does not permit. *)
+(** Counter incremented when an OAS after-turn response is accepted but
+    its response model field is empty. This tracks malformed or partial
+    provider response metadata, not keeper tool_access policy decisions. *)
 val metric_after_turn_response_model_empty : string
 
 val metric_after_turn_response_model_alias : string

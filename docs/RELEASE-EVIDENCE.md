@@ -21,7 +21,7 @@ code_refs:
 - local boot + `/health`: isolated base path에서 서버 부팅 후 health payload 저장
 - MCP handshake: `initialize` + `tools/list` raw capture 저장
 - repo workspace collaboration read path: `masc_status` raw capture 저장
-- dashboard read paths: `/api/v1/dashboard/mission`, `/api/v1/dashboard/namespace-truth` raw capture 저장
+- dashboard read paths: `/api/v1/dashboard/project-snapshot`, `/api/v1/dashboard/namespace-truth` raw capture 저장
 - quantitative readiness: `docs/PRODUCTION-READINESS-GATES.md`의 release artifact, keeper turn evidence, performance SLO, OAS pin/boundary gate 결과를 함께 첨부
 - raw evidence: headers/body/json 정규화본 + `server.log`
 

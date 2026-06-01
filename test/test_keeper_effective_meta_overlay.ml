@@ -24,6 +24,36 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "keeper_effective_meta_runtime_" ".toml" in
+  write_file path runtime_toml;
+  match Masc_mcp.Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+;;
+
 let rec rm_rf path =
   try
     if Sys.file_exists path then
@@ -132,9 +162,7 @@ let test_toml_overlay_reaches_effective_meta () =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "docker"
-
-[keeper.tool_access]
-tools = ["tool_execute", "tool_read_file"]
+tool_access = ["tool_execute", "tool_read_file"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc_mcp.Keeper_meta_contract.keeper_meta);
@@ -314,6 +342,7 @@ goal = "missing sandbox profile"
           | _ -> Alcotest.fail "fleet error row missing effective_meta_error")
 
 let () =
+  init_runtime_default_for_tests ();
   Alcotest.run "keeper_effective_meta_overlay"
     [
       ( "effective_meta",

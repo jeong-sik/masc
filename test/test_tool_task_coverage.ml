@@ -54,8 +54,8 @@ let ensure_test_runtime =
       Fun.protect
         ~finally:(fun () -> Stdlib.Mutex.unlock lock)
         (fun () ->
-	           if not (Atomic.get initialized) then initialize_once ()))
-	;;
+           if not (Atomic.get initialized) then initialize_once ()))
+;;
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in

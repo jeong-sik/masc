@@ -65,6 +65,13 @@ failure just because a keeper uses the Docker backend.
   sandbox live state. Persisted runtime JSON intentionally omits TOML-owned
   fields; raw reads can otherwise report `local` while receipts and tool
   execution correctly use `docker`.
+- Runtime/provider attribution for status surfaces must come from explicit
+  runtime observations and execution receipts. `Runtime_agent.run` must attach
+  terminal runtime observation to completed or partial-completed turns, receipts
+  must serialize `runtime.selected_model`, and runtime-trust status may fall
+  back from decision telemetry to the latest receipt model. Public dashboards
+  may keep provider/model lanes redacted, but keeper operator surfaces must show
+  either observed attribution or a typed runtime/provider blocker.
 - Command semantics may only interpret commands accepted by the typed
   bash subset parser. Unsupported shell constructs fail closed and must
   not be reinterpreted with space splitting or fallback token scans.
@@ -75,6 +82,8 @@ Focused behavioral tests verify path and command behavior:
 
 - `test_keeper_path_ssot`
 - `test_keeper_effective_meta_overlay`
+- `test_keeper_runtime_trust_snapshot`
+- `test_runtime_provider_auth_headers`
 - `test_keeper_sandbox_docker_route`
 
 Source-level boundary tests prevent regressions in layer ownership:
@@ -111,3 +120,6 @@ The boundary test intentionally fails if:
 - keeper TOML parsing stops using the structured parser;
 - command semantics reintroduces word extraction or string-split fallback
   parsing.
+- completed or partial-completed runtime turns stop producing terminal runtime
+  observation for receipts, or runtime-trust status stops surfacing receipt
+  `runtime.selected_model` when decision telemetry is absent.

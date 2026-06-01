@@ -226,9 +226,19 @@ let keeper_list_effective_meta_error_json name err =
     ]
 
 let keeper_list_error_row_json ~runtime_class config name err =
-  let persisted_fields =
+  let persisted_meta =
     match read_meta config name with
-    | Ok (Some meta) ->
+    | Ok (Some meta) -> Some meta
+    | Ok None | Error _ -> None
+  in
+  let keepalive_running =
+    match persisted_meta with
+    | Some meta -> Keeper_status_bridge.runtime_keepalive_running config meta
+    | None -> false
+  in
+  let persisted_fields =
+    match persisted_meta with
+    | Some meta ->
         [
           ("meta", keeper_brief_meta_json meta);
           ("agent_name", `String meta.agent_name);
@@ -239,7 +249,7 @@ let keeper_list_error_row_json ~runtime_class config name err =
           ("proactive_idle_sec", `Int meta.proactive.idle_sec);
           ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
         ]
-    | Ok None | Error _ ->
+    | None ->
         [
           ("meta", `Null);
           ("agent_name", `Null);
@@ -251,7 +261,7 @@ let keeper_list_error_row_json ~runtime_class config name err =
     ([
        ("runtime_class", `String runtime_class);
        ("name", `String name);
-       ("keepalive_running", `Bool false);
+       ("keepalive_running", `Bool keepalive_running);
        ("effective_meta_error", keeper_list_effective_meta_error_json name err);
      ]
      @ persisted_fields)

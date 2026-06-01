@@ -653,11 +653,10 @@ let effective_meta_of_profile_defaults
   let target_sandbox_profile =
     match defaults.sandbox_profile, defaults.manifest_path with
     | Some profile, _ -> Ok profile
-    | None, Some _ ->
+    | None, _ ->
         Error
           (missing_required_sandbox_profile_error ~keeper_name:meta.name
              defaults)
-    | None, None -> Ok meta.sandbox_profile
   in
   match target_sandbox_profile with
   | Error _ as err -> err

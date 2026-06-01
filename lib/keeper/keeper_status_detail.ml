@@ -175,50 +175,61 @@ let resolve_status_target (ctx : _ context) args =
     parameter combos (e.g. fast=true vs fast=false) and TOML/persona overlays
     get separate cache entries. Persisted JSON writes update [updated_at], but
     external [keepers/<name>.toml] edits do not. *)
-let profile_overlay_pair_json pairs =
-  `List (List.map (fun (key, value) -> `List [ `String key; `String value ]) pairs)
+let cache_fingerprint_field (key, value) =
+  Printf.sprintf "%s=%d:%s" key (String.length value) value
+
+let cache_fingerprint_list values = String.concat "\x1f" values
+
+let cache_fingerprint_pairs pairs =
+  pairs
+  |> List.map (fun (key, value) ->
+       key ^ "\x1e" ^ string_of_int (String.length value) ^ "\x1e" ^ value)
+  |> String.concat "\x1f"
 
 let effective_meta_overlay_hash (meta : keeper_meta) =
-  let overlay_json =
-    `Assoc
-      [
-        ("goal", `String meta.goal);
-        ("short_goal", `String meta.short_goal);
-        ("mid_goal", `String meta.mid_goal);
-        ("long_goal", `String meta.long_goal);
-        ("will", `String meta.will);
-        ("needs", `String meta.needs);
-        ("desires", `String meta.desires);
-        ("instructions", `String meta.instructions);
-        ("social_model", `String meta.social_model);
-        ( "sandbox_profile",
-          `String (sandbox_profile_to_string meta.sandbox_profile) );
-        ("sandbox_image", Json_util.string_opt_to_json meta.sandbox_image);
-        ("network_mode", `String (network_mode_to_string meta.network_mode));
-        ("allowed_paths", Json_util.json_string_list meta.allowed_paths);
-        ("tool_access", Json_util.json_string_list meta.tool_access);
-        ("tool_denylist", Json_util.json_string_list meta.tool_denylist);
-        ("mention_targets", Json_util.json_string_list meta.mention_targets);
-        ("active_goal_ids", Json_util.json_string_list meta.active_goal_ids);
-        ( "proactive",
-          `Assoc
-            [
-              ("enabled", `Bool meta.proactive.enabled);
-              ("idle_sec", `Int meta.proactive.idle_sec);
-              ("cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ] );
-        ("autoboot_enabled", `Bool meta.autoboot_enabled);
-        ( "telemetry_feedback_enabled",
-          Json_util.bool_opt_to_json meta.telemetry_feedback_enabled );
-        ( "telemetry_feedback_window_hours",
-          Json_util.int_opt_to_json meta.telemetry_feedback_window_hours );
-        ( "per_provider_timeout_s",
-          Json_util.float_opt_to_json meta.per_provider_timeout_s );
-        ("always_approve", Json_util.bool_opt_to_json meta.always_approve);
-        ("oas_env", profile_overlay_pair_json meta.oas_env);
-      ]
+  let opt_string = Option.value ~default:"" in
+  let opt_bool = function
+    | Some true -> "true"
+    | Some false -> "false"
+    | None -> ""
   in
-  Digest.string (Yojson.Safe.to_string overlay_json) |> Digest.to_hex
+  let opt_int = Option.fold ~none:"" ~some:string_of_int in
+  let opt_float = Option.fold ~none:"" ~some:(Printf.sprintf "%.6f") in
+  let fields =
+    [
+      ("goal", meta.goal);
+      ("short_goal", meta.short_goal);
+      ("mid_goal", meta.mid_goal);
+      ("long_goal", meta.long_goal);
+      ("will", meta.will);
+      ("needs", meta.needs);
+      ("desires", meta.desires);
+      ("social_model", meta.social_model);
+      ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
+      ("sandbox_image", opt_string meta.sandbox_image);
+      ("network_mode", network_mode_to_string meta.network_mode);
+      ("allowed_paths", cache_fingerprint_list meta.allowed_paths);
+      ("tool_access", cache_fingerprint_list meta.tool_access);
+      ("tool_denylist", cache_fingerprint_list meta.tool_denylist);
+      ("mention_targets", cache_fingerprint_list meta.mention_targets);
+      ("active_goal_ids", cache_fingerprint_list meta.active_goal_ids);
+      ("proactive_enabled", string_of_bool meta.proactive.enabled);
+      ("proactive_idle_sec", string_of_int meta.proactive.idle_sec);
+      ("proactive_cooldown_sec", string_of_int meta.proactive.cooldown_sec);
+      ("autoboot_enabled", string_of_bool meta.autoboot_enabled);
+      ("telemetry_feedback_enabled", opt_bool meta.telemetry_feedback_enabled);
+      ( "telemetry_feedback_window_hours",
+        opt_int meta.telemetry_feedback_window_hours );
+      ("per_provider_timeout_s", opt_float meta.per_provider_timeout_s);
+      ("always_approve", opt_bool meta.always_approve);
+      ("oas_env", cache_fingerprint_pairs meta.oas_env);
+    ]
+  in
+  fields
+  |> List.map cache_fingerprint_field
+  |> String.concat "\n"
+  |> Digest.string
+  |> Digest.to_hex
 
 let hash_status_args _config resolved_name (meta : keeper_meta) args =
   let parts = [

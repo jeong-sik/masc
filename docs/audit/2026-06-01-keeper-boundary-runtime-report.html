@@ -456,9 +456,15 @@
 	          </tr>
 	          <tr>
 	            <td>Runtime/provider observability</td>
-	            <td><span class="badge warn">remaining</span></td>
-	            <td>No provider/model attribution patch in this slice.</td>
-	            <td>One controlled keeper turn must produce non-null runtime observation or a typed provider blocker.</td>
+	            <td><span class="badge good">patched</span></td>
+	            <td>`Runtime_agent.run` now materializes a terminal runtime observation for completed and partial-completed OAS turns. `Keeper_execution_receipt.to_json` preserves `runtime.selected_model`, and `Keeper_runtime_trust_snapshot` falls back from decision telemetry to latest receipt runtime model for `selected_model`, `active_model`, and `execution.provider_selected_model`.</td>
+	            <td>After rebuild/restart, one controlled keeper turn must produce non-null runtime observation or a typed provider blocker in the live receipt/status surface.</td>
+	          </tr>
+	          <tr>
+	            <td>Runtime observability regression guard</td>
+	            <td><span class="badge good">added</span></td>
+	            <td>`test_runtime_provider_auth_headers` proves runtime-agent terminal observations carry runtime id, selected model, one attempt, and `runtime_agent_terminal` source. `test_keeper_runtime_trust_snapshot` proves receipt runtime model attribution feeds trust snapshot when decision telemetry is absent.</td>
+	            <td>Focused Dune build/test must stay green for `test_runtime_provider_auth_headers` and `test_keeper_runtime_trust_snapshot`.</td>
 	          </tr>
 	          <tr>
 	            <td>Telemetry append gaps</td>

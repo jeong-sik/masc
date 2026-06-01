@@ -110,11 +110,57 @@ let test_snapshot_counts_malformed_decision_rows () =
        Alcotest.(check (float 0.001))
          "malformed json increments entry error"
          1.0
-         (drop_value entry_error -. before_entry_error);
+       (drop_value entry_error -. before_entry_error);
        Alcotest.(check (float 0.001))
          "non-object row increments invalid payload"
          1.0
          (drop_value invalid_payload -. before_invalid_payload))
+;;
+
+let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc_mcp.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-receipt-model" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc_mcp.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "turn_count", `Int 7
+             ; "ended_at", `String "2026-06-01T00:00:00Z"
+             ; ( "runtime"
+               , `Assoc
+                   [ "name", `String "runtime-test"
+                   ; "selected_model", `String "receipt-model"
+                   ; "attempt_count", `Int 1
+                   ; "fallback_applied", `Bool false
+                   ; "outcome", `String "completed"
+                   ] )
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "selected model falls back to receipt"
+         "receipt-model"
+         (snapshot |> member "selected_model" |> to_string);
+       Alcotest.(check string)
+         "active model falls back to receipt"
+         "receipt-model"
+         (snapshot |> member "active_model" |> to_string);
+       Alcotest.(check string)
+         "execution provider selected model follows receipt"
+         "receipt-model"
+         (snapshot |> member "execution" |> member "provider_selected_model" |> to_string))
 ;;
 
 let () =
@@ -125,6 +171,12 @@ let () =
             "malformed decision rows increment drop metrics"
             `Quick
             test_snapshot_counts_malformed_decision_rows
+        ] )
+    ; ( "receipt_runtime_model"
+      , [ Alcotest.test_case
+            "receipt runtime model feeds trust snapshot when decision is absent"
+            `Quick
+            test_snapshot_uses_receipt_runtime_model_when_decision_absent
         ] )
     ]
 ;;

@@ -148,9 +148,22 @@ let test_monotone_safety () =
     corpus
 ;;
 
+(* A command whose risk is irreducibly string-borne: [risk_of_typed]
+   returns R0 by design and the word-list floor owns it permanently
+   (RFC-0208 B1). gh is the only such class today. These are EXPECTED to
+   stay load-bearing — they are not a typing work-list and never reach
+   floor-retirement readiness. Floor-retirement readiness is therefore
+   judged on the STRUCTURAL load-bearing remainder only. *)
+let is_string_borne = function
+  | S (b, _) -> b = "gh"
+  | P stages -> List.exists (fun (b, _) -> b = "gh") stages
+;;
+
 (* Report: typed coverage and floor-retirement readiness. The load-bearing
    list is the set of commands the floor still classifies stricter than the
-   typed model — i.e. the floor cannot be dropped for these yet. *)
+   typed model — i.e. the floor cannot be dropped for these yet. It is split
+   into a structural work-list (should reach 0) and the string-borne classes
+   (gh; floor-owned by design). *)
 let test_report_floor_readiness () =
   let n = List.length corpus in
   Alcotest.(check bool) "harness ran over a non-empty corpus" true (n > 0);
@@ -160,6 +173,7 @@ let test_report_floor_readiness () =
       (fun e -> not (ge (typed_only (ir_of e)) (Risk.classify_words (words_of e))))
       corpus
   in
+  let string_borne, structural = List.partition is_string_borne load_bearing in
   let redundant = n - List.length load_bearing in
   let pct x = 100.0 *. float_of_int x /. float_of_int n in
   Printf.printf "\n=== RFC-0208 P2 differential-safety harness ===\n";
@@ -174,38 +188,53 @@ let test_report_floor_readiness () =
     redundant
     n
     (pct redundant);
-  Printf.printf "floor still load-bearing: %d\n" (List.length load_bearing);
-  List.iter
-    (fun e ->
-       Printf.printf
-         "  - %s  (typed_only=%s, floor=%s)\n"
-         (label e)
-         (Risk.string_of_risk_class (typed_only (ir_of e)))
-         (Risk.string_of_risk_class (Risk.classify_words (words_of e))))
-    load_bearing;
   Printf.printf
-    "floor retirement readiness: %s\n"
-    (if load_bearing = []
-     then "READY — typed model dominates the whole corpus"
+    "floor still load-bearing: %d (structural: %d, string-borne/gh: %d)\n"
+    (List.length load_bearing)
+    (List.length structural)
+    (List.length string_borne);
+  let print_entry e =
+    Printf.printf
+      "  - %s  (typed_only=%s, floor=%s)\n"
+      (label e)
+      (Risk.string_of_risk_class (typed_only (ir_of e)))
+      (Risk.string_of_risk_class (Risk.classify_words (words_of e)))
+  in
+  if structural <> [] then begin
+    Printf.printf "structural load-bearing (typing work-list, should reach 0):\n";
+    List.iter print_entry structural
+  end;
+  if string_borne <> [] then begin
+    Printf.printf "string-borne load-bearing (gh; floor-owned by design, expected):\n";
+    List.iter print_entry string_borne
+  end;
+  Printf.printf
+    "floor retirement readiness (structural classes only): %s\n"
+    (if structural = []
+     then
+       "READY — typed model dominates every structurally-typed class; the \
+        floor remains only for string-borne gh by design"
      else
        Printf.sprintf
-         "NOT READY — %d command-class(es) still need the floor"
-         (List.length load_bearing));
+         "NOT READY — %d structural command-class(es) still need the floor"
+         (List.length structural));
   (* The harness reports; it never auto-retires the floor. *)
   ()
 ;;
 
-(* RFC-0208 P3 ratchet: these classes were closed by typed-classifier
-   completion (git checkout/reset typed arms; gh pr/graphql via the shared
-   classifier) and must stay floor-redundant. A regression here means a
-   typed arm was weakened back below the floor. *)
+(* RFC-0208 P3 ratchet: these classes are closed by GENUINELY typed
+   classifier arms (git checkout -> R1, git reset -> R2) whose risk is
+   structural and read directly from the typed shape. They must stay
+   floor-redundant; a regression here means a typed arm was weakened back
+   below the floor. gh is deliberately NOT in this list: gh risk is
+   string-borne (HTTP method / -f fields / graphql body), so [risk_of_typed]
+   returns R0 and the word-list floor owns gh by design (RFC-0208 B1). gh
+   commands therefore stay load-bearing in the readiness report — that is
+   the honest state, not a regression. *)
 let test_p3_closed_redundant () =
   let closed =
     [ S ("git", [ "checkout"; "-b"; "feature" ])
     ; S ("git", [ "reset"; "--hard"; "HEAD~1" ])
-    ; S ("gh", [ "pr"; "create"; "--title"; "t" ])
-    ; S ("gh", [ "pr"; "merge"; "123" ])
-    ; S ("gh", [ "api"; "graphql"; "-f"; "query=mutation{deleteRef}" ])
     ]
   in
   List.iter

@@ -187,7 +187,10 @@ let cache_fingerprint_pairs pairs =
   |> String.concat "\x1f"
 
 let effective_meta_overlay_hash (meta : keeper_meta) =
-  let opt_string = Option.value ~default:"" in
+  let opt_string = function
+    | Some value -> value
+    | None -> ""
+  in
   let opt_bool = function
     | Some true -> "true"
     | Some false -> "false"

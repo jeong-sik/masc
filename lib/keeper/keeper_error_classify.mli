@@ -13,15 +13,14 @@ val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
     not a transport-level timeout. *)
 val is_structural_oas_timeout_message : string -> bool
 
-(** Detect server-side request body parse errors (e.g. Ollama yyjson
-    rejecting a malformed request body).  The LLM never
-    processed the request, so committed tool results are not at risk
-    of duplication.  Used to auto-recover reconcile-safe tools instead
-    of requiring manual reconcile. *)
+(** Detect request body parse errors from either the provider or the API
+    (e.g. Ollama yyjson rejecting a malformed request body or the API
+    rejecting invalid JSON).  The LLM never processed the request, so
+    committed tool results are not at risk of duplication.  Used to
+    auto-recover reconcile-safe tools instead of requiring manual reconcile. *)
 val is_server_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] for provider/client-side request serialization or provider
-    request-body parse rejections. *)
+(** [true] for provider-side request-body parse rejections. *)
 val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] for model/API-side request-body parse rejections reported as

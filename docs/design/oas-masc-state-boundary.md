@@ -54,7 +54,7 @@ State that describes the coordination domain — not how an agent thinks, but wh
 
 | Category | Data | Current Owner | Target Owner |
 |----------|------|---------------|--------------|
-| Room membership | `joined_room_ids`, `last_seen_seq_by_room`, agents.json | MASC | MASC (single-room canonical state) |
+| Message cursor | `last_seen_message_seq`, agents.json | MASC | MASC (single-feed canonical state) |
 | Task claims | task files, `assignee`, `status` | MASC | MASC (correct) |
 | Board posts | `board_posts`, `board_comments`, `board_votes` | MASC | MASC (correct) |
 | Governance | petitions, cases, rulings, execution orders | MASC (`governance_v2`) | MASC (correct) |
@@ -95,7 +95,7 @@ So the flattened operational surface is roughly 83 fields. Approximately 29-30 o
 
 **Domain state fields in keeper_meta (correct placement):**
 - `mention_targets`, `proactive_*` — operational coordination policy
-- `joined_room_ids`, `last_seen_seq_by_room` — room membership state under the single-room canonical model
+- `last_seen_message_seq` — single-feed read cursor
 - `autonomy_level`, `active_goal_ids` — coordination state
 
 **Impact**: Every keeper turn reads the full keeper record, updates agent-runtime fields, and writes it back. This couples domain persistence (MASC JSONL/PG) with agent-runtime state that OAS should own.

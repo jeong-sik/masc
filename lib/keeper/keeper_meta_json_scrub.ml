@@ -58,6 +58,7 @@ let persisted_retired_keeper_meta_key_names =
   let retired_discovery_key suffix = "work_" ^ "discovery" ^ suffix in
   [
     "repo_cli_identity";
+    "last_seen_seq_by_room";
     "last_" ^ retired_discovery_key "_ts";
     retired_discovery_key "_count";
     retired_discovery_key "_enabled";

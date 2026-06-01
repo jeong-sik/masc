@@ -11,6 +11,39 @@
     related test rows have been removed accordingly.) *)
 
 open Alcotest
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    output_string oc content)
+
+let init_test_runtime () =
+  let path = Filename.temp_file "keeper-meta-runtime-" ".toml" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () ->
+       write_file path
+         {|[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 1024
+tools-support = true
+
+[test_provider.test_model]
+max-concurrent = 1
+|};
+       match Masc_mcp.Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> failwith ("test runtime init failed: " ^ msg))
+
+let () = init_test_runtime ()
+
 module KT = Masc_mcp.Keeper_types
 module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
@@ -147,7 +180,7 @@ let test_legacy_last_blocker_pair_rejected () =
   | Error msg ->
     check string
       "rejects legacy blocker class"
-      "legacy keeper meta fields are no longer supported: last_blocker_class"
+      "removed keeper meta fields are no longer supported: last_blocker_class"
       msg
 
 let test_legacy_last_blocker_string_rejected () =
@@ -163,7 +196,7 @@ let test_legacy_last_blocker_string_rejected () =
   | Error msg ->
     check string
       "rejects string last_blocker"
-      "legacy keeper meta field shape is no longer supported: \
+      "removed keeper meta field shape is no longer supported: \
        last_blocker:string. Use structured last_blocker object."
       msg
 
@@ -179,7 +212,7 @@ let test_repo_cli_identity_runtime_meta_rejected () =
   | Error msg ->
     check string
       "rejects repo_cli_identity"
-      "legacy keeper meta fields are no longer supported: repo_cli_identity"
+      "removed keeper meta fields are no longer supported: repo_cli_identity"
       msg
 
 let has_key key = function
@@ -192,6 +225,7 @@ let test_persisted_retired_runtime_meta_fields_scrubbed () =
   let retired_fields =
     [
       "repo_cli_identity", `String "anyang-keepers";
+      "last_seen_seq_by_room", `Assoc [ "default", `Int 5749 ];
       "last_" ^ retired_discovery_key "_ts", `String "2026-05-24T16:29:11Z";
       retired_discovery_key "_count", `Int 12;
       retired_discovery_key "_enabled", `Bool true;

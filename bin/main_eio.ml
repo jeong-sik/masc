@@ -515,7 +515,9 @@ let host =
   Arg.(value & opt string default & info ["host"] ~docv:"HOST" ~doc)
 
 let base_path =
-  let doc = "Base path for MASC data (.masc folder location)" in
+  let doc =
+    "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
+  in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
 let login_json =

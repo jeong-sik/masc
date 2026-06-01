@@ -22,7 +22,7 @@ merged 기준 전체 구조 요약은 [spec/SPEC-INDEX.md](./spec/SPEC-INDEX.md)
 ## 개념 맵
 
 - `namespace`
-  - 조율 범위. tool 이름은 아직 `workspace`을 쓰지만 현재 구현은 project root 아래 `.masc/`의 single default namespace로 수렴한다.
+  - 조율 범위. tool 이름은 아직 `workspace`을 쓰지만 현재 구현은 `<base-path>/.masc/`의 single default namespace로 수렴한다.
 - `task`
   - backlog item. `masc_transition(action="claim")`은 backlog 소유권만 바꾸고 planning `current_task`는 자동으로 안 잡힌다. `masc_claim_next`는 current builds에서 planning `current_task`를 함께 맞춘다.
 - `operation`

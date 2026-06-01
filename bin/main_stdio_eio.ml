@@ -11,7 +11,9 @@ open Cmdliner
 let default_base_path () = Masc_mcp.Server_mcp_transport_http.default_base_path ()
 
 let base_path =
-  let doc = "Base path for MASC data (.masc folder location)" in
+  let doc =
+    "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
+  in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
 let run_cmd base_path =

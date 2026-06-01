@@ -2,6 +2,7 @@ module Workspace = Masc_mcp.Workspace
 module Store = Masc_mcp.Keeper_meta_store
 module Profile = Masc_mcp.Keeper_types_profile
 module Status_detail = Masc_mcp.Keeper_status_detail
+module Tool_keeper = Masc_mcp.Tool_keeper
 module Tool_keeper_ops = Masc_mcp.Tool_keeper_ops
 
 let temp_dir () =
@@ -50,6 +51,17 @@ let json_string_field key = function
   | `Assoc fields -> (
       match List.assoc_opt key fields with
       | Some (`String value) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let json_field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let json_bool_field key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`Bool value) -> Some value
       | _ -> None)
   | _ -> None
 
@@ -161,6 +173,19 @@ goal = "missing sandbox profile"
         true
         (contains_substring ~needle:"sandbox_profile is required" err)
 
+let test_missing_profile_source_fails_loud () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "nosource" in
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc_mcp.Keeper_meta_contract.keeper_meta);
+  match Store.read_effective_meta config name with
+  | Ok _ -> Alcotest.fail "expected absent TOML/persona source to fail loudly"
+  | Error err ->
+      Alcotest.(check bool)
+        "error names missing sandbox_profile"
+        true
+        (contains_substring ~needle:"sandbox_profile is required" err)
+
 let test_status_cache_tracks_toml_overlay_changes () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "statuscache" in
@@ -204,6 +229,90 @@ goal = "missing sandbox profile"
              (List.mem_assoc "effective_meta_error" fields)
        | _ -> Alcotest.fail "expected object row")
 
+let test_keeper_list_error_row_preserves_keepalive_state () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "badprofile-running" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+goal = "missing sandbox profile"
+|};
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Masc_mcp.Keeper_registry.clear ();
+  ignore (Masc_mcp.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Fun.protect
+    ~finally:Masc_mcp.Keeper_registry.clear
+    (fun () ->
+      match Tool_keeper_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
+      | None -> Alcotest.fail "expected error row for invalid effective meta"
+      | Some row ->
+          Alcotest.(check (option bool))
+            "error row keeps live keepalive state"
+            (Some true)
+            (json_bool_field "keepalive_running" row))
+
+let test_sandbox_status_fleet_surfaces_effective_meta_errors () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "badfleet-running" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+goal = "missing sandbox profile"
+|};
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Masc_mcp.Keeper_registry.clear ();
+  ignore (Masc_mcp.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Fun.protect
+    ~finally:Masc_mcp.Keeper_registry.clear
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Tool_keeper.context =
+        {
+          config;
+          agent_name = "test-agent";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = None;
+          net = None;
+        }
+      in
+      match
+        Tool_keeper.dispatch ctx ~name:"masc_keeper_sandbox_status" ~args:(`Assoc [])
+      with
+      | None -> Alcotest.fail "sandbox status tool was not dispatched"
+      | Some result ->
+          if not (Profile.tool_result_success result) then
+            Alcotest.failf "sandbox status failed: %s" (Profile.tool_result_body result);
+          let json = Yojson.Safe.from_string (Profile.tool_result_body result) in
+          let items =
+            match json_field "items" json with
+            | Some (`List items) -> items
+            | _ -> Alcotest.fail "sandbox status response missing items"
+          in
+          let row =
+            match
+              List.find_opt
+                (fun item -> json_string_field "keeper" item = Some name)
+                items
+            with
+            | Some row -> row
+            | None -> Alcotest.fail "expected bad keeper error row in fleet items"
+          in
+          Alcotest.(check (option string))
+            "fleet row status is error"
+            (Some "error")
+            (json_string_field "status" row);
+          Alcotest.(check (option bool))
+            "fleet error row keeps live keepalive state"
+            (Some true)
+            (json_bool_field "keepalive_running" row);
+          match json_field "effective_meta_error" row with
+          | Some (`Assoc _) -> ()
+          | _ -> Alcotest.fail "fleet error row missing effective_meta_error")
+
 let () =
   Alcotest.run "keeper_effective_meta_overlay"
     [
@@ -214,9 +323,18 @@ let () =
           Alcotest.test_case
             "profile source without sandbox_profile fails loudly"
             `Quick test_missing_sandbox_profile_fails_loud_for_profile_source;
+          Alcotest.test_case
+            "missing profile source fails loudly"
+            `Quick test_missing_profile_source_fails_loud;
           Alcotest.test_case "status cache tracks TOML overlay edits" `Quick
             test_status_cache_tracks_toml_overlay_changes;
           Alcotest.test_case "keeper list surfaces effective meta errors"
             `Quick test_keeper_list_row_surfaces_effective_meta_errors;
+          Alcotest.test_case
+            "keeper list error row preserves keepalive state"
+            `Quick test_keeper_list_error_row_preserves_keepalive_state;
+          Alcotest.test_case
+            "sandbox status fleet surfaces effective meta errors"
+            `Quick test_sandbox_status_fleet_surfaces_effective_meta_errors;
         ] );
     ]

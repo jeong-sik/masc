@@ -107,16 +107,24 @@ let display_provider_name provider_name =
 
 (* Build headers list with Authorization when api_key is present.
    Anthropic/Anthropic use x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
+(* Returns the non-credential request headers only. The auth credential
+   (Authorization / x-api-key) is intentionally NOT emitted here: the OAS
+   transport derives it from [~api_key] at request time, and its contract is
+   that the header list "never carries sensitive tokens" (oas api.ml auth_hdrs).
+   Emitting the credential here too produced a DUPLICATE Authorization header
+   that RunPod's cloudflare edge rejected with an opaque 400 before the origin
+   (diagnosed 2026-06-01 via the http_client_4xx_request_header_profile log:
+   2 x Authorization). The token still travels to OAS via [~api_key]; only
+   Content-Type (OAS does not set it) and the non-credential Anthropic version
+   header belong here. Mirror of [Runtime_adapter.headers_with_auth] — keep in
+   sync (tracked for de-duplication). *)
 let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_key =
   let base = [("Content-Type", "application/json")] in
   if api_key = "" then base
     else match kind with
     | Anthropic ->
-        ("x-api-key", api_key)
-        :: ("provider_a-version", "2023-06-01")
-        :: base
-    | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope ->
-        ("Authorization", "Bearer " ^ api_key) :: base
+        ("provider_a-version", "2023-06-01") :: base
+    | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> base
 
 let trim_trailing_slash path =
   if String.length path > 1 && String.ends_with ~suffix:"/" path then

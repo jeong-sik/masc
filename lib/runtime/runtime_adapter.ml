@@ -30,16 +30,24 @@ let normalize_provider_id provider_id =
   |> String.map (fun c -> if c = '-' then '_' else c)
 ;;
 
+(* Returns the non-credential request headers only. The auth credential
+   (Authorization / x-api-key) is intentionally NOT emitted here: the OAS
+   transport derives it from [~api_key] at request time, and its contract is
+   that the header list "never carries sensitive tokens" (oas api.ml auth_hdrs).
+   Emitting the credential here too produced a DUPLICATE Authorization header
+   that RunPod's cloudflare edge rejected with an opaque 400 before the origin
+   (diagnosed 2026-06-01 via the http_client_4xx_request_header_profile log:
+   2 x Authorization, 74 B each). The token still travels to OAS via [~api_key];
+   only Content-Type (OAS does not set it) and the non-credential Anthropic
+   version header belong here. *)
 let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_key =
   let base = [ ("Content-Type", "application/json") ] in
   if api_key = ""
   then base
   else (
     match kind with
-    | Anthropic ->
-      ("x-api-key", api_key) :: ("provider_a-version", "2023-06-01") :: base
-    | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope ->
-      ("Authorization", "Bearer " ^ api_key) :: base)
+    | Anthropic -> ("provider_a-version", "2023-06-01") :: base
+    | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> base)
 ;;
 
 let trim_trailing_slash path =

@@ -108,8 +108,8 @@ let string_to_action s =
   (* Split on first ':' to separate tag from payload for parameterized
      variants.  Simple action names without ':' match directly.  This
      replaces the old prefix+magic-length approach which was fragile:
-     magic numbers drifted from tag lengths, and [starts_with] could
-     not handle payloads containing ':'. *)
+     magic numbers drifted from tag lengths, and a fixed-length prefix
+     could not account for variable-length payloads. *)
   match String.index_opt s ':' with
   | Some colon_pos ->
     let tag = String.sub s 0 colon_pos in

@@ -27,7 +27,7 @@ gen_descriptor_b64() {
   protoc \
     --descriptor_set_out="${tmp_bin}" \
     --proto_path="${PROTO_DIR}" \
-    "${proto_file}" 2>&1
+    "${proto_file}"
   # protoc --descriptor_set_out produces a FileDescriptorSet wrapper.
   # Strip the outer wrapper to get raw FileDescriptorProto.
   # FileDescriptorSet = tag(0x0a) + varint(length) + FileDescriptorProto
@@ -47,19 +47,19 @@ sys.stdout.buffer.write(data[i:])
 
 do_generate() {
   check_protoc
-  echo "--- masc_workspace collaboration.proto ---"
-  gen_descriptor_b64 "${PROTO_DIR}/masc_workspace collaboration.proto"
+  echo "--- masc_workspace.proto ---"
+  gen_descriptor_b64 "masc_workspace.proto"
   echo ""
   echo ""
   echo "--- grpc_health_v1.proto ---"
-  gen_descriptor_b64 "${PROTO_DIR}/grpc_health_v1.proto"
+  gen_descriptor_b64 "grpc_health_v1.proto"
   echo ""
 }
 
 do_check() {
   check_protoc
   local masc_gen
-  masc_gen="$(gen_descriptor_b64 "${PROTO_DIR}/masc_workspace collaboration.proto")"
+  masc_gen="$(gen_descriptor_b64 "masc_workspace.proto")"
 
   # Extract current masc descriptor from OCaml source.
   # The descriptor is split across multiple lines with ^ concatenation.

@@ -64,7 +64,11 @@ let blocked_task_ids_mutex = Mutex.create ()
 let blocked_task_key (config : Workspace.config) task_id = config.base_path, task_id
 
 let register_scope_blocked_task_id ?now config task_id =
-  let now = Option.value now ~default:(Time_compat.now ()) in
+  let now =
+    match now with
+    | Some now -> now
+    | None -> Time_compat.now ()
+  in
   let key = blocked_task_key config task_id in
   Mutex.protect blocked_task_ids_mutex (fun () ->
     Hashtbl.replace blocked_task_ids_table key now)

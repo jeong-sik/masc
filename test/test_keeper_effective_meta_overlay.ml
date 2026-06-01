@@ -53,6 +53,13 @@ let json_string_field key = function
       | _ -> None)
   | _ -> None
 
+let json_bool_field key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`Bool value) -> Some value
+      | _ -> None)
+  | _ -> None
+
 let with_config_dir f =
   let base = temp_dir () in
   let config_dir = Filename.concat base ".masc/config" in
@@ -161,6 +168,19 @@ goal = "missing sandbox profile"
         true
         (contains_substring ~needle:"sandbox_profile is required" err)
 
+let test_missing_profile_source_fails_loud () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "nosource" in
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc_mcp.Keeper_meta_contract.keeper_meta);
+  match Store.read_effective_meta config name with
+  | Ok _ -> Alcotest.fail "expected absent TOML/persona source to fail loudly"
+  | Error err ->
+      Alcotest.(check bool)
+        "error names missing sandbox_profile"
+        true
+        (contains_substring ~needle:"sandbox_profile is required" err)
+
 let test_status_cache_tracks_toml_overlay_changes () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "statuscache" in
@@ -204,6 +224,29 @@ goal = "missing sandbox profile"
              (List.mem_assoc "effective_meta_error" fields)
        | _ -> Alcotest.fail "expected object row")
 
+let test_keeper_list_error_row_preserves_keepalive_state () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "badprofile-running" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+goal = "missing sandbox profile"
+|};
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Masc_mcp.Keeper_registry.clear ();
+  ignore (Masc_mcp.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Fun.protect
+    ~finally:Masc_mcp.Keeper_registry.clear
+    (fun () ->
+      match Tool_keeper_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
+      | None -> Alcotest.fail "expected error row for invalid effective meta"
+      | Some row ->
+          Alcotest.(check (option bool))
+            "error row keeps live keepalive state"
+            (Some true)
+            (json_bool_field "keepalive_running" row))
+
 let () =
   Alcotest.run "keeper_effective_meta_overlay"
     [
@@ -214,9 +257,15 @@ let () =
           Alcotest.test_case
             "profile source without sandbox_profile fails loudly"
             `Quick test_missing_sandbox_profile_fails_loud_for_profile_source;
+          Alcotest.test_case
+            "missing profile source fails loudly"
+            `Quick test_missing_profile_source_fails_loud;
           Alcotest.test_case "status cache tracks TOML overlay edits" `Quick
             test_status_cache_tracks_toml_overlay_changes;
           Alcotest.test_case "keeper list surfaces effective meta errors"
             `Quick test_keeper_list_row_surfaces_effective_meta_errors;
+          Alcotest.test_case
+            "keeper list error row preserves keepalive state"
+            `Quick test_keeper_list_error_row_preserves_keepalive_state;
         ] );
     ]

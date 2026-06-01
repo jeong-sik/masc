@@ -198,7 +198,7 @@ let status_of_archived_session (session : session_context option) =
   match session with
   | Some session ->
       if is_session_concluded session.status then "inactive" else "offline"
-  | None -> "unknown"
+  | None -> "<missing status>"
 
 let archived_reason_for_session (session : session_context option) =
   match session with
@@ -360,7 +360,7 @@ let build_agent_briefs config sessions attention_queue _workspace_json (keepers 
            | None, _ -> "archived"
            | Some _, Some age when age <= 300 -> "live"
            | Some _, Some _ -> "stale"
-           | Some _, None -> "unknown"
+           | Some _, None -> "<missing status>"
          in
          let evidence_source =
            if Option.is_some latest_out || Option.is_some latest_in then

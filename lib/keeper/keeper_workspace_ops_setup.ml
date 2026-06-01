@@ -1,8 +1,8 @@
-(* SearchFiles operation setup:
+(* Grep operation setup:
     coreutils resolution, Prometheus metric, history observation,
     and the shared process-result renderer.
 
-    Extracted from the SearchFiles dispatcher as part of godfile near-threshold split. *)
+    Extracted from the Grep dispatcher as part of godfile near-threshold split. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -30,7 +30,7 @@ let () =
     ~name:metric_bash_history_append_failures
     ~help:
       "Total bash-history audit append failures observed at \
-       SearchFiles setup. Bash_history.append returned Error (Sys_error \
+       Grep setup. Bash_history.append returned Error (Sys_error \
        from open/write/close). Decoupled from tool-call success/failure. \
        No labels."
     ()

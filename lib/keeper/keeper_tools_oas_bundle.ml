@@ -142,7 +142,7 @@ let make_tool_bundle
          else None)
       tool_defs
   in
-  (* Pass B: register LLM-native capability names (Execute/ReadFile/etc)
+  (* Pass B: register LLM-native capability names (Execute/Read/etc)
      via descriptor projection. The handler dispatches with
      [~name:descriptor.internal_name] so all telemetry SSOT remains internal;
      only the Tool.schema.name (LLM-visible) is the public name.

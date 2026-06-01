@@ -3,7 +3,7 @@
 
     The keeper sandbox boundary historically followed the tool name:
     Execute for [sandbox_profile=Docker] keepers ran in a
-    container, but [ReadFile] / [EditFile/WriteFile] / structured search
+    container, but [Read] / [Edit/Write] / structured search
     could touch the host directly. The result was a cross-tool leak:
     different tools enforced different boundaries for the same keeper.
 

@@ -1,6 +1,6 @@
 (** Keeper_tool_capability_axis -- semantic capability classification for tool names.
 
-    Callers may pass public aliases ([Execute], [WriteFile], ...), public MCP
+    Callers may pass public aliases ([Execute], [Write], ...), public MCP
     names, prefixed MCP names, or internal handler names. This module
     normalizes names through descriptor resolution before answering capability
     predicates. *)

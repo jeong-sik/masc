@@ -15,7 +15,7 @@ type fs_write_mode =
   | Append
   | Patch
   (** RFC-0006 Phase A.4: read-replace-write for the Anthropic Code
-        [EditFile] cognate. Caller supplies [old_string] + [new_string]
+        [Edit] cognate. Caller supplies [old_string] + [new_string]
         (and optional [replace_all]) instead of [content]. *)
 
 let fs_write_mode_to_string = function
@@ -38,7 +38,7 @@ let fs_write_mode_of_string_opt raw =
 let all_fs_write_modes = [ Overwrite; Append; Patch ]
 let valid_fs_write_mode_strings = List.map fs_write_mode_to_string all_fs_write_modes
 
-(** ReadFile max_bytes clamp. [read_file_default_max_bytes] is the
+(** Read max_bytes clamp. [read_file_default_max_bytes] is the
     canonical default; [Tool_shard_limits.read_file_default_max_bytes]
     re-exports it at a leaf module so the tool schema in tool_shard.ml
     can reference the same value without creating a dependency cycle. *)
@@ -190,7 +190,7 @@ let handle_read_file
        (* RFC-0006 Phase B-1: Docker keepers are always contained to their
        playground bundle on the host before any read-side I/O proceeds.
        The resolver-level allowed_paths check is augmented by this
-       strict containment so host FS cannot leak through ReadFile
+       strict containment so host FS cannot leak through Read
        while Execute is container-isolated. *)
        (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
         | Error e -> error_json ~fields:[ "path", `String target ] e
@@ -267,7 +267,7 @@ let handle_read_file
 
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
    [replace_all=false], requires exactly one occurrence so accidental
-   multi-edits are rejected (mirrors EditFile semantics). *)
+   multi-edits are rejected (mirrors Edit semantics). *)
 let apply_patch ~old_string ~new_string ~replace_all text =
   if old_string = ""
   then Error "old_string must be non-empty for mode=patch."

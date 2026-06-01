@@ -1,4 +1,4 @@
-(** Shared setup for SearchFiles shell operation handlers. *)
+(** Shared setup for Grep shell operation handlers. *)
 
 val coreutils : Host_config.coreutils
 val metric_bash_history_append_failures : string

@@ -386,7 +386,7 @@ let transient_mutex_contention_tool_error
     Telemetry SSOT contract: [~name] flows into every observability
     sink (Keeper_registry.record_tool_use, SSE broadcast tool_name,
     decision-log "tool" field, Tool_registry). The LLM-facing
-    public name (Execute/ReadFile/...) only appears as the [Tool.schema.name]
+    public name (Execute/Read/...) only appears as the [Tool.schema.name]
     set by [Tool_bridge.oas_tool_of_masc] above this helper.
 
     [?translate_input] reshapes the incoming JSON from the public schema

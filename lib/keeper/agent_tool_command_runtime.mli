@@ -1,13 +1,13 @@
-(** Tool execution handlers — command execution and structured SearchFiles ops.
+(** Tool execution handlers — command execution and structured Grep ops.
 
     Handles [Execute] (arbitrary commands with blocklist) and
-    [SearchFiles] / [tool_search_files] (structured ops: ls, cat, find, rg,
+    [Grep] / [tool_search_files] (structured ops: ls, cat, find, rg,
     head, tail, wc, tree, git-log, git-diff, git-status, pwd).
 
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)
 
-(** Issue #8524: Variant SSOT for SearchFiles op. Mirror in
+(** Issue #8524: Variant SSOT for Grep op. Mirror in
     [Tool_shard.tool_search_files_op_enum_strings] (cycle-aware, sync test
     catches drift). *)
 type shell_op =

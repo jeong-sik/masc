@@ -1,7 +1,7 @@
-(* Keeper_workspace_read_ops — read-side operation handlers for SearchFiles.
+(* Keeper_workspace_read_ops — read-side operation handlers for Grep.
 
    This module owns structured read/list/search operations so
-   the SearchFiles facade stays as the public dispatcher instead of reabsorbing
+   the Grep facade stays as the public dispatcher instead of reabsorbing
    read-backend, path-resolution, and host Shell IR details. *)
 
 open Keeper_types
@@ -377,7 +377,7 @@ let try_handle
            else
              let rg_available = Agent_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
-               path_error "rg executable not found; SearchFiles requires rg"
+               path_error "rg executable not found; Grep requires rg"
              else
                let argv =
                  [ "-n"; "-m"; string_of_int limit ]

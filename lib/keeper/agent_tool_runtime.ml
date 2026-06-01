@@ -81,7 +81,7 @@ let handle_filesystem ctx descriptor args =
 ;;
 
 (* Shell IR mechanics live under Execute lowerers. Agent_tool_command_runtime is
-   the descriptor-selected runtime boundary that binds Execute/SearchFiles to
+   the descriptor-selected runtime boundary that binds Execute/Grep to
    those lowerers without keeping them under the keeper_exec* axis. *)
 let handle_shell_ir ctx descriptor args =
   match descriptor.Agent_tool_descriptor.runtime_handler with

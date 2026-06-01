@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Guard against re-emergence of pre-RFC-0064 public tool names in the
-# descriptor-backed tool surface.
+# descriptor-backed tool surface and keeper-facing prompt files.
 #
 # After RFC-0202 tool name alignment, the active LLM-native public names are:
 #   Execute, Read, Edit, Write, Grep, WebSearch, WebFetch
 #
 # The retired names — Bash, ReadFile, WriteFile, EditFile, SearchFiles,
 # SearchWeb, FetchWeb — must not reappear as quoted string literals in active
-# tool-surface modules. This
-# script is intentionally narrow: it only scans files that declare or route
-# public tool names. Identifiers and code symbols (e.g. OCaml `Read` modules)
-# are untouched.
+# tool-surface modules or as prompt-visible tool names in keeper prompts. This
+# script is intentionally narrow: it only scans files that declare/route public
+# tool names plus prompt files that tell keepers what to call. Identifiers and
+# code symbols (e.g. OCaml `Read` modules) are untouched.
 #
 # Baseline = 0 occurrences. Allowlist is a debt ledger; entries are exact
 # `path:line:literal` keys that drift with line numbers, forcing same-PR
@@ -35,7 +35,7 @@ case "${1:---fail}" in
     ;;
 esac
 
-for tool in rg sed sort mktemp comm wc; do
+for tool in rg sed sort mktemp comm wc find; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "[no-legacy-tool-surface-name] required tool missing: $tool" >&2
     exit 2
@@ -63,7 +63,13 @@ SCAN_GLOBS=(
   "lib/tool_catalog_surfaces.mli"
 )
 
+PROMPT_SCAN_FILES=("docs/KEEPER-CAPABILITY-MATRIX.md")
+while IFS= read -r prompt_file; do
+  PROMPT_SCAN_FILES+=("$prompt_file")
+done < <(find config/prompts -type f | sort)
+
 LITERAL_PATTERN='"(Bash|ReadFile|WriteFile|EditFile|SearchFiles|SearchWeb|FetchWeb)"'
+PROMPT_TOKEN_PATTERN='\b(Bash|ReadFile|WriteFile|EditFile|SearchFiles|SearchWeb|FetchWeb)\b'
 
 current_tmp="$(mktemp -t legacy-tool-surface-name.current.XXXXXX)"
 allow_tmp="$(mktemp -t legacy-tool-surface-name.allow.XXXXXX)"
@@ -81,6 +87,21 @@ for file in "${SCAN_GLOBS[@]}"; do
     done < <(printf '%s\n' "$content" | rg -o --replace '$1' "$LITERAL_PATTERN" || true)
   done < <(rg --with-filename --no-heading --line-number --color=never "$LITERAL_PATTERN" "$file" || true)
 done | sort -u >"$current_tmp"
+
+{
+  cat "$current_tmp"
+  for file in "${PROMPT_SCAN_FILES[@]}"; do
+    [[ -f "$file" ]] || continue
+    while IFS=: read -r path line content; do
+      [[ -n "${path:-}" && -n "${line:-}" ]] || continue
+      while IFS= read -r literal; do
+        [[ -n "$literal" ]] || continue
+        printf '%s:%s:%s\n' "$path" "$line" "$literal"
+      done < <(printf '%s\n' "$content" | rg -o "$PROMPT_TOKEN_PATTERN" || true)
+    done < <(rg --with-filename --no-heading --line-number --color=never "$PROMPT_TOKEN_PATTERN" "$file" || true)
+  done
+} | sort -u >"${current_tmp}.next"
+mv "${current_tmp}.next" "$current_tmp"
 
 if [[ -f "$ALLOWLIST" ]]; then
   sed -E 's/#.*//; s/[[:space:]]//g; /^$/d' "$ALLOWLIST" | sort -u >"$allow_tmp"

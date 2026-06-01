@@ -63,14 +63,14 @@ let readonly_hint_of_category = function
   | "chaining" ->
     "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
      Issue one command per Execute call, or use visible read/search \
-     aliases such as ReadFile and SearchFiles. \
+     aliases such as Read and Grep. \
      Good: Execute executable='git' argv=['status']. \
      Bad: raw shell text 'git status && git log -1'."
   | "redirect" ->
     "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
-     Use WriteFile/EditFile when a file must change, or Execute only when the \
+     Use Write/Edit when a file must change, or Execute only when the \
      active policy exposes a write-capable Execute surface. \
-     Good: WriteFile file_path='notes.md' content='...'. \
+     Good: Write file_path='notes.md' content='...'. \
      Bad: raw shell text 'echo hi > notes.md'."
   | "git_write" ->
     "Use Execute only when the active policy exposes write-capable command \
@@ -162,7 +162,7 @@ let diagnosis_of_block_reason reason =
            keeper validates one command per call."
       ; rewrite =
           Some
-            "Split into two Execute calls, or use visible ReadFile/SearchFiles \
+            "Split into two Execute calls, or use visible Read/Grep \
              tools for file inspection and search."
       ; tool_suggestion = None
       }

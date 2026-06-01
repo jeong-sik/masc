@@ -7,8 +7,45 @@
     Pure synchronous tests — no Eio or network required. *)
 
 module Tool_shard = Masc_mcp.Tool_shard
+module Dashboard_keeper_feature_catalog = Masc_mcp.Dashboard_keeper_feature_catalog
+module Tool_shard_types = Masc_mcp.Tool_shard_types
 module Tool_shard_types_schemas_execute = Masc_mcp.Tool_shard_types_schemas_execute
 module Types = Masc_domain
+
+let contains text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop index =
+    index + needle_len <= text_len
+    && (String.sub text index needle_len = needle || loop (index + 1))
+  in
+  needle_len = 0 || loop 0
+;;
+
+let check_contains label needle text =
+  Alcotest.(check bool) label true (contains text needle)
+;;
+
+let check_not_contains label needle text =
+  Alcotest.(check bool) label false (contains text needle)
+;;
+
+let schema_description name schemas =
+  match List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name) schemas with
+  | Some schema -> schema.description
+  | None -> Alcotest.failf "missing schema: %s" name
+;;
+
+let feature_by_id id =
+  match
+    List.find_opt
+      (fun (feature : Dashboard_keeper_feature_catalog.feature_spec) ->
+         String.equal feature.id id)
+      Dashboard_keeper_feature_catalog.tool_features
+  with
+  | Some feature -> feature
+  | None -> Alcotest.failf "missing feature: %s" id
+;;
 
 let get_json_assoc key = function
   | `Assoc fields -> (
@@ -54,6 +91,39 @@ let test_shard_search_files_exists () =
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1)
   | None -> Alcotest.fail "search_files shard not found"
+
+let test_user_facing_alias_copy_is_canonical () =
+  let execute_description =
+    schema_description "tool_execute" Tool_shard_types.typed_execute_tools
+  in
+  let read_description =
+    schema_description "tool_read_file" Tool_shard_types.filesystem_tools
+  in
+  let search_shard_description =
+    match Tool_shard.get_shard "search_files" with
+    | Some shard -> shard.description
+    | None -> Alcotest.fail "search_files shard not found"
+  in
+  let search_feature = feature_by_id "search_files_tools" in
+  let surface_text =
+    String.concat
+      "\n"
+      [ execute_description
+      ; read_description
+      ; search_shard_description
+      ; search_feature.label
+      ; search_feature.next_action
+      ]
+  in
+  List.iter
+    (fun retired ->
+       check_not_contains ("retired alias absent: " ^ retired) retired surface_text)
+    [ "Search" ^ "Files"; "Edit" ^ "File"; "Read" ^ "File"; "Write" ^ "File" ];
+  List.iter
+    (fun canonical ->
+       check_contains ("canonical alias present: " ^ canonical) canonical surface_text)
+    [ "Grep"; "Edit"; "Execute" ]
+;;
 
 let test_shard_governance_removed () =
   Alcotest.(check bool) "governance shard removed"
@@ -508,6 +578,8 @@ let () =
       Alcotest.test_case "board" `Quick test_shard_board_exists;
       Alcotest.test_case "filesystem" `Quick test_shard_filesystem_exists;
       Alcotest.test_case "search_files" `Quick test_shard_search_files_exists;
+      Alcotest.test_case "canonical alias copy" `Quick
+        test_user_facing_alias_copy_is_canonical;
       Alcotest.test_case "governance removed" `Quick test_shard_governance_removed;
       Alcotest.test_case "retired tool-mode shard removed" `Quick
         test_retired_tool_mode_shard_removed;

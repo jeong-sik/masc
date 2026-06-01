@@ -562,7 +562,7 @@ let executable_not_allowlisted_hint ~name ~mode =
     match mode, name with
     | Readonly, "gh" | Readonly, "git" ->
       Some
-        "This tool_access list is read-only. Use ReadFile/SearchFiles when visible; \
+        "This tool_access list is read-only. Use Read/Grep when visible; \
          otherwise ask for a write/execute-capable schema before using git/gh."
     | _, "bash" | _, "sh" | _, "zsh" ->
       Some
@@ -575,7 +575,7 @@ let executable_not_allowlisted_hint ~name ~mode =
     | _, "jq" ->
       Some
         "jq is not part of Execute. Use typed task/board tools for MASC \
-         state, or inspect files with ReadFile/SearchFiles and parse only the \
+         state, or inspect files with Read/Grep and parse only the \
          needed fields."
     | _, "curl" ->
       Some

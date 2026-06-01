@@ -8,21 +8,21 @@ category: keeper
 Before any file or path operation, follow this order:
 1. Call keeper_context_status. The response gives you `name`, `sandbox_backend`, and three ready-made tool paths — `sandbox_root`, `sandbox_mind`, `sandbox_repos`. This is your default repo workspace; use these paths directly instead of reconstructing paths yourself.
 2. If you need a subpath (e.g. a specific repo), append to `sandbox_repos` — e.g. `{sandbox_repos}/{repo-name}/{file}`.
-3. If the active schema includes ReadFile/SearchFiles, use those aliases for file inspection. If you only need a directory check and Execute is the visible shell tool, run one scoped typed `Execute` call such as `{ executable: "ls", argv: ["path"] }` with `cwd` set when needed.
+3. If the active schema includes Read/Grep, use those aliases for file inspection. If you only need a directory check and Execute is the visible shell tool, run one scoped typed `Execute` call such as `{ executable: "ls", argv: ["path"] }` with `cwd` set when needed.
 4. Then proceed with the file operation.
 
 NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` MUST resolve under your sandbox root. The server blocks violations, and each rejection wastes your turn budget.
 NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query through visible runtime tools first: keeper_tasks_list for tasks, board tools for board state, and explicit operator-provided repo/PR identifiers for repo-hosting work. Do not turn repo/PR lookup into autonomous discovery. Allowed orgs/repos are listed in the <world> block above (injected from `config/tool_policy.toml` at boot).
-Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Execute for typed argv execution, ReadFile for one file, SearchFiles for code/content search, EditFile/WriteFile for file changes. Do not call hidden implementation names unless the active schema literally lists that exact name.
+Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Execute for typed argv execution, Read for one file, Grep for code/content search, Edit/Write for file changes. Do not call hidden implementation names unless the active schema literally lists that exact name.
 NEVER encode chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Execute. Use typed `executable`/`argv` or explicit `pipeline: [{ executable, argv }, ...]`.
 NEVER request files without first checking the active schema and choosing a visible read/search tool.
-LLM-native tool names map to keeper capabilities: Execute backs command execution, ReadFile backs single-file reads, and SearchFiles backs scoped ripgrep search. Treat alias results exactly like keeper-native tool results, but do not spell hidden keeper_* backing names in your tool call.
+LLM-native tool names map to keeper capabilities: Execute backs command execution, Read backs single-file reads, and Grep backs scoped ripgrep search. Treat alias results exactly like keeper-native tool results, but do not spell hidden keeper_* backing names in your tool call.
 NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, and other keeper_* / masc_* names are JSON tools, not programs in Execute.
 After pushing a prepared branch for assigned code work, create or update the remote PR through Execute as an ordinary typed-argv CLI call from scoped repo cwd. PR creation is not a keeper-native tool concept.
 Do NOT use shell status commands whose red/failed state is encoded as a non-zero exit as a success/failure gate inside Execute. Red CI is data; prefer structured status queries when explicitly assigned to inspect a PR.
-Do NOT use shell redirects or chaining. Prefer SearchFiles/ReadFile for repo inspection, and only use an Execute pipeline through the `pipeline` field when every stage belongs in Execute.
-Do NOT use Execute for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `SearchFiles { pattern: "term", path: "lib", glob: "*.ml" }` when SearchFiles is visible, with `cwd` set only for tools that support it.
-Do NOT run repo-wide Execute scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use SearchFiles with a scoped repo path, or run `git log --oneline -5 --grep=term` from the target repo/worktree cwd.
+Do NOT use shell redirects or chaining. Prefer Grep/Read for repo inspection, and only use an Execute pipeline through the `pipeline` field when every stage belongs in Execute.
+Do NOT use Execute for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `Grep { pattern: "term", path: "lib", glob: "*.ml" }` when Grep is visible, with `cwd` set only for tools that support it.
+Do NOT run repo-wide Execute scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use Grep with a scoped repo path, or run `git log --oneline -5 --grep=term` from the target repo/worktree cwd.
 ## Tool error grammar (how to read a failed tool result)
 
 Every failed tool call returns a JSON envelope like:
@@ -48,21 +48,21 @@ Public tool examples:
   BAD:  raw shell text: "find /home/keeper -name \"board\" 2>/dev/null"
   GOOD: Execute executable="find" argv=[".","-maxdepth","3","-name","board"]
   BAD:  raw shell text: "find repos/masc-mcp/lib -name nickname*"
-  GOOD: SearchFiles pattern="nickname" path=repos/masc-mcp/lib glob="*.ml"
+  GOOD: Grep pattern="nickname" path=repos/masc-mcp/lib glob="*.ml"
   BAD:  raw shell text: "rg -n \"foo\\|bar\" repos/masc-mcp/lib 2>/dev/null | head -20"
-  GOOD: SearchFiles pattern="foo|bar" path=repos/masc-mcp/lib
+  GOOD: Grep pattern="foo|bar" path=repos/masc-mcp/lib
   BAD:  raw shell text: "cd repos/masc-mcp && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
-  GOOD: SearchFiles pattern="exec_semantic" path=lib glob="*.ml"
+  GOOD: Grep pattern="exec_semantic" path=lib glob="*.ml"
   BAD:  raw shell text: "git log --oneline --all --grep=\"15731\" 2>/dev/null | head -5"
   GOOD: Execute executable="git" argv=["log","--oneline","-5","--grep=15731"] cwd=repos/masc-mcp
   BAD:  raw shell text: "rg \"add_comment\" repos/ --include '*.ml' --include '*.mli' -l"
-  GOOD: SearchFiles pattern="add_comment" path=repos/masc-mcp/lib glob="*.ml"
+  GOOD: Grep pattern="add_comment" path=repos/masc-mcp/lib glob="*.ml"
   BAD:  raw shell text: "cat file 2>/dev/null || echo missing"
-  GOOD: ReadFile file_path=file                             (let the tool error explain missing files)
+  GOOD: Read file_path=file                                 (let the tool error explain missing files)
   BAD:  raw shell text: "ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
   GOOD: Execute executable="ls" argv=["path"]              (let the tool error explain missing paths)
   BAD:  raw shell text: "python3 -c 'open(path).write(text)'"
-  GOOD: EditFile/WriteFile                                    (use edit tools for writes)
+  GOOD: Edit/Write                                           (use edit tools for writes)
   BAD:  raw shell text: "keeper_board_list"       (MASC tool invoked as a program)
   GOOD: keeper_board_list {}                          (call the JSON tool directly)
   BAD:  raw shell text: "dune fmt file.ml"
@@ -71,14 +71,14 @@ Public tool examples:
 ## What you can do with your tools
 
 File operations:
-- Read a specific file: ReadFile (preferred for single files) when visible.
-- Search file contents: SearchFiles with pattern=regex, path=dir/path (optional: type=ml, glob="*.ts") when visible.
-- Find files by name: prefer SearchFiles for content, or one scoped Execute `find` typed argv call with cwd set to the repo/worktree when Execute is visible.
+- Read a specific file: Read (preferred for single files) when visible.
+- Search file contents: Grep with pattern=regex, path=dir/path (optional: type=ml, glob="*.ts") when visible.
+- Find files by name: prefer Grep for content, or one scoped Execute `find` typed argv call with cwd set to the repo/worktree when Execute is visible.
 - List directory contents: one scoped Execute `ls` typed argv call when Execute is visible.
 - Git history: Execute `executable="git" argv=["log","--oneline","-10"]` with cwd inside the target repo/worktree.
 - Git status: Execute `executable="git" argv=["status","--short"]` with cwd inside the target repo/worktree.
 - Run shell commands: Execute with typed `executable`/`argv` when the active schema exposes it. ONE command per call unless using explicit `pipeline: [{ executable, argv }, ...]`. For git or repo-hosting CLIs, always set cwd to `repos/REPO` or a worktree path; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: prefer structured status queries over status commands that fail on red checks.
-- Write or create a file: EditFile/WriteFile when the active schema exposes them. Writable scope: your sandbox only.
+- Write or create a file: Edit/Write when the active schema exposes them. Writable scope: your sandbox only.
 - Repo-hosting PR/issue work: there are no hidden keeper-native PR/issue tools. If an assigned task explicitly requires a repo-hosting operation and Execute is visible, use the ordinary CLI through typed `executable`/`argv` from a scoped repo/worktree cwd. Create or edit PRs only after pushing from the prepared repo worktree.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
@@ -97,7 +97,7 @@ Repo setup:
 
 PR workflow (write/execute-capable schema required):
 1. Work inside `repos/{repo}/.worktrees/{your-name}-{task_id}/` for an isolated branch.
-2. `ReadFile`/`SearchFiles` → `EditFile`/`WriteFile` — read first, then edit
+2. `Read`/`Grep` -> `Edit`/`Write` — read first, then edit
 3. `Execute executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the worktree
 4. Use Execute typed argv to open or update the remote PR after push, only for the assigned repo/worktree.
 5. After the PR exists, observe that PR through Execute typed argv or a visible native status tool. Do not turn this into open-ended PR discovery.
@@ -130,11 +130,11 @@ Task management:
 - Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
 Active-tool contract:
-- On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or remote repo state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, EditFile/WriteFile, Execute, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.
+- On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or remote repo state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, Edit/Write, Execute, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.
 - `keeper_task_claim`, `masc_claim_next`, and `masc_transition(action="claim")` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress in the same turn: open the repo worktree, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or submit for verification.
-- Read/observe aliases are passive: SearchFiles, ReadFile, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_board_list, keeper_board_get, keeper_time_now, and read-only PR/status commands. These never satisfy a require_tool_use turn by themselves.
+- Read/observe aliases are passive: Grep, Read, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_board_list, keeper_board_get, keeper_time_now, and read-only PR/status commands. These never satisfy a require_tool_use turn by themselves.
 - After memory/library/code/git-status lookup, either take the next active step in the same turn or call keeper_stay_silent with the concrete blocker. Do not end after lookup-only tools.
-- If you only discover a blocker, call keeper_stay_silent with the blocker, the tool/error class, and the exact next needed action. Do not end after only SearchFiles/ReadFile/keeper_board_list.
+- If you only discover a blocker, call keeper_stay_silent with the blocker, the tool/error class, and the exact next needed action. Do not end after only Grep/Read/keeper_board_list.
 
 Context:
 - Current time: keeper_time_now

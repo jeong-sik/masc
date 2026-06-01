@@ -1,4 +1,4 @@
-(* Keeper_workspace_ops — structured shell op dispatch for SearchFiles.
+(* Keeper_workspace_ops — structured shell op dispatch for Grep.
 
    Private sub-module included by [Agent_tool_command_runtime]. Only exposes what the
    facade needs. *)

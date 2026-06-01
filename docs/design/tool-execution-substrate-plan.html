@@ -455,12 +455,12 @@
 
       <div class="mini-list" aria-label="accepted public tools">
         <span class="pill">Execute</span>
-        <span class="pill">SearchFiles</span>
-        <span class="pill">ReadFile</span>
-        <span class="pill">EditFile</span>
-        <span class="pill">WriteFile</span>
-        <span class="pill">SearchWeb</span>
-        <span class="pill">FetchWeb</span>
+        <span class="pill">Grep</span>
+        <span class="pill">Read</span>
+        <span class="pill">Edit</span>
+        <span class="pill">Write</span>
+        <span class="pill">WebSearch</span>
+        <span class="pill">WebFetch</span>
       </div>
     </section>
 
@@ -474,7 +474,7 @@
       <div class="diagram" aria-label="tool execution architecture diagram">
         <div class="node public">
           <strong>Public Tool</strong>
-          <span>Model-facing name such as <code>Execute</code> or <code>ReadFile</code>.</span>
+          <span>Model-facing name such as <code>Execute</code> or <code>Read</code>.</span>
         </div>
         <div class="node public">
           <strong>Descriptor</strong>
@@ -527,19 +527,19 @@
           <tr>
             <td><code>Shell_ir</code></td>
             <td>Typed command execution and structured search-file command adapters.</td>
-            <td><code>Execute</code>, <code>SearchFiles</code></td>
+            <td><code>Execute</code>, <code>Grep</code></td>
             <td><code>Gh_cli</code>, <code>Git_cli</code>, raw <code>Bash</code>.</td>
           </tr>
           <tr>
             <td><code>Filesystem</code></td>
             <td>Semantic file reads and writes with reviewable path/content shape.</td>
-            <td><code>ReadFile</code>, <code>EditFile</code>, <code>WriteFile</code></td>
+            <td><code>Read</code>, <code>Edit</code>, <code>Write</code></td>
             <td>Ad hoc shell redirection or command-generated file mutation.</td>
           </tr>
           <tr>
             <td><code>Remote_mcp</code></td>
             <td>Remote evidence or MCP capability boundary.</td>
-            <td><code>SearchWeb</code>, <code>FetchWeb</code></td>
+            <td><code>WebSearch</code>, <code>WebFetch</code></td>
             <td>Mirroring every remote operation as a first-class tool.</td>
           </tr>
           <tr>
@@ -637,7 +637,7 @@
           <tr>
             <td><span class="status done">PR-C</span> Prompt alignment</td>
             <td>Stop keeper prompts from suggesting stale names.</td>
-            <td>Normalize keeper prompts/matrix to <code>SearchWeb</code>, <code>FetchWeb</code>, <code>SearchFiles</code>, <code>ReadFile</code>, <code>EditFile</code>, <code>WriteFile</code>, <code>Execute</code>, and ratchet internal web names out of keeper-facing guidance.</td>
+            <td>Normalize keeper prompts/matrix to <code>WebSearch</code>, <code>WebFetch</code>, <code>Grep</code>, <code>Read</code>, <code>Edit</code>, <code>Write</code>, <code>Execute</code>, and ratchet internal web names out of keeper-facing guidance.</td>
             <td><code>bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail</code> plus focused source-test build/case.</td>
           </tr>
           <tr>
@@ -693,13 +693,13 @@
         <tbody>
           <tr>
             <td>Read current source</td>
-            <td><code>SearchFiles</code> then <code>ReadFile</code></td>
+            <td><code>Grep</code> then <code>Read</code></td>
             <td>No legacy <code>Read</code> call; file evidence has descriptor route.</td>
             <td><code>Tool not found: Read</code> loops.</td>
           </tr>
           <tr>
             <td>Edit and test</td>
-            <td><code>EditFile</code> or <code>WriteFile</code>, then <code>Execute</code> typed <code>dune</code>/<code>scripts/dune-local.sh</code></td>
+            <td><code>Edit</code> or <code>Write</code>, then <code>Execute</code> typed <code>dune</code>/<code>scripts/dune-local.sh</code></td>
             <td>Write gate decision is explicit; command runs through Shell IR.</td>
             <td>Raw shell string, glob, redirect, or chained command accepted silently.</td>
           </tr>
@@ -711,7 +711,7 @@
           </tr>
           <tr>
             <td>Web evidence</td>
-            <td><code>SearchWeb</code> then <code>FetchWeb</code></td>
+            <td><code>WebSearch</code> then <code>WebFetch</code></td>
             <td>Keeper prompt and descriptor surface agree on names.</td>
             <td>Prompt tells keeper to call <code>masc_web_search</code> when only alias is exposed.</td>
           </tr>
@@ -892,7 +892,7 @@
           </tr>
           <tr>
             <td>Keeper prompt web aliases</td>
-            <td>Keeper-facing prompts and the capability matrix use <code>SearchWeb</code> / <code>FetchWeb</code>; <code>masc_web_search</code> / <code>masc_web_fetch</code> remain outside these model-facing guidance surfaces.</td>
+            <td>Keeper-facing prompts and the capability matrix use <code>WebSearch</code> / <code>WebFetch</code>; <code>masc_web_search</code> / <code>masc_web_fetch</code> remain outside these model-facing guidance surfaces.</td>
           </tr>
           <tr>
             <td>Known caveat</td>

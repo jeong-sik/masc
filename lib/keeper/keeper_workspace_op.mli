@@ -1,4 +1,4 @@
-(** Shell operation vocabulary for the structured SearchFiles surface. *)
+(** Shell operation vocabulary for the structured Grep surface. *)
 
 type t =
   | Pwd

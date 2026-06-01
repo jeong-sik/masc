@@ -1,4 +1,4 @@
-(** Filesystem runtime handlers for descriptor-backed ReadFile/EditFile/WriteFile tools. *)
+(** Filesystem runtime handlers for descriptor-backed Read/Edit/Write tools. *)
 
 val resolve_partition_for_write
   :  base_dir:string

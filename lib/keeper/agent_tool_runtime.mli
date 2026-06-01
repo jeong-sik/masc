@@ -2,7 +2,7 @@
 
     [Agent_tool_dispatch_runtime] owns cross-cutting execution bookkeeping. This module
     owns the descriptor-selected lowerer/handler route for first-class agent
-    tools such as [Execute], [ReadFile], [SearchFiles], and [SearchWeb]. *)
+    tools such as [Execute], [Read], [Grep], and [WebSearch]. *)
 
 (* RFC-0182 Phase 5 PR-A: [sw] / [clock] / [proc_mgr] / [net] /
    [mcp_session_id] are optional Eio resource fields.  Eio-bound

@@ -684,7 +684,7 @@ let run_turn
                  (* RFC-0064: canonicalise observed tool names across all three
                     input surfaces (LLM-native public / MCP protocol /
                     already-internal) before the disclosure check. Without
-                    this, the disclosure check flags every Execute/ReadFile call as
+                    this, the disclosure check flags every Execute/Read call as
                     "unexpected" and nukes turns where the LLM only used the
                     alias names (≈18% of turns per #8778).
 
@@ -706,7 +706,7 @@ let run_turn
                  unexpected_tool_names_ref := unexpected_tool_names;
                  (* Partial tolerance (#8471): when a turn mixes valid tool calls
           with unexpected ones (LLM hallucinating Claude Code built-ins
-          like Execute/ReadFile/Skill outside the keeper surface), do not nuke
+          like Execute/Read/Skill outside the keeper surface), do not nuke
           the whole turn. OAS already returns tool_result="error" for the
           unknown calls so the LLM can recover on the next step. We still
           hard-fail when EVERY tool call is unexpected — that means the

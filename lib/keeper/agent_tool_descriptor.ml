@@ -1123,7 +1123,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "tool_help" "masc_tool_help"
       "Read help text for a tool name." ~readonly:true
   (* [masc_web_search] / [masc_web_fetch] are already owned by the
-     LLM-native SearchWeb / FetchWeb descriptors above. Do not add
+     LLM-native WebSearch / WebFetch descriptors above. Do not add
      duplicate internal descriptors here; that would make runtime receipt
      projection depend on list order. *)
   ; masc_misc_descriptor "tool_admin_snapshot" "masc_tool_admin_snapshot"

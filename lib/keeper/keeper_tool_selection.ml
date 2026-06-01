@@ -123,7 +123,7 @@ let contract_enforcement_filter
         tool_names
     in
     (* stay_silent is Completion-class, already in [preserved].
-       This filter removes only Passive_status tools (ReadFile, SearchFiles, List, etc.)
+       This filter removes only Passive_status tools (Read, Grep, List, etc.)
        that contribute nothing to owned tasks during streaks. *)
     preserved)
 ;;

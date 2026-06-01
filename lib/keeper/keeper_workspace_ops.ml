@@ -1,4 +1,4 @@
-(* SearchFiles operation handlers.
+(* Grep operation handlers.
 
    Read/list/search operations live in Keeper_workspace_read_ops. This facade keeps
    alias parsing, remaining git mutation-ish helpers, and unsupported-op

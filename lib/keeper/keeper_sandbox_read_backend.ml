@@ -206,12 +206,12 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
       Error
         (Printf.sprintf
            "docker_cat_failed: path_not_found: %s (host path does not exist; verify the \
-            relative path under your playground before calling ReadFile)"
+            relative path under your playground before calling Read)"
            host_path)
     else if Sys.is_directory host_path then
       Error
         (Printf.sprintf
-           "docker_cat_failed: path_is_directory: %s (ReadFile requires a file, \
+           "docker_cat_failed: path_is_directory: %s (Read requires a file, \
             not a directory; use Execute executable='ls' argv=['<path>'] or a visible file-listing \
             tool for directory listings)"
            host_path)

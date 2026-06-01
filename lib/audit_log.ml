@@ -104,27 +104,37 @@ let action_to_string = function
       "governance_decision:" ^ governance_audit_decision_to_string decision
   | Custom name -> "custom:" ^ name
 
-let string_to_action = function
-  | "claim_task" -> ClaimTask
-  | "start_task" -> StartTask
-  | "done_task" -> DoneTask
-  | "cancel_task" -> CancelTask
-  | "release_task" -> ReleaseTask
-  | "broadcast" -> Broadcast
-  | "suspend" -> Suspend
-  | "auth_success" -> AuthSuccess
-  | "auth_failure" -> AuthFailure
-  | "circuit_open" -> CircuitOpen
-  | "circuit_close" -> CircuitClose
-  | "search_refinement" -> SearchRefinement
-  | s when String.length s > 10 && String.starts_with ~prefix:"tool_call:" s ->
-      ToolCall (String.sub s 10 (String.length s - 10))
-  | s when String.length s > 20 && String.starts_with ~prefix:"governance_decision:" s ->
-      let raw = String.sub s 20 (String.length s - 20) in
-      GovernanceDecision (governance_audit_decision_of_string raw)
-  | s when String.length s > 7 && String.starts_with ~prefix:"custom:" s ->
-      Custom (String.sub s 7 (String.length s - 7))
-  | s -> Custom s
+let string_to_action s =
+  (* Split on first ':' to separate tag from payload for parameterized
+     variants.  Simple action names without ':' match directly.  This
+     replaces the old prefix+magic-length approach which was fragile:
+     magic numbers drifted from tag lengths, and a fixed-length prefix
+     could not account for variable-length payloads. *)
+  match String.index_opt s ':' with
+  | Some colon_pos ->
+    let tag = String.sub s 0 colon_pos in
+    let payload = String.sub s (colon_pos + 1) (String.length s - colon_pos - 1) in
+    (match tag with
+     | "tool_call" -> ToolCall payload
+     | "governance_decision" ->
+         GovernanceDecision (governance_audit_decision_of_string payload)
+     | "custom" -> Custom payload
+     | _ -> Custom s)
+  | None ->
+    (match s with
+     | "claim_task" -> ClaimTask
+     | "start_task" -> StartTask
+     | "done_task" -> DoneTask
+     | "cancel_task" -> CancelTask
+     | "release_task" -> ReleaseTask
+     | "broadcast" -> Broadcast
+     | "suspend" -> Suspend
+     | "auth_success" -> AuthSuccess
+     | "auth_failure" -> AuthFailure
+     | "circuit_open" -> CircuitOpen
+     | "circuit_close" -> CircuitClose
+     | "search_refinement" -> SearchRefinement
+     | _ -> Custom s)
 
 let outcome_to_json = function
   | Success -> `Assoc [("status", `String "success")]

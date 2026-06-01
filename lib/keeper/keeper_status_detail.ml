@@ -727,6 +727,10 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          let attention_fields =
            attention_fields_json config m
          in
+         let runtime_trust =
+           Keeper_runtime_trust_snapshot.snapshot_json
+             ~config:config ~meta:m
+         in
          let latest_metrics =
            latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
          in
@@ -734,11 +738,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            model_observability_json
              ~current_runtime_id:(runtime_id_of_meta m)
              ~runtime_blocker_fields
+             ~runtime_trust
              latest_metrics
-         in
-         let runtime_trust =
-           Keeper_runtime_trust_snapshot.snapshot_json
-             ~config:config ~meta:m
          in
          let attention_fields =
            attention_fields_with_runtime_trust attention_fields runtime_trust

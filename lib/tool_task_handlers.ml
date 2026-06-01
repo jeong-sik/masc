@@ -35,6 +35,7 @@ type task_owner_hooks =
   ; agent_tool_names : Workspace.config -> agent_name:string -> string list option
   ; transition_action_denylist : Workspace.config -> agent_name:string -> string list
   ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
+  ; workflow_scope_block_ttl_seconds : float
   }
 
 let default_task_owner_hooks =
@@ -43,6 +44,7 @@ let default_task_owner_hooks =
   ; agent_tool_names = (fun _ ~agent_name:_ -> None)
   ; transition_action_denylist = (fun _ ~agent_name:_ -> [])
   ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
+  ; workflow_scope_block_ttl_seconds = 1800.
   }
 ;;
 
@@ -55,7 +57,7 @@ let current_task_owner_hooks () = Atomic.get task_owner_hooks
    [handle_claim_next] can exclude it from the next [claim_next_r] call. Entries
    expire with the same TTL as the per-tool workflow scope block. *)
 
-let blocked_task_ttl_seconds = Keeper_tools_oas_workflow.workflow_block_ttl_seconds
+let blocked_task_ttl_seconds () = (current_keeper_hooks ()).workflow_scope_block_ttl_seconds
 
 let blocked_task_ids_table : (string * string, float) Hashtbl.t = Hashtbl.create 16
 let blocked_task_ids_mutex = Mutex.create ()
@@ -79,7 +81,7 @@ let scope_blocked_task_ids config =
     let expired = ref [] in
     Hashtbl.iter
       (fun key blocked_at ->
-        if now -. blocked_at > blocked_task_ttl_seconds then
+        if now -. blocked_at > blocked_task_ttl_seconds () then
           expired := key :: !expired)
       blocked_task_ids_table;
     List.iter (fun k -> Hashtbl.remove blocked_task_ids_table k) !expired;

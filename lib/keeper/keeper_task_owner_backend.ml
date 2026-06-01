@@ -117,5 +117,6 @@ let install_hooks () =
           (fun config ~agent_name -> transition_action_denylist_fn config ~agent_name)
       ; active_goal_phases_for_agent =
           (fun config ~agent_name -> active_goal_phases_for_agent_fn config ~agent_name)
+      ; workflow_scope_block_ttl_seconds = Keeper_tools_oas.workflow_block_ttl_seconds
       }
 ;;

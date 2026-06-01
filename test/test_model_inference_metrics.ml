@@ -791,7 +791,7 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
         ~ts:(ts -. 20.0)
         ~input_tokens:10 ~output_tokens:5 ~latency_ms:200
         ~cost_usd:0.02 ();
-      success_entry ~model:"model-d" ~provider:"provider_d"
+      success_entry ~model:"model-d" ~provider:"chat_completions_v1"
         ~ts:(ts -. 10.0)
         ~input_tokens:20 ~output_tokens:10 ~latency_ms:1000
         ~cost_usd:0.01 ();

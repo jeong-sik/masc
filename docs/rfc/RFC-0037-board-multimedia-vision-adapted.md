@@ -5,7 +5,7 @@
 - **Created**: 2026-05-07
 - **Drives**: adaptation of an externally authored 2025-05 plan document for board multimedia + AI vision integration. The external plan as written is not implementable on masc-mcp main; this RFC documents the verified gap and proposes a stack-aligned path.
 - **Related**:
-  - `docs/rfc/RFC-0008-credential-provider.md` — credential surface that any external API integration (Provider-A / Provider-D) must respect.
+  - `docs/rfc/RFC-0008-credential-provider.md` — credential surface that any external API integration (Provider-A / Chat Completions v1) must respect.
   - `lib/board_types/board_types.mli` — current post type SSOT (line 76 onward).
   - `lib/provider_adapter.ml` — existing AI provider abstraction (1626 LOC + 397 mli) that this RFC builds on rather than replacing.
   - `~/me/common/evidence-record.md` — currency policy that any model-id / pricing claim must satisfy at PR time.
@@ -56,7 +56,7 @@ The plan's **intent** (give board posts a media surface and automate analysis) i
 | Comment type | `board_types.mli:95-105` — analogous structure, no `meta_json` field today |
 | API dispatch | `lib/board_dispatch.ml`, `lib/board.ml`, `lib/board_core.ml` |
 | AI provider abstraction | `lib/provider_adapter.ml` (1626 LOC + 397 mli) — `runtime_kind` (Local / Cli_agent / Direct_api), `auth_mode`, `model_family`, `model_policy` |
-| Provider-D compat surface | `lib/server/server_openai_compat.ml` — receives Provider-D-style requests but is not vision-aware today |
+| Chat Completions v1 compat surface | `lib/server/server_openai_compat.ml` — receives Chat Completions v1-style requests but is not vision-aware today |
 | Frontend board components | 12 files in `dashboard/src/components/board/` — board-state, board-surface (863 LOC), post-detail (538 LOC), mention-inbox, message-workspace-timeline, board-curation-panel, board-karma-panel, reaction-bar, state-block-messages, sub-board-surface, index, plus tests |
 
 ## 4. Phased proposal
@@ -159,7 +159,7 @@ The plan proposes a separate `VisionProvider` module hierarchy (with its own `na
   ```
 - Reuse existing `auth_mode` (`Api_key` / `Vertex_adc`) — no new credential paths.
 
-**Currency placeholder**: model selection is deferred to PR-time fetch of the official Provider-A and Provider-D model lists, with Evidence Record entries created per `~/me/common/evidence-record.md`. This RFC explicitly does **not** commit to specific model strings.
+**Currency placeholder**: model selection is deferred to PR-time fetch of the official Provider-A and Chat Completions v1 model lists, with Evidence Record entries created per `~/me/common/evidence-record.md`. This RFC explicitly does **not** commit to specific model strings.
 
 ### 4.4 Phase C — deferred
 

@@ -201,7 +201,7 @@ describe('buildFleetRows runtime labels', () => {
             runtime_strategy: 'round_robin',
             fallback_applied: true,
             fallback_hops: 1,
-            fallback_from: 'provider-d:gpt-5.4',
+            fallback_from: 'chat-completions-v1:gpt-5.4',
             fallback_to: 'provider-a:model-a-sonnet',
             fallback_reason: 'turn_timeout',
           },

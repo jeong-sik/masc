@@ -22,7 +22,7 @@ Apply a consistent vendor-agnostic mapping across the 32 files. The mapping pres
 | `provider-a`, `Provider-A` | `provider-a`, `Provider-A` |
 | `provider-b`, `Provider-B` | `provider-b`, `Provider-B` |
 | `provider-c`, `Provider-C` (word) | `provider-c`, `Provider-C` |
-| `provider-d`, `Provider-D` | `provider-d`, `Provider-D` |
+| `chat-completions-v1`, `Chat Completions v1` | `chat-completions-v1`, `Chat Completions v1` |
 | `provider-e`, `Provider-E`, `PROVIDER-A` (case) | `provider-e`, `Provider-E`, `PROVIDER-A` |
 | `provider-f`, `Provider-F` | `provider-f`, `Provider-F` |
 | `provider-g`, `Provider-G` | `provider-g`, `Provider-G` |

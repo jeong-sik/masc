@@ -52,14 +52,14 @@ let api_format_of_protocol (s : string)
   =
   match s with
   | "provider_a-cli" | "provider_a-http" -> Ok Runtime_schema.Messages_api
-  | "provider_d-cli" | "provider_d-http" | "provider_f-cli" | "provider_c-cli" ->
+  | "chat_completions_v1_cli" | "chat_completions_v1_http" | "provider_f-cli" | "provider_c-cli" ->
     Ok Runtime_schema.Chat_completions_api
   | "ollama-http" -> Ok Runtime_schema.Ollama_api
   | _ ->
     Error
       (Printf.sprintf
          "unknown protocol %S: expected one of provider_a-cli, provider_a-http, \
-          provider_d-cli, provider_d-http, provider_f-cli, provider_c-cli, \
+          chat_completions_v1_cli, chat_completions_v1_http, provider_f-cli, provider_c-cli, \
           ollama-http"
          s)
 ;;

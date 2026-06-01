@@ -135,7 +135,7 @@ describe('normalizeOperatorDigest', () => {
         status: 'complete',
         confidence: 0.85,
         model_name: 'gpt-4.1',
-        runtime_name: 'provider-d',
+        runtime_name: 'chat-completions-v1',
       },
     })
     expect(result.judgment).not.toBeNull()

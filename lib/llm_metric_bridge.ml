@@ -20,14 +20,14 @@
 (** Canonical metric name for provider HTTP response counts.
 
     Label cardinality (practical upper bound as of v0.4.x):
-    - [provider]: fixed enum of 6 canonical values (ollama, provider_k,
-      provider_k-coding, provider_a, provider_d, provider_f, cli_tool_d)
+    - [provider]: fixed enum of 7 canonical values (ollama, provider_k,
+      provider_k-coding, provider_a, chat_completions_v1, provider_f, cli_tool_d)
     - [model]: bounded by entries in [config/keeper_runtime.toml], typically
       under 10 distinct values per deployment
     - [status]: small set of HTTP codes the provider actually emits
       (usually 200, 400, 401, 429, 500, 503)
 
-    Upper bound ≈ 6 × 10 × 10 = 600 series.  No runtime cardinality
+    Upper bound ≈ 7 × 10 × 10 = 700 series.  No runtime cardinality
     guard; if a deployment introduces unbounded custom model ids,
     revisit with an allowlist or drop the [model] label. *)
 let http_status_metric = Prometheus.metric_llm_provider_http_status

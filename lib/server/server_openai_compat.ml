@@ -76,7 +76,7 @@ let extract_user_message (messages : Yojson.Safe.t) : string option =
 let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) result =
   let ctx : _ Keeper_types_profile.context = {
     config;
-    agent_name = "provider_d-compat";
+    agent_name = "chat-completions-v1-compat";
     sw;
     clock;
     proc_mgr = None;

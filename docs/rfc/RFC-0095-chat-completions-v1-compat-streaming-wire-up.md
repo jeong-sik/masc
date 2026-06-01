@@ -1,6 +1,6 @@
 ---
 rfc: "0095"
-title: "Provider-D-compat provider streaming wire-up"
+title: "Chat Completions v1-compatible provider streaming wire-up"
 status: Implemented
 created: 2026-05-17
 updated: 2026-05-22
@@ -11,7 +11,7 @@ related: ["0047", "0045", "0033", "0058"]
 implementation_prs: [15722,15725]
 ---
 
-# RFC-0095 — Provider-D-compat provider streaming wire-up
+# RFC-0095 — Chat Completions v1-compatible provider streaming wire-up
 
 ## 1. Summary
 
@@ -143,7 +143,7 @@ Phase 0 PR 은 **production behavior 무변경**. trace 코드는 `-tags trace`
   않는 *layer-above* fix.
 
 Fix 자체는 **production-impacting**. 다음 안전망 적용:
-- `feature/rfc-0095-provider-d-compat-streaming` 브랜치 + Draft PR + sangsu /
+- `feature/rfc-0095-chat-completions-v1-compat-streaming` 브랜치 + Draft PR + sangsu /
   imseonghan / jobsian_purist 등 *runpod_mtp runtime 사용 7 keeper*
   canary observation.
 - Rollback path: keeper_runtime.toml 에서 `streaming = false` per-model override
@@ -151,7 +151,7 @@ Fix 자체는 **production-impacting**. 다음 안전망 적용:
 
 ## 7. Phase 2 — Regression test
 
-- `test/test_runtime_streaming_wire_up.ml` (신규): mock provider-d-compat
+- `test/test_runtime_streaming_wire_up.ml` (신규): mock chat-completions-v1-compat
   endpoint 를 띄우고 sangsu-like keeper turn 1 회 실행 → metric
   counter `provider="openai_compat"` first_chunk_count > 0 + 라벨
   누락 bucket count = 0 확인.

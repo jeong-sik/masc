@@ -27,7 +27,7 @@ default = "test.local"
 
 [providers.test]
 display-name = "Test"
-protocol = "provider_d-http"
+protocol = "chat_completions_v1_http"
 endpoint = "http://127.0.0.1:1"
 
 [models.local]

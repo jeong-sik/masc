@@ -19,7 +19,7 @@ default = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "chat_completions_v1_http"
 endpoint = "https://runpod.example/v1"
 
 [providers.runpod_mtp.capabilities]
@@ -28,12 +28,12 @@ supports-runtime-tool-events = true
 
 [providers.openai]
 display-name = "OpenAI"
-protocol = "provider_d-http"
+protocol = "chat_completions_v1_http"
 endpoint = "https://api.openai.example/v1"
 
 [providers.local_mtp]
 display-name = "Local MTP"
-protocol = "provider_d-http"
+protocol = "chat_completions_v1_http"
 endpoint = "http://127.0.0.1:8080"
 
 [providers.local_mtp.capabilities]

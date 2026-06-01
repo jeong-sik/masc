@@ -11,7 +11,7 @@
 
 After RFC-0165 / 0166 / 0167 cleared all upstream-LLM-provider and MCP-client name literals from `lib/` and `bin/`, the dashboard frontend still carried a closed roster of provider colors:
 
-- `dashboard/design-system/tokens/source.ts:155-169` — 14 raw color tokens (`p-provider-a`, `p-provider-c`, `p-provider-d`, `p-provider-e`, `p-provider-f`, `p-provider-g`, `p-provider-h`, `p-provider-j`, `p-provider-l`, `p-ollama`, `p-llamacpp`, `p-provider-k`, `p-provider-f-cli`, `p-agent-code-cli`).
+- `dashboard/design-system/tokens/source.ts:155-169` — 14 raw color tokens (`p-provider-a`, `p-provider-c`, `p-chat-completions-v1`, `p-provider-e`, `p-provider-f`, `p-provider-g`, `p-provider-h`, `p-provider-j`, `p-provider-l`, `p-ollama`, `p-llamacpp`, `p-provider-k`, `p-provider-f-cli`, `p-agent-code-cli`).
 - `dashboard/design-system/tokens/source.ts:499-517` — 14 paired soft/border semantic variants generated from the raw palette.
 - All generated outputs (`dashboard/src/styles/tokens.generated.{ts,css}`, `dashboard/design-system/source_styles/tokens.generated.css`, `dashboard_bonsai/src/tokens.{ml,mli}`, `dashboard_bonsai/static/colors_and_type.generated.css`, `dashboard/design-system/tokens/build/tokens.json`).
 - Stale generated artifacts not produced by `pnpm tokens:build` but committed: `dashboard/design-system/tokens.generated.css`, `dashboard/design-system/ui_kits/cockpit/tokens.generated.css`.
@@ -40,7 +40,7 @@ No live UX regression — the palette was dead code.
 ## 4. Verification
 
 - `pnpm tokens:build` clean.
-- `rg 'p-(provider-a|provider-c|provider-d|provider-e|provider-f|provider-g|provider-h|provider-j|provider-l|ollama|llamacpp|provider-k|agent-code)' dashboard/src/` returns 0 hits.
+- `rg 'p-(provider-a|provider-c|chat-completions-v1|provider-e|provider-f|provider-g|provider-h|provider-j|provider-l|ollama|llamacpp|provider-k|agent-code)' dashboard/src/` returns 0 hits.
 - `dune build lib/ bin/` clean (OCaml core unaffected).
 - `pnpm vitest run` — 5 tests fail. 4 of those failures are origin/main baseline (verified by running the same subset against `origin/main` via stash); the remaining 1 is unattributed in this PR.
 

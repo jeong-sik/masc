@@ -21,19 +21,19 @@ Related:
 
 ## 0. Problem framing
 
-`lib/runtime/runtime_phonebook_types.ml` defines typed sum types for `runtime_server_flavor` (`Llama_cpp | Ollama | Vllm | Provider_d_wire | Provider_g_wire | Provider_k_zai | Provider_h_wire`) and `runtime_protocol` (`Openai_http | Ollama_http | Provider_a_http | Openai_cli`). String roundtrip is hand-rolled via `flavor_of_string` / `flavor_to_string` / `protocol_of_string` / `protocol_to_string`, with literal forms `"provider_d"`, `"provider_g"`, `"zai-provider_k"`, `"provider_h"`, `"provider_d-http"`, `"provider_a-http"`, `"provider_d-cli"`.
+`lib/runtime/runtime_phonebook_types.ml` defines typed sum types for `runtime_server_flavor` (`Llama_cpp | Ollama | Vllm | Chat_completions_v1_wire | Provider_g_wire | Provider_k_zai | Provider_h_wire`) and `runtime_protocol` (`Openai_http | Ollama_http | Provider_a_http | Openai_cli`). String roundtrip is hand-rolled via `flavor_of_string` / `flavor_to_string` / `protocol_of_string` / `protocol_to_string`, with literal forms `"chat_completions_v1"`, `"provider_g"`, `"zai-provider_k"`, `"provider_h"`, `"chat_completions_v1_http"`, `"provider_a-http"`, `"chat_completions_v1_cli"`.
 
 This produces two compounding fragilities:
 
 ### Fragility 1 — string literals are unguarded by the type system
 
-Adding a new flavor adds a variant and forces an exhaustive `match` update — that part is fine. But the *string form* picked for the new variant has no compiler-checked relationship to the fixture or runtime TOML. Drift between the literal (`"provider_d"`), the fixture (`provider_d-http`), and the runtime config (`<MASC_BASE>/.masc/config/keeper_runtime.toml`'s `protocol = "provider_d-http"`) is only caught by tests, and only the tests that happen to exercise that path.
+Adding a new flavor adds a variant and forces an exhaustive `match` update — that part is fine. But the *string form* picked for the new variant has no compiler-checked relationship to the fixture or runtime TOML. Drift between the literal (`"chat_completions_v1"`), the fixture (`chat_completions_v1_http`), and the runtime config (`<MASC_BASE>/.masc/config/keeper_runtime.toml`'s `protocol = "chat_completions_v1_http"`) is only caught by tests, and only the tests that happen to exercise that path.
 
-PR #18837's dropped commit `1e0f96365` ("fix(runtime): accept hyphenated protocol/flavor strings in phonebook parser", 2026-05-27) is the concrete evidence: an LLM-authored fix claimed PR #18232 had renamed fixtures from underscore to hyphen, but main fixture (`test/test_runtime_phonebook.ml`), branch base fixture (`57ac702a245`), and runtime `<MASC_BASE>/.masc/config/keeper_runtime.toml` were *all* still underscore. The "fix" introduced an inconsistency it then patched with alt-form parsing (`"provider-d" | "provider_d" -> Provider_d_wire`). This is CLAUDE.md §워크어라운드 §2 (string/substring classifier 보강) verbatim — `pr-rfc-check.sh --workaround-gate-only` would have flagged it at push time.
+PR #18837's dropped commit `1e0f96365` ("fix(runtime): accept hyphenated protocol/flavor strings in phonebook parser", 2026-05-27) is the concrete evidence: an LLM-authored fix claimed PR #18232 had renamed fixtures from underscore to hyphen, but main fixture (`test/test_runtime_phonebook.ml`), branch base fixture (`57ac702a245`), and runtime `<MASC_BASE>/.masc/config/keeper_runtime.toml` were *all* still underscore. The "fix" introduced an inconsistency it then patched with alt-form parsing (`"chat-completions-v1" | "chat_completions_v1" -> Chat_completions_v1_wire`). This is CLAUDE.md §워크어라운드 §2 (string/substring classifier 보강) verbatim — `pr-rfc-check.sh --workaround-gate-only` would have flagged it at push time.
 
 ### Fragility 2 — generic placeholder names are semantically empty
 
-RFC-0172/0173 vendor purge replaced vendor names (`anthropic`, `openai`, `deepseek`, `groq`, `zai`) with placeholders (`provider_d`, `provider_g`, `provider_h`, `provider_k`). The typed OCaml variants kept their semantics in trailing comments (`Provider_d_wire (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)`), but the string surface lost all meaning. A reader of `<MASC_BASE>/.masc/config/keeper_runtime.toml` who sees `protocol = "provider_d-http"` cannot tell what wire format it commits to without bouncing through `runtime_phonebook_types.ml`.
+RFC-0172/0173 vendor purge replaced vendor names (`anthropic`, `openai`, `deepseek`, `groq`, `zai`) with placeholders (`chat_completions_v1`, `provider_g`, `provider_h`, `provider_k`). The typed OCaml variants kept their semantics in trailing comments (`Chat_completions_v1_wire (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)`), but the string surface lost all meaning. A reader of `<MASC_BASE>/.masc/config/keeper_runtime.toml` who sees `protocol = "chat_completions_v1_http"` cannot tell what wire format it commits to without bouncing through `runtime_phonebook_types.ml`.
 
 `"zai-provider_k"` is the proof — the purge stripped vendors but left `zai-` as a partial prefix, because the variant name (`Provider_k_zai`) preserved the vendor reference. The string surface is now half-purged, half-vendor, half-placeholder.
 
@@ -55,7 +55,7 @@ Sketch of the proposed direction (subject to RFC-0181 outcome):
 | Option | Mechanism | Drift surface | Migration cost |
 |---|---|---|---|
 | **A. ATD/PPX deserialization** | TOML parser generated from a single ATD schema or `[@@deriving of_toml]` PPX. Variant constructor *is* the wire form (e.g. ATD `<json name>` maps to constructor name). | Zero — the schema is the contract. | Medium — schema authoring + caller migration, but no behavior change. |
-| **B. Restore vendor names** | Reverse RFC-0172/0173 for runtime phonebook only. `"openai-http"` instead of `"provider_d-http"`. | Same as today, but at least the literal carries meaning. | Low (code) + needs IP/legal sign-off on why vendor names were purged in the first place. |
+| **B. Restore vendor names** | Reverse RFC-0172/0173 for runtime phonebook only. `"openai-http"` instead of `"chat_completions_v1_http"`. | Same as today, but at least the literal carries meaning. | Low (code) + needs IP/legal sign-off on why vendor names were purged in the first place. |
 | **C. Closed-enum single-form** | One canonical literal per variant, explicit `Result.t` rejection of all alt forms. No `|`-alternation in match arms. Drift detection via a CI ratchet (`pr-rfc-check.sh` extension). | Zero in code; drift in fixture vs runtime caught at parse time. | Lowest — only the alt-form branches deleted, plus the CI ratchet. |
 
 Recommendation pending RFC-0181 decision: **A** if RFC-0181 introduces new typed surfaces (consistent generation pipeline), **C** as a holding pattern if RFC-0181 stays string-based.
@@ -92,10 +92,10 @@ Interim mitigation (no code change): add an entry to `pr-rfc-check.sh`'s grep th
 
 - **Evidence**: 
   - `lib/runtime/runtime_phonebook_types.ml` lines 17-44 (current hand-rolled `_of_string` / `_to_string` with literal alt-forms)
-  - PR #18837 commit `1e0f96365` body (false-premise documentation) + diff vs main (`provider_d-http` vs `provider-d-http`)
-  - `git show 57ac702a245:test/test_runtime_phonebook.ml | rg "protocol = "` → all `provider_d-http` (underscore)
-  - `git show origin/main:test/test_runtime_phonebook.ml | rg "protocol = "` → all `provider_d-http` (underscore)
-  - `rg "^protocol\s*=" <MASC_BASE>/.masc/config/keeper_runtime.toml` → all `provider_d-http` (underscore)
+  - PR #18837 commit `1e0f96365` body (false-premise documentation) + diff vs main (`provider_d-http` vs `chat_completions_v1_http`)
+  - `git show 57ac702a245:test/test_runtime_phonebook.ml | rg "protocol = "` → all `chat_completions_v1_http` (underscore)
+  - `git show origin/main:test/test_runtime_phonebook.ml | rg "protocol = "` → all `chat_completions_v1_http` (underscore)
+  - `rg "^protocol\s*=" <MASC_BASE>/.masc/config/keeper_runtime.toml` → all `chat_completions_v1_http` (underscore)
   - PR #18232 (RFC-0172 vendor purge) merged 2026-05-24, commit `6426b841d` (RFC-0173)
   - PR #18697 (RFC-0181) OPEN, Q1~Q5 architect decision pending per memory
 - **Timestamp**: 2026-05-27

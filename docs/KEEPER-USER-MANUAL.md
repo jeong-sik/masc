@@ -585,7 +585,7 @@ Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 | `agent-llm-a` | `agent-llm-a:sonnet` | Provider-A Messages API |
 | `provider-f` | `provider-f:pro` | Google AI API |
 | `openrouter` | `openrouter:meta-llama/llama-3` | OpenRouter API |
-| `custom` | `custom:model@http://host:port` | Provider-D 호환 엔드포인트 |
+| `custom` | `custom:model@http://host:port` | Chat Completions v1 호환 엔드포인트 |
 
 ### 5.4 모델 변경 시 주의사항
 

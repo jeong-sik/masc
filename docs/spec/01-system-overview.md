@@ -174,7 +174,7 @@ Retired team-session / command-plane HTTP surfaces는 migration context로만 �
 | Langfuse | Cloud API | HTTP | LLM 호출 tracing, cost attribution | 선택적 활성화. |
 | GraphQL API | Railway (`second-brain-graphql-production.up.railway.app`) | HTTP | Agent 정보 로드, collaboration edge 기록 | `$GRAPHQL_API_KEY` 인증. Query cost limit 2000. |
 | Cloudflare Tunnel | `masc.crying.pictures` | HTTP -> HTTPS | 원격 dashboard 접근 | Origin HTTP/1.1. Cloudflare가 HTTP/2 변환. |
-| local runtime | configured local endpoint | Provider-D-compatible API | 로컬 LLM 추론 (Runtime 1순위) | OAS discovery endpoint. |
+| local runtime | configured local endpoint | Chat Completions v1-compatible API | 로컬 LLM 추론 (Runtime 1순위) | OAS discovery endpoint. |
 | Provider-K Cloud | ZAI API | HTTP | Cloud LLM 추론 (Runtime 2순위) | `sb provider-k-text` 경로. |
 
 ## 9. Invariants (System-Level)

@@ -121,7 +121,7 @@ describe('keeperDisplayModel', () => {
       keeperDisplayModel({
         active_model: 'cli-tool-d:auto',
         metrics_series: [
-          { model_used: 'provider-d:gpt-5.4' },
+          { model_used: 'chat-completions-v1:gpt-5.4' },
           { model_used: 'provider-a:model-a-sonnet' },
         ],
       }),
@@ -144,7 +144,7 @@ describe('keeperDisplayModel', () => {
         last_model_used_label: 'default',
         last_model_used: 'auto',
         active_model_label: 'cli-tool-a:auto',
-        primary_model: 'provider-d:gpt-5.4',
+        primary_model: 'chat-completions-v1:gpt-5.4',
       }),
     ).toBeNull()
   })
@@ -153,7 +153,7 @@ describe('keeperDisplayModel', () => {
     expect(
       keeperDisplayModel({
         metrics_series: [
-          { model_used: 'provider-d:gpt-5.4' },
+          { model_used: 'chat-completions-v1:gpt-5.4' },
           { model_used: 'provider-a:model-a-sonnet' },
         ],
       }),

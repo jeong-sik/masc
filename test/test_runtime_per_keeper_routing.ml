@@ -89,12 +89,12 @@ default = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "chat_completions_v1_http"
 endpoint = "https://runpod.example/v1"
 
 [providers.openai]
 display-name = "OpenAI"
-protocol = "provider_d-http"
+protocol = "chat_completions_v1_http"
 endpoint = "https://api.openai.example/v1"
 
 [models.qwen]

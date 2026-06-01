@@ -19,8 +19,6 @@ type parsed_args = {
   runtime_id_opt : string option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
-  sandbox_profile_opt : sandbox_profile option;
-  network_mode_opt : network_mode option;
   mention_targets_in : string list;
   active_goal_ids_opt : string list option;
   max_context_override_opt : int option;
@@ -97,22 +95,6 @@ let parse_present_string_list_opt args key =
         (Printf.sprintf "%s must be an array of strings (received %s)" key
            (Json_util.kind_name other))
 
-let parse_enum_string_opt args key of_string ~allowed_values =
-  match Json_util.assoc_member_opt key args with
-  | None -> Ok None
-  | Some (`String raw) -> (
-      match of_string raw with
-      | Some value -> Ok (Some value)
-      | None ->
-          Error
-            (Printf.sprintf "invalid %s '%s' (allowed: %s)"
-               key raw allowed_values))
-  | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
-  | Some other ->
-      Error
-        (Printf.sprintf "%s must be a string (received %s)" key
-           (Json_util.kind_name other))
-
 let parse_runtime_id_field_opt args key =
   match get_string_opt args key with
   | None -> Ok None
@@ -167,30 +149,18 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let tool_access_input_res = parse_tool_access_input args in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
-    let sandbox_profile_opt_res =
-      parse_enum_string_opt args "sandbox_profile" sandbox_profile_of_string
-        ~allowed_values:(String.concat ", " valid_sandbox_profile_strings)
-    in
-    let network_mode_opt_res =
-      parse_enum_string_opt args "network_mode" network_mode_of_string
-        ~allowed_values:"none, inherit"
-    in
     match
       compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,
-      active_goal_ids_opt_res, sandbox_profile_opt_res, network_mode_opt_res
+      active_goal_ids_opt_res
     with
-    | Error e, _, _, _, _, _
-    | _, Error e, _, _, _, _
-    | _, _, Error e, _, _, _
-    | _, _, _, Error e, _, _
-    | _, _, _, _, Error e, _
-    | _, _, _, _, _, Error e -> Error (tool_result_error e)
+    | Error e, _, _, _
+    | _, Error e, _, _
+    | _, _, Error e, _
+    | _, _, _, Error e -> Error (tool_result_error e)
     | Ok compaction_profile_opt,
       Ok tool_access_opt,
       Ok allowed_paths_opt,
-      Ok active_goal_ids_opt,
-      Ok sandbox_profile_opt,
-      Ok network_mode_opt ->
+      Ok active_goal_ids_opt ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
@@ -262,8 +232,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       allowed_paths_opt;
       active_goal_ids_opt;
       autoboot_enabled_opt;
-      sandbox_profile_opt;
-      network_mode_opt;
       mention_targets_in;
       max_context_override_opt;
       proactive_enabled_opt;
@@ -295,14 +263,25 @@ let resolve_mention_targets ~mention_targets_in ~fallback_targets ~name =
   in
   raw |> List.filter (fun s -> String.trim s <> "") |> dedupe_keep_order
 
-let resolve_sandbox_profile ~preferred ~fallback =
-  Dashboard_utils.first_some preferred fallback
+let resolve_sandbox_profile ~fallback =
+  fallback
   |> Option.value ~default:default_sandbox_profile
 
-let resolve_network_mode ~preferred ~fallback =
-  match Dashboard_utils.first_some preferred fallback with
-  | Some mode -> mode
-  | None -> Network_inherit
+let resolve_network_mode ~sandbox_profile ~fallback =
+  fallback
+  |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
+
+
+let private_workspace_root_rel ~sandbox_profile keeper_name =
+  Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_name
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+let private_workspace_root_abs ~(config : Workspace.config) ~sandbox_profile keeper_name =
+  Filename.concat
+    (Keeper_alerting_path.project_root_of_config config)
+    (private_workspace_root_rel ~sandbox_profile keeper_name)
+  |> Keeper_alerting_path.normalize_path_for_check
+  |> Keeper_alerting_path.strip_trailing_slashes
 
 let sandbox_allowed_path_has_forbidden_segments path =
   let has_glob =

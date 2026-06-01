@@ -66,12 +66,12 @@ val get_turn_context :
     the keeper, or [None] values when no turn context has
     been recorded. *)
 
-val runtime_contract_json_for_call :
+val runtime_observability_contract_json_for_call :
   keeper_name:string ->
   unit ->
   Yojson.Safe.t
-(** [runtime_contract_json_for_call ~keeper_name ()] returns the
-    canonical keeper runtime contract from the current turn context. *)
+(** [runtime_observability_contract_json_for_call ~keeper_name ()] returns the
+    observability projection from the current turn context. *)
 
 val action_radius_json_for_call :
   keeper_name:string ->

@@ -110,14 +110,8 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
-  let sandbox_profile =
-    Option.value ~default:old.sandbox_profile p.sandbox_profile_opt
-  in
-  let network_mode =
-    match p.network_mode_opt with
-    | Some mode -> mode
-    | None -> old.network_mode
-  in
+  let sandbox_profile = old.sandbox_profile in
+  let network_mode = old.network_mode in
   let autoboot_enabled =
     match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
     | Some value, _ -> value

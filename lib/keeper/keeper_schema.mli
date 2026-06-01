@@ -1,19 +1,13 @@
 (** Keeper Schema — JSON Schema fragments for keeper authoring tools.
 
     Builds tool-input JSON schemas exposed by [tool_keeper_*] handlers and
-    the dashboard authoring surface.  Centralises the enum strings (tool
-    compaction profile, sandbox profile, network mode, etc.) so a new value lands in
-    one place and propagates to every tool that takes the keeper meta as
-    input. *)
+    the dashboard authoring surface. *)
 
 module Persona_contract = Keeper_persona_authoring_contract
 (** Authoring contract used to derive the persona axis schemas. *)
 
-val sandbox_profile_enum_strings : string list
-(** Allowed values for [meta.sandbox.profile]. *)
-
 val network_mode_enum_strings : string list
-(** Allowed values for [meta.sandbox.network_mode]. *)
+(** Allowed values for explicit sandbox-management tool inputs. *)
 
 
 val tail_order_enum_strings : string list

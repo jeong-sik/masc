@@ -98,7 +98,7 @@ let record_pre_tool_gate_attempt
   | Some acc ->
       let trace_id = acc.Trajectory.trace_id in
       let runtime_contract =
-        Keeper_tool_call_log.runtime_contract_json_for_call
+        Keeper_tool_call_log.runtime_observability_contract_json_for_call
           ~keeper_name
           ()
       in

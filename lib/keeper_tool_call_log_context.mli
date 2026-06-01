@@ -79,7 +79,7 @@ val get_turn_context :
   * string option
   * string option
 
-val runtime_contract_json_for_call :
+val runtime_observability_contract_json_for_call :
   keeper_name:string ->
   unit ->
   Yojson.Safe.t

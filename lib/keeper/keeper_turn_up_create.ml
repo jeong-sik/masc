@@ -73,13 +73,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                (String.concat ", " missing))
   in
   let sandbox_profile =
-    resolve_sandbox_profile
-      ~preferred:p.sandbox_profile_opt
-      ~fallback:p.profile_defaults.sandbox_profile
+    resolve_sandbox_profile ~fallback:p.profile_defaults.sandbox_profile
   in
   let network_mode =
     resolve_network_mode
-      ~preferred:p.network_mode_opt
+      ~sandbox_profile
       ~fallback:p.profile_defaults.network_mode
   in
   let mention_targets =

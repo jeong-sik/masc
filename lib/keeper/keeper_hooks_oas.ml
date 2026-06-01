@@ -617,7 +617,7 @@ let make_hooks
                output_text
            in
            let runtime_contract =
-             Keeper_tool_call_log.runtime_contract_json_for_call
+             Keeper_tool_call_log.runtime_observability_contract_json_for_call
                ~keeper_name
                ()
            in

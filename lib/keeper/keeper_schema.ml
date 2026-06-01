@@ -3,17 +3,8 @@
 open Masc_domain
 module Persona_contract = Keeper_persona_authoring_contract
 
-(** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
-    [network_mode]. Same cycle constraint as other schema mirrors —
-    Keeper_schema cannot depend on
-    Keeper_types_profile directly because the latter [include]s
-    Keeper_config and is otherwise downstream. The test
-    [test_types.ml :: keeper_profile_enum_ssot] asserts these mirrors
-    stay in sync with [valid_*_strings] so adding a constructor in
-    Keeper_types_profile fails the test instead of silently dropping
-    from the JSON Schema. *)
-let sandbox_profile_enum_strings =
-  [ "local"; "docker" ]
+(** Network mode strings exposed only by explicit sandbox-management tools.
+    Keeper creation/update no longer accepts sandbox posture knobs. *)
 let network_mode_enum_strings =
   [ "none"; "inherit" ]
 (** Issue #8486: hand-mirrored from
@@ -358,16 +349,6 @@ let keeper_schemas : tool_schema list = [
         ("handoff_cooldown_sec", `Assoc [
           ("type", `String "integer");
           ("description", `String "Minimum seconds between handoffs (default: 300).");
-        ]);
-        ("sandbox_profile", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) sandbox_profile_enum_strings));
-          ("description", `String "Filesystem/process sandbox profile. 'local' runs on the host process with filesystem scoped to the keeper playground. 'docker' runs shell commands in an ephemeral hardened Docker container; the internal git/gh dispatcher upgrades network+credential mounts per-command.");
-        ]);
-        ("network_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
-          ("description", `String "Network policy associated with the sandbox profile. 'none' is valid only with sandbox_profile='docker'.");
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");

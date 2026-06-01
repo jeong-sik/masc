@@ -10,7 +10,9 @@ use wasm_bindgen_futures::JsFuture;
 use crate::config;
 use crate::game::components::{Actor, Condition, Equipment, Skill, Stats};
 use crate::game::events::*;
-use crate::game::state::{ConnectionStatus, MapState, WorkspaceState, TurnPhase, TurnProgressState};
+use crate::game::state::{
+    ConnectionStatus, MapState, TurnPhase, TurnProgressState, WorkspaceState,
+};
 
 // ─── Expected API Response Types ─────────────
 
@@ -167,7 +169,10 @@ fn workspace_requires_new_game(raw_status: &str) -> bool {
     )
 }
 
-fn initial_progress_event_type(workspace_status: &str, state_unavailable: bool) -> Option<&'static str> {
+fn initial_progress_event_type(
+    workspace_status: &str,
+    state_unavailable: bool,
+) -> Option<&'static str> {
     if state_unavailable {
         return None;
     }
@@ -250,7 +255,9 @@ pub fn refresh_state_on_workspace_change(
 ) {
     let current_workspace = config::current_workspace_id();
     let current_workspace_rev = config::current_workspace_revision();
-    if active_workspace.workspace_id == current_workspace && active_workspace.workspace_rev == current_workspace_rev {
+    if active_workspace.workspace_id == current_workspace
+        && active_workspace.workspace_rev == current_workspace_rev
+    {
         return;
     }
 
@@ -313,7 +320,9 @@ pub fn apply_initial_state(
 
     let actor_ids: Vec<String> = state.characters.iter().map(|ch| ch.id.clone()).collect();
     if let Some(workspace) = &state.workspace {
-        if let Some(workspace_event) = initial_progress_event_type(&workspace.status, state_unavailable) {
+        if let Some(workspace_event) =
+            initial_progress_event_type(&workspace.status, state_unavailable)
+        {
             let selected_players = actor_ids
                 .iter()
                 .filter(|id| id.as_str() != "dm")
@@ -332,7 +341,11 @@ pub fn apply_initial_state(
                 dm_keeper: "".to_string(),
                 selected_player_ids: selected_players,
             }));
-            if should_emit_initial_turn_advanced(workspace.turn, &workspace.status, state_unavailable) {
+            if should_emit_initial_turn_advanced(
+                workspace.turn,
+                &workspace.status,
+                state_unavailable,
+            ) {
                 turn_writer.write(TurnAdvanced(TurnAdvancePayload {
                     turn: workspace.turn,
                     phase: workspace.phase.clone(),
@@ -570,7 +583,9 @@ fn merge_state_fallback(primary: &mut GameStateResponse, fallback: &GameStateRes
             if primary_workspace.turn == 0 && fallback_workspace.turn > 0 {
                 primary_workspace.turn = fallback_workspace.turn;
             }
-            if primary_workspace.phase.trim().is_empty() && !fallback_workspace.phase.trim().is_empty() {
+            if primary_workspace.phase.trim().is_empty()
+                && !fallback_workspace.phase.trim().is_empty()
+            {
                 primary_workspace.phase = fallback_workspace.phase.clone();
             }
             if primary_workspace.current_scenario.trim().is_empty()
@@ -578,7 +593,9 @@ fn merge_state_fallback(primary: &mut GameStateResponse, fallback: &GameStateRes
             {
                 primary_workspace.current_scenario = fallback_workspace.current_scenario.clone();
             }
-            if primary_workspace.current_node.trim().is_empty() && !fallback_workspace.current_node.trim().is_empty() {
+            if primary_workspace.current_node.trim().is_empty()
+                && !fallback_workspace.current_node.trim().is_empty()
+            {
                 primary_workspace.current_node = fallback_workspace.current_node.clone();
             }
         }
@@ -1568,7 +1585,10 @@ mod tests {
     #[test]
     fn unavailable_game_state_has_correct_shape() {
         let state = unavailable_game_state("test-workspace");
-        let workspace = state.workspace.as_ref().expect("workspace should be present");
+        let workspace = state
+            .workspace
+            .as_ref()
+            .expect("workspace should be present");
         assert_eq!(workspace.id, "test-workspace");
         assert_eq!(workspace.status, "unavailable");
         assert!(state.characters.is_empty());
@@ -1594,7 +1614,10 @@ mod tests {
 
     #[test]
     fn initial_progress_event_marks_ended_workspace_as_ended_event() {
-        assert_eq!(initial_progress_event_type("ended", false), Some("workspace.ended"));
+        assert_eq!(
+            initial_progress_event_type("ended", false),
+            Some("workspace.ended")
+        );
     }
 
     #[test]

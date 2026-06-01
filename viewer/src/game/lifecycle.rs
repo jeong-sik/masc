@@ -40,8 +40,8 @@ impl TrpgLifecycleState {
             | "outcome_narration" | "state_update" | "transition" => Self::Running,
             "paused" | "stopped" | "suspended" | "halted" => Self::Stopped,
             "ended" | "completed" | "done" | "retired" | "closed" | "archived" => Self::Ended,
-            "loading" | "bootstrapping" | "bootstrap" | "syncing" | "starting"
-            | "initializing" | "creating" => Self::Loading,
+            "loading" | "bootstrapping" | "bootstrap" | "syncing" | "starting" | "initializing"
+            | "creating" => Self::Loading,
             "unavailable" | "error" | "failed" => Self::Unavailable,
             "idle" | "created" | "ready" => Self::Idle,
             "unknown" => Self::Unknown,
@@ -61,9 +61,13 @@ impl TrpgLifecycleState {
         // Progress status is more granular when valid, but stale "loading/unknown/idle"
         // should not mask a stronger workspace lifecycle from runtime state.
         match progress {
-            Self::Loading if !matches!(workspace, Self::Unknown | Self::Idle | Self::Loading) => workspace,
+            Self::Loading if !matches!(workspace, Self::Unknown | Self::Idle | Self::Loading) => {
+                workspace
+            }
             Self::Unknown if !matches!(workspace, Self::Unknown) => workspace,
-            Self::Idle if !matches!(workspace, Self::Unknown | Self::Idle | Self::Loading) => workspace,
+            Self::Idle if !matches!(workspace, Self::Unknown | Self::Idle | Self::Loading) => {
+                workspace
+            }
             _ => progress,
         }
     }

@@ -10,15 +10,16 @@ use crate::game::lifecycle::TrpgLifecycleState;
 
 use super::mcp_rpc::mcp_tool_call;
 use super::{
-    actor_admin_workspace_id, actor_admin_set_status, clear_trpg_dom, refresh_actor_admin_list,
-    render_auto_round_toggle, set_current_workspace_id, set_element_display, sync_session_pause_buttons,
-    unique_non_empty,
+    actor_admin_set_status, actor_admin_workspace_id, clear_trpg_dom, refresh_actor_admin_list,
+    render_auto_round_toggle, set_current_workspace_id, set_element_display,
+    sync_session_pause_buttons, unique_non_empty,
 };
 
 const RECENT_WORKSPACES_STORAGE_KEY: &str = "masc_viewer_recent_workspaces";
 pub(super) const KNOWN_WORKSPACES_STORAGE_KEY: &str = "masc_viewer_known_workspaces";
 pub(super) const WORKSPACE_HUB_VISIBLE_STORAGE_KEY: &str = "masc_viewer_workspace_hub_visible";
-pub(super) const WORKSPACE_HUB_RUNNING_ONLY_STORAGE_KEY: &str = "masc_viewer_workspace_hub_running_only";
+pub(super) const WORKSPACE_HUB_RUNNING_ONLY_STORAGE_KEY: &str =
+    "masc_viewer_workspace_hub_running_only";
 const INLINE_SELECTOR_MAX_OPTIONS: usize = 5;
 const WORKSPACE_AUTO_FOCUS_DEFAULT_WORKSPACE_ONLY: bool = true;
 const WORKSPACE_AUTO_FOCUS_SCORE_RUNNING: u8 = 4;
@@ -29,7 +30,12 @@ const WORKSPACE_AUTO_FOCUS_SCORE_LOADING: u8 = 1;
 pub(super) fn load_recent_workspaces() -> Vec<String> {
     let raw = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(RECENT_WORKSPACES_STORAGE_KEY).ok().flatten())
+        .and_then(|storage| {
+            storage
+                .get_item(RECENT_WORKSPACES_STORAGE_KEY)
+                .ok()
+                .flatten()
+        })
         .unwrap_or_default();
     unique_non_empty(
         raw.split('\n')
@@ -90,7 +96,10 @@ fn auto_focus_score(status: &str) -> Option<u8> {
     }
 }
 
-fn select_workspace_for_ended_default(current_workspace: &str, workspaces: &[WorkspaceSnapshot]) -> Option<String> {
+fn select_workspace_for_ended_default(
+    current_workspace: &str,
+    workspaces: &[WorkspaceSnapshot],
+) -> Option<String> {
     if WORKSPACE_AUTO_FOCUS_DEFAULT_WORKSPACE_ONLY
         && !current_workspace.eq_ignore_ascii_case(crate::config::DEFAULT_WORKSPACE_ID)
     {
@@ -100,7 +109,9 @@ fn select_workspace_for_ended_default(current_workspace: &str, workspaces: &[Wor
     let current_is_ended = workspaces
         .iter()
         .find(|workspace| workspace.id.eq_ignore_ascii_case(current_workspace))
-        .map(|workspace| TrpgLifecycleState::from_status(&workspace.status) == TrpgLifecycleState::Ended)
+        .map(|workspace| {
+            TrpgLifecycleState::from_status(&workspace.status) == TrpgLifecycleState::Ended
+        })
         .unwrap_or(false);
     if !current_is_ended {
         return None;
@@ -110,7 +121,8 @@ fn select_workspace_for_ended_default(current_workspace: &str, workspaces: &[Wor
         .iter()
         .filter(|workspace| !workspace.id.eq_ignore_ascii_case(current_workspace))
         .filter_map(|workspace| {
-            auto_focus_score(&workspace.status).map(|score| (score, workspace.turn, workspace.id.clone()))
+            auto_focus_score(&workspace.status)
+                .map(|score| (score, workspace.turn, workspace.id.clone()))
         })
         .max_by_key(|(score, turn, _)| (*score, *turn))
         .map(|(_, _, id)| id)
@@ -118,7 +130,9 @@ fn select_workspace_for_ended_default(current_workspace: &str, workspaces: &[Wor
 
 #[cfg(test)]
 mod tests {
-    use super::{inline_selector_workspaces, select_workspace_for_ended_default, WorkspaceSnapshot};
+    use super::{
+        inline_selector_workspaces, select_workspace_for_ended_default, WorkspaceSnapshot,
+    };
 
     fn snapshot(id: &str, status: &str, turn: u32) -> WorkspaceSnapshot {
         WorkspaceSnapshot {
@@ -163,7 +177,10 @@ mod tests {
             snapshot("custom", "ended", 4),
             snapshot("run-b", "running", 7),
         ];
-        assert_eq!(select_workspace_for_ended_default("custom", &workspaces), None);
+        assert_eq!(
+            select_workspace_for_ended_default("custom", &workspaces),
+            None
+        );
     }
 
     #[test]
@@ -172,7 +189,10 @@ mod tests {
             snapshot("default", "running", 4),
             snapshot("run-b", "running", 7),
         ];
-        assert_eq!(select_workspace_for_ended_default("default", &workspaces), None);
+        assert_eq!(
+            select_workspace_for_ended_default("default", &workspaces),
+            None
+        );
     }
 
     #[test]
@@ -182,7 +202,10 @@ mod tests {
             snapshot("archived", "ended", 1),
             snapshot("broken", "unavailable", 0),
         ];
-        assert_eq!(select_workspace_for_ended_default("default", &workspaces), None);
+        assert_eq!(
+            select_workspace_for_ended_default("default", &workspaces),
+            None
+        );
     }
 
     #[test]
@@ -211,7 +234,14 @@ mod tests {
             "default".to_string(),
         ];
         let workspaces = inline_selector_workspaces("beta-workspace", &known);
-        assert_eq!(workspaces, vec!["beta-workspace".to_string(), "default".to_string(), "alpha-workspace".to_string()]);
+        assert_eq!(
+            workspaces,
+            vec![
+                "beta-workspace".to_string(),
+                "default".to_string(),
+                "alpha-workspace".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -247,7 +277,11 @@ mod tests {
     }
 }
 
-fn render_workspace_hub(doc: &web_sys::Document, workspaces: &[WorkspaceSnapshot], selected_workspace: &str) {
+fn render_workspace_hub(
+    doc: &web_sys::Document,
+    workspaces: &[WorkspaceSnapshot],
+    selected_workspace: &str,
+) {
     let Some(hub) = doc.get_element_by_id("workspace-hub") else {
         return;
     };
@@ -428,13 +462,18 @@ fn sync_workspace_hub_selection(doc: &web_sys::Document, selected_workspace: &st
             continue;
         };
         let workspace = el.get_attribute("data-workspace-id").unwrap_or_default();
-        let current = if workspace == selected_workspace { "1" } else { "0" };
+        let current = if workspace == selected_workspace {
+            "1"
+        } else {
+            "0"
+        };
         let _ = el.set_attribute("data-current", current);
     }
 }
 
 async fn fetch_workspace_runtime(workspace_id: &str) -> Result<(String, u32, String), String> {
-    let url = crate::config::build_masc_url(&format!("api/v1/trpg/state?workspace_id={}", workspace_id));
+    let url =
+        crate::config::build_masc_url(&format!("api/v1/trpg/state?workspace_id={}", workspace_id));
     let opts = web_sys::RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(web_sys::RequestMode::Cors);
@@ -524,7 +563,12 @@ async fn fetch_workspace_runtime(workspace_id: &str) -> Result<(String, u32, Str
 pub(super) fn load_known_workspaces() -> Vec<String> {
     let raw = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|storage| storage.get_item(KNOWN_WORKSPACES_STORAGE_KEY).ok().flatten())
+        .and_then(|storage| {
+            storage
+                .get_item(KNOWN_WORKSPACES_STORAGE_KEY)
+                .ok()
+                .flatten()
+        })
         .unwrap_or_default();
     unique_non_empty(
         raw.split('\n')
@@ -543,7 +587,9 @@ fn save_known_workspaces(workspaces: &[String]) {
 pub(super) fn candidate_workspace_ids() -> Vec<String> {
     unique_non_empty(
         std::iter::once(crate::config::current_workspace_id())
-            .chain(std::iter::once(crate::config::DEFAULT_WORKSPACE_ID.to_string()))
+            .chain(std::iter::once(
+                crate::config::DEFAULT_WORKSPACE_ID.to_string(),
+            ))
             .chain(load_recent_workspaces().into_iter())
             .chain(load_known_workspaces().into_iter())
             .collect::<Vec<_>>(),
@@ -597,7 +643,10 @@ fn save_workspace_hub_running_only(enabled: bool) {
 fn sync_workspace_hub_top_offset(doc: &web_sys::Document) {
     let top_px = doc
         .get_element_by_id("top-bar")
-        .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().map(|bar| bar.offset_height()))
+        .and_then(|el| {
+            el.dyn_ref::<web_sys::HtmlElement>()
+                .map(|bar| bar.offset_height())
+        })
         .map(|height| height.max(84))
         .unwrap_or(84);
     if let Some(hub) = doc
@@ -675,7 +724,10 @@ fn confirm_unknown_workspace_switch(doc: &web_sys::Document, workspace_id: &str)
     proceed
 }
 
-fn inline_selector_workspaces(selected_workspace: &str, known_workspaces: &[String]) -> Vec<String> {
+fn inline_selector_workspaces(
+    selected_workspace: &str,
+    known_workspaces: &[String],
+) -> Vec<String> {
     let is_generated = |workspace: &str| {
         let key = workspace.to_ascii_lowercase();
         key.starts_with("adventure-")
@@ -693,7 +745,9 @@ fn inline_selector_workspaces(selected_workspace: &str, known_workspaces: &[Stri
     let mut generated = Vec::new();
 
     for workspace in deduped {
-        if workspace == selected_workspace || workspace.eq_ignore_ascii_case(crate::config::DEFAULT_WORKSPACE_ID) {
+        if workspace == selected_workspace
+            || workspace.eq_ignore_ascii_case(crate::config::DEFAULT_WORKSPACE_ID)
+        {
             prioritized.push(workspace);
             continue;
         }
@@ -754,7 +808,11 @@ pub(super) fn sync_workspace_controls(doc: &web_sys::Document, selected_workspac
     sync_workspace_hub_selection(doc, &selected);
 }
 
-fn apply_workspace_switch_from_ui(doc: &web_sys::Document, raw_workspace: &str, manual_input: bool) {
+fn apply_workspace_switch_from_ui(
+    doc: &web_sys::Document,
+    raw_workspace: &str,
+    manual_input: bool,
+) {
     let Some(workspace) = crate::config::sanitize_workspace_id(raw_workspace) else {
         log::warn!("Ignoring invalid workspace id from UI: {}", raw_workspace);
         return;
@@ -798,7 +856,11 @@ fn apply_workspace_switch_from_ui(doc: &web_sys::Document, raw_workspace: &str, 
         if let Ok(rows) = refresh_actor_admin_list(&doc_for_refresh).await {
             actor_admin_set_status(
                 &doc_for_refresh,
-                &format!("workspace {} 액터 {}명", actor_admin_workspace_id(), rows.len()),
+                &format!(
+                    "workspace {} 액터 {}명",
+                    actor_admin_workspace_id(),
+                    rows.len()
+                ),
                 "status-ok",
             );
         }
@@ -865,7 +927,8 @@ pub(super) async fn refresh_workspaces_from_server(
         .collect::<std::collections::HashSet<_>>();
     let mut recent_workspaces = load_recent_workspaces();
     recent_workspaces.retain(|workspace| {
-        workspace.eq_ignore_ascii_case(&current) || !ended_ids.contains(&workspace.to_ascii_lowercase())
+        workspace.eq_ignore_ascii_case(&current)
+            || !ended_ids.contains(&workspace.to_ascii_lowercase())
     });
     save_recent_workspaces(&recent_workspaces);
     sync_workspace_controls(doc, &current);
@@ -922,8 +985,8 @@ fn dedup_workspace_snapshots(rows: Vec<WorkspaceSnapshot>) -> Vec<WorkspaceSnaps
     let mut index_by_id: HashMap<String, usize> = HashMap::new();
 
     for mut row in rows {
-        row.id =
-            crate::config::sanitize_workspace_id(&row.id).unwrap_or_else(|| row.id.trim().to_string());
+        row.id = crate::config::sanitize_workspace_id(&row.id)
+            .unwrap_or_else(|| row.id.trim().to_string());
         if row.id.is_empty() {
             continue;
         }
@@ -1046,8 +1109,8 @@ pub(super) fn bind_workspace_controls(doc: &web_sys::Document) {
                                     == TrpgLifecycleState::Ended
                             })
                             .unwrap_or(false);
-                        let visible_count =
-                            workspaces.len().saturating_sub(ended_count) + usize::from(current_is_ended);
+                        let visible_count = workspaces.len().saturating_sub(ended_count)
+                            + usize::from(current_is_ended);
                         if let Some(pill) = doc_for_fetch.get_element_by_id("workspace-status") {
                             let current_label = workspace_display_label(&current);
                             pill.set_text_content(Some(&format!(

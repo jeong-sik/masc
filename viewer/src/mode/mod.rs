@@ -403,7 +403,10 @@ fn enter_trpg() {
         crate::game::round_runner::set_auto_round_running(auto_round_enabled_from_dom(&doc));
 
         if let Some(pill) = doc.get_element_by_id("workspace-status") {
-            pill.set_text_content(Some(&format!("현재 게임: {} · 목록 불러오는 중...", workspace)));
+            pill.set_text_content(Some(&format!(
+                "현재 게임: {} · 목록 불러오는 중...",
+                workspace
+            )));
         }
         let doc_for_workspaces = doc.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -425,8 +428,8 @@ fn enter_trpg() {
                                 == TrpgLifecycleState::Ended
                         })
                         .unwrap_or(false);
-                    let visible_count =
-                        workspaces.len().saturating_sub(ended_count) + usize::from(current_is_ended);
+                    let visible_count = workspaces.len().saturating_sub(ended_count)
+                        + usize::from(current_is_ended);
                     if let Some(pill) = doc_for_workspaces.get_element_by_id("workspace-status") {
                         pill.set_text_content(Some(&format!(
                             "현재 게임: {} · 표시 {} / 전체 {}",
@@ -795,7 +798,9 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
                 let doc_async = doc_for_resume.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     let workspace_id = crate::config::current_workspace_id();
-                    match post_tool_action("masc_resume", json!({ "workspace_id": workspace_id })).await {
+                    match post_tool_action("masc_resume", json!({ "workspace_id": workspace_id }))
+                        .await
+                    {
                         Ok(raw) => {
                             let detail = summarize_session_control_payload(&raw);
                             let status = if detail.is_empty() {
@@ -1401,10 +1406,7 @@ pub(super) fn set_new_game_preflight_status(doc: &web_sys::Document, message: &s
 }
 
 #[cfg(target_arch = "wasm32")]
-fn set_new_game_preflight_rows(
-    doc: &web_sys::Document,
-    rows: &[transport_classify::PreflightRow],
-) {
+fn set_new_game_preflight_rows(doc: &web_sys::Document, rows: &[transport_classify::PreflightRow]) {
     if let Some(el) = doc.get_element_by_id("new-game-preflight") {
         let html = rows
             .iter()
@@ -1487,10 +1489,14 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
         el.set_inner_html("<div class=\"trpg-summary-empty\">허용된 액션을 계산 중입니다.</div>");
     }
     if let Some(el) = doc.get_element_by_id("trpg-timeline-summary") {
-        el.set_inner_html("<div class=\"trpg-summary-empty\">타임라인 요약을 불러오는 중입니다.</div>");
+        el.set_inner_html(
+            "<div class=\"trpg-summary-empty\">타임라인 요약을 불러오는 중입니다.</div>",
+        );
     }
     if let Some(el) = doc.get_element_by_id("trpg-timeline-events") {
-        el.set_inner_html("<div class=\"trpg-summary-empty\">최근 이벤트를 불러오는 중입니다.</div>");
+        el.set_inner_html(
+            "<div class=\"trpg-summary-empty\">최근 이벤트를 불러오는 중입니다.</div>",
+        );
     }
     if let Some(el) = doc.get_element_by_id("turn-num") {
         el.set_text_content(Some("1"));
@@ -1749,8 +1755,8 @@ use mcp_rpc::{mcp_tool_call, parse_embedded_tool_payload};
 mod workspace_hub;
 #[cfg(target_arch = "wasm32")]
 use workspace_hub::{
-    bind_workspace_controls, candidate_workspace_ids, load_known_workspaces, refresh_workspaces_from_server,
-    remember_recent_workspace, sync_workspace_controls,
+    bind_workspace_controls, candidate_workspace_ids, load_known_workspaces,
+    refresh_workspaces_from_server, remember_recent_workspace, sync_workspace_controls,
 };
 
 #[path = "../../../archive/trpg/viewer/trpg_controls.rs"]
@@ -1758,7 +1764,7 @@ use workspace_hub::{
 mod trpg_controls;
 #[cfg(target_arch = "wasm32")]
 use trpg_controls::{
-    actor_admin_workspace_id, actor_admin_set_status, bind_new_game_controls,
+    actor_admin_set_status, actor_admin_workspace_id, bind_new_game_controls,
     refresh_actor_admin_list, refresh_trpg_ops_snapshots,
 };
 

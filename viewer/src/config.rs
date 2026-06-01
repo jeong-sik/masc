@@ -393,7 +393,8 @@ pub fn current_workspace_id() -> String {
         if let Some(win) = web_sys::window() {
             if let Ok(search) = win.location().search() {
                 if let Some(workspace) = parse_query_param(&search, "workspace") {
-                    return sanitize_workspace_id(&workspace).unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
+                    return sanitize_workspace_id(&workspace)
+                        .unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string());
                 }
             }
         }
@@ -488,7 +489,10 @@ pub fn trpg_uses_polling() -> bool {
 }
 
 pub fn trpg_state_url() -> String {
-    build_masc_url(&format!("api/v1/trpg/state?workspace_id={}", current_workspace_id()))
+    build_masc_url(&format!(
+        "api/v1/trpg/state?workspace_id={}",
+        current_workspace_id()
+    ))
 }
 
 /// Legacy JSON poll endpoint.

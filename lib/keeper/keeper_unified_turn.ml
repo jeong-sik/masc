@@ -169,6 +169,7 @@ let run_keeper_cycle
                 (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
             in
             let error_message = Agent_sdk.Error.to_string err in
+            Log.Keeper.error "%s: pre_dispatch failed: %s" meta.name error_message;
             record_pre_dispatch_terminal_observation
               ~config
               ~meta

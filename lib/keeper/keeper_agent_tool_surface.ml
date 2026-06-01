@@ -332,10 +332,7 @@ let tool_names_for_required_gate_surface
     | [] -> tool_names
     | _ :: _ -> actionable
 
-let should_require_tools_for_initial_turn ~(max_turns : int)
-    ~(turn_affordances : string list) =
-  ignore max_turns;
-  ignore turn_affordances;
+let should_require_tools_for_initial_turn ~max_turns:_ ~turn_affordances:_ =
   false
 
 let has_turn_affordance expected turn_affordances =

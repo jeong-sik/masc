@@ -489,8 +489,7 @@ let prepare_agent_setup
   let fallback_tool_surface ~turn =
     validate_allow_list ~turn fallback_floor_tool_names
   in
-  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn ~allowed_tool_names =
-    ignore allowed_tool_names;
+  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
     let caller_requires_tools =
       (* Enumerate every [tool_choice] variant + [None] so a new constructor
          added to [Agent_sdk.Types.tool_choice] surfaces a Warning 8 here.
@@ -780,7 +779,6 @@ let prepare_agent_setup
       || tool_gate_requested_for_turn
            ~current_tool_choice
            ~is_last_turn
-           ~allowed_tool_names:turn_visible_tool_names
     in
     let turn_visible_tool_names =
       tool_names_for_required_gate_surface

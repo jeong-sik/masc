@@ -16,6 +16,7 @@
 
 module AE = Masc_mcp.Keeper_agent_error
 module Code = Masc_mcp.Keeper_turn_terminal_code
+module EC = Masc_mcp.Keeper_error_classify
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
 module Http = Llm_provider.Http_client
@@ -111,6 +112,44 @@ let test_sdk_typed_wire () =
     sdk_cases
 ;;
 
+let check_parse_split label err ~provider ~model_ ~server =
+  Alcotest.(check bool)
+    (label ^ "/provider")
+    provider
+    (EC.is_provider_rejected_parse_error err);
+  Alcotest.(check bool) (label ^ "/model") model_ (EC.is_model_rejected_parse_error err);
+  Alcotest.(check bool) (label ^ "/server") server (EC.is_server_rejected_parse_error err)
+;;
+
+let test_server_parse_rejection_split () =
+  check_parse_split
+    "provider_parse_error"
+    (SdkE.Provider (Llm_provider.Error.ParseError { detail = "yyjson rejected body" }))
+    ~provider:true
+    ~model_:false
+    ~server:true;
+  check_parse_split
+    "provider_invalid_request_parse_error"
+    (SdkE.Provider
+       (Llm_provider.Error.InvalidRequest
+          { provider = "agent_llm_a"; reason = "unexpected character in JSON at byte 9" }))
+    ~provider:true
+    ~model_:false
+    ~server:true;
+  check_parse_split
+    "api_invalid_request_parse_error"
+    (SdkE.Api (Retry.InvalidRequest { message = "unexpected character in JSON at byte 9" }))
+    ~provider:false
+    ~model_:true
+    ~server:true;
+  check_parse_split
+    "api_invalid_request_generic"
+    (SdkE.Api (Retry.InvalidRequest { message = "missing required field: model" }))
+    ~provider:false
+    ~model_:false
+    ~server:false
+;;
+
 let () =
   Alcotest.run
     "keeper_sdk_error_typed_bridge"
@@ -125,6 +164,12 @@ let () =
             "all sdk_error cases produce expected wire"
             `Quick
             test_sdk_typed_wire
+        ] )
+    ; ( "server parse rejection split"
+      , [ Alcotest.test_case
+            "provider and model parse rejections remain distinguishable"
+            `Quick
+            test_server_parse_rejection_split
         ] )
     ]
 ;;

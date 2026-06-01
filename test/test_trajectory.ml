@@ -474,6 +474,9 @@ let test_runtime_contract_projection_redacts_backend_details () =
     (has_assoc_key "network_mode" keeper_visible);
   Alcotest.(check string) "keeper contract keeps sandbox root" "/workspace"
     (keeper_visible |> member "sandbox_root" |> to_string);
+  Alcotest.(check bool) "keeper contract says Read has no implicit cwd" false
+    (keeper_visible |> member "path_resolution" |> member "read_implicit_cwd"
+     |> to_bool);
   Alcotest.(check string) "observability keeps sandbox_profile" "docker"
     (observability |> member "sandbox_profile" |> to_string);
   Alcotest.(check string) "observability keeps network_mode" "none"

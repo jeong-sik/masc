@@ -190,7 +190,12 @@ let execute_schema = Tool_shard_types_schemas_execute.tool_execute_schema.input_
 let read_file_schema =
   object_schema
     ~required:[ "file_path" ]
-    [ property "file_path" "string" "Absolute or sandbox-relative file path to read."
+    [ property
+        "file_path"
+        "string"
+        "Existing file path to read. Read has no implicit cwd and does not inherit \
+         Execute cwd; use an absolute path, a sandbox-relative path, or a path returned \
+         by Grep/Execute listing."
     ; property
         "limit"
         "integer"
@@ -433,7 +438,9 @@ let public_descriptors =
       ~id:"agent.read_file"
       ~public_name:"Read"
       ~internal_name:"tool_read_file"
-      ~description:"Read one file from the keeper sandbox or an allowed path."
+      ~description:
+        "Read one existing file from the keeper sandbox or an allowed path. Read has no \
+         implicit cwd; list or search first when the exact path is unclear."
       ~input_schema:read_file_schema
       ~policy:
         (policy

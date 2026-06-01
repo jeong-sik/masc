@@ -743,6 +743,25 @@ let test_missing_file_error_redacts_directory_suggestions () =
            "detail preserves path"
            true
            (Option.is_some (Safe_ops.json_string_opt "path" detail));
+         check string
+           "detail names keeper playground"
+           (Keeper_sandbox.allowed_root_rel_of_meta ~meta)
+           (Yojson.Safe.Util.member "your_playground" detail
+            |> Yojson.Safe.Util.to_string);
+         let path_resolution =
+           Yojson.Safe.Util.member "path_resolution" detail
+         in
+         check bool
+           "detail says Read has no implicit cwd"
+           false
+           (Yojson.Safe.Util.member "implicit_cwd" path_resolution
+            |> Yojson.Safe.Util.to_bool);
+         check bool
+           "detail says Read does not inherit Execute cwd"
+           true
+           (Yojson.Safe.Util.member "basis" path_resolution
+            |> Yojson.Safe.Util.to_string
+            |> string_contains ~sub:"does not inherit Execute cwd");
          check
            bool
            "directory entries are not leaked"

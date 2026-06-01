@@ -116,6 +116,7 @@ let file_not_found_prefix = "File not found:"
 
 let missing_file_error_json
       ~(config : Workspace.config)
+      ~(meta : keeper_meta)
       ~(target : string)
       ~(fallback_dir : string)
       ~(error : string)
@@ -126,8 +127,26 @@ let missing_file_error_json
      and listing its contents leaks its directory layout (oracle leak).
      The generic error string already contains the path that was tried,
      which is sufficient for the LLM to self-correct. *)
+  let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
   Yojson.Safe.to_string
-    (`Assoc [ "ok", `Bool false; "error", `String error; "path", `String target ])
+    (`Assoc
+        [ "ok", `Bool false
+        ; "error", `String error
+        ; "path", `String target
+        ; "your_playground", `String playground
+        ; ( "path_resolution"
+          , `Assoc
+              [ "implicit_cwd", `Bool false
+              ; ( "basis"
+                , `String
+                    "Read resolves file_path against the keeper sandbox or explicit \
+                     allowed_paths; it does not inherit Execute cwd." )
+              ; ( "next_action"
+                , `String
+                    "Use Grep or Execute ls to discover the exact file path, then pass \
+                     that path to Read." )
+              ] )
+        ])
 ;;
 
 let find_registry_meta ~(keeper_name : string) ~(source_layer : string)

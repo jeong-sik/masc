@@ -1,9 +1,18 @@
 (** Comprehensive Tests for Tools module - MCP Tool Definitions *)
 
 open Masc_domain
-open Masc_mcp.Tools
 
-let schema_inventory = all_schemas_extended
+let schema_inventory = Masc_mcp.Tools.all_schemas_extended
+let registered_schema_inventory = Masc_mcp.Config.raw_all_tool_schemas
+
+let find_schema_in schemas name =
+  List.find_opt
+    (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+    schemas
+;;
+
+let find_schema_inventory_tool name = find_schema_in schema_inventory name
+let find_registered_tool name = find_schema_in registered_schema_inventory name
 
 (* ============================================================ *)
 (* Helper functions                                              *)
@@ -75,30 +84,30 @@ let test_all_names_start_with_masc () =
   ) schema_inventory
 
 (* ============================================================ *)
-(* 2. find_tool Function Tests                                   *)
+(* 2. Schema Inventory Lookup Tests                              *)
 (* ============================================================ *)
 
-let test_find_tool_existing () =
+let test_schema_inventory_lookup_existing () =
   let tools =
     [ "masc_start"; "masc_status"; "masc_broadcast"; "masc_transition" ]
   in
   List.iter (fun name ->
-    match find_tool name with
+    match find_schema_inventory_tool name with
     | Some schema -> Alcotest.(check string) "found correct tool" name schema.name
     | None -> Alcotest.fail (Printf.sprintf "Tool %s not found" name)
   ) tools
 
-let test_find_tool_not_found () =
+let test_schema_inventory_lookup_not_found () =
   let invalid_tools = ["invalid_tool"; "masc"; ""; "MASC_STATUS"; "masc-status"] in
   List.iter (fun name ->
-    match find_tool name with
+    match find_schema_inventory_tool name with
     | None -> ()
     | Some _ -> Alcotest.fail (Printf.sprintf "Should not find tool %s" name)
   ) invalid_tools
 
-let test_find_tool_case_sensitive () =
+let test_schema_inventory_lookup_case_sensitive () =
   (* Tool names are case-sensitive *)
-  match find_tool "MASC_STATUS" with
+  match find_schema_inventory_tool "MASC_STATUS" with
   | None -> ()  (* Expected: not found because wrong case *)
   | Some _ -> Alcotest.fail "Tool lookup should be case-sensitive"
 
@@ -140,7 +149,7 @@ let test_required_field_is_list () =
 (* test_masc_bind_schema and test_masc_unbind_schema removed with lifecycle collapse. *)
 
 let test_masc_start_schema () =
-  match find_tool "masc_start" with
+  match find_registered_tool "masc_start" with
   | None -> Alcotest.fail "masc_start not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -151,7 +160,7 @@ let test_masc_start_schema () =
       | None -> Alcotest.fail "masc_start missing properties"
 
 let test_masc_status_schema () =
-  match find_tool "masc_status" with
+  match find_registered_tool "masc_status" with
   | None -> Alcotest.fail "masc_status not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -161,7 +170,7 @@ let test_masc_status_schema () =
       | None -> Alcotest.fail "masc_status missing properties"
 
 let test_masc_broadcast_schema () =
-  match find_tool "masc_broadcast" with
+  match find_registered_tool "masc_broadcast" with
   | None -> Alcotest.fail "masc_broadcast not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -171,7 +180,7 @@ let test_masc_broadcast_schema () =
       | None -> Alcotest.fail "masc_broadcast missing properties"
 
 let test_masc_transition_schema () =
-  match find_tool "masc_transition" with
+  match find_registered_tool "masc_transition" with
   | None -> Alcotest.fail "masc_transition not found"
   | Some schema ->
       (match get_json_assoc "properties" schema.input_schema with
@@ -191,7 +200,7 @@ let test_masc_transition_schema () =
       | None -> Alcotest.fail "masc_transition missing required field"
 
 let test_masc_add_task_schema () =
-  match find_tool "masc_add_task" with
+  match find_registered_tool "masc_add_task" with
   | None -> Alcotest.fail "masc_add_task not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -203,7 +212,7 @@ let test_masc_add_task_schema () =
       | None -> Alcotest.fail "masc_add_task missing properties"
 
 let test_masc_goal_list_schema () =
-  match find_tool "masc_goal_list" with
+  match find_registered_tool "masc_goal_list" with
   | None -> Alcotest.fail "masc_goal_list not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -214,7 +223,7 @@ let test_masc_goal_list_schema () =
       | None -> Alcotest.fail "masc_goal_list missing properties"
 
 let test_masc_goal_upsert_schema () =
-  match find_tool "masc_goal_upsert" with
+  match find_registered_tool "masc_goal_upsert" with
   | None -> Alcotest.fail "masc_goal_upsert not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -235,7 +244,7 @@ let test_masc_goal_upsert_schema () =
       | None -> Alcotest.fail "masc_goal_upsert missing properties"
 
 let test_masc_goal_transition_schema () =
-  match find_tool "masc_goal_transition" with
+  match find_registered_tool "masc_goal_transition" with
   | None -> Alcotest.fail "masc_goal_transition not found"
   | Some schema ->
       (match get_json_assoc "properties" schema.input_schema with
@@ -262,7 +271,7 @@ let test_masc_goal_transition_schema () =
       | None -> Alcotest.fail "masc_goal_transition missing required field"
 
 let test_masc_goal_verify_schema () =
-  match find_tool "masc_goal_verify" with
+  match find_registered_tool "masc_goal_verify" with
   | None -> Alcotest.fail "masc_goal_verify not found"
   | Some schema ->
       (match get_json_assoc "properties" schema.input_schema with
@@ -365,11 +374,13 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
   in
   List.iter
     (fun name ->
-      match find_tool name with
+      match find_registered_tool name with
       | None -> ()
       | Some _ ->
           Alcotest.fail
-            (Printf.sprintf "%s should be absent from schema inventory" name))
+            (Printf.sprintf
+               "%s should be absent from registered schema inventory"
+               name))
     retired_tools
 
 let test_masc_board_post_schema_supports_judgment () =
@@ -394,12 +405,12 @@ let test_masc_board_post_schema_supports_judgment () =
 (* ============================================================ *)
 
 let test_masc_agents_schema () =
-  match find_tool "masc_agents" with
+  match find_registered_tool "masc_agents" with
   | None -> Alcotest.fail "masc_agents not found"
   | Some _ -> ()
 
 let test_masc_register_capabilities_removed () =
-  match find_tool "masc_register_capabilities" with
+  match find_registered_tool "masc_register_capabilities" with
   | None -> ()
   | Some _ -> Alcotest.fail "masc_register_capabilities should be removed"
 
@@ -410,7 +421,7 @@ let test_masc_register_capabilities_removed () =
 (* ============================================================ *)
 
 let test_masc_plan_init_schema () =
-  match find_tool "masc_plan_init" with
+  match find_registered_tool "masc_plan_init" with
   | None -> Alcotest.fail "masc_plan_init not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -419,17 +430,17 @@ let test_masc_plan_init_schema () =
       | None -> Alcotest.fail "masc_plan_init missing properties"
 
 let test_masc_plan_update_schema () =
-  match find_tool "masc_plan_update" with
+  match find_registered_tool "masc_plan_update" with
   | None -> Alcotest.fail "masc_plan_update not found"
   | Some _ -> ()
 
 let test_masc_plan_get_schema () =
-  match find_tool "masc_plan_get" with
+  match find_registered_tool "masc_plan_get" with
   | None -> Alcotest.fail "masc_plan_get not found"
   | Some _ -> ()
 
 let test_masc_deliver_schema () =
-  match find_tool "masc_deliver" with
+  match find_registered_tool "masc_deliver" with
   | None -> Alcotest.fail "masc_deliver not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -460,10 +471,10 @@ let test_masc_deliver_schema () =
 (* test_masc_persona_list_schema removed: persona list coverage is trivial. *)
 
 let test_masc_persona_authoring_schemas () =
-  (match find_tool "masc_persona_schema" with
+  (match find_registered_tool "masc_persona_schema" with
   | None -> Alcotest.fail "masc_persona_schema not found"
   | Some _ -> ());
-  (match find_tool "masc_persona_generate" with
+  (match find_registered_tool "masc_persona_generate" with
   | None -> Alcotest.fail "masc_persona_generate not found"
   | Some schema -> (
       match get_json_assoc "properties" schema.input_schema with
@@ -514,7 +525,7 @@ let test_masc_persona_authoring_schemas () =
           Alcotest.(check bool) "proactive default follows contract"
             Contract.default_generation_proactive_enabled (default_bool "proactive_enabled")
       | None -> Alcotest.fail "masc_persona_generate missing properties"));
-  match find_tool "masc_persona_save" with
+  match find_registered_tool "masc_persona_save" with
   | None -> Alcotest.fail "masc_persona_save not found"
   | Some schema -> (
       match get_json_assoc "properties" schema.input_schema with
@@ -528,7 +539,7 @@ let test_masc_persona_authoring_schemas () =
       | None -> Alcotest.fail "masc_persona_save missing properties")
 
 let test_masc_keeper_create_from_persona_schema () =
-  match find_tool "masc_keeper_create_from_persona" with
+  match find_registered_tool "masc_keeper_create_from_persona" with
   | None -> Alcotest.fail "masc_keeper_create_from_persona not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -548,7 +559,7 @@ let test_masc_keeper_create_from_persona_schema () =
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
 
 let test_masc_keeper_up_schema () =
-  match find_tool "masc_keeper_up" with
+  match find_registered_tool "masc_keeper_up" with
   | None -> Alcotest.fail "masc_keeper_up not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -586,7 +597,7 @@ let test_masc_keeper_up_schema () =
       | None -> Alcotest.fail "masc_keeper_up missing properties"
 
 let test_masc_keeper_msg_schema () =
-  match find_tool "masc_keeper_msg" with
+  match find_registered_tool "masc_keeper_msg" with
   | None -> Alcotest.fail "masc_keeper_msg not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -604,7 +615,7 @@ let test_masc_keeper_msg_schema () =
       | None -> Alcotest.fail "masc_keeper_msg missing properties"
 
 let test_masc_keeper_repair_schema () =
-  match find_tool "masc_keeper_repair" with
+  match find_registered_tool "masc_keeper_repair" with
   | None -> Alcotest.fail "masc_keeper_repair not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -622,7 +633,7 @@ let test_masc_keeper_repair_schema () =
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
 
 let test_masc_tool_admin_snapshot_schema () =
-  match find_tool "masc_tool_admin_snapshot" with
+  match find_registered_tool "masc_tool_admin_snapshot" with
   | None -> Alcotest.fail "masc_tool_admin_snapshot not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -634,7 +645,7 @@ let test_masc_tool_admin_snapshot_schema () =
       | None -> Alcotest.fail "masc_tool_admin_snapshot missing properties"
 
 let test_masc_tool_admin_update_schema () =
-  match find_tool "masc_tool_admin_update" with
+  match find_registered_tool "masc_tool_admin_update" with
   | None -> Alcotest.fail "masc_tool_admin_update not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -669,7 +680,7 @@ let test_legacy_swarm_tools_removed () =
   in
   List.iter
     (fun name ->
-      match find_tool name with
+      match find_registered_tool name with
       | None -> ()
       | Some _ ->
           Alcotest.fail (Printf.sprintf "%s should be removed from public schemas" name))
@@ -690,7 +701,7 @@ let test_legacy_mitosis_tools_removed () =
   in
   List.iter
     (fun name ->
-      match find_tool name with
+      match find_registered_tool name with
       | None -> ()
       | Some _ ->
           Alcotest.fail
@@ -708,22 +719,22 @@ let test_legacy_mitosis_tools_removed () =
 (* ============================================================ *)
 
 let test_masc_dashboard_schema () =
-  match find_tool "masc_dashboard" with
+  match find_registered_tool "masc_dashboard" with
   | None -> Alcotest.fail "masc_dashboard not found"
   | Some _ -> ()
 
 let test_masc_agent_fitness_schema () =
-  match find_tool "masc_agent_fitness" with
+  match find_registered_tool "masc_agent_fitness" with
   | None -> Alcotest.fail "masc_agent_fitness not found"
   | Some _ -> ()
 
 let test_masc_get_metrics_schema () =
-  match find_tool "masc_get_metrics" with
+  match find_registered_tool "masc_get_metrics" with
   | None -> Alcotest.fail "masc_get_metrics not found"
   | Some _ -> ()
 
 let test_masc_agent_card_schema () =
-  match find_tool "masc_agent_card" with
+  match find_registered_tool "masc_agent_card" with
   | None -> Alcotest.fail "masc_agent_card not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -791,10 +802,11 @@ let () =
       Alcotest.test_case "unique_names" `Quick test_schema_names_are_unique;
       Alcotest.test_case "masc_prefix" `Quick test_all_names_start_with_masc;
     ];
-    "find_tool", [
-      Alcotest.test_case "existing" `Quick test_find_tool_existing;
-      Alcotest.test_case "not_found" `Quick test_find_tool_not_found;
-      Alcotest.test_case "case_sensitive" `Quick test_find_tool_case_sensitive;
+    "schema_inventory_lookup", [
+      Alcotest.test_case "existing" `Quick test_schema_inventory_lookup_existing;
+      Alcotest.test_case "not_found" `Quick test_schema_inventory_lookup_not_found;
+      Alcotest.test_case "case_sensitive" `Quick
+        test_schema_inventory_lookup_case_sensitive;
     ];
     "input_schema", [
       Alcotest.test_case "type_is_object" `Quick test_input_schema_type_is_object;

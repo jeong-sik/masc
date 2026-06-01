@@ -100,3 +100,23 @@ let active_goal_phases_for_agent config ~agent_name =
       meta.active_goal_ids
   | Ok None | Error _ -> []
 ;;
+
+let install_hooks () =
+  let is_registered_agent_alias_fn = is_registered_agent_alias in
+  let sync_current_task_binding_fn = sync_current_task_binding in
+  let agent_tool_names_fn = agent_tool_names in
+  let transition_action_denylist_fn = transition_action_denylist in
+  let active_goal_phases_for_agent_fn = active_goal_phases_for_agent in
+  Tool_task_handlers.set_keeper_hooks
+    Tool_task_handlers.
+      { is_registered_agent_alias =
+          (fun config agent_name -> is_registered_agent_alias_fn config agent_name)
+      ; sync_current_task_binding =
+          (fun config ~agent_name -> sync_current_task_binding_fn config ~agent_name)
+      ; agent_tool_names = (fun config ~agent_name -> agent_tool_names_fn config ~agent_name)
+      ; transition_action_denylist =
+          (fun config ~agent_name -> transition_action_denylist_fn config ~agent_name)
+      ; active_goal_phases_for_agent =
+          (fun config ~agent_name -> active_goal_phases_for_agent_fn config ~agent_name)
+      }
+;;

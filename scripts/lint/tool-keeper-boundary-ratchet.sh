@@ -3,8 +3,9 @@
 #
 # Principle: the generic tool surface must not reference the keeper subsystem.
 # Keeper depends on the tool surface (Tool_dispatch / Tool_catalog / Tool_name),
-# never the reverse. A tool module that calls a `Keeper_<module>.<fn>` is a
-# boundary violation.
+# never the reverse. A tool module that mentions keeper-owned runtime modules
+# such as `Agent_tool_dispatch_runtime`, `Keeper_types_profile`, or
+# `Task_keeper_backend` is a boundary violation.
 #
 # RFC status: RFC-0084 enforced this direction for the dispatch PATH
 # (tool_dispatch.ml, done). No existing RFC owns the surface-WIDE reverse-
@@ -19,12 +20,14 @@
 # sub-library; until then this gate holds the line.
 #
 # Scope:
-#   - Subjects: lib/**/tool_*.ml, EXCLUDING tool_keeper*.ml. The tool_keeper*
-#     modules are keeper-purpose handlers (keeper IS their domain); they are
-#     tracked separately, not by this gate.
-#   - Violation: a real `Keeper_<Word>.<lowercase>` module call. Comments
-#     (incl. nested and odoc `[Keeper_x.y]`) and string literals are stripped
-#     before matching, so doc references and prose do not count.
+#   - Subjects: every lib/**/tool_*.ml{i} found recursively, plus
+#     lib/tools.ml{i}, EXCLUDING
+#     tool_keeper*.ml{i}. The tool_keeper* modules are keeper-purpose handlers
+#     (keeper IS their domain); they are tracked separately, not by this gate.
+#   - Violation: a keeper-owned module token or a real
+#     `Keeper_<Word>.<lowercase>` module call. Comments (incl. nested and odoc
+#     `[Keeper_x.y]`) and string literals are stripped before matching, so doc
+#     references and prose do not count.
 #   - Keeper subsystem only. Masc_* coupling (Masc_domain is shared vocabulary)
 #     is a separate axis, not covered here.
 #
@@ -47,7 +50,7 @@ for tool in rg sort comm mktemp wc perl; do
 done
 
 # Strip OCaml comments (nested-aware) and string literals from stdin, then
-# report whether a `Keeper_<Word>.<lowercase>` module call remains.
+# report whether a keeper-owned module token remains.
 # A char-state scanner is used because OCaml comments nest and a regex cannot
 # strip them reliably (a non-greedy `(*.*?*)` produced false negatives, e.g.
 # tool_deep_review.ml:160 was missed). Newlines are preserved in stripped
@@ -76,7 +79,7 @@ keeper_call_in_file() {
     }
     print join("", @o);
   ' < "$1")"
-  rg -q '\bKeeper_[A-Za-z_]+\.[a-z]' <<<"$stripped"
+  rg -q '\b(Agent_tool_descriptor|Agent_tool_descriptor_resolution|Agent_tool_dispatch_runtime|Keeper_tool_alias|Keeper_types_profile|Task_keeper_backend)\b|\bKeeper_[A-Za-z_]+\.[a-z]' <<<"$stripped"
 }
 
 current_callers() {
@@ -87,7 +90,12 @@ current_callers() {
       if keeper_call_in_file "$f"; then
         printf '%s\n' "$f"
       fi
-    done < <(find lib -maxdepth 2 -name 'tool_*.ml' ! -name '*test*' | sort)
+    done < <(
+      {
+        find lib \( -name 'tool_*.ml' -o -name 'tool_*.mli' \) ! -name '*test*'
+        printf '%s\n' lib/tools.ml lib/tools.mli
+      } | sort -u
+    )
   ) | sort -u
 }
 
@@ -138,7 +146,7 @@ check() {
   if [[ -s "$new_tmp" ]]; then
     echo "[tool-keeper-boundary-ratchet] DRIFT UP: new tool->Keeper boundary violation(s):" >&2
     sed 's/^/  - /' "$new_tmp" >&2
-    echo "  A tool surface module must not call a Keeper_<module>. Inject the" >&2
+    echo "  A tool surface module must not mention keeper-owned modules. Inject the" >&2
     echo "  keeper-facing behaviour at the boundary, or move the handler into the" >&2
     echo "  keeper domain. Do not add it to the baseline." >&2
     drift=1

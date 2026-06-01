@@ -26,14 +26,63 @@ let to_string = function
 ;;
 
 
+let public_masc_to_internal_tbl =
+  let t = Hashtbl.create 16 in
+  List.iter
+    (fun internal ->
+       match Tool_catalog_surfaces.keeper_internal_replacement internal with
+       | Some public -> Hashtbl.replace t public internal
+       | None -> ())
+    Tool_catalog_surfaces.keeper_internal_tools;
+  t
+;;
+
+let public_masc_to_internal name = Hashtbl.find_opt public_masc_to_internal_tbl name
+
+let translate_search_files_public_args args =
+  match args with
+  | `Assoc fields ->
+    let out = ref [ "op", `String "rg" ] in
+    let is_case_insensitive =
+      match List.assoc_opt "-i" fields with
+      | Some (`Bool true) -> true
+      | _ -> false
+    in
+    List.iter
+      (fun (k, v) ->
+         match k with
+         | "pattern" ->
+           let v' =
+             if is_case_insensitive
+             then (
+               match v with
+               | `String s -> `String ("(?i)" ^ s)
+               | _ -> v)
+             else v
+           in
+           out := (k, v') :: !out
+         | "path" | "glob" | "type" -> out := (k, v) :: !out
+         | "op" | "-i" -> ()
+         | _ -> out := (k, v) :: !out)
+      fields;
+    `Assoc (List.rev !out)
+  | _ -> args
+;;
+
+let translate_public_alias_args ~public args =
+  match public with
+  | "Grep" -> translate_search_files_public_args args
+  | _ -> args
+;;
+
 let normalize_call ~tool_name ~arguments =
-  let stripped = Tool_alias.strip_mcp_masc_prefix tool_name in
-  match Tool_alias.canonical_resolution tool_name with
-  | Tool_alias.Public_mcp { internal; _ } -> internal, arguments
-  | Tool_alias.Public_alias { internal } ->
-    internal, Tool_alias.translate_input ~public:stripped arguments
-  | Tool_alias.Internal { canonical } -> canonical, arguments
-  | Tool_alias.Unknown -> stripped, arguments
+  let stripped = Tool_name_alias_axis.strip_mcp_masc_prefix tool_name in
+  match public_masc_to_internal stripped with
+  | Some internal -> internal, arguments
+  | None ->
+    (match Tool_name_alias_axis.internal_name_of_public stripped with
+     | Some internal -> internal, translate_public_alias_args ~public:stripped arguments
+     | None -> stripped, arguments)
 ;;
 
 let json_string_list_opt key fields =

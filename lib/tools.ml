@@ -37,7 +37,6 @@ let all_schemas : tool_schema list = raw_schemas
 let all_schemas_extended =
   (all_schemas
    @ Tool_schemas_misc.schemas
-   @ Keeper_types_profile.schemas
    @ Tool_local_runtime.schemas @ Tool_shard.schemas)
   |> dedupe_schemas_by_name
 

@@ -110,6 +110,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
    | Error msg ->
        Log.Server.warn "keeper_runtime.toml load failed: %s (continuing with env defaults)" msg);
   Keeper_runtime_resolved.init ();
+  Task_keeper_backend.install_hooks ();
   (* #9919: active Heuristic_metrics recording moved to Prometheus/Thompson
      paths, but the dashboard still reads the legacy JSONL via
      /api/v1/dashboard/heuristics. Keep storage initialized so existing

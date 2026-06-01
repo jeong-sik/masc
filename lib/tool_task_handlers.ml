@@ -29,6 +29,27 @@ type context = {
   sw: Eio.Switch.t option;
 }
 
+type keeper_hooks =
+  { is_registered_agent_alias : Workspace.config -> string -> bool
+  ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
+  ; agent_tool_names : Workspace.config -> agent_name:string -> string list option
+  ; transition_action_denylist : Workspace.config -> agent_name:string -> string list
+  ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
+  }
+
+let default_keeper_hooks =
+  { is_registered_agent_alias = (fun _ _ -> false)
+  ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
+  ; agent_tool_names = (fun _ ~agent_name:_ -> None)
+  ; transition_action_denylist = (fun _ ~agent_name:_ -> [])
+  ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
+  }
+;;
+
+let keeper_hooks = Atomic.make default_keeper_hooks
+let set_keeper_hooks hooks = Atomic.set keeper_hooks hooks
+let current_keeper_hooks () = Atomic.get keeper_hooks
+
 open Tool_args
 
 (* RFC-0189: [Masc_domain] backend Error variants (Task_error /
@@ -74,7 +95,7 @@ let client_side_transition_gate_error ~task_opt ~action ~action_s =
 include Tool_task_payloads
 
 let is_registered_keeper_agent_alias_name config agent_name =
-  Task_keeper_backend.is_registered_agent_alias config agent_name
+  (current_keeper_hooks ()).is_registered_agent_alias config agent_name
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
   let actual_name =
@@ -122,15 +143,15 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
     | None -> Planning_eio.clear_current_task ctx.config
 
 let sync_keeper_current_task_binding (ctx : context) =
-  Task_keeper_backend.sync_current_task_binding
+  (current_keeper_hooks ()).sync_current_task_binding
     ctx.config
     ~agent_name:ctx.agent_name
 
 let keeper_agent_tool_names (ctx : context) =
-  Task_keeper_backend.agent_tool_names ctx.config ~agent_name:ctx.agent_name
+  (current_keeper_hooks ()).agent_tool_names ctx.config ~agent_name:ctx.agent_name
 
 let keeper_transition_action_denylist (ctx : context) =
-  Task_keeper_backend.transition_action_denylist
+  (current_keeper_hooks ()).transition_action_denylist
     ctx.config
     ~agent_name:ctx.agent_name
 
@@ -388,7 +409,7 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
    from the bare excluded_count. See PR body for the velvet-hammer
    misdiagnosis that motivated this surface. *)
 let active_goal_phases_for_agent ctx =
-  Task_keeper_backend.active_goal_phases_for_agent
+  (current_keeper_hooks ()).active_goal_phases_for_agent
     ctx.config
     ~agent_name:ctx.agent_name
 

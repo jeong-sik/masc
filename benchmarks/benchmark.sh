@@ -185,12 +185,6 @@ bench_bootstrap_agent() {
   bench_call_tool "masc_start" "$(jq -cn --arg path "$BENCH_ROOM_PATH" '{path:$path}')" >/dev/null
 }
 
-bench_leave_agent() {
-  if [[ -n "$MCP_SESSION_ID" ]]; then
-    bench_call_tool "masc_leave" "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent}')" >/dev/null 2>&1 || true
-  fi
-}
-
 stats_csv() {
   python3 - "$@" <<'PY'
 import math, sys
@@ -497,7 +491,6 @@ log "Session warmup iterations: $BENCH_SESSION_WARMUP_ITERATIONS"
 log "Results: $RESULT_FILE"
 
 printf 'benchmark,avg_ms,p50_ms,p95_ms,max_ms,notes\n' >"$RESULT_FILE"
-trap bench_leave_agent EXIT
 
 run_pattern
 COMPARE_BASELINE_FILE="$(find_compare_baseline || true)"

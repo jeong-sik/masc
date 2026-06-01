@@ -78,10 +78,8 @@ val parse_enum_string_opt :
 val resolve_tool_name_list :
   preferred:string list option -> fallback:string list option -> string list
 
-(** Parse the canonical [tool_access] field.
-    Removed top-level tool-policy args are rejected. *)
+(** Parse the canonical [tool_access] field. *)
 val parse_tool_access_input :
-  ?tool_name:string ->
   Yojson.Safe.t ->
   (string list option, string) result
 

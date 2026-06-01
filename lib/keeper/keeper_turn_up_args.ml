@@ -135,23 +135,20 @@ let resolve_tool_name_list ~preferred ~fallback =
   |> Option.value ~default:[]
   |> normalize_tool_name_list
 
-let parse_tool_access_input ?(tool_name = "keeper input") (args : Yojson.Safe.t) :
+let parse_tool_access_input (args : Yojson.Safe.t) :
     (string list option, string) result =
-  match reject_removed_keeper_input_keys ~tool_name args with
-  | Error msg -> Error msg
-  | Ok () -> (
-      match Json_util.assoc_member_opt "tool_access" args with
-      | Some (`List _ as access_json) -> (
-          match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
-          | Ok access -> Ok (Some access)
-          | Error msg -> Error msg)
-      | Some `Null -> Ok None
-      | Some other ->
-          Error
-            (Printf.sprintf
-               "tool_access must be an array of strings (received %s)"
-               (Json_util.kind_name other))
-      | None -> Ok None)
+  match Json_util.assoc_member_opt "tool_access" args with
+  | Some (`List _ as access_json) -> (
+      match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
+      | Ok access -> Ok (Some access)
+      | Error msg -> Error msg)
+  | Some `Null -> Ok None
+  | Some other ->
+      Error
+        (Printf.sprintf
+           "tool_access must be an array of strings (received %s)"
+           (Json_util.kind_name other))
+  | None -> Ok None
 
 let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
@@ -167,9 +164,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let compaction_profile_opt_res =
       parse_compaction_profile_opt args "compaction_profile"
     in
-    let tool_access_input_res =
-      parse_tool_access_input ~tool_name:"masc_keeper_up" args
-    in
+    let tool_access_input_res = parse_tool_access_input args in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     let sandbox_profile_opt_res =

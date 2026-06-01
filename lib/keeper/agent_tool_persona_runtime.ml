@@ -84,7 +84,7 @@ let resolved_keeper_args_to_json
     let tool_access =
       match tool_access_opt with
       | Some tool_access -> tool_access
-      | None -> default_tool_access_of_meta_json ()
+      | None -> []
     in
     [("tool_access", tool_access_to_json tool_access)]
   in

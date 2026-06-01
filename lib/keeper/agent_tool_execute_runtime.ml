@@ -180,6 +180,14 @@ let handle_tool_execute_typed
           Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
           |> Exec_policy.truncate_for_log
         in
+        let message_for_log s =
+          String.map
+            (function
+              | '\n' | '\r' | '\t' -> ' '
+              | c -> c)
+            s
+          |> Exec_policy.truncate_for_log
+        in
         let typed_error_fields =
           [ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
         in
@@ -189,9 +197,10 @@ let handle_tool_execute_typed
              JSON to the agent. Covers destructive-block and write-gate; the
              [error] code distinguishes them. *)
           Log.Keeper.warn
-            "shell_ir blocked keeper=%s reason=%s typed_hit=%b cmd=%s"
+            "shell_ir blocked keeper=%s error=%s reason=%s typed_hit=%b cmd=%s"
             meta.name
             error
+            (message_for_log reason)
             (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir)
             cmd_for_log;
           let deterministic_retry_fields =
@@ -277,7 +286,7 @@ let handle_tool_execute_typed
               "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
               meta.name
               cmd_for_log
-              diagnostic;
+              (message_for_log diagnostic);
             typed_error_json diagnostic
           | Error Agent_tool_execute_shell_ir.Cannot_parse -> typed_error_json "Cannot parse command"
           | Error Agent_tool_execute_shell_ir.Too_complex -> typed_error_json "Command too complex"
@@ -287,7 +296,7 @@ let handle_tool_execute_typed
               "shell_ir path_reject keeper=%s cmd=%s reason=%s"
               meta.name
               cmd_for_log
-              e;
+              (message_for_log e);
             error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
           | Ok result ->
             let elapsed_ms =

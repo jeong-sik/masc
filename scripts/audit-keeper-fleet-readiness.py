@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Audit live keeper fleet readiness from on-disk MASC runtime state.
 
-This is intentionally read-only. It separates configuration readiness
-(Docker, repo CLI identity, repo-mutation-capable tool access) from durable
-evidence (recent turns, board actions, persisted PR references) so operators do
-not mistake a configured capability for proof that every keeper already used it.
+This is intentionally read-only. It separates static sandbox/runtime
+configuration from durable evidence (recent turns, board actions, persisted PR
+references) so operators do not mistake a configured capability for proof that
+every keeper already used it.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import os
 import re
 import sys
 import time
-from collections import Counter
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -25,7 +24,6 @@ from typing import Any
 import tomllib
 
 
-REPO_MUTATION_TOOLS = {"tool_execute", "tool_edit_file", "tool_write_file"}
 BOARD_TOOLS = {
     "keeper_board_post",
     "keeper_board_comment",
@@ -62,7 +60,6 @@ PR_CREATED_NUMBER_RE = re.compile(
     r"(?:draft\s+)?PR\s*#([0-9]+)\b",
     re.IGNORECASE,
 )
-GH_HOSTS_USER_RE = re.compile(r"^\s*user:\s*['\"]?([^'\"\s#]+)")
 ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
 
 
@@ -80,12 +77,6 @@ class KeeperAudit:
     sandbox_profile: str | None
     network_mode: str | None
     tool_access: list[str] | None
-    repo_mutation_tools: list[str]
-    repo_cli_identity: str | None
-    github_account_login: str | None
-    git_identity_mode: str | None
-    credential_dir: str | None
-    credential_dir_exists: bool
     last_turn_ts: float | None
     last_turn_age_hours: float | None
     recent_action: bool
@@ -183,19 +174,6 @@ def load_toml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected TOML object")
     return data
-
-
-def read_github_account_login(gh_config_dir: Path | None) -> str | None:
-    if gh_config_dir is None:
-        return None
-    hosts_path = gh_config_dir / "hosts.yml"
-    if not hosts_path.is_file():
-        return None
-    for line in hosts_path.read_text(encoding="utf-8", errors="replace").splitlines():
-        match = GH_HOSTS_USER_RE.match(line)
-        if match:
-            return match.group(1).strip()
-    return None
 
 
 def merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -325,12 +303,6 @@ def tool_access_from_runtime(
     if tools is None:
         return None, ["tool_access_runtime_invalid"]
     return tools, []
-
-
-def repo_mutation_tools(tool_access: list[str] | None) -> list[str]:
-    if tool_access is None:
-        return []
-    return sorted(REPO_MUTATION_TOOLS.intersection(tool_access))
 
 
 def tools_from_decision(row: dict[str, Any]) -> list[str]:
@@ -1085,7 +1057,6 @@ def audit_keeper(
     require_checkpoint_evidence: bool,
     require_history_evidence: bool,
     require_tool_call_log_evidence: bool,
-    forbidden_repo_cli_identities: set[str] | None = None,
 ) -> KeeperAudit:
     name = config_path.stem
     config = load_keeper_config(config_path)
@@ -1111,13 +1082,6 @@ def audit_keeper(
     tool_access = (
         runtime_tool_access if runtime_tool_access is not None else config_tool_access
     )
-    mutation_tools = repo_mutation_tools(tool_access)
-    repo_cli_identity = string_field(runtime, "repo_cli_identity") or string_field(
-        config, "repo_cli_identity"
-    )
-    git_identity_mode = string_field(runtime, "git_identity_mode") or string_field(
-        config, "git_identity_mode"
-    )
 
     if sandbox_profile != "docker":
         failures.append("sandbox_not_docker")
@@ -1125,36 +1089,6 @@ def audit_keeper(
         failures.append("network_not_inherit")
     failures.extend(config_tool_access_failures)
     failures.extend(runtime_tool_access_failures)
-    if not mutation_tools:
-        failures.append("repo_mutation_tools_missing")
-    if not repo_cli_identity:
-        failures.append("repo_cli_identity_missing")
-    elif (
-        forbidden_repo_cli_identities
-        and repo_cli_identity in forbidden_repo_cli_identities
-    ):
-        failures.append(f"repo_cli_identity_forbidden_{repo_cli_identity}")
-    if git_identity_mode != "repo_cli_identity":
-        failures.append("git_identity_mode_not_repo_cli_identity")
-
-    credential_dir: Path | None = None
-    credential_dir_exists = False
-    github_account_login: str | None = None
-    if repo_cli_identity:
-        credential_dir = (
-            base_path / ".masc" / "repo-cli-identities" / repo_cli_identity / "gh"
-        )
-        credential_dir_exists = credential_dir.is_dir()
-        if not credential_dir_exists:
-            failures.append("github_credential_dir_missing")
-        else:
-            github_account_login = read_github_account_login(credential_dir)
-            if (
-                forbidden_repo_cli_identities
-                and github_account_login in forbidden_repo_cli_identities
-                and github_account_login != repo_cli_identity
-            ):
-                failures.append(f"github_account_forbidden_{github_account_login}")
 
     evidence_ts, tools = scan_keeper_evidence(
         base_path,
@@ -1247,12 +1181,6 @@ def audit_keeper(
         sandbox_profile=sandbox_profile,
         network_mode=network_mode,
         tool_access=tool_access,
-        repo_mutation_tools=mutation_tools,
-        repo_cli_identity=repo_cli_identity,
-        github_account_login=github_account_login,
-        git_identity_mode=git_identity_mode,
-        credential_dir=str(credential_dir) if credential_dir else None,
-        credential_dir_exists=credential_dir_exists,
         last_turn_ts=last_turn_ts,
         last_turn_age_hours=last_turn_age_hours,
         recent_action=recent_action,
@@ -1322,7 +1250,6 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                 args.require_tool_call_log_evidence
                 or args.require_persistent_work_evidence
             ),
-            forbidden_repo_cli_identities=set(args.forbid_repo_cli_identity or []),
         )
         for path in config_paths
     ]
@@ -1332,12 +1259,6 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         fleet_failures.append(
             f"minimum_{args.expected_keepers}_configured_keepers_got_{len(config_paths)}"
         )
-    repo_cli_identity_counts = Counter(
-        keeper.repo_cli_identity for keeper in keepers if keeper.repo_cli_identity
-    )
-    github_account_counts = Counter(
-        keeper.github_account_login for keeper in keepers if keeper.github_account_login
-    )
     failed_keepers = [keeper for keeper in keepers if keeper.failures]
     ok = not fleet_failures and not failed_keepers
     return {
@@ -1347,14 +1268,11 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "expected_keepers": args.expected_keepers,
         "configured_keepers": len(config_paths),
         "max_silence_hours": args.max_silence_hours,
-        "repo_cli_identity_counts": dict(sorted(repo_cli_identity_counts.items())),
-        "github_account_counts": dict(sorted(github_account_counts.items())),
         "requirements": {
             "require_board_evidence": args.require_board_evidence,
             "require_web_search_evidence": args.require_web_search_evidence,
             "require_product_evidence": args.require_product_evidence,
             "require_design_evidence": args.require_design_evidence,
-            "forbid_repo_cli_identity": args.forbid_repo_cli_identity or [],
             "require_pr_created_evidence": args.require_pr_created_evidence,
             "require_pr_url_evidence": args.require_pr_url_evidence,
             "require_provider_turn_evidence": args.require_provider_turn_evidence,
@@ -1393,13 +1311,11 @@ def print_text(report: dict[str, Any]) -> None:
             if keeper["tool_access"] is None
             else str(len(keeper["tool_access"]))
         )
-        repo_tools_label = ",".join(keeper["repo_mutation_tools"]) or "none"
         print(
-            "- {name}: {marker} tool_access={tool_access} repo_tools={repo_tools} "
+            "- {name}: {marker} tool_access={tool_access} "
             "sandbox={sandbox}/{network} "
-            "gh={github} recent={recent} age={age} board={board} "
+            "recent={recent} age={age} board={board} "
             "web_search={web_search} "
-            "gh_account={github_account} "
             "product={product} design={design} "
             "pr_created={pr_created} pr_url={pr_url} "
             "provider_turn={provider_turn} checkpoint={checkpoint} "
@@ -1407,11 +1323,8 @@ def print_text(report: dict[str, Any]) -> None:
                 name=keeper["name"],
                 marker=marker,
                 tool_access=tool_access_label,
-                repo_tools=repo_tools_label,
                 sandbox=keeper["sandbox_profile"],
                 network=keeper["network_mode"],
-                github=keeper["repo_cli_identity"],
-                github_account=keeper["github_account_login"],
                 recent=str(keeper["recent_action"]).lower(),
                 age=age_label,
                 board=str(keeper["board_action"]).lower(),
@@ -1458,18 +1371,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Minimum configured keeper count required for fleet readiness.",
     )
     parser.add_argument("--max-silence-hours", type=float, default=2400.0)
-    parser.add_argument(
-        "--forbid-repo-cli-identity",
-        "--forbid-github-identity",
-        dest="forbid_repo_cli_identity",
-        action="append",
-        default=[],
-        metavar="IDENTITY",
-        help=(
-            "Fail keepers using this repo CLI identity. Repeat for multiple "
-            "operator or unsafe identity names."
-        ),
-    )
     parser.add_argument(
         "--no-require-board-evidence",
         action="store_false",

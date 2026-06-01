@@ -47,7 +47,6 @@ MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-product-design-board-reprobe}"
 BOARD_POST_ID="${BOARD_POST_ID:-}"
-FORBID_GITHUB_IDENTITIES="${FORBID_GITHUB_IDENTITIES:-}"
 
 usage() {
   cat <<'EOF'
@@ -68,8 +67,6 @@ Options:
   --board-post-id ID       Post a final board comment to this thread.
   --run-id ID              Stable run id for prompts and artifacts.
   --run-dir PATH           Artifact directory.
-  --forbid-github-identity NAME
-                           Pass a forbidden identity to the final audit.
   -h, --help               Show this help.
 
 Environment:
@@ -80,7 +77,6 @@ Environment:
   KEEPER_TURN_TIMEOUT_SEC  Per-keeper Agent.run timeout_sec sent to masc_keeper_msg.
   REQUIRED_TOOLS           CSV required_tools sent to masc_keeper_msg.
   RUN_AUDIT=0              Skip final audit.
-  FORBID_GITHUB_IDENTITIES Optional CSV of forbidden keeper GitHub identities.
 EOF
 }
 
@@ -142,14 +138,6 @@ while [[ $# -gt 0 ]]; do
       POLL_ERRORS_FILE="$RUN_DIR/poll_errors.jsonl"
       SUMMARY_FILE="$RUN_DIR/summary.json"
       AUDIT_FILE="$RUN_DIR/audit-product-design.json"
-      shift 2
-      ;;
-    --forbid-github-identity)
-      if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then
-        FORBID_GITHUB_IDENTITIES="$FORBID_GITHUB_IDENTITIES,$2"
-      else
-        FORBID_GITHUB_IDENTITIES="$2"
-      fi
       shift 2
       ;;
     -h|--help)
@@ -502,17 +490,6 @@ run_audit() {
     --require-design-evidence
     --json
   )
-  if [[ -n "$FORBID_GITHUB_IDENTITIES" ]]; then
-    IFS=',' read -r -a forbidden_items <<<"$FORBID_GITHUB_IDENTITIES"
-    local forbidden_item
-    for forbidden_item in "${forbidden_items[@]}"; do
-      forbidden_item="${forbidden_item#"${forbidden_item%%[![:space:]]*}"}"
-      forbidden_item="${forbidden_item%"${forbidden_item##*[![:space:]]}"}"
-      if [[ -n "$forbidden_item" ]]; then
-        audit_args+=(--forbid-github-identity "$forbidden_item")
-      fi
-    done
-  fi
   set +e
   python3 "${audit_args[@]}" >"$AUDIT_FILE"
   local audit_status=$?
@@ -533,7 +510,6 @@ write_summary() {
     --arg run_id "$RUN_ID" \
     --arg run_dir "$RUN_DIR" \
     --arg base_path "$BASE_PATH" \
-    --arg forbid_repo_cli_identities "$FORBID_GITHUB_IDENTITIES" \
     --argjson mutate "$MUTATE" \
     --argjson keeper_count "$keeper_count" \
     --argjson request_count "$request_count" \
@@ -542,7 +518,7 @@ write_summary() {
     --argjson poll_error_count "$poll_error_count" \
     --argjson audit_status "$audit_status" \
     --arg audit_file "$AUDIT_FILE" \
-    '{run_id:$run_id,run_dir:$run_dir,base_path:$base_path,forbid_repo_cli_identities:$forbid_repo_cli_identities,mutate:$mutate,keeper_count:$keeper_count,request_count:$request_count,result_count:$result_count,timeout_count:$timeout_count,poll_error_count:$poll_error_count,audit_status:$audit_status,audit_file:$audit_file}' \
+    '{run_id:$run_id,run_dir:$run_dir,base_path:$base_path,mutate:$mutate,keeper_count:$keeper_count,request_count:$request_count,result_count:$result_count,timeout_count:$timeout_count,poll_error_count:$poll_error_count,audit_status:$audit_status,audit_file:$audit_file}' \
     >"$SUMMARY_FILE"
 }
 

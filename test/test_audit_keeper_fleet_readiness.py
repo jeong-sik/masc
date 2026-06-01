@@ -64,43 +64,20 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_history_evidence=False,
         require_tool_call_log_evidence=False,
         require_persistent_work_evidence=False,
-        forbid_repo_cli_identity=[],
     )
 
 
-def write_ready_keeper(
-    root: Path,
-    name: str,
-    *,
-    repo_cli_identity: str = "anyang-keepers",
-    github_account_login: str | None = None,
-) -> None:
+def write_ready_keeper(root: Path, name: str) -> None:
     config_dir = root / ".masc" / "config" / "keepers"
     runtime_dir = root / ".masc" / "keepers"
-    credential_dir = root / ".masc" / "repo-cli-identities" / repo_cli_identity / "gh"
     config_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    credential_dir.mkdir(parents=True, exist_ok=True)
-    account_login = github_account_login or repo_cli_identity
-    (credential_dir / "hosts.yml").write_text(
-        "\n".join(
-            [
-                "github.com:",
-                "    git_protocol: https",
-                f"    user: {account_login}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
     (config_dir / f"{name}.toml").write_text(
         "\n".join(
             [
                 "[keeper]",
                 'sandbox_profile = "docker"',
                 'network_mode = "inherit"',
-                f'repo_cli_identity = "{repo_cli_identity}"',
-                'git_identity_mode = "repo_cli_identity"',
                 "tool_access = [",
                 '  "tool_execute",',
                 '  "tool_edit_file",',
@@ -123,8 +100,6 @@ def write_ready_keeper(
                     "tool_write_file",
                     "keeper_board_post",
                 ],
-                "repo_cli_identity": repo_cli_identity,
-                "git_identity_mode": "repo_cli_identity",
                 "last_turn_ts": time.time(),
             }
         ),
@@ -278,11 +253,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         args = audit.parse_args([])
 
         self.assertEqual(args.expected_keepers, 18)
-
-    def test_parse_args_accepts_forbid_github_identity_alias(self):
-        args = audit.parse_args(["--forbid-github-identity", "operator"])
-
-        self.assertEqual(args.forbid_repo_cli_identity, ["operator"])
 
     def test_iter_jsonl_streams_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -547,7 +517,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             report["fleet_failures"], ["minimum_2_configured_keepers_got_1"]
         )
 
-    def test_explicit_tool_access_must_include_repo_mutation_tool(self):
+    def test_explicit_tool_access_shape_does_not_gate_readiness(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_ready_keeper(root, "alpha")
@@ -558,12 +528,9 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
             report = audit.build_report(audit_args(root, expected_keepers=1))
 
-        self.assertFalse(report["ok"])
-        keeper = report["keepers"][0]
-        self.assertEqual(keeper["repo_mutation_tools"], [])
-        self.assertIn("repo_mutation_tools_missing", keeper["failures"])
+        self.assertTrue(report["ok"])
 
-    def test_missing_tool_access_has_no_repo_mutation_surface(self):
+    def test_missing_tool_access_does_not_gate_readiness(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_ready_keeper(root, "alpha")
@@ -578,8 +545,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                         "[keeper]",
                         'sandbox_profile = "docker"',
                         'network_mode = "inherit"',
-                        'repo_cli_identity = "anyang-keepers"',
-                        'git_identity_mode = "repo_cli_identity"',
                         "",
                     ]
                 ),
@@ -588,11 +553,9 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
             report = audit.build_report(audit_args(root, expected_keepers=1))
 
-        self.assertFalse(report["ok"])
+        self.assertTrue(report["ok"])
         keeper = report["keepers"][0]
         self.assertIsNone(keeper["tool_access"])
-        self.assertEqual(keeper["repo_mutation_tools"], [])
-        self.assertIn("repo_mutation_tools_missing", keeper["failures"])
 
     def test_require_persistent_work_evidence_fails_without_runtime_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -709,41 +672,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(len(keeper["checkpoint_evidence_refs"]), 1)
         self.assertEqual(len(keeper["history_evidence_refs"]), 1)
         self.assertEqual(len(keeper["tool_call_log_evidence_refs"]), 1)
-
-    def test_forbid_repo_cli_identity_fails_matching_keeper(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write_ready_keeper(root, "alpha", repo_cli_identity="operator")
-            args = audit_args(root, expected_keepers=1)
-            args.forbid_repo_cli_identity = ["operator"]
-
-            report = audit.build_report(args)
-
-        self.assertFalse(report["ok"])
-        self.assertEqual(
-            report["keepers"][0]["failures"],
-            ["repo_cli_identity_forbidden_operator"],
-        )
-
-    def test_forbid_repo_cli_identity_fails_matching_account_login(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write_ready_keeper(
-                root,
-                "alpha",
-                repo_cli_identity="reviewer-keepers",
-                github_account_login="operator",
-            )
-            args = audit_args(root, expected_keepers=1)
-            args.forbid_repo_cli_identity = ["operator"]
-
-            report = audit.build_report(args)
-
-        self.assertFalse(report["ok"])
-        self.assertEqual(
-            report["keepers"][0]["failures"],
-            ["github_account_forbidden_operator"],
-        )
 
     def test_scan_keeper_evidence_reads_tool_calls(self):
         with tempfile.TemporaryDirectory() as tmp:

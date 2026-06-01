@@ -13,6 +13,8 @@ type pending_approval =
   ; action_key : string
   ; input_hash : string
   ; sandbox_target : string
+  ; sandbox_profile : string option
+  ; backend : string option
   ; input : Yojson.Safe.t
   ; risk_level : risk_level
   ; requested_at : float

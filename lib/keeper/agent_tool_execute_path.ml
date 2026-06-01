@@ -128,14 +128,24 @@ let validate_repo_path_args_ready
       ~(cwd : string)
       (ir : Masc_exec.Shell_ir.t)
   =
+  let normalize_repo_command_name command_name =
+    let command_name = String.lowercase_ascii command_name in
+    if String.ends_with ~suffix:".exe" command_name
+    then String.sub command_name 0 (String.length command_name - String.length ".exe")
+    else command_name
+  in
   let path_args_of_simple simple =
     let command_name =
       Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
       |> Filename.basename
+      |> normalize_repo_command_name
     in
-    match Exec_policy.simple_literal_args simple with
-    | None -> []
-    | Some args -> Exec_policy.path_argument_values command_name args
+    if not (command_name = "git" || command_name = "gh")
+    then []
+    else
+      match Exec_policy.simple_literal_args simple with
+      | None -> []
+      | Some args -> Exec_policy.path_argument_values command_name args
   in
   let rec path_args = function
     | Masc_exec.Shell_ir.Simple simple ->

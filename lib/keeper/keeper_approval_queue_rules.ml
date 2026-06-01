@@ -141,6 +141,23 @@ let backend_of_runtime_contract runtime_contract =
   Option.bind runtime_contract (string_opt_member "backend")
 ;;
 
+let nonempty_string_opt = function
+  | Some value when String.trim value <> "" -> Some (String.trim value)
+  | _ -> None
+;;
+
+let sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract =
+  match nonempty_string_opt sandbox_profile with
+  | Some _ as value -> value
+  | None -> sandbox_profile_of_runtime_contract runtime_contract
+;;
+
+let backend_of_runtime_context ?backend runtime_contract =
+  match nonempty_string_opt backend with
+  | Some _ as value -> value
+  | None -> backend_of_runtime_contract runtime_contract
+;;
+
 let load_rules_unlocked ?base_path () =
   match Safe_ops.read_json_file_safe (rules_path ?base_path ()) with
   | Ok (`List entries) -> entries |> List.filter_map approval_rule_of_yojson
@@ -196,6 +213,8 @@ let upsert_rule
       ~tool_name
       ~input
       ~risk_level
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?created_by
       ?source_approval_id
@@ -208,8 +227,8 @@ let upsert_rule
       { id = make_generated_id "rule"
       ; keeper_name
       ; tool_name
-      ; sandbox_profile = sandbox_profile_of_runtime_contract runtime_contract
-      ; backend = backend_of_runtime_contract runtime_contract
+      ; sandbox_profile = sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract
+      ; backend = backend_of_runtime_context ?backend runtime_contract
       ; request_fingerprint
       ; request_fingerprint_preview = request_fingerprint_preview request_fingerprint
       ; max_risk = risk_level
@@ -252,14 +271,16 @@ let find_matching_rule
       ~tool_name
       ~input
       ~risk_level
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ()
   =
   with_rules_lock (fun () ->
     let rules = load_rules_unlocked ?base_path () in
     let request_fingerprint = request_fingerprint input in
-    let sandbox_profile = sandbox_profile_of_runtime_contract runtime_contract in
-    let backend = backend_of_runtime_contract runtime_contract in
+    let sandbox_profile = sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract in
+    let backend = backend_of_runtime_context ?backend runtime_contract in
     match
       List.find_opt
         (fun rule ->

@@ -835,7 +835,7 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     | None -> `Null
   in
   let runtime_contract =
-    Keeper_runtime_contract.runtime_contract_json ~config meta
+    Keeper_runtime_contract.runtime_observability_contract_json ~config meta
   in
   let fallback_disposition, fallback_disposition_reason =
     disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields

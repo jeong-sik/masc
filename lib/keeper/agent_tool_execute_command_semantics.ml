@@ -62,8 +62,15 @@ let is_env_assignment token =
   | Some 0 -> false
   | Some i -> is_shell_identifier (String.sub token 0 i)
 
-let rec effective_stage = function
-  | { bin = "env"; args } ->
+let normalize_command_name command_name =
+  let command_name = Filename.basename command_name |> String.lowercase_ascii in
+  if String.ends_with ~suffix:".exe" command_name
+  then String.sub command_name 0 (String.length command_name - String.length ".exe")
+  else command_name
+
+let rec effective_stage stage =
+  match normalize_command_name stage.bin, stage.args with
+  | "env", args ->
     let rec scan = function
       | [] -> None
       | ("-i" | "--ignore-environment") :: rest -> scan rest
@@ -72,13 +79,16 @@ let rec effective_stage = function
       | bin :: args -> Some { bin; args }
     in
     scan args
-  | { bin = "opam"; args = "exec" :: rest } ->
+  | "opam", "exec" :: rest ->
     (match rest with
      | "--" :: bin :: args -> Some { bin; args }
      | bin :: args when not (String.starts_with ~prefix:"-" bin) ->
        Some { bin; args }
      | _ -> None)
-  | stage -> Some stage
+  | _ ->
+    (* DET-OK: this is the parsed command itself, not an inferred fallback for
+       an unknown wrapper. *)
+    Some stage
 
 let effective_stages_of_ir ir =
   parsed_stages_of_ir ir |> List.filter_map effective_stage
@@ -101,10 +111,12 @@ let safe_repo_name name =
   && not (String.contains name '\000')
 
 let stages_target_repo_commands stages =
-  List.exists (fun stage -> stage.bin = "git" || stage.bin = "gh") stages
+  List.exists (fun stage ->
+    let bin = normalize_command_name stage.bin in
+    bin = "git" || bin = "gh") stages
 
 let stages_target_repo_hosting_cli stages =
-  List.exists (fun stage -> stage.bin = "gh") stages
+  List.exists (fun stage -> normalize_command_name stage.bin = "gh") stages
 
 let repo_hosting_cli_args_have_repo_flag args =
   List.exists
@@ -117,7 +129,9 @@ let repo_hosting_cli_args_have_repo_flag args =
 
 let stages_have_repo_hosting_cli_repo_flag stages =
   List.exists
-    (fun stage -> stage.bin = "gh" && repo_hosting_cli_args_have_repo_flag stage.args)
+    (fun stage ->
+       normalize_command_name stage.bin = "gh"
+       && repo_hosting_cli_args_have_repo_flag stage.args)
     stages
 
 let repo_flag_value = function
@@ -137,7 +151,7 @@ let repo_hosting_cli_repo_flag_api_misuse_of_stages stages =
     | _ -> None
   in
   List.find_map (fun stage ->
-    if stage.bin = "gh" then scan_args stage.args else None) stages
+    if normalize_command_name stage.bin = "gh" then scan_args stage.args else None) stages
 
 let bare_worktrees_path token =
   let token = strip_simple_shell_quotes token in
@@ -146,20 +160,60 @@ let bare_worktrees_path token =
   || String.starts_with ~prefix:".worktrees/" token
   || String.starts_with ~prefix:"./.worktrees/" token
 
-let git_c_path_of_stages stages =
-  let rec scan_git_args = function
-    | "-C" :: path :: _ -> Some path
-    | "--" :: _ -> None
-    | option :: _ when String.starts_with ~prefix:"-C" option ->
+let git_global_c_paths_of_stages stages =
+  let rec scan_git_args acc = function
+    | "-C" :: path :: rest -> scan_git_args (path :: acc) rest
+    | "-C" :: [] -> List.rev acc
+    | "--" :: _ -> List.rev acc
+    | option :: rest when String.starts_with ~prefix:"-C" option ->
       let path =
         String.sub option 2 (String.length option - 2) |> String.trim
       in
-      if path = "" then None else Some path
-    | _ :: rest -> scan_git_args rest
-    | [] -> None
+      if path = "" then List.rev acc else scan_git_args (path :: acc) rest
+    | ("-c" | "--config-env" | "--git-dir" | "--work-tree" | "--namespace"
+      | "--super-prefix" | "--exec-path") :: _value :: rest ->
+      scan_git_args acc rest
+    | option :: rest when String.starts_with ~prefix:"-" option ->
+      scan_git_args acc rest
+    | _ :: _ -> List.rev acc
+    | [] -> List.rev acc
   in
   List.find_map (fun stage ->
-    if stage.bin = "git" then scan_git_args stage.args else None) stages
+    if normalize_command_name stage.bin = "git"
+    then (
+      match scan_git_args [] stage.args with
+      | [] -> None
+      | paths -> Some paths)
+    else None) stages
+
+let normalize_cwd_relative_path ?container_root ?host_root ~cwd path =
+  let path = strip_simple_shell_quotes path |> String.trim in
+  let path = if Filename.is_relative path then Filename.concat cwd path else path in
+  let path =
+    Keeper_alerting_path.normalize_path_for_check path
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  match container_root, host_root with
+  | Some container_root, Some host_root ->
+    let container_root =
+      Keeper_alerting_path.normalize_path_for_check container_root
+      |> Keeper_alerting_path.strip_trailing_slashes
+    in
+    if path = container_root
+    then host_root
+    else (
+      let prefix = container_root ^ "/" in
+      if String.starts_with ~prefix path
+      then
+        Filename.concat
+          host_root
+          (String.sub path (String.length prefix) (String.length path - String.length prefix))
+      else path)
+  | _ -> path
+
+let path_is_existing_dir path =
+  try Sys.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
 
 let normalize_repos_path_token token =
   let token = strip_simple_shell_quotes token |> String.trim in
@@ -174,7 +228,8 @@ let normalize_repos_path_token token =
 
 let repos_path_hint_of_stages ~cmd stages =
   List.find_map (fun stage ->
-    if stage.bin <> "git" && stage.bin <> "gh"
+    let bin = normalize_command_name stage.bin in
+    if bin <> "git" && bin <> "gh"
     then None
     else
       stage.args
@@ -217,10 +272,7 @@ let resolve_sandbox_root_git_cwd_of_stages
   then cwd, None
   else if cwd_normalized = host_root && stages_target_repo_commands stages
   then (
-    let explicit_git_c_path = git_c_path_of_stages stages in
-    match explicit_git_c_path with
-    | Some path when not (bare_worktrees_path path) -> cwd, None
-    | _ -> (
+    let resolve_without_explicit_git_c () =
       match repos_in_playground () with
       | [ single_repo ] ->
         Filename.concat (Filename.concat host_root "repos") single_repo, None
@@ -248,7 +300,32 @@ let resolve_sandbox_root_git_cwd_of_stages
                 Do not retry the same cmd from sandbox root."
                host_root
                suggested_cwd
-               (String.concat ", " many)) )))
+               (String.concat ", " many)) )
+    in
+    let explicit_git_c_paths = git_global_c_paths_of_stages stages in
+    match explicit_git_c_paths with
+    | Some [ path ] when bare_worktrees_path path -> resolve_without_explicit_git_c ()
+    | Some paths ->
+      let target =
+        List.fold_left
+          (fun cwd path ->
+             normalize_cwd_relative_path
+               ~container_root:(Keeper_sandbox.container_root meta.name)
+               ~host_root
+               ~cwd
+               path)
+          cwd_normalized
+          paths
+      in
+      if path_is_existing_dir target
+      then cwd, None
+      else
+        cwd,
+        Some
+          (Printf.sprintf
+             "cwd_not_directory: %s (git -C target must be an existing directory)"
+             target)
+    | _ -> resolve_without_explicit_git_c ())
   else cwd, None
 
 let effective_stages_of_cmd cmd =

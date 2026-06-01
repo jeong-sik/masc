@@ -351,7 +351,7 @@ let record_runtime_mcp_keeper_trajectory
       ~turn
   in
   let runtime_contract =
-    Keeper_runtime_contract.runtime_contract_json_from_fields
+    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
       ~keeper_name:ctx.keeper_name
       ?agent_name:ctx.agent_name
       ?trace_id:ctx.trace_id

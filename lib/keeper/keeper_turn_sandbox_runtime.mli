@@ -10,6 +10,7 @@ val create :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?network_mode:Keeper_types_profile_sandbox.network_mode ->
+  ?credential_mounts_enabled:bool ->
   turn_id:int ->
   unit ->
   t

@@ -89,7 +89,7 @@ let append_decision_record
     | [] -> None
   in
   let runtime_contract =
-    Keeper_runtime_contract.runtime_contract_json ~config meta
+    Keeper_runtime_contract.runtime_observability_contract_json ~config meta
   in
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name

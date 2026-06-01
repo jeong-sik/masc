@@ -372,6 +372,15 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
              Keeper_runtime_contract.runtime_contract_json ?config keeper_meta)
           meta
       in
+      let sandbox_profile, backend, sandbox_target =
+        match meta with
+        | Some keeper_meta ->
+          let backend = Keeper_runtime_contract.backend_of_meta keeper_meta in
+          ( Some (Keeper_types_profile.sandbox_profile_to_string keeper_meta.sandbox_profile)
+          , Some backend
+          , Some backend )
+        | None -> None, None, None
+      in
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in
       let base_path =
@@ -427,6 +436,8 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
             ~tool_name
             ~input
             ~risk_level
+            ?sandbox_profile
+            ?backend
             ?runtime_contract
             ()
       in
@@ -443,6 +454,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
           ?task_id
           ?goal_id
           ~goal_ids:(Option.value ~default:[] goal_ids)
+          ?sandbox_target
           ?runtime_contract
           ?selected_model
           ~disposition:"Pass"
@@ -464,6 +476,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
             ?task_id
             ?goal_id
             ~goal_ids:(Option.value ~default:[] goal_ids)
+            ?sandbox_target
             ?runtime_contract
             ?selected_model
             ~disposition:"Pass"
@@ -491,6 +504,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
                ?task_id
                ?goal_id
                ~goal_ids:(Option.value ~default:[] goal_ids)
+               ?sandbox_target
                ?runtime_contract
                ?selected_model
                ~disposition:"Pass"
@@ -509,6 +523,9 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
                ?task_id
                ?goal_id
                ?goal_ids
+               ?sandbox_target
+               ?sandbox_profile
+               ?backend
                ?runtime_contract
                ?selected_model
                ~disposition:"Blocked"

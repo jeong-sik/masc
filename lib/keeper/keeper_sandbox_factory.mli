@@ -25,6 +25,7 @@ type t
 
 val create :
   ?default_network_override:Keeper_types_profile_sandbox.network_mode ->
+  ?credential_mounts_enabled:bool ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?turn_id:int ->
@@ -32,7 +33,9 @@ val create :
   t
 (** Create an empty factory.  [default_network_override], when supplied,
     is applied to every runtime created via {!resolve} (used by the git
-    variant which always inherits the host network). *)
+    variant which always inherits the host network).
+    [credential_mounts_enabled] is deliberately opt-in: generic Docker
+    execution should not mount git/gh credential bundles. *)
 
 val resolve :
   t ->

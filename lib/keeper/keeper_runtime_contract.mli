@@ -35,6 +35,14 @@ val resolve_observation_claim_goal_scope :
 
 val runtime_contract_json :
   ?config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+(** Keeper-visible runtime contract. Backend implementation details such as
+    [sandbox_profile], [network_mode], [backend], and [sandbox_target] are
+    intentionally omitted; use [runtime_observability_contract_json] for
+    operator-facing status, receipts, and debugging. *)
+
+val runtime_observability_contract_json :
+  ?config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+(** Operator-facing runtime contract with sandbox backend details included. *)
 
 val runtime_contract_json_from_fields :
   keeper_name:string ->
@@ -58,7 +66,34 @@ val runtime_contract_json_from_fields :
   ?runtime_profile:string ->
   unit ->
   Yojson.Safe.t
-(** Build the runtime contract projection from turn-context fields. *)
+(** Build the keeper-visible runtime contract projection from turn-context
+    fields. Backend implementation details are intentionally omitted. *)
+
+val runtime_observability_contract_json_from_fields :
+  keeper_name:string ->
+  ?agent_name:string ->
+  ?trace_id:string ->
+  ?session_id:string ->
+  ?generation:int ->
+  ?keeper_turn_id:int ->
+  ?task_id:string ->
+  ?goal_ids:string list ->
+  ?sandbox_profile:string ->
+  ?sandbox_root:string ->
+  ?allowed_paths:string list ->
+  ?network_mode:string ->
+  ?approval_mode:string ->
+  ?tool_surface_class:string ->
+  ?visible_tool_count:int ->
+  ?required_tools:string list ->
+  ?required_tool_candidates:string list ->
+  ?missing_required_tools:string list ->
+  ?runtime_profile:string ->
+  unit ->
+  Yojson.Safe.t
+(** Build an operator-facing runtime contract projection from turn-context
+    fields, including sandbox backend details for status, receipts, and
+    debugging. *)
 
 val action_radius_json :
   tool_name:string ->

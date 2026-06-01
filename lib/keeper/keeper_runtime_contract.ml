@@ -214,7 +214,20 @@ let nonempty_list = function
   | Some values -> values
   | None -> []
 
-let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
+let backend_detail_keys =
+  [ "sandbox_profile"; "network_mode"; "backend"; "sandbox_target" ]
+
+let is_backend_detail_key key = List.mem key backend_detail_keys
+
+let redact_backend_details = function
+  | `Assoc fields ->
+      `Assoc
+        (List.filter
+           (fun (key, _) -> not (is_backend_detail_key key))
+           fields)
+  | json -> json
+
+let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
     ?visible_tool_count ?required_tools ?required_tool_candidates ?missing_required_tools
@@ -243,6 +256,34 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
         Json_util.json_string_list (nonempty_list missing_required_tools) );
       ("runtime_profile", string_opt_json runtime_profile);
     ]
+
+let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
+    ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
+    ?visible_tool_count ?required_tools ?required_tool_candidates ?missing_required_tools
+    ?runtime_profile () : Yojson.Safe.t =
+  runtime_observability_contract_json_from_fields
+    ~keeper_name
+    ?agent_name
+    ?trace_id
+    ?session_id
+    ?generation
+    ?keeper_turn_id
+    ?task_id
+    ?goal_ids
+    ?sandbox_profile
+    ?sandbox_root
+    ?allowed_paths
+    ?network_mode
+    ?approval_mode
+    ?tool_surface_class
+    ?visible_tool_count
+    ?required_tools
+    ?required_tool_candidates
+    ?missing_required_tools
+    ?runtime_profile
+    ()
+  |> redact_backend_details
 
 
 let json_string_field name = function
@@ -316,17 +357,12 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
     ]
 
 let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
-  let sandbox_target = backend_of_meta meta in
   let goal_progress = goal_progress_json ?config meta in
   let blocked_task_count =
     Safe_ops.json_int "blocked_task_count" ~default:0 goal_progress
   in
   `Assoc
     [
-      ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
-      ("network_mode", `String (network_mode_to_string meta.network_mode));
-      ("backend", `String sandbox_target);
-      ("sandbox_target", `String sandbox_target);
       ("task_id", Json_util.string_opt_to_json (current_task_id_opt meta));
       ("goal_id", Json_util.string_opt_to_json (primary_goal_id_opt meta));
       ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
@@ -334,3 +370,17 @@ let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
       ("blocked_task_count", `Int blocked_task_count);
       ("approval_policy_effective", approval_policy_effective_json ?config meta);
     ]
+
+let runtime_observability_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
+  let sandbox_target = backend_of_meta meta in
+  match runtime_contract_json ?config meta with
+  | `Assoc fields ->
+    `Assoc
+      ([
+         ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
+         ("network_mode", `String (network_mode_to_string meta.network_mode));
+         ("backend", `String sandbox_target);
+         ("sandbox_target", `String sandbox_target);
+       ]
+       @ fields)
+  | json -> json

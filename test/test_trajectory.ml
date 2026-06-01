@@ -412,7 +412,7 @@ let test_entry_to_json_includes_contract_and_radius () =
     cost_usd = 0.0001;
   } in
   let runtime_contract =
-    Keeper_runtime_contract.runtime_contract_json_from_fields
+    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
       ~keeper_name:"alpha"
       ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
@@ -439,6 +439,45 @@ let test_entry_to_json_includes_contract_and_radius () =
   Alcotest.(check string) "observed path" "/tmp/work"
     (json |> member "action_radius" |> member "observed_paths" |> to_list
      |> List.hd |> to_string)
+
+let has_assoc_key key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
+
+let test_runtime_contract_projection_redacts_backend_details () =
+  let keeper_visible =
+    Keeper_runtime_contract.runtime_contract_json_from_fields
+      ~keeper_name:"alpha"
+      ~agent_name:"alpha-agent"
+      ~trace_id:"trace-alpha"
+      ~generation:2
+      ~sandbox_profile:"docker"
+      ~sandbox_root:"/workspace"
+      ~network_mode:"none"
+      ()
+  in
+  let observability =
+    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
+      ~keeper_name:"alpha"
+      ~agent_name:"alpha-agent"
+      ~trace_id:"trace-alpha"
+      ~generation:2
+      ~sandbox_profile:"docker"
+      ~sandbox_root:"/workspace"
+      ~network_mode:"none"
+      ()
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "keeper contract redacts sandbox_profile" false
+    (has_assoc_key "sandbox_profile" keeper_visible);
+  Alcotest.(check bool) "keeper contract redacts network_mode" false
+    (has_assoc_key "network_mode" keeper_visible);
+  Alcotest.(check string) "keeper contract keeps sandbox root" "/workspace"
+    (keeper_visible |> member "sandbox_root" |> to_string);
+  Alcotest.(check string) "observability keeps sandbox_profile" "docker"
+    (observability |> member "sandbox_profile" |> to_string);
+  Alcotest.(check string) "observability keeps network_mode" "none"
+    (observability |> member "network_mode" |> to_string)
 
 (* ================================================================ *)
 (* Test: read_entries_since (file-based)                             *)
@@ -559,6 +598,8 @@ let () =
       Alcotest.test_case "hourly_bucket to json" `Quick test_hourly_bucket_json;
       Alcotest.test_case "entry carries runtime/action telemetry" `Quick
         test_entry_to_json_includes_contract_and_radius;
+      Alcotest.test_case "runtime contract redacts backend details" `Quick
+        test_runtime_contract_projection_redacts_backend_details;
     ]);
     ("read_entries_since", [
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;

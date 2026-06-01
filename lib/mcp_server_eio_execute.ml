@@ -475,6 +475,7 @@ let execute_tool_eio
                      Some
                        (Keeper_sandbox_factory.create
                           ~default_network_override:Keeper_types_profile_sandbox.Network_inherit
+                          ~credential_mounts_enabled:true
                           ~config
                           ~meta
                           ())

@@ -25,8 +25,6 @@ val docker_info_security_options :
 type required_command_check = { command : string; available : bool; }
 type docker_preflight = {
   ok : bool;
-  credential_fallbacks_disabled : bool;
-  git_egress : string;
   image : string;
   docker_runtime_ok : bool;
   docker_runtime_error : string option;

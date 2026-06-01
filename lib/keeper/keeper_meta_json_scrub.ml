@@ -46,13 +46,12 @@ let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
 ;;
 
 let strict_rejected_keeper_meta_key_names =
-  [ "allowed_providers"; "last_blocker_class"; "repo_cli_identity" ]
+  [ "allowed_providers"; "last_blocker_class" ]
 ;;
 
 let persisted_retired_keeper_meta_key_names =
   let retired_discovery_key suffix = "work_" ^ "discovery" ^ suffix in
   [
-    "repo_cli_identity";
     "last_" ^ retired_discovery_key "_ts";
     retired_discovery_key "_count";
     retired_discovery_key "_enabled";

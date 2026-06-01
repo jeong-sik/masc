@@ -104,43 +104,15 @@ val resolve_sandbox_profile :
   sandbox_profile
 
 val resolve_network_mode :
-  sandbox_profile:sandbox_profile ->
   preferred:network_mode option ->
   fallback:network_mode option ->
   network_mode
-
-(** Private workspace root path (relative to project root). *)
-val private_workspace_root_rel :
-  sandbox_profile:sandbox_profile -> string -> string
-
-(** Private workspace root path (absolute, normalized). *)
-val private_workspace_root_abs :
-  config:Workspace.config ->
-  sandbox_profile:sandbox_profile ->
-  string ->
-  string
 
 (** Reject globs ([*?\[\]]) and traversal segments ([./..]) in
     sandbox allowed-path entries. *)
 val sandbox_allowed_path_has_forbidden_segments : string -> bool
 
-(** [true] iff [path] resolves to a location within the keeper's
-    private workspace root (after normalization + traversal check). *)
-val sandbox_allowed_path_within_private_root :
-  config:Workspace.config ->
-  keeper_name:string ->
-  sandbox_profile:sandbox_profile ->
-  string ->
-  bool
-
-(** Validate sandbox + network + allowed_paths against the
-    [Local | Docker] profile constraints. Returns [Error msg] with
-    a remediation hint when settings are inconsistent. *)
+(** Validate allowed_paths without changing behavior by sandbox backend. *)
 val validate_sandbox_settings :
-  config:Workspace.config ->
-  keeper_name:string ->
-  repo_cli_identity:'a option ->
-  sandbox_profile:sandbox_profile ->
-  network_mode:network_mode ->
   allowed_paths:string list ->
   (unit, string) result

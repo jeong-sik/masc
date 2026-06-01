@@ -542,8 +542,6 @@ describe('RuntimeLensSection', () => {
             sandbox_profiles: ['docker'],
             network_modes: ['inherit'],
             docker_visible: true,
-            git_credentials_enabled: true,
-            repo_cli_identity_materialized: true,
             latest_at: '2026-05-13T00:00:01Z',
           },
           context: {
@@ -778,7 +776,6 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('pass / 2 calls')).toBeInTheDocument()
     expect(screen.getByText('sandbox proof')).toBeInTheDocument()
     expect(screen.getByText('docker')).toBeInTheDocument()
-    expect(screen.getByText('repo CLI proof')).toBeInTheDocument()
     expect(screen.getByText('git creds / identity materialized')).toBeInTheDocument()
     expect(screen.getByText('proof tools')).toBeInTheDocument()
     expect(screen.getByText('Execute, SearchFiles')).toBeInTheDocument()

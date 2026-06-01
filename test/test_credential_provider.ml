@@ -87,18 +87,6 @@ let with_config_dir_env config_dir f =
       Config_dir_resolver.reset ())
     f
 
-let write_repo_cli_identity_toml ~base_path ~keeper_name ~repo_cli_identity =
-  let keepers_dir = Filename.concat base_path ".masc/config/keepers" in
-  mkdir_p keepers_dir;
-  let path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      Printf.fprintf oc
-        "[keeper]\nname = %S\nrepo_cli_identity = %S\ngit_identity_mode = \"repo_cli_identity\"\n"
-        keeper_name repo_cli_identity)
-
 let seed_credential ~base_path cred =
   match Credential_store.add ~base_path cred with
   | Ok _ -> ()
@@ -140,10 +128,8 @@ let make_repo ~id ~credential_id : repository =
 
 let make_keeper_binding ~bundle_root ~gh_config_dir : KRC.keeper_binding =
   {
-    KRC.configured_repo_cli_identity = Some "test-gh";
-    effective_repo_cli_identity = "test-gh";
+    KRC.credential_identity = "test-gh";
     credential_scope = KRC.Keeper_identity;
-    git_identity_mode = "repo_cli_identity";
     bundle_root;
     gh_config_dir;
   }
@@ -455,52 +441,6 @@ let test_resolve_credential_store_mounts_explicit_ssh_key () =
                binding.ro_mounts)
       | Error err -> failf "expected credential binding, got %s" (CP.pp_error err))
 
-let test_credential_store_mapping_conflicting_repo_cli_identity_fails_closed
-    () =
-  with_temp_base_path (fun base_path ->
-      let config = Masc_mcp.Workspace.default_config base_path in
-      let config_dir = Filename.concat base_path ".masc/config" in
-      let keeper_name = "keeper-conflict" in
-      let declared_identity = "declared-reviewer" in
-      write_repo_cli_identity_toml ~base_path ~keeper_name
-        ~repo_cli_identity:declared_identity;
-      with_config_dir_env config_dir (fun () ->
-          let gh_config_dir =
-            Filename.concat base_path ".masc/repo-cli-identities/other/gh"
-          in
-          seed_credential ~base_path
-            (make_credential ~id:"other-credential" ~username:"other-user"
-               ~gh_config_dir ());
-          seed_repo ~base_path
-            (make_repo ~id:"repo-conflict"
-               ~credential_id:"other-credential");
-          write_mapping base_path keeper_name [ "repo-conflict" ];
-          match HCP.resolve ~config ~identity:keeper_name with
-          | Error (CP.Missing_bundle { identity; path }) ->
-              check string "identity" keeper_name identity;
-              check bool "mentions declared identity" true
-                (try
-                   ignore
-                     (Str.search_forward
-                        (Str.regexp_string declared_identity)
-                        path 0);
-                   true
-                 with Not_found -> false);
-              check bool "mentions mapped credential" true
-                (try
-                   ignore
-                     (Str.search_forward
-                        (Str.regexp_string "other-credential")
-                        path 0);
-                   true
-                 with Not_found -> false)
-          | Ok _ ->
-              fail
-                "conflicting credential-store mapping should fail closed \
-                 before materializing Docker credentials"
-          | Error other ->
-              failf "expected Missing_bundle, got %s" (CP.pp_error other)))
-
 (* --- 4. finalize / tear_down noop semantics --- *)
 
 let dummy_binding () : CP.binding =
@@ -699,8 +639,6 @@ let () =
             test_resolve_without_mapping_fails_closed;
           test_case "explicit ssh key is mounted" `Quick
             test_resolve_credential_store_mounts_explicit_ssh_key;
-          test_case "conflicting keeper repo_cli_identity fails closed" `Quick
-            test_credential_store_mapping_conflicting_repo_cli_identity_fails_closed;
         ] );
       ( "lifecycle (PR-1 noop)",
         [

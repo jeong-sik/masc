@@ -160,27 +160,11 @@ let test_legacy_last_blocker_string_rejected () =
        last_blocker:string. Use structured last_blocker object."
       msg
 
-let test_repo_cli_identity_runtime_meta_rejected () =
-  let legacy_json =
-    match legacy_base_json "legacy-github-identity" with
-    | `Assoc fields ->
-      `Assoc (fields @ [ "repo_cli_identity", `String "anyang-keepers" ])
-    | json -> json
-  in
-  match Keeper_meta_json_parse.meta_of_json legacy_json with
-  | Ok _ -> fail "runtime meta repo_cli_identity field should be rejected"
-  | Error msg ->
-    check string
-      "rejects repo_cli_identity"
-      "removed keeper meta fields are no longer supported: repo_cli_identity"
-      msg
-
 let retired_discovery_key suffix = "work_" ^ "discovery" ^ suffix
 
 let test_persisted_retired_runtime_meta_fields_rejected () =
   let retired_fields =
     [
-      "repo_cli_identity", `String "anyang-keepers";
       "last_" ^ retired_discovery_key "_ts", `String "2026-05-24T16:29:11Z";
       retired_discovery_key "_count", `Int 12;
       retired_discovery_key "_enabled", `Bool true;
@@ -227,8 +211,6 @@ let () =
             test_legacy_last_blocker_pair_rejected;
           test_case "legacy blocker string rejected" `Quick
             test_legacy_last_blocker_string_rejected;
-          test_case "repo_cli_identity stays out of runtime meta" `Quick
-            test_repo_cli_identity_runtime_meta_rejected;
           test_case "retired persisted runtime fields are rejected" `Quick
             test_persisted_retired_runtime_meta_fields_rejected;
         ] );

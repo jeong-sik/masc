@@ -166,9 +166,7 @@ type keeper_profile_defaults =
     Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
-  repo_cli_identity : string option;
-  git_identity_mode : string option;
-  tool_custom_list : string list option;
+  tool_access : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;
@@ -200,7 +198,6 @@ val keeper_oas_context_of_defaults :
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
-val normalize_git_identity_mode_opt : string option -> string option
 val normalize_social_model_opt : string option -> string option
 val valid_social_model_strings : string list
 val lower_string_list_opt : string list -> string list option

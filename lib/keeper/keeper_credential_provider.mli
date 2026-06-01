@@ -44,8 +44,7 @@ type binding = {
       (** argv executed inside the container after start ([None] for
           host-mounted bundles). *)
   metadata : (string * string) list;
-      (** Audit pairs: [source], [git_identity_mode], optional
-          [repo_cli_identity], [effective_repo_cli_identity],
+      (** Audit pairs such as [source], [credential_identity],
           [credential_scope], and [bundle_root]. *)
 }
 

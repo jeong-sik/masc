@@ -90,17 +90,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     Option.value ~default:old.sandbox_profile p.sandbox_profile_opt
   in
   let network_mode =
-    match p.network_mode_opt with
-    | Some mode -> mode
-    | None ->
-        if Option.is_some p.sandbox_profile_opt
-           && sandbox_profile <> old.sandbox_profile
-        then
-          (* Recompute the profile default on sandbox posture changes so
-             legacy egress does not silently carry into hardened mode. *)
-          default_network_mode_for_profile sandbox_profile
-        else
-          old.network_mode
+    Option.value ~default:old.network_mode p.network_mode_opt
   in
   let autoboot_enabled =
     match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
@@ -131,7 +121,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     match p.tool_access_opt with
     | Some access -> access
     | None ->
-        (match p.profile_defaults.tool_custom_list with
+        (match p.profile_defaults.tool_access with
          | Some tools -> normalize_tool_names tools
          | None -> old.tool_access)
   in
@@ -310,13 +300,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     updated_at = now_iso ();
   } in
   match
-    validate_sandbox_settings
-      ~config:ctx.config
-      ~keeper_name:p.name
-      ~repo_cli_identity:p.profile_defaults.repo_cli_identity
-      ~sandbox_profile
-      ~network_mode
-      ~allowed_paths
+    validate_sandbox_settings ~allowed_paths
   with
   | Error err ->
       Prometheus.inc_counter

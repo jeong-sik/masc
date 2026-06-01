@@ -49,26 +49,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let result =
     Result.bind result (fun () ->
-        match str "repo_cli_identity" with
-        | Some raw when not (validate_name raw) ->
-            Error (Printf.sprintf "invalid repo_cli_identity '%s'" raw)
-        | _ -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
-        match str "git_identity_mode" with
-        | Some raw -> (
-            match normalize_git_identity_mode_opt (Some raw) with
-            | Some _ -> Ok ()
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid git_identity_mode '%s' (allowed: keeper_alias, repo_cli_identity)"
-                     raw))
-        | None -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
         match str "social_model" with
         | Some raw -> (
             match normalize_social_model_opt (Some raw) with
@@ -137,11 +117,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
     Result.bind result (fun () -> tool_access_defaults_result)
   in
   let result =
-    Result.bind result (fun tool_custom_list ->
-      Result.map (fun runtime_id_opt -> tool_custom_list, runtime_id_opt) runtime_id_result)
+    Result.bind result (fun tool_access ->
+      Result.map (fun runtime_id_opt -> tool_access, runtime_id_opt) runtime_id_result)
   in
   Result.map
-    (fun (tool_custom_list, runtime_id_opt) ->
+    (fun (tool_access, runtime_id_opt) ->
       {
         id = None;
         manifest_path = None;
@@ -177,10 +157,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         sandbox_image = str "sandbox_image";
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
-        repo_cli_identity = str "repo_cli_identity";
-        git_identity_mode =
-          normalize_git_identity_mode_opt (str "git_identity_mode");
-        tool_custom_list;
+        tool_access;
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         active_goal_ids =
           if has "active_goal_ids" then
@@ -226,8 +203,6 @@ let parsed_field_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "repo_cli_identity"
-  ; "git_identity_mode"
   ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
@@ -271,8 +246,6 @@ let canonical_keeper_toml_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "repo_cli_identity"
-  ; "git_identity_mode"
   ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
@@ -410,10 +383,7 @@ let merge_keeper_profile_defaults
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
-    repo_cli_identity = prefer overlay.repo_cli_identity base.repo_cli_identity;
-    git_identity_mode =
-      prefer overlay.git_identity_mode base.git_identity_mode;
-    tool_custom_list = prefer overlay.tool_custom_list base.tool_custom_list;
+    tool_access = prefer overlay.tool_access base.tool_access;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     telemetry_feedback_enabled =

@@ -453,8 +453,6 @@ proactive_enabled = true
 proactive_idle_sec = 300
 proactive_cooldown_sec = 60
 autoboot_enabled = false
-repo_cli_identity = "anyang-keepers"
-git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
 |} in
   match TL.parse_toml input with
@@ -471,10 +469,6 @@ active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
-      check (option string) "repo_cli_identity" (Some "anyang-keepers")
-        d.repo_cli_identity;
-      check (option string) "git_identity_mode" (Some "keeper_alias")
-        d.git_identity_mode;
       check (option (list string)) "active_goal_ids"
         (Some [ "goal-runtime"; "goal-masc-mcp" ])
         d.active_goal_ids
@@ -494,21 +488,6 @@ proactive_idle_sec = 120
        | Error msg ->
            check bool "mentions missing cooldown" true
              (contains_substring msg "proactive_cooldown_sec is missing"))
-
-let test_profile_rejects_invalid_git_identity_mode () =
-  let input = {|
-[keeper]
-goal = "test"
-git_identity_mode = "hot_switch"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-      (match KTP.profile_defaults_of_toml doc with
-       | Ok _ -> fail "expected invalid git_identity_mode error"
-       | Error msg ->
-           check bool "mentions invalid git_identity_mode" true
-             (contains_substring msg "invalid git_identity_mode"))
 
 let test_profile_rejects_invalid_social_model () =
   let input = {|
@@ -649,8 +628,6 @@ let test_load_keeper_toml_inherits_base_defaults () =
 runtime_id = "route.keeper_turn"
 sandbox_profile = "docker"
 network_mode = "inherit"
-repo_cli_identity = "anyang-keepers"
-git_identity_mode = "repo_cli_identity"
 |};
       write_file child_path {|
 [keeper]
@@ -669,10 +646,6 @@ persona_name = "sangsu"
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
           check (option string) "base network" (Some "inherit")
             (Option.map KTP.network_mode_to_string defaults.network_mode);
-          check (option string) "base github identity"
-            (Some "anyang-keepers") defaults.repo_cli_identity;
-          check (option string) "base git identity mode"
-            (Some "repo_cli_identity") defaults.git_identity_mode;
           ())
 
 (* ================================================================ *)
@@ -1193,7 +1166,7 @@ let test_persona_resolver_renders_durable_keeper_toml () =
               check (option (list string)) "allowed_paths"
                 (Some [ "/tmp/probe" ]) defaults.allowed_paths;
               check (option (list string)) "tool_access"
-                (Some [ "masc_status" ]) defaults.tool_custom_list;
+                (Some [ "masc_status" ]) defaults.tool_access;
               check (option (list string)) "tool_denylist"
                 (Some [ "masc_keeper_reset" ]) defaults.tool_denylist))
 
@@ -1411,8 +1384,6 @@ goal = "canonical"
 mention_targets = ["a", "b"]
 autoboot_enabled = false
 runtime_id = "primary"
-repo_cli_identity = "anyang-keepers"
-git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]
 |} in
   match TL.parse_toml input with
@@ -1879,8 +1850,6 @@ let () =
             test_profile_rejects_partial_proactive_interval_pair;
           test_case "rejects invalid social_model" `Quick
             test_profile_rejects_invalid_social_model;
-          test_case "rejects invalid git_identity_mode" `Quick
-            test_profile_rejects_invalid_git_identity_mode;
           test_case "rejects removed model keys" `Quick
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick

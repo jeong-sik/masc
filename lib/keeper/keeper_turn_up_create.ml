@@ -79,7 +79,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   in
   let network_mode =
     resolve_network_mode
-      ~sandbox_profile
       ~preferred:p.network_mode_opt
       ~fallback:p.profile_defaults.network_mode
   in
@@ -97,13 +96,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   | Some msg -> tool_result_error msg
   | None ->
     match
-      validate_sandbox_settings
-        ~config:ctx.config
-        ~keeper_name:p.name
-        ~repo_cli_identity:p.profile_defaults.repo_cli_identity
-        ~sandbox_profile
-        ~network_mode
-        ~allowed_paths
+      validate_sandbox_settings ~allowed_paths
     with
     | Error err ->
         Prometheus.inc_counter
@@ -186,7 +179,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 match p.tool_access_opt with
                 | Some access -> access
                 | None ->
-                    (match p.profile_defaults.tool_custom_list with
+                    (match p.profile_defaults.tool_access with
                      | Some tools -> normalize_tool_names tools
                      | None -> default_tool_access_of_meta_json ())
               in

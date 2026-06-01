@@ -847,8 +847,6 @@ export interface KeeperRuntimeLensRuntimeProofAxis {
   sandbox_profiles: string[]
   network_modes: string[]
   docker_visible: boolean
-  git_credentials_enabled: boolean
-  repo_cli_identity_materialized: boolean
   latest_at: string | null
 }
 
@@ -1315,8 +1313,6 @@ function parseRuntimeLensRuntimeProofAxis(raw: unknown): KeeperRuntimeLensRuntim
     sandbox_profiles: stringListField(obj, 'sandbox_profiles'),
     network_modes: stringListField(obj, 'network_modes'),
     docker_visible: obj.docker_visible === true,
-    git_credentials_enabled: obj.git_credentials_enabled === true,
-    repo_cli_identity_materialized: obj.repo_cli_identity_materialized === true,
     latest_at: nullableStringField(obj, 'latest_at'),
   }
 }

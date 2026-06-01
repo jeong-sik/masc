@@ -157,26 +157,17 @@ let compose_ro_mounts_result ?keeper_name
                 ~container:(Filename.concat cred_root ".ssh")))
 
 let resolve_git_identity (kb : Repo_cli_credentials.keeper_binding) ~keeper_name =
-  match kb.configured_repo_cli_identity, kb.git_identity_mode with
-  | Some id, "repo_cli_identity" ->
-      id, id ^ "@users.noreply.github.com"
-  | _ ->
-      Keeper_identity.keeper_git_author ~keeper_name,
-      Keeper_identity.keeper_git_email ~keeper_name
+  ignore keeper_name;
+  ( kb.credential_identity,
+    kb.credential_identity ^ "@users.noreply.github.com" )
 
 let metadata_of_binding (kb : Repo_cli_credentials.keeper_binding) =
-  let base =
-    [ "source", "host_config";
-      "git_identity_mode", kb.git_identity_mode;
-      "effective_repo_cli_identity", kb.effective_repo_cli_identity;
-      "credential_scope",
-      Repo_cli_credentials.credential_scope_to_string kb.credential_scope;
-      "bundle_root", kb.bundle_root;
-    ]
-  in
-  match kb.configured_repo_cli_identity with
-  | Some id -> base @ [ "repo_cli_identity", id ]
-  | None -> base
+  [ "source", "host_config";
+    "credential_identity", kb.credential_identity;
+    "credential_scope",
+    Repo_cli_credentials.credential_scope_to_string kb.credential_scope;
+    "bundle_root", kb.bundle_root;
+  ]
 
 (* RFC-0019 bridge to the multi-repo credential store.  A keeper must have a
    [Keeper_repo_mapping] entry that resolves to exactly one
@@ -237,7 +228,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
          Ok
            Keeper_credential_provider.
              {
-               identity = kb.effective_repo_cli_identity;
+               identity = kb.credential_identity;
                env;
                ro_mounts;
                bootstrap = None;
@@ -286,10 +277,8 @@ let binding_of_credential (cred : Repo_manager_types.credential)
       Ok
         Repo_cli_credentials.
           {
-            configured_repo_cli_identity = Some cred.username;
-            effective_repo_cli_identity = cred.username;
+            credential_identity = cred.username;
             credential_scope = Keeper_identity;
-            git_identity_mode = "repo_cli_identity";
             bundle_root = synth_bundle_root;
             gh_config_dir;
           }
@@ -301,14 +290,6 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
         (Keeper_credential_provider.Missing_bundle
            { identity = keeper_name; path = reason })
   | Ok kb ->
-      let kb =
-        match
-          (Keeper_types_profile.load_keeper_profile_defaults keeper_name)
-            .git_identity_mode
-        with
-        | Some "keeper_alias" -> { kb with git_identity_mode = "keeper_alias" }
-        | _ -> kb
-      in
       let ssh_key_path =
         match cred.ssh_key_path with
         | Some path ->
@@ -345,51 +326,6 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
               match ssh_key_path with
               | None -> []
               | Some path -> [ ("ssh_key_path", path) ]))
-
-let repo_cli_config_dir_matches_identity ~expected gh_config_dir =
-  String.equal (Filename.basename gh_config_dir) "gh"
-  && String.equal (Filename.basename (Filename.dirname gh_config_dir)) expected
-
-let credential_matches_explicit_repo_cli_identity ~expected
-    (cred : Repo_manager_types.credential) =
-  let expected = String.trim expected in
-  expected <> ""
-  && (String.equal cred.id expected
-      || String.equal cred.username expected
-      ||
-      match cred.gh_config_dir with
-      | Some gh_config_dir ->
-          repo_cli_config_dir_matches_identity ~expected (String.trim gh_config_dir)
-      | None -> false)
-
-let explicit_repo_cli_identity_conflict ~keeper_name
-    (cred : Repo_manager_types.credential) =
-  let defaults = Keeper_types_profile.load_keeper_profile_defaults keeper_name in
-  match defaults.repo_cli_identity, defaults.git_identity_mode with
-  | Some expected, Some "repo_cli_identity"
-    when not (credential_matches_explicit_repo_cli_identity ~expected cred) ->
-      Some expected
-  | _ -> None
-
-let bind_from_credential_checked ~keeper_name cred =
-  match explicit_repo_cli_identity_conflict ~keeper_name cred with
-  | Some expected ->
-      let gh_config_dir =
-        Option.value ~default:"<none>" cred.Repo_manager_types.gh_config_dir
-      in
-      Error
-        (Keeper_credential_provider.Missing_bundle
-           { identity = keeper_name
-           ; path =
-               Printf.sprintf
-                 "keeper %s declares repo_cli_identity %s but credential \
-                  mapping selected credential_id=%s username=%s \
-                  gh_config_dir=%s. Update keeper_repo_mappings.toml to \
-                  select the declared identity bundle or remove the \
-                  conflicting mapping."
-                 keeper_name expected cred.id cred.username gh_config_dir
-           })
-  | None -> bind_from_credential ~keeper_name cred
 
 let resolve ~config ~identity:keeper_name =
   match
@@ -428,7 +364,7 @@ let resolve ~config ~identity:keeper_name =
   | Ok [cred] ->
       count_resolve_outcome ~keeper_name ~source:"credential_store"
         ~reason:"single_mapping";
-      bind_from_credential_checked ~keeper_name cred
+      bind_from_credential ~keeper_name cred
   | Ok many ->
       count_resolve_outcome ~keeper_name ~source:"ambiguous"
         ~reason:"multi_mapping";

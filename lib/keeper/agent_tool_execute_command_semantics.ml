@@ -161,11 +161,30 @@ let git_c_path_of_stages stages =
   List.find_map (fun stage ->
     if stage.bin = "git" then scan_git_args stage.args else None) stages
 
-let normalize_cwd_relative_path ~cwd path =
+let normalize_cwd_relative_path ?container_root ?host_root ~cwd path =
   let path = strip_simple_shell_quotes path |> String.trim in
   let path = if Filename.is_relative path then Filename.concat cwd path else path in
-  Keeper_alerting_path.normalize_path_for_check path
-  |> Keeper_alerting_path.strip_trailing_slashes
+  let path =
+    Keeper_alerting_path.normalize_path_for_check path
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  match container_root, host_root with
+  | Some container_root, Some host_root ->
+    let container_root =
+      Keeper_alerting_path.normalize_path_for_check container_root
+      |> Keeper_alerting_path.strip_trailing_slashes
+    in
+    if path = container_root
+    then host_root
+    else (
+      let prefix = container_root ^ "/" in
+      if String.starts_with ~prefix path
+      then
+        Filename.concat
+          host_root
+          (String.sub path (String.length prefix) (String.length path - String.length prefix))
+      else path)
+  | _ -> path
 
 let path_is_existing_dir path =
   try Sys.file_exists path && Sys.is_directory path with
@@ -230,7 +249,13 @@ let resolve_sandbox_root_git_cwd_of_stages
     let explicit_git_c_path = git_c_path_of_stages stages in
     match explicit_git_c_path with
     | Some path when not (bare_worktrees_path path) ->
-      let target = normalize_cwd_relative_path ~cwd:cwd_normalized path in
+      let target =
+        normalize_cwd_relative_path
+          ~container_root:(Keeper_sandbox.container_root meta.name)
+          ~host_root
+          ~cwd:cwd_normalized
+          path
+      in
       if path_is_existing_dir target
       then cwd, None
       else

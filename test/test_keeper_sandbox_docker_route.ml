@@ -1494,6 +1494,23 @@ let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   Alcotest.(check (option string)) "no error" None error;
   Alcotest.(check string) "auto cwd selects the only repo" repo cwd
 
+let test_sandbox_root_git_c_container_path_preflight_uses_host_path () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  let container_repo =
+    Filename.concat (Filename.concat (Keeper_sandbox.container_root meta.name) "repos") "masc-mcp"
+  in
+  let cwd, error =
+    resolve_sandbox_root_git_cwd_string ~config ~meta
+      ~cwd:playground
+      ~cmd:(Printf.sprintf "git -C %s status" container_repo)
+  in
+  Alcotest.(check (option string)) "no error" None error;
+  Alcotest.(check string) "explicit -C keeps sandbox-root cwd" playground cwd
+
 let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -2200,6 +2217,10 @@ let () =
           Alcotest.test_case
             "sandbox-root git with one repo auto-selects cwd"
             `Quick test_sandbox_root_git_cwd_single_repo_auto_chdir;
+          Alcotest.test_case
+            "sandbox-root git -C container path checks host path"
+            `Quick
+            test_sandbox_root_git_c_container_path_preflight_uses_host_path;
           Alcotest.test_case
             "sandbox-root git with multiple repos gives cwd correction"
             `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;

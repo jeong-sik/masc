@@ -9,7 +9,11 @@ type t = {
   mutex : Eio.Mutex.t;
 }
 
-let create ?default_network_override ?(credential_mounts_enabled = false)
+(* Callers select the credentialed factory after Shell IR effective-stage
+   analysis; keep this cache policy-neutral so wrapped git/gh routing stays
+   centralized in Agent_tool_execute_runtime. *)
+let create ?default_network_override
+    ?(credential_mounts_enabled = false)
     ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ?(turn_id = 0) () =
   {
     config;

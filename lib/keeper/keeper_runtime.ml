@@ -181,10 +181,6 @@ let ensure_keeper_meta config name =
     let target_social_model =
       apply_default defaults.social_model meta.social_model
       |> Keeper_social_model.normalize_social_model in
-    let target_runtime_id =
-      effective_declarative_runtime_id defaults meta
-    in
-    let resolved_target_runtime_id = target_runtime_id in
     (* --- Personality --- *)
     let target_goal = apply_default defaults.goal meta.goal in
     let target_short_goal = apply_default defaults.short_goal meta.short_goal in
@@ -277,125 +273,8 @@ let ensure_keeper_meta config name =
       | [] -> meta.oas_env
       | env -> env
     in
-    (* --- Change detection by category --- *)
-    let proactive_changed =
-      meta.proactive.enabled <> target_proactive
-      || meta.proactive.idle_sec <> target_idle_sec
-      || meta.proactive.cooldown_sec <> target_cooldown_sec in
-    let denylist_changed = meta.tool_denylist <> target_denylist in
-    let social_model_changed = meta.social_model <> target_social_model in
-    (* [meta runtime id] may be a raw TOML/JSON value while
-       [resolved_target_runtime_id] is the validated runtime catalog
-       name. Normalize the meta side only so alias cleanup does not
-       register as a semantic change. *)
-    let runtime_changed =
-      String.trim (runtime_id_of_meta meta)
-      <> resolved_target_runtime_id
-    in
-    (* #10061: persisted state vs TOML source can differ by a single
-       trailing newline when OCaml string literals round-trip through
-       the TOML writer (heredoc [""" … """] closing sequence drops the
-       final newline) or through an older binary that wrote the field
-       with extra whitespace. The semantic content of these prose
-       fields does not care about trailing whitespace, yet a byte-
-       level [<>] compare marks every 30 s hot-reload tick as a
-       personality change, producing a re-sync storm (2880 redundant
-       writes/day on nick0cave alone; other 13 keepers: 0 events).
-       Normalise both sides with [String.trim] so only meaningful
-       content drives resync. *)
-    (* #10269: name the diverging fields so the re-sync log carries
-       the diagnostic upstream (length and first-diff offset) instead
-       of the opaque [personality] category. *)
-    let personality_diff_entries =
-      personality_diff_summary
-        [
-          ("goal", meta.goal, target_goal);
-          ("short_goal", meta.short_goal, target_short_goal);
-          ("mid_goal", meta.mid_goal, target_mid_goal);
-          ("long_goal", meta.long_goal, target_long_goal);
-          ("will", meta.will, target_will);
-          ("needs", meta.needs, target_needs);
-          ("desires", meta.desires, target_desires);
-          ("instructions", meta.instructions, target_instructions);
-        ]
-    in
-    let personality_changed = personality_diff_entries <> [] in
-    let policy_changed =
-      meta.autoboot_enabled <> target_autoboot_enabled
-      || meta.mention_targets <> target_mention_targets
-      || meta.active_goal_ids <> target_active_goal_ids
-      || meta.tool_access <> target_tool_access
-      || meta.sandbox_profile <> target_sandbox_profile
-      || meta.network_mode <> target_network_mode
-      || meta.allowed_paths <> target_allowed_paths
-      || meta.always_approve <> target_always_approve in
-    let telemetry_changed =
-      meta.telemetry_feedback_enabled <> target_tf_enabled
-      || meta.telemetry_feedback_window_hours <> target_tf_window in
-    let timeout_policy_changed =
-      meta.per_provider_timeout_s <> target_per_provider_timeout in
-    let oas_env_changed = meta.oas_env <> target_oas_env in
-    let any_changed =
-      proactive_changed || denylist_changed
-      || social_model_changed
-      || runtime_changed
-      || personality_changed || policy_changed
-      || telemetry_changed || timeout_policy_changed || oas_env_changed in
-
-    if any_changed then begin
-      let cats = List.filter_map Fun.id [
-        (if proactive_changed then Some "proactive" else None);
-        (if denylist_changed then Some "denylist" else None);
-        (if social_model_changed then Some "social_model" else None);
-        (if runtime_changed then Some "runtime" else None);
-        (if personality_changed then
-           Some
-             (Printf.sprintf "personality:%s"
-                (String.concat "+" personality_diff_entries))
-        else None);
-        (if policy_changed then Some "policy" else None);
-        (if telemetry_changed then Some "telemetry" else None);
-        (if timeout_policy_changed then Some "timeout_policy" else None);
-        (if oas_env_changed then Some "oas_env" else None);
-      ] in
-      Log.Keeper.info
-        "ensure_keeper_meta: re-syncing [%s] for %s"
-        (String.concat "," cats)
-        meta.name;
-      (* #10269: nick0cave alone re-syncs [personality] on every reconcile
-         tick (~371 events / 3000 logs).  When personality is in [cats],
-         emit a follow-up info line listing the specific fields that
-         differ along with their raw lengths and trim-normalised
-         previews so root cause (TOML triple-quote, JSON encoding drift,
-         persona overlay) is visible without code-reading. *)
-      if personality_changed then begin
-        let diffs =
-          List.filter_map Fun.id
-            [
-              personality_field_diff_summary ~field:"goal"
-                ~current:meta.goal ~target:target_goal;
-              personality_field_diff_summary ~field:"short_goal"
-                ~current:meta.short_goal ~target:target_short_goal;
-              personality_field_diff_summary ~field:"mid_goal"
-                ~current:meta.mid_goal ~target:target_mid_goal;
-              personality_field_diff_summary ~field:"long_goal"
-                ~current:meta.long_goal ~target:target_long_goal;
-              personality_field_diff_summary ~field:"will"
-                ~current:meta.will ~target:target_will;
-              personality_field_diff_summary ~field:"needs"
-                ~current:meta.needs ~target:target_needs;
-              personality_field_diff_summary ~field:"desires"
-                ~current:meta.desires ~target:target_desires;
-              personality_field_diff_summary ~field:"instructions"
-                ~current:meta.instructions ~target:target_instructions;
-            ]
-        in
-        Log.Keeper.info
-          "ensure_keeper_meta: personality drift fields for %s: %s"
-          meta.name
-          (String.concat "; " diffs)
-      end;
-      let updated = { meta with
+    let overlayed =
+      { meta with
         proactive = {
           enabled = target_proactive;
           idle_sec = target_idle_sec;
@@ -424,19 +303,47 @@ let ensure_keeper_meta config name =
         per_provider_timeout_s = target_per_provider_timeout;
         always_approve = target_always_approve;
         oas_env = target_oas_env;
-        updated_at = now_iso ();
-      } in
+      }
+    in
+    (* Runtime JSON intentionally omits TOML-owned config/personality
+       fields.  They must be overlaid into the returned meta for the
+       live registry, but comparing those omitted fields against TOML
+       would classify every reconcile tick as a write-worthy drift.
+       Only fields serialized by [meta_to_json] should drive a disk
+       write here. *)
+    let active_goal_ids_changed =
+      meta.active_goal_ids <> target_active_goal_ids
+    in
+    let oas_env_changed = meta.oas_env <> target_oas_env in
+    let persistent_changed = active_goal_ids_changed || oas_env_changed in
+    let overlay_without_persistent_changes =
+      { overlayed with
+        active_goal_ids = meta.active_goal_ids;
+        oas_env = meta.oas_env;
+      }
+    in
+
+    if persistent_changed then begin
+      let cats = List.filter_map Fun.id [
+        (if active_goal_ids_changed then Some "active_goal_ids" else None);
+        (if oas_env_changed then Some "oas_env" else None);
+      ] in
+      Log.Keeper.info
+        "ensure_keeper_meta: re-syncing [%s] for %s"
+        (String.concat "," cats)
+        meta.name;
+      let updated = { overlayed with updated_at = now_iso () } in
       match write_meta config updated with
-      | Ok () -> Ok updated
+      | Ok () -> Ok { updated with meta_version = updated.meta_version + 1 }
       | Error e ->
         Prometheus.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
           ();
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
-        Ok meta
+        Ok overlay_without_persistent_changes
     end
-    else Ok meta))
+    else Ok overlayed))
   | Ok None ->
     Log.Keeper.warn
       "ensure_keeper_meta: no persistent meta for %s — run keeper_up to initialize" name;

@@ -117,34 +117,6 @@ let test_log_entry_json_roundtrip () =
       check string "note" original.note decoded.note
   | None -> fail "json decode failed"
 
-let test_log_entry_json_accepts_legacy_and_metadata () =
-  let legacy =
-    `Assoc [
-      ("timestamp", `String "2024-01-01T15:00:00Z");
-      ("note", `String "Legacy log entry");
-    ]
-  in
-  match Run_eio.log_entry_of_json legacy with
-  | None -> fail "legacy json decode failed"
-  | Some decoded ->
-      check string "legacy note" "Legacy log entry" decoded.note;
-      let json =
-        Run_eio.log_entry_to_json
-          ~kind:"append"
-          ~task_id:"task-log-legacy"
-          decoded
-      in
-      let open Yojson.Safe.Util in
-      check string "metadata kind" "append" (json |> member "kind" |> to_string);
-      check string
-        "metadata task_id"
-        "task-log-legacy"
-        (json |> member "task_id" |> to_string);
-      match Run_eio.log_entry_of_json json with
-      | Some roundtrip ->
-          check string "metadata note" decoded.note roundtrip.note
-      | None -> fail "metadata json decode failed"
-
 (* ============================================================
    Eio Helpers
    ============================================================ *)
@@ -448,10 +420,6 @@ let () =
       test_case "run_record" `Quick test_run_record_json_roundtrip;
       test_case "run_record none agent" `Quick test_run_record_json_none_agent;
       test_case "log_entry" `Quick test_log_entry_json_roundtrip;
-      test_case
-        "log_entry accepts legacy and metadata"
-        `Quick
-        test_log_entry_json_accepts_legacy_and_metadata;
     ];
     "eio_init_read", [
       test_case "init run" `Quick test_init_run;

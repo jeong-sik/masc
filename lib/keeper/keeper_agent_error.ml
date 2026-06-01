@@ -220,11 +220,18 @@ let agent_error_terminal_reason_code = function
       "completion_contract_violation:%s"
       (Agent_sdk.Completion_contract_id.to_string contract)
   | Agent_sdk.Error.MaxTurnsExceeded { turns; limit } ->
-    Printf.sprintf "agent_error_max_turns_exceeded:turns=%d,limit=%d" turns limit
+    (* SSOT prefix: [Keeper_execution_receipt.is_auto_recoverable_turn_budget_terminal]
+       matches on it to route the disposition to [Reason_turn_budget_exhausted]. *)
+    Printf.sprintf
+      "%s:turns=%d,limit=%d"
+      Keeper_execution_receipt.terminal_prefix_max_turns_exceeded
+      turns
+      limit
   | Agent_sdk.Error.AgentExecutionTimeout
       { elapsed_sec; timeout_sec; turn_count; max_turns } ->
     Printf.sprintf
-      "agent_error_execution_timeout:elapsed_sec=%.1f,timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      "%s:elapsed_sec=%.1f,timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      Keeper_execution_receipt.terminal_prefix_execution_timeout
       elapsed_sec
       timeout_sec
       turn_count
@@ -232,7 +239,8 @@ let agent_error_terminal_reason_code = function
   | Agent_sdk.Error.AgentExecutionIdleTimeout
       { idle_sec; idle_timeout_sec; turn_count; max_turns } ->
     Printf.sprintf
-      "agent_error_idle_timeout:idle_sec=%.1f,idle_timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      "%s:idle_sec=%.1f,idle_timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      Keeper_execution_receipt.terminal_prefix_idle_timeout
       idle_sec
       idle_timeout_sec
       turn_count

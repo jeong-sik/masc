@@ -283,12 +283,29 @@ type operator_disposition_reason =
   | Reason_internal_error
   | Reason_tool_required_unsatisfied
   | Reason_tool_route_recoverable_failure
+  | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_unmapped_runtime_state
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string
+
+(** Terminal-reason prefixes for OAS agent-execution errors that exhaust a
+    turn/time budget before the turn completes. SSOT: the encoder
+    [Keeper_agent_error.agent_error_terminal_reason_code] builds the wire
+    strings from these, and [operator_disposition] /
+    [is_auto_recoverable_turn_budget_terminal] match on them. *)
+val terminal_prefix_max_turns_exceeded : string
+
+val terminal_prefix_execution_timeout : string
+val terminal_prefix_idle_timeout : string
+
+(** [true] when [terminal_reason] is a turn/time-budget cut-off
+    ([MaxTurnsExceeded] / [AgentExecutionTimeout] / [AgentExecutionIdleTimeout]):
+    auto-recoverable, the keeper resumes from its checkpoint, so it must NOT be
+    classified as a tool-contract failure. *)
+val is_auto_recoverable_turn_budget_terminal : string -> bool
 
 (** Derived display pair (disposition, reason) computed from receipt fields.
     Exposed for test access; the runtime path consumes it via [append]. *)

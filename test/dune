@@ -1451,6 +1451,7 @@
 
 (include stanzas/test_keeper_cwd_response.inc)
 
+(include stanzas/test_keeper_disposition_budget.inc)
 
 (include stanzas/test_keeper_failure_policy.inc)
 

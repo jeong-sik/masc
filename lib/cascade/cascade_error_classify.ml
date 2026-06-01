@@ -81,9 +81,13 @@ let string_contains_substring ~(needle : string) (haystack : string) =
     in
     loop 0
 
-let sdk_error_is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
+let sdk_error_is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
   match err with
   | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
+  | _ -> false
+
+let sdk_error_is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
+  match err with
   | Agent_sdk.Error.Api (InvalidRequest { message }) ->
     let lower = String.lowercase_ascii message in
     (string_contains_substring ~needle:"can't find closing" lower
@@ -91,21 +95,6 @@ let sdk_error_is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) =
     || string_contains_substring ~needle:"unexpected character in json" lower
     || string_contains_substring ~needle:"unterminated" lower
     || string_contains_substring ~needle:"parse error" lower
-  | Agent_sdk.Error.Api
-      ( RateLimited _
-      | Overloaded _
-      | ServerError _
-      | AuthError _
-      | NotFound _
-      | ContextOverflow _
-      | NetworkError _
-      | Timeout _ )
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
-  | Agent_sdk.Error.Internal _ -> false
+  | _ -> false
+
+let sdk_error_is_server_rejected_parse_error = sdk_error_is_provider_rejected_parse_error

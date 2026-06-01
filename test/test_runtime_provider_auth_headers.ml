@@ -146,12 +146,23 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
     observation.attempt_details_source
 
 let test_capacity_key_separates_models_on_shared_base_url () =
+  let base_url = "https://shared-runtime.example/v1" in
   let provider_config model_id =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat
       ~model_id
-      ~base_url:"https://shared-runtime.example/v1"
+      ~base_url
       ()
+  in
+  let empty_model_key =
+    provider_config ""
+    |> Runtime_candidate.of_provider_config
+    |> Runtime_candidate.capacity_key
+  in
+  let whitespace_model_key =
+    provider_config "  "
+    |> Runtime_candidate.of_provider_config
+    |> Runtime_candidate.capacity_key
   in
   let key_a =
     provider_config "model-a"
@@ -164,6 +175,13 @@ let test_capacity_key_separates_models_on_shared_base_url () =
     |> Runtime_candidate.capacity_key
   in
   check bool "capacity keys differ by model" true (not (String.equal key_a key_b));
+  check string "empty model_id is no-op" empty_model_key whitespace_model_key;
+  check bool "empty model key keeps base_url" true
+    (Astring.String.is_infix ~affix:base_url empty_model_key);
+  check bool "empty model key omits model separator" false
+    (Astring.String.is_infix ~affix:":@" empty_model_key);
+  check bool "model-a differs from empty model key" true
+    (not (String.equal key_a empty_model_key));
   check bool "model-a appears in key" true
     (Astring.String.is_infix ~affix:"model-a" key_a);
   check bool "model-b appears in key" true

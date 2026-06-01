@@ -53,24 +53,66 @@ let personality_diff_summary fields =
       personality_field_diff_entry name current target)
     fields
 
+let utf8_char_width s i =
+  let byte = Char.code s.[i] in
+  if byte land 0x80 = 0 then 1
+  else if byte land 0xE0 = 0xC0 then 2
+  else if byte land 0xF0 = 0xE0 then 3
+  else if byte land 0xF8 = 0xF0 then 4
+  else 1
+
+let truncate_utf8_prefix ~max_bytes s =
+  let len = String.length s in
+  if len <= max_bytes then s, false
+  else
+    let rec loop i =
+      if i >= len then i
+      else
+        let next = i + utf8_char_width s i in
+        if next > max_bytes then i else loop next
+    in
+    String.sub s 0 (loop 0), true
+
+let quote_log_preview s =
+  let buf = Buffer.create (String.length s + 2) in
+  Buffer.add_char buf '"';
+  String.iter
+    (fun c ->
+       match c with
+       | '"' -> Buffer.add_string buf "\\\""
+       | '\\' -> Buffer.add_string buf "\\\\"
+       | '\n' -> Buffer.add_string buf "\\n"
+       | '\r' -> Buffer.add_string buf "\\r"
+       | '\t' -> Buffer.add_string buf "\\t"
+       | c ->
+         let code = Char.code c in
+         if code < 0x20 || code = 0x7F
+         then Buffer.add_string buf (Printf.sprintf "\\x%02x" code)
+         else Buffer.add_char buf c)
+    s;
+  Buffer.add_char buf '"';
+  Buffer.contents buf
+
 (** Per-call helper used at runtime re-sync sites.  Different output
     shape from [personality_field_diff_entry]:
     [field(raw_meta_len=N raw_target_len=N trim_meta=S trim_target=S)]
     so dashboards can distinguish raw-length drift from trimmed-content
     drift.  Returns [None] when the two trim-equal so steady-state
     keepers stay quiet.  Trimmed previews truncated to 32 bytes each
-    to keep a wide [instructions] field log-friendly. *)
+    to keep a wide [instructions] field log-friendly.  UTF-8 bytes are
+    preserved for operator readability; only quotes, backslashes, and
+    control characters are escaped. *)
 let personality_field_diff_summary ~field ~current ~target =
   if personality_text_equal current target then None
   else
     let preview s =
       let trimmed = String.trim s in
-      if String.length trimmed <= 32 then trimmed
-      else String.sub trimmed 0 32 ^ "..."
+      let prefix, truncated = truncate_utf8_prefix ~max_bytes:32 trimmed in
+      quote_log_preview (if truncated then prefix ^ "..." else prefix)
     in
     Some
       (Printf.sprintf
-         "%s(raw_meta_len=%d raw_target_len=%d trim_meta=%S trim_target=%S)"
+         "%s(raw_meta_len=%d raw_target_len=%d trim_meta=%s trim_target=%s)"
          field
          (String.length current) (String.length target)
          (preview current) (preview target))

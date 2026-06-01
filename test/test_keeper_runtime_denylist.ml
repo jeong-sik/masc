@@ -21,6 +21,36 @@ let write_file path content =
   output_string oc content;
   close_out oc
 
+let runtime_toml =
+  {|[runtime]
+default = "test.local"
+
+[providers.test]
+display-name = "Test"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.local]
+api-name = "local"
+max-context = 4096
+tools-support = true
+streaming = true
+
+[test.local]
+is-default = true
+max-concurrent = 1
+|}
+
+let with_runtime_default f =
+  let path = Filename.temp_file "keeper-runtime-denylist-runtime" ".toml" in
+  write_file path runtime_toml;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      match Runtime.init_default ~config_path:path with
+      | Ok () -> f ()
+      | Error e -> fail ("Runtime.init_default failed: " ^ e))
+
 let with_config_dir f =
   with_temp_dir "keeper-runtime-denylist-config" @@ fun config_dir ->
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
@@ -38,15 +68,18 @@ let with_config_dir f =
       Config_dir_resolver.reset ();
       f config_dir)
 
-(** Regression test: ensure_keeper_meta must overwrite a stale persisted
-    tool_denylist with the value from config/keepers/<name>.toml on bootstrap.
+(** Regression test: ensure_keeper_meta must overlay a TOML-owned
+    tool_denylist at runtime without trying to persist it back into the
+    runtime-only JSON file on every reconcile tick.
 
     Steps:
     1. Write a keeper TOML declaring tool_denylist = ["toml-tool-x", "toml-tool-y"]
     2. Write keeper meta with a different stale denylist = ["old-stale-tool"]
     3. Call ensure_keeper_meta
-    4. Assert the returned (and persisted) denylist matches the TOML *)
-let test_ensure_keeper_meta_resyncs_denylist_from_toml () =
+    4. Assert the returned meta has the TOML denylist while persisted JSON
+       remains runtime-only. *)
+let test_ensure_keeper_meta_overlays_denylist_from_toml () =
+  with_runtime_default @@ fun () ->
   with_temp_dir "keeper-runtime-denylist-workspace" @@ fun workspace_dir ->
   with_config_dir @@ fun config_dir ->
   Fs_compat.clear_fs ();
@@ -60,6 +93,7 @@ let test_ensure_keeper_meta_resyncs_denylist_from_toml () =
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
 goal = "Test denylist resync"
+sandbox_profile = "local"
 tool_denylist = ["toml-tool-x", "toml-tool-y"]
 |};
   (* 2. Write keeper meta with a stale denylist *)
@@ -82,26 +116,84 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
   (match Keeper_meta_store.write_meta ~force:true config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
-  (* 3. Call ensure_keeper_meta — should resync denylist from TOML *)
+  (* 3. Call ensure_keeper_meta — should overlay denylist from TOML *)
   (match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
       (* 4a. Returned meta has TOML denylist *)
       check
         (list string)
-        "returned meta denylist resynced from TOML"
+        "returned meta denylist overlaid from TOML"
         [ "toml-tool-x"; "toml-tool-y" ]
         updated.Keeper_meta_contract.tool_denylist;
-      (* 4b. Persisted meta also has TOML denylist *)
+      (* 4b. Persisted meta remains runtime-only, so TOML-owned denylist
+         does not cause a reconcile write loop. *)
       (match Keeper_meta_store.read_meta config keeper_name with
       | Error e -> fail ("read_meta failed: " ^ e)
       | Ok None -> fail "meta should exist after ensure_keeper_meta"
       | Ok (Some persisted) ->
           check
             (list string)
-            "persisted meta denylist resynced from TOML"
-            [ "toml-tool-x"; "toml-tool-y" ]
-            persisted.Keeper_meta_contract.tool_denylist))
+            "persisted meta does not store TOML denylist"
+            []
+            persisted.Keeper_meta_contract.tool_denylist;
+          check int "no TOML-only write bump" (initial_meta.meta_version + 1)
+            persisted.Keeper_meta_contract.meta_version))
+
+let test_ensure_keeper_meta_persists_active_goal_ids () =
+  with_runtime_default @@ fun () ->
+  with_temp_dir "keeper-runtime-active-goal-workspace" @@ fun workspace_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let keeper_name = "active-goal-resync-test" in
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    {|[keeper]
+goal = "Test active goal resync"
+sandbox_profile = "local"
+active_goal_ids = ["goal-runtime"]
+|};
+  let config = Workspace.default_config workspace_dir in
+  let initial_meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String keeper_name);
+            ("trace_id", `String "trace-active-goal-resync");
+          ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json failed: " ^ e)
+  in
+  (match Keeper_meta_store.write_meta ~force:true config initial_meta with
+  | Error e -> fail ("write_meta failed: " ^ e)
+  | Ok () -> ());
+  (match Keeper_runtime.ensure_keeper_meta config keeper_name with
+  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
+  | Ok updated ->
+      check
+        (list string)
+        "returned meta active_goal_ids overlaid from TOML"
+        [ "goal-runtime" ]
+        updated.Keeper_meta_contract.active_goal_ids;
+      (match Keeper_meta_store.read_meta config keeper_name with
+      | Error e -> fail ("read_meta failed: " ^ e)
+      | Ok None -> fail "meta should exist after ensure_keeper_meta"
+      | Ok (Some persisted) ->
+          check
+            (list string)
+            "persisted meta keeps active_goal_ids"
+            [ "goal-runtime" ]
+            persisted.Keeper_meta_contract.active_goal_ids;
+          check int "persisted write bumps meta_version"
+            (initial_meta.meta_version + 2)
+            persisted.Keeper_meta_contract.meta_version))
 
 let () =
   run "Keeper_runtime denylist resync"
@@ -109,8 +201,12 @@ let () =
       ( "ensure_keeper_meta",
         [
           test_case
-            "resyncs stale persisted denylist from TOML on bootstrap"
+            "overlays TOML denylist without persisting config fields"
             `Quick
-            test_ensure_keeper_meta_resyncs_denylist_from_toml;
+            test_ensure_keeper_meta_overlays_denylist_from_toml;
+          test_case
+            "persists active_goal_ids from TOML on bootstrap"
+            `Quick
+            test_ensure_keeper_meta_persists_active_goal_ids;
         ] );
     ]

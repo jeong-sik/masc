@@ -20,8 +20,8 @@
 Runtime providers are called without any in-attempt liveness contract. A
 single hung HTTP read on the first runtime slot consumes the entire
 turn budget (3600s) before the runtime FSM advances to the next
-provider. This RFC introduces an attempt-level three-tier streaming
-liveness gate (TTFT, inter-chunk idle, wall) that fails the *current
+provider. This RFC introduces an attempt-level streaming liveness
+gate (TTFT, inter-chunk idle, pre-stream wall) that fails the *current
 attempt* — not the turn — when the provider stops emitting evidence of
 forward motion. Thinking tokens count as motion, so adaptive-reasoning
 turns are protected.
@@ -34,7 +34,7 @@ operate on disjoint state and disjoint kill classes:
 | Layer | RFC | State | Decision input | Kill class | Effect on caller |
 |---|---|---|---|---|---|
 | Pre-attempt | RFC-0009 | `Runtime_health_tracker.trust_score` | aggregate failures over time | provider demoted in runtime order | next call sees better order |
-| **In-attempt (this RFC)** | **0022** | per-attempt liveness clock | absence of streaming chunks | `Attempt_no_first_token` / `Attempt_inter_chunk_idle` / `Attempt_wall_exceeded` | this attempt fails, FSM advances to next slot, **turn lives** |
+| **In-attempt (this RFC)** | **0022** | per-attempt liveness clock | absence of streaming chunks | `Attempt_no_first_token` / `Attempt_inter_chunk_idle` / pre-stream `Attempt_wall_exceeded` | this attempt fails, FSM advances to next slot, **turn lives** |
 | Cross-attempt (turn) | RFC-0012 | `turn_observation.last_progress_at` | absence of `oas:event` across all attempts in this turn | `Mid_turn_no_progress` | watchdog terminates fiber, turn dies |
 
 Invariant L1 (layer independence):
@@ -127,7 +127,7 @@ typed runtime failure (not a generic timeout):
 | `Done` | response complete | — | success |
 | `No_first_token` | TTFT exceeded | `Attempt_no_first_token` | persistent |
 | `Inter_chunk_idle` | gap between chunks > idle_max | `Attempt_inter_chunk_idle` | persistent |
-| `Wall_exceeded` | total wall > attempt_wall_max | `Attempt_wall_exceeded` | persistent |
+| `Wall_exceeded` | pre-stream wall > attempt_wall_max | `Attempt_wall_exceeded` | persistent |
 | `Provider_error` | HTTP 4xx/5xx with body | classified by RFC-0009 | depends |
 | `Network_drop` | TCP RST / EOF mid-stream | `Network_drop` | transient |
 | `Cancelled` | upstream Cancel | `Upstream_cancelled` | n/a |

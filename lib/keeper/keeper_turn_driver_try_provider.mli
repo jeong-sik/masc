@@ -70,6 +70,12 @@ val run_try_provider :
   * (string * Keeper_attempt_liveness_config.success_sample) option
 
 module For_testing : sig
+  val max_execution_time_for_attempt :
+    ?per_provider_timeout_s:float -> unit -> float option
+
+  val stream_idle_timeout_for_attempt :
+    configured:float option -> float option
+
   val sanitize_runtime_mcp_external_tool_choice :
     runtime_mcp_external_tools:bool ->
     Agent_sdk.Hooks.turn_params ->

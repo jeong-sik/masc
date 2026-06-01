@@ -87,11 +87,9 @@ let null_recorder = {
    - S1: every chunk except Done advances last_chunk_at.
    - S2: Done in Streaming → Success terminal; no further state moves.
    - T1: Heartbeat / Thinking_delta both count as motion.
-   - L2: TTFT and inter-chunk checks fire before wall when both expire
-         on the same tick (caller of runtime_fsm gets the most specific
-         kill class; matches §1 invariant L2 "no double kill"). Wall still
-         applies in Awaiting, so a shorter attempt wall can kill a no-first-byte
-         attempt before the TTFT ceiling. *)
+   - L2: TTFT and inter-chunk are the specific stream-liveness kill classes.
+         A cumulative wall can only apply before the stream has produced a
+         first chunk; active streaming is judged by inter-chunk progress. *)
 
 let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
   : state * output =
@@ -117,8 +115,8 @@ let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
 
   (* Awaiting × Tick: check TTFT first, wall second.
      [now - started_at >= ttft_max] is the more specific no-first-token
-     failure. [attempt_wall_max] still applies while Awaiting so an attempt
-     with a shorter global wall cannot wait forever for a first chunk. *)
+     failure. [attempt_wall_max] applies only while Awaiting so a shorter
+     pre-stream backstop cannot wait forever for a first chunk. *)
   | Awaiting { started_at }, Tick now ->
       let wall = now -. started_at in
       if wall >= b.ttft_max then begin
@@ -148,19 +146,15 @@ let step ?(recorder = null_recorder) (b : budget) (s : state) (e : event)
       ( Streaming { started_at; last_chunk_at = received_at }
       , Continue )
 
-  (* Streaming × Tick: check inter-chunk first, wall second.
-     Per L2, the more specific kill class wins when both expire on
-     the same tick — inter-chunk is more specific (gap-based) than
-     wall (cumulative). *)
+  (* Streaming × Tick: once the provider has emitted chunks, liveness is
+     progress-based. A stream that keeps producing chunks must not be killed
+     only because cumulative wall-clock elapsed; the keeper turn watchdog is
+     the outer runaway guard. *)
   | Streaming { started_at; last_chunk_at }, Tick now ->
       let gap = now -. last_chunk_at in
-      let wall = now -. started_at in
       if gap >= b.inter_chunk_max then begin
         recorder.record_liveness_outcome (Some Inter_chunk_idle);
         (Failed Inter_chunk_idle, Outcome Inter_chunk_idle)
-      end else if wall >= b.attempt_wall_max then begin
-        recorder.record_liveness_outcome (Some Wall_exceeded);
-        (Failed Wall_exceeded, Outcome Wall_exceeded)
       end else
         (s, Continue)
 

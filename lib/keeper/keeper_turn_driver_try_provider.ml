@@ -165,20 +165,28 @@ let wrap_runtime_mcp_external_tool_hooks
     Some { hooks with before_turn_params }
 
 let max_execution_time_for_attempt ?per_provider_timeout_s () =
-  (* OAS total-run ceiling for a provider attempt. The default cap is
-     removed (None): a blunt total wall-clock cancels a healthy streaming
-     turn mid-stream once the deadline passes, even while tokens are still
-     arriving — the AgentExecutionTimeout that killed long qwen reasoning
-     turns. Liveness instead comes from [stream_idle_timeout_s] (per-line
-     stall -> attempt fall-forward; always set, 120s default) and the
-     keeper stale watchdog (Mid_turn_no_progress / In_turn_hung; RFC-0022
-     attempt liveness). An explicit per-keeper [per_provider_timeout]
-     (profile config) is still honoured as the cap, so a ceiling is
-     re-addable per keeper via config rather than a hardcoded global
-     default. This value also feeds [body_timeout_s] (which falls back to
-     it below), so both OAS total caps drop together when no per-keeper
-     timeout is configured. *)
-  per_provider_timeout_s
+  (* Never forward per-provider timeouts to OAS [max_execution_time_s].
+     That field is a cumulative wall-clock kill switch for one Agent.run /
+     run_stream call; it cancels healthy active streams even while chunks are
+     arriving. Provider-attempt liveness is progress-based instead:
+     [stream_idle_timeout_s] catches inter-line stalls, the liveness observer
+     catches no-first-token / inter-chunk gaps, and the keeper turn watchdog is
+     the outer runaway guard. *)
+  (match per_provider_timeout_s with
+   | Some (_ : float) -> ()
+   | None -> ());
+  None
+
+let stream_idle_timeout_for_attempt ~configured =
+  Some
+    (Option.value
+       ~default:Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
+       configured)
+
+let body_timeout_for_attempt ?per_provider_timeout_s () =
+  match Keeper_runtime_resolved.body_timeout_override_sec () with
+  | Some _ as s -> s
+  | None -> max_execution_time_for_attempt ?per_provider_timeout_s ()
 
 (** Run a single provider attempt within the runtime.
 
@@ -297,31 +305,16 @@ let run_try_provider
           ; max_input_tokens = ctx.max_input_tokens
           ; max_cost_usd = ctx.max_cost_usd
           ; stream_idle_timeout_s =
-              (match per_provider_timeout_s with
-               | Some _ as timeout_s -> timeout_s
-               | None ->
-                 Some
-                   (Option.value
-                      ~default:
-                        Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
-                      ctx.stream_idle_timeout_s))
+              stream_idle_timeout_for_attempt ~configured:ctx.stream_idle_timeout_s
           ; max_execution_time_s =
               max_execution_time_for_attempt ?per_provider_timeout_s ()
           ; body_timeout_s =
               (* SSOT: Keeper_runtime_resolved.body_timeout_override_sec
-                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). When set, the
-                 body-callback wall-clock fires before any turn cap,
-                 surfacing Retry.Timeout so runtime falls forward at the
-                 attempt boundary. When unset (default), it inherits the
-                 per-attempt cap — now [None] unless a per-keeper
-                 [per_provider_timeout] is configured (see
-                 [max_execution_time_for_attempt]). A blunt per-stream
-                 total body deadline is itself a mid-stream killer of a
-                 healthy reasoning burst, so it stays opt-in; stall
-                 detection is handled by [stream_idle_timeout_s]. *)
-              (match Keeper_runtime_resolved.body_timeout_override_sec () with
-               | Some _ as s -> s
-               | None -> max_execution_time_for_attempt ?per_provider_timeout_s ())
+                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). When unset, do not
+                 inherit [per_provider_timeout_s]: a cumulative body deadline
+                 is another mid-stream killer for healthy reasoning bursts.
+                 Stall detection is handled by [stream_idle_timeout_s]. *)
+              body_timeout_for_attempt ?per_provider_timeout_s ()
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails
@@ -509,7 +502,9 @@ let run_try_provider
                 let outer_wall_for_provider =
                   Keeper_attempt_liveness_config.outer_wall_for_attempt
                     ~mode:liveness_mode
-                    ~observer_attached:(Option.is_some liveness_observer_opt)
+                    ~observer_attached:
+                      (Option.is_some liveness_observer_opt
+                       || Option.is_some ctx.on_event)
                     ~per_provider_timeout_s
                     ~candidate_key
                 in
@@ -565,6 +560,8 @@ let run_try_provider
 ;;
 
 module For_testing = struct
+  let max_execution_time_for_attempt = max_execution_time_for_attempt
+  let stream_idle_timeout_for_attempt = stream_idle_timeout_for_attempt
   let sanitize_runtime_mcp_external_tool_choice =
     sanitize_runtime_mcp_external_tool_choice
 end

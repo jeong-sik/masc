@@ -18,16 +18,13 @@
    - 30s leaves ~9-12s headroom for actual response
 
    RFC-0129 (2026-05-18): the prior reserve_fraction band-aid below
-   was removed. End-to-end cap chain confirmed:
-     [effective_timeout_sec] ->
-       [Keeper_turn_driver_try_provider.per_provider_timeout_s] ->
-       [Runtime_agent_context.max_execution_time_s] ->
-       [Agent_sdk.Builder.with_max_execution_time]
-   plus OAS 0.195.0+ enforces a per-HTTP cap via [body_timeout_s]
-   (lib/llm_provider/complete.ml:656) and per-stream-line cap via
-   [stream_idle_timeout_s] ([read_sse]/[read_ndjson]). So the
-   original "OAS HTTP body lacking timeout" condition no longer
-   holds and the halving workaround was killing healthy slow
+   was removed. The current live-stream cap chain is progress-based:
+     [Keeper_turn_driver_try_provider.per_provider_timeout_s] is not
+       forwarded to [Runtime_agent_context.max_execution_time_s];
+     [stream_idle_timeout_s] bounds inter-line silence; and
+     [body_timeout_s] is opt-in via the explicit body-timeout override.
+   So the original "OAS HTTP body lacking timeout" condition no longer
+   holds and cumulative per-attempt caps must not kill healthy slow
    streams (14-event 307.5s cluster, 2026-05-17 fleet).
 *)
 

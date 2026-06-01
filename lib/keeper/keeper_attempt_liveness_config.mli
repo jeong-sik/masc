@@ -96,15 +96,9 @@ val outer_wall_for_attempt
     enforce around an attempt, given the active liveness mode and
     whether an observer is attached.
 
-    - [Enforce] + observer attached: returns [None]. The observer is
-      the authority and drives [Switch.fail] on TTFT, inter-chunk, or
-      attempt wall budget breach. The legacy outer wall must not
-      pre-empt it.
-    - [Off] / [Observe] + observer attached: returns
-      [Some (max t (budget_for_candidate ~candidate_key).budget.attempt_wall_max)]
-      when [per_provider_timeout_s = Some t]. Successful prior attempts for
-      the same candidate can raise the legacy wall so a slow-but-honest stream
-      is not killed before the liveness observer's own deadline.
+    - Observer attached: returns [None]. The stream-progress observer and
+      [stream_idle_timeout_s] own liveness; the legacy outer wall must not
+      pre-empt a stream that is still emitting chunks.
     - No observer attached (any mode): returns [per_provider_timeout_s]
       unchanged. Without an observer there is no per-provider budget
       to clamp against, so the caller's legacy knob is honored as-is.

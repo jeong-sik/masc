@@ -59,7 +59,7 @@ collected during PR-1 implementation contradicted that premise:
 |---|---|---|
 | `oas/lib/llm_provider/http_client.ml` `post_sync` body read | unbounded `take_all` | wrapped in `Eio.Time.with_timeout_exn` via `body_timeout_s` since OAS 0.195.0 (`complete.ml:656-686`) |
 | `oas/lib/llm_provider/http_client.ml` SSE / NDJSON | unbounded line read | per-line `idle_timeout` via `Eio.Time.with_timeout_exn` (`http_client.mli:204-243`) |
-| masc-mcp ↔ OAS per-attempt cap | not wired | wired end-to-end: `effective_timeout_sec` → `per_provider_timeout_s` → `Runtime_agent_context.max_execution_time_s` → `Agent_sdk.Builder.with_max_execution_time` (`runtime_agent_context.ml:178-180`) |
+| masc-mcp ↔ OAS cumulative per-attempt cap | not wired | no longer forwarded for active streaming: `per_provider_timeout_s` does not populate `Runtime_agent_context.max_execution_time_s`; streaming liveness is progress-based |
 | masc-mcp ↔ OAS per-line idle cap | not wired | wired: `Agent_sdk.Builder.with_stream_idle_timeout` (`runtime_agent_context.ml:174`), default `stream_idle_timeout_sec = 120s` (`keeper_runtime_config.mli:75`) |
 
 The premise `keeper_turn_runtime_budget.ml:173-174` was written
@@ -119,12 +119,10 @@ Both comments **predate**:
    raise `Eio.Time.Timeout` if no line arrives within
    `idle_timeout` seconds. The deadline resets on each line.
 3. **masc-mcp wiring**:
-   `Runtime_agent_context.max_execution_time_s` →
-   `Agent_sdk.Builder.with_max_execution_time` (per-attempt cap
-   already plumbed; populated by
-   `keeper_turn_driver_try_provider.max_execution_time_for_attempt`).
-   `stream_idle_timeout_s` similarly wired to
-   `Agent_sdk.Builder.with_stream_idle_timeout`.
+   `stream_idle_timeout_s` is wired to
+   `Agent_sdk.Builder.with_stream_idle_timeout`. Active streaming
+   attempts no longer derive `Runtime_agent_context.max_execution_time_s`
+   from `per_provider_timeout_s`.
 
 Given these three pieces have all landed, the reserve_fraction is
 no longer protecting against "OAS can hang the body read". It is
@@ -150,10 +148,9 @@ A single, narrow change scope:
    `Keeper_turn_runtime_budget.resolve_bounded_oas_timeout_budget_with_turn_budget`.
 2. **Update** the stale comment block to reflect the cap chain that
    now exists end-to-end.
-3. **Keep** the existing wiring: `with_max_execution_time` continues
-   to bound the per-attempt outer wall clock at full usable budget;
-   `with_stream_idle_timeout` continues to bound inter-line silence;
-   OAS `body_timeout_s` continues to bound non-streaming bodies.
+3. **Keep** the streaming-progress wiring: `with_stream_idle_timeout`
+   continues to bound inter-line silence; OAS `body_timeout_s` remains
+   opt-in for explicit non-streaming body ceilings.
 
 Two related-but-non-gating tracks are explicitly separated below
 (§4.2, §4.3) so they cannot stall the fleet fix.
@@ -268,8 +265,8 @@ Expected:
   PR-2).
 - OAS `body_timeout_s` since 0.195.0, `complete.ml:656-686`.
 - OAS streaming `idle_timeout` at `http_client.mli:204-243`.
-- masc-mcp `with_max_execution_time` wiring at
-  `runtime_agent_context.ml:178-180`.
+- masc-mcp `stream_idle_timeout_s` wiring at
+  `runtime_agent_context.ml:174-180`.
 
 ## §9 Open questions
 

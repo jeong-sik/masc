@@ -6,7 +6,8 @@
 
     - {!No_first_token}     — provider produces no chunk within [ttft_max]
     - {!Inter_chunk_idle}   — gap between consecutive chunks exceeds [inter_chunk_max]
-    - {!Wall_exceeded}      — total attempt wall-clock exceeds [attempt_wall_max]
+    - {!Wall_exceeded}      — pre-stream total attempt wall-clock exceeds
+                              [attempt_wall_max]
 
     See [docs/rfc/RFC-0022-runtime-attempt-liveness.md] §4 for the design.
 
@@ -43,7 +44,8 @@ type budget = {
   (** Maximum gap between consecutive chunks once streaming starts. *)
 
   attempt_wall_max : float;
-  (** Hard backstop on total attempt wall-clock duration. *)
+  (** Pre-stream wall-clock backstop. Once streaming starts, chunk progress is
+      governed by [inter_chunk_max] rather than a cumulative wall cap. *)
 }
 
 val bootstrap : budget
@@ -110,8 +112,7 @@ type state =
       (** No chunks received yet. Subject to [ttft_max]. *)
 
   | Streaming of { started_at : float; last_chunk_at : float }
-      (** At least one chunk received. Subject to [inter_chunk_max]
-          and [attempt_wall_max]. *)
+      (** At least one chunk received. Subject to [inter_chunk_max]. *)
 
   | Failed of failure
       (** Terminal failure. *)

@@ -11,7 +11,7 @@
     Runtime is one pre-selected binding. Errors are surfaced as
     [(_, string) result] so the caller fails fast (no silent fallback).
 
-    The three identity helpers ([normalize_provider_id], [headers_with_auth],
+    The identity helpers ([normalize_provider_id], [default_headers_for_kind],
     [normalize_openai_compat_request_path]) lived only in the deleted
     [Runtime_config_provider_binding] and are inlined here so this module has
     no [Runtime_*] dependency.
@@ -40,14 +40,11 @@ let normalize_provider_id provider_id =
    2 x Authorization, 74 B each). The token still travels to OAS via [~api_key];
    only Content-Type (OAS does not set it) and the non-credential Anthropic
    version header belong here. *)
-let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_key =
+let default_headers_for_kind (kind : Llm_provider.Provider_config.provider_kind) =
   let base = [ ("Content-Type", "application/json") ] in
-  if api_key = ""
-  then base
-  else (
-    match kind with
-    | Anthropic -> ("provider_a-version", "2023-06-01") :: base
-    | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> base)
+  match kind with
+  | Anthropic -> ("provider_a-version", "2023-06-01") :: base
+  | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> base
 ;;
 
 let trim_trailing_slash path =
@@ -258,15 +255,15 @@ let provider_config_from_declared_provider (provider : Runtime_schema.provider)
          request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
        in
        let api_key = api_key_of_credential ?registry_entry provider.credentials in
-       let auth_headers = headers_with_auth ~kind ~api_key in
+       let default_headers = default_headers_for_kind kind in
        let custom_headers = Option.value ~default:[] provider.headers in
-       (* TOML-declared custom headers override generated auth headers by key.
-          This allows operators to set provider-specific headers (e.g.
-          provider_a-version) while preserving auth and Content-Type. *)
+       (* TOML-declared custom headers override generated non-auth headers by
+          key. Auth is carried only by [api_key] and is merged by OAS at HTTP
+          request time, so [Provider_config.headers] does not duplicate secrets. *)
        let custom_keys = List.map fst custom_headers in
        let headers =
          custom_headers
-         @ List.filter (fun (k, _) -> not (List.mem k custom_keys)) auth_headers
+         @ List.filter (fun (k, _) -> not (List.mem k custom_keys)) default_headers
        in
        Some
          (Llm_provider.Provider_config.make

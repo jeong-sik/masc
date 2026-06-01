@@ -105,6 +105,13 @@ let display_provider_name provider_name =
   | None -> String.trim provider_name
 ;;
 
+let default_headers_for_kind (kind : Llm_provider.Provider_config.provider_kind) =
+  let base = [("Content-Type", "application/json")] in
+  match kind with
+  | Anthropic -> ("provider_a-version", "2023-06-01") :: base
+  | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> base
+;;
+
 (* Build headers list with Authorization when api_key is present.
    Anthropic/Anthropic use x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
 (* Returns the non-credential request headers only. The auth credential

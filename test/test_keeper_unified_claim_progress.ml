@@ -168,7 +168,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~tool_names:[])
 ;;
 
-let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
+let test_stay_silent_and_passive_tools_remain_advisory_on_actionable_signal () =
   check
     bool
     "stay_silent satisfies required contract"
@@ -242,9 +242,9 @@ let () =
             `Quick
             test_actionable_tool_contract_allows_execution_tools
         ; test_case
-            "stay_silent needs typed no-work proof on actionable signal"
+            "stay_silent and passive tools remain advisory on actionable signal"
             `Quick
-            test_stay_silent_requires_typed_no_work_proof_on_actionable_signal
+            test_stay_silent_and_passive_tools_remain_advisory_on_actionable_signal
         ] )
     ]
 ;;

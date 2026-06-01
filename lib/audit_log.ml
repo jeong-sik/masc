@@ -112,6 +112,33 @@ let unknown_action raw =
      silent coercion to a normal concrete action. *)
   Unknown raw
 
+let action_of_tagged_wire ~tag ~payload =
+  match tag with
+  | "tool_call" -> Some (ToolCall payload)
+  | "governance_decision" ->
+      Some (GovernanceDecision (governance_audit_decision_of_string payload))
+  | "custom" -> Some (Custom payload)
+  | _ -> None
+
+let simple_action_of_wire = function
+  | "claim_task" -> Some ClaimTask
+  | "start_task" -> Some StartTask
+  | "done_task" -> Some DoneTask
+  | "cancel_task" -> Some CancelTask
+  | "release_task" -> Some ReleaseTask
+  | "broadcast" -> Some Broadcast
+  | "suspend" -> Some Suspend
+  | "auth_success" -> Some AuthSuccess
+  | "auth_failure" -> Some AuthFailure
+  | "circuit_open" -> Some CircuitOpen
+  | "circuit_close" -> Some CircuitClose
+  | "search_refinement" -> Some SearchRefinement
+  | _ -> None
+
+let parsed_or_unknown raw = function
+  | Some action -> action
+  | None -> unknown_action raw
+
 let string_to_action s =
   (* Split on first ':' to separate tag from payload for parameterized
      variants.  Simple action names without ':' match directly.  This
@@ -122,27 +149,8 @@ let string_to_action s =
   | Some colon_pos ->
     let tag = String.sub s 0 colon_pos in
     let payload = String.sub s (colon_pos + 1) (String.length s - colon_pos - 1) in
-    (match tag with
-     | "tool_call" -> ToolCall payload
-     | "governance_decision" ->
-         GovernanceDecision (governance_audit_decision_of_string payload)
-     | "custom" -> Custom payload
-     | _ -> unknown_action s)
-  | None ->
-    (match s with
-     | "claim_task" -> ClaimTask
-     | "start_task" -> StartTask
-     | "done_task" -> DoneTask
-     | "cancel_task" -> CancelTask
-     | "release_task" -> ReleaseTask
-     | "broadcast" -> Broadcast
-     | "suspend" -> Suspend
-     | "auth_success" -> AuthSuccess
-     | "auth_failure" -> AuthFailure
-     | "circuit_open" -> CircuitOpen
-     | "circuit_close" -> CircuitClose
-     | "search_refinement" -> SearchRefinement
-     | _ -> unknown_action s)
+    parsed_or_unknown s (action_of_tagged_wire ~tag ~payload)
+  | None -> parsed_or_unknown s (simple_action_of_wire s)
 
 let outcome_to_json = function
   | Success -> `Assoc [("status", `String "success")]

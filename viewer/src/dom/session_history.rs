@@ -87,7 +87,7 @@ fn normalize_room_status(raw: &str) -> String {
             "active"
         }
         "paused" | "pause" | "stopped" | "on_hold" | "on-hold" => "paused",
-        "idle" | "lobby" | "created" | "ready" => "unknown",
+        "idle" | "created" | "ready" => "unknown",
         "ended" | "finished" | "completed" | "closed" | "done" | "archived" | "terminated" => {
             "ended"
         }

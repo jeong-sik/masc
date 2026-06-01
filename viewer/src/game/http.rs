@@ -163,8 +163,7 @@ fn normalize_room_status(raw: &str) -> String {
 fn room_requires_new_game(raw_status: &str) -> bool {
     matches!(
         normalize_room_status(raw_status).as_str(),
-        "" | "idle" | "lobby" | "ended" | "completed" | "done" | "retired" | "closed"
-            | "unavailable"
+        "" | "idle" | "ended" | "completed" | "done" | "retired" | "closed" | "unavailable"
     )
 }
 
@@ -579,7 +578,9 @@ fn merge_state_fallback(primary: &mut GameStateResponse, fallback: &GameStateRes
             {
                 primary_room.current_scenario = fallback_room.current_scenario.clone();
             }
-            if primary_room.current_node.trim().is_empty() && !fallback_room.current_node.trim().is_empty() {
+            if primary_room.current_node.trim().is_empty()
+                && !fallback_room.current_node.trim().is_empty()
+            {
                 primary_room.current_node = fallback_room.current_node.clone();
             }
         }
@@ -1589,14 +1590,16 @@ mod tests {
     }
 
     #[test]
-    fn initial_progress_event_is_hidden_for_idle_and_lobby() {
-        assert_eq!(initial_progress_event_type("lobby", false), None);
+    fn initial_progress_event_is_hidden_for_idle() {
         assert_eq!(initial_progress_event_type("idle", false), None);
     }
 
     #[test]
     fn initial_progress_event_marks_ended_room_as_ended_event() {
-        assert_eq!(initial_progress_event_type("ended", false), Some("room.ended"));
+        assert_eq!(
+            initial_progress_event_type("ended", false),
+            Some("room.ended")
+        );
     }
 
     #[test]

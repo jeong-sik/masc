@@ -30,7 +30,7 @@
     --panel-radius: 2px;
     --panel-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
     --card-radius: 4px;
-    --lobby-bg: radial-gradient(ellipse at 50% 30%, #1a1a2e 0%, #0a0a12 70%);
+    --home-bg: radial-gradient(ellipse at 50% 30%, #1a1a2e 0%, #0a0a12 70%);
     --mode-card-border: 1px solid #2a1f1a;
     --mode-card-hover-border: 1px solid #c4a265;
     --mode-card-hover-shadow: 0 0 20px rgba(196, 162, 101, 0.15);
@@ -65,7 +65,7 @@
     --panel-radius: 0;
     --panel-shadow: 0 0 16px rgba(106, 47, 214, 0.3);
     --card-radius: 0;
-    --lobby-bg: radial-gradient(ellipse at 50% 60%, #1a1235 0%, #05000f 70%);
+    --home-bg: radial-gradient(ellipse at 50% 60%, #1a1235 0%, #05000f 70%);
     --mode-card-border: 1px solid #2a1a4a;
     --mode-card-hover-border: 1px solid #00ffcc;
     --mode-card-hover-shadow: 0 0 24px rgba(0, 255, 204, 0.2), 0 0 48px rgba(0, 255, 204, 0.05);
@@ -100,7 +100,7 @@
     --panel-radius: 0;
     --panel-shadow: 0 0 8px rgba(0, 255, 0, 0.1);
     --card-radius: 0;
-    --lobby-bg: #000800;
+    --home-bg: #000800;
     --mode-card-border: 1px solid #0a3a0a;
     --mode-card-hover-border: 1px solid #00ff00;
     --mode-card-hover-shadow: 0 0 16px rgba(0, 255, 0, 0.15);
@@ -135,7 +135,7 @@
     --panel-radius: 3px;
     --panel-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
     --card-radius: 6px;
-    --lobby-bg: radial-gradient(ellipse at 50% 40%, #2e2820 0%, #1a1610 70%);
+    --home-bg: radial-gradient(ellipse at 50% 40%, #2e2820 0%, #1a1610 70%);
     --mode-card-border: 1px solid #4a3f30;
     --mode-card-hover-border: 1px solid #c4a050;
     --mode-card-hover-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
@@ -210,35 +210,35 @@ body {
 }
 
 /* ═══════════════════════════════════════════
-   LOBBY SCREEN
+   HOME SCREEN
    ═══════════════════════════════════════════ */
 
-#lobby-screen {
+#home-screen {
     display: none;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     height: 100vh;
-    background: var(--lobby-bg);
+    background: var(--home-bg);
     padding: 40px 24px;
     gap: 48px;
 }
 
-body.mode-lobby #lobby-screen {
+body.mode-home #home-screen {
     display: flex;
 }
 
-body.mode-lobby #dashboard {
+body.mode-home #dashboard {
     display: none;
 }
 
-/* ─── Lobby Header ─────────────────────── */
+/* ─── Home Header ─────────────────────── */
 
-.lobby-header {
+.home-header {
     text-align: center;
 }
 
-.lobby-title {
+.home-title {
     font-family: var(--font-display);
     font-size: 42px;
     color: var(--accent-primary);
@@ -248,7 +248,7 @@ body.mode-lobby #dashboard {
     text-shadow: 0 0 40px var(--accent-glow);
 }
 
-.lobby-subtitle {
+.home-subtitle {
     font-family: var(--font-ui);
     font-size: 13px;
     color: var(--text-dim);
@@ -320,9 +320,9 @@ body.mode-lobby #dashboard {
     line-height: 1.5;
 }
 
-/* ─── Lobby Footer ─────────────────────── */
+/* ─── Home Footer ─────────────────────── */
 
-.lobby-footer {
+.home-footer {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -488,7 +488,7 @@ body:not(.mode-trpg) #ops-hud {
     border-bottom: 1px solid var(--border-main);
 }
 
-#back-to-lobby {
+#back-to-home {
     background: none;
     border: none;
     color: var(--text-dim);
@@ -500,7 +500,7 @@ body:not(.mode-trpg) #ops-hud {
     font-family: inherit;
 }
 
-#back-to-lobby:hover {
+#back-to-home:hover {
     color: var(--accent-primary);
 }
 
@@ -2537,8 +2537,8 @@ body.wasm-dom-fallback #bevy-canvas {
     border-color: rgba(177, 116, 116, 0.32);
 }
 
-.turn-runtime-item .v.state-lobby,
-.room-chip-state.state-lobby,
+.turn-runtime-item .v.state-idle,
+.room-chip-state.state-idle,
 .turn-runtime-item .v.state-unknown,
 .room-chip-state.state-unknown {
     color: var(--text-dim);
@@ -3685,7 +3685,7 @@ body.wasm-dom-fallback #bevy-canvas {
     overflow-y: auto;
 }
 
-#dashboard[data-trpg-surface="lobby"] #new-game-panel {
+#dashboard[data-trpg-surface="idle"] #new-game-panel {
     display: flex;
 }
 
@@ -4173,7 +4173,7 @@ body.wasm-dom-fallback #bevy-canvas {
     text-shadow: -1px 0 #ff2266, 1px 0 #00ffcc;
 }
 
-[data-theme="cyberpunk"] .lobby-title {
+[data-theme="cyberpunk"] .home-title {
     animation: glitch-subtle 3s infinite;
 }
 

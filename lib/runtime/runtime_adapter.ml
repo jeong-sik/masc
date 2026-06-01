@@ -47,6 +47,14 @@ let default_headers_for_kind (kind : Llm_provider.Provider_config.provider_kind)
   | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> base
 ;;
 
+let normalize_header_key key = String.lowercase_ascii (String.trim key)
+
+let is_auth_header_key key =
+  match normalize_header_key key with
+  | "authorization" | "x-api-key" -> true
+  | _ -> false
+;;
+
 let trim_trailing_slash path =
   if String.length path > 1 && String.ends_with ~suffix:"/" path
   then String.sub path 0 (String.length path - 1)
@@ -256,14 +264,20 @@ let provider_config_from_declared_provider (provider : Runtime_schema.provider)
        in
        let api_key = api_key_of_credential ?registry_entry provider.credentials in
        let default_headers = default_headers_for_kind kind in
-       let custom_headers = Option.value ~default:[] provider.headers in
+       let custom_headers =
+         provider.headers
+         |> Option.value ~default:[]
+         |> List.filter (fun (key, _) -> not (is_auth_header_key key))
+       in
        (* TOML-declared custom headers override generated non-auth headers by
           key. Auth is carried only by [api_key] and is merged by OAS at HTTP
           request time, so [Provider_config.headers] does not duplicate secrets. *)
-       let custom_keys = List.map fst custom_headers in
+       let custom_keys = List.map (fun (key, _) -> normalize_header_key key) custom_headers in
        let headers =
          custom_headers
-         @ List.filter (fun (k, _) -> not (List.mem k custom_keys)) default_headers
+         @ List.filter
+             (fun (key, _) -> not (List.mem (normalize_header_key key) custom_keys))
+             default_headers
        in
        Some
          (Llm_provider.Provider_config.make

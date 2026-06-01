@@ -46,7 +46,8 @@ let openai_compat_adapter =
   ; transport = Openai_compat
   ; auth_mode = No_auth
   ; aliases =
-      [ "voice-chat-completions-v1-compat"; "openai_compat"; "railway-elevenlabs-proxy" ]
+      [ "voice-chat-completions-v1-compat"; "voice-provider_d-compat"; "provider_d"
+      ; "openai_compat"; "railway-elevenlabs-proxy" ]
   }
 ;;
 

@@ -1511,6 +1511,24 @@ let test_sandbox_root_git_c_container_path_preflight_uses_host_path () =
   Alcotest.(check (option string)) "no error" None error;
   Alcotest.(check string) "explicit -C keeps sandbox-root cwd" playground cwd
 
+let test_sandbox_root_git_c_missing_target_keeps_execution_cwd () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let missing = "repos/masc-mcp/.worktrees/missing" in
+  let cwd, error =
+    resolve_sandbox_root_git_cwd_string ~config ~meta
+      ~cwd:playground
+      ~cmd:(Printf.sprintf "git -C %s status" missing)
+  in
+  Alcotest.(check string) "execution cwd remains sandbox root" playground cwd;
+  match error with
+  | None -> Alcotest.fail "expected missing git -C target error"
+  | Some msg ->
+    Alcotest.(check bool)
+      "error identifies missing git -C target"
+      true
+      (contains_substring msg "git -C target must be an existing directory")
+
 let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -2221,6 +2239,10 @@ let () =
             "sandbox-root git -C container path checks host path"
             `Quick
             test_sandbox_root_git_c_container_path_preflight_uses_host_path;
+          Alcotest.test_case
+            "sandbox-root git -C missing target keeps execution cwd"
+            `Quick
+            test_sandbox_root_git_c_missing_target_keeps_execution_cwd;
           Alcotest.test_case
             "sandbox-root git with multiple repos gives cwd correction"
             `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;

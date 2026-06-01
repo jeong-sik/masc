@@ -259,7 +259,7 @@ let resolve_sandbox_root_git_cwd_of_stages
       if path_is_existing_dir target
       then cwd, None
       else
-        target,
+        cwd,
         Some
           (Printf.sprintf
              "cwd_not_directory: %s (git -C target must be an existing directory)"

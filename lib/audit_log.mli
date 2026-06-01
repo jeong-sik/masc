@@ -10,7 +10,7 @@
     [action] + [details] payload before delegating to {!log_action}),
     plus reader / pruner / stats helpers.
 
-    Internal helpers ([preview], [string_to_action], [outcome_to_json]
+    Internal helpers ([preview], [outcome_to_json]
     decoders, the [audit_store_cache] and its mutex,
     [get_audit_store], [parse_entries], [max_logged_errors],
     [remove_assoc_keys]) are hidden — callers use the typed log
@@ -77,6 +77,11 @@ val action_to_string : action -> string
 (** Stable serialisation; round-tripped by {!string_to_action}. The
     parametric variants ([ToolCall] / [GovernanceDecision] /
     [Custom]) are encoded as ["<tag>:<arg>"]. *)
+
+val string_to_action : string -> action
+(** Decode a wire-format action string.  Unrecognised tags fall
+    through to [Custom] to maintain forward compatibility with
+    future action variants. *)
 
 val governance_audit_decision_to_string :
   governance_audit_decision -> string

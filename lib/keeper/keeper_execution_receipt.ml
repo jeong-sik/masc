@@ -207,6 +207,7 @@ type operator_disposition_reason =
   | Reason_internal_error
   | Reason_tool_required_unsatisfied
   | Reason_tool_route_recoverable_failure
+  | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped
@@ -222,10 +223,32 @@ let operator_disposition_reason_to_string = function
   | Reason_internal_error -> "internal_error"
   | Reason_tool_required_unsatisfied -> "tool_required_unsatisfied"
   | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
+  | Reason_turn_budget_exhausted -> "turn_budget_exhausted"
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
+;;
+
+(* Terminal-reason prefixes for OAS agent-execution errors that exhaust a
+   turn/time budget before the turn completes. SSOT shared with the encoder
+   [Keeper_agent_error.agent_error_terminal_reason_code]. A turn cut off by
+   the per-call turn cap ([MaxTurnsExceeded]), the wall-clock ceiling
+   ([AgentExecutionTimeout]), or the progress-aware idle watchdog
+   ([AgentExecutionIdleTimeout]) did NOT violate the tool contract — it never
+   reached a verdict. The keeper checkpoints and the supervisor auto-resumes
+   ([Keeper_error_classify.is_auto_recoverable_turn_error] /
+   [Keeper_supervisor] auto_resume). Scope is deliberately narrow: token/cost
+   budget, guardrail, and tripwire terminals stay out, since those are
+   genuine ceilings an operator should see, not transient turn cut-offs. *)
+let terminal_prefix_max_turns_exceeded = "agent_error_max_turns_exceeded"
+let terminal_prefix_execution_timeout = "agent_error_execution_timeout"
+let terminal_prefix_idle_timeout = "agent_error_idle_timeout"
+
+let is_auto_recoverable_turn_budget_terminal terminal_reason =
+  String.starts_with ~prefix:terminal_prefix_max_turns_exceeded terminal_reason
+  || String.starts_with ~prefix:terminal_prefix_execution_timeout terminal_reason
+  || String.starts_with ~prefix:terminal_prefix_idle_timeout terminal_reason
 ;;
 
 let operator_disposition (receipt : t)
@@ -303,6 +326,19 @@ let operator_disposition (receipt : t)
     | Some "internal" -> true
     | Some _ | None -> false
   then Disp_pause_human, Reason_internal_error
+  else if is_auto_recoverable_turn_budget_terminal terminal_reason
+  then
+    (* The turn was cut off by its per-call turn cap / wall-clock ceiling /
+       idle watchdog before producing a verdict. This is auto-recoverable
+       (the supervisor resumes from the checkpoint), NOT a tool-contract
+       failure. Without this branch the turn falls through to the generic
+       [required_tool_contract_unsatisfied] check below, which — because a
+       cut-off turn has [tools_used = []] on a [tool_requirement = Required]
+       lane — returned [Disp_pause_human, Reason_tool_required_unsatisfied],
+       falsely paging an operator while the keeper silently auto-resumed.
+       #19714 removed the blunt default wall-clock; this closes the
+       disposition-side half of the same mis-signal. *)
+    Disp_pass, Reason_turn_budget_exhausted
   else
     let canonical_names names =
       names

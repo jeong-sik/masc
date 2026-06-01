@@ -20,7 +20,8 @@
 # sub-library; until then this gate holds the line.
 #
 # Scope:
-#   - Subjects: lib/**/tool_*.ml{i}, plus lib/tools.ml{i}, EXCLUDING
+#   - Subjects: every lib/**/tool_*.ml{i} found recursively, plus
+#     lib/tools.ml{i}, EXCLUDING
 #     tool_keeper*.ml{i}. The tool_keeper* modules are keeper-purpose handlers
 #     (keeper IS their domain); they are tracked separately, not by this gate.
 #   - Violation: a keeper-owned module token or a real

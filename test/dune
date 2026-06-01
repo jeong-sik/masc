@@ -560,6 +560,13 @@
   test_blocker_class_exhaustiveness)
  (libraries masc_test_deps multimodal))
 
+; Focused CI gate for runtime TOML validity.
+
+(test
+ (name test_runtime_config_validity)
+ (modules test_runtime_config_validity)
+ (libraries masc_test_deps))
+
 ; Group 2: Property-based tests (QCheck)
 
 (tests

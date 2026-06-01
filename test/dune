@@ -1530,6 +1530,8 @@
 
 (include stanzas/test_keeper_unified_tool_event_order_source.inc)
 
+(include stanzas/test_keeper_validation_breaker_exempt.inc)
+
 (include stanzas/test_keeper_turn_livelock_10121.inc)
 
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)
@@ -1652,6 +1654,8 @@
 (include stanzas/test_tool_inline_dispatch.inc)
 
 (include stanzas/test_tool_name.inc)
+
+(include stanzas/test_tool_task_args.inc)
 
 (include stanzas/test_tool_task_completion_example.inc)
 

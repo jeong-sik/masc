@@ -79,6 +79,23 @@ let keeper_tool_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t opti
           @ typed_outcome_fields))
 ;;
 
+(* Caller-input validation errors carry [Tool_result.Policy_rejection]. Per
+   RFC-0062 §3.2 that variant is "permission, guardrail, validation reject", so
+   validation belongs there by original design — and the schema-layer producer
+   [Tool_input_validation] already emits Policy_rejection for invalid args.
+   Tagging makes the keeper *health* circuit breaker (Gate #1,
+   [Agent_tool_dispatch_runtime.should_apply_circuit_breaker_to_failure_payload])
+   exempt these: an LLM that sends malformed/missing args is making an input
+   mistake, not exhibiting a keeper-health fault. The per-(tool,args) breaker
+   (Gate #2) still counts them, so retrying the SAME bad args stays blocked. *)
+let validation_error_json message =
+  keeper_tool_result_json
+    ~failure_class:(Some Tool_result.Policy_rejection)
+    ~ok:false
+    ~message
+    ()
+;;
+
 let validate_goal_id config goal_id =
   match Goal_store.get_goal config ~goal_id with
   | Some _ -> Ok goal_id
@@ -99,17 +116,6 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
              (Printf.sprintf
                 "goal_id is required when keeper has multiple active_goal_ids: [%s]"
                 (String.concat ", " goal_ids)))
-;;
-
-let parse_task_contract_arg args =
-  match Json_util.assoc_member_opt "contract" args with
-  | Some `Null -> Ok None
-  | Some (`Assoc _ as json) -> (
-      match Masc_domain.task_contract_of_yojson json with
-      | Ok contract -> Ok (Some contract)
-      | Error message ->
-          Error (Printf.sprintf "Invalid contract payload: %s" message))
-  | _ -> Error "contract must be an object when provided"
 ;;
 
 (* RFC-0034.v2: per-goal task creation cap moved to
@@ -471,15 +477,25 @@ let handle_keeper_task_tool
     let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in
     let priority = Safe_ops.json_int ~default:3 "priority" args |> max 1 |> min 5 in
     if title = ""
-    then error_json "title is required. Provide a clear, actionable task title."
+    then validation_error_json "title is required. Provide a clear, actionable task title."
     else if description = ""
-    then error_json "description is required. Explain what needs to be done and why."
+    then
+      validation_error_json
+        "description is required. Explain what needs to be done and why."
     else (
       match resolve_task_create_goal_id ~config ~meta args with
-      | Error message -> error_json message
+      | Error message -> validation_error_json message
       | Ok goal_id ->
-          (match parse_task_contract_arg args with
-           | Error message -> error_json message
+          (* De-duplicated: this keeper-internal path now shares the canonical
+             [Tool_task_args.parse_task_contract] used by the public
+             masc_task_create facade. The previous local copy
+             [parse_task_contract_arg] had regressed — it rejected an OMITTED
+             optional [contract] via a catch-all that conflated None(omitted)
+             with a wrong-typed value, which falsely failed keeper_task_create
+             and tripped the keeper failure circuit breaker. Same lib, no
+             dependency wall; the canonical parser handles [None | Some `Null]. *)
+          (match Tool_task_args.parse_task_contract args with
+           | Error message -> validation_error_json message
            | Ok contract ->
               let capacity_error =
                 let backlog = Workspace.read_backlog config in

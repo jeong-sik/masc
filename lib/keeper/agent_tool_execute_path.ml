@@ -3,31 +3,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Agent_tool_shared_runtime
 
-let resolve_tool_read_cwd
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(args : Yojson.Safe.t)
-  =
-  let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
-  let resolved =
-    if raw_cwd = ""
-    then Ok (keeper_default_read_root ~config ~meta)
-    else resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd
-  in
-  match resolved with
-  | Error _ as err -> err
-  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
-  | Ok cwd ->
-    if not (Fs_compat.file_exists cwd) then begin
-      (* Auto-create missing CWD under the sandbox.  The path has already
-         passed [resolve_keeper_read_path] sandbox containment, so creating
-         it is safe.  This handles stale worktree references and first-run
-         repo directories that the LLM targets before clone. *)
-      ignore (Keeper_fs.ensure_dir cwd);
-      Ok cwd
-    end else
-      Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
-
 let normalize_repo_cwd_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
@@ -121,6 +96,40 @@ let validate_repo_path_ready
 
 let validate_repo_cwd_ready ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
   validate_repo_path_ready ~config ~meta ~probe_path:cwd cwd
+
+let resolve_missing_cwd
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      cwd
+  =
+  match repo_path_context ~config ~meta cwd with
+  | Some _ ->
+    (match validate_repo_cwd_ready ~config ~meta cwd with
+     | Ok () -> Ok cwd
+     | Error _ as err -> err)
+  | None ->
+    let _created_path = Keeper_fs.ensure_dir cwd in
+    Ok cwd
+
+let resolve_tool_read_cwd
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+  =
+  let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
+  let resolved =
+    if raw_cwd = ""
+    then Ok (keeper_default_read_root ~config ~meta)
+    else resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd
+  in
+  match resolved with
+  | Error _ as err -> err
+  | Ok cwd when Fs_compat.file_exists cwd && Sys.is_directory cwd -> Ok cwd
+  | Ok cwd ->
+    if not (Fs_compat.file_exists cwd) then
+      resolve_missing_cwd ~config ~meta cwd
+    else
+      Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
 let validate_repo_path_args_ready
       ~(config : Workspace.config)
@@ -234,12 +243,9 @@ let resolve_tool_write_cwd
      | Ok () -> Ok cwd
      | Error _ as err -> err)
   | Ok cwd ->
-    if not (Fs_compat.file_exists cwd) then begin
-      ignore (Keeper_fs.ensure_dir cwd);
-      match validate_repo_cwd_ready ~config ~meta cwd with
-      | Ok () -> Ok cwd
-      | Error _ as err -> err
-    end else
+    if not (Fs_compat.file_exists cwd) then
+      resolve_missing_cwd ~config ~meta cwd
+    else
       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
 
 (* Docker playground path mapping: host → container.

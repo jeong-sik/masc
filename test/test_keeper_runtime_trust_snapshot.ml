@@ -202,6 +202,43 @@ let test_model_observability_uses_runtime_trust_selected_model () =
     (json |> member "runtime_contract" |> member "actual_model_id" |> to_string)
 ;;
 
+let test_model_observability_uses_runtime_trust_execution_selected_model () =
+  let runtime_trust =
+    `Assoc
+      [ ( "execution"
+        , `Assoc [ "provider_selected_model", `String "execution-model" ] )
+      ]
+  in
+  let json =
+    O.model_observability_json
+      ~current_runtime_id:"runtime-test"
+      ~runtime_blocker_fields:[]
+      ~runtime_trust
+      None
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "runtime-trust execution model counts as recent observation"
+    true
+    (json |> member "recent_turn_observation" |> to_bool);
+  Alcotest.(check string)
+    "execution selected model falls through to model_observability"
+    "execution-model"
+    (json |> member "selected_model" |> to_string);
+  Alcotest.(check bool)
+    "runtime contract marks execution selected model proof verified"
+    true
+    (json |> member "runtime_contract" |> member "verified" |> to_bool);
+  Alcotest.(check string)
+    "runtime contract source records execution trust field"
+    "runtime_trust.execution.provider_selected_model"
+    (json |> member "runtime_contract" |> member "source" |> to_string);
+  Alcotest.(check string)
+    "runtime contract exposes observed execution selected model"
+    "execution-model"
+    (json |> member "runtime_contract" |> member "actual_model_id" |> to_string)
+;;
+
 let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
@@ -220,6 +257,10 @@ let () =
             "status model observability reuses runtime-trust selected model"
             `Quick
             test_model_observability_uses_runtime_trust_selected_model
+        ; Alcotest.test_case
+            "status model observability reuses runtime-trust execution selected model"
+            `Quick
+            test_model_observability_uses_runtime_trust_execution_selected_model
         ] )
     ]
 ;;

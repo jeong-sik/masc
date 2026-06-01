@@ -609,6 +609,148 @@ type keeper_meta =
   ; meta_version : int
   }
 
+let apply_profile_default opt current =
+  match opt with
+  | Some value -> value
+  | None -> current
+;;
+
+let apply_profile_default_opt opt current =
+  match opt with
+  | Some _ -> opt
+  | None -> current
+;;
+
+let invalid_profile_defaults_error ~keeper_name detail =
+  if String_util.contains_substring detail "runtime_id" then
+    Printf.sprintf
+      "invalid profile.runtime_id for keeper %s: unknown runtime_id: %s"
+      keeper_name detail
+  else
+    Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
+;;
+
+let missing_required_sandbox_profile_error ~keeper_name
+    (defaults : Keeper_types_profile.keeper_profile_defaults) =
+  let manifest_hint =
+    match defaults.manifest_path with
+    | Some path -> Printf.sprintf " (loaded from %s)" path
+    | None -> ""
+  in
+  Printf.sprintf
+    "keeper %s rejected: sandbox_profile is required (allowed: %s)%s. \
+     Add e.g. `sandbox_profile = \"docker\"` to the keeper TOML."
+    keeper_name
+    (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings)
+    manifest_hint
+;;
+
+let effective_meta_of_profile_defaults
+    (defaults : Keeper_types_profile.keeper_profile_defaults)
+    (meta : keeper_meta) : (keeper_meta, string) result =
+  let open Keeper_types_profile in
+  let has_profile_source = Option.is_some defaults.manifest_path in
+  let target_sandbox_profile =
+    match defaults.sandbox_profile, defaults.manifest_path with
+    | Some profile, _ -> Ok profile
+    | None, _ ->
+        Error
+          (missing_required_sandbox_profile_error ~keeper_name:meta.name
+             defaults)
+  in
+  match target_sandbox_profile with
+  | Error _ as err -> err
+  | Ok sandbox_profile ->
+      let default_network_mode =
+        if has_profile_source then default_network_mode_for_profile sandbox_profile
+        else meta.network_mode
+      in
+      let network_mode =
+        apply_profile_default defaults.network_mode default_network_mode
+      in
+      let tool_access =
+        match defaults.tool_custom_list with
+        | Some tools -> normalize_tool_names tools
+        | None -> meta.tool_access
+      in
+      let per_provider_timeout_s =
+        match defaults.per_provider_timeout_state with
+        | Per_provider_timeout_unset ->
+            normalize_per_provider_timeout_opt
+              ~source:(Printf.sprintf "keeper effective meta %s" meta.name)
+              meta.per_provider_timeout_s
+        | Per_provider_timeout_invalid -> None
+        | Per_provider_timeout_set -> defaults.per_provider_timeout
+      in
+      Ok
+        { meta with
+          proactive =
+            {
+              enabled =
+                apply_profile_default defaults.proactive_enabled
+                  Keeper_config.default_proactive_enabled;
+              idle_sec =
+                apply_profile_default defaults.proactive_idle_sec
+                  Keeper_config.default_proactive_idle_sec;
+              cooldown_sec =
+                apply_profile_default defaults.proactive_cooldown_sec
+                  Keeper_config.default_proactive_cooldown_sec;
+            };
+          tool_denylist =
+            apply_profile_default defaults.tool_denylist meta.tool_denylist;
+          social_model =
+            apply_profile_default defaults.social_model meta.social_model;
+          goal = apply_profile_default defaults.goal meta.goal;
+          short_goal =
+            apply_profile_default defaults.short_goal meta.short_goal;
+          mid_goal = apply_profile_default defaults.mid_goal meta.mid_goal;
+          long_goal = apply_profile_default defaults.long_goal meta.long_goal;
+          will = apply_profile_default defaults.will meta.will;
+          needs = apply_profile_default defaults.needs meta.needs;
+          desires = apply_profile_default defaults.desires meta.desires;
+          instructions =
+            apply_profile_default defaults.instructions meta.instructions;
+          autoboot_enabled =
+            apply_profile_default defaults.autoboot_enabled
+              meta.autoboot_enabled;
+          mention_targets =
+            (match defaults.mention_targets with
+             | [] -> meta.mention_targets
+             | targets -> targets);
+          active_goal_ids =
+            apply_profile_default defaults.active_goal_ids meta.active_goal_ids;
+          tool_access;
+          sandbox_profile;
+          sandbox_image =
+            apply_profile_default_opt defaults.sandbox_image meta.sandbox_image;
+          network_mode;
+          allowed_paths =
+            apply_profile_default defaults.allowed_paths
+              (if has_profile_source then [] else meta.allowed_paths);
+          telemetry_feedback_enabled =
+            apply_profile_default_opt defaults.telemetry_feedback_enabled
+              meta.telemetry_feedback_enabled;
+          telemetry_feedback_window_hours =
+            apply_profile_default_opt defaults.telemetry_feedback_window_hours
+              meta.telemetry_feedback_window_hours;
+          per_provider_timeout_s;
+          always_approve =
+            apply_profile_default_opt defaults.always_approve
+              meta.always_approve;
+          oas_env =
+            (match defaults.oas_env with
+             | [] -> meta.oas_env
+             | env -> env);
+        }
+;;
+
+let effective_meta_result (meta : keeper_meta) : (keeper_meta, string) result =
+  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
+  | Error detail ->
+      Error (invalid_profile_defaults_error ~keeper_name:meta.name detail)
+  | Ok defaults -> effective_meta_of_profile_defaults defaults meta
+;;
+
 let runtime_id_of_meta (m : keeper_meta) : string =
   (* RFC-0207: a keeper's per-keeper runtime is its persona [model] selection
      (keepers/<name>.toml [model = "provider.model"], cached by

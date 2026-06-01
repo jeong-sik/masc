@@ -373,6 +373,18 @@ type keeper_meta = {
   meta_version : int;
 }
 
+(** Overlay TOML/persona defaults onto persisted runtime meta for
+    status-facing reads. Persisted runtime JSON intentionally omits
+    TOML-owned fields such as [sandbox_profile], [network_mode], and
+    [tool_access]. *)
+val effective_meta_result : keeper_meta -> (keeper_meta, string) result
+
+(** Pure variant for callers that already loaded profile defaults. *)
+val effective_meta_of_profile_defaults :
+  Keeper_types_profile.keeper_profile_defaults ->
+  keeper_meta ->
+  (keeper_meta, string) result
+
 (** {1 Runtime id derivation} *)
 
 val runtime_id_of_meta : keeper_meta -> string

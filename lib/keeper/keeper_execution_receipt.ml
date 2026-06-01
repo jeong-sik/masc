@@ -564,7 +564,7 @@ let to_json (receipt : t) =
     ; ( "runtime"
       , `Assoc
           [ "name", `String (receipt.runtime_id)
-          ; "selected_model", `Null
+          ; "selected_model", string_opt_json receipt.runtime_selected_model
           ; "attempt_count", `Int receipt.runtime_attempt_count
           ; "fallback_applied", `Bool receipt.runtime_fallback_applied
           ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)

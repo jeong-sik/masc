@@ -70,6 +70,19 @@ val read_meta_resolved :
 val read_meta :
   Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
 
+(** Read persisted keeper meta and overlay TOML/persona defaults before
+    returning it. Status/list/operator surfaces should use this for
+    TOML-owned fields such as [sandbox_profile], [network_mode], and
+    [tool_access]. *)
+val read_effective_meta_resolved :
+  Workspace.config ->
+  string ->
+  ((string * Keeper_meta_contract.keeper_meta) option, string) result
+
+(** Like [read_effective_meta_resolved] but discards the filename component. *)
+val read_effective_meta :
+  Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
+
 (** Read keeper meta only if the canonical [name] file's mtime exceeds
     [last_mtime]. Returns [Some (meta, mtime)] when changed, [None] when
     unchanged, missing, or unparsable (logs the parse-failure case). *)

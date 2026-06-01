@@ -257,11 +257,46 @@ let transport_for_provider ~sw ~net ~provider_cfg () =
      threaded here. *)
   Ok (Some (provider_config_preserving_http_transport ~sw ~net ~provider_cfg))
 
+let runtime_id_of_config (config : config) =
+  let runtime_prefix = "runtime:" in
+  let runtime_suffix = "/runtime" in
+  match config.description with
+  | Some description
+    when String.starts_with ~prefix:runtime_prefix description
+         && String.ends_with ~suffix:runtime_suffix description ->
+      let prefix_len = String.length runtime_prefix in
+      let suffix_len = String.length runtime_suffix in
+      let len = String.length description - prefix_len - suffix_len in
+      if len > 0 then String.sub description prefix_len len else config.name
+  | _ -> config.name
+
+let runtime_observation_for_completed_config ~total_duration_ms
+    (config : config) =
+  let latency_ms = Some (int_of_float total_duration_ms) in
+  let capture, _metrics =
+    Keeper_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+  in
+  Keeper_observation.record_attempt_terminal capture ~model_id:config.model_id
+    ~latency_ms ~error:None;
+  Keeper_observation.runtime_observation_with_metrics
+    ~runtime_id:(runtime_id_of_config config)
+    ~strategy:"single_provider_runtime"
+    ~configured_labels:
+      [ Keeper_observation.model_label_of_config config.provider_cfg ]
+    ~candidate_count:1
+    ~selected_model_raw:(Some config.model_id)
+    ~capture
+    ~attempt_details_source:"runtime_agent_terminal"
+    ()
+
 module For_testing = struct
   let request_runtime_fields_on_base_config =
     request_runtime_fields_on_base_config
 
   let provider_http_slot_transport = provider_http_slot_transport
+  let runtime_id_of_config = runtime_id_of_config
+  let runtime_observation_for_completed_config =
+    runtime_observation_for_completed_config
 end
 
 (* ================================================================ *)
@@ -556,6 +591,10 @@ let run
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
         ~status:Dashboard_oas_bridge.Success response;
+      let runtime_observation =
+        runtime_observation_for_completed_config
+          ~total_duration_ms:run_total_duration_ms config
+      in
       Ok
         {
           response;
@@ -564,7 +603,7 @@ let run
           turns;
           trace_ref;
           run_validation;
-          runtime_observation = None;
+          runtime_observation = Some runtime_observation;
           stop_reason = Completed;
         }
     | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded r)) ->
@@ -578,6 +617,10 @@ let run
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
         ~status:Dashboard_oas_bridge.Timeout partial_response;
+      let runtime_observation =
+        runtime_observation_for_completed_config
+          ~total_duration_ms:run_total_duration_ms config
+      in
       Ok
         {
           response = partial_response;
@@ -586,7 +629,7 @@ let run
           turns;
           trace_ref;
           run_validation;
-          runtime_observation = None;
+          runtime_observation = Some runtime_observation;
           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
         }
     | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
@@ -608,6 +651,10 @@ let run
           ~total_duration_ms:run_total_duration_ms
           ~status:(dashboard_status_of_stop_reason stop_reason)
           partial_response;
+        let runtime_observation =
+          runtime_observation_for_completed_config
+            ~total_duration_ms:run_total_duration_ms config
+        in
         Ok
           {
             response = partial_response;
@@ -616,7 +663,7 @@ let run
             turns;
             trace_ref;
             run_validation;
-            runtime_observation = None;
+            runtime_observation = Some runtime_observation;
             stop_reason;
           }
       | None ->

@@ -213,6 +213,59 @@ let keeper_brief_meta_json (meta : keeper_meta) =
       ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
       ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
     ]
+
+let keeper_list_effective_meta_error_json name err =
+  `Assoc
+    [
+      ("keeper", `String name);
+      ("message", `String err);
+      ("terminal_reason", `String "effective_meta_read_failed");
+      ("severity", `String "error");
+      ("operator_action_required", `Bool true);
+      ("next_action", `String "fix_keeper_toml_or_persona_profile");
+    ]
+
+let keeper_list_error_row_json ~runtime_class config name err =
+  let persisted_meta =
+    match read_meta config name with
+    | Ok (Some meta) -> Some meta
+    | Ok None | Error _ -> None
+  in
+  let keepalive_running =
+    match persisted_meta with
+    | Some meta -> Keeper_status_bridge.runtime_keepalive_running config meta
+    | None -> false
+  in
+  let persisted_fields =
+    match persisted_meta with
+    | Some meta ->
+        [
+          ("meta", keeper_brief_meta_json meta);
+          ("agent_name", `String meta.agent_name);
+          ("created_at", `String meta.created_at);
+          ("updated_at", `String meta.updated_at);
+          ("autoboot_enabled", `Bool meta.autoboot_enabled);
+          ("proactive_enabled", `Bool meta.proactive.enabled);
+          ("proactive_idle_sec", `Int meta.proactive.idle_sec);
+          ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
+        ]
+    | None ->
+        [
+          ("meta", `Null);
+          ("agent_name", `Null);
+          ("created_at", `Null);
+          ("updated_at", `Null);
+        ]
+  in
+  error_assoc
+    ([
+       ("runtime_class", `String runtime_class);
+       ("name", `String name);
+       ("keepalive_running", `Bool keepalive_running);
+       ("effective_meta_error", keeper_list_effective_meta_error_json name err);
+     ]
+     @ persisted_fields)
+
 let keeper_list_skill_route_json config (meta : keeper_meta) =
   let metrics_store = Keeper_types_support.keeper_metrics_store config meta.name in
   let metrics_path = Keeper_types_support.keeper_metrics_path config meta.name in
@@ -258,8 +311,9 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
   in
   find_latest (List.rev lines)
 let keeper_list_row_json ~runtime_class config name =
-  match read_meta config name with
-  | Error _ | Ok None -> None
+  match read_effective_meta config name with
+  | Error err -> Some (keeper_list_error_row_json ~runtime_class config name err)
+  | Ok None -> None
   | Ok (Some (meta : keeper_meta)) ->
       let now_ts = Time_compat.now () in
       let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
@@ -586,7 +640,7 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
-  match read_meta_resolved config name with
+  match read_effective_meta_resolved config name with
   | Ok (Some (_resolved_name, meta)) -> Ok meta
   | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
   | Error err -> Error (Printf.sprintf "%s" err)

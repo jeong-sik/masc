@@ -162,7 +162,7 @@ let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : str
           [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
          requested_name)
   else
-    match read_meta_resolved config requested_name with
+    match read_effective_meta_resolved config requested_name with
     | Error e -> Error e
     | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
     | Ok None ->
@@ -171,11 +171,73 @@ let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : str
 let resolve_status_target (ctx : _ context) args =
   resolve_status_target_config ~config:ctx.config ~agent_name:ctx.agent_name args
 
-(** Hash the status-affecting args so different parameter combos
-    get separate cache entries (e.g. fast=true vs fast=false). *)
-let hash_status_args _config resolved_name args =
+(** Hash the status-affecting args and the profile-overlay fields so different
+    parameter combos (e.g. fast=true vs fast=false) and TOML/persona overlays
+    get separate cache entries. Persisted JSON writes update [updated_at], but
+    external [keepers/<name>.toml] edits do not. *)
+let cache_fingerprint_field (key, value) =
+  Printf.sprintf "%s=%d:%s" key (String.length value) value
+
+let cache_fingerprint_list values = String.concat "\x1f" values
+
+let cache_fingerprint_pairs pairs =
+  pairs
+  |> List.map (fun (key, value) ->
+       key ^ "\x1e" ^ string_of_int (String.length value) ^ "\x1e" ^ value)
+  |> String.concat "\x1f"
+
+let effective_meta_overlay_hash (meta : keeper_meta) =
+  let opt_string = function
+    | Some value -> value
+    | None -> ""
+  in
+  let opt_bool = function
+    | Some true -> "true"
+    | Some false -> "false"
+    | None -> ""
+  in
+  let opt_int = Option.fold ~none:"" ~some:string_of_int in
+  let opt_float = Option.fold ~none:"" ~some:(Printf.sprintf "%.6f") in
+  let fields =
+    [
+      ("goal", meta.goal);
+      ("short_goal", meta.short_goal);
+      ("mid_goal", meta.mid_goal);
+      ("long_goal", meta.long_goal);
+      ("will", meta.will);
+      ("needs", meta.needs);
+      ("desires", meta.desires);
+      ("social_model", meta.social_model);
+      ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
+      ("sandbox_image", opt_string meta.sandbox_image);
+      ("network_mode", network_mode_to_string meta.network_mode);
+      ("allowed_paths", cache_fingerprint_list meta.allowed_paths);
+      ("tool_access", cache_fingerprint_list meta.tool_access);
+      ("tool_denylist", cache_fingerprint_list meta.tool_denylist);
+      ("mention_targets", cache_fingerprint_list meta.mention_targets);
+      ("active_goal_ids", cache_fingerprint_list meta.active_goal_ids);
+      ("proactive_enabled", string_of_bool meta.proactive.enabled);
+      ("proactive_idle_sec", string_of_int meta.proactive.idle_sec);
+      ("proactive_cooldown_sec", string_of_int meta.proactive.cooldown_sec);
+      ("autoboot_enabled", string_of_bool meta.autoboot_enabled);
+      ("telemetry_feedback_enabled", opt_bool meta.telemetry_feedback_enabled);
+      ( "telemetry_feedback_window_hours",
+        opt_int meta.telemetry_feedback_window_hours );
+      ("per_provider_timeout_s", opt_float meta.per_provider_timeout_s);
+      ("always_approve", opt_bool meta.always_approve);
+      ("oas_env", cache_fingerprint_pairs meta.oas_env);
+    ]
+  in
+  fields
+  |> List.map cache_fingerprint_field
+  |> String.concat "\n"
+  |> Digest.string
+  |> Digest.to_hex
+
+let hash_status_args _config resolved_name (meta : keeper_meta) args =
   let parts = [
     resolved_name;
+    effective_meta_overlay_hash meta;
     (* Keeper_manual_reconcile.cache_key removed with reconcile system. *)
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);
@@ -202,8 +264,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
   | Error err -> tool_result_error err
   | Ok (name, m) ->
       let cache_key = status_cache_key ~base_path:config.base_path ~name in
-      let args_hash = hash_status_args config name args in
-      (* Cache hit: same updated_at + same args → return cached response.
+      let args_hash = hash_status_args config name m args in
+      (* Cache hit: same updated_at + same args/effective-meta hash → return cached response.
          The read is taken under [cache_mu] so it cannot interleave with
          an eviction from [invalidate_status_cache_{for,all}]. *)
       (match

@@ -161,6 +161,7 @@ val runtime_observation_with_metrics :
   candidate_count:int ->
   selected_model_raw:string option ->
   capture:runtime_metrics_capture ->
+  ?attempt_details_source:string ->
   ?oas_internal_runtime_allowed:bool ->
   unit ->
   runtime_observation

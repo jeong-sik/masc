@@ -391,6 +391,15 @@ let selected_model_of_latest_decision latest_decision =
       | Some _ as value -> value
       | None -> json_string_opt_member "selected_model" decision)
 
+let selected_model_of_latest_decision_or_receipt latest_decision latest_receipt
+    =
+  match selected_model_of_latest_decision latest_decision with
+  | Some _ as value -> value
+  | None ->
+      Option.bind latest_receipt (fun receipt ->
+          receipt |> json_member "runtime"
+          |> json_string_opt_member "selected_model")
+
 let pending_first_json pending_approvals =
   match pending_approvals with
   | `List (first :: _) ->
@@ -535,6 +544,11 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | `Null -> None
     | json -> json_string_opt_member "outcome" json
   in
+  let runtime_selected_model =
+    match runtime_json with
+    | `Null -> None
+    | json -> json_string_opt_member "selected_model" json
+  in
   let mutation_guard_summary =
     match tool_contract_result with
     | Some "violated" -> "mutation_contract_violated"
@@ -566,7 +580,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
         | Some value -> `Bool value
         | None -> `Null );
       ( "provider_selected_model",
-        `Null );
+        Json_util.string_opt_to_json runtime_selected_model );
       ( "runtime_outcome",
         Json_util.string_opt_to_json runtime_outcome );
       ( "sandbox_summary",
@@ -825,7 +839,9 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let latest_next_action =
     Option.bind latest_terminal_reason (fun reason -> reason.next_action)
   in
-  let selected_model = selected_model_of_latest_decision latest_decision in
+  let selected_model =
+    selected_model_of_latest_decision_or_receipt latest_decision latest_receipt
+  in
   let attention_fields =
     Keeper_status_bridge.attention_fields_json config meta
   in

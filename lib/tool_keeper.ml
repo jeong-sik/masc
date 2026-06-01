@@ -81,6 +81,59 @@ let keeper_sandbox_status_fleet_names ctx =
   registry_names @ configured_keeper_names ctx.config @ keeper_names ctx.config
   |> dedupe_sorted_strings
 
+type sandbox_status_fleet_item =
+  | Sandbox_status_meta of keeper_meta
+  | Sandbox_status_error of { name : string; error : string }
+
+let keeper_sandbox_status_error_item_json config ~name ~error =
+  let persisted_meta =
+    match read_meta config name with
+    | Ok (Some meta) -> Some meta
+    | Ok None | Error _ -> None
+  in
+  let keepalive_running =
+    match persisted_meta with
+    | Some meta -> Keeper_status_bridge.runtime_keepalive_running config meta
+    | None -> false
+  in
+  let persisted_fields =
+    match persisted_meta with
+    | Some meta ->
+        [
+          ("persisted_meta", keeper_brief_meta_json meta);
+          ("agent_name", `String meta.agent_name);
+          ( "persisted_sandbox_profile",
+            `String (sandbox_profile_to_string meta.sandbox_profile) );
+          ( "persisted_network_mode",
+            `String (network_mode_to_string meta.network_mode) );
+        ]
+    | None ->
+        [
+          ("persisted_meta", `Null);
+          ("agent_name", `Null);
+          ("persisted_sandbox_profile", `Null);
+          ("persisted_network_mode", `Null);
+        ]
+  in
+  error_assoc
+    ([
+       ("keeper", `String name);
+       ("sandbox_profile", `Null);
+       ("configured_network_mode", `Null);
+       ("effective_mode", `String "unknown");
+       ("managed_container_kind", `String Keeper_sandbox_control.managed_kind);
+       ("container_count", `Int 0);
+       ("containers", `List []);
+       ("preflight", `Null);
+       ("container_error", `Null);
+       ("why_no_container", `String "effective_meta_read_failed");
+       ( "recommendation",
+         `String "Fix keeper TOML/persona profile and retry sandbox status." );
+       ("keepalive_running", `Bool keepalive_running);
+       ("effective_meta_error", keeper_list_effective_meta_error_json name error);
+     ]
+     @ persisted_fields)
+
 let handle_keeper_sandbox_status ctx args : tool_result =
   let verbose = get_bool args "verbose" false in
   let include_preflight = get_bool args "include_preflight" true in
@@ -92,33 +145,51 @@ let handle_keeper_sandbox_status ctx args : tool_result =
       let resolved =
         candidate_names
         |> List.filter_map (fun name ->
-             match read_meta ctx.config name with
-             | Ok (Some meta) -> Some meta
+             match read_effective_meta ctx.config name with
+             | Ok (Some meta) -> Some (Sandbox_status_meta meta)
              | Ok None when List.mem name configured_names -> (
                  match load_or_materialize_boot_meta ctx name with
-                 | Ok { meta; _ } -> Some meta
+                 | Ok { meta; _ } -> (
+                     match Keeper_meta_contract.effective_meta_result meta with
+                     | Ok effective_meta -> Some (Sandbox_status_meta effective_meta)
+                     | Error msg ->
+                         Log.Keeper.warn
+                           "keeper_sandbox_status fleet: failed to overlay effective meta for materialized keeper %s: %s"
+                           name msg;
+                         Some (Sandbox_status_error { name; error = msg }))
                  | Error msg ->
                      Log.Keeper.warn
                        "keeper_sandbox_status fleet: failed to materialize configured keeper %s: %s"
                        name msg;
-                     None)
-             | Ok None | Error _ -> None)
+                     Some (Sandbox_status_error { name; error = msg }))
+             | Ok None -> None
+             | Error msg ->
+                 Log.Keeper.warn
+                   "keeper_sandbox_status fleet: failed to read effective meta for %s: %s"
+                   name msg;
+                 Some (Sandbox_status_error { name; error = msg }))
       in
       let seen = Hashtbl.create 16 in
-      let unique_metas =
+      let unique_items =
         List.filter_map
-          (fun (meta : keeper_meta) ->
-            if Hashtbl.mem seen meta.name then None
-            else begin
-              Hashtbl.add seen meta.name ();
-              Some meta
-            end)
+          (fun item ->
+            let name =
+              match item with
+              | Sandbox_status_meta meta -> meta.name
+              | Sandbox_status_error { name; _ } -> name
+            in
+            if Hashtbl.mem seen name then None
+            else (
+              Hashtbl.add seen name ();
+              Some item))
           resolved
       in
       let any_docker =
         List.exists
-          (fun (m : keeper_meta) -> m.sandbox_profile = Docker)
-          unique_metas
+          (function
+            | Sandbox_status_meta (m : keeper_meta) -> m.sandbox_profile = Docker
+            | Sandbox_status_error _ -> false)
+          unique_items
       in
       let cached_preflight =
         if include_preflight && any_docker then
@@ -135,7 +206,14 @@ let handle_keeper_sandbox_status ctx args : tool_result =
           ~include_preflight ?preflight_override
           ~config:ctx.config ~meta ~timeout_sec ~verbose ()
       in
-      let items = List.map render_item unique_metas in
+      let items =
+        List.map
+          (function
+            | Sandbox_status_meta meta -> render_item meta
+            | Sandbox_status_error { name; error } ->
+                keeper_sandbox_status_error_item_json ctx.config ~name ~error)
+          unique_items
+      in
       tool_result_ok
         (Yojson.Safe.pretty_to_string
            (`Assoc

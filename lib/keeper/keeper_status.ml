@@ -43,7 +43,7 @@ let handle_keeper_list ctx args : tool_result =
     let now_ts = Time_compat.now () in
     let keepers =
       List.filter_map (fun name ->
-        match read_meta ctx.config name with
+        match read_effective_meta ctx.config name with
         | Error _ -> None
         | Ok None -> None
         | Ok (Some m) ->

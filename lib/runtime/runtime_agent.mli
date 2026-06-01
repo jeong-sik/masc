@@ -192,6 +192,11 @@ module For_testing : sig
 
   val provider_http_slot_transport :
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
+
+  val runtime_id_of_config : config -> string
+
+  val runtime_observation_for_completed_config :
+    total_duration_ms:float -> config -> Keeper_observation.runtime_observation
 end
 
 (** {1 Lifecycle / checkpoint helpers (re-exported)} *)

@@ -265,7 +265,7 @@ let resolved_persona_name ~keeper_name
   | Some name when String.trim name <> "" -> name
   | _ -> keeper_name
 
-let load_keeper_profile_defaults_result name :
+let load_keeper_profile_defaults_result_uncached name :
     (keeper_profile_defaults, string) result =
   (* Priority: TOML config/keepers/<name>.toml > persona profile.json.
      If TOML sets [persona_name], load that persona first and treat TOML as a
@@ -441,14 +441,128 @@ let keeper_toml_config_error_for_name name =
   | None -> None
   | Some path -> keeper_toml_config_error_of_path path
 
-(* Profile defaults cache — TOML/JSON config files are static at runtime.
-   Eliminates per-tool-call disk reads for the same keeper name.
-   Key includes config_dir so tests with isolated MASC_CONFIG_DIR don't collide. *)
-let profile_defaults_cache : (string * string, keeper_profile_defaults) Hashtbl.t =
+(* Profile defaults cache — strict results are cached by source file
+   fingerprint, not by keeper name alone. TOML/persona edits happen outside the
+   process, so both Ok and Error entries must invalidate when their dependency
+   mtimes/sizes change. *)
+type profile_defaults_cache_key = string * string
+
+type profile_defaults_cache_entry =
+  { primary_toml_path : string option
+  ; dependency_paths : string list
+  ; dependency_fingerprint : string
+  ; result : (keeper_profile_defaults, string) result
+  }
+
+let profile_defaults_cache : (profile_defaults_cache_key, profile_defaults_cache_entry) Hashtbl.t =
   Hashtbl.create 32
 let profile_defaults_mu = Stdlib.Mutex.create ()
 
-let load_keeper_profile_defaults_uncached name : keeper_profile_defaults =
+let profile_cache_scope () =
+  try
+    let resolution = Config_dir_resolver.resolve () in
+    String.concat "|"
+      [ resolution.config_root.path; resolution.personas.path ]
+  with
+  | exn ->
+    (* resolver failure fallback uses env only as a cache-key salt;
+       profile parsing remains explicit and the cache miss path revalidates
+       file fingerprints before returning a cached result. NDT-OK *)
+    String.concat "|"
+      [
+        Option.value ~default:"" (Sys.getenv_opt "MASC_CONFIG_DIR");
+        (* NDT-OK: same cache-key salt fallback as MASC_CONFIG_DIR above. *)
+        Option.value ~default:"" (Sys.getenv_opt "MASC_PERSONAS_DIR");
+        Printexc.to_string exn;
+      ]
+
+let profile_defaults_cache_key name = (profile_cache_scope (), name)
+
+let same_string_opt a b =
+  match a, b with
+  | None, None -> true
+  | Some a, Some b -> String.equal a b
+  | _ -> false
+
+let file_fingerprint path =
+  match Fs_compat.file_mtime path, Fs_compat.file_size path with
+  | Some mtime, Some size -> Printf.sprintf "%s:%.6f:%d" path mtime size
+  | Some mtime, None -> Printf.sprintf "%s:%.6f:?" path mtime
+  | None, Some size -> Printf.sprintf "%s:missing:%d" path size
+  | None, None -> path ^ ":missing"
+
+let dependency_fingerprint paths =
+  paths |> List.map file_fingerprint |> String.concat "|"
+
+let persona_profile_candidate_paths name =
+  let dirs =
+    try Config_dir_resolver.personas_dirs () with
+    | Sys_error _ -> []
+    | exn ->
+      Prometheus.inc_counter
+        Keeper_metrics.(to_string ProfileLoadFailures)
+        ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Personas_dirs_resolve) ]
+        ();
+      Log.Keeper.warn
+        "profile cache personas_dirs unexpected: %s"
+        (Printexc.to_string exn);
+      []
+  in
+  dirs
+  |> List.map (fun root ->
+       Filename.concat (Filename.concat root name) "profile.json")
+
+let profile_dependency_paths ~name ~primary_toml_path
+    (result : (keeper_profile_defaults, string) result) =
+  let paths =
+    match primary_toml_path, result with
+    | Some toml_path, Ok defaults ->
+      let persona_paths =
+        match defaults.persona_name with
+        | Some persona_name when String.trim persona_name <> "" ->
+          persona_profile_candidate_paths persona_name
+        | _ -> []
+      in
+      toml_path :: persona_paths
+    | Some toml_path, Error _ -> [ toml_path ]
+    | None, _ -> persona_profile_candidate_paths name
+  in
+  dedupe_keep_order paths
+
+let load_keeper_profile_defaults_result name :
+    (keeper_profile_defaults, string) result =
+  let primary_toml_path = keeper_toml_path_opt name in
+  let key = profile_defaults_cache_key name in
+  let cached =
+    Stdlib.Mutex.lock profile_defaults_mu;
+    let value = Hashtbl.find_opt profile_defaults_cache key in
+    Stdlib.Mutex.unlock profile_defaults_mu;
+    value
+  in
+  match cached with
+  | Some entry
+    when same_string_opt entry.primary_toml_path primary_toml_path
+         && String.equal entry.dependency_fingerprint
+              (dependency_fingerprint entry.dependency_paths) ->
+    entry.result
+  | _ ->
+    let result = load_keeper_profile_defaults_result_uncached name in
+    let dependency_paths =
+      profile_dependency_paths ~name ~primary_toml_path result
+    in
+    let entry =
+      { primary_toml_path
+      ; dependency_paths
+      ; dependency_fingerprint = dependency_fingerprint dependency_paths
+      ; result
+      }
+    in
+    Stdlib.Mutex.lock profile_defaults_mu;
+    Hashtbl.replace profile_defaults_cache key entry;
+    Stdlib.Mutex.unlock profile_defaults_mu;
+    result
+
+let load_keeper_profile_defaults name : keeper_profile_defaults =
   match load_keeper_profile_defaults_result name with
   | Ok defaults -> defaults
   | Error e ->
@@ -460,22 +574,6 @@ let load_keeper_profile_defaults_uncached name : keeper_profile_defaults =
          ()
      | None -> ());
     load_keeper_profile_defaults_from_persona name
-
-let load_keeper_profile_defaults name : keeper_profile_defaults =
-  let config_dir = Option.value ~default:"" (Sys.getenv_opt "MASC_CONFIG_DIR") in
-  let key = (config_dir, name) in
-  Stdlib.Mutex.lock profile_defaults_mu;
-  match Hashtbl.find_opt profile_defaults_cache key with
-  | Some defaults ->
-    Stdlib.Mutex.unlock profile_defaults_mu;
-    defaults
-  | None ->
-    Stdlib.Mutex.unlock profile_defaults_mu;
-    let defaults = load_keeper_profile_defaults_uncached name in
-    Stdlib.Mutex.lock profile_defaults_mu;
-    Hashtbl.replace profile_defaults_cache key defaults;
-    Stdlib.Mutex.unlock profile_defaults_mu;
-    defaults
 
 (** Clamp a profile-provided max-turns override to [1, 100] — the same range
     enforced by [Keeper_runtime_resolved.reactive_max_turns_per_call].

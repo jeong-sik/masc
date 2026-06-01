@@ -29,6 +29,11 @@ let to_simple : type i o r s. (i, o, r, s) command -> Shell_ir.simple =
 let risk = Shell_ir_typed_walkers_gen.gen_risk
 let sandbox = Shell_ir_typed_walkers_gen.gen_sandbox
 
+(* RFC-0208 P1: [true] for the [Generic] escape hatch, [false] for every
+   typed constructor. Generated (exhaustive, no catch-all) so a new
+   constructor forces an explicit arm. *)
+let is_generic = Shell_ir_typed_walkers_gen.gen_is_generic
+
 (* ---------------------------------------------------------------------- *)
 (* Pretty-printer *)
 

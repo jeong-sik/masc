@@ -2,7 +2,7 @@
 
     Split into multiple layers:
     - [Keeper_tool_registry]: declarative tool name lists (data)
-    - [Keeper_tool_policy]: access control, presets, allowed-tool resolution (logic)
+    - [Keeper_tool_policy]: access control, tool_access, allowed-tool resolution (logic)
     - [Agent_tool_*_runtime]: dedicated runtime modules for tool categories
     - This module: execution dispatch + shared helpers (side-effects) *)
 
@@ -373,7 +373,7 @@ let execute_keeper_tool_call_with_outcome
          else
            ( "not_in_allow_set"
            , Printf.sprintf
-               "'%s' exists but your preset does not allow it. Use keeper_tools_list to \
+               "'%s' exists but your tool_access list does not allow it. Use keeper_tools_list to \
                 see available tools."
                name )
        in

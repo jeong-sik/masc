@@ -15,7 +15,7 @@ module StringSet : Set.S with type elt = string
 (** {1 Policy Initialization} *)
 
 (** Load tool policy configuration from [config/tool_policy.toml].
-    Must be called once at server startup before any preset resolution. *)
+    Must be called once at server startup before tool_access resolution. *)
 val init_policy_config :
   base_path:string -> (unit, string) result
 
@@ -132,7 +132,7 @@ val keeper_allowed_tool_names :
 (** Universe tool names: candidates minus denied, no policy filter. *)
 val keeper_universe_tool_names : keeper_meta -> string list
 
-(** Preset-scoped universe: preset allowlist + core_always - denied. *)
+(** Tool-access scoped universe: explicit allowlist + core_always - denied. *)
 val keeper_tool_search_scope : keeper_meta -> string list
 
 (** Tools safe to call on the keeper's last turn. *)
@@ -147,7 +147,7 @@ val keeper_allowed_model_tools :
 (** Universe model tool schemas for Agent.run(). *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
-(** Preset-scoped universe model tool schemas for BM25 indexing. *)
+(** Tool-access scoped universe model tool schemas for BM25 indexing. *)
 val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Filter schemas by a set of allowed names.  O(1) per schema. *)

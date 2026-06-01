@@ -63,7 +63,9 @@ let test_load_falls_back_to_resolved_config_dir () =
   match KTPC.load ~base_path with
   | Ok cfg ->
       check bool "loads config from project root" true
-        (List.mem "full" [] && List.mem "messaging" [])
+        (List.mem "base" (KTPC.group_names cfg)
+         && List.mem "keeper_time_now" (KTPC.all_group_tools cfg)
+         && List.mem "masc_status" (KTPC.all_masc_tools cfg))
   | Error msg ->
       fail
         (Printf.sprintf
@@ -83,7 +85,9 @@ let test_load_honors_masc_config_dir_override () =
   match KTPC.load ~base_path:"/tmp/unrelated-base-path" with
   | Ok cfg ->
       check bool "loads config from MASC_CONFIG_DIR override" true
-        (List.mem "full" [] && List.mem "messaging" [])
+        (List.mem "base" (KTPC.group_names cfg)
+         && List.mem "keeper_time_now" (KTPC.all_group_tools cfg)
+         && List.mem "masc_status" (KTPC.all_masc_tools cfg))
   | Error msg ->
       fail
         (Printf.sprintf
@@ -101,7 +105,9 @@ let test_load_anchors_resolution_to_base_path_over_cwd_candidate () =
   match KTPC.load ~base_path:source_root with
   | Ok cfg ->
       check bool "ignores cwd-only config candidate without tool_policy" true
-        (List.mem "full" [] && List.mem "messaging" [])
+        (List.mem "base" (KTPC.group_names cfg)
+         && List.mem "keeper_time_now" (KTPC.all_group_tools cfg)
+         && List.mem "masc_status" (KTPC.all_masc_tools cfg))
   | Error msg ->
       fail
         (Printf.sprintf
@@ -120,11 +126,6 @@ tools = ["keeper_fs_write", "keeper_fs_delete"]
 
 [masc.legacy]
 tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
-
-[[].legacy]
-groups = ["legacy"]
-masc_groups = ["legacy"]
-masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
 |};
   match KTPC.load ~base_path:root with
   | Ok _ -> fail "expected removed filesystem tool names to fail config load"
@@ -135,9 +136,8 @@ masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
         (contains_substring msg "groups.legacy: tool 'keeper_fs_delete' unresolved");
       check bool "rejects masc keeper_fs_write" true
         (contains_substring msg "masc.legacy: tool 'keeper_fs_write' unresolved");
-      check bool "rejects preset keeper_fs_delete" true
-        (contains_substring msg
-           "[].legacy.masc_tools: tool 'keeper_fs_delete' unresolved")
+      check bool "rejects masc keeper_fs_delete" true
+        (contains_substring msg "masc.legacy: tool 'keeper_fs_delete' unresolved")
 
 let test_no_backward_compat_alias_groups () =
   let source_root = Masc_test_deps.find_project_root () in

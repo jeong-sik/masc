@@ -71,10 +71,10 @@ let register
   add
     Keeper_metrics.(to_string ToolNotAllowed)
     "Total keeper tool calls denied because the tool is not in the keeper's allowlist \
-     (preset drift, deny-list, or unknown tool name). Labels: keeper, tool, reason. \
+     (tool_access drift, deny-list, or unknown tool name). Labels: keeper, tool, reason. \
      reason ∈ {not_in_candidate_set, denied_by_policy, not_in_allow_set}. Alert on a \
      non-zero rate for any (keeper, tool) pair: it means the keeper's BDI is attempting \
-     tools that its preset/policy does not permit, causing the keeper to loop without \
+     tools that its tool_access policy does not permit, causing the keeper to loop without \
      making progress. Distinct from masc_keeper_tool_use_failure_total (post-execution \
      hook failure) and masc_keeper_turn_gate_rejected_terminal_total (pre_tool_use guard \
      hard-reject)."

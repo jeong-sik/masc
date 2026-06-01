@@ -16,8 +16,6 @@ RUN_ROUND=0
 ROUNDS="${ROUNDS:-1}"
 ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-45}"
 WORKSPACE_ID="${WORKSPACE_ID:-}"
-WORLD_PRESET_ID="${WORLD_PRESET_ID:-}"
-DM_PRESET_ID="${DM_PRESET_ID:-}"
 PARTY_SIZE="${PARTY_SIZE:-4}"
 POOL_SIZE="${POOL_SIZE:-6}"
 KEEPER_MODELS="${KEEPER_MODELS:-}"
@@ -52,8 +50,6 @@ viewer-local-e2e-check.sh
   --rounds N                 smoke 라운드 수 (기본 1)
   --round-timeout-sec N      round timeout (기본 45)
   --workspace-id ID               smoke workspace_id (기본: 자동 생성)
-  --world-preset-id ID       smoke world preset
-  --dm-preset-id ID          smoke DM preset
   --party-size N             smoke party size (기본 4)
   --pool-size N              smoke pool size (기본 6)
   --keeper-models CSV        smoke keeper 모델 (예: glm:auto)
@@ -361,14 +357,6 @@ while [ $# -gt 0 ]; do
     --workspace-id)
       shift
       WORKSPACE_ID="${1:-}"
-      ;;
-    --world-preset-id)
-      shift
-      WORLD_PRESET_ID="${1:-}"
-      ;;
-    --dm-preset-id)
-      shift
-      DM_PRESET_ID="${1:-}"
       ;;
     --party-size)
       shift

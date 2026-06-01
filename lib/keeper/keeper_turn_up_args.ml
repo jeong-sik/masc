@@ -137,28 +137,17 @@ let resolve_tool_name_list ~preferred ~fallback =
 
 let parse_tool_access_input (args : Yojson.Safe.t) :
     (string list option, string) result =
-  let removed_tool_policy_keys =
-    present_json_keys
-      [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist" ]
-      args
-  in
-  if removed_tool_policy_keys <> [] then
-    Error
-      (Printf.sprintf
-         "removed keeper tool policy args: %s. Use canonical tool_access."
-         (String.concat ", " removed_tool_policy_keys))
-  else
-    match Json_util.assoc_member_opt "tool_access" args with
-    | Some (`List _ as access_json) -> (
-        match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
-        | Ok access -> Ok (Some access)
-        | Error msg -> Error msg)
-    | Some `Null -> Ok None
-    | Some other ->
-        Error
-          (Printf.sprintf "tool_access must be an array of strings (received %s)"
-             (Json_util.kind_name other))
-    | None -> Ok None
+  match Json_util.assoc_member_opt "tool_access" args with
+  | Some (`List _ as access_json) -> (
+      match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
+      | Ok access -> Ok (Some access)
+      | Error msg -> Error msg)
+  | Some `Null -> Ok None
+  | Some other ->
+      Error
+        (Printf.sprintf "tool_access must be an array of strings (received %s)"
+           (Json_util.kind_name other))
+  | None -> Ok None
 
 let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
   let name = get_string args "name" "" in

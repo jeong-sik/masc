@@ -56,7 +56,7 @@ let record_turn ~keeper_name ~speech_act =
           ~labels:[ ("keeper", keeper_name) ] ();
         Log.Keeper.error
           "#9926 stay_silent loop detected keeper=%s streak=%d threshold=%d \
-           — keeper is returning stay_silent repeatedly. Check preset \
+           — keeper is returning stay_silent repeatedly. Check tool_access \
            mismatch (#9926 proposal 1) or scheduler/backlog drift. \
            Counter will not re-fire until the streak resets via any \
           non-stay_silent speech act."

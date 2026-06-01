@@ -77,7 +77,7 @@ val record :
 
 (** {1 Tool-assignment lifecycle event}
 
-    Snapshot the dashboard records when a profile/preset is assigned
+    Snapshot the dashboard records when a profile is assigned
     to an agent.  Concrete record for the same reason as {!report}. *)
 type assignment_snapshot = {
   agent_name : string;

@@ -282,6 +282,7 @@ let handle_add_task ~tool_name ~start_time ctx args =
             ~priority ~description)
 
 let handle_batch_add_tasks ~tool_name ~start_time ctx args =
+  let valid_item_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
   let tasks_json = match Json_util.assoc_member_opt "tasks" args with
     | Some (`List l) -> l
     | _ -> []
@@ -325,13 +326,17 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
             | None | Some `Null -> false
             | Some _ -> true
           in
-          if has_removed_field "required_preset" then
-            Error (Printf.sprintf "item[%d]: required_preset is no longer supported" idx)
-          else if has_removed_field "required_role" then
+          let unknown = unknown_args ~valid_keys:valid_item_keys t in
+          if has_removed_field "required_role" then
             Error (Printf.sprintf "item[%d]: required_role is no longer supported" idx)
           else if has_removed_field "required_verifier_role" then
             Error
               (Printf.sprintf "item[%d]: required_verifier_role is no longer supported" idx)
+          else if Stdlib.List.length unknown > 0 then
+            Error
+              (Printf.sprintf "item[%d]: Unknown argument(s): %s. Valid: %s" idx
+                 (String.concat ", " unknown)
+                 (String.concat ", " valid_item_keys))
           else
             Ok (title, priority, description, contract, goal_id)
       | Error error -> Error error

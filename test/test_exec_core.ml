@@ -4,12 +4,22 @@ open Yojson.Safe.Util
 let get_string_field json key =
   json |> member key |> to_string
 
+let classification_of_cmd cmd =
+  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Ok ir -> Masc_mcp.Exec_core.classify_command_of_ir ir
+  | Error reason ->
+      failwith
+        ("command parse failed: "
+         ^ Masc_mcp.Exec_policy.block_reason_to_string reason)
+
 let test_rg_no_match_is_semantic_success () =
+  let cmd = "rg missing_pattern lib/" in
   let json =
     Masc_mcp.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"exec-core"
-      ~cmd:"rg missing_pattern lib/"
+      ~cmd
+      ~classification:(classification_of_cmd cmd)
       ~status:(Unix.WEXITED 1)
       ~output:""
       ()
@@ -68,11 +78,13 @@ let test_missing_task_state_path_points_to_task_tools () =
     (get_string_field json "recovery_hint")
 
 let test_blocked_json_adds_classification () =
+  let cmd = "git push origin main" in
   let json =
     Masc_mcp.Exec_core.blocked_result_json
-      ~cmd:"git push origin main"
+      ~cmd
       ~error:"write_operation_gated"
-      ~reason:"write preset required"
+      ~reason:"write tool_access required"
+      ~classification:(classification_of_cmd cmd)
       ~retryability:Masc_mcp.Exec_core.Operator_required
       ()
   in

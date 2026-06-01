@@ -15,7 +15,8 @@ val keeper_allowed_model_tools
 
 (** Universe tool names: candidates minus denied, no policy filter.
     Superset of [keeper_allowed_tool_names].  Used as the BM25 retrieval
-    scope so progressive disclosure can surface tools beyond the preset. *)
+    scope so progressive disclosure can surface tools beyond the active
+    [tool_access] list. *)
 val keeper_universe_tool_names : keeper_meta -> string list
 
 (** Keeper-facing runtime candidate names before policy filtering. *)
@@ -25,15 +26,15 @@ val keeper_internal_candidate_tool_names : string list
     so [make_tools] can build {!Agent_sdk.Tool.t} for the full search scope. *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
-(** Preset-scoped universe: preset allowlist + core_always - denied.
+(** Tool-access scoped universe: explicit allowlist + core_always - denied.
     Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
-    to reduce candidate pool size per keeper preset.  See #4637. *)
+    to reduce candidate pool size per keeper.  See #4637. *)
 val keeper_tool_search_scope : keeper_meta -> string list
 
-(** Preset-scoped model tool schemas for BM25 indexing. *)
+(** Tool-access scoped model tool schemas for BM25 indexing. *)
 val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
-(** Core tools that bypass preset filtering and seed the disclosure floor.
+(** Core tools that bypass [tool_access] filtering and seed the disclosure floor.
     Runtime gating/pruning can still narrow their visibility on a given turn. *)
 val core_always_tools : string list
 
@@ -91,11 +92,11 @@ val dedupe_tool_names : string list -> string list
     Keeper_denied tools are excluded at injection time. *)
 val inject_masc_schemas : Masc_domain.tool_schema list -> unit
 
-(** Load preset definitions from [config/tool_policy.toml].
+(** Load tool group definitions from [config/tool_policy.toml].
     Must be called once during server initialization.
     Raises [Failure] if the config file is missing or malformed.
-    For preset-scoped allowlist filtering to include injected [masc_*]
-    schemas, call [inject_masc_schemas] before the first preset resolution. *)
+    For tool_access-scoped allowlist filtering to include injected [masc_*]
+    schemas, call [inject_masc_schemas] before the first resolution. *)
 val init_policy_config : base_path:string -> (unit, string) result
 
 (** Check if a tool name is in the Keeper_denied surface (Tool_catalog).
@@ -118,7 +119,7 @@ type tool_result_payload =
 
 (** Bridge-facing execution outcome.
     Structured tool errors, including [tool_not_allowed], are failures so
-    preset/policy rejections cannot silently end a keeper turn as success. *)
+    tool_access/policy rejections cannot silently end a keeper turn as success. *)
 type execution_outcome =
   [ `Success
   | `Failure

@@ -310,7 +310,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                          Execute or SearchFiles. PR creation tasks \
                                          should include Execute and SearchFiles so \
                                          claim_next routes them only to capable \
-                                         presets. PR review mutation tasks must \
+                                         keepers. PR review mutation tasks must \
                                          route code/review work through sandboxed \
                                          repo worktrees with Execute rather than \
                                          dedicated review wrappers." )

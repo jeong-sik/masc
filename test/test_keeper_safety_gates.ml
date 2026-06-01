@@ -2,7 +2,7 @@
 
     Covers three safety layers:
     1. Eval_gate.detect_destructive — all 19 patterns + safe commands
-    2. Agent_tool_dispatch_runtime.keeper_allowed_tool_names — policy mode tool grants
+    2. Agent_tool_dispatch_runtime.keeper_allowed_tool_names — tool_access grants
     3. Keeper_guards.extract_command_from_input — JSON command extraction
 
     Closes the P1 test gap from the keeper safety audit. *)
@@ -37,6 +37,14 @@ let make_meta
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
+
+let full_tool_access () =
+  Keeper_meta_tool_access.normalize_tool_access
+    (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+     @ Tool_catalog.tools_for_surface Tool_catalog.Public_mcp)
+
+let minimal_tool_access =
+  [ "keeper_time_now"; "keeper_context_status"; "masc_web_search" ]
 
 (* ================================================================ *)
 (* Group 1: Destructive Pattern Detection (all 19 patterns)          *)
@@ -180,7 +188,7 @@ let test_safe_empty () =
 (* Group 2: Mode-free tool grants (mode removal)                     *)
 (* ================================================================ *)
 
-(* Tool exposure now follows preset/custom policy for the full keeper surface. *)
+(* Tool exposure now follows explicit tool_access policy. *)
 
 let test_write_done_kills_all () =
   let meta = make_meta
@@ -188,8 +196,8 @@ let test_write_done_kills_all () =
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names ~write_done:true meta in
   check (list string) "write_done returns empty" [] tools
 
-let test_all_keepers_get_full_toolset () =
-  let meta = make_meta () in
+let test_explicit_access_gets_full_toolset () =
+  let meta = make_meta ~tool_access:(full_tool_access ()) () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
@@ -197,34 +205,34 @@ let test_all_keepers_get_full_toolset () =
   check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
 let test_all_keepers_have_research_tools () =
-  let meta = make_meta () in
+  let meta = make_meta ~tool_access:(full_tool_access ()) () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "research has library search" true (List.mem "keeper_library_search" tools);
   check bool "research has web search" true (List.mem "masc_web_search" tools);
   check bool "research has file search" true (List.mem "tool_search_files" tools)
 
 let test_heuristic_mode_tools () =
-  let meta = make_meta () in
+  let meta = make_meta ~tool_access:minimal_tool_access () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "heuristic returns nonempty tools" true (List.length tools > 0)
 
-let test_messaging_preset_tools () =
-  let meta = make_meta () in
+let test_explicit_board_access_tools () =
+  let meta = make_meta ~tool_access:(full_tool_access ()) () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
   check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
-let test_execution_preset_has_repo_tools () =
-  let meta = make_meta () in
+let test_explicit_execution_access_has_repo_tools () =
+  let meta = make_meta ~tool_access:(full_tool_access ()) () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "tool_search_files included" true (List.mem "tool_search_files" tools);
   check bool "tool_read_file included" true (List.mem "tool_read_file" tools);
   check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 
-let test_all_modes_produce_same_tools () =
-  let meta_a = make_meta () in
-  let meta_b = make_meta () in
+let test_explicit_access_lists_control_tool_count () =
+  let meta_a = make_meta ~tool_access:minimal_tool_access () in
+  let meta_b = make_meta ~tool_access:(full_tool_access ()) () in
   let tools_a = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta_a in
   let tools_b = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta_b in
   check bool "full has more tools" true (List.length tools_b > List.length tools_a)
@@ -381,14 +389,14 @@ let () =
       test_case "git reset --soft" `Quick test_safe_git_reset_soft;
       test_case "empty string" `Quick test_safe_empty;
     ]);
-    ("policy_mode_tool_grants", [
+    ("tool_access_grants", [
       test_case "write_done kills all tools" `Quick test_write_done_kills_all;
-      test_case "all keepers get full toolset" `Quick test_all_keepers_get_full_toolset;
+      test_case "explicit access gets full toolset" `Quick test_explicit_access_gets_full_toolset;
       test_case "allowlisted keepers have research tools" `Quick test_all_keepers_have_research_tools;
       test_case "heuristic mode" `Quick test_heuristic_mode_tools;
-      test_case "messaging preset tools" `Quick test_messaging_preset_tools;
-      test_case "execution preset has repo tools" `Quick test_execution_preset_has_repo_tools;
-      test_case "all modes produce same tools" `Quick test_all_modes_produce_same_tools;
+      test_case "explicit board access tools" `Quick test_explicit_board_access_tools;
+      test_case "explicit execution access has repo tools" `Quick test_explicit_execution_access_has_repo_tools;
+      test_case "explicit access lists control tool count" `Quick test_explicit_access_lists_control_tool_count;
     ]);
     ("extract_command_from_input", [
       test_case "command key" `Quick test_extract_command_key;

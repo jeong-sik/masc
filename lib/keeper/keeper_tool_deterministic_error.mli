@@ -37,7 +37,7 @@ type deterministic_reason =
   | Cwd_not_directory
       (** cwd argument resolves but is not a directory. *)
   | Policy_blocked
-      (** governance / preset policy rejected the call. *)
+      (** governance / tool_access policy rejected the call. *)
   | Write_operation_gated
       (** write-capable Execute is required before retrying the same operation. *)
   | Completion_contract_violation

@@ -184,11 +184,7 @@ let tool_access_toml_section json =
   | Some (`List _ as tool_access) -> (
       match tool_access_of_meta_json (`Assoc [ ("tool_access", tool_access) ]) with
       | Ok tools ->
-          Ok
-            [
-              "[keeper.tool_access]";
-              Printf.sprintf "tools = %s" (toml_string_array tools);
-            ]
+          Ok [ Printf.sprintf "tool_access = %s" (toml_string_array tools) ]
       | Error msg -> Error msg)
   | Some _ -> Error "tool_access must be an array of strings for durable TOML"
   | None -> Ok []

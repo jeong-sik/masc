@@ -95,7 +95,7 @@ let test_no_task_violation_counts_on_false_bucket () =
    Regression guard: a call with [needs_execution_progress] must
    not leak into the [passive_only] series, otherwise the operator
    sees a single undifferentiated counter that cannot drive
-   preset-reshape decisions. *)
+   tool_access reshape decisions. *)
 let test_contract_status_labels_are_isolated () =
   let keeper = "test-velvet-10091" in
   let before_needs =
@@ -120,8 +120,7 @@ let test_contract_status_labels_are_isolated () =
     (counter_for ~keeper ~has_current_task:true
        ~contract_status:"passive_only")
 
-(* Keeper name is the primary cohort discriminator: the operator
-   uses it to target the right tool_preset.  Regression guard for
+(* Keeper name is the primary cohort discriminator. Regression guard for
    cross-keeper label leakage. *)
 let test_keeper_labels_are_isolated () =
   let status = "claim_only_after_owned_task" in

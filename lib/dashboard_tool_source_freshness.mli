@@ -102,7 +102,7 @@ val keeper_tool_call_io_fields :
   dashboard_surface:string ->
   unit ->
   (string * Yojson.Safe.t) list
-(** Preset wrapper around {!metadata_fields} for the keeper
+(** Convenience wrapper around {!metadata_fields} for the keeper
     tool-call I/O source:
     - [source_name = "tool_call_io"]
     - [source_producer = "keeper_hooks_oas|mcp_server_eio_call_tool"]

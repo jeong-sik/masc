@@ -94,7 +94,7 @@ val resynced_tool_access :
   Keeper_types_profile.keeper_profile_defaults ->
   Keeper_meta_contract.keeper_meta -> string list
 (** Re-derive the tool-access record after merging profile defaults so
-    the meta-level [preset] and per-tool overrides stay consistent. *)
+    the meta-level [tool_access] and per-tool overrides stay consistent. *)
 
 val ensure_keeper_meta :
   Workspace.config ->

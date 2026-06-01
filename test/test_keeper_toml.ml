@@ -552,27 +552,6 @@ models = ["llama:test"]
                 true
               with Not_found -> false))
 
-let test_profile_rejects_removed_also_allow_alias () =
-  let input = {|
-[keeper]
-goal = "test"
-also_allow = ["tool_search_files"]
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-      (match KTP.profile_defaults_of_toml doc with
-       | Ok _ -> fail "expected removed TOML alias error"
-       | Error msg ->
-           check bool "mentions removed also_allow alias" true
-             (try
-                ignore
-                  (Str.search_forward
-                     (Str.regexp_string "keeper.also_allow")
-                     msg 0);
-                true
-              with Not_found -> false))
-
 let test_profile_rejects_removed_initiative_keys () =
   let input = {|
 [keeper]
@@ -841,6 +820,40 @@ runtime_id = "primary"
        check bool "mentions removed allowed_providers key" true
          (contains_substring msg "keeper.allowed_providers"))
 
+let test_profile_rejects_legacy_tool_policy_key () =
+  let input = {|
+[keeper]
+goal = "test"
+tool_preset = "delivery"
+runtime_id = "primary"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected removed TOML key error"
+     | Error msg ->
+       check bool "mentions removed tool_preset key" true
+         (contains_substring msg "keeper.tool_preset"))
+
+let test_profile_rejects_legacy_tool_access_table () =
+  let input = {|
+[keeper]
+goal = "test"
+runtime_id = "primary"
+
+[keeper.tool_access]
+tools = ["tool_read_file"]
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected removed tool_access table error"
+     | Error msg ->
+       check bool "mentions removed tool_access table key" true
+         (contains_substring msg "keeper.tool_access.tools"))
+
 let test_profile_max_turns_overrides () =
   let input = {|
 [keeper]
@@ -938,7 +951,7 @@ runtime_id = "oas-coding_first"
          (Some "oas-coding_first")
          defaults.model)
 
-let test_persona_resolver_defaults_to_research_tool_access () =
+let test_persona_resolver_defaults_to_empty_tool_access () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -961,8 +974,8 @@ let test_persona_resolver_defaults_to_research_tool_access () =
       let tool_access = Yojson.Safe.Util.member "tool_access" resolved in
       (match tool_access with
        | `List items ->
-           check bool "persona default tool_access is non-empty list" true
-             (List.length items > 0)
+           check int "persona default tool_access is empty" 0
+             (List.length items)
        | _ -> fail "persona default tool_access should be a list")
 
 let test_persona_resolver_rejects_operator_todo_profile () =
@@ -1233,8 +1246,8 @@ let test_persona_resolver_renders_tool_access_array_durable_toml () =
   match KEP.render_keeper_toml_from_resolved_args resolved with
   | Error e -> fail ("render failed: " ^ e)
   | Ok toml ->
-      check bool "renders tools array" true
-        (contains_substring toml "tools = [\"masc_status\"]")
+      check bool "renders tool_access array" true
+        (contains_substring toml "tool_access = [\"masc_status\"]")
 
 let authoring_minimal_profile =
   `Assoc
@@ -1457,19 +1470,17 @@ mention_targets = ["a"]
     check (list string) "surfaces dead config"
       ["keeper.legacy_scope"; "keeper.scope_kind"] unknown
 
-let test_detect_unknown_keys_accepts_tool_access_table () =
+let test_detect_unknown_keys_accepts_tool_access_array () =
   let input = {|
 [keeper]
 goal = "g"
-
-[keeper.tool_access]
-tools = ["masc_status"]
+tool_access = ["masc_status"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
   | Ok doc ->
     let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "tool_access TOML table is canonical" [] unknown
+    check (list string) "tool_access TOML array is canonical" [] unknown
 
 let test_detect_unknown_keys_accepts_loader_base () =
   let input = {|
@@ -1633,19 +1644,6 @@ OAS_CODEX_SKIP_GIT = false
         (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
       check string "false → 0" "0"
         (List.assoc "OAS_CODEX_SKIP_GIT" d.oas_env)
-
-let test_detect_unknown_keys_flags_also_allow_alias () =
-  let input = {|
-[keeper]
-goal = "g"
-also_allow = ["x"]
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "also_allow alias is stale drift"
-      ["keeper.also_allow"] unknown
 
 let test_load_keeper_toml_captures_unknown_keys_on_profile () =
   let tmp = Filename.temp_file "keeper_unknown" ".toml" in
@@ -1919,12 +1917,14 @@ let () =
             test_profile_rejects_invalid_git_identity_mode;
           test_case "rejects removed model keys" `Quick
             test_profile_rejects_removed_model_keys;
-          test_case "rejects removed also_allow alias" `Quick
-            test_profile_rejects_removed_also_allow_alias;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
           test_case "legacy allowed_providers rejected" `Quick
             test_profile_rejects_legacy_allowed_providers;
+          test_case "legacy tool policy key rejected" `Quick
+            test_profile_rejects_legacy_tool_policy_key;
+          test_case "legacy tool_access table rejected" `Quick
+            test_profile_rejects_legacy_tool_access_table;
           test_case "runtime_id parsed" `Quick
             test_profile_accepts_runtime_id;
           test_case "max_turns overrides parsed and applied" `Quick
@@ -1942,12 +1942,10 @@ let () =
             test_detect_unknown_keys_empty_when_all_canonical;
           test_case "flags legacy dead config" `Quick
             test_detect_unknown_keys_flags_legacy_dead_config;
-          test_case "accepts tool_access table" `Quick
-            test_detect_unknown_keys_accepts_tool_access_table;
+          test_case "accepts tool_access array" `Quick
+            test_detect_unknown_keys_accepts_tool_access_array;
           test_case "accepts loader base include" `Quick
             test_detect_unknown_keys_accepts_loader_base;
-          test_case "also_allow alias flagged" `Quick
-            test_detect_unknown_keys_flags_also_allow_alias;
           test_case "oas_env keys not flagged as unknown" `Quick
             test_oas_env_not_flagged_as_unknown;
           test_case "load_keeper_toml captures unknown keys on profile" `Quick
@@ -1996,8 +1994,8 @@ let () =
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
-          test_case "persona resolver defaults to research tool_access" `Quick
-            test_persona_resolver_defaults_to_research_tool_access;
+          test_case "persona resolver defaults to empty tool_access" `Quick
+            test_persona_resolver_defaults_to_empty_tool_access;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver reports placeholder defaults source" `Quick

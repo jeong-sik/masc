@@ -63,7 +63,7 @@ should be treated as restart-required.
 | Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_WS_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED`, `MASC_WEBRTC_ENABLED` | listeners and advertised base URLs are fixed during server startup |
 | Backend/bootstrap wiring | `MASC_STORAGE_TYPE`, `MASC_STARTUP_WATCHDOG_SEC` | boot-time filesystem storage enforcement and watchdog setup |
 | Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `keeper_runtime.toml` | TOML is loaded once and injected into the process env during boot |
-| Startup-loaded policy | tool policy related env plus `tool_policy.toml`-driven behavior | presets are loaded once at startup |
+| Startup-loaded policy | tool policy related env plus `tool_policy.toml`-driven behavior | tool groups are loaded once at startup |
 
 Representative code paths:
 

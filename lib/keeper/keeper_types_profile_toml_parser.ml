@@ -13,23 +13,22 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let has_raw key = List.mem_assoc key doc in
-  let tool_access_key key = k ("tool_access." ^ key) in
   let tool_access_defaults_result =
-    let tools_key = tool_access_key "tools" in
-    let removed_keys =
-      [ "kind"; "preset"; "also_allow" ]
-      |> List.map tool_access_key
+    let key = k "tool_access" in
+    let retired_table_keys =
+      [ "tools"; "kind"; "preset"; "also_allow" ]
+      |> List.map (fun suffix -> k ("tool_access." ^ suffix))
       |> List.filter has_raw
     in
-    match removed_keys with
+    match retired_table_keys with
     | _ :: _ ->
         Error
           (Printf.sprintf
-             "removed keeper.tool_access keys: %s. Use [keeper.tool_access] tools = [...]"
-             (String.concat ", " removed_keys))
-    | [] when has_raw tools_key ->
-        let tools = Keeper_toml_loader.toml_string_list doc tools_key in
-        Ok (Some (normalize_name_list tools))
+             "removed keeper.tool_access table keys: %s. Use keeper.tool_access = [...]"
+             (String.concat ", " retired_table_keys))
+    | [] when has_raw key ->
+      let tools = Keeper_toml_loader.toml_string_list doc key in
+      Ok (Some (normalize_name_list tools))
     | [] -> Ok None
   in
   let per_provider_timeout_state, per_provider_timeout =
@@ -240,7 +239,7 @@ let parsed_field_key_names =
   ; "network_mode"
   ; "repo_cli_identity"
   ; "git_identity_mode"
-  ; "tool_access.tools"
+  ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
@@ -285,7 +284,7 @@ let canonical_keeper_toml_key_names =
   ; "network_mode"
   ; "repo_cli_identity"
   ; "git_identity_mode"
-  ; "tool_access.tools"
+  ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"

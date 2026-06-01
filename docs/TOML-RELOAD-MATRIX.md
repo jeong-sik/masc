@@ -31,7 +31,7 @@ The key distinction is:
 | File | Purpose | Load point | Reload trigger | Reload class | Notes |
 | --- | --- | --- | --- | --- | --- |
 | `<base_path>/.masc/config/keeper_runtime.toml` | startup env seeding for `MASC_KEEPER_*` knobs | server bootstrap before `Env_config_keeper` consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
-| `<resolved-config-root>/tool_policy.toml` | keeper tool preset/group policy | server bootstrap via `init_policy_config` | none | `boot_static` | presets are stored in process memory once loaded |
+| `<resolved-config-root>/tool_policy.toml` | keeper tool group policy | server bootstrap via `init_policy_config` | none | `boot_static` | groups are stored in process memory once loaded |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
 | `<resolved-config-root>/keeper_runtime.toml` | runtime catalog source | model resolve path in OAS/MASC (rendered in memory) | next resolve / next turn | `request_dynamic` | invalid TOML blocks runtime load; `runtime.json` is retired |
 

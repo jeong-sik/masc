@@ -297,7 +297,7 @@ let is_execution_progress_tool_name name =
 ;;
 
 (* #10091: record a [require_tool_use] contract violation with the labels the
-   operator needs to fix the underlying cause (tool_preset mismatch vs.
+   operator needs to fix the underlying cause (tool surface mismatch vs.
    active-task refusal vs. cohort misconfiguration). Split out of
    [keeper_agent_run.ml] so the counter emission is directly testable without
    standing up a full OAS/Eio harness. [contract_status] is the same string

@@ -140,7 +140,12 @@ let invalid_profile_defaults_error ~keeper_name detail =
 let effective_declarative_runtime_id
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
+  (* [runtime_id]/[model] is the persona's per-keeper runtime selection
+     ("provider.model").  RFC-0207: this resolves from the SAME [defaults.model]
+     source as {!Keeper_meta_contract.runtime_id_of_meta} (the dispatcher), so
+     the declare/status view and the wire never disagree.  Do NOT re-fork this
+     onto a different source — divergence makes the reconcile change-detector
+     flag [runtime] every sweep (perpetual re-sync storm, cf. #10061). *)
   match defaults.model, defaults.manifest_path with
   | Some runtime_id, _ -> String.trim runtime_id
   | None, Some _ -> (Keeper_config.default_runtime_id ())

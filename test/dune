@@ -585,6 +585,12 @@
  (modules test_runtime_config_validity)
  (libraries masc_test_deps))
 
+; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
+(test
+ (name test_runtime_per_keeper_routing)
+ (modules test_runtime_per_keeper_routing)
+ (libraries masc_test_deps unix))
+
 ; Group 2: Property-based tests (QCheck)
 
 (tests

@@ -609,12 +609,24 @@ type keeper_meta =
   ; meta_version : int
   }
 
-let runtime_id_of_meta (_m : keeper_meta) : string =
-  Runtime.get_default_runtime_id ()
-;;
-
 let runtime_id_of_meta (m : keeper_meta) : string =
-  runtime_id_of_meta m
+  (* RFC-0207: a keeper's per-keeper runtime is its persona [model] selection
+     (keepers/<name>.toml [model = "provider.model"], cached by
+     {!Keeper_types_profile.load_keeper_profile_defaults}); absent that, the
+     documented global default ([[runtime].default]) — NOT a silent
+     substitution.  The prior [_m] discarded the keeper entirely, so the persona
+     selection never reached the wire (the driver also hardcoded the default —
+     both points fixed).  Reads the SAME [defaults.model] source as
+     {!Keeper_runtime.effective_declarative_runtime_id} (declare/status path), so
+     the dispatcher and the reconcile change-detector never disagree (one
+     surface — no split-brain, no re-sync storm).  An id that does not resolve to
+     a materialized runtime fails fast at dispatch in the turn driver. *)
+  let defaults : Keeper_types_profile.keeper_profile_defaults =
+    Keeper_types_profile.load_keeper_profile_defaults m.name
+  in
+  match defaults.model with
+  | Some runtime_id -> String.trim runtime_id
+  | None -> Runtime.get_default_runtime_id ()
 ;;
 
 

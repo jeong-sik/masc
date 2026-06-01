@@ -26,7 +26,11 @@ let effective_declarative_runtime_id
       (defaults : keeper_profile_defaults)
       (meta : keeper_meta)
   =
-  (* [runtime_id] is canonical; [model] remains the legacy storage slot. *)
+  (* RFC-0207: same [defaults.model] source as
+     {!Keeper_meta_contract.runtime_id_of_meta} (the dispatcher) and the
+     keeper_runtime.ml copy of this function — keep them on one source so the
+     status override view matches the wire.  Re-forking causes a re-sync storm
+     (cf. #10061). *)
   match defaults.model, defaults.manifest_path with
   | Some runtime_id, _ -> String.trim runtime_id
   | None, Some _ -> (Keeper_config.default_runtime_id ())

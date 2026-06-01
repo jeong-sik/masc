@@ -156,6 +156,17 @@ let apply_post_turn_lifecycle_with_resilience_handles =
 let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
+let record_lifecycle_dispatch_rejection ~keeper_name event ~error =
+  Prometheus.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
+    ();
+  Log.Keeper.warn
+    "%s: post-turn lifecycle dispatch failed event=%s error=%s"
+    keeper_name
+    (Keeper_state_machine.event_to_string event)
+    error
+
 let dispatch_keeper_phase_event
     ~(config : Workspace.config)
     ?(origin = Keeper_registry.Generic_dispatch)
@@ -170,15 +181,15 @@ let dispatch_keeper_phase_event
   with
   | Ok _ -> ()
   | Error err ->
-      Prometheus.inc_counter
-        Keeper_metrics.(to_string LifecycleDispatchRejections)
-        ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
-        ();
-      Log.Keeper.warn
-        "%s: post-turn lifecycle dispatch failed event=%s error=%s"
-        keeper_name
-        (Keeper_state_machine.event_to_string event)
-        (Keeper_state_machine.transition_error_to_string err)
+      record_lifecycle_dispatch_rejection
+        ~keeper_name
+        event
+        ~error:(Keeper_state_machine.transition_error_to_string err)
+  | exception (Keeper_registry_types.Compaction_transition_violation _ as exn) ->
+      record_lifecycle_dispatch_rejection
+        ~keeper_name
+        event
+        ~error:(Printexc.to_string exn)
 
 (* #9988 Option B follow-up: centralize [Compaction_completed] dispatch
    so both emit paths (manual recovery in [tool_keeper] and automatic

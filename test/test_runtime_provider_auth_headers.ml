@@ -164,6 +164,21 @@ let test_capacity_key_separates_models_on_shared_base_url () =
     |> Runtime_candidate.of_provider_config
     |> Runtime_candidate.capacity_key
   in
+  let auto_model_key =
+    provider_config "auto"
+    |> Runtime_candidate.of_provider_config
+    |> Runtime_candidate.capacity_key
+  in
+  let health_key_a =
+    provider_config "model-a"
+    |> Runtime_candidate.of_provider_config
+    |> Runtime_candidate.health_key
+  in
+  let health_key_b =
+    provider_config "model-b"
+    |> Runtime_candidate.of_provider_config
+    |> Runtime_candidate.health_key
+  in
   let key_a =
     provider_config "model-a"
     |> Runtime_candidate.of_provider_config
@@ -176,6 +191,9 @@ let test_capacity_key_separates_models_on_shared_base_url () =
   in
   check bool "capacity keys differ by model" true (not (String.equal key_a key_b));
   check string "empty model_id is no-op" empty_model_key whitespace_model_key;
+  check string "auto model_id keeps provider health key" empty_model_key auto_model_key;
+  check string "health keys stay provider-wide" health_key_a health_key_b;
+  check string "capacity empty model matches health key" health_key_a empty_model_key;
   check bool "empty model key keeps base_url" true
     (Astring.String.is_infix ~affix:base_url empty_model_key);
   check bool "empty model key omits model separator" false

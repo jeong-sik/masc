@@ -28,8 +28,8 @@ val provider_label_of_config : Llm_provider.Provider_config.t -> string
 
 val provider_health_key_of_config : Llm_provider.Provider_config.t -> string
 (** Key used by {!Runtime_health_tracker}. For OpenAI-compatible configs
-    the model and base URL are appended so each endpoint is tracked
-    independently. *)
+    the base URL is appended, but model IDs are deliberately omitted so
+    provider/account-wide cooldowns propagate across sibling models. *)
 
 val binding_auth_is_no_auth : Runtime_binding.t -> bool
 

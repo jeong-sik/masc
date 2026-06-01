@@ -210,7 +210,15 @@ let tool_filter_rejection_label ~keeper_name ?runtime_mcp_policy ~tools
   in
   None
 
-let capacity_key (t : t) = health_key t
+let capacity_key (t : t) =
+  match t.kind with
+  | Llm_provider.Provider_config.OpenAI_compat ->
+    let base_url = String.trim t.base_url in
+    let model_id = String.trim t.model_id in
+    if base_url = "" || model_id = "" || String.equal model_id "auto"
+    then health_key t
+    else Printf.sprintf "%s:%s@%s" (provider_label t) model_id base_url
+  | _ -> health_key t
 
 let capacity_keys candidates =
   candidates |> List.map capacity_key |> List.sort_uniq String.compare

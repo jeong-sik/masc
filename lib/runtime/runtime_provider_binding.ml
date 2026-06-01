@@ -45,12 +45,9 @@ let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with
   | Llm_provider.Provider_config.OpenAI_compat ->
     let base_url = String.trim cfg.base_url in
-    let model_id = String.trim cfg.model_id in
     if base_url = ""
     then provider_label_of_config cfg
-    else if model_id = ""
-    then Printf.sprintf "%s@%s" (provider_label_of_config cfg) base_url
-    else Printf.sprintf "%s:%s@%s" (provider_label_of_config cfg) model_id base_url
+    else Printf.sprintf "%s@%s" (provider_label_of_config cfg) base_url
   | _ -> provider_label_of_config cfg
 ;;
 

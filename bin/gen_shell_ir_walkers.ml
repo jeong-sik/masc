@@ -5797,6 +5797,26 @@ let emit_risk buf spec =
   Buffer.add_string buf "\n"
 ;;
 
+(* RFC-0208 P1: exhaustive Generic discriminator. Generated (not
+   hand-written with a catch-all) so warning 4 stays satisfied and a new
+   constructor forces an explicit [false] arm here rather than silently
+   counting as a typed hit. *)
+let emit_is_generic buf spec =
+  Buffer.add_string
+    buf
+    "let gen_is_generic : Shell_ir_typed_types.wrapped -> bool = function\n";
+  List.iter
+    (fun c ->
+       Buffer.add_string
+         buf
+         (Printf.sprintf
+            "  | Shell_ir_typed_types.W (Shell_ir_typed_types.%s) -> %b\n"
+            c.anon_pattern
+            (c.name = "Generic")))
+    spec;
+  Buffer.add_string buf "\n"
+;;
+
 let emit_sandbox buf spec =
   Buffer.add_string
     buf
@@ -6035,6 +6055,7 @@ let () =
   let buf = Buffer.create 4096 in
   emit_header buf;
   emit_risk buf shell_ir_typed_spec;
+  emit_is_generic buf shell_ir_typed_spec;
   emit_sandbox buf shell_ir_typed_spec;
   emit_to_simple buf shell_ir_typed_spec;
   emit_parse_functions buf shell_ir_typed_spec;

@@ -627,3 +627,17 @@ let classify (T ir : undecided t) : decided decided_ir =
   let flat_floor = classify_words (flat_stage_words ir) in
   { ir; risk = max_risk flat_floor (composed_decision ir) }
 ;;
+
+(* RFC-0208 P1 observability: did the typed lowering classify every
+   [Simple] node via a real constructor, or did it fall to the [Generic]
+   escape hatch? [classify] folds the typed and word-list verdicts into a
+   single [risk_class] and discards which path won, so the 110 typed
+   constructors are invisible in production. [typed_hit_of_ir] recovers
+   the typed-vs-Generic signal so the dispatch log and the differential
+   harness can measure real coverage. A pipeline is a typed hit only when
+   all of its stages are. *)
+let rec typed_hit_of_ir (ir : Shell_ir.t) : bool =
+  match ir with
+  | Shell_ir.Simple s -> not (Shell_ir_typed.is_generic (Shell_ir_typed.of_simple s))
+  | Shell_ir.Pipeline stages -> List.for_all typed_hit_of_ir stages
+;;

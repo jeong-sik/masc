@@ -37,8 +37,19 @@ val classify : undecided t -> decided decided_ir
     defaulting to R0.
 
     [Simple] commands are lowered to the [Shell_ir_typed] GADT and
-    classified by [risk_of_typed]; [Pipeline]s and the [Generic] escape
-    hatch fall back to the word-list classifier [classify_words]. *)
+    classified by [risk_of_typed]; the [Generic] escape hatch falls back
+    to the word-list classifier [classify_words]. [Pipeline]s compose the
+    per-stage decision with [max_risk] (RFC-0208 P0), so every stage
+    contributes its typed and word-list verdict rather than the pipeline
+    deferring wholesale to the head-anchored floor. *)
+
+val typed_hit_of_ir : Shell_ir.t -> bool
+(** [true] when the typed lowering classified every [Simple] node via a
+    real [Shell_ir_typed] constructor rather than the [Generic] escape
+    hatch. RFC-0208 P1 observability instrument: lets the dispatch log and
+    the differential harness measure real typed coverage vs [Generic]
+    fallback over live traffic. A [Pipeline] is a typed hit only when all
+    of its stages are. *)
 
 val risk_of_typed : Shell_ir_typed.wrapped -> risk_class
 (** Risk opinion implied by the typed command shape alone (RFC-0160 §S1)

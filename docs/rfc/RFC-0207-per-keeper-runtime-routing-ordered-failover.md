@@ -129,13 +129,16 @@ recoverable failure the existing `degraded_rotation` fallback still applies.
 
 ## 7. Tests
 
-`test/test_runtime_per_keeper_routing.ml` (3 cases, self-initialising):
+`test/test_runtime_per_keeper_routing.ml` (5 cases, self-initialising):
 
 1. persona `model` drives `runtime_id_of_meta` (declared keeper → its selection,
    not the default);
 2. undeclared keeper falls to `[runtime].default`;
 3. `get_runtime_by_id` resolves a known id and returns `None` for an unknown id
-   (driver fail-fast).
+   (driver fail-fast);
+4. direct budget resolution uses the selected runtime's `max-context`;
+5. the production `resolve_max_context_resolution_of_meta` path budgets against
+   the persona runtime rather than the global default.
 
 Whole-program `dune build @check` and `dune build .` are green; the existing
 `runtime_id_of_meta` consumers (`test_keeper_identity_parse`,

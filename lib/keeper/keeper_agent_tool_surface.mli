@@ -177,6 +177,9 @@ val turn_affordances_require_tool_gate_with_allowed :
     progress when such tools exist. Passive status/read tools remain visible on
     optional turns and on surfaces that have no actionable alternative.
 
+    When [has_current_task] is true, claim/context tools are not treated as
+    actionable alternatives because the keeper already owns active work.
+
     Explicit [required_tool_names] are preserved even when they are read-only:
     operator/harness calls such as [masc_keeper_msg.required_tools =
     ["masc_web_search"]] are a direct evidence contract, not a generic

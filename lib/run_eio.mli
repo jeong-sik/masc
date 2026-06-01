@@ -33,10 +33,7 @@ val run_record_to_json : run_record -> Yojson.Safe.t
 
 val run_record_of_json : Yojson.Safe.t -> run_record option
 
-(** Serialize a log entry. [kind] and [task_id] are optional JSON metadata for
-    newly appended logs; the public record stays source-compatible with older
-    callers that construct entries by record literal. *)
-val log_entry_to_json : ?kind:string -> ?task_id:string -> log_entry -> Yojson.Safe.t
+val log_entry_to_json : log_entry -> Yojson.Safe.t
 
 val log_entry_of_json : Yojson.Safe.t -> log_entry option
 

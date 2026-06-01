@@ -127,7 +127,7 @@ let test_turn_required_tool_satisfaction_keeps_generic_presence_separate () =
           (required_tool_call "keeper_board_get" (`Assoc []))))
 ;;
 
-let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
+let test_required_tool_satisfaction_treats_satisfying_tools_as_advisory () =
   check bool "base generic presence succeeds" true
     (Result.is_ok
        (KTP.required_tool_satisfaction (required_tool_call "masc_status" (`Assoc []))));
@@ -230,9 +230,9 @@ let () =
             `Quick
             test_turn_required_tool_satisfaction_keeps_generic_presence_separate
         ; test_case
-            "required tool satisfaction ignores satisfying tools hint"
+            "required tool satisfaction treats satisfying tools as advisory"
             `Quick
-            test_required_tool_satisfaction_includes_satisfying_tools_hint
+            test_required_tool_satisfaction_treats_satisfying_tools_as_advisory
         ; test_case
             "satisfying_tools_for_turn computes from affordances"
             `Quick

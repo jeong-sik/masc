@@ -158,7 +158,7 @@ let test_validate_completion_contract_presence_requires_keeper_surface_tool () =
       (contains_substring e "keeper-surface tools")
 ;;
 
-let test_actionable_tool_contract_flags_no_tools () =
+let test_actionable_tool_contract_allows_no_tools () =
   check
     (option string)
     "no tools no longer violates actionable signal"
@@ -180,7 +180,7 @@ let test_actionable_tool_contract_allows_no_actionable_context () =
        ~tool_names:[])
 ;;
 
-let test_actionable_tool_contract_flags_passive_only_tools () =
+let test_actionable_tool_contract_allows_passive_only_tools () =
   check
     (option string)
     "passive-only tools no longer violate actionable signal"
@@ -191,7 +191,7 @@ let test_actionable_tool_contract_flags_passive_only_tools () =
        ~tool_names:[ "keeper_board_get"; "masc_status" ])
 ;;
 
-let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () =
+let test_actionable_tool_contract_allows_claim_context_after_ownership () =
   check
     (option string)
     "claim context no longer violates after ownership"
@@ -210,7 +210,7 @@ let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () 
        ~tool_names:[ "keeper_task_claim" ])
 ;;
 
-let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
+let test_actionable_tool_contract_allows_stay_silent_after_ownership () =
   let check_no_violation label tool_names =
     check
       (option string)
@@ -279,7 +279,7 @@ let () =
         ; test_case
             "actionable signal allows no tools"
             `Quick
-            test_actionable_tool_contract_flags_no_tools
+            test_actionable_tool_contract_allows_no_tools
         ; test_case
             "actionable signal allows no-actionable context"
             `Quick
@@ -287,15 +287,15 @@ let () =
         ; test_case
             "actionable signal allows passive-only tools"
             `Quick
-            test_actionable_tool_contract_flags_passive_only_tools
+            test_actionable_tool_contract_allows_passive_only_tools
         ; test_case
             "actionable signal allows claim context after ownership"
             `Quick
-            test_actionable_tool_contract_rejects_claim_context_when_already_claimed
+            test_actionable_tool_contract_allows_claim_context_after_ownership
         ; test_case
             "actionable signal allows stay_silent after ownership"
             `Quick
-            test_actionable_tool_contract_rejects_stay_silent_when_already_claimed
+            test_actionable_tool_contract_allows_stay_silent_after_ownership
         ] )
     ]
 ;;

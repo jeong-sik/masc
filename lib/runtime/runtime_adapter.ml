@@ -265,9 +265,10 @@ let provider_config_from_declared_provider (provider : Runtime_schema.provider)
        let api_key = api_key_of_credential ?registry_entry provider.credentials in
        let default_headers = default_headers_for_kind kind in
        let custom_headers =
-         provider.headers
-         |> Option.value ~default:[]
-         |> List.filter (fun (key, _) -> not (is_auth_header_key key))
+         match provider.headers with
+         | None -> []
+         | Some headers ->
+           List.filter (fun (key, _) -> not (is_auth_header_key key)) headers
        in
        (* TOML-declared custom headers override generated non-auth headers by
           key. Auth is carried only by [api_key] and is merged by OAS at HTTP

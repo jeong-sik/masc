@@ -80,10 +80,14 @@ let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let runtime_supports_required_tools (rt : t) =
   let provider_caps =
-    Option.value ~default:capabilities_default rt.provider.capabilities
+    match rt.provider.capabilities with
+    | Some capabilities -> capabilities
+    | None -> capabilities_default
   in
   let model_caps =
-    Option.value ~default:model_capabilities_default rt.model.capabilities
+    match rt.model.capabilities with
+    | Some capabilities -> capabilities
+    | None -> model_capabilities_default
   in
   rt.model.tools_support
   && model_caps.supports_tool_choice

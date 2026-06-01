@@ -18,7 +18,7 @@ module Float = Stdlib.Float
 open Tool_call_quality_benchmark_types
 
 let default_case_set_path ~repo_root =
-  Filename.concat repo_root "benchmark/tool_call_quality_cases.json"
+  Filename.concat repo_root "benchmarks/data/tool_call_quality_cases.json"
 
 let default_evidence_path ~repo_root =
   Filename.concat repo_root "test/fixtures/tool_call_quality_benchmark/evidence_runs.json"

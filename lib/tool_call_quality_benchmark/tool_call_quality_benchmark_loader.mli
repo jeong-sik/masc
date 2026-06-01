@@ -14,7 +14,7 @@
 
 val default_case_set_path : repo_root:string -> string
 (** [default_case_set_path ~repo_root] returns
-    [<repo_root>/benchmark/tool_call_quality_cases.json].
+    [<repo_root>/benchmarks/data/tool_call_quality_cases.json].
     Pinned at the contract seam — operator runbooks reference
     the exact relative path; a future case-set move requires
     synchronized runbook + benchmark-runner updates. *)

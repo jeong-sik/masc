@@ -21,25 +21,59 @@ Related:
 
 ## 0. Problem framing
 
-`lib/runtime/runtime_phonebook_types.ml` defines typed sum types for `runtime_server_flavor` (`Llama_cpp | Ollama | Vllm | Chat_completions_v1_wire | Provider_g_wire | Provider_k_zai | Provider_h_wire`) and `runtime_protocol` (`Openai_http | Ollama_http | Provider_a_http | Openai_cli`). String roundtrip is hand-rolled via `flavor_of_string` / `flavor_to_string` / `protocol_of_string` / `protocol_to_string`, with literal forms `"chat_completions_v1"`, `"provider_g"`, `"zai-provider_k"`, `"provider_h"`, `"chat_completions_v1_http"`, `"provider_a-http"`, `"chat_completions_v1_cli"`.
+The old runtime phonebook module was removed by the RFC-0181/RFC-0206 runtime
+rebirth. The remaining string boundary is now the TOML parser:
+`lib/runtime/runtime_toml.ml` maps provider `protocol` strings through
+`api_format_of_protocol`, then stores the parsed result in
+`Runtime_schema.provider.api_format`. Current accepted literals include
+`"provider_a-cli"`, `"provider_a-http"`, `"chat_completions_v1_cli"`,
+`"chat_completions_v1_http"`, `"provider_f-cli"`, `"provider_c-cli"`, and
+`"ollama-http"`.
 
 This produces two compounding fragilities:
 
 ### Fragility 1 — string literals are unguarded by the type system
 
-Adding a new flavor adds a variant and forces an exhaustive `match` update — that part is fine. But the *string form* picked for the new variant has no compiler-checked relationship to the fixture or runtime TOML. Drift between the literal (`"chat_completions_v1"`), the fixture (`chat_completions_v1_http`), and the runtime config (`<MASC_BASE>/.masc/config/keeper_runtime.toml`'s `protocol = "chat_completions_v1_http"`) is only caught by tests, and only the tests that happen to exercise that path.
+Adding a new protocol literal requires a manual branch in
+`Runtime_toml.api_format_of_protocol`, plus fixture/runtime TOML updates. The
+literal has no compiler-checked relationship to the runtime schema value it
+selects. Drift between the accepted string (`"chat_completions_v1_http"`), test
+fixtures, and `<MASC_BASE>/.masc/config/keeper_runtime.toml` is only caught by
+tests, and only the tests that happen to exercise that path.
 
-PR #18837's dropped commit `1e0f96365` ("fix(runtime): accept hyphenated protocol/flavor strings in phonebook parser", 2026-05-27) is the concrete evidence: an LLM-authored fix claimed PR #18232 had renamed fixtures from underscore to hyphen, but main fixture (`test/test_runtime_phonebook.ml`), branch base fixture (`57ac702a245`), and runtime `<MASC_BASE>/.masc/config/keeper_runtime.toml` were *all* still underscore. The "fix" introduced an inconsistency it then patched with alt-form parsing (`"chat-completions-v1" | "chat_completions_v1" -> Chat_completions_v1_wire`). This is CLAUDE.md §워크어라운드 §2 (string/substring classifier 보강) verbatim — `pr-rfc-check.sh --workaround-gate-only` would have flagged it at push time.
+PR #18837's dropped commit `1e0f96365` ("fix(runtime): accept hyphenated
+protocol/flavor strings in phonebook parser", 2026-05-27) is the concrete
+evidence: an LLM-authored fix claimed PR #18232 had renamed fixtures from
+underscore to hyphen, but the main fixtures and runtime
+`<MASC_BASE>/.masc/config/keeper_runtime.toml` were still underscore. The old
+phonebook module no longer exists; the same failure mode now lives at the TOML
+parser string boundary. This is CLAUDE.md §워크어라운드 §2 (string/substring
+classifier 보강) verbatim — `pr-rfc-check.sh --workaround-gate-only` would have
+flagged it at push time.
 
 ### Fragility 2 — generic placeholder names are semantically empty
 
-RFC-0172/0173 vendor purge replaced vendor names (`anthropic`, `openai`, `deepseek`, `groq`, `zai`) with placeholders (`chat_completions_v1`, `provider_g`, `provider_h`, `provider_k`). The typed OCaml variants kept their semantics in trailing comments (`Chat_completions_v1_wire (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)`), but the string surface lost all meaning. A reader of `<MASC_BASE>/.masc/config/keeper_runtime.toml` who sees `protocol = "chat_completions_v1_http"` cannot tell what wire format it commits to without bouncing through `runtime_phonebook_types.ml`.
+RFC-0172/0173 vendor purge replaced vendor names (`anthropic`, `openai`,
+`deepseek`, `groq`, `zai`) with placeholders (`chat_completions_v1`,
+`provider_g`, `provider_h`, `provider_k`). The typed OCaml schema keeps only
+`Messages_api`, `Chat_completions_api`, and `Ollama_api`; provider-specific
+semantics live in parser literals and provider bindings. A reader of
+`<MASC_BASE>/.masc/config/keeper_runtime.toml` who sees
+`protocol = "chat_completions_v1_http"` cannot tell what wire format it commits
+to without bouncing through `runtime_toml.ml` and `runtime_schema.ml`.
 
-`"zai-provider_k"` is the proof — the purge stripped vendors but left `zai-` as a partial prefix, because the variant name (`Provider_k_zai`) preserved the vendor reference. The string surface is now half-purged, half-vendor, half-placeholder.
+`"provider_a-http"` is the proof — the purge stripped vendors from the name,
+but the placeholder still carries no protocol semantics by itself. The string
+surface is now placeholder-heavy and requires parser context to understand.
 
 ## 1. Root cause
 
-Hand-written `_of_string` / `_to_string` functions with literal alternatives are the *implementation*, not the *interface*. The interface a TOML fixture exposes is "give me a `runtime_protocol`," but there is no machine-readable schema that says what string forms are valid. Each new format variant requires manual literal addition in two functions, with no exhaustiveness guarantee that the inverse pair stays consistent. Test-driven discovery of drift is the current safety net.
+Hand-written TOML string classifiers are the *implementation*, not the
+*interface*. The interface a TOML fixture exposes is "give me a protocol," but
+there is no machine-readable schema that says what string forms are valid. Each
+new format variant requires manual literal addition, with no exhaustiveness
+guarantee tying the string to the `Runtime_schema.api_format`. Test-driven
+discovery of drift is the current safety net.
 
 The right interface is either:
 - a generated serializer from a single schema (ATD/PPX), so the typed variant *is* the source of truth and string roundtrip is mechanical, or
@@ -68,16 +102,24 @@ Recommendation pending RFC-0181 decision: **A** if RFC-0181 introduces new typed
 
 ## 4. Verification plan (when activated)
 
-- Acceptance: `flavor_to_string >> flavor_of_string = Ok` for every constructor (qcheck or hand-rolled property). Same for `protocol`.
-- Drift gate: `pr-rfc-check.sh --workaround-gate-only` extension that flags any new `| "foo" | "bar" ->` alt-form arm in `lib/runtime/runtime_phonebook_types.ml` as `WORKAROUND` requiring §override 3-line label.
-- Regression: existing `test_runtime_phonebook` 24/24 must continue PASS after the migration.
-- Smoke: runtime `<MASC_BASE>/.masc/config/keeper_runtime.toml` parses unchanged, hot-reload preserves every (protocol, flavor, provider) tuple.
+- Acceptance: every supported protocol literal in runtime TOML parses to the
+  intended `Runtime_schema.api_format`, and every fixture/runtime config uses a
+  literal accepted by `Runtime_toml.api_format_of_protocol`.
+- Drift gate: `pr-rfc-check.sh --workaround-gate-only` extension that flags any
+  new alternate string-classifier arm in `lib/runtime/runtime_toml.ml` as
+  `WORKAROUND` requiring §override 3-line label.
+- Regression: runtime TOML parser tests must continue PASS after the migration.
+- Smoke: runtime `<MASC_BASE>/.masc/config/keeper_runtime.toml` parses unchanged,
+  hot-reload preserves every (protocol, provider, model) tuple.
 
 ## 5. Why this RFC matters even while deferred
 
 Without RFC-0184 the next LLM-authored "fix" hits the same false-premise trap. PR #18837 commit `1e0f96365` consumed reviewer + author + force-push cycles for a zero-progress change. Recording the antipattern in an RFC (rather than only in a memory note) lets `pr-rfc-check.sh --workaround-gate-only` reference RFC-0184 in the gate message when a future PR introduces a string-classifier alt-form on runtime identifiers.
 
-Interim mitigation (no code change): add an entry to `pr-rfc-check.sh`'s grep that catches `| "provider[_-][a-z]" ->` patterns in `lib/runtime/runtime_phonebook_types.ml` and requires `WORKAROUND: RFC-0184 deferred` or `WORKAROUND-WAIVED:` in the PR body.
+Interim mitigation (no code change): add an entry to `pr-rfc-check.sh`'s grep
+that catches alternate provider/protocol string arms in
+`lib/runtime/runtime_toml.ml` and requires `WORKAROUND: RFC-0184 deferred` or
+`WORKAROUND-WAIVED:` in the PR body.
 
 ## 6. Implementation status
 
@@ -91,10 +133,9 @@ Interim mitigation (no code change): add an entry to `pr-rfc-check.sh`'s grep th
 ## 7. Evidence Record
 
 - **Evidence**: 
-  - `lib/runtime/runtime_phonebook_types.ml` lines 17-44 (current hand-rolled `_of_string` / `_to_string` with literal alt-forms)
+  - `lib/runtime/runtime_toml.ml` `api_format_of_protocol` (current hand-rolled protocol string classifier)
   - PR #18837 commit `1e0f96365` body (false-premise documentation) + diff vs main (`provider_d-http` vs `chat_completions_v1_http`)
-  - `git show 57ac702a245:test/test_runtime_phonebook.ml | rg "protocol = "` → all `chat_completions_v1_http` (underscore)
-  - `git show origin/main:test/test_runtime_phonebook.ml | rg "protocol = "` → all `chat_completions_v1_http` (underscore)
+  - `rg 'protocol = "chat_completions_v1_http"' test lib/runtime` → runtime TOML fixtures and parser fixtures use the underscore form
   - `rg "^protocol\s*=" <MASC_BASE>/.masc/config/keeper_runtime.toml` → all `chat_completions_v1_http` (underscore)
   - PR #18232 (RFC-0172 vendor purge) merged 2026-05-24, commit `6426b841d` (RFC-0173)
   - PR #18697 (RFC-0181) OPEN, Q1~Q5 architect decision pending per memory

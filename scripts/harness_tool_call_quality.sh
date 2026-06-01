@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${TOOL_CALL_QUALITY_OUT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/tool-call-quality.XXXXXX")}"
-CASES_PATH="${TOOL_CALL_QUALITY_CASES_PATH:-${ROOT_DIR}/benchmark/tool_call_quality_cases.json}"
+CASES_PATH="${TOOL_CALL_QUALITY_CASES_PATH:-${ROOT_DIR}/benchmarks/data/tool_call_quality_cases.json}"
 EVIDENCE_PATH="${TOOL_CALL_QUALITY_EVIDENCE_PATH:-${ROOT_DIR}/test/fixtures/tool_call_quality_benchmark/evidence_runs.json}"
 FORMAT="${TOOL_CALL_QUALITY_FORMAT:-json}"
 VIEW="${TOOL_CALL_QUALITY_VIEW:-provider-model-keeper}"

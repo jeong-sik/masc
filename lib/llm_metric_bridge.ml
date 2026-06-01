@@ -107,7 +107,7 @@ let resolve_provider_for_latency ?provider ~model_id () =
 (** Project a [provider_resolution] to the Prometheus [provider] label.
     Cardinality budget unchanged: both unknown variants emit
     [unknown_provider_label] so the upper bound stays at the documented
-    6 × 10 × 10 = 600 series. *)
+    7 × 10 × 10 = 700 series. *)
 let provider_label_of_resolution = function
   | Provider_explicit p | Provider_cached p -> p
   | Provider_unknown_no_model_id | Provider_unknown_cache_miss _ ->

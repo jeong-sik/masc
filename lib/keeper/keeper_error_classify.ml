@@ -516,6 +516,9 @@ let required_tool_rotation_candidate
     name
   =
   let normalized = normalized_runtime_id ~catalog_names name in
+  let is_declared_required_tool_runtime =
+    List.exists (String.equal normalized) (Runtime.get_required_tool_runtime_ids ())
+  in
   let routed_phase_buffer_is_distinct =
     not
       (String.equal
@@ -530,14 +533,25 @@ let required_tool_rotation_candidate
     ((routed_phase_buffer_is_distinct
       && String.equal normalized (Keeper_config.default_runtime_id ())))
   && (allow_phase_recovery
+      || is_declared_required_tool_runtime
       || not
            (String.equal normalized (Keeper_config.default_runtime_id ())))
   && not (String.equal normalized "")
 
-let tool_required_rotation_runtime_id () =
-  try
-    Runtime.get_default_runtime_id ()
-  with Failure _ -> (Keeper_config.default_runtime_id ())
+let runtime_catalog_names () =
+  match Runtime.get_runtime_ids () with
+  | [] -> [ Keeper_config.default_runtime_id () ]
+  | names -> names
+;;
+
+let tool_required_rotation_runtime_ids () =
+  let default_runtime_id =
+    try Runtime.get_default_runtime_id () with
+    | Failure _ -> Keeper_config.default_runtime_id ()
+  in
+  match Runtime.get_required_tool_runtime_ids () with
+  | [] -> [ default_runtime_id ]
+  | ids -> ids
 
 let default_degraded_rotation_candidates
     ~catalog_names
@@ -547,15 +561,16 @@ let default_degraded_rotation_candidates
   let default_runtime =
     normalized_runtime_id ~catalog_names (Keeper_config.default_runtime_id ())
   in
-  let tool_required_runtime =
-    normalized_runtime_id ~catalog_names (tool_required_rotation_runtime_id ())
+  let tool_required_runtimes =
+    tool_required_rotation_runtime_ids ()
+    |> List.map (normalized_runtime_id ~catalog_names)
   in
   let phase_recovery_runtime =
     normalized_runtime_id ~catalog_names
       (Runtime.get_default_runtime_id ())
   in
   match tool_requirement with
-  | Required -> [ normalized_base; tool_required_runtime ]
+  | Required -> normalized_base :: tool_required_runtimes
   | Optional | No_tools ->
     [ normalized_base; default_runtime; phase_recovery_runtime ]
 
@@ -623,7 +638,7 @@ let degraded_rotation_after_recoverable_error
       (* Load the live catalog once at the degraded-rotation boundary and pass
          the snapshot through normalization/filter helpers.  This preserves
          concrete profile names without adding per-candidate catalog I/O. *)
-      let catalog_names = [ Keeper_config.default_runtime_id () ] in
+      let catalog_names = runtime_catalog_names () in
       let attempted =
         attempted_runtimes
         |> List.map (normalized_runtime_id ~catalog_names)

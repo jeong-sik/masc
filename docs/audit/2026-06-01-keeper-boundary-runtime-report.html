@@ -159,7 +159,7 @@
         <div class="card">
           <h3>Sandbox</h3>
           <p><span class="badge bad">NOT GREEN</span></p>
-          <p>코드는 TOML 기반 sandbox overlay와 docker route 테스트를 갖고 있고, status surface overlay 패치도 main에 들어갔다. 현재 live runtime과 root/main은 `7156fa2eef`로 맞춰졌지만, config schema는 `keeper.git_identity_mode` unknown-key 16건으로 blocked다.</p>
+          <p>코드는 TOML 기반 sandbox overlay와 docker route 테스트를 갖고 있고, status surface overlay 패치도 main에 들어갔다. 현재 live runtime과 local root checkout은 `7156fa2eef`이고, PR branch는 최신 `origin/main`(`0db23b44f8`) 위로 rebase됐다. Live config schema는 여전히 `keeper.git_identity_mode` unknown-key 16건으로 blocked다.</p>
         </div>
         <div class="card">
           <h3>Tool Surface</h3>
@@ -173,7 +173,7 @@
         </div>
       </div>
       <p><strong>최종 판정:</strong> 운영은 살아 있고 commit truth는 회복됐지만, live config schema가 `keeper.git_identity_mode` unknown-key로 blocked라 아직 green이 아니다. 이 문서의 현재 PR slice는 그 schema blocker를 canonical TOML field로 수용하는 것이다.</p>
-      <p class="small">Generated: 2026-06-01 22:11 KST. Source branch head: `b7e1aaceab`; live root/main/runtime: `7156fa2eef`. The PR branch is not live until merge/rebuild/restart.</p>
+      <p class="small">Generated: 2026-06-01 22:18 KST. Source branch: `fix/keeper-git-identity-mode-20260601` rebased on `origin/main=0db23b44f8`; live root/runtime: `7156fa2eef`. The PR branch is not live until merge/rebuild/restart.</p>
     </div>
 
     <div class="section">
@@ -194,8 +194,8 @@
           </tr>
           <tr>
             <td>Runtime/source commits</td>
-            <td>Root checkout, `origin/main`, and live runtime all report `7156fa2eef` from repo-relative `_build/default/bin/main_eio.exe`.</td>
-            <td>Commit truth is stable for current main. This PR branch is not live yet; acceptance still requires merge/rebuild/restart.</td>
+            <td>Local root checkout and live runtime report `7156fa2eef` from repo-relative `_build/default/bin/main_eio.exe`; `origin/main` has advanced to `0db23b44f8` and this PR branch is rebased on that base.</td>
+            <td>Commit truth is stable for the running binary, but the running binary is not the latest remote main. This PR branch is not live yet; acceptance still requires merge/rebuild/restart.</td>
           </tr>
           <tr>
             <td>`masc_keeper_sandbox_status(include_preflight=true)`</td>
@@ -214,13 +214,13 @@
           </tr>
           <tr>
             <td>`/api/v1/dashboard/telemetry/summary`</td>
-            <td>`tool_call_io` gaps 3 / active 0 / `ok`; `trajectory_tool_call` gaps 2 / active 0 / `ok`; `execution_receipt` gaps 1 / active 0 / `ok`; `tool_usage` gaps 9 / active 0 / `stale` due to freshness.</td>
+            <td>`tool_call_io` gaps 3 / active 0 / `ok`; `trajectory_tool_call` gaps 2 / active 0 / `ok`; `execution_receipt` gaps 1 / active 0 / `ok`; `keeper_metric`, `oas_event`, and `tool_metric` are `ok`; `agent_event` and `tool_usage` are `stale` due to freshness.</td>
             <td>Active-gap patch is live. Remaining tool_usage red is freshness, not unrecovered append gap.</td>
           </tr>
           <tr>
             <td>`/api/v1/models/metrics`</td>
-            <td>`total_entries=0`, `total_error_entries=0`, `models=[]`.</td>
-            <td>No current metrics row proves provider/model identity at keeper boundary.</td>
+            <td>`total_entries=216`, `total_error_entries=11`, two runtime lanes: `runtime_lane_20ee7b46c6a8` provider `null` / coverage `partial`, and `runtime_lane_c52cf484f37a` provider `null` / coverage `none`.</td>
+            <td>Rows exist, but no current metrics row proves provider identity at keeper boundary.</td>
           </tr>
           <tr>
             <td>`masc_keeper_persona_audit(include_ok=false)`</td>
@@ -231,12 +231,12 @@
       </table>
       <h3>[근거]</h3>
       <ul>
-        <li>Command: `curl -fsS 'http://127.0.0.1:8935/health?full=1'`; checked 2026-06-01 21:46 KST; confidence High for live health, Medium for final acceptance because this PR branch is not live until merge/rebuild/restart.</li>
+        <li>Command: `curl -fsS 'http://127.0.0.1:8935/health?full=1'`; checked 2026-06-01 22:18 KST; confidence High for live health, Medium for final acceptance because this PR branch is not live until merge/rebuild/restart.</li>
         <li>Command: `masc_keeper_sandbox_status(include_preflight=true)`; checked 2026-06-01 16:54 KST; confidence High for that surface, Medium overall because other surfaces disagree.</li>
         <li>Command: `masc_keeper_status echo/analyst`; checked 2026-06-01 16:54 KST; confidence High for receipt/status payload, Medium overall because runtime restarted during audit.</li>
-        <li>Command: `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/telemetry/summary'`; checked 2026-06-01 21:46 KST; confidence High for telemetry source health.</li>
-        <li>Command: `curl -fsS 'http://127.0.0.1:8935/api/v1/models/metrics'`; checked 2026-06-01 21:46 KST; confidence High for metrics payload, Medium for provider identity because no current rows exist.</li>
-        <li>Command: `git fetch origin main`, `git rev-parse --short=10 HEAD`, `git rev-parse --short=10 origin/main`; checked 2026-06-01 21:46 KST; confidence High for root/source commit.</li>
+        <li>Command: `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/telemetry/summary'`; checked 2026-06-01 22:11 KST; confidence High for telemetry source health.</li>
+        <li>Command: `curl -fsS 'http://127.0.0.1:8935/api/v1/models/metrics'`; checked 2026-06-01 22:18 KST; confidence High for metrics payload, Medium for provider identity because current rows still have null provider.</li>
+        <li>Command: `git rev-parse --short=10 origin/main`, `git -C /Users/dancer/me/workspace/yousleepwhen/masc-mcp rev-parse --short=12 HEAD`, and `/health?full=1.build`; checked 2026-06-01 22:18 KST; confidence High for source and live commit.</li>
       </ul>
     </div>
 
@@ -385,7 +385,7 @@
           <tr>
             <td>F0</td>
             <td><span class="badge warn">P1</span></td>
-            <td>Runtime/source drift is cleared for current main (`7156fa2eef`), but this PR branch is not deployed yet.</td>
+            <td>Runtime/source drift is cleared for the running local root checkout (`7156fa2eef`), but remote `origin/main` is newer (`0db23b44f8`) and this PR branch is not deployed yet.</td>
             <td>After this PR merges, rebuild/restart once and require `/health?full=1.build.commit` to include the merge commit.</td>
           </tr>
           <tr>

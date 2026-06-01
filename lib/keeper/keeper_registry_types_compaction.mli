@@ -32,12 +32,11 @@ val witness_to_compaction_stage : packed_compaction_stage -> compaction_stage
     Used by the [Compaction_transition_violation] [Printexc] printer. *)
 val packed_compaction_stage_label : packed_compaction_stage -> string
 
-(** RFC-0072 Phase 6: typed error for the 3 forbidden compaction-stage
-    transitions (3 idempotent + 3 valid + 3 forbidden = 9 = 3×3). *)
+(** RFC-0072 Phase 6: typed error for forbidden compaction-stage
+    transitions. *)
 type compaction_transition_spec_violation =
   | Accumulating_to_done
   | Done_to_accumulating
-  | Done_to_compacting
 
 val compaction_transition_spec_violation_to_tag
   :  compaction_transition_spec_violation

@@ -215,6 +215,18 @@ let test_apply_compaction_started () =
   check bool "compaction_active" true tr.updated_conditions.compaction_active
 ;;
 
+let test_apply_compaction_started_from_failing_health_lane () =
+  let failing_conds = { running_conditions with heartbeat_healthy = false } in
+  let tr =
+    apply_ok
+      ~current_phase:SM.Failing
+      ~conditions:failing_conds
+      ~event:SM.Compaction_started
+  in
+  check phase_t "Failing -> Compacting" SM.Compacting tr.new_phase;
+  check bool "compaction_active" true tr.updated_conditions.compaction_active
+;;
+
 let test_apply_compaction_completed () =
   let compacting_conds = { running_conditions with compaction_active = true } in
   let tr =
@@ -224,6 +236,20 @@ let test_apply_compaction_completed () =
       ~event:(SM.Compaction_completed { before_tokens = 100000; after_tokens = 50000 })
   in
   check phase_t "Compacting -> Running" SM.Running tr.new_phase;
+  check bool "compaction done" false tr.updated_conditions.compaction_active
+;;
+
+let test_apply_compaction_completed_returns_to_failing_health_lane () =
+  let compacting_conds =
+    { running_conditions with compaction_active = true; heartbeat_healthy = false }
+  in
+  let tr =
+    apply_ok
+      ~current_phase:SM.Compacting
+      ~conditions:compacting_conds
+      ~event:(SM.Compaction_completed { before_tokens = 100000; after_tokens = 50000 })
+  in
+  check phase_t "Compacting -> Failing" SM.Failing tr.new_phase;
   check bool "compaction done" false tr.updated_conditions.compaction_active
 ;;
 
@@ -2575,7 +2601,15 @@ let () =
             test_apply_heartbeat_fail_to_failing
         ; test_case "heartbeat recover" `Quick test_apply_heartbeat_recover
         ; test_case "compaction started" `Quick test_apply_compaction_started
+        ; test_case
+            "compaction started from failing health lane"
+            `Quick
+            test_apply_compaction_started_from_failing_health_lane
         ; test_case "compaction completed" `Quick test_apply_compaction_completed
+        ; test_case
+            "compaction completed returns to failing health lane"
+            `Quick
+            test_apply_compaction_completed_returns_to_failing_health_lane
         ; test_case "handoff lifecycle" `Quick test_apply_handoff_lifecycle
         ; test_case "pause/resume" `Quick test_apply_operator_pause_resume
         ; test_case

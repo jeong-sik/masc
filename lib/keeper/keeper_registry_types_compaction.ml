@@ -51,19 +51,16 @@ let packed_compaction_stage_label : packed_compaction_stage -> string = function
 ;;
 
 (* RFC-0072 Phase 6: typed error for forbidden compaction-stage transitions.
-   One constructor per of the 3 forbidden pairs in the compaction matrix
-   (3 idempotent + 3 valid cross-state + 3 forbidden = 9 = 3×3).  Mirrors
+   One constructor per forbidden pair in the compaction matrix.  Mirrors
    [turn_phase_transition_spec_violation]; smaller because the compaction axis
    has only 3 states. *)
 type compaction_transition_spec_violation =
   | Accumulating_to_done
   | Done_to_accumulating
-  | Done_to_compacting
 
 let compaction_transition_spec_violation_to_tag = function
   | Accumulating_to_done -> "accumulating->done"
   | Done_to_accumulating -> "done->accumulating"
-  | Done_to_compacting -> "done->compacting"
 ;;
 
 (* RFC-0072 Phase 6: typed exception for forbidden compaction transitions.

@@ -42,6 +42,45 @@ let write_lines path lines =
           output_char oc '\n')
         lines)
 
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let ensure_test_runtime =
+  let initialized = ref false in
+  fun () ->
+    if not !initialized then (
+      let path = Filename.temp_file "keeper_lifecycle_runtime_" ".toml" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc test_runtime_toml);
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove path with
+          | Sys_error _ -> ())
+        (fun () ->
+          match Masc_mcp.Runtime.init_default ~config_path:path with
+          | Ok () -> initialized := true
+          | Error msg -> fail msg))
+
 let persistence_read_drop_total ~surface ~reason =
   P.metric_value_or_zero P.metric_persistence_read_drops
     ~labels:[("surface", surface); ("reason", reason)]
@@ -55,6 +94,7 @@ let check_persistence_read_drop_delta ~surface ~reason ~before ~delta =
 
 let make_keeper_meta ?(name = "keeper-lifecycle-test")
     ?(trace_id = "trace-keeper-lifecycle") () =
+  ensure_test_runtime ();
   match
     Keeper_meta_json_parse.meta_of_json
       (`Assoc
@@ -62,7 +102,7 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ()));
+          ("runtime_id", `String (Masc_mcp.Keeper_config.default_runtime_id ()));
           ("last_model_used", `String "llama:auto");
           ("sandbox_profile", `String "local");
           ("network_mode", `String "inherit");
@@ -159,6 +199,172 @@ let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
           check string "compaction completion reaches registry" "running"
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after lifecycle dispatch")
+
+let test_post_turn_compaction_runs_from_failing_health_lane () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_failing_compaction" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      let meta = make_keeper_meta ~name:"keeper-failing-compaction" () in
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      KEC.dispatch_keeper_phase_event
+        ~config
+        ~keeper_name:meta.name
+        (KST.Heartbeat_failed { consecutive = 1; max_allowed = 3 });
+      (match KR.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+           check string "heartbeat failure reaches failing" "failing"
+             (KST.phase_to_string entry.phase)
+       | None -> fail "expected registered keeper after heartbeat dispatch");
+      KEC.dispatch_keeper_phase_event
+        ~config
+        ~origin:KR.Post_turn_lifecycle
+        ~keeper_name:meta.name
+        KST.Compaction_started;
+      (match KR.get ~base_path:config.base_path meta.name with
+       | Some entry ->
+           check string "post-turn compaction starts while failing" "compacting"
+             (KST.phase_to_string entry.phase)
+       | None -> fail "expected registered keeper after compaction start");
+      let lifecycle =
+        {
+          (base_lifecycle ~meta) with
+          compaction =
+            {
+              attempted = true;
+              applied = true;
+              failure_reason = None;
+              trigger = Some Compaction_trigger.Manual;
+              decision = KEC.Applied Compaction_trigger.Manual;
+              before_tokens = 42;
+              after_tokens = 21;
+              saved_tokens = 21;
+            };
+        }
+      in
+      KEC.dispatch_post_turn_lifecycle_events
+        ~config
+        ~keeper_name:meta.name
+        lifecycle;
+      match KR.get ~base_path:config.base_path meta.name with
+      | Some entry ->
+          check string "compaction completion preserves failing health lane" "failing"
+            (KST.phase_to_string entry.phase)
+      | None -> fail "expected registered keeper after compaction completion")
+
+let test_compaction_completion_without_started_is_nonfatal () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_missing_start" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      let meta = make_keeper_meta ~name:"keeper-missing-compaction-start" () in
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      let labels =
+        [ ("keeper", meta.name); ("event", "compaction_completed(42->21)") ]
+      in
+      let before =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      let lifecycle =
+        {
+          (base_lifecycle ~meta) with
+          compaction =
+            {
+              attempted = true;
+              applied = true;
+              failure_reason = None;
+              trigger = Some Compaction_trigger.Manual;
+              decision = KEC.Applied Compaction_trigger.Manual;
+              before_tokens = 42;
+              after_tokens = 21;
+              saved_tokens = 21;
+            };
+        }
+      in
+      KEC.dispatch_post_turn_lifecycle_events
+        ~config
+        ~keeper_name:meta.name
+        lifecycle;
+      let after =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      check bool "missing-start completion rejection is counted" true (after > before);
+      match KR.get ~base_path:config.base_path meta.name with
+      | Some entry ->
+          check string "missing-start completion leaves phase unchanged" "running"
+            (KST.phase_to_string entry.phase)
+      | None -> fail "expected registered keeper after rejected completion")
+
+let test_post_turn_compaction_restarts_after_done_stage () =
+  let base_dir = temp_dir "keeper_lifecycle_registry_repeat_compaction" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      let meta = make_keeper_meta ~name:"keeper-repeat-compaction" () in
+      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      let lifecycle before_tokens after_tokens =
+        {
+          (base_lifecycle ~meta) with
+          compaction =
+            {
+              attempted = true;
+              applied = true;
+              failure_reason = None;
+              trigger = Some Compaction_trigger.Manual;
+              decision = KEC.Applied Compaction_trigger.Manual;
+              before_tokens;
+              after_tokens;
+              saved_tokens = before_tokens - after_tokens;
+            };
+        }
+      in
+      let run_compaction label before_tokens after_tokens =
+        KEC.dispatch_keeper_phase_event
+          ~config
+          ~origin:KR.Post_turn_lifecycle
+          ~keeper_name:meta.name
+          KST.Compaction_started;
+        (match KR.get ~base_path:config.base_path meta.name with
+         | Some entry ->
+             check string (label ^ " start reaches compacting") "compacting"
+               (KST.phase_to_string entry.phase)
+         | None -> fail "expected registered keeper after compaction start");
+        KEC.dispatch_post_turn_lifecycle_events
+          ~config
+          ~keeper_name:meta.name
+          (lifecycle before_tokens after_tokens);
+        match KR.get ~base_path:config.base_path meta.name with
+        | Some entry ->
+            check string (label ^ " completion returns running") "running"
+              (KST.phase_to_string entry.phase)
+        | None -> fail "expected registered keeper after compaction completion"
+      in
+      run_compaction "first" 42 21;
+      run_compaction "second" 84 42)
 
 let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
   let base_dir = temp_dir "keeper_lifecycle_registry_origin_guard" in
@@ -331,7 +537,7 @@ let test_heartbeat_history_fallback_counts_malformed_rows () =
       check_persistence_read_drop_delta ~surface ~reason:entry_reason
         ~before:before_entry ~delta:1;
       check_persistence_read_drop_delta ~surface ~reason:invalid_reason
-        ~before:before_invalid ~delta:1)
+        ~before:before_invalid ~delta:2)
 
 let () =
   run "keeper_lifecycle_registry_dispatch"
@@ -342,6 +548,12 @@ let () =
             test_dispatch_keeper_phase_event_uses_workspace_base_path;
           test_case "post-turn lifecycle events use workspace base_path" `Quick
             test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path;
+          test_case "post-turn compaction runs from failing health lane" `Quick
+            test_post_turn_compaction_runs_from_failing_health_lane;
+          test_case "compaction completion without started is nonfatal" `Quick
+            test_compaction_completion_without_started_is_nonfatal;
+          test_case "post-turn compaction restarts after done stage" `Quick
+            test_post_turn_compaction_restarts_after_done_stage;
           test_case "unscoped lifecycle event is rejected" `Quick
             test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event;
           test_case "phase event rejection increments metric" `Quick

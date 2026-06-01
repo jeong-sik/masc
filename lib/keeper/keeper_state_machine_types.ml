@@ -336,10 +336,13 @@ let can_transition ~from_phase ~to_phase =
   | Running, (Offline | Running | Restarting) -> false
   (* Failing -> Running (recovery) | Crashed (threshold) | Draining (stop)
      | Paused (operator can pause for investigation)
-     | Overflowed (context overflow distinct from generic failure) *)
-  | Failing, (Running | Overflowed | Crashed | Draining | Paused) -> true
+     | Overflowed (context overflow distinct from generic failure)
+     | Compacting (post-turn compaction can run while the keeper remains in
+     the health-failing lane; completion returns to Failing if the health latch
+     is still set). *)
+  | Failing, (Running | Overflowed | Compacting | Crashed | Draining | Paused) -> true
   | ( Failing
-    , (Offline | Failing | Compacting | HandingOff | Stopped | Restarting) ) ->
+    , (Offline | Failing | HandingOff | Stopped | Restarting) ) ->
     false
   (* Overflowed -> Running (operator_clear resolves the overflow in-place)
      | Compacting (auto-recovery, the default next step)

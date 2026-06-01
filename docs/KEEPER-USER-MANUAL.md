@@ -278,10 +278,8 @@ spawn 시 인자로 직접 설정하는 필드.
 | `auto_handoff` | bool | `true` | context 초과 시 자동 handoff | `masc_keeper_up`의 `auto_handoff` 인자 |
 | `handoff_threshold` | float | `0.85` | handoff 트리거 context_ratio | `masc_keeper_up`의 `handoff_threshold` 인자 |
 | `verify` | bool | `false` | 저비용 모델로 action 검증 | `masc_keeper_up`의 `verify` 인자 |
-| `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). 기본 모드의 `docker` 프로필은 git/gh 명령에 대해서만 런타임에 network+credential 마운트를 올릴 수 있다. hard mode에서는 `docker`만 허용된다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
-| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none` (기본 모드의 git/gh dispatch만 `inherit`으로 승격). hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
-| `repo_cli_identity` | string | 없음 | keeper에 바인딩된 repo CLI identity 이름. `.masc/repo-cli-identities/<identity>/gh` bundle을 사용한다. | `keeper.toml` 선언 |
-| `git_identity_mode` | string | `keeper_alias` | git author를 keeper alias로 유지할지, repo CLI identity 기반 author로 결합할지 결정 | `keeper.toml` 선언 |
+| `sandbox_profile` | string | `local` | 실행 샌드박스 프로필 (`local`, `docker`). hard mode에서는 `docker`만 허용된다. | `masc_keeper_up`의 `sandbox_profile` 인자 |
+| `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none`이고 hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
 | `active_goal_ids` | string[] | 없음 | 설정 시 `keeper_task_claim`이 goal-linked task만 claim. scoped pool에 현재 capability로 claim 가능한 task가 없으면 claim을 멈춘다. auto-repair keeper-purpose goal만 전체 claimable task fallback 허용 | `keeper.toml` 선언 |
 
 ### 3.1.1 Sandbox Core V1 사용법
@@ -303,8 +301,8 @@ spawn 시 인자로 직접 설정하는 필드.
 - keeper shell write는 자기 sandbox 안에서만 허용된다. 현재 local/docker backend의 디스크 구현은 `.masc/playground/<keeper>/`이지만 keeper-facing 경로는 `.` / `mind` / `repos`이다.
 - `sandbox_profile=docker`는 keeper identity 전체에 적용된다. `tool_execute`, `tool_read_file`, `tool_edit_file`, `tool_write_file`, `tool_search_files`의 sandboxed read/write 흐름이 Docker로 라우팅된다. 기본은 read-only rootfs, tmpfs `/tmp`, `cap-drop=ALL`, `no-new-privileges`, `pids-limit`, memory limit, private sandbox mount, network=`none`이다.
 - Docker 내부에서 더 자유로운 부트스트랩/설치가 필요하면 `MASC_KEEPER_SANDBOX_RELAX_FS=true`로 rootfs writable + executable `/tmp` 조합을 켤 수 있다. 이 경우에도 host mount 범위, `cap-drop=ALL`, `no-new-privileges`, pids/memory limit은 유지된다. hard mode에서는 이 완화가 거부된다.
-- 기본 모드의 git/gh dispatch: `sandbox_profile=docker`에서 network가 필요한 `git`/`gh` 계열 명령은 `Execute`의 typed `executable`/`argv` 경로로 실행된다. `repo_cli_identity`가 바인딩된 keeper는 `.masc/repo-cli-identities/<identity>/gh`만 사용하고, bundle이 없으면 fail-closed 된다. 바인딩이 없는 keeper는 `.masc/repo-cli-identities/root/gh` root bundle만 fallback으로 사용한다. root bundle도 없으면 fail-closed 된다. operator host `~/.config/gh`, `~/.gitconfig`, `~/.ssh`, `GH_TOKEN`, `GITHUB_TOKEN`, `SSH_AUTH_SOCK`, keychain probe는 keeper credential 경로가 아니다. 그 외 명령은 계속 network=none의 hardened container 또는 turn-scoped `docker exec` runtime으로 실행된다. Docker 라우트 응답에는 `via: "docker"`가 들어오고, git credential dispatch가 켜진 경우 `git_creds_enabled: true`도 함께 들어온다. 비활성화하려면 `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false`.
-- hard mode: `MASC_KEEPER_SANDBOX_HARD_MODE=true`는 `sandbox_profile=docker`, `network_mode=none`, selected repo CLI identity bundle을 강제한다. Keeper별 `repo_cli_identity`가 없으면 root bundle을 사용하고, root bundle도 없으면 startup/validation에서 fail-closed 된다. Docker container는 `git`/`gh` 때문에 bridge/host network로 승격되지 않고, ambient operator credential도 비활성화된다. hard mode 라우트 응답은 `via: "brokered"`를 노출한다.
+- Docker profile은 host credential을 암묵적으로 상속하지 않는다. GitHub/Git 명령도 keeper TOML의 별도 identity 필드가 아니라 현재 tool/sandbox policy와 runtime route의 일반 검증을 따른다.
+- hard mode: `MASC_KEEPER_SANDBOX_HARD_MODE=true`는 `sandbox_profile=docker`, `network_mode=none`을 강제한다. Docker container는 Git/GitHub 작업 때문에 bridge/host network로 승격되지 않고, ambient operator credential도 비활성화된다.
 - hard mode runtime preflight는 Docker `SecurityOptions`에서 `rootless`와 `userns`를 모두 요구한다. 현재 Docker Desktop/rootful daemon처럼 둘 중 하나라도 없으면 keeper startup/runtime validation에서 fail-closed 된다.
 - 기본 sandbox 이미지는 `masc-keeper-sandbox:local`이다. Docker keeper를 올리기 전에 `scripts/build-keeper-sandbox-image.sh`를 실행해 이미지를 만들고, smoke 검증은 `scripts/keeper-sandbox-smoke.sh`를 사용한다.
 - keeper Docker 컨테이너에는 `masc.mcp.component=keeper-sandbox`와 base path hash 라벨이 붙는다. 새 컨테이너 시작 전 같은 base path 범위의 오래된 MASC keeper 컨테이너만 best-effort로 정리한다. 조정값은 `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED`, `MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC`, `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC`이다.
@@ -319,56 +317,13 @@ Docker 사용 여부와 컨테이너 유지 방식은 서로 다른 결정이다
 - `masc_keeper_sandbox_start`로 visible managed container를 미리 띄우면 이후 sandboxed tool call은 그 container/runtime에 붙을 수 있다. 디버깅, 연속 shell 작업, container 상태 관찰이 필요할 때 쓰는 운영 모드다.
 - `masc_keeper_sandbox_status`에서 `sandbox_profile=docker`, `effective_mode=oneshot_or_managed_inherit`, `container_count=0`이면 "Docker keeper지만 현재 prewarmed container는 없고, sandboxed tool call 때 one-shot Docker를 쓴다"는 뜻이다.
 
-### 3.1.2 repo CLI identity 운영 절차
-
-`repo_cli_identity`는 현재 대시보드의 일반 설정 화면에서 수정하는 필드가 아니라 active config root의 `keeper.toml` overlay가 SSOT다. 대시보드에서 찾지 못하면 먼저 active config root를 확인하고 파일을 수정한다.
-
-```bash
-printf '%s\n' "${MASC_CONFIG_DIR:-/path/to/base/.masc/config}"
-```
-
-Keeper가 사용할 identity bundle은 base path 아래에 있어야 한다. 예를 들어 `anyang-keepers`를 쓸 때:
-
-```bash
-test -s /path/to/base/.masc/repo-cli-identities/anyang-keepers/gh/hosts.yml
-```
-
-bundle이 없으면 같은 `GH_CONFIG_DIR`로 login한다. 이 login은 bundle을 생성하기 위한
-operator confirmation 절차이며, readiness/preflight는 GitHub CLI status probe를
-게이트로 삼지 않는다.
-
-```bash
-mkdir -p /path/to/base/.masc/repo-cli-identities/anyang-keepers/gh
-GH_CONFIG_DIR=/path/to/base/.masc/repo-cli-identities/anyang-keepers/gh \
-  gh auth login --hostname github.com --git-protocol https --web
-```
-
-각 keeper의 `<active_config_root>/keepers/<keeper>.toml`에 다음을 둔다.
-
-```toml
-repo_cli_identity = "anyang-keepers"
-git_identity_mode = "repo_cli_identity"
-```
-
-확인 순서:
-
-```bash
-rg -n 'repo_cli_identity|git_identity_mode' <active_config_root>/keepers
-test -s /path/to/base/.masc/repo-cli-identities/anyang-keepers/gh/hosts.yml
-printf 'active_config_root=%s\n' "${MASC_CONFIG_DIR:-/path/to/base/.masc/config}"
-```
-
-Docker keeper의 실제 사용 여부는 keeper가 sandboxed tool 또는 git/gh 계열 `Execute`를 호출할 때 확정된다. 이 경로는 operator host의 `~/.config/gh`, `GH_TOKEN`, `GITHUB_TOKEN`, SSH agent, keychain으로 fallback하지 않는다. selected bundle이 없으면 fail-closed 된다. token 만료/폐기는 별도 preflight probe가 아니라 첫 scoped git/gh 작업의 실패로 드러난다.
-
-hard mode 예시:
+### 3.1.2 hard mode 예시
 
 ```toml
 [keeper]
 persona_name = "analyst"
 sandbox_profile = "docker"
 network_mode = "none"
-repo_cli_identity = "anyang-keepers"
-git_identity_mode = "repo_cli_identity"
 ```
 
 ```bash
@@ -376,9 +331,9 @@ export MASC_KEEPER_SANDBOX_HARD_MODE=true
 scripts/keeper-sandbox-smoke.sh
 ```
 
-근거(확인일: 2026-04-23, 신뢰도 High): Docker rootless mode는 Docker daemon과 container를 non-root user namespace에서 실행한다는 공식 Docker 문서 기준이다. Docker userns-remap은 container root를 host의 unprivileged UID range로 remap한다는 공식 Docker 문서 기준이다. GitHub CLI `GH_CONFIG_DIR`는 gh config 저장 디렉터리를 지정한다는 공식 GitHub CLI manual 기준이다. gVisor/runsc는 Docker/Kubernetes와 통합되는 OCI runtime으로 별도 backend 후보이며, hard mode V1에는 아직 구현하지 않았다.
+근거(확인일: 2026-04-23, 신뢰도 High): Docker rootless mode는 Docker daemon과 container를 non-root user namespace에서 실행한다는 공식 Docker 문서 기준이다. Docker userns-remap은 container root를 host의 unprivileged UID range로 remap한다는 공식 Docker 문서 기준이다. gVisor/runsc는 Docker/Kubernetes와 통합되는 OCI runtime으로 별도 backend 후보이며, hard mode V1에는 아직 구현하지 않았다.
 
-References: https://docs.docker.com/engine/security/rootless/ , https://docs.docker.com/engine/security/userns-remap/ , https://cli.github.com/manual/gh_help_environment , https://gvisor.dev/docs/
+References: https://docs.docker.com/engine/security/rootless/ , https://docs.docker.com/engine/security/userns-remap/ , https://gvisor.dev/docs/
 
 guardrail:
 
@@ -875,15 +830,14 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 
 별도 keepalive 등록 레지스트리는 없다. keeper는 durable always-on으로 취급되며,
 멈춤은 설정값이 아니라 `paused` 또는 `keeper_down` 상태 전이로 표현한다.
-현재 구현에는 compatibility 이유로 authored 필드가 `.masc/keepers/<name>.json`에
-materialize될 수 있지만, 정식 edit surface는 `profile.json`과 `keeper.toml`이다.
+정식 edit surface는 `profile.json`과 `keeper.toml`이다.
 
 `keeper.toml`의 **전체 스펙 필드 목록**은
 [`docs/KEEPER-FILE-MODEL.md` §2 Keeper Declaration](./KEEPER-FILE-MODEL.md#2-keeper-declaration)을 참조한다. 요약:
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
-- **Overlay fields**: `goal`, `tool_access`, `runtime_id`, `sandbox_profile`, `network_mode`, `repo_cli_identity`, `git_identity_mode`, `active_goal_ids` 등 배치별 override 전용.
-- **Allowed value sets**: `tool_access`는 tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `git_identity_mode ∈ {keeper_alias, repo_cli_identity}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `keeper_runtime.toml`에 `<name>_models` 키로 존재해야 함.
+- **Overlay fields**: `goal`, `tool_access`, `runtime_id`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용.
+- **Allowed value sets**: `tool_access`는 tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `keeper_runtime.toml`에 `<name>_models` 키로 존재해야 함.
 - **Removed / hard-rejected**: `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 

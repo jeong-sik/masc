@@ -60,25 +60,19 @@ let input_with_cwd cwd = function
   | Agent_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
     Agent_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
 
-let resolve_typed_git_cwd ~config ~meta ~cwd ~cmd ~mode input =
+let typed_input_effective_stages ~mode input =
   match Agent_tool_execute_typed_input.to_shell_ir_unvalidated ~mode input with
-  | Error _ -> cwd, None
+  | Error _ -> []
   | Ok ir ->
-    let stages = Agent_tool_execute_command_semantics.effective_stages_of_ir ir in
+    Agent_tool_execute_command_semantics.effective_stages_of_ir ir
+
+let resolve_typed_git_cwd_of_stages ~config ~meta ~cwd ~cmd stages =
     Agent_tool_execute_command_semantics.resolve_sandbox_root_git_cwd_of_stages
       ~config
       ~meta
       ~cwd
       ~cmd
       stages
-
-let is_git_command cmd =
-  let trimmed = String.trim cmd in
-  String.starts_with ~prefix:"git " trimmed
-  || String.starts_with ~prefix:"gh " trimmed
-  || String.equal trimmed "git"
-  || String.equal trimmed "gh"
-;;
 
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -107,8 +101,14 @@ let handle_tool_execute_typed
           then Agent_tool_execute_typed_input.Dev_full
           else Agent_tool_execute_typed_input.Readonly
         in
+        let effective_stages = typed_input_effective_stages ~mode input in
         let cwd, root_git_cwd_error =
-          resolve_typed_git_cwd ~config ~meta ~cwd ~cmd ~mode input
+          resolve_typed_git_cwd_of_stages
+            ~config
+            ~meta
+            ~cwd
+            ~cmd
+            effective_stages
         in
         let input = input_with_cwd cwd input in
         let in_playground = Agent_tool_execute_path.in_playground ~root ~cwd ~meta in
@@ -129,7 +129,9 @@ let handle_tool_execute_typed
               | Some fallback when in_playground -> Ok fallback
               | Some _ | None ->
                 let effective_factory =
-                  if is_git_command cmd
+                  if
+                    Agent_tool_execute_command_semantics.stages_target_repo_commands
+                      effective_stages
                   then (match turn_sandbox_factory_git with
                     | Some _ as f -> f
                     | None -> turn_sandbox_factory)

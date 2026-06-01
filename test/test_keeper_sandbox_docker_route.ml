@@ -228,6 +228,21 @@ let with_turn_sandbox_factory ~config ~meta f =
   Fun.protect ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory) @@ fun () ->
   f factory
 
+let with_turn_sandbox_factories ~config ~meta f =
+  let generic_factory = Keeper_sandbox_factory.create ~config ~meta () in
+  let git_factory =
+    Keeper_sandbox_factory.create
+      ~config
+      ~meta
+      ~credential_mounts_enabled:true
+      ()
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_sandbox_factory.cleanup generic_factory;
+      Keeper_sandbox_factory.cleanup git_factory)
+  @@ fun () -> f ~generic_factory ~git_factory
+
 let setup_two_docker_keepers f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
@@ -1217,6 +1232,71 @@ let test_execute_git_push_routes_through_git_creds_docker () =
   Alcotest.(check bool) "generic typed push does not mount repo CLI identity bundle" false
     (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
 
+let test_execute_env_wrapped_git_uses_git_creds_factory () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factories ~config ~meta @@ fun ~generic_factory ~git_factory ->
+  let raw =
+    Agent_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:(Some generic_factory)
+      ~turn_sandbox_factory_git:(Some git_factory)
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (tool_execute_typed_exec_args ~cwd:repo "env"
+           ~argv:[ "git"; "status" ])
+      ()
+  in
+  Alcotest.(check (option bool)) "env git succeeds via fake docker" (Some true)
+    (parse_bool_field raw "ok");
+  let log = read_file log_path in
+  let root_repo_cli_dir =
+    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
+  in
+  Alcotest.(check bool) "env-wrapped git uses credentialed factory" true
+    (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
+
+let test_execute_pipeline_gh_uses_git_creds_factory () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_turn_sandbox_factories ~config ~meta @@ fun ~generic_factory ~git_factory ->
+  let raw =
+    Agent_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:(Some generic_factory)
+      ~turn_sandbox_factory_git:(Some git_factory)
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (tool_execute_typed_pipeline_args_of
+           ~cwd:repo
+           [ "printf", [ "{}" ]; "gh", [ "api"; "user" ] ])
+      ()
+  in
+  Alcotest.(check (option bool)) "pipeline gh succeeds via fake docker" (Some true)
+    (parse_bool_field raw "ok");
+  let log = read_file log_path in
+  let root_repo_cli_dir =
+    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
+  in
+  Alcotest.(check bool) "pipeline gh uses credentialed factory" true
+    (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
+
 let test_tool_search_files_repo_review_is_unsupported () =
   with_tool_policy_config @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -1528,6 +1608,48 @@ let test_sandbox_root_git_c_missing_target_keeps_execution_cwd () =
       "error identifies missing git -C target"
       true
       (contains_substring msg "git -C target must be an existing directory")
+
+let test_sandbox_root_git_c_repeated_missing_final_target () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  let cwd, error =
+    resolve_sandbox_root_git_cwd_string
+      ~config
+      ~meta
+      ~cwd:playground
+      ~cmd:"git -C repos/masc-mcp -C .worktrees/missing status"
+  in
+  Alcotest.(check string) "execution cwd remains sandbox root" playground cwd;
+  match error with
+  | None -> Alcotest.fail "expected repeated git -C final target error"
+  | Some msg ->
+    Alcotest.(check bool)
+      "error identifies repeated git -C final target"
+      true
+      (contains_substring msg "repos/masc-mcp/.worktrees/missing")
+
+let test_sandbox_root_git_subcommand_c_is_not_cwd () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  let cwd, error =
+    resolve_sandbox_root_git_cwd_string
+      ~config
+      ~meta
+      ~cwd:playground
+      ~cmd:"git commit -C HEAD"
+  in
+  let repo =
+    Keeper_alerting_path.normalize_path_for_check repo
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  Alcotest.(check string) "subcommand -C keeps single-repo auto cwd" repo cwd;
+  Alcotest.(check (option string)) "subcommand -C is not a cwd preflight" None error
 
 let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2127,6 +2249,12 @@ let () =
             "docker keeper git push routes through git-creds docker"
             `Quick test_execute_git_push_routes_through_git_creds_docker;
           Alcotest.test_case
+            "docker Execute env git uses git-creds factory"
+            `Quick test_execute_env_wrapped_git_uses_git_creds_factory;
+          Alcotest.test_case
+            "docker Execute pipeline gh uses git-creds factory"
+            `Quick test_execute_pipeline_gh_uses_git_creds_factory;
+          Alcotest.test_case
             "tool_search_files repo review is unsupported"
             `Quick test_tool_search_files_repo_review_is_unsupported;
           Alcotest.test_case
@@ -2243,6 +2371,14 @@ let () =
             "sandbox-root git -C missing target keeps execution cwd"
             `Quick
             test_sandbox_root_git_c_missing_target_keeps_execution_cwd;
+          Alcotest.test_case
+            "sandbox-root repeated git -C validates final target"
+            `Quick
+            test_sandbox_root_git_c_repeated_missing_final_target;
+          Alcotest.test_case
+            "sandbox-root git subcommand -C is not cwd"
+            `Quick
+            test_sandbox_root_git_subcommand_c_is_not_cwd;
           Alcotest.test_case
             "sandbox-root git with multiple repos gives cwd correction"
             `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;

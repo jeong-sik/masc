@@ -1,5 +1,15 @@
 open Masc_mcp
 
+let contains_substring haystack needle =
+  let len = String.length needle in
+  let n = String.length haystack in
+  let rec loop i =
+    if i + len > n then false
+    else if String.sub haystack i len = needle then true
+    else loop (i + 1)
+  in
+  loop 0
+
 let () =
   (* Test 1: Seed round-trip — minimal JSON should parse + serialize *)
   let seed = Yojson.Safe.from_string {|
@@ -42,6 +52,16 @@ let () =
      in
      if not (String.starts_with ~prefix msg) then begin
        Printf.printf "FAIL test2: unexpected rejection: %s\n" msg; exit 1
+     end;
+     if not (contains_substring msg ": ") then begin
+       Printf.printf "FAIL test2: rejection did not include field list: %s\n" msg;
+       exit 1
+     end;
+     if not (contains_substring msg "compaction_profile") then begin
+       Printf.printf
+         "FAIL test2: rejection did not mention compaction_profile: %s\n"
+         msg;
+       exit 1
      end;
      Printf.printf "test2: PASS — config fields rejected\n");
 

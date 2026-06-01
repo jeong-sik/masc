@@ -100,7 +100,7 @@ let () =
   let few = some_band (Eval_variance.band_of_scores [ 0.7; 0.8 ]) in
   check "n=2 < min_runs=5 -> Too_few_runs"
     (match Eval_variance.check_gate Eval_variance.default_gate few with
-     | Too_few_runs { got = 2; need = 5 } -> true
+     | Eval_variance.Too_few_runs { got = 2; need = 5 } -> true
      | _ -> false);
   let tight = some_band (Eval_variance.band_of_scores [ 0.80; 0.80; 0.81; 0.79; 0.80 ]) in
   check "tight band, n=5 -> Gate_ok"
@@ -108,7 +108,7 @@ let () =
   let wide_gate = { Eval_variance.min_runs = 5; max_ci_width = 0.001 } in
   check "tight band vs strict ci gate -> Ci_too_wide"
     (match Eval_variance.check_gate wide_gate tight with
-     | Ci_too_wide _ -> true
+     | Eval_variance.Ci_too_wide _ -> true
      | _ -> false);
 
   print_endline "json";

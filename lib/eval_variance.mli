@@ -20,7 +20,7 @@
 
 type variance_band = {
   mean : float;       (** point estimate (mean score, or proportion) *)
-  std : float;        (** sample standard deviation (n-1 denominator) *)
+  std : float;        (** sample SD for score samples; Bernoulli SD for proportions *)
   n : int;            (** number of samples / trials *)
   stderr : float;     (** standard error of the mean = std / sqrt n *)
   ci_low : float;     (** lower bound of the [confidence] interval *)

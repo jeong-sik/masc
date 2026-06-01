@@ -101,6 +101,9 @@ type eval_result = {
   mean_score : float;       (** Mean weighted score across runs *)
   consistency : float;      (** Std dev of scores (lower = more consistent) *)
   total_cost_usd : float;   (** Sum of all run costs *)
+  ci95_low : float;         (** Lower bound of 95% confidence interval for mean_score *)
+  ci95_high : float;        (** Upper bound of 95% confidence interval for mean_score *)
+  min_runs_met : bool;      (** Whether minimum runs (5) requirement is satisfied *)
 }
 
 type eval_suite_result = {
@@ -230,12 +233,19 @@ let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : ev
   let mean = if n = 0 then 0.0
     else List.fold_left (+.) 0.0 scores /. float_of_int n in
   let total_cost = List.fold_left (fun a (r : eval_run) -> a +. r.total_cost_usd) 0.0 runs in
+  let std_dev = score_std_dev scores in
+  let ci95_margin = if n > 1 then 1.96 *. std_dev /. sqrt (float_of_int n) else 0.0 in
+  let ci95_low = Float.max 0.0 (mean -. ci95_margin) in
+  let ci95_high = Float.min 1.0 (mean +. ci95_margin) in
   { scenario;
     runs;
     pass_at_k = compute_pass_at_k ~k ~n ~c;
     mean_score = mean;
-    consistency = score_std_dev scores;
+    consistency = std_dev;
     total_cost_usd = total_cost;
+    ci95_low;
+    ci95_high;
+    min_runs_met = n >= 5;
   }
 
 (* ================================================================ *)
@@ -283,6 +293,9 @@ let eval_result_to_json (r : eval_result) : Yojson.Safe.t =
     ("consistency", `Float r.consistency);
     ("total_cost_usd", `Float r.total_cost_usd);
     ("num_runs", `Int (List.length r.runs));
+    ("ci95_low", `Float r.ci95_low);
+    ("ci95_high", `Float r.ci95_high);
+    ("min_runs_met", `Bool r.min_runs_met);
     ("runs", `List (List.map eval_run_to_json r.runs));
   ]
 

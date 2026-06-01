@@ -130,16 +130,20 @@ let test_codec_roundtrip_parametric_actions () =
   action_roundtrip "Custom:colon-in-name"
     (Audit_log.Custom "foo:bar") "custom:foo:bar"
 
-let test_codec_unknown_falls_back_to_custom () =
-  (* Unknown bare strings fall to [Custom s]; re-encoding prefixes
-     with "custom:" — this is by design, the wire format is lossy
-     for unrecognised action tags. *)
+let check_unknown label expected = function
+  | Audit_log.Unknown raw -> check string label expected raw
+  | action ->
+      failf "%s decoded as %s" label (Audit_log.action_to_string action)
+
+let test_codec_unknown_preserves_wire () =
   let decoded = Audit_log.string_to_action "future_action" in
-  check string "unknown bare → Custom (re-encoded)"
-    "custom:future_action" (Audit_log.action_to_string decoded);
+  check_unknown "unknown bare" "future_action" decoded;
+  check string "unknown bare re-encoded" "future_action"
+    (Audit_log.action_to_string decoded);
   let decoded_tagged = Audit_log.string_to_action "unknown_tag:payload" in
-  check string "unknown tagged → Custom (re-encoded)"
-    "custom:unknown_tag:payload" (Audit_log.action_to_string decoded_tagged)
+  check_unknown "unknown tagged" "unknown_tag:payload" decoded_tagged;
+  check string "unknown tagged re-encoded" "unknown_tag:payload"
+    (Audit_log.action_to_string decoded_tagged)
 
 let test_codec_empty_payload () =
   (* Edge: colon at end means empty payload *)
@@ -164,8 +168,8 @@ let () =
             test_codec_roundtrip_simple_actions;
           test_case "parametric actions round-trip" `Quick
             test_codec_roundtrip_parametric_actions;
-          test_case "unknown falls back to Custom" `Quick
-            test_codec_unknown_falls_back_to_custom;
+          test_case "unknown preserves wire" `Quick
+            test_codec_unknown_preserves_wire;
           test_case "empty payload edge case" `Quick
             test_codec_empty_payload;
         ] );

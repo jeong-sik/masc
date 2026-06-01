@@ -1,7 +1,7 @@
-(** Tool_shard_types_schemas_search_files — [search_files_tools]
-    tool_search_files schema.
+(** Tool_shard_types_schemas_search_files — [search_files_tools] tool_search_files
+    schema.
 
-    [SearchFiles] is a repo inspection capability, not a shell capability. *)
+    [Grep] is a repo inspection capability, not a shell capability. *)
 
 open Tool_shard_types_enum_mirrors
 

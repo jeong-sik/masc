@@ -44,13 +44,13 @@ let tool_features =
     };
     {
       id = "search_files_tools";
-      label = "SearchFiles tools";
+      label = "Grep tools";
       required_tools = [
         "tool_search_files";
         "tool_execute";
       ];
       next_action =
-        "Run SearchFiles and Execute probes under the keeper sandbox policy.";
+        "Run Grep and Execute probes under the keeper sandbox policy.";
     };
     {
       id = "library_tools";

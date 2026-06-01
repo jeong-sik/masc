@@ -57,6 +57,7 @@ type action =
   | SearchRefinement
   | GovernanceDecision of governance_audit_decision
   | Custom of string
+  | Unknown of string
 [@@deriving tla]
 
 type audit_entry = {
@@ -76,12 +77,13 @@ type audit_entry = {
 val action_to_string : action -> string
 (** Stable serialisation; round-tripped by {!string_to_action}. The
     parametric variants ([ToolCall] / [GovernanceDecision] /
-    [Custom]) are encoded as ["<tag>:<arg>"]. *)
+    [Custom]) are encoded as ["<tag>:<arg>"]. Unknown wire strings
+    round-trip through [Unknown] without being coerced to [Custom]. *)
 
 val string_to_action : string -> action
-(** Decode a wire-format action string.  Unrecognised tags fall
-    through to [Custom] to maintain forward compatibility with
-    future action variants. *)
+(** Decode a wire-format action string. Unrecognised tags return
+    [Unknown] so callers can distinguish future action variants from
+    explicit [Custom] events. *)
 
 val governance_audit_decision_to_string :
   governance_audit_decision -> string

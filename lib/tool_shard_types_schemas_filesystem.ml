@@ -9,7 +9,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
          relative to your playground — use 'repos/X/lib/foo.ml' not \
          '.masc/playground/your-name/repos/X/lib/foo.ml'. Good: path='lib/foo.ml', \
          path='repos/masc-mcp/lib/workspace.ml'. Bad: path=''. For multi-file search, use \
-         SearchFiles."
+         Grep."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

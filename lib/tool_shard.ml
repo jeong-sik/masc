@@ -92,7 +92,7 @@ let shard_search_files : shard =
   ; tools = search_files_tools
   ; read_only_tools = [ "tool_search_files" ]
   ; removable = true
-  ; description = "SearchFiles: structured repo inspection"
+  ; description = "Grep: structured repo inspection"
   }
 ;;
 

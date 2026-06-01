@@ -60,7 +60,7 @@ val shard_filesystem : shard
 (** File I/O: read-only inspection. *)
 
 val shard_search_files : shard
-(** SearchFiles structured repo inspection access. *)
+(** Grep structured repo inspection access. *)
 
 (** {1 Lookup} *)
 

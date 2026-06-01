@@ -1361,7 +1361,7 @@ let () = test "handle_claim_next_excludes_scope_blocked_task" (fun () ->
     Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("title", `String "Next eligible") ])
   in
-  Tool_task.register_scope_blocked_task_id ctx.config "task-001";
+  Tool_task.register_scope_blocked_task_id ctx.config ~task_id:"task-001";
   let result =
     Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [])
   in
@@ -1376,7 +1376,7 @@ let () = test "scope_blocked_task_ids_expire" (fun () ->
   Tool_task.register_scope_blocked_task_id
     ~now:(Time_compat.now () -. 3600.)
     ctx.config
-    "task-001";
+    ~task_id:"task-001";
   let ids = Tool_task.scope_blocked_task_ids ctx.config in
   if List.mem "task-001" ids
   then failwith "expected expired scope-blocked task id to be pruned"
@@ -1384,7 +1384,9 @@ let () = test "scope_blocked_task_ids_expire" (fun () ->
 
 let () = test "scope_blocked_task_ids_are_workspace_scoped" (fun () ->
   let blocked_ctx = make_test_ctx_with_agent "blocked-agent" in
-  Tool_task.register_scope_blocked_task_id blocked_ctx.config "task-001";
+  Tool_task.register_scope_blocked_task_id
+    blocked_ctx.config
+    ~task_id:"task-001";
   let claim_ctx = make_test_ctx_with_agent "claim-agent" in
   let _ =
     Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 claim_ctx

@@ -75,7 +75,8 @@ val build_verdict_sse_payload :
 (** F4: Register a task ID as scope-blocked by a workflow rejection.
     [handle_claim_next] excludes these IDs from the next claim cycle.
     Entries expire with the shared workflow scope-block TTL. *)
-val register_scope_blocked_task_id : ?now:float -> Workspace.config -> string -> unit
+val register_scope_blocked_task_id :
+  ?now:float -> Workspace.config -> task_id:string -> unit
 
 (** F4: Return currently scope-blocked task IDs (non-expired). *)
 val scope_blocked_task_ids : Workspace.config -> string list

@@ -80,7 +80,7 @@ let test_public_alias_guidance_prefers_visible_edit_alias () =
   let expected =
     Some
       "tool_edit_file is an internal keeper implementation tool name, not a \
-       model-facing tool. Use EditFile instead."
+       model-facing tool. Use Edit instead."
   in
   check
     (option string)
@@ -265,7 +265,7 @@ let () =
             `Quick
             test_public_alias_guidance_ignores_public_execute
         ; test_case
-            "internal edit prefers visible EditFile alias"
+            "internal edit prefers visible Edit alias"
             `Quick
             test_public_alias_guidance_prefers_visible_edit_alias
         ; test_case

@@ -347,7 +347,9 @@ let prepare_agent_setup
     "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
-  let allowed_exec_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let policy_allowed_tool_names =
+    Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta
+  in
   (* Descriptor-backed public names are the LLM-visible names; internal
      counterparts are implementation details.
 
@@ -363,27 +365,28 @@ let prepare_agent_setup
     |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   (* Only include a public name when its descriptor internal target is
-     itself in [allowed_exec_names]. Otherwise the public name (e.g. "Execute")
+     itself in [policy_allowed_tool_names]. Otherwise the public name (e.g. "Execute")
      could let the LLM invoke a tool whose internal handler the current
      keeper/preset has explicitly excluded — the descriptor would dispatch to
      a registered-but-disallowed tool. See PR #14574 review. *)
   let descriptor_public_names =
     Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names
-      allowed_exec_names
+      policy_allowed_tool_names
   in
   (* Now strip the descriptor internal names from the LLM-visible surface,
      after [descriptor_public_names] has been computed. *)
-  let allowed_exec_names =
+  let policy_allowed_tool_names =
     List.filter
       (fun name -> not (List.mem name descriptor_internal_names))
-      allowed_exec_names
+      policy_allowed_tool_names
   in
-  let allowed_exec_names_with_public_descriptors =
-    allowed_exec_names @ descriptor_public_names
+  let policy_allowed_tool_names_with_public_descriptors =
+    policy_allowed_tool_names @ descriptor_public_names
   in
-  let allowed_exec_set =
+  let policy_allowed_tool_set =
     let base =
-      Keeper_tool_policy.tool_name_set allowed_exec_names_with_public_descriptors
+      Keeper_tool_policy.tool_name_set
+        policy_allowed_tool_names_with_public_descriptors
     in
     Keeper_tool_policy.StringSet.union
       base
@@ -393,7 +396,7 @@ let prepare_agent_setup
     Agent_tool_descriptor_resolution.public_names_for_internal internal_name
     |> List.find_opt (fun public_name ->
       Keeper_tool_policy.StringSet.mem public_name universe_set
-      && Keeper_tool_policy.StringSet.mem public_name allowed_exec_set)
+      && Keeper_tool_policy.StringSet.mem public_name policy_allowed_tool_set)
   in
   (* Receipt refs: written sequentially after OAS execution, kept as refs
      because the facade (keeper_agent_run.ml) writes them post-run. *)
@@ -449,28 +452,28 @@ let prepare_agent_setup
   in
   let visible_policy_name name =
     (* Preserve names that are already valid public surface entries.
-       tool_edit_file has two public aliases (EditFile, WriteFile) with different
-       schemas; round-tripping through public_name_for_internal always
-       picks EditFile, so any WriteFile entry would be coerced to Edit and then
+       tool_edit_file and tool_write_file have distinct public aliases
+       (Edit, Write); round-tripping through public_name_for_internal always
+       picks one descriptor, so a Write entry could be coerced to Edit and then
        deduped. Only canonicalize names that are not themselves valid
        public entries (e.g., internal names like tool_edit_file, or
        unrecognized inputs). *)
     if Keeper_tool_policy.StringSet.mem name universe_set
-       && Keeper_tool_policy.StringSet.mem name allowed_exec_set
+       && Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set
     then name
     else (
       let canonical = Keeper_tool_resolution.canonical_tool_name name in
       match Keeper_tool_name_projection.public_alias_for_internal canonical with
       | Some public
         when Keeper_tool_policy.StringSet.mem public universe_set
-             && Keeper_tool_policy.StringSet.mem public allowed_exec_set ->
+             && Keeper_tool_policy.StringSet.mem public policy_allowed_tool_set ->
         public
       | _ -> name)
   in
   let visible_policy_name_opt name =
     let name = visible_policy_name name in
     if Keeper_tool_policy.StringSet.mem name universe_set
-       && Keeper_tool_policy.StringSet.mem name allowed_exec_set
+       && Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set
     then Some name
     else allowed_public_name_for_internal name
   in
@@ -486,7 +489,7 @@ let prepare_agent_setup
         (fun n (validated, dropped_names) ->
            if
              Keeper_tool_policy.StringSet.mem n universe_set
-             && Keeper_tool_policy.StringSet.mem n allowed_exec_set
+             && Keeper_tool_policy.StringSet.mem n policy_allowed_tool_set
            then n :: validated, dropped_names
            else
              match allowed_public_name_for_internal n with
@@ -567,7 +570,8 @@ let prepare_agent_setup
     in
     let core =
       Agent_tool_dispatch_runtime.effective_core_tools ()
-      |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
+      |> List.filter (fun name ->
+        Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set)
     in
     let discovered =
       Keeper_discovered_tools.active_names acc.discovered ~turn
@@ -734,7 +738,7 @@ let prepare_agent_setup
       List.length
         (List.filter (fun n -> not (List.mem n deterministic_floor_set)) llm_selected)
     in
-    let all_allowed =
+    let turn_visible_tool_names =
       Agent_sdk.Tool_op.apply
         (Agent_sdk.Tool_op.compose
            [ Agent_sdk.Tool_op.Replace_with merged; acc.tool_overlay ])
@@ -748,15 +752,17 @@ let prepare_agent_setup
     let per_call_turn = turn - start_turn_count in
     let is_last_turn = per_call_turn >= max_turns in
     let is_warning_zone = per_call_turn >= max_turns - 1 in
-    let all_allowed, tool_surface_fallback_used =
-      if all_allowed = []
+    let turn_visible_tool_names, tool_surface_fallback_used =
+      if turn_visible_tool_names = []
       then (
-        let fallback_allowed = fallback_tool_surface ~turn in
-        if fallback_allowed <> [] then fallback_allowed, true else all_allowed, false)
-      else all_allowed, false
+        let fallback_visible_tool_names = fallback_tool_surface ~turn in
+        if fallback_visible_tool_names <> []
+        then fallback_visible_tool_names, true
+        else turn_visible_tool_names, false)
+      else turn_visible_tool_names, false
     in
     let last_turn_safe = Keeper_tool_policy.last_turn_safe_tool_names () in
-    (* Mirror allowed_exec_names_with_public_descriptors: only include a public name
+    (* Mirror policy_allowed_tool_names_with_public_descriptors: only include a public name
        in the last-turn-safe set when its routed internal handler is also
        last-turn-safe. Otherwise the public name could re-introduce a tool
        the policy explicitly excluded from the final turn. PR #14574. *)
@@ -765,13 +771,13 @@ let prepare_agent_setup
         last_turn_safe
     in
     let safe_last_turn_tools = last_turn_safe @ descriptor_safe_public_names in
-    let all_allowed =
+    let turn_visible_tool_names =
       if is_last_turn && required_tool_names = []
       then
         Agent_sdk.Tool_op.apply
           (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
-          all_allowed
-      else all_allowed
+          turn_visible_tool_names
+      else turn_visible_tool_names
     in
     let passive_streak =
       Keeper_passive_loop_detector.current_streak ~keeper_name:meta.name
@@ -781,12 +787,12 @@ let prepare_agent_setup
       Keeper_metrics.(to_string PassiveLoopStreak)
       ~labels:[ "keeper", meta.name ]
       (float_of_int passive_streak);
-    let all_allowed =
+    let turn_visible_tool_names =
       Keeper_tool_selection.contract_enforcement_filter
         ~passive_streak
         ~streak_threshold
         ~actionable_signal
-        all_allowed
+        turn_visible_tool_names
     in
     if passive_streak >= streak_threshold && actionable_signal
     then
@@ -800,16 +806,16 @@ let prepare_agent_setup
       || tool_gate_requested_for_turn
            ~current_tool_choice
            ~is_last_turn
-           ~allowed_tool_names:all_allowed
+           ~allowed_tool_names:turn_visible_tool_names
     in
-    let all_allowed =
+    let turn_visible_tool_names =
       tool_names_for_required_gate_surface
         ~tool_gate_requested
         ~required_tool_names
-        all_allowed
+        turn_visible_tool_names
     in
-    let allowed_canonical_tool_names =
-      all_allowed
+    let visible_canonical_tool_names =
+      turn_visible_tool_names
       |> List.map Keeper_tool_resolution.canonical_tool_name
       |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
@@ -817,7 +823,7 @@ let prepare_agent_setup
       List.filter
         (fun name ->
            let canonical = Keeper_tool_resolution.canonical_tool_name name in
-           not (List.mem canonical allowed_canonical_tool_names))
+           not (List.mem canonical visible_canonical_tool_names))
         required_tool_names
     in
     let required_tool_candidate_names =
@@ -826,14 +832,14 @@ let prepare_agent_setup
         generic_required_tool_candidate_names
           ~has_current_task:(keeper_has_owned_active_task ())
           ~turn_affordances
-          ~allowed_tool_names:all_allowed
+          ~allowed_tool_names:turn_visible_tool_names
       else []
     in
-    let visible_tool_count = List.length all_allowed in
+    let visible_tool_count = List.length turn_visible_tool_names in
     let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =
       if visible_tool_count = 0
       then Surface_none
-      else if List.for_all Tool_catalog.is_public_mcp all_allowed
+      else if List.for_all Tool_catalog.is_public_mcp turn_visible_tool_names
       then Surface_public_only
       else Surface_mixed
     in
@@ -856,7 +862,7 @@ let prepare_agent_setup
            | Some Agent_sdk.Types.None_ -> Lane_tool_disabled
            | _ -> Lane_text_only))
     in
-    { all_allowed
+    { turn_visible_tool_names
     ; absolute_turn = turn
     ; checkpoint_start_turn = start_turn_count
     ; per_call_turn

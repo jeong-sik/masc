@@ -142,7 +142,7 @@ type tool_surface_metrics =
   }
 
 type computed_tool_surface =
-  { all_allowed : string list
+  { turn_visible_tool_names : string list
   ; absolute_turn : int
   ; checkpoint_start_turn : int
   ; per_call_turn : int

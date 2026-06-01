@@ -106,7 +106,7 @@ type tool_surface_metrics =
 (** Result of computing the per-turn tool surface (selection +
     classification + lane). *)
 type computed_tool_surface =
-  { all_allowed : string list
+  { turn_visible_tool_names : string list
   ; absolute_turn : int
   ; checkpoint_start_turn : int
   ; per_call_turn : int

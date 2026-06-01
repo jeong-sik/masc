@@ -371,8 +371,9 @@ let register
   add
     metric_empty_tool_universe_observed
     "Phase A F3 (2026-04-28): increments every time the keeper turn enters the \
-     [Keeper_tool_surface_empty] blocker branch in keeper_agent_run (i.e. \
-     tool_gate_requested && all_allowed = []). Pre-fix the blocker fired silently with \
+     [Keeper_tool_surface_empty] blocker branch, incremented from \
+     [Keeper_run_tools_hooks] (the pre-turn tool-surface check), i.e. \
+     tool_gate_requested && turn_visible_tool_names = []. Pre-fix the blocker fired silently with \
      no operator-visible counter; this surfaces the volume so Phase B PR-4 can promote \
      it to a typed terminal state with LLM-visible feedback. Labels: keeper_name, \
      turn_lane (text_only | tool_optional | tool_required | retry | tool_disabled), \

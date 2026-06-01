@@ -332,7 +332,7 @@ let finalize
     ~decision:
       (Keeper_runtime_manifest.tool_lineage
          ~searched_tool_names:initial_tool_surface.deterministic_prefilter
-         ~visible_tool_names:initial_tool_surface.all_allowed
+         ~visible_tool_names:initial_tool_surface.turn_visible_tool_names
          ~materialized_tool_names:!materialized_tool_names_ref
          ~emitted_tool_names:!reported_tool_names_ref
          ~executed_tool_names:!observed_tool_names_ref

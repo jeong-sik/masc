@@ -124,7 +124,8 @@ let assemble_hooks
   <- { turn_lane = initial_tool_surface.lane
      ; tool_surface_class = initial_tool_surface.tool_surface_class
      ; tool_requirement = initial_tool_surface.tool_requirement
-     ; visible_tool_count = List.length initial_tool_surface.all_allowed
+     ; visible_tool_count =
+         List.length initial_tool_surface.turn_visible_tool_names
      ; tool_gate_enabled = initial_tool_surface.tool_gate_requested
      ; tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used
      ; required_tool_names = initial_tool_surface.required_tool_names
@@ -151,11 +152,12 @@ let assemble_hooks
                  ; required_tools = initial_tool_surface.required_tool_names
                  ; missing_required_tools =
                      initial_tool_surface.missing_required_tool_names
-                 ; visible_tools = initial_tool_surface.all_allowed
+                 ; visible_tools = initial_tool_surface.turn_visible_tool_names
                  }));
       Ok initial_tool_surface)
     else if
-      initial_tool_surface.tool_gate_requested && initial_tool_surface.all_allowed = []
+      initial_tool_surface.tool_gate_requested
+      && initial_tool_surface.turn_visible_tool_names = []
     then (
       acc.receipt_tool_contract_result <-
         Keeper_execution_receipt.Contract_no_tool_capable_provider;
@@ -187,7 +189,9 @@ let assemble_hooks
   match initial_tool_surface_result with
   | Error err -> Error err
   | Ok initial_tool_surface ->
-    Keeper_run_tools_hook_accumulator.record_requested_tool_names acc initial_tool_surface.all_allowed;
+    Keeper_run_tools_hook_accumulator.record_requested_tool_names
+      acc
+      initial_tool_surface.turn_visible_tool_names;
     let meta_ref = ref acc.meta in
     let public_alias_pre_tool_use_guard ~tool_name ~input:_ =
       Keeper_tool_resolution.public_alias_guidance_for_internal_call
@@ -403,7 +407,7 @@ let assemble_hooks
                     computed_surface.discovered_count
                     computed_surface.llm_selected_count
                     (Keeper_config.keeper_llm_rerank_enabled ())
-                    (List.length computed_surface.all_allowed)
+                    (List.length computed_surface.turn_visible_tool_names)
                     (String.length computed_surface.query_text)
                     (Keeper_agent_tool_surface.tool_selection_mode_to_string
                        computed_surface.selection_mode);
@@ -462,7 +466,7 @@ let assemble_hooks
                       (generic_required_tool_gate_guidance
                          ~has_current_task:(keeper_has_owned_active_task ())
                          ~turn_affordances
-                         ~allowed_tool_names:computed_surface.all_allowed)
+                         ~allowed_tool_names:computed_surface.turn_visible_tool_names)
                   else if is_retry
                   then
                     append_ctx
@@ -499,7 +503,7 @@ let assemble_hooks
                       .generic_required_tool_candidate_names
                         ~has_current_task:(keeper_has_owned_active_task ())
                         ~turn_affordances
-                        ~allowed_tool_names:computed_surface.all_allowed
+                        ~allowed_tool_names:computed_surface.turn_visible_tool_names
                     in
                     let preview =
                       satisfying_tools
@@ -537,29 +541,35 @@ let assemble_hooks
                     computed_surface.per_call_turn
                     computed_surface.per_call_max_turns
                     computed_surface.is_last_turn;
-                let all_allowed = computed_surface.all_allowed in
-                let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
+                let turn_visible_tool_names =
+                  computed_surface.turn_visible_tool_names
+                in
+                let tool_filter =
+                  Agent_sdk.Guardrails.AllowList turn_visible_tool_names
+                in
                 let clear_inherited_strict_tool_choice = function
                   | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> None
                   | other -> other
                 in
                 let tool_choice =
-                  if computed_surface.required_tool_names <> [] && all_allowed <> []
+                  if
+                    computed_surface.required_tool_names <> []
+                    && turn_visible_tool_names <> []
                   then
                     Some
                       (preferred_tool_choice_for_required_tool_names
                          ~required_tool_names:computed_surface.required_tool_names
-                         ~allowed_tool_names:all_allowed)
+                         ~allowed_tool_names:turn_visible_tool_names)
                   else if
                     (not computed_surface.is_last_turn)
                     && computed_surface.tool_gate_requested
-                    && all_allowed <> []
+                    && turn_visible_tool_names <> []
                   then
                     Some
                       (preferred_tool_choice_for_required_turn
                          ~has_current_task:(keeper_has_owned_active_task ())
                          ~turn_affordances
-                         ~allowed_tool_names:all_allowed)
+                         ~allowed_tool_names:turn_visible_tool_names)
                   else clear_inherited_strict_tool_choice current_params.tool_choice
                 in
                 let turn_completion_contract =
@@ -574,12 +584,14 @@ let assemble_hooks
                 if turn_completion_contract = Keeper_tool_completion_contract.Require_tool_use
                 then acc.required_tool_use_seen <- true;
                 let lane = computed_surface.lane in
-                Keeper_run_tools_hook_accumulator.record_requested_tool_names acc all_allowed;
+                Keeper_run_tools_hook_accumulator.record_requested_tool_names
+                  acc
+                  turn_visible_tool_names;
                 acc.tool_surface
                 <- { turn_lane = lane
                    ; tool_surface_class = computed_surface.tool_surface_class
                    ; tool_requirement = computed_surface.tool_requirement
-                   ; visible_tool_count = List.length all_allowed
+                   ; visible_tool_count = List.length turn_visible_tool_names
                    ; tool_gate_enabled = computed_surface.tool_gate_requested
                    ; tool_surface_fallback_used =
                        computed_surface.tool_surface_fallback_used
@@ -631,7 +643,7 @@ let assemble_hooks
                   ~tool_surface_class:
                     (Keeper_agent_tool_surface.tool_surface_class_to_string
                        computed_surface.tool_surface_class)
-                  ~visible_tool_count:(List.length all_allowed)
+                  ~visible_tool_count:(List.length turn_visible_tool_names)
                   ~required_tools:computed_surface.required_tool_names
                   ~required_tool_candidates:
                     computed_surface.required_tool_candidate_names
@@ -687,7 +699,7 @@ let assemble_hooks
                        , `Int computed_surface.deterministic_prefilter_count )
                      ; "discovered_count", `Int computed_surface.discovered_count
                      ; "llm_selected_count", `Int computed_surface.llm_selected_count
-                     ; "final_visible", `Int (List.length all_allowed)
+                     ; "final_visible", `Int (List.length turn_visible_tool_names)
                      ; ( "turn_lane"
                        , Keeper_agent_tool_surface.turn_lane_to_yojson lane )
                      ; ( "tool_surface_class"

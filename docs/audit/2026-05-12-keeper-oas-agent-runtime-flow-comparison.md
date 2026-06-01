@@ -199,7 +199,7 @@ flowchart TD
 - The actual visible surface is recomputed every OAS SDK turn in `BeforeTurnParams`.
 - LLM rerank is a hint layer, not a hard dependency. If rerank runtime resolution, health filtering, or `Tool_selector.select_names` fails, the surface falls back to core + BM25 prefilter + discovered tools.
 - Required tools can come from the active task contract and per-call `required_tool_names`.
-- The hook sets both `Guardrails.AllowList all_allowed` and `tool_choice`. This is important: `AllowList` constrains execution, while `tool_choice` nudges or forces provider-side tool use.
+- The hook sets both `Guardrails.AllowList turn_visible_tool_names` and `tool_choice`. This is important: `AllowList` constrains execution, while `tool_choice` nudges or forces provider-side tool use.
 - OAS later dispatches only `ToolUse` blocks. Parallelism is handled in OAS `execute_tools` via sequential/exclusive/parallel batches.
 - MASC does not trust only the final assistant blocks. It reconciles reported tool names from response content, registry-observed names, hook-observed names, canonical aliases, and unexpected names before writing the receipt.
 - Tool execution observation has two layers: OAS publishes `ToolCalled` / `ToolCompleted` and raw trace records, while MASC wraps keeper tool handlers and logs keeper-specific route evidence, policy outcomes, and hook observations.

@@ -30,22 +30,6 @@ val verification_blocks_claim
   -> Masc_domain.task
   -> bool
 
-val task_required_tools : Masc_domain.task -> string list
-val string_list_contains : string list -> string -> bool
-val required_tools_allowed : ?agent_tool_names:string list -> string list -> bool
-
-(** [make_required_tools_predicate ?agent_tool_names ()] returns a
-    closure that checks whether a given [required_tools] list is
-    satisfied by [agent_tool_names].  The allowed-set is materialised
-    once at call time and reused across every invocation of the
-    returned closure — call this {b outside} per-candidate loops to
-    avoid rebuilding the set per task. *)
-val make_required_tools_predicate
-  :  ?agent_tool_names:string list
-  -> unit
-  -> string list
-  -> bool
-
 val underscore_name : string -> string
 val hyphen_name : string -> string
 val keeper_name_from_agent_name : string -> string option
@@ -61,11 +45,6 @@ val json_raw_string_path : string list -> Yojson.Safe.t -> string option
 val json_string_path : string list -> Yojson.Safe.t -> string option
 val receipt_sort_key : Yojson.Safe.t -> string
 val latest_execution_receipt_json : config -> agent_name:string -> Yojson.Safe.t option
-val latest_receipt_blocks_required_tool_claim
-  :  config
-  -> agent_name:string
-  -> required_tools:string list
-  -> bool
 
 val active_task_assignees_by_task_id : Masc_domain.backlog -> (string, string) Hashtbl.t
 
@@ -102,7 +81,6 @@ val reconcile_all_agent_current_tasks_with_fresh_backlog
 val claim_next_r
   :  config
   -> agent_name:string
-  -> ?agent_tool_names:string list
   -> ?exclude_task_ids:string list
   -> ?task_filter:(Masc_domain.task -> bool)
   -> ?admission_filter:

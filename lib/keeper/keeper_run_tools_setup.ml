@@ -419,37 +419,6 @@ let prepare_agent_setup
   let keeper_has_owned_active_task () =
     Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
   in
-  let current_task_required_tools () =
-    match owned_active_task_id_for_meta ~config ~meta:acc.meta with
-    | None -> []
-    | Some task_id ->
-      let task_id = Keeper_id.Task_id.to_string task_id in
-      let tasks =
-        try Workspace.get_tasks_raw config with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Prometheus.inc_counter
-            Keeper_metrics.(to_string TaskLoadFailures)
-            ~labels:[ "keeper", meta.name; "phase", "task_contract_load" ]
-            ();
-          Log.Keeper.warn
-            "keeper:%s failed to load current task contract for %s: %s"
-            meta.name
-            task_id
-            (Printexc.to_string exn);
-          []
-      in
-      (match
-         List.find_opt
-           (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-           tasks
-       with
-       | Some (task : Masc_domain.task) ->
-         (match task.contract with
-          | Some contract -> Keeper_types_profile_toml_normalizers.dedupe_keep_order contract.required_tools
-          | None -> [])
-       | None -> [])
-  in
   let visible_policy_name name =
     (* Preserve names that are already valid public surface entries.
        tool_edit_file and tool_write_file have distinct public aliases
@@ -697,7 +666,7 @@ let prepare_agent_setup
     in
     let required_tool_names_raw =
       required_tool_names_for_turn
-        ~current_task_required_tool_names:(current_task_required_tools ())
+        ~current_task_required_tool_names:[]
         ~per_call_required_tool_names:required_tool_names
       |> List.map Keeper_tool_resolution.canonical_tool_name
       |> Keeper_types_profile_toml_normalizers.dedupe_keep_order

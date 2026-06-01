@@ -234,11 +234,8 @@ type claim_next_result = Masc_domain.claim_next_result =
       ; blocked_count : int
       ; verification_blocked_count : int
       ; scope_excluded_count : int
-      ; required_tool_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int
-      ; receipt_required_tool_blocked : bool
-      ; agent_tool_names_known : bool
       }
   | Claim_next_error of string
 

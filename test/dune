@@ -747,8 +747,6 @@
   test_board_karma_ledger
   test_task_dispatch
   test_workspace_task_lifecycle
-  test_workspace_task_classify_guard
-  test_make_required_tools_predicate
   test_workspace_task_verification_phase_e
   test_drift_guard_core
   test_verify_handoff_tool
@@ -949,8 +947,6 @@
   test_board_karma_ledger
   test_task_dispatch
   test_workspace_task_lifecycle
-  test_workspace_task_classify_guard
-  test_make_required_tools_predicate
   test_workspace_task_verification_phase_e
   test_drift_guard_core
   test_verify_handoff_tool

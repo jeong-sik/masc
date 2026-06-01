@@ -1270,28 +1270,23 @@ let () = test "handle_claim_rejects_second_active_owned_task" (fun () ->
   | None -> failwith "task-002 missing"
 )
 
-let () = test "handle_claim_blocks_required_tools_without_server_surface" (fun () ->
+let () = test "handle_claim_ignores_required_tools_without_server_surface" (fun () ->
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
   let result =
-    Tool_task.handle_claim ~agent_tool_names:[ "masc_status" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [
-          ("task_id", `String "task-001");
-          ("agent_tool_names", `List [ `String "tool_execute" ]);
-        ])
+    Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("task_id", `String "task-001") ])
   in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "requires tool(s) unavailable");
-  assert_task_todo ctx;
-  assert (Planning_eio.get_current_task ctx.config = None)
+  if not (Tool_result.is_success result) then failwith (Tool_result.message result);
+  assert_task_claimed_by ctx ctx.agent_name;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
 let () = test "handle_claim_allows_required_tools_with_server_surface" (fun () ->
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
   let result =
-    Tool_task.handle_claim ~agent_tool_names:[ "masc_status"; "tool_execute" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("task_id", `String "task-001") ])
   in
   if not (Tool_result.is_success result) then failwith (Tool_result.message result);
@@ -1357,23 +1352,16 @@ let () = test "handle_claim_next_returns_claim_observation" (fun () ->
 )
 
 let () =
-  test "handle_claim_next_blocks_required_tools_without_server_surface" (fun () ->
+  test "handle_claim_next_ignores_required_tools_without_server_surface" (fun () ->
     let ctx = make_test_ctx () in
     add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
     let result =
-      Tool_task.handle_claim_next ~agent_tool_names:[ "masc_status" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
+      Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc [])
     in
     assert (Tool_result.is_success result);
-    assert (str_contains (Tool_result.message result) "No eligible tasks available");
-    let open Yojson.Safe.Util in
-    assert ((Tool_result.data result) |> member "diagnostics"
-            |> member "required_tool_excluded_count" |> to_int
-            = 1);
-    assert ((Tool_result.data result) |> member "diagnostics"
-            |> member "agent_tool_names_known" |> to_bool);
-    assert_task_todo ctx;
-    assert (Planning_eio.get_current_task ctx.config = None))
+    assert_task_claimed_by ctx ctx.agent_name;
+    assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () =
   test "handle_claim_next_allows_required_tools_with_server_surface" (fun () ->
@@ -1381,7 +1369,6 @@ let () =
     add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
     let result =
       Tool_task.handle_claim_next
-        ~agent_tool_names:[ "masc_status"; "tool_execute" ]
         ~tool_name:"test_tool" ~start_time:0.0
         ctx (`Assoc [])
     in
@@ -1470,11 +1457,11 @@ let () = test "transition_claim_sets_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
-let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () ->
+let () = test "transition_claim_ignores_required_tools_even_with_force" (fun () ->
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
   let result =
-    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ~agent_tool_names:[ "masc_status" ] ctx
+    Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
@@ -1482,10 +1469,9 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
           ("force", `Bool true);
         ])
   in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "requires tool(s) unavailable");
-  assert_task_todo ctx;
-  assert (Planning_eio.get_current_task ctx.config = None)
+  assert (Tool_result.is_success result);
+  assert_task_claimed_by ctx ctx.agent_name;
+  assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
 (* RFC-0109 Phase E (#18822, 2026-05-27) retired the transition-layer
@@ -1500,24 +1486,25 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
    [test/test_cdal_evidence_gate.ml] (10 cases).  See issue #18830
    Cluster A.1 for the triage record. *)
 
-let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun () ->
+let task_submit_evidence_notes =
+  "completion_notes: implementation completed with verification context. \
+   pr_url_or_artifact_ref: PR evidence is attached."
+
+let () = test "transition_submit_pr_evidence_accepts_todo_pr_url_alias" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/13169" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
     let result =
       Tool_task.handle_transition
-        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
         ~tool_name:"test_tool" ~start_time:0.0
         ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
-            ("action", `String "submit_for_verification");
+            ("action", `String "submit_pr_evidence");
             ("pr_url", `String pr_url);
-            ( "notes",
-              `String
-                "Implementation is already merged; submit PR evidence for independent verification." );
+            ("notes", `String task_submit_evidence_notes);
           ])
     in
     if not (Tool_result.is_success result) then failwith (Tool_result.message result);
@@ -1546,7 +1533,6 @@ let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () -
     let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/77777" in
     let submit_result =
       Tool_task.handle_transition
-        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
         ~tool_name:"test_tool" ~start_time:0.0
         ctx
         (`Assoc
@@ -1554,7 +1540,7 @@ let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () -
             ("task_id", `String "task-001");
             ("action", `String "submit_pr_evidence");
             ("pr_url", `String pr_url);
-            ("notes", `String "evidence available");
+            ("notes", `String task_submit_evidence_notes);
           ])
     in
     if not (Tool_result.is_success submit_result) then
@@ -1578,7 +1564,6 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
     let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/88888" in
     let submit_result =
       Tool_task.handle_transition
-        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
         ~tool_name:"test_tool" ~start_time:0.0
         ctx
         (`Assoc
@@ -1586,7 +1571,7 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
             ("task_id", `String "task-001");
             ("action", `String "submit_pr_evidence");
             ("pr_url", `String pr_url);
-            ("notes", `String "evidence available");
+            ("notes", `String task_submit_evidence_notes);
             ( "handoff_context",
               `Assoc
                 [
@@ -1606,27 +1591,12 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
     | None -> failwith "expected handoff_context to be persisted")
 )
 
-let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_required_tool" (fun () ->
+let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
-    let claim_result =
-      Tool_task.handle_transition
-        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
-        ~tool_name:"test_tool" ~start_time:0.0
-        ctx
-        (`Assoc
-          [
-            ("task_id", `String "task-001");
-            ("action", `String "claim");
-          ])
-    in
-    assert (not (Tool_result.is_success claim_result));
-    assert (str_contains (Tool_result.message claim_result) "requires tool(s) unavailable");
-    assert_task_todo ctx;
     let submit_result =
       Tool_task.handle_transition
-        ~agent_tool_names:[ "masc_status"; "masc_transition" ]
         ~tool_name:"test_tool" ~start_time:0.0
         ctx
         (`Assoc
@@ -1634,9 +1604,7 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_re
             ("task_id", `String "task-001");
             ("action", `String "submit_pr_evidence");
             ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
-            ( "notes",
-              `String
-                "Implementation is already merged; submit PR evidence for independent verification." );
+            ("notes", `String task_submit_evidence_notes);
           ])
     in
     if not (Tool_result.is_success submit_result) then failwith (Tool_result.message submit_result);
@@ -1780,20 +1748,18 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
   match
-    Tool_task.dispatch ~agent_tool_names:[ "masc_status" ] ctx
+    Tool_task.dispatch ctx
       ~name:"masc_transition"
       ~args:
         (`Assoc
           [
             ("task_id", `String "task-001");
             ("action", `String "claim");
-            ("agent_tool_names", `List [ `String "tool_execute" ]);
           ])
   with
   | Some result ->
-      assert (not (Tool_result.is_success result));
-      assert (str_contains (Tool_result.message result) "requires tool(s) unavailable");
-      assert_task_todo ctx
+      assert (Tool_result.is_success result);
+      assert_task_claimed_by ctx ctx.agent_name
   | None -> failwith "dispatch returned None"
 )
 
@@ -1805,12 +1771,13 @@ let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
     let result =
-      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ~agent_tool_names:[ "masc_status" ] ctx
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
           [
             ("task_id", `String "task-001");
             ("action", `String "submit_pr_evidence");
-            ("notes", `String "PR jeong-sik/masc-mcp#13169 merged 2026-05-05");
+            ("notes", `String task_submit_evidence_notes);
+            ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
           ])
     in
     if not (Tool_result.is_success result) then

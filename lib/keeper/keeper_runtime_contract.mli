@@ -12,7 +12,6 @@ type claim_goal_scope = {
 }
 
 val resolve_claim_goal_scope :
-  ?agent_tool_names:string list ->
   (* [allow_empty_goal_scope_fallback] should stay false for normal keeper
       task claims. Auto-repaired keeper-purpose goals may still fall back to
       all tasks; explicit persisted [active_goal_ids] stay scoped unless this
@@ -24,7 +23,6 @@ val resolve_claim_goal_scope :
   claim_goal_scope
 
 val resolve_observation_claim_goal_scope :
-  ?agent_tool_names:string list ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   unit ->

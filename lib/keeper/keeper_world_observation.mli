@@ -222,7 +222,6 @@ val read_continuity_summary :
     @param config Workspace configuration for I/O operations
     @param meta Current keeper metadata *)
 val observe :
-  allowed_tool_names:string list option ->
   pending_board_events:pending_board_event list option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -237,7 +236,6 @@ val observe :
     scheduled timer signals, but they must still see the durable work
     signals that drive tool-use contracts. *)
 val observe_direct_keeper_msg :
-  allowed_tool_names:string list option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   world_observation
@@ -249,7 +247,6 @@ val observe_direct_keeper_msg :
     [Skip_idle]. Unlike {!observe}, this helper does not advance board or
     message cursors. *)
 val durable_signal_present :
-  allowed_tool_names:string list option ->
   pending_board_events:pending_board_event list option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

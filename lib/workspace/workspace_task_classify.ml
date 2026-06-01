@@ -178,7 +178,7 @@ let normalize_execution_links (links : Masc_domain.task_execution_links) =
 let normalize_task_contract (contract : Masc_domain.task_contract) =
   { contract with
     completion_contract = normalized_string_list contract.completion_contract
-  ; required_tools = normalized_string_list contract.required_tools
+  ; required_tools = []
   ; required_evidence = normalized_string_list contract.required_evidence
   ; inspect_gate_evidence = normalized_string_list contract.inspect_gate_evidence
   ; verify_gate_evidence = normalized_string_list contract.verify_gate_evidence
@@ -196,81 +196,6 @@ let empty_task_contract =
   ; required_evidence_typed = []
   ; links = { operation_id = None; session_id = None }
   }
-;;
-
-let task_required_tools (task : Masc_domain.task) =
-  match task.contract with
-  | Some contract -> normalized_string_list contract.required_tools
-  | None -> []
-;;
-
-let canonical_required_tool_name name =
-  Tool_name_alias_axis.canonical_required_tool_name name
-;;
-
-let missing_required_tools ~allowed required =
-  (* Build a name-keyed Hashtbl over [allowed] once; per-required-name
-     check drops from O(|allowed|) to O(1).  Called on the task-claim
-     guard path where [allowed] is typically the agent's tool surface
-     (~30-50 names) and [required] is 1-5 contract tools.
-     Constant initial bucket size avoids the [List.length allowed]
-     pre-traversal (Hashtbl grows automatically).  Compare canonical
-     runtime names so public aliases such as [Execute] satisfy contracts
-     written against their canonical tool ids such as [tool_execute]. *)
-  let allowed_set = Hashtbl.create 32 in
-  List.iter
-    (fun name -> Hashtbl.replace allowed_set (canonical_required_tool_name name) ())
-    allowed;
-  List.filter
-    (fun required_name ->
-       not (Hashtbl.mem allowed_set (canonical_required_tool_name required_name)))
-    required
-;;
-
-let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
-  let required_tools = task_required_tools task in
-  match required_tools, agent_tool_names with
-  | [], _ -> Ok ()
-  | _ :: _, None ->
-    log_event
-      config
-      (`Assoc
-          [ "type", `String "task_claim_required_tools_unknown_surface"
-          ; "agent", `String agent_name
-          ; "task", `String task.id
-          ; "required_tools", `List (List.map (fun name -> `String name) required_tools)
-          ; "ts", `String (now_iso ())
-          ]);
-    Error
-      (Masc_domain.Task
-         (Masc_domain.Task_error.InvalidState
-            (Printf.sprintf
-               "Workflow rejected: task %s requires tool(s) but %s has no registered tool surface"
-               task.id
-               agent_name)))
-  | _ :: _, Some allowed ->
-    let missing = missing_required_tools ~allowed required_tools in
-    if missing = []
-    then Ok ()
-    else (
-      log_event
-        config
-        (`Assoc
-            [ "type", `String "task_claim_required_tools_blocked"
-            ; "agent", `String agent_name
-            ; "task", `String task.id
-            ; "required_tools", `List (List.map (fun name -> `String name) required_tools)
-            ; "missing_tools", `List (List.map (fun name -> `String name) missing)
-            ; "ts", `String (now_iso ())
-            ]);
-      Error
-        (Masc_domain.Task
-           (Masc_domain.Task_error.InvalidState
-              (Printf.sprintf
-                 "Workflow rejected: task %s requires tool(s) unavailable to %s: %s"
-                 task.id
-                 agent_name
-                 (String.concat ", " missing)))))
 ;;
 
 let default_verification_evidence_refs = [ "completion_notes"; "pr_url_or_artifact_ref" ]
@@ -302,7 +227,6 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
     | Some contract -> normalize_task_contract contract
     | None -> empty_task_contract
   in
-  let required_tools = base.required_tools in
   let completion_contract =
     if base.completion_contract <> []
     then base.completion_contract
@@ -321,7 +245,7 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
     else default_verification_evidence_refs
   in
   normalize_task_contract
-    { base with required_tools; completion_contract; required_evidence; verify_gate_evidence }
+    { base with completion_contract; required_tools = []; required_evidence; verify_gate_evidence }
 ;;
 
 let merge_execution_links

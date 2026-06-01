@@ -169,11 +169,7 @@ let run_keepalive_unified_turn
       in
       let pending_board_events = event_intake.pending_board_events in
       let obs =
-        let allowed_tool_names =
-          Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage
-        in
         Keeper_world_observation.observe
-          ~allowed_tool_names:(Some allowed_tool_names)
           ~pending_board_events:(Some pending_board_events)
           ~config:ctx.config
           ~meta:meta_after_triage
@@ -497,12 +493,8 @@ let run_smart_heartbeat_gate
            ();
          true)
        else (
-         let allowed_tool_names =
-           Keeper_tool_policy.keeper_allowed_tool_names meta_current
-         in
          if
            Keeper_world_observation.durable_signal_present
-             ~allowed_tool_names:(Some allowed_tool_names)
              ~pending_board_events:None
              ~config
              ~meta:meta_current

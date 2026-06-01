@@ -61,48 +61,6 @@ let verification_blocks_claim latest_status_by_task (task : Masc_domain.task) =
   | Some (_, `Passed) | None -> false
 ;;
 
-let task_required_tools (task : Masc_domain.task) =
-  match task.contract with
-  | Some contract -> contract.required_tools
-  | None -> []
-;;
-
-let string_list_contains all value = List.exists (String.equal value) all
-
-let build_allowed_set = Workspace_task_receipts.build_allowed_set
-
-let make_required_tools_predicate ?agent_tool_names () =
-  match agent_tool_names with
-  | None ->
-    (* Without an explicit tool surface, we cannot verify the keeper
-       possesses the required tools.  Reject tasks with non-empty
-       [required_tools] to prevent routing loops where a keeper
-       claims a task it cannot execute (tool_surface_mismatch at
-       setup time, then re-claims the same task indefinitely).
-       Tasks with empty [required_tools] remain claimable. *)
-    fun required_tools -> required_tools = []
-  | Some allowed ->
-    let allowed_set = build_allowed_set allowed in
-    fun required_tools ->
-      (match required_tools with
-       | [] -> true
-       | _ ->
-         List.for_all
-           (fun name ->
-              Hashtbl.mem
-                allowed_set
-                (Workspace_task_classify.canonical_required_tool_name name))
-           required_tools)
-;;
-
-let required_tools_allowed ?agent_tool_names required_tools =
-  (* Single-shot caller convenience.  Per-candidate loops should hoist
-     [make_required_tools_predicate] above the loop so the allowed-set
-     is built once per claim cycle instead of once per candidate. *)
-  let pred = make_required_tools_predicate ?agent_tool_names () in
-  pred required_tools
-;;
-
 let underscore_name = Workspace_task_receipts.underscore_name
 let hyphen_name = Workspace_task_receipts.hyphen_name
 let keeper_name_from_agent_name = Workspace_task_receipts.keeper_name_from_agent_name
@@ -118,10 +76,6 @@ let json_raw_string_path = Workspace_task_receipts.json_raw_string_path
 let json_string_path = Workspace_task_receipts.json_string_path
 let receipt_sort_key = Workspace_task_receipts.receipt_sort_key
 let latest_execution_receipt_json = Workspace_task_receipts.latest_execution_receipt_json
-let latest_receipt_blocks_required_tool_claim =
-  Workspace_task_receipts.latest_receipt_blocks_required_tool_claim
-;;
-
 let active_task_assignees_by_task_id backlog =
   let table = Hashtbl.create (List.length backlog.tasks) in
   List.iter
@@ -271,7 +225,6 @@ let reconcile_all_agent_current_tasks_with_fresh_backlog ?(touch_last_seen = tru
 let claim_next_r
       config
       ~agent_name
-      ?agent_tool_names
       ?(exclude_task_ids = [])
       ?(task_filter : Masc_domain.task -> bool = fun _ -> true)
       ?(admission_filter :
@@ -433,45 +386,6 @@ let claim_next_r
           | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
           | None -> blocked_ids @ exclude_task_ids
         in
-        let receipt_blocks_task (task : Masc_domain.task) =
-          match agent_tool_names with
-          | Some _ -> false
-          | None ->
-            let required_tools = task_required_tools task in
-            required_tools <> []
-            && latest_receipt_blocks_required_tool_claim
-                 config
-                 ~agent_name
-                 ~required_tools
-        in
-        if
-          Option.is_none agent_tool_names
-          && List.exists (fun task -> task_required_tools task <> []) unclaimed
-        then
-          log_event
-            config
-            (`Assoc
-                [ "type", `String "task_claim_next_required_tools_unknown_surface"
-                ; "agent", `String agent_name
-                ; ( "candidate_count"
-                  , `Int
-                      (List.length
-                         (List.filter
-                            (fun task -> task_required_tools task <> [])
-                            unclaimed)) )
-                ; "ts", `String (now_iso ())
-                ]);
-        (* Hoist allowed-set materialisation above the per-candidate
-         filter so we pay O(A) once instead of O(R*A).  Restores the
-         O(R+A) win that this PR's title advertises. *)
-        let required_tools_allowed_for_agent =
-          make_required_tools_predicate ?agent_tool_names ()
-        in
-        let required_tool_claim_allowed (task : Masc_domain.task) =
-          let required_tools = task_required_tools task in
-          required_tools_allowed_for_agent required_tools
-          && not (receipt_blocks_task task)
-        in
         let admission_decisions = Hashtbl.create 16 in
         let admission_allowed (task : Masc_domain.task) =
           match Hashtbl.find_opt admission_decisions task.id with
@@ -481,29 +395,8 @@ let claim_next_r
             Hashtbl.replace admission_decisions task.id allowed;
             allowed
         in
-        let required_tool_excluded =
-          List.filter
-            (fun (t : task) ->
-               (not (List.mem t.id all_excluded))
-               && task_filter t
-               && not (required_tool_claim_allowed t))
-            unclaimed
-        in
-        if required_tool_excluded <> []
-        then
-          log_event
-            config
-            (`Assoc
-                [ "type", `String "task_claim_next_skip_required_tools"
-                ; "agent", `String agent_name
-                ; "blocked", `Int (List.length required_tool_excluded)
-                ; ( "receipt_blocked"
-                  , `Bool (List.exists receipt_blocks_task required_tool_excluded) )
-                ; "agent_tool_names_known", `Bool (Option.is_some agent_tool_names)
-                ; "ts", `String (now_iso ())
-                ]);
         let effective_task_filter (task : Masc_domain.task) =
-          task_filter task && admission_allowed task && required_tool_claim_allowed task
+          task_filter task && admission_allowed task
         in
         let task_filter_excluded =
           List.filter
@@ -527,12 +420,7 @@ let claim_next_r
           | None -> 0
         in
         let no_eligible_excluded_count =
-          List.length all_excluded
-          + List.length task_filter_excluded
-          + List.length required_tool_excluded
-        in
-        let receipt_required_tool_blocked =
-          List.exists receipt_blocks_task required_tool_excluded
+          List.length all_excluded + List.length task_filter_excluded
         in
         (* Helper: clear agent current_task and reset status after a legacy
          released_task_id path when no replacement task can be claimed. Delegates to
@@ -579,11 +467,8 @@ let claim_next_r
              ; blocked_count = List.length blocked_todo
              ; verification_blocked_count = List.length verification_blocked_todo
              ; scope_excluded_count = List.length task_filter_excluded
-             ; required_tool_excluded_count = List.length required_tool_excluded
              ; explicit_excluded_count
              ; claim_pool_candidate_count = List.length unclaimed
-             ; receipt_required_tool_blocked
-             ; agent_tool_names_known = Option.is_some agent_tool_names
              }
          | _ :: _, task :: _ ->
            (* Claim this task *)
@@ -713,17 +598,14 @@ let claim_next config ~agent_name =
   | Claim_next_no_eligible
       { excluded_count
       ; scope_excluded_count
-      ; required_tool_excluded_count
       ; verification_blocked_count
       ; _
       } ->
     Printf.sprintf
       "No eligible unclaimed tasks. ACTION: Stop task-checking — \
-       blocked/excluded=%d (goal_scope_or_filter=%d, required_tools=%d, \
-       verification=%d)."
+       blocked/excluded=%d (goal_scope_or_filter=%d, verification=%d)."
       excluded_count
       scope_excluded_count
-      required_tool_excluded_count
       verification_blocked_count
   | Claim_next_error e -> Printf.sprintf "Error: %s" e
 ;;

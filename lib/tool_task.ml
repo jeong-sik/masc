@@ -70,7 +70,7 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
        Log.Task.error ~keeper_name:task_id "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
   result_to_response ~tool_name ~start_time result
 
-and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
+and handle_transition ~tool_name ~start_time ctx args =
   (* Underscore-prefixed keys (e.g. "_agent_name") are internal protocol markers
      injected by the HTTP transport and dashboard client for identity
      propagation. They are consumed upstream in Agent_identity and must not
@@ -503,14 +503,9 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   | None ->
   let rec try_transition attempt =
       let ev = if attempt = 0 then expected_version else None in
-      let agent_tool_names =
-        match agent_tool_names with
-        | Some _ -> agent_tool_names
-        | None -> keeper_agent_tool_names ctx
-      in
       let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
                 ~task_id ~action ?expected_version:ev ~notes ~reason
-                ?handoff_context ?agent_tool_names ?prepare_verification_request
+                ?handoff_context ?prepare_verification_request
                 ?prepare_verification_verdict () in
       if is_version_mismatch r && attempt < max_cas_retries then begin
         Log.Task.info ~keeper_name:task_id "CAS version mismatch on %s (attempt %d/%d), retrying in %.0fms"
@@ -685,13 +680,13 @@ let handle_task_history ~tool_name ~start_time ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch ?agent_tool_names ctx ~name ~args : Tool_result.result option =
+let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
   | "masc_add_task" -> Some (handle_add_task ~tool_name:name ~start_time:start ctx args)
   | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ~tool_name:name ~start_time:start ctx args)
-  | "masc_claim_next" -> Some (handle_claim_next ?agent_tool_names ~tool_name:name ~start_time:start ctx args)
-  | "masc_transition" -> Some (handle_transition ?agent_tool_names ~tool_name:name ~start_time:start ctx args)
+  | "masc_claim_next" -> Some (handle_claim_next ~tool_name:name ~start_time:start ctx args)
+  | "masc_transition" -> Some (handle_transition ~tool_name:name ~start_time:start ctx args)
   | "masc_update_priority" -> Some (handle_update_priority ~tool_name:name ~start_time:start ctx args)
   | "masc_tasks" -> Some (handle_tasks ~tool_name:name ~start_time:start ctx args)
   | "masc_task_history" -> Some (handle_task_history ~tool_name:name ~start_time:start ctx args)

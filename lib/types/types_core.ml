@@ -465,6 +465,7 @@ type task_execution_links = {
 type task_contract = {
   strict : bool; [@default false]
   completion_contract : string list; [@default []]
+  (** Deprecated and ignored by task claim routing. *)
   required_tools : string list; [@default []]
   required_evidence : string list; [@default []]
   required_evidence_typed : Evidence_claim.t list; [@default []]
@@ -1041,10 +1042,7 @@ type claim_next_result =
       ; blocked_count : int
       ; verification_blocked_count : int
       ; scope_excluded_count : int
-      ; required_tool_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int
-      ; receipt_required_tool_blocked : bool
-      ; agent_tool_names_known : bool
       }
   | Claim_next_error of string

@@ -20,7 +20,6 @@ and claim_scope_exclusions = {
   scope_excluded_count : int;
   blocked_count : int;
   verification_blocked_count : int;
-  required_tool_excluded_count : int;
   all_goals_excluded : bool;
 }
 

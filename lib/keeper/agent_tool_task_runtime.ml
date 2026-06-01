@@ -125,11 +125,8 @@ let active_goal_scope_json
       ?blocked_count
       ?verification_blocked_count
       ?scope_excluded_count
-      ?required_tool_excluded_count
       ?explicit_excluded_count
       ?claim_pool_candidate_count
-      ?receipt_required_tool_blocked
-      ?agent_tool_names_known
       ?effective_mode
       ?effective_goal_ids
       ?fallback_reason
@@ -169,21 +166,13 @@ let active_goal_scope_json
     [ "blocked_count", blocked_count
     ; "verification_blocked_count", verification_blocked_count
     ; "scope_excluded_count", scope_excluded_count
-    ; "required_tool_excluded_count", required_tool_excluded_count
     ; "explicit_excluded_count", explicit_excluded_count
     ; "claim_pool_candidate_count", claim_pool_candidate_count
     ]
     |> List.filter_map (fun (name, value) ->
       Option.map (fun count -> name, `Int count) value)
   in
-  let bool_fields =
-    [ "receipt_required_tool_blocked", receipt_required_tool_blocked
-    ; "agent_tool_names_known", agent_tool_names_known
-    ]
-    |> List.filter_map (fun (name, value) ->
-      Option.map (fun flag -> name, `Bool flag) value)
-  in
-  let fields = fields @ int_fields @ bool_fields in
+  let fields = fields @ int_fields in
   `Assoc fields
 ;;
 
@@ -228,44 +217,12 @@ let no_eligible_blocker_summary
       ~blocked_count
       ~verification_blocked_count
       ~scope_excluded_count
-      ~required_tool_excluded_count
   =
   Printf.sprintf
-    "Diagnostics: goal_scope_or_filter=%d, required_tools=%d, verification=%d, \
-     blocked=%d."
+    "Diagnostics: goal_scope_or_filter=%d, verification=%d, blocked=%d."
     scope_excluded_count
-    required_tool_excluded_count
     verification_blocked_count
     blocked_count
-;;
-
-let missing_required_tools_for_claim_scope config ~agent_tool_names ~task_filter =
-  Workspace.get_tasks_raw config
-  |> List.filter Workspace_task_schedule.task_is_claim_pool_candidate
-  |> List.filter task_filter
-  |> List.concat_map (fun task ->
-       Workspace_task_classify.missing_required_tools
-         ~allowed:agent_tool_names
-         (Workspace_task_schedule.task_required_tools task))
-  |> List.sort_uniq String.compare
-;;
-
-let required_tool_workflow_rejection config ~agent_tool_names claim_goal_scope =
-  match claim_goal_scope.Keeper_runtime_contract.mode with
-  | "active_goal_ids" | "active_goal_ids_advisory" -> None
-  | _ -> (
-    match
-      missing_required_tools_for_claim_scope
-        config
-        ~agent_tool_names
-        ~task_filter:claim_goal_scope.Keeper_runtime_contract.task_filter
-    with
-    | [] -> None
-    | missing ->
-      Some
-        (Printf.sprintf
-           "Workflow rejected: this keeper lacks required execution/repo tool(s): %s. Route the task to a keeper whose tool access satisfies required_tools, or update required_tools."
-           (String.concat ", " missing)))
 ;;
 
 let wip_admission_default_repo config =
@@ -551,13 +508,8 @@ let handle_keeper_task_tool
                     , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
                   ]))))
     | Task_claim ->
-    let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let claim_goal_scope =
-      Keeper_runtime_contract.resolve_claim_goal_scope
-        ~agent_tool_names
-        ~config
-        ~meta
-        ()
+      Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
     in
     let wip_default_repo = wip_admission_default_repo config in
     let wip_rejections = ref [] in
@@ -581,7 +533,7 @@ let handle_keeper_task_tool
         false
     in
     let result =
-      Workspace.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names
+      Workspace.claim_next_r config ~agent_name:meta.agent_name
         ~task_filter:claim_goal_scope.task_filter
         ~admission_filter:wip_admission_filter
         ()
@@ -639,22 +591,13 @@ let handle_keeper_task_tool
           ; blocked_count
           ; verification_blocked_count
           ; scope_excluded_count
-          ; required_tool_excluded_count
           ; _
           } ->
         let action =
           match wip_admission_rejection_action wip_rejections with
           | Some rejection -> rejection
           | None ->
-            (match
-               required_tool_workflow_rejection
-                 config
-                 ~agent_tool_names
-                 claim_goal_scope
-             with
-             | Some rejection -> rejection
-             | None ->
-               no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count)
+            no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count
         in
         Printf.sprintf
           "No eligible tasks%s. %s %s"
@@ -663,8 +606,7 @@ let handle_keeper_task_tool
           (no_eligible_blocker_summary
              ~blocked_count
              ~verification_blocked_count
-             ~scope_excluded_count
-             ~required_tool_excluded_count)
+             ~scope_excluded_count)
       | Workspace.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claim_scope, claimed_task_fields =
@@ -697,11 +639,8 @@ let handle_keeper_task_tool
           ; blocked_count
           ; verification_blocked_count
           ; scope_excluded_count
-          ; required_tool_excluded_count
           ; explicit_excluded_count
           ; claim_pool_candidate_count
-          ; receipt_required_tool_blocked
-          ; agent_tool_names_known
           } ->
           ( active_goal_scope_json
               ~meta
@@ -709,11 +648,8 @@ let handle_keeper_task_tool
               ~blocked_count
               ~verification_blocked_count
               ~scope_excluded_count
-              ~required_tool_excluded_count
               ~explicit_excluded_count
               ~claim_pool_candidate_count
-              ~receipt_required_tool_blocked
-              ~agent_tool_names_known
               ~effective_mode:claim_goal_scope.mode
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
               ?fallback_reason:claim_goal_scope.fallback_reason ()
@@ -730,7 +666,6 @@ let handle_keeper_task_tool
           { scope_excluded_count
           ; blocked_count
           ; verification_blocked_count
-          ; required_tool_excluded_count
           ; _
           } ->
         let all_goals_excluded =
@@ -747,7 +682,6 @@ let handle_keeper_task_tool
                        { scope_excluded_count
                        ; blocked_count
                        ; verification_blocked_count
-                       ; required_tool_excluded_count
                        ; all_goals_excluded
                        }
                  }) )

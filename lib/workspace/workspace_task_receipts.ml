@@ -1,20 +1,7 @@
-(** Receipt helpers used by task scheduling claim gates. *)
+(** Receipt helpers used by task scheduling. *)
 
 open Masc_domain
 open Workspace_utils
-
-(* Build [allowed] as a [(name, unit) Hashtbl.t] once. Constant
-   initial bucket size avoids the [List.length allowed] pre-traversal
-   (Hashtbl grows automatically); [allowed] is typically the agent's
-   tool surface, ~30-50 names. *)
-let build_allowed_set allowed =
-  let set = Hashtbl.create 32 in
-  List.iter
-    (fun name ->
-       Hashtbl.replace set (Workspace_task_classify.canonical_required_tool_name name) ())
-    allowed;
-  set
-;;
 
 let underscore_name name =
   String.map
@@ -164,48 +151,4 @@ let latest_execution_receipt_json config ~agent_name =
     latest_json_in_receipt_dir base_dir)
   |> List.sort (fun a b -> compare (receipt_sort_key b) (receipt_sort_key a))
   |> List.find_opt (fun _ -> true)
-;;
-
-let latest_receipt_blocks_required_tool_claim config ~agent_name ~required_tools =
-  match latest_execution_receipt_json config ~agent_name with
-  | None -> false
-  | Some receipt ->
-    let operator_reason = json_string_path [ "operator_disposition_reason" ] receipt in
-    let tool_contract_result = json_string_path [ "tool_contract_result" ] receipt in
-    let tool_requirement =
-      json_string_path [ "tool_surface"; "tool_requirement" ] receipt
-    in
-    let tools_used = Json_util.get_string_list receipt "tools_used" in
-    let degraded_contract =
-      match tool_contract_result with
-      | Some
-          ( "violated"
-          | "unknown"
-          | "satisfied_by_deterministic_fallback"
-          | "needs_execution_progress"
-          | "missing_required_tool_use"
-          | "passive_only"
-          | "claim_only_after_owned_task"
-          | "tool_surface_mismatch"
-          | "no_tool_capable_provider" ) -> true
-      | Some _ | None -> false
-    in
-    let visible_tools =
-      Json_util.get_string_list receipt "requested_tools"
-      @ Json_util.get_string_list receipt "canonical_tools"
-      @ tools_used
-    in
-    let visible_set = build_allowed_set visible_tools in
-    let required_tool_visible =
-      List.exists
-        (fun required_tool ->
-           Hashtbl.mem
-             visible_set
-             (Workspace_task_classify.canonical_required_tool_name required_tool))
-        required_tools
-    in
-    (operator_reason = Some "tool_required_no_tools"
-     || degraded_contract
-     || (tool_requirement = Some "required" && tools_used = []))
-    && not required_tool_visible
 ;;

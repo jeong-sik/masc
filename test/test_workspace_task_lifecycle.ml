@@ -310,7 +310,7 @@ let test_exhaustive_consistency () =
     statuses
 ;;
 
-(* ── required_tools inference from write-intent keywords ──── *)
+(* ── required_tools are ignored for task contracts ─────────── *)
 
 module Classify = Workspace_task_classify
 
@@ -333,8 +333,8 @@ let test_write_intent_detected () =
       ()
   in
   assert_equal_string_list
-    ~ctx:"write-intent: fix+update detected"
-    ~expected:[ "tool_edit_file"; "tool_execute" ]
+    ~ctx:"write-intent: no task-level required_tools"
+    ~expected:[]
     ~actual:contract.required_tools
 ;;
 
@@ -346,8 +346,8 @@ let test_write_intent_korean () =
       ()
   in
   assert_equal_string_list
-    ~ctx:"write-intent: Korean 수정+변경 detected"
-    ~expected:[ "tool_edit_file"; "tool_execute" ]
+    ~ctx:"write-intent Korean: no task-level required_tools"
+    ~expected:[]
     ~actual:contract.required_tools
 ;;
 
@@ -359,8 +359,8 @@ let test_write_intent_pr () =
       ()
   in
   assert_equal_string_list
-    ~ctx:"write-intent: PR detected"
-    ~expected:[ "tool_edit_file"; "tool_execute" ]
+    ~ctx:"write-intent PR: no task-level required_tools"
+    ~expected:[]
     ~actual:contract.required_tools
 ;;
 
@@ -377,7 +377,7 @@ let test_no_write_intent () =
     ~actual:contract.required_tools
 ;;
 
-let test_explicit_required_tools_preserved () =
+let test_explicit_required_tools_dropped () =
   let explicit_contract =
     { Classify.empty_task_contract with required_tools = [ "custom_tool"; "another_tool" ] }
   in
@@ -389,8 +389,8 @@ let test_explicit_required_tools_preserved () =
       ()
   in
   assert_equal_string_list
-    ~ctx:"explicit required_tools preserved"
-    ~expected:[ "custom_tool"; "another_tool" ]
+    ~ctx:"explicit required_tools dropped"
+    ~expected:[]
     ~actual:contract.required_tools
 ;;
 
@@ -412,6 +412,6 @@ let () =
   test_write_intent_korean ();
   test_write_intent_pr ();
   test_no_write_intent ();
-  test_explicit_required_tools_preserved ();
+  test_explicit_required_tools_dropped ();
   print_endline "test_task_state_lifecycle: all assertions passed"
 ;;

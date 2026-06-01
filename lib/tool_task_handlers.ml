@@ -32,7 +32,6 @@ type context = {
 type keeper_hooks =
   { is_registered_agent_alias : Workspace.config -> string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
-  ; agent_tool_names : Workspace.config -> agent_name:string -> string list option
   ; transition_action_denylist : Workspace.config -> agent_name:string -> string list
   ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
@@ -40,7 +39,6 @@ type keeper_hooks =
 let default_keeper_hooks =
   { is_registered_agent_alias = (fun _ _ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
-  ; agent_tool_names = (fun _ ~agent_name:_ -> None)
   ; transition_action_denylist = (fun _ ~agent_name:_ -> [])
   ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
@@ -146,9 +144,6 @@ let sync_keeper_current_task_binding (ctx : context) =
   (current_keeper_hooks ()).sync_current_task_binding
     ctx.config
     ~agent_name:ctx.agent_name
-
-let keeper_agent_tool_names (ctx : context) =
-  (current_keeper_hooks ()).agent_tool_names ctx.config ~agent_name:ctx.agent_name
 
 let keeper_transition_action_denylist (ctx : context) =
   (current_keeper_hooks ()).transition_action_denylist
@@ -354,7 +349,7 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
     Tool_result.ok ~tool_name ~start_time (Workspace.batch_add_tasks_with_contracts
       ~created_by:ctx.agent_name ctx.config tasks)
 
-let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
+let handle_claim ~tool_name ~start_time ctx args =
   (* #18965 — removed [is_agent_session_bound] hard gate.  Keeper-internal tag
      dispatch path bypasses MCP entry session binding, so this gate produced
      false-negative rejects for every keeper turn (fleet evidence:
@@ -371,14 +366,8 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
   match validate_task_id task_id with
   | Error e -> result_to_response ~tool_name ~start_time (Error e)
   | Ok task_id ->
-  let agent_tool_names =
-    match agent_tool_names with
-    | Some _ -> agent_tool_names
-    | None -> keeper_agent_tool_names ctx
-  in
   let result =
-    Workspace.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
-      ?agent_tool_names ()
+    Workspace.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ()
   in
   (match result with
    | Ok outcome ->
@@ -429,14 +418,12 @@ let format_no_eligible
       ~blocked_count
       ~verification_blocked_count
       ~scope_excluded_count
-      ~required_tool_excluded_count
   =
   let diagnostics =
     no_eligible_blocker_summary
       ~blocked_count
       ~verification_blocked_count
       ~scope_excluded_count
-      ~required_tool_excluded_count
   in
   match active_goal_phases_for_agent ctx with
   | [] ->
@@ -457,19 +444,12 @@ let format_no_eligible
         (String.concat ", " phases)
         diagnostics
 
-let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
+let handle_claim_next ~tool_name ~start_time ctx _args =
   (* #18965 — removed [is_agent_session_bound] hard gate (same rationale as
      [handle_claim] above).  Workspace.claim_next_r operates on
      [~agent_name] alone; backlog read does not require an entry under
      agents_dir. *)
-  let agent_tool_names =
-    match agent_tool_names with
-    | Some _ -> agent_tool_names
-    | None -> keeper_agent_tool_names ctx
-  in
-  let result =
-    Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name ?agent_tool_names ()
-  in
+  let result = Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
   match result with
   | Workspace.Claim_next_claimed { message; task_id; _ } ->
     sync_keeper_current_task_binding ctx;
@@ -484,11 +464,8 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
       ; blocked_count
       ; verification_blocked_count
       ; scope_excluded_count
-      ; required_tool_excluded_count
       ; explicit_excluded_count
       ; claim_pool_candidate_count
-      ; receipt_required_tool_blocked
-      ; agent_tool_names_known
       } ->
     let message =
       format_no_eligible
@@ -497,7 +474,6 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
         ~blocked_count
         ~verification_blocked_count
         ~scope_excluded_count
-        ~required_tool_excluded_count
     in
     let diagnostics =
       no_eligible_diagnostics_json
@@ -505,11 +481,8 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
         ~blocked_count
         ~verification_blocked_count
         ~scope_excluded_count
-        ~required_tool_excluded_count
         ~explicit_excluded_count
         ~claim_pool_candidate_count
-        ~receipt_required_tool_blocked
-        ~agent_tool_names_known
     in
     (* #18954: build the structured payload directly via [make_ok ~data]
        so the message and diagnostics live in the JSON [data] field.

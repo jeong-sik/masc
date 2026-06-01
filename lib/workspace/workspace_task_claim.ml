@@ -105,7 +105,7 @@ type claim_outcome = {
 }
 
 (** Result-returning version of claim_task for type-safe error handling. *)
-let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
+let claim_task_r config ~agent_name ~task_id ()
   : claim_outcome Masc_domain.masc_result
   =
   let open Result.Syntax in
@@ -128,9 +128,6 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
            match target_task with
            | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
            | Some task -> Ok task
-         in
-         let* () =
-           Workspace_task_classify.required_tool_claim_guard config ~agent_name ?agent_tool_names task
          in
          (* Claim gate: only typed policy blocks Todo reclaim.
          do_not_reclaim_reason is an operator-facing explanation, not state;

@@ -771,6 +771,8 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('0/1')).toBeInTheDocument()
     expect(screen.getByText('runtime proof')).toBeInTheDocument()
     expect(screen.getByText('pass / 2 calls')).toBeInTheDocument()
+    expect(screen.getByText('tool lineage')).toBeInTheDocument()
+    expect(screen.getByText('not recorded')).toBeInTheDocument()
     expect(screen.getByText('proof tools')).toBeInTheDocument()
     expect(screen.getByText('Execute, SearchFiles')).toBeInTheDocument()
     expect(screen.getByText('working loops')).toBeInTheDocument()

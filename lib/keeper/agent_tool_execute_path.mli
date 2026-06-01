@@ -30,9 +30,12 @@ val execution_location_json :
   cwd:string ->
   Yojson.Safe.t
 (** Structured cwd contract for Execute responses.  The JSON tells the agent
-    whether the effective cwd is the keeper playground root, a sandbox repo,
-    or a sandbox worktree, and records that relative argv paths resolve against
-    that effective cwd. *)
+    whether the effective cwd is inside the keeper playground
+    ([playground_root], [playground_subpath], [repo_root], [repo_subpath],
+    [repo_worktree_root], [repo_worktree_subpath]) or outside it
+    ([outside_playground]).  [relative_cwd] is relative to [playground_root]
+    for playground scopes and [null] when the cwd is outside the playground.
+    Relative argv paths resolve against the effective cwd. *)
 
 val auto_correct_path :
   meta:Keeper_meta_contract.keeper_meta -> string -> string option

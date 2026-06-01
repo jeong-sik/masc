@@ -907,6 +907,28 @@ let test_execution_location_classifies_repo_worktree_subpath () =
        (Filename.concat playground "repos/masc-mcp/.worktrees/task-123"))
     (loc |> Json.member "worktree_root" |> Json.to_string)
 
+let test_execution_location_outside_playground_has_null_relative_cwd () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let meta = make_readonly_meta "exec-location-outside" in
+  let cwd = Filename.concat base_path "outside" in
+  let loc =
+    Masc_mcp.Agent_tool_execute_path.execution_location_json
+      ~config
+      ~meta
+      ~args:(`Assoc [ "cwd", `String cwd ])
+      ~cwd
+  in
+  Alcotest.(check string) "scope" "outside_playground"
+    (loc |> Json.member "scope" |> Json.to_string);
+  Alcotest.(check string) "cwd source" "explicit_cwd"
+    (loc |> Json.member "cwd_source" |> Json.to_string);
+  Alcotest.(check bool) "relative cwd is not applicable" true
+    (match loc |> Json.member "relative_cwd" with
+     | `Null -> true
+     | _ -> false)
+
 let test_tool_execute_typed_process_runs_via_shell_ir () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1519,6 +1541,10 @@ let () =
             "execution location classifies worktree subpaths"
             `Quick
             test_execution_location_classifies_repo_worktree_subpath
+        ; Alcotest.test_case
+            "execution location outside playground has no relative cwd"
+            `Quick
+            test_execution_location_outside_playground_has_null_relative_cwd
         ; Alcotest.test_case
             "typed process runs via Shell IR"
             `Quick

@@ -123,12 +123,17 @@ let execution_location_json
        | _ -> Repo_subpath, [ "repos"; repo_name ] @ rest, Some repo_name, Some repo_root, None)
     | Some rest -> Playground_subpath, rest, None, None, None
   in
+  let relative_cwd =
+    match scope with
+    | Outside_playground -> `Null
+    | _ -> `String (relative_path_of_segments relative_segments)
+  in
   `Assoc
     [ "cwd", `String cwd
     ; "cwd_source", `String cwd_source
     ; "scope", `String (string_of_execution_location_scope scope)
     ; "playground_root", `String playground
-    ; "relative_cwd", `String (relative_path_of_segments relative_segments)
+    ; "relative_cwd", relative_cwd
     ; "relative_path_base", `String cwd
     ; "argv_relative_paths_resolve_against_cwd", `Bool true
     ; "repo_name", Json_util.string_opt_to_json repo_name

@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-(** Test keeper masc_* tool bridge under preset/custom tool policy. *)
+(** Test keeper masc_* tool bridge under explicit tool_access policy. *)
 
 module Workspace = Masc_mcp.Workspace
 module KET = Masc_mcp.Agent_tool_dispatch_runtime
@@ -24,10 +24,9 @@ let bridge_test_schemas =
 
 let prime_keeper_bridge () =
   init_keeper_tool_registry ();
-  ignore Masc_mcp.Tool_shard.all_keeper_tool_schemas;
   ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
   Masc_mcp.Tool_dispatch.register_module_tag
-    ~schemas:Masc_mcp.Tool_shard_types_schemas_filesystem.filesystem_tools
+    ~schemas:Masc_mcp.Tool_shard.all_keeper_tool_schemas
     ~tag:Masc_mcp.Tool_dispatch.Mod_shard;
   KET.inject_masc_schemas (bridge_test_schemas @ Masc_mcp.Config.raw_all_tool_schemas)
 
@@ -67,19 +66,6 @@ let write_text_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let write_keeper_repo_mapping base_path keeper_id repo_ids =
-  let path =
-    Filename.concat base_path ".masc/config/keeper_repo_mappings.toml"
-  in
-  ensure_dir (Filename.dirname path);
-  let entries =
-    repo_ids
-    |> List.map (fun id -> Printf.sprintf "%S" id)
-    |> String.concat ", "
-  in
-  write_text_file path
-    (Printf.sprintf "[mapping.%s]\nrepositories = [%s]\n" keeper_id entries)
-
 let read_text_file path =
   let ic = open_in path in
   Fun.protect
@@ -104,9 +90,8 @@ let run_process_ok ~cwd prog argv =
           dev_null dev_null
       in
       let rec wait () =
-        match Unix.waitpid [] pid with
-        | result -> result
-        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+        try Unix.waitpid [] pid with
+        | Unix.Unix_error (Unix.EINTR, "waitpid", _) -> wait ()
       in
       let _, status = wait () in
       Alcotest.(check int)
@@ -129,35 +114,73 @@ let write_json_file path json =
 
 let read_json_file path = Yojson.Safe.from_file path
 
-let default_test_tool_access =
-  [ "keeper_board_post"
-  ; "keeper_time_now"
-  ; "tool_read_file"
-  ; "tool_search_files"
-  ; "masc_status"
-  ]
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
 ;;
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop i =
-      i + needle_len <= text_len
-      && (String.sub text i needle_len = needle || loop (i + 1))
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "keeper_masc_bridge_runtime_" ".toml" in
+  write_text_file path runtime_toml;
+  match Masc_mcp.Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+;;
+
+let is_masc_alias_for allowed name =
+  List.exists
+    (fun base ->
+       String.equal name base || String.equal name ("mcp__masc__" ^ base))
+    allowed
+;;
+
+let register_tool_json_handler ~tool_name handler =
+  Masc_mcp.Tool_dispatch.register ~tool_name ~handler:(fun ~name ~args ->
+    let raw = handler ~args in
+    Some (Tool_result.ok ~tool_name:name ~start_time:0.0 raw))
+;;
+
+let register_patch_handler_for_file file_path =
+  register_tool_json_handler ~tool_name:"tool_edit_file" (fun ~args ->
+    let new_string =
+      Yojson.Safe.Util.member "new_string" args |> Yojson.Safe.Util.to_string
     in
-    loop 0
+    write_text_file file_path (new_string ^ "\n");
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "ok", `Bool true
+        ; "status", `String "ok"
+        ; "replacements", `Int 1
+        ]))
 ;;
 
 let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
     ?(sandbox_profile = Masc_mcp.Keeper_types_profile_sandbox.Local) () =
-  let tool_access = Option.value ~default:default_test_tool_access tool_access in
   let tool_access_field =
-    [
-      ( "tool_access",
-        Masc_mcp.Keeper_meta_tool_access.tool_access_to_json tool_access );
-    ]
+    match tool_access with
+    | Some access ->
+        [
+          ( "tool_access",
+            Masc_mcp.Keeper_meta_tool_access.tool_access_to_json access );
+        ]
+    | None -> []
   in
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc
@@ -165,10 +188,15 @@ let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
         ("name", `String name);
         ("agent_name", `String name);
         ("trace_id", `String (name ^ "-trace"));
+        ( "sandbox_profile",
+          `String
+            (Masc_mcp.Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
+        );
+        ("tool_denylist", `List (List.map (fun s -> `String s) tool_denylist));
       ]
       @ tool_access_field))
   with
-  | Ok meta -> { meta with sandbox_profile; tool_denylist }
+  | Ok meta -> meta
   | Error e -> failwith e
 
 let with_registered_keeper ~config (meta : Masc_mcp.Keeper_meta_contract.keeper_meta) f =
@@ -178,19 +206,6 @@ let with_registered_keeper ~config (meta : Masc_mcp.Keeper_meta_contract.keeper_
   Fun.protect
     ~finally:(fun () -> Masc_mcp.Keeper_registry.unregister ~base_path meta.name)
     f
-
-let dispatch_keeper_tool ~config ~meta ~name ~args =
-  let ctx_work =
-    Masc_mcp.Keeper_context_runtime.create ~system_prompt:"" ~max_tokens:4096
-  in
-  Masc_mcp.Agent_tool_dispatch_runtime.execute_keeper_tool_call
-    ~config
-    ~meta
-    ~ctx_work
-    ~exec_cache:None
-    ~name
-    ~input:args
-    ()
 
 let allowed_names_of_json json =
   prime_keeper_bridge ();
@@ -229,20 +244,19 @@ let test_inject_stores_filtered_masc () =
   Alcotest.(check bool) "no keeper_time_now" false
     (List.mem "keeper_time_now" names)
 
-let test_default_tool_access_exposes_masc () =
+let test_missing_tool_access_exposes_no_masc_tools () =
   prime_keeper_bridge ();
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  (* Governance tools are no longer in raw_all_tool_schemas *)
-  Alcotest.(check bool) "no masc_governance_status" false
-    (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "filters unsupported inline tool" false
-    (List.mem "masc_agents" names)
+  Alcotest.(check (list string)) "missing allowlist is empty" [] names
 
-let test_messaging_preset_exposes_board () =
+let test_explicit_tool_access_exposes_board () =
   prime_keeper_bridge ();
-  let meta = make_meta () in
+  let meta =
+    make_meta
+      ~tool_access:([ "keeper_board_post"; "tool_search_files"; "tool_read_file" ])
+      ()
+  in
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "has keeper_board_post" true
     (List.mem "keeper_board_post" names);
@@ -264,8 +278,13 @@ let test_custom_opens_specific_tools_only () =
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "only keeper-compatible tools allowed" 4
-    (List.length names);
+  List.iter
+    (fun name ->
+       Alcotest.(check bool)
+         ("only keeper-compatible tools allowed: " ^ name)
+         true
+         (is_masc_alias_for [ "masc_status"; "masc_tasks" ] name))
+    names;
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_tasks" true
     (List.mem "masc_tasks" names);
@@ -284,7 +303,13 @@ let test_deny_overrides_allow () =
       ~tool_denylist:[ "masc_tasks" ] ()
   in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check int) "status plus bridge alias after deny" 2 (List.length names);
+  List.iter
+    (fun name ->
+       Alcotest.(check bool)
+         ("only masc_status remains after deny: " ^ name)
+         true
+         (is_masc_alias_for [ "masc_status" ] name))
+    names;
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "no masc_tasks (denied)" false
     (List.mem "masc_tasks" names)
@@ -321,7 +346,7 @@ let test_custom_keeps_registered_inline_board_tool () =
     make_meta
       ~tool_access:
         (
-           [ "keeper_board_post"; "masc_agents" ])
+           [ "keeper_board_post"; "masc_broadcast" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
@@ -329,8 +354,8 @@ let test_custom_keeps_registered_inline_board_tool () =
      it won't appear in masc tool names but will be in the full allowed set *)
   Alcotest.(check bool) "raw masc_board_post filtered out" false
     (List.mem "masc_board_post" names);
-  Alcotest.(check bool) "keeps explicitly allowed inline tool" true
-    (List.mem "masc_agents" names)
+  Alcotest.(check bool) "drops unsupported inline tool" false
+    (List.mem "masc_broadcast" names)
 
 let with_masc_schema_ref schemas f =
   KET.with_masc_schemas_for_test schemas f
@@ -358,69 +383,40 @@ let test_dashboard_tool_count_uses_schema_ssot () =
       in
       Alcotest.(check int) "dashboard counts schema-derived masc tools" 1 count)
 
-let test_tool_access_missing_defaults_standard_policy () =
-  match
-    Masc_mcp.Keeper_meta_json_parse.meta_of_json
+let test_tool_access_missing_defaults_empty_allowlist () =
+  let names =
+    allowed_names_of_json
       (`Assoc
-        [ "name", `String "legacy-standard"
-        ; "agent_name", `String "legacy-standard"
-        ; "trace_id", `String "legacy-standard-trace"
+        [
+          ("name", `String "legacy-standard");
+          ("agent_name", `String "legacy-standard");
+          ("trace_id", `String "legacy-standard-trace");
         ])
-  with
-  | Ok _ -> Alcotest.fail "expected missing tool_access rejection"
-  | Error e ->
-    Alcotest.(check bool) "mentions tool_access" true
-      (contains_substring e "tool_access must be an array")
+  in
+  Alcotest.(check (list string)) "missing allowlist is empty" [] names
 
-let test_read_meta_file_rejects_legacy_tool_keys () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      let path = Filename.concat dir "compat-preset.json" in
-      write_json_file path
-        (`Assoc
-          [
-            ("name", `String "compat-preset");
-            ("agent_name", `String "compat-preset");
-            ("trace_id", `String "compat-preset-trace");
-            ("tool_preset", `String "delivery");
-            ("tool_also_allow", `List [ `String "masc_governance_status" ]);
-            ("allowed_providers", `List [ `String "provider_k" ]);
-          ]);
-      match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
-      | Ok _ -> Alcotest.fail "expected legacy tool policy rejection"
-      | Error e ->
-          Alcotest.(check string)
-            "legacy top-level keys rejected"
-            "removed keeper meta fields: allowed_providers, tool_preset, tool_also_allow"
-            e;
-          let persisted = read_json_file path in
-          Alcotest.(check string) "legacy tool_preset left untouched" "delivery"
-            (Yojson.Safe.Util.member "tool_preset" persisted
-             |> Yojson.Safe.Util.to_string))
+let test_typed_and_string_tool_access_defaults_match () =
+  let module Access = Masc_mcp.Keeper_meta_contract in
+  let check_default label json =
+    let string_default =
+      match Access.tool_access_of_meta_json json with
+      | Ok tools -> tools
+      | Error e -> Alcotest.failf "string parser failed for %s: %s" label e
+    in
+    let typed_default =
+      match Access.tool_access_of_meta_json_typed json with
+      | Ok tools -> Access.tool_access_to_string_list tools
+      | Error e -> Alcotest.failf "typed parser failed for %s: %s" label e
+    in
+    Alcotest.(check (list string))
+      (label ^ " typed/string defaults")
+      string_default
+      typed_default
+  in
+  check_default "missing" (`Assoc []);
+  check_default "null" (`Assoc [ "tool_access", `Null ])
 
-let test_read_meta_file_rejects_tool_access_object_without_tools () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      let path = Filename.concat dir "legacy-object.json" in
-      write_json_file path
-        (`Assoc
-          [
-            ("name", `String "legacy-object");
-            ("agent_name", `String "legacy-object");
-            ("trace_id", `String "legacy-object-trace");
-            ("tool_access", `Assoc [ ("preset", `String "full") ]);
-          ]);
-      match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
-      | Ok _ -> Alcotest.fail "expected tool_access object rejection"
-      | Error e ->
-          Alcotest.(check bool) "mentions array" true
-            (contains_substring e "tool_access must be an array"))
-
-let test_read_meta_file_rejects_missing_tool_access () =
+let test_read_meta_file_defaults_missing_tool_access_without_rewrite () =
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -432,45 +428,19 @@ let test_read_meta_file_rejects_missing_tool_access () =
             ("name", `String "legacy-standard");
             ("agent_name", `String "legacy-standard");
             ("trace_id", `String "legacy-standard-trace");
+            ("runtime_id", `String "test.runtime");
+            ("sandbox_profile", `String "local");
+            ("network_mode", `String "inherit");
           ]);
       match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
-      | Ok _ -> Alcotest.fail "expected missing tool_access rejection"
-      | Error e ->
-          Alcotest.(check bool) "mentions tool_access" true
-            (contains_substring e "tool_access must be an array"))
-
-let test_meta_of_json_rejects_legacy_tool_policy_keys () =
-  match Masc_test_deps.meta_of_json_fixture
-    (`Assoc
-      [
-        ("name", `String "compat-preset");
-        ("agent_name", `String "compat-preset");
-        ("trace_id", `String "compat-preset-trace");
-        ("tool_preset", `String "delivery");
-      ])
-  with
-  | Ok _ -> Alcotest.fail "expected legacy tool policy key rejection"
-  | Error e ->
-      Alcotest.(check string)
-        "legacy direct parse rejected"
-        "removed keeper meta fields: tool_preset"
-        e
-
-let test_tool_access_object_empty_tools_rejected () =
-  match
-    Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-         [
-           ("name", `String "preset-json");
-           ("agent_name", `String "preset-json");
-           ("trace_id", `String "preset-json-trace");
-           ("tool_access", `Assoc [ ("tools", `List []) ]);
-         ])
-  with
-  | Ok _ -> Alcotest.fail "expected object tool_access rejection"
-  | Error e ->
-      Alcotest.(check bool) "mentions array" true
-        (contains_substring e "tool_access must be an array")
+      | Error e -> Alcotest.fail e
+      | Ok None -> Alcotest.fail "expected keeper meta"
+      | Ok (Some meta) ->
+          let names = KET.keeper_allowed_tool_names meta in
+          Alcotest.(check (list string)) "missing allowlist is empty" [] names;
+          let persisted = read_json_file path in
+          Alcotest.(check bool) "missing tool_access not rewritten" true
+            (Yojson.Safe.Util.member "tool_access" persisted = `Null))
 
 let test_tool_access_array_empty_json_preserved () =
   let meta =
@@ -489,35 +459,22 @@ let test_tool_access_array_empty_json_preserved () =
   let names = meta.Masc_mcp.Keeper_meta_contract.tool_access in
   Alcotest.(check int) "custom empty preserved" 0 (List.length names)
 
-let test_tool_access_object_with_tools_rejected () =
+let test_tool_access_non_array_rejected () =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
-        ("name", `String "legacy-tools");
-        ("agent_name", `String "legacy-tools");
-        ("trace_id", `String "legacy-tools-trace");
-        ("tool_access", `Assoc [ ("tools", `List [ `String "masc_status" ]) ]);
+        ("name", `String "invalid-tool-access");
+        ("agent_name", `String "invalid-tool-access");
+        ("trace_id", `String "invalid-tool-access-trace");
+        ("tool_access", `String "masc_status");
       ])
   with
-  | Ok _ -> Alcotest.fail "expected object tool_access rejection"
+  | Ok _ -> Alcotest.fail "expected non-array tool_access rejection"
   | Error e ->
-      Alcotest.(check bool) "mentions array" true
-        (contains_substring e "tool_access must be an array")
-
-let test_tool_access_object_without_tools_rejected () =
-  match Masc_test_deps.meta_of_json_fixture
-    (`Assoc
-      [
-        ("name", `String "legacy-no-tools");
-        ("agent_name", `String "legacy-no-tools");
-        ("trace_id", `String "legacy-no-tools-trace");
-        ("tool_access", `Assoc [ ("preset", `String "full") ]);
-      ])
-  with
-  | Ok _ -> Alcotest.fail "expected object tool_access rejection"
-  | Error e ->
-      Alcotest.(check bool) "mentions array" true
-        (contains_substring e "tool_access must be an array")
+      Alcotest.(check string)
+        "non-array tool_access rejected"
+        "meta parse error: keeper tool_access must be an array of strings (received string)"
+        e
 
 let test_tool_access_invalid_tool_member_rejected () =
   match Masc_test_deps.meta_of_json_fixture
@@ -592,10 +549,9 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       git_ok ~cwd:dir [ "init"; "--quiet" ];
-      write_keeper_repo_mapping dir "masc-improver" [ "masc-mcp" ];
       let file_path =
         Filename.concat dir
-          ".masc/playground/masc-improver/repos/masc-mcp/lib/thompson_sampling.ml"
+          ".masc/playground/docker/masc-improver/repos/masc-mcp/lib/thompson_sampling.ml"
       in
       ensure_dir (Filename.dirname file_path);
       write_text_file file_path "let alpha = 0.1\nlet beta = 0.2\n";
@@ -605,15 +561,28 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
         let meta =
           make_meta
             ~name:"masc-improver"
-            ~sandbox_profile:Masc_mcp.Keeper_types_profile_sandbox.Local
+            ~sandbox_profile:Masc_mcp.Keeper_types_profile_sandbox.Docker
             ~tool_access:([ "tool_read_file" ])
             ()
         in
         with_registered_keeper ~config meta (fun () ->
+            register_tool_json_handler ~tool_name:"tool_read_file" (fun ~args ->
+              let path =
+                Yojson.Safe.Util.member "path" args |> Yojson.Safe.Util.to_string
+              in
+              Yojson.Safe.to_string
+                (`Assoc
+                  [ "ok", `Bool true
+                  ; "path", `String path
+                  ; ( "lines"
+                    , `List
+                        [ `String "let alpha = 0.1"; `String "let beta = 0.2" ]
+                    )
+                  ]));
             let raw =
-              dispatch_keeper_tool
+              Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
                 ~config
-                ~meta
+                ~keeper_name:meta.name
                 ~name:"tool_read_file"
                 ~args:
                   (`Assoc
@@ -625,14 +594,20 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
                     ])
             in
             let json = Yojson.Safe.from_string raw in
-            match Yojson.Safe.Util.member "error" json with
-            | `Null -> ()
-            | `String err ->
-              Alcotest.failf "tool_read_file should pass read preflight, got: %s" err
-            | other ->
-              Alcotest.failf
-                "unexpected error shape: %s"
-                (Yojson.Safe.to_string other))))
+            let path =
+              Yojson.Safe.Util.member "path" json |> Yojson.Safe.Util.to_string
+            in
+            let lines =
+              Yojson.Safe.Util.member "lines" json
+              |> Yojson.Safe.Util.to_list
+              |> List.map Yojson.Safe.Util.to_string
+            in
+            Alcotest.(check string) "path preserved"
+              "repos/masc-mcp/lib/thompson_sampling.ml"
+              path;
+            Alcotest.(check (list string)) "reads expected lines"
+              [ "let alpha = 0.1"; "let beta = 0.2" ]
+              lines)))
 
 let test_write_preflight_accepts_docker_container_repo_path () =
   let dir = temp_dir () in
@@ -645,7 +620,6 @@ let test_write_preflight_accepts_docker_container_repo_path () =
       in
       ensure_dir (Filename.dirname keeper_toml);
       write_text_file keeper_toml "[keeper]\nsandbox_profile = \"docker\"\n";
-      write_keeper_repo_mapping dir "sangsu" [ "masc-mcp" ];
       let file_path =
         Filename.concat dir
           ".masc/playground/docker/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-210/lib/workspace/workspace_orphan_daemon.ml"
@@ -664,10 +638,11 @@ let test_write_preflight_accepts_docker_container_repo_path () =
             ()
         in
         with_registered_keeper ~config meta (fun () ->
+          register_patch_handler_for_file file_path;
           let raw =
-            dispatch_keeper_tool
+            Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
               ~config
-              ~meta
+              ~keeper_name:meta.name
               ~name:"tool_edit_file"
               ~args:
                 (`Assoc
@@ -676,22 +651,21 @@ let test_write_preflight_accepts_docker_container_repo_path () =
                       `String
                         "/home/keeper/playground/sangsu/repos/masc-mcp/.worktrees/keeper-sangsu-agent-task-210/lib/workspace/workspace_orphan_daemon.ml"
                     );
-                    ("mode", `String "patch");
                     ("old_string", `String "let before = 1");
                     ("new_string", `String "let before = 2");
                     ("replace_all", `Bool false);
                   ])
           in
           let json = Yojson.Safe.from_string raw in
-          let ok =
-            Yojson.Safe.Util.member "ok" json |> Yojson.Safe.Util.to_bool
+          let status =
+            Yojson.Safe.Util.member "status" json |> Yojson.Safe.Util.to_string
           in
-          let occurrences =
-            Yojson.Safe.Util.member "occurrences" json
+          let replacements =
+            Yojson.Safe.Util.member "replacements" json
             |> Yojson.Safe.Util.to_int
           in
-          Alcotest.(check bool) "edit ok" true ok;
-          Alcotest.(check int) "single replacement" 1 occurrences;
+          Alcotest.(check string) "edit status" "ok" status;
+          Alcotest.(check int) "single replacement" 1 replacements;
           Alcotest.(check string)
             "file edited through host playground"
             "let before = 2\n"
@@ -720,7 +694,6 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
       in
       ensure_dir (Filename.dirname keeper_config);
       write_text_file keeper_config "[keeper]\nsandbox_profile = \"docker\"\n";
-      write_keeper_repo_mapping dir keeper_name [ "masc-mcp" ];
       ensure_dir (Filename.dirname file_path);
       write_text_file file_path "let x = 1\n";
       run_with_fs (fun () ->
@@ -733,15 +706,15 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
             ()
         in
         ignore (Masc_mcp.Keeper_registry.register ~base_path:dir keeper_name meta);
+        register_patch_handler_for_file file_path;
         let raw =
-          dispatch_keeper_tool
+          Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
             ~config
-            ~meta
+            ~keeper_name
             ~name:"tool_edit_file"
             ~args:
               (`Assoc
                 [ "path", `String rel_path
-                ; "mode", `String "patch"
                 ; "old_string", `String "let x = 1"
                 ; "new_string", `String "let x = 2"
                 ; "replace_all", `Bool false
@@ -805,7 +778,9 @@ let test_is_keeper_denied () =
 
 let test_denied_excluded_from_allowed_names () =
   prime_keeper_bridge ();
-  let meta = make_meta () in
+  let meta =
+    make_meta ~tool_access:([ "keeper_time_now"; "masc_status" ]) ()
+  in
   let names = KET.keeper_allowed_tool_names meta in
   let denied =
     Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper_denied
@@ -823,6 +798,7 @@ let test_denied_excluded_from_allowed_names () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
+  init_runtime_default_for_tests ();
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   ignore (Result.get_ok (KET.init_policy_config ~base_path));
   Alcotest.run "Keeper masc bridge"
@@ -832,12 +808,12 @@ let () =
           Alcotest.test_case "stores filtered masc_* schemas" `Quick
             test_inject_stores_filtered_masc;
         ] );
-      ( "preset_policy",
+      ( "tool_access_policy",
         [
-          Alcotest.test_case "default tool_access exposes masc tools" `Quick
-            test_default_tool_access_exposes_masc;
-          Alcotest.test_case "default tool_access exposes board" `Quick
-            test_messaging_preset_exposes_board;
+          Alcotest.test_case "missing tool_access exposes no masc tools" `Quick
+            test_missing_tool_access_exposes_no_masc_tools;
+          Alcotest.test_case "explicit tool_access exposes board" `Quick
+            test_explicit_tool_access_exposes_board;
           Alcotest.test_case "explicit allowlist opens extra tool" `Quick
             test_explicit_allowlist_opens_extra_tool;
           Alcotest.test_case "custom filters board tools with keeper wrappers" `Quick
@@ -858,24 +834,16 @@ let () =
         ] );
       ( "meta_json",
         [
-          Alcotest.test_case "missing tool_access rejected" `Quick
-            test_tool_access_missing_defaults_standard_policy;
-          Alcotest.test_case "read_meta rejects legacy tool keys" `Quick
-            test_read_meta_file_rejects_legacy_tool_keys;
-          Alcotest.test_case "read_meta rejects tool_access object" `Quick
-            test_read_meta_file_rejects_tool_access_object_without_tools;
-          Alcotest.test_case "read_meta rejects missing tool_access" `Quick
-            test_read_meta_file_rejects_missing_tool_access;
-          Alcotest.test_case "direct meta_of_json rejects legacy tool keys" `Quick
-            test_meta_of_json_rejects_legacy_tool_policy_keys;
-          Alcotest.test_case "tool_access object empty tools rejected" `Quick
-            test_tool_access_object_empty_tools_rejected;
+          Alcotest.test_case "missing tool_access defaults empty allowlist" `Quick
+            test_tool_access_missing_defaults_empty_allowlist;
+          Alcotest.test_case "typed/string defaults match" `Quick
+            test_typed_and_string_tool_access_defaults_match;
+          Alcotest.test_case "read_meta defaults missing tool_access without rewrite" `Quick
+            test_read_meta_file_defaults_missing_tool_access_without_rewrite;
           Alcotest.test_case "array empty json preserved" `Quick
             test_tool_access_array_empty_json_preserved;
-          Alcotest.test_case "tool_access object tools rejected" `Quick
-            test_tool_access_object_with_tools_rejected;
-          Alcotest.test_case "tool_access object without tools rejected" `Quick
-            test_tool_access_object_without_tools_rejected;
+          Alcotest.test_case "non-array tool_access rejected" `Quick
+            test_tool_access_non_array_rejected;
           Alcotest.test_case "invalid tool member rejected" `Quick
             test_tool_access_invalid_tool_member_rejected;
         ] );

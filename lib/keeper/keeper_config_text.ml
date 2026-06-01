@@ -55,14 +55,6 @@ let legacy_provider_filter_name = "allowed_providers"
 
 (* ── Removed / rejected keeper input keys ───────────────────── *)
 
-let removed_keeper_tool_policy_input_key_names =
-  [
-    "tool_preset";
-    "tool_also_allow";
-    "tool_custom_allowlist";
-    "also_allow";
-  ]
-
 let removed_keeper_input_key_names =
   [
     "models";
@@ -80,7 +72,6 @@ let removed_keeper_input_key_names =
     "policy_mode";
     "policy_shell_mode";
   ]
-  @ removed_keeper_tool_policy_input_key_names
 
 let non_public_keeper_input_key_names =
   [

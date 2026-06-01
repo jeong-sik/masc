@@ -15,21 +15,10 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let has_raw key = List.mem_assoc key doc in
   let tool_access_defaults_result =
     let key = k "tool_access" in
-    let retired_table_keys =
-      [ "tools"; "kind"; "preset"; "also_allow" ]
-      |> List.map (fun suffix -> k ("tool_access." ^ suffix))
-      |> List.filter has_raw
-    in
-    match retired_table_keys with
-    | _ :: _ ->
-        Error
-          (Printf.sprintf
-             "removed keeper.tool_access table keys: %s. Use keeper.tool_access = [...]"
-             (String.concat ", " retired_table_keys))
-    | [] when has_raw key ->
+    if has_raw key then
       let tools = Keeper_toml_loader.toml_string_list doc key in
       Ok (Some (normalize_name_list tools))
-    | [] -> Ok None
+    else Ok None
   in
   let per_provider_timeout_state, per_provider_timeout =
     per_provider_timeout_of_toml

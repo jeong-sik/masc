@@ -81,6 +81,7 @@ val resolve_tool_name_list :
 (** Parse the canonical [tool_access] field.
     Removed top-level tool-policy args are rejected. *)
 val parse_tool_access_input :
+  ?tool_name:string ->
   Yojson.Safe.t ->
   (string list option, string) result
 

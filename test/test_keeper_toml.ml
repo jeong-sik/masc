@@ -820,40 +820,6 @@ runtime_id = "primary"
        check bool "mentions removed allowed_providers key" true
          (contains_substring msg "keeper.allowed_providers"))
 
-let test_profile_rejects_legacy_tool_policy_key () =
-  let input = {|
-[keeper]
-goal = "test"
-tool_preset = "delivery"
-runtime_id = "primary"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected removed TOML key error"
-     | Error msg ->
-       check bool "mentions removed tool_preset key" true
-         (contains_substring msg "keeper.tool_preset"))
-
-let test_profile_rejects_legacy_tool_access_table () =
-  let input = {|
-[keeper]
-goal = "test"
-runtime_id = "primary"
-
-[keeper.tool_access]
-tools = ["tool_read_file"]
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected removed tool_access table error"
-     | Error msg ->
-       check bool "mentions removed tool_access table key" true
-         (contains_substring msg "keeper.tool_access.tools"))
-
 let test_profile_max_turns_overrides () =
   let input = {|
 [keeper]
@@ -1921,10 +1887,6 @@ let () =
             test_profile_rejects_removed_initiative_keys;
           test_case "legacy allowed_providers rejected" `Quick
             test_profile_rejects_legacy_allowed_providers;
-          test_case "legacy tool policy key rejected" `Quick
-            test_profile_rejects_legacy_tool_policy_key;
-          test_case "legacy tool_access table rejected" `Quick
-            test_profile_rejects_legacy_tool_access_table;
           test_case "runtime_id parsed" `Quick
             test_profile_accepts_runtime_id;
           test_case "max_turns overrides parsed and applied" `Quick

@@ -23,9 +23,15 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let rm_rf path =
-  try Masc_mcp.Fs_compat.remove_tree path with
-  | _ -> ()
+let rec rm_rf path =
+  try
+    if Sys.file_exists path then
+      if Sys.is_directory path then (
+        Sys.readdir path
+        |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path)
+      else Sys.remove path
+  with _ -> ()
 
 let restore_env name = function
   | Some value -> Unix.putenv name value

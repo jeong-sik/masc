@@ -89,7 +89,7 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
 let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
   check bool "generic masc_web_search satisfies presence" true
     (satisfies_required_tool "masc_web_search" (`Assoc []));
-  check bool "explicit masc_web_search satisfies required contract" true
+  check bool "explicit masc_web_search remains advisory-compatible" true
     (satisfies_explicit_required_tool
        ~required_tool_names:[ "masc_web_search" ]
        "masc_web_search"
@@ -99,7 +99,7 @@ let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
        ~required_tool_names:[ "masc_web_search" ]
        "WebSearch"
        (`Assoc []));
-  check bool "unlisted passive tool still rejected" false
+  check bool "unlisted passive tool is advisory-compatible" true
     (satisfies_explicit_required_tool
        ~required_tool_names:[ "tool_execute" ]
        "masc_web_search"
@@ -115,7 +115,7 @@ let test_turn_required_tool_satisfaction_keeps_generic_presence_separate () =
        (KTP.required_tool_satisfaction_for_turn
           ~required_tool_names:[]
           (required_tool_call "keeper_board_get" (`Assoc []))));
-  check bool "explicit required action still rejects unrelated passive tool" false
+  check bool "explicit required action is advisory-compatible" true
     (Result.is_ok
        (KTP.required_tool_satisfaction_for_turn
           ~required_tool_names:[ "tool_execute" ]
@@ -148,16 +148,12 @@ let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
       (required_tool_call "keeper_tasks_list" (`Assoc []))
   in
   check bool "empty hint generic presence succeeds" true (Result.is_ok empty_hint_error);
-  let turn_hinted =
-    KTP.required_tool_satisfaction_for_turn
-      ~satisfying_tools:[ "keeper_task_claim" ]
-      ~required_tool_names:[ "tool_execute" ]
-      (required_tool_call "masc_status" (`Assoc []))
-  in
-  check string "turn-level rejection forwards satisfying_tools hint"
-    "tool 'masc_status' was called, but this turn explicitly required one of: \
-     [tool_execute]. Call one of these instead: [keeper_task_claim]"
-    (Result.get_error turn_hinted)
+  check bool "turn-level satisfying_tools hint stays advisory" true
+    (Result.is_ok
+       (KTP.required_tool_satisfaction_for_turn
+          ~satisfying_tools:[ "keeper_task_claim" ]
+          ~required_tool_names:[ "tool_execute" ]
+          (required_tool_call "masc_status" (`Assoc []))))
 ;;
 
 let test_satisfying_tools_for_turn_computes_from_affordances () =
@@ -226,15 +222,15 @@ let () =
             `Quick
             test_required_tool_satisfaction_accepts_mutating_tools
         ; test_case
-            "explicit required tool predicate accepts named passive tool"
+            "explicit required tool predicate is advisory"
             `Quick
             test_explicit_required_tool_satisfaction_accepts_named_passive_tool
         ; test_case
-            "turn required tool predicate separates presence from progress"
+            "turn required tool predicate is advisory"
             `Quick
             test_turn_required_tool_satisfaction_keeps_generic_presence_separate
         ; test_case
-            "required tool satisfaction includes satisfying tools hint"
+            "required tool satisfaction ignores satisfying tools hint"
             `Quick
             test_required_tool_satisfaction_includes_satisfying_tools_hint
         ; test_case

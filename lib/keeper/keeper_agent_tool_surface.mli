@@ -171,17 +171,16 @@ val turn_affordances_require_tool_gate_with_allowed :
   -> string list
   -> bool
 
-(** On a required-action turn, trim the visible surface to tools that can make
+(** On a tool-gated turn, trim the visible surface to tools that can make
     progress when such tools exist. Passive status/read tools remain visible on
     optional turns and on surfaces that have no actionable alternative.
 
     When [has_current_task] is true, claim/context tools are not treated as
     actionable alternatives because the keeper already owns active work.
 
-    Explicit [required_tool_names] are preserved even when they are read-only:
-    operator/harness calls such as [masc_keeper_msg.required_tools =
-    ["masc_web_search"]] are a direct evidence contract, not a generic
-    actionable-world-signal gate. *)
+    Explicit [required_tool_names] are preserved only as advisory
+    tool-surface hints for compatibility; they do not create a hard evidence
+    contract. *)
 val tool_names_for_required_gate_surface :
   ?has_current_task:bool ->
   tool_gate_requested:bool ->
@@ -190,9 +189,8 @@ val tool_names_for_required_gate_surface :
   string list
 
 (** Whether the very first turn of a multi-turn slot should require a tool
-    call. Generic affordances no longer create a required-tool contract; only
-    explicit required tools or caller [tool_choice] do that later in turn
-    setup. *)
+    call. Generic affordances and explicit [required_tools] no longer create a
+    required-tool contract. *)
 val should_require_tools_for_initial_turn :
   max_turns:int -> turn_affordances:string list -> bool
 
@@ -200,7 +198,7 @@ val has_turn_affordance : turn_affordance -> string list -> bool
 
 val has_task_claim_affordance : string list -> bool
 
-(** Ordered executable candidates for generic required-tool gates.
+(** Ordered executable candidates for legacy tool-gate guidance.
     Claim/context tools are excluded when the keeper already owns active work,
     and passive status/read tools are never recommended. *)
 val generic_required_actionable_tool_names :
@@ -209,26 +207,22 @@ val generic_required_actionable_tool_names :
   allowed_tool_names:string list ->
   string list
 
-(** Pick the model-facing [tool_choice] when the gate fires. *)
+(** Legacy helper for model-facing [tool_choice] when a gate fires. *)
 val preferred_tool_choice_for_required_turn :
   has_current_task:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   Agent_sdk.Types.tool_choice
 
-(** Human-readable instruction for generic affordance-driven required-tool
-    turns, where no explicit [required_tool_names] exist but the runtime still
-    requires a keeper tool call. *)
+(** Human-readable instruction for legacy affordance-driven tool-gate turns. *)
 val generic_required_tool_gate_guidance :
   has_current_task:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string
 
-(** Candidate tools a generic required-tool gate can recommend. This is
-    distinct from explicit [required_tool_names]: callers may satisfy a
-    generic gate with any execution-progress tool, while this list explains
-    the preferred candidates exposed to the model/operator. *)
+(** Candidate tools legacy tool-gate guidance can recommend. This is distinct
+    from explicit [required_tool_names], which are now advisory surface hints. *)
 val generic_required_tool_candidate_names :
   has_current_task:bool ->
   turn_affordances:string list ->
@@ -245,32 +239,29 @@ val actionable_signal_requires_active_task_tool_gate :
   allowed_tool_names:string list ->
   bool
 
-(** Per-call [masc_keeper_msg.required_tools] is an explicit operator/harness
-    contract for this turn. When present, it takes precedence over the keeper's
-    active task contract so stale task-specific required tools cannot hijack the
-    message. *)
+(** Per-call [masc_keeper_msg.required_tools] is an advisory operator/harness
+    hint for surfacing relevant tools. When present, it takes precedence over
+    the keeper's active task hint so stale task-specific tool suggestions cannot
+    hijack the message. *)
 val required_tool_names_for_turn :
   current_task_required_tool_names:string list ->
   per_call_required_tool_names:string list ->
   string list
 
-(** Remove required tools that have already been satisfied in the current
-    Agent.run. This keeps a multi-turn keeper message from forcing the same
-    specific tool again after the successful tool call has already happened. *)
+(** Remove suggested tools that have already been used in the current
+    Agent.run. This keeps a multi-turn keeper message from repeatedly
+    over-weighting the same specific tool after a successful call. *)
 val outstanding_required_tool_names :
   required_tool_names:string list -> satisfied_tool_names:string list -> string list
 
-(** Extract successfully satisfied required-contract tools from observed
-    [(tool_name, outcome)] pairs. Failed calls and no-progress successes stay
-    outstanding. Explicit per-call requirements may include read-only tools, so
-    an [ok] outcome is enough to latch the named tool as satisfied. *)
+(** Extract successfully used advisory tools from observed [(tool_name,
+    outcome)] pairs. Failed calls and no-progress successes stay outstanding. *)
 val satisfied_required_tool_names_of_outcomes :
   (string * string) list -> string list
 
-(** Pick the model-facing [tool_choice] for an explicit required-tool list.
-    Visible required tools use [Any] so OAS enforces tool use without
-    exact-name matching before MASC canonicalizes MCP-prefixed tool names. The
-    specific required names are checked after execution. *)
+(** Legacy helper retained for callers that still ask for a model-facing
+    [tool_choice] from [required_tools]. It now returns [Auto] semantics in the
+    implementation because [required_tools] are advisory. *)
 val preferred_tool_choice_for_required_tool_names :
   required_tool_names:string list ->
   allowed_tool_names:string list ->

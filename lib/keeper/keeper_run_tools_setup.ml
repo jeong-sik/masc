@@ -774,11 +774,8 @@ let prepare_agent_setup
            ~allowed_tool_names:turn_visible_tool_names
     in
     let tool_gate_requested =
-      required_tool_names <> []
-      || active_task_actionable_tool_gate_requested
-      || tool_gate_requested_for_turn
-           ~current_tool_choice
-           ~is_last_turn
+      active_task_actionable_tool_gate_requested
+      || tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
     in
     let turn_visible_tool_names =
       tool_names_for_required_gate_surface

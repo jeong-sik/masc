@@ -68,8 +68,8 @@ let test_claim_contract_result_counts_initial_claim_as_execution () =
     (result ~had_owned_active_task_at_turn_start:true [ "keeper_task_claim" ]);
   check
     string
-    "claim does not satisfy unrelated explicit required tool"
-    "missing_required_tool_use"
+    "explicit required tool names are advisory for observed progress"
+    "satisfied_execution"
     (result ~required:[ "keeper_task_done" ] [ "keeper_task_claim" ])
 ;;
 

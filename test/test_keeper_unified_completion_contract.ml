@@ -48,9 +48,9 @@ let test_validate_completion_contract_requires_tool_use () =
   | Error e ->
     check
       bool
-      "error mentions required tool contract"
+      "error mentions strict tool_choice contract"
       true
-      (contains_substring e "required tool contract")
+      (contains_substring e "strict tool_choice contract")
 ;;
 
 let test_validate_completion_contract_accepts_stay_silent () =

@@ -548,12 +548,12 @@ let keeper_schemas : tool_schema list = [
         ("required_tools", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional: tool names that must be visible and used during this one keeper turn. Missing required tools surface as tool_surface_mismatch/missing_required_tool_use.");
+          ("description", `String "Optional: advisory tool names to include/prefer during this one keeper turn. They do not create a hard completion contract.");
         ]);
         ("required_tool_names", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional alias for required_tools. Tool names listed here must be visible and used during this one keeper turn.");
+          ("description", `String "Optional alias for required_tools. Tool names listed here are advisory surface hints.");
         ]);
         ("no_skill_route", `Assoc [
           ("type", `String "boolean");

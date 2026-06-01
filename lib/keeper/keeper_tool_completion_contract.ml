@@ -85,7 +85,7 @@ let validate_completion_contract_presence
     then Ok ()
     else
       Error
-        "keeper turn violated required tool contract: no keeper-surface tools were called"
+        "keeper turn violated strict tool_choice contract: no keeper-surface tools were called"
   in
   post_completion_contract_presence_check ~contract ~tool_present ~result;
   result
@@ -115,7 +115,7 @@ let validate_completion_contract
   | Require_tool_use ->
     (match tool_names with
      | _ :: _ -> Ok ()
-     | [] -> Error "keeper turn violated required tool contract: no tools were called")
+     | [] -> Error "keeper turn violated strict tool_choice contract: no tools were called")
   in
   post_completion_contract_finalize_check ~contract ~tool_names ~result;
   result

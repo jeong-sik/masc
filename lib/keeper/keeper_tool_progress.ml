@@ -1,8 +1,8 @@
 (** Keeper_tool_progress - tool progress classification and required-action
     contract helpers. *)
 
-(** Keeper tool progress classes are the shared contract between required-tool
-    validation, runtime receipts, and liveness metrics. Keep these classes
+(** Keeper tool progress classes are the shared vocabulary for runtime receipts
+    and liveness metrics. Keep these classes
     conservative: state/reporting tools do not count as productive progress,
     and claim tools only bind work; execution or completion tools are what
     prove the keeper is alive past task pickup. *)
@@ -161,29 +161,10 @@ let required_tool_satisfaction_for_required_names
       (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
   =
-  let required_tool_names =
-    required_tool_names
-    |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-  in
-  let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
-  if List.mem tool_name required_tool_names
-  then Ok ()
-  else (
-    let base_msg =
-      Printf.sprintf
-        "tool '%s' was called, but this turn explicitly required one of: [%s]"
-        tool_name
-        (String.concat "; " required_tool_names)
-    in
-    match satisfying_tools with
-    | [] -> Error base_msg
-    | _ ->
-      Error
-        (Printf.sprintf
-           "%s. Call one of these instead: [%s]"
-           base_msg
-           (String.concat "; " satisfying_tools)))
+  ignore satisfying_tools;
+  ignore required_tool_names;
+  ignore call;
+  Ok ()
 ;;
 
 let required_tool_satisfaction_for_turn
@@ -192,9 +173,10 @@ let required_tool_satisfaction_for_turn
       (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
   =
-  match required_tool_names with
-  | [] -> Ok ()
-  | _ -> required_tool_satisfaction_for_required_names ~satisfying_tools ~required_tool_names call
+  required_tool_satisfaction_for_required_names
+    ~satisfying_tools
+    ~required_tool_names
+    call
 ;;
 
 let parse_tool_csv text =

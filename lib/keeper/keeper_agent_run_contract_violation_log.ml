@@ -39,7 +39,7 @@ let record_text_only
   let contract_str = completion_contract_to_string effective_completion_contract in
   let signal_label = signal_label actionable_signal_kind in
   Log.Keeper.error
-    "keeper:%s required tool contract violated (turn=%d, tools=%d, contract=%s, \
+    "keeper:%s strict tool_choice contract violated (turn=%d, tools=%d, contract=%s, \
      signal=%s). Rejecting text-only response. Reason: %s"
     keeper_name
     turns

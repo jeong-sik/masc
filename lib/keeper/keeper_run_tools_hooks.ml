@@ -140,22 +140,7 @@ let assemble_hooks
      };
   let initial_tool_surface_blocker = ref None in
   let initial_tool_surface_result =
-    if initial_tool_surface.missing_required_tool_names <> []
-    then (
-      acc.receipt_tool_contract_result <-
-        Keeper_execution_receipt.Contract_tool_surface_mismatch;
-      initial_tool_surface_blocker
-      := Some
-           (sdk_error_of_keeper_internal_error
-              (Keeper_tool_surface_mismatch
-                 { keeper_name = meta.name
-                 ; required_tools = initial_tool_surface.required_tool_names
-                 ; missing_required_tools =
-                     initial_tool_surface.missing_required_tool_names
-                 ; visible_tools = initial_tool_surface.turn_visible_tool_names
-                 }));
-      Ok initial_tool_surface)
-    else if
+    if
       initial_tool_surface.tool_gate_requested
       && initial_tool_surface.turn_visible_tool_names = []
     then (
@@ -386,11 +371,10 @@ let assemble_hooks
                     append_ctx
                       ctx
                       (Printf.sprintf
-                         "[REQUIRED TOOLS - FINAL TURN] This Agent.run call is on its \
-                          final turn, but this message has explicit required_tools: %s. \
-                          You MUST either use every required tool now or return a \
-                          concise blocker naming the missing policy/tool/runtime \
-                          condition."
+                         "[REQUESTED TOOLS - FINAL TURN] This Agent.run call is on its \
+                          final turn and the caller suggested these tools: %s. Prefer \
+                          them only when they are useful and visible; do not block the \
+                          turn or fabricate a call merely to satisfy this advisory hint."
                          (String.concat ", " computed_surface.required_tool_names))
                   else if computed_surface.is_last_turn
                   then
@@ -415,10 +399,11 @@ let assemble_hooks
                     append_ctx
                       ctx
                       (Printf.sprintf
-                         "[REQUIRED TOOLS] This Agent.run call has explicit \
-                          required_tools: %s. You MUST use these exact runtime tools \
-                          before answering in natural language. Do not substitute a \
-                          shell command or status read for a listed required tool."
+                         "[REQUESTED TOOLS] The caller suggested these tools for this \
+                          Agent.run call: %s. Treat this as a tool-surface hint, not a \
+                          completion contract. Use a listed tool only when it is the \
+                          right visible tool for the work; otherwise proceed with the \
+                          best available response."
                          (String.concat ", " computed_surface.required_tool_names))
                   else if computed_surface.tool_gate_requested
                   then
@@ -452,10 +437,8 @@ let assemble_hooks
                          computed_surface.per_call_max_turns)
                   else ctx
                 in
-                (* Contract violation retry feedback: when a previous
-                   Agent.run attempt was rejected for not calling
-                   required tools, inject explicit guidance naming the
-                   satisfying tools so the model knows what to do. *)
+                (* Provider-level strict tool_choice retry feedback. Keeper
+                   required_tools are advisory and do not create this path. *)
                 let ctx =
                   if acc.contract_violation_retries > 0
                   then
@@ -474,20 +457,19 @@ let assemble_hooks
                     let retry_action =
                       if preview = ""
                       then
-                        "No currently visible tool can satisfy this contract; \
-                         emit a concise blocker instead."
+                        "No currently visible tool can satisfy the provider-level \
+                         tool_choice contract; emit a concise blocker instead."
                       else
                         Printf.sprintf
-                          "You MUST call one of these tools NOW: %s."
+                          "Call one useful visible tool before answering: %s."
                           preview
                     in
                     append_ctx
                       ctx
                       (Printf.sprintf
                          "[CONTRACT VIOLATION RETRY] Your previous Agent.run \
-                          attempt was rejected because you did not call a \
-                          required tool. %s Do NOT respond with text only, do NOT substitute \
-                          status or read-only tools."
+                          attempt was rejected by a provider-level tool_choice \
+                          contract. %s"
                          retry_action)
                   else ctx
                 in
@@ -513,15 +495,7 @@ let assemble_hooks
                   | other -> other
                 in
                 let tool_choice =
-                  if
-                    computed_surface.required_tool_names <> []
-                    && turn_visible_tool_names <> []
-                  then
-                    Some
-                      (preferred_tool_choice_for_required_tool_names
-                         ~required_tool_names:computed_surface.required_tool_names
-                         ~allowed_tool_names:turn_visible_tool_names)
-                  else clear_inherited_strict_tool_choice current_params.tool_choice
+                  clear_inherited_strict_tool_choice current_params.tool_choice
                 in
                 let turn_completion_contract =
                   Keeper_tool_completion_contract.completion_contract_of_tool_choice

@@ -374,7 +374,7 @@ let run (ctx : ctx)
           if EC.is_server_rejected_parse_error err
           then "server parse rejection"
           else if EC.is_required_tool_contract_violation err
-          then "required tool contract violation"
+          then "strict tool_choice contract violation"
           else "transient error"
         in
         Log.Keeper.warn

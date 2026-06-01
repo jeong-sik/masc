@@ -1,13 +1,12 @@
-(** Keeper_tool_progress - tool progress classification and required-action
-    contract helpers.
+(** Keeper_tool_progress - tool progress classification and legacy
+    required-action helpers.
 
     This module owns whether a tool call is passive, claim/context binding,
     execution progress, or completion. It is deliberately separate from tool
-    disclosure/selection so liveness and contract semantics do not live in the
-    prompt-surface module. *)
+    disclosure/selection so liveness semantics do not live in the prompt-surface
+    module. *)
 
-(** Tool progress class shared by required-tool validation, runtime receipts,
-    and liveness metrics. *)
+(** Tool progress class shared by runtime receipts and liveness metrics. *)
 type tool_progress_class =
   | Passive_status
   | Claim_context
@@ -58,34 +57,29 @@ val is_claim_tool_name : string -> bool
 val is_claim_context_tool_name : string -> bool
 val is_completion_tool_name : string -> bool
 
-(** [true] iff the tool name represents productive execution progress for a
-    required-action gate. Completion tools are exempted even when read-only;
-    passive keeper observation tools remain [false]. *)
+(** [true] iff the tool name represents productive execution progress.
+    Completion tools are exempted even when read-only; passive keeper
+    observation tools remain [false]. *)
 val tool_name_can_satisfy_required_contract : string -> bool
 
-(** Validate an observed generic [Require_tool_use] call.
-
-    Generic keeper required-tool gates are presence-only. Passive/read-only
-    tools must not turn an otherwise useful observation turn into an OAS
-    contract retry. *)
+(** Legacy required-tool satisfaction hook. Keeper no longer treats tool calls
+    as evidence for a hard completion contract, so this predicate is
+    presence-compatible and always succeeds. *)
 val required_tool_satisfaction
   :  ?satisfying_tools:string list
   -> Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 
-(** Variant of [required_tool_satisfaction] for an explicit [required_tools]
-    contract. Explicit task/operator contracts still require one of the named
-    tools, but no longer reject tools because they are read-only/passive. *)
+(** Legacy explicit [required_tools] predicate. The field is retained as an
+    advisory tool-surface hint for compatibility; it is not a hard evidence
+    contract and this predicate does not reject unrelated calls. *)
 val required_tool_satisfaction_for_required_names
   :  ?satisfying_tools:string list
   -> required_tool_names:string list
   -> Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 
-(** OAS-level satisfaction callback for keeper turns.
-
-    Generic required-tool gates use OAS to enforce tool presence only.
-    Explicit [required_tool_names] still require the named tool. *)
+(** OAS-level compatibility callback for keeper turns. *)
 val required_tool_satisfaction_for_turn
   :  ?satisfying_tools:string list
   -> required_tool_names:string list

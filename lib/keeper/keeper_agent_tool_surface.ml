@@ -515,17 +515,17 @@ let generic_required_tool_gate_guidance ~(has_current_task : bool)
   if String.equal preview ""
   then
     Printf.sprintf
-      "[TOOL BLOCKED] This turn has an actionable runtime signal, but no \
+      "[TOOL SIGNAL] This turn has an actionable runtime signal, but no \
        currently visible keeper tool can advance it. Do not call passive \
        reads/status, claim/context tools, or keeper_stay_silent merely to \
-       satisfy the contract.%s Emit a concise [STATE] blocker instead."
+       satisfy a tool hint.%s Emit a concise [STATE] blocker instead."
       claim_context_note
   else
     Printf.sprintf
-      "[TOOL REQUIRED] This turn has an actionable runtime signal. Before \
-       answering in natural language, call one of the currently visible keeper \
-       runtime tools. Preferred tools for this signal: %s%s. Passive \
-       reads/status alone do not satisfy this turn.%s"
+      "[TOOL SIGNAL] This turn has an actionable runtime signal. Prefer a \
+       currently visible keeper runtime tool when it directly advances the \
+       work. Preferred tools for this signal: %s%s. Passive reads/status alone \
+       do not advance the task.%s"
       preview
       suffix
       claim_context_note
@@ -558,50 +558,9 @@ let satisfied_required_tool_names_of_outcomes
 
 let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
-  let add_visible_required acc canonical visible_name via_public_alias =
-    if List.exists
-         (fun (_, existing_name, _) -> String.equal existing_name visible_name)
-         acc
-    then acc
-    else acc @ [ canonical, visible_name, via_public_alias ]
-  in
-  let visible_required =
-    required_tool_names
-    |> List.fold_left
-         (fun acc name ->
-            let canonical = Keeper_tool_resolution.canonical_tool_name name in
-            if List.mem canonical allowed_tool_names
-            then add_visible_required acc canonical canonical false
-            else if List.mem name allowed_tool_names
-            then add_visible_required acc canonical name false
-            else (
-              match Keeper_tool_name_projection.public_alias_for_internal canonical with
-              | Some public when List.mem public allowed_tool_names ->
-                add_visible_required acc canonical public true
-              | _ -> acc))
-         []
-  in
-  match visible_required with
-  | [ canonical, name, false ]
-    when not
-           (Keeper_tool_progress.tool_name_can_satisfy_required_contract
-              canonical
-            || Keeper_tool_progress.tool_name_can_satisfy_required_contract name)
-    ->
-    (* Passive/read-only tools do not suffer the mutating-tool raw-name
-       satisfaction ambiguity described below. When an operator explicitly
-       requires one passive tool, exact tool_choice keeps the model from
-       satisfying the turn with an unrelated write. *)
-    Agent_sdk.Types.Tool name
-  | _ :: _ ->
-    (* Use the provider-level "some tool is required" contract here, even
-       for a single explicit required tool. Runtime MCP transports may return
-       legacy internal MCP names; OAS exact-tool contracts
-       compare raw names before MASC can canonicalize them, so exact Tool(name)
-       can reject a correct call. MASC still validates the specific required
-       names after execution via [outstanding_required_tool_names]. *)
-    Agent_sdk.Types.Any
-  | [] -> Agent_sdk.Types.Auto
+  ignore required_tool_names;
+  ignore allowed_tool_names;
+  Agent_sdk.Types.Auto
 
 let owned_active_task_id_for_meta =
   Keeper_current_task_reconcile.owned_active_task_id_for_meta

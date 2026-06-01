@@ -6,7 +6,7 @@
     (MASC server) and are not needed inside the keeper container or shell
     subprocess.
 
-    Keeper GitHub execution must use the selected MASC identity bundle,
+    Keeper GitHub execution must use the selected MASC credential bundle,
     never the operator's ambient GitHub token/config or SSH agent.
     [GH_TOKEN], [GITHUB_TOKEN], [GH_CONFIG_DIR], and [SSH_AUTH_SOCK]
     are scrubbed at this boundary. Git config-location env such as

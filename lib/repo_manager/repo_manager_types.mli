@@ -41,7 +41,7 @@ type credential = {
   id : string;
   cred_type : credential_type;
   username : string;
-  gh_config_dir : string option [@default None];
+  credential_bundle_dir : string option [@default None];
   ssh_key_path : string option [@default None];
   gpg_key_id : string option [@default None];
   state : credential_state [@default Unmaterialized];

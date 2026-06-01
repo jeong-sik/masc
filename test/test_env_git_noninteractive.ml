@@ -165,7 +165,7 @@ let test_filter_environment () =
   assert_false "GIT_CONFIG_COUNT stripped"
     (List.exists (fun e -> String.starts_with ~prefix:"GIT_CONFIG_COUNT=" e) out_list)
 
-let test_compose_base_with_repo_cli_config_rehomes_git_config () =
+let test_compose_base_with_credential_bundle_rehomes_git_config () =
   with_env "HOME" "/operator/home" @@ fun () ->
   with_env "GH_CONFIG_DIR" "/operator/gh" @@ fun () ->
   with_env "GIT_CONFIG_GLOBAL" "/operator/.gitconfig" @@ fun () ->
@@ -175,7 +175,7 @@ let test_compose_base_with_repo_cli_config_rehomes_git_config () =
   let dir = "/tmp/masc-root/gh" in
   let bundle_root = Filename.dirname dir in
   let out =
-    Repo_cli_credentials.compose_base_with_repo_cli_config ~dir |> Array.to_list
+    Credential_bundle.compose_base_with_credential_bundle ~dir |> Array.to_list
   in
   assert_contains ~msg:"HOME rehomed to bundle root"
     out ("HOME=" ^ bundle_root);
@@ -269,7 +269,7 @@ let () =
   test_scrub_exact_match_only ();
   test_scrub_and_pass_disjoint ();
   test_filter_environment ();
-  test_compose_base_with_repo_cli_config_rehomes_git_config ();
+  test_compose_base_with_credential_bundle_rehomes_git_config ();
   test_no_forgotten_git_askpass_literals ();
   (* Silence unused-value warning if a helper is unused in a future edit. *)
   let _ = assert_list_eq in

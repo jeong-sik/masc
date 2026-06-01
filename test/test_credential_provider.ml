@@ -2,9 +2,9 @@
     {!Keeper_host_config_provider} pure helpers.
 
     Integration coverage of [resolve] (which goes through
-    [Repo_cli_credentials.keeper_binding] + filesystem) is left to the
+    [Credential_bundle.keeper_binding] + filesystem) is left to the
     existing [test_keeper_sandbox_docker_route] suite — that path
-    exercises selected root/keeper identity bundle mounting end to end
+    exercises selected credential bundle mounting end to end
     without re-staging a tmpdir + keeper profile fixture here.
 
     What this file pins:
@@ -13,12 +13,12 @@
        a regression guard: if a future PR adds a fifth error case
        and forgets [pp_error], the [exhaustive] assertion catches it.
     2. [Keeper_host_config_provider.For_testing.compose_ro_mounts_result]
-       fails closed when the selected repo CLI config mount is empty/missing.
+       fails closed when the selected credential bundle mount is empty/missing.
        [mount_if_present] stays a pure optional-mount helper for
        sibling gitconfig/ssh paths.
     3. [For_testing.compose_env] emits only container-local path/env
-       keys for the selected identity bundle plus non-interactive git
-       guards.  Ambient operator repo credentials stay outside this
+       keys for the selected credential bundle plus non-interactive git
+       guards.  Ambient operator credentials stay outside this
        contract.
     4. [finalize] / [tear_down] are noops ([finalize] returns
        [Ok ()] regardless of [container_id]; [tear_down] never
@@ -28,7 +28,7 @@ open Alcotest
 
 module CP = Masc_mcp.Keeper_credential_provider
 module HCP = Masc_mcp.Keeper_host_config_provider
-module KRC = Masc_mcp.Repo_cli_credentials
+module KRC = Masc_mcp.Credential_bundle
 open Repo_manager_types
 
 let mkdir_p path =
@@ -97,12 +97,12 @@ let seed_repo ~base_path repo =
   | Ok _ -> ()
   | Error msg -> failf "seed repo %s: %s" repo.id msg
 
-let make_credential ?ssh_key_path ~id ~username ~gh_config_dir () =
+let make_credential ?ssh_key_path ~id ~username ~credential_bundle_dir () =
   {
     id;
     cred_type = Github;
     username;
-    gh_config_dir = Some gh_config_dir;
+    credential_bundle_dir = Some credential_bundle_dir;
     ssh_key_path;
     gpg_key_id = None;
     state = Unmaterialized;
@@ -126,12 +126,12 @@ let make_repo ~id ~credential_id : repository =
     updated_at = Int64.zero;
   }
 
-let make_keeper_binding ~bundle_root ~gh_config_dir : KRC.keeper_binding =
+let make_keeper_binding ~bundle_root ~credential_bundle_dir : KRC.keeper_binding =
   {
     KRC.credential_identity = "test-gh";
     credential_scope = KRC.Keeper_identity;
     bundle_root;
-    gh_config_dir;
+    credential_bundle_dir;
   }
 
 (* --- 1. pp_error covers every variant --- *)
@@ -155,20 +155,20 @@ let test_pp_error_all_variants () =
          && String.sub rendered 0 (String.length prefix) = prefix))
     cases
 
-(* --- 2. required repo CLI mount fail-closed rules --- *)
+(* --- 2. required credential bundle mount fail-closed rules --- *)
 
-let test_required_repo_cli_mount_empty_path_fails_closed () =
-  let kb = make_keeper_binding ~bundle_root:"" ~gh_config_dir:"" in
+let test_required_credential_bundle_mount_empty_path_fails_closed () =
+  let kb = make_keeper_binding ~bundle_root:"" ~credential_bundle_dir:"" in
   match HCP.For_testing.compose_ro_mounts_result kb with
   | Ok mounts ->
-      failf "empty required gh_config_dir should fail, got %d mounts"
+      failf "empty required credential_bundle_dir should fail, got %d mounts"
         (List.length mounts)
   | Error reason ->
       check bool "mentions required mount" true
         (try
            ignore
              (Str.search_forward
-                (Str.regexp_string "required credential mount repo_cli_creds")
+                (Str.regexp_string "required credential mount credential_bundle")
                 reason 0);
            true
          with Not_found -> false);
@@ -180,18 +180,18 @@ let test_required_repo_cli_mount_empty_path_fails_closed () =
            true
          with Not_found -> false)
 
-let test_required_repo_cli_mount_missing_path_fails_closed () =
+let test_required_credential_bundle_mount_missing_path_fails_closed () =
   let missing_path =
     Filename.concat (Filename.get_temp_dir_name ())
       "nonexistent-host-path-rfc0008-pr1"
   in
   let kb =
     make_keeper_binding ~bundle_root:(Filename.dirname missing_path)
-      ~gh_config_dir:missing_path
+      ~credential_bundle_dir:missing_path
   in
   match HCP.For_testing.compose_ro_mounts_result kb with
   | Ok mounts ->
-      failf "missing required gh_config_dir should fail, got %d mounts"
+      failf "missing required credential_bundle_dir should fail, got %d mounts"
         (List.length mounts)
   | Error reason ->
       check bool "mentions missing host path" true
@@ -207,22 +207,22 @@ let test_required_repo_cli_mount_missing_path_fails_closed () =
            true
          with Not_found -> false)
 
-let test_required_repo_cli_mount_allows_absent_optional_siblings () =
+let test_required_credential_bundle_mount_allows_absent_optional_siblings () =
   with_temp_base_path (fun base_path ->
       let bundle_root =
-        Filename.concat base_path ".masc/repo-cli-identities/test-gh"
+        Filename.concat base_path ".masc/credentials/test-gh"
       in
-      let gh_config_dir = Filename.concat bundle_root "gh" in
-      mkdir_p gh_config_dir;
-      let kb = make_keeper_binding ~bundle_root ~gh_config_dir in
+      let credential_bundle_dir = Filename.concat bundle_root "gh" in
+      mkdir_p credential_bundle_dir;
+      let kb = make_keeper_binding ~bundle_root ~credential_bundle_dir in
       match HCP.For_testing.compose_ro_mounts_result kb with
       | Error reason ->
-          failf "existing required gh_config_dir should mount: %s" reason
+          failf "existing required credential_bundle_dir should mount: %s" reason
       | Ok mounts ->
-          check int "only required repo CLI mount" 1 (List.length mounts);
+          check int "only required credential bundle mount" 1 (List.length mounts);
           match mounts with
           | [ mount ] ->
-              check string "host preserved" gh_config_dir mount.CP.host;
+              check string "host preserved" credential_bundle_dir mount.CP.host;
               check string "container"
                 (Filename.concat HCP.cred_root ".config/gh")
                 mount.CP.container
@@ -313,10 +313,10 @@ let test_compose_env_path_values_anchored_to_cred_root () =
 	    (lookup "GIT_CONFIG_KEY_1");
 	  check string "credential helper reset value" ""
 	    (lookup "GIT_CONFIG_VALUE_1");
-	  check string "repo CLI credential helper"
+	  check string "GitHub credential helper"
 	    "credential.https://github.com.helper"
 	    (lookup "GIT_CONFIG_KEY_2");
-	  check string "repo CLI credential helper command"
+	  check string "GitHub credential helper command"
 	    "!gh auth git-credential"
 	    (lookup "GIT_CONFIG_VALUE_2")
 
@@ -385,12 +385,12 @@ let test_resolve_without_mapping_fails_closed () =
             "unmapped keeper must not resolve through legacy host_config_provider"
       | Error other -> failf "expected Missing_bundle, got %s" (CP.pp_error other))
 
-let seed_minimal_gh_bundle ~gh_config_dir =
+let seed_minimal_gh_bundle ~credential_bundle_dir =
   (* Write a minimal projectable hosts.yml. The oauth_token line is fake:
      keeper credential binding only checks deterministic config/file state;
      actual token validity is surfaced by the first scoped forge operation. *)
-  mkdir_p gh_config_dir;
-  let hosts_yml = Filename.concat gh_config_dir "hosts.yml" in
+  mkdir_p credential_bundle_dir;
+  let hosts_yml = Filename.concat credential_bundle_dir "hosts.yml" in
   let oc = open_out hosts_yml in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
@@ -403,19 +403,19 @@ let seed_minimal_gh_bundle ~gh_config_dir =
 let test_resolve_credential_store_mounts_explicit_ssh_key () =
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Workspace.default_config base_path in
-      let gh_config_dir =
-        Filename.concat base_path ".masc/repo-cli-identities/cred-A/gh"
+      let credential_bundle_dir =
+        Filename.concat base_path ".masc/credentials/cred-A/gh"
       in
       let ssh_key_path =
-        Filename.concat base_path ".masc/repo-cli-identities/cred-A/ssh/id_ed25519"
+        Filename.concat base_path ".masc/credentials/cred-A/ssh/id_ed25519"
       in
-      seed_minimal_gh_bundle ~gh_config_dir;
+      seed_minimal_gh_bundle ~credential_bundle_dir;
       mkdir_p (Filename.dirname ssh_key_path);
       let oc = open_out ssh_key_path in
       close_out oc;
       seed_credential ~base_path
         (make_credential ~id:"cred-A" ~username:"user-A"
-           ~gh_config_dir ~ssh_key_path ());
+           ~credential_bundle_dir ~ssh_key_path ());
       seed_repo ~base_path (make_repo ~id:"repo-1" ~credential_id:"cred-A");
       write_mapping base_path "keeper-1" [ "repo-1" ];
       match HCP.resolve ~config ~identity:"keeper-1" with
@@ -535,17 +535,17 @@ let test_f1_gate_resolve_stub () =
 (* --- 6. deterministic credential file preflight --- *)
 
 let test_preflight_missing_hosts_yml () =
-  (* gh_config_dir exists but has no hosts.yml/oauth_token -> resolve must
+  (* credential_bundle_dir exists but has no hosts.yml/oauth_token -> resolve must
      return Missing_bundle without invoking gh auth status. *)
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Workspace.default_config base_path in
-      let gh_config_dir =
-        Filename.concat base_path ".masc/repo-cli-identities/cred-B/gh"
+      let credential_bundle_dir =
+        Filename.concat base_path ".masc/credentials/cred-B/gh"
       in
-      mkdir_p gh_config_dir;
+      mkdir_p credential_bundle_dir;
       seed_credential ~base_path
         (make_credential ~id:"cred-B" ~username:"user-B"
-           ~gh_config_dir ());
+           ~credential_bundle_dir ());
       seed_repo ~base_path (make_repo ~id:"repo-2" ~credential_id:"cred-B");
       write_mapping base_path "keeper-2" [ "repo-2" ];
       match HCP.resolve ~config ~identity:"keeper-2" with
@@ -566,18 +566,18 @@ let test_preflight_missing_hosts_yml () =
           failf "expected Missing_bundle, got %s" (CP.pp_error other))
 
 let test_preflight_fake_token_accepted_without_gh_auth_probe () =
-  (* gh_config_dir has hosts.yml with a projectable token. Binding accepts
+  (* credential_bundle_dir has hosts.yml with a projectable token. Binding accepts
      the configured bundle without running gh auth status; real token
      validity belongs to the first scoped forge operation. *)
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Workspace.default_config base_path in
-      let gh_config_dir =
-        Filename.concat base_path ".masc/repo-cli-identities/cred-C/gh"
+      let credential_bundle_dir =
+        Filename.concat base_path ".masc/credentials/cred-C/gh"
       in
-      seed_minimal_gh_bundle ~gh_config_dir;
+      seed_minimal_gh_bundle ~credential_bundle_dir;
       seed_credential ~base_path
         (make_credential ~id:"cred-C" ~username:"user-C"
-           ~gh_config_dir ());
+           ~credential_bundle_dir ());
       seed_repo ~base_path (make_repo ~id:"repo-3" ~credential_id:"cred-C");
       write_mapping base_path "keeper-3" [ "repo-3" ];
       match HCP.resolve ~config ~identity:"keeper-3" with
@@ -589,18 +589,18 @@ let test_preflight_fake_token_accepted_without_gh_auth_probe () =
           failf "expected credential binding, got %s" (CP.pp_error err))
 
 let test_preflight_empty_dir_rejected () =
-  (* gh_config_dir is an empty string -> resolve must return Missing_bundle. *)
+  (* credential_bundle_dir is an empty string -> resolve must return Missing_bundle. *)
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Workspace.default_config base_path in
       seed_credential ~base_path
         (make_credential ~id:"cred-D" ~username:"user-D"
-           ~gh_config_dir:"" ());
+           ~credential_bundle_dir:"" ());
       seed_repo ~base_path (make_repo ~id:"repo-4" ~credential_id:"cred-D");
       write_mapping base_path "keeper-4" [ "repo-4" ];
       match HCP.resolve ~config ~identity:"keeper-4" with
       | Error (CP.Missing_bundle _) -> ()
       | Ok _ ->
-          fail "resolve should reject empty gh_config_dir"
+          fail "resolve should reject empty credential_bundle_dir"
       | Error other ->
           failf "expected Missing_bundle, got %s" (CP.pp_error other))
 
@@ -610,12 +610,12 @@ let () =
         ( "errors",
         [
           test_case "pp_error covers all variants" `Quick test_pp_error_all_variants;
-          test_case "empty required repo CLI mount fails closed" `Quick
-            test_required_repo_cli_mount_empty_path_fails_closed;
-          test_case "missing required repo CLI mount fails closed" `Quick
-            test_required_repo_cli_mount_missing_path_fails_closed;
+          test_case "empty required credential bundle mount fails closed" `Quick
+            test_required_credential_bundle_mount_empty_path_fails_closed;
+          test_case "missing required credential bundle mount fails closed" `Quick
+            test_required_credential_bundle_mount_missing_path_fails_closed;
           test_case "absent optional siblings are allowed" `Quick
-            test_required_repo_cli_mount_allows_absent_optional_siblings;
+            test_required_credential_bundle_mount_allows_absent_optional_siblings;
         ] );
       ( "mount_if_present",
         [
@@ -665,7 +665,7 @@ let () =
             test_preflight_missing_hosts_yml;
           test_case "fake token accepted without gh auth probe" `Quick
             test_preflight_fake_token_accepted_without_gh_auth_probe;
-          test_case "empty gh_config_dir -> Missing_bundle" `Quick
+          test_case "empty credential_bundle_dir -> Missing_bundle" `Quick
             test_preflight_empty_dir_rejected;
         ] );
     ]

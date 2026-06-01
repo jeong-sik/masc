@@ -202,7 +202,7 @@ export function CredentialSettings() {
         name: draft.name.trim(),
         username: draft.username.trim(),
         type: draft.type,
-        gh_config_dir: sanitizeOptionalString(draft.gh_config_dir),
+        credential_bundle_dir: sanitizeOptionalString(draft.credential_bundle_dir),
         ssh_key_path: sanitizeOptionalString(draft.ssh_key_path),
         gpg_key_id: sanitizeOptionalString(draft.gpg_key_id),
         oauth_method: draft.oauth_method ?? DEFAULT_OAUTH_METHOD,
@@ -327,15 +327,15 @@ export function CredentialSettings() {
                 </select>
               </div>
               <div>
-                <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">GH_CONFIG_DIR</label>
+                <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">Credential bundle dir</label>
                 <input
                   type="text"
                   class="${FIELD_STYLE_BASE}"
-                  placeholder="base_path/.masc/github-identities/<credential-id>/gh"
-                  value=${draft.gh_config_dir ?? ''}
-                  onInput=${(e: Event) => { addDraft.value = { ...draft, gh_config_dir: (e.target as HTMLInputElement).value } }}
+                  placeholder="base_path/.masc/credentials/<credential-id>/gh"
+                  value=${draft.credential_bundle_dir ?? ''}
+                  onInput=${(e: Event) => { addDraft.value = { ...draft, credential_bundle_dir: (e.target as HTMLInputElement).value } }}
                 />
-                <div class="${helperStyle}">비우면 서버 base_path 아래 identity bundle을 사용합니다.</div>
+                <div class="${helperStyle}">비우면 서버 base_path 아래 credential bundle을 사용합니다.</div>
               </div>
               ${draft.oauth_method === 'with_token' ? html`
                 <div>
@@ -355,7 +355,7 @@ export function CredentialSettings() {
                 <input
                   type="text"
                   class="${FIELD_STYLE_BASE}"
-                  placeholder="base_path/.masc/github-identities/<credential-id>/ssh/id_ed25519"
+                  placeholder="base_path/.masc/credentials/<credential-id>/ssh/id_ed25519"
                   value=${draft.ssh_key_path ?? ''}
                   onInput=${(e: Event) => { addDraft.value = { ...draft, ssh_key_path: (e.target as HTMLInputElement).value } }}
                 />
@@ -441,11 +441,11 @@ export function CredentialSettings() {
                   </td>
                   <td class="py-2 px-3 text-xs text-text-muted max-w-[28rem]">
                     <div class="flex flex-col gap-1">
-                      ${cred.gh_config_dir ? html`
-                        <code class="font-mono text-3xs text-text-body break-all">${cred.gh_config_dir}</code>
-                      ` : html`<span class="text-3xs text-text-dim">GH_CONFIG_DIR --</span>`}
-                      ${githubLoginCommand(cred.gh_config_dir) && cred.state?.kind !== 'Materialized' ? html`
-                        <code class="font-mono text-3xs text-accent-fg break-all">${githubLoginCommand(cred.gh_config_dir)}</code>
+                      ${cred.credential_bundle_dir ? html`
+                        <code class="font-mono text-3xs text-text-body break-all">${cred.credential_bundle_dir}</code>
+                      ` : html`<span class="text-3xs text-text-dim">credential bundle 없음</span>`}
+                      ${githubLoginCommand(cred.credential_bundle_dir) && cred.state?.kind !== 'Materialized' ? html`
+                        <code class="font-mono text-3xs text-accent-fg break-all">${githubLoginCommand(cred.credential_bundle_dir)}</code>
                       ` : null}
                       ${cred.ssh_key_path ? html`
                         <code class="font-mono text-3xs text-text-dim break-all">ssh ${cred.ssh_key_path}</code>

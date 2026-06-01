@@ -32,7 +32,7 @@ let env_of_credential credential =
   in
   match credential.cred_type with
   | Github | Gitlab -> (
-      match credential.gh_config_dir with
+      match credential.credential_bundle_dir with
       | Some dir -> ("GH_CONFIG_DIR", dir) :: non_interactive
       | None -> non_interactive)
   | Local -> (

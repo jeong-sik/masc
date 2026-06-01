@@ -19,7 +19,7 @@ let mount_if_present ~host ~container : Keeper_credential_provider.ro_mount list
 (* ── Skipped credential mount warnings ─────────────────────────
 
    [mount_if_present] silently drops mounts whose host path is empty
-   or missing.  The selected repo CLI config bundle is a required credential
+   or missing.  The selected credential bundle is a required credential
    mount, so the composition layer reports that absence as an explicit
    error before docker dispatch.
 
@@ -73,14 +73,14 @@ let warn_mount_skips_if_any ~keeper_name (attempts : mount_attempt list) =
     Log.Keeper.warn
       "%s: sandbox credential mount(s) skipped; keeper docker dispatch \
        will fail before credentials are projected. Skipped: [%s]. \
-       Resolution: materialize the selected root/keeper repo CLI identity \
-       bundle under $base_path/.masc/repo-cli-identities. See \
+       Resolution: materialize the selected credential bundle under \
+       $base_path/.masc/credentials. See \
        [host_config_provider.ml compose_ro_mounts_result]."
       keeper_name
       (String.concat "; " (List.map pp_skip skipped))
   end
 
-(* Env composition for the selected identity bundle inside the docker
+(* Env composition for the selected credential bundle inside the docker
    credential dispatch container.  Ambient operator credential env is
    scrubbed before callers reach this provider; this block exposes only
    container-local GH/Git paths plus non-interactive git guards. *)
@@ -105,7 +105,7 @@ let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
     "GIT_COMMITTER_NAME", git_author_name;
     "GIT_COMMITTER_EMAIL", git_author_email;
   ]
-  @ Repo_cli_credentials.git_config_env_pairs
+  @ Credential_bundle.git_config_env_pairs
   @ ssh_env
   @ Env_git_noninteractive.env
 
@@ -124,8 +124,8 @@ let required_mount_result (attempt : mount_attempt) ~container =
            attempt.label)
 
 let compose_ro_mounts_result ?keeper_name
-    (kb : Repo_cli_credentials.keeper_binding) =
-  let repo_cli_creds = kb.gh_config_dir in
+    (kb : Credential_bundle.keeper_binding) =
+  let credential_bundle_dir = kb.credential_bundle_dir in
   let identity_gitconfig = Filename.concat kb.bundle_root "gitconfig" in
   let identity_ssh_dir = Filename.concat kb.bundle_root "ssh" in
   let gitconfig =
@@ -136,36 +136,36 @@ let compose_ro_mounts_result ?keeper_name
       identity_ssh_dir
     else ""
   in
-  let repo_cli_attempt =
-    classify_mount_attempt ~label:"repo_cli_creds" ~host:repo_cli_creds
+  let credential_bundle_attempt =
+    classify_mount_attempt ~label:"credential_bundle" ~host:credential_bundle_dir
   in
-  let attempts = [ repo_cli_attempt ] in
+  let attempts = [ credential_bundle_attempt ] in
   Option.iter
     (fun name -> warn_mount_skips_if_any ~keeper_name:name attempts)
     keeper_name;
   match
-    required_mount_result repo_cli_attempt
+    required_mount_result credential_bundle_attempt
       ~container:(Filename.concat cred_root ".config/gh")
   with
   | Error _ as err -> err
-  | Ok repo_cli_mount ->
+  | Ok credential_bundle_mount ->
       Ok
-        (repo_cli_mount
+        (credential_bundle_mount
          :: (mount_if_present ~host:gitconfig
                ~container:(Filename.concat cred_root ".gitconfig")
             @ mount_if_present ~host:ssh_dir
                 ~container:(Filename.concat cred_root ".ssh")))
 
-let resolve_git_identity (kb : Repo_cli_credentials.keeper_binding) ~keeper_name =
+let resolve_git_identity (kb : Credential_bundle.keeper_binding) ~keeper_name =
   ignore keeper_name;
   ( kb.credential_identity,
     kb.credential_identity ^ "@users.noreply.github.com" )
 
-let metadata_of_binding (kb : Repo_cli_credentials.keeper_binding) =
+let metadata_of_binding (kb : Credential_bundle.keeper_binding) =
   [ "source", "host_config";
     "credential_identity", kb.credential_identity;
     "credential_scope",
-    Repo_cli_credentials.credential_scope_to_string kb.credential_scope;
+    Credential_bundle.credential_scope_to_string kb.credential_scope;
     "bundle_root", kb.bundle_root;
   ]
 
@@ -183,7 +183,7 @@ let count_resolve_outcome ~keeper_name ~source ~reason =
     ()
 
 let bind_from_keeper_binding ?ssh_key_path ~keeper_name
-    (kb : Repo_cli_credentials.keeper_binding) ~extra_metadata =
+    (kb : Credential_bundle.keeper_binding) ~extra_metadata =
   let git_author_name, git_author_email =
     resolve_git_identity kb ~keeper_name
   in
@@ -212,7 +212,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
     in
     (* Deterministic credential preflight.
 
-       Keeper sandbox identity is selected by keeper_repo_mappings.toml and
+       Keeper credential is selected by keeper_repo_mappings.toml and
        credentials.toml.  Do not probe [gh auth status] here: stale or
        rejected tokens should surface on the first real scoped gh/git
        operation, not through a separate identity check that can drift from
@@ -221,7 +221,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
        Docker. *)
     (match
        Credential_materializer.compute_token_sha256_prefix
-         ~gh_config_dir:kb.gh_config_dir
+         ~credential_bundle_dir:kb.credential_bundle_dir
      with
      | Some _ ->
          let metadata = metadata_of_binding kb @ extra_metadata in
@@ -243,44 +243,44 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
                    "credential bundle %s has no projectable hosts.yml \
                     oauth_token. Resolution: materialize via dashboard or \
                     gh auth login --with-token into the bundle."
-                   kb.gh_config_dir
+                   kb.credential_bundle_dir
              }))
 
-(* Synthesise a [Repo_cli_credentials.keeper_binding] from a credential store
-   record.  PR-A convention: [bundle_root = dirname gh_config_dir].  This
+(* Synthesise a [Credential_bundle.keeper_binding] from a credential store
+   record.  PR-A convention: [bundle_root = dirname credential_bundle_dir].  This
    matches the existing host bundle layout
-   (<base>/.masc/repo-cli-identities/<id>/gh) but tolerates operator-set
+   (<base>/.masc/credentials/<id>/gh) but tolerates operator-set
    custom paths — sibling files (gitconfig, ssh) that happen to live next
-   to [gh_config_dir] are picked up by [compose_ro_mounts_result] via
+   to [credential_bundle_dir] are picked up by [compose_ro_mounts_result] via
    [mount_if_present]; absent siblings are optional. *)
 let binding_of_credential (cred : Repo_manager_types.credential)
-    : (Repo_cli_credentials.keeper_binding, string) result =
-  match cred.gh_config_dir with
+    : (Credential_bundle.keeper_binding, string) result =
+  match cred.credential_bundle_dir with
   | None ->
       Error
         (Printf.sprintf
-           "credential %s has no gh_config_dir; the PR-A bridge cannot \
+           "credential %s has no credential_bundle_dir; the PR-A bridge cannot \
             materialise an unmaterialised credential. Resolution: \
-            populate gh_config_dir via dashboard or `gh auth login` \
+            populate credential_bundle_dir via dashboard or `gh auth login` \
             into the bundle path, then retry."
            cred.id)
   | Some "" ->
       Error
         (Printf.sprintf
-           "credential %s has empty gh_config_dir" cred.id)
-  | Some gh_config_dir ->
+           "credential %s has empty credential_bundle_dir" cred.id)
+  | Some credential_bundle_dir ->
       (* Local name [synth_bundle_root] avoids field punning collision
-         with the [Repo_cli_credentials.bundle_root] function that the
-         [Repo_cli_credentials.{ ... }] qualified record syntax brings into
+         with the [Credential_bundle.bundle_root] function that the
+         [Credential_bundle.{ ... }] qualified record syntax brings into
          scope. *)
-      let synth_bundle_root = Filename.dirname gh_config_dir in
+      let synth_bundle_root = Filename.dirname credential_bundle_dir in
       Ok
-        Repo_cli_credentials.
+        Credential_bundle.
           {
             credential_identity = cred.username;
             credential_scope = Keeper_identity;
             bundle_root = synth_bundle_root;
-            gh_config_dir;
+            credential_bundle_dir;
           }
 
 let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =

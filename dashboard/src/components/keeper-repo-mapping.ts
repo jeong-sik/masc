@@ -43,7 +43,7 @@ export interface KeeperCredentialOption {
   name: string
   type: CredentialType
   username: string
-  gh_config_dir?: string | null
+  credential_bundle_dir?: string | null
   state?: CredentialState | null
 }
 
@@ -410,7 +410,7 @@ export function KeeperRepoMapping() {
                       name: `Missing: ${draftCredentialId}`,
                       type: 'github' as const,
                       username: draftCredentialId,
-                      gh_config_dir: null,
+                      credential_bundle_dir: null,
                       state: null,
                     },
                     ...credentials,
@@ -420,7 +420,7 @@ export function KeeperRepoMapping() {
               ? credentialOptions.find(credential => credential.id === draftCredentialId)
               : null
             const selectedLoginCommand = selectedCredential
-              ? githubLoginCommand(selectedCredential.gh_config_dir)
+              ? githubLoginCommand(selectedCredential.credential_bundle_dir)
               : null
             const allowAll = isAllowAll(keeperId, draft)
             const repoChanged = hasChanges(keeperId, original, draft)
@@ -483,7 +483,7 @@ export function KeeperRepoMapping() {
                             <span class="px-2 py-0.5 rounded-[var(--r-1)] border ${credentialStateBadgeClass(selectedCredential.state)}">
                               ${credentialStateLabel(selectedCredential.state)}
                             </span>
-                            <span class="font-mono truncate">${selectedCredential.gh_config_dir ?? 'gh_config_dir 없음'}</span>
+                            <span class="font-mono truncate">${selectedCredential.credential_bundle_dir ?? 'credential_bundle_dir 없음'}</span>
                           </div>
                           ${selectedLoginCommand ? html`
                             <code class="block max-w-full overflow-x-auto rounded-[var(--r-1)] bg-[var(--black-30)] px-2 py-1 font-mono text-3xs text-text-body">

@@ -84,7 +84,7 @@ masc create persona \
   --tier <primary|retired_fast_profile|tier_small|...> \
   --tools <preset|comma-list> \
   [--work-source <unclaimed_tasks|...>] \
-  [--git-identity-mode <repo_cli_identity|keeper_alias>] \
+  [--git-identity-mode <retired_credential_config|keeper_alias>] \
   [--dry-run]
 ```
 
@@ -185,7 +185,7 @@ runs:
   `runtime_toml_materializer`).
 - Cross-reference checks (persona's tool access exists; runtime's
   fallback profile exists; keeper's persona exists).
-- Capability checks (persona's `git_identity_mode` is one of the two
+- Capability checks (persona's `retired_git_author_config` is one of the two
   enum variants; tier exists in runtime).
 - Conflict checks (no two keepers with same name; no two runtime
   profiles with same name).

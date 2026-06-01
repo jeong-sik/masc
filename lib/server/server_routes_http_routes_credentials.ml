@@ -34,7 +34,7 @@ let credential_json (c : Repo_manager_types.credential) : Yojson.Safe.t =
       ("type", `String typ);
       ("cred_type", `String typ);
       ("username", `String c.username);
-      ("gh_config_dir", Json_util.string_opt_to_json c.gh_config_dir);
+      ("credential_bundle_dir", Json_util.string_opt_to_json c.credential_bundle_dir);
       ("ssh_key_path", Json_util.string_opt_to_json c.ssh_key_path);
       ("gpg_key_id", Json_util.string_opt_to_json c.gpg_key_id);
       ("state", credential_state_json c.state);
@@ -73,7 +73,7 @@ let credential_of_json (json : Yojson.Safe.t) :
       let* id = get_string "id" in
       let* cred_type_str = get_string_alias ["cred_type"; "type"] in
       let* username = get_string_alias ["username"; "name"] in
-      let* gh_config_dir = get_opt_string "gh_config_dir" in
+      let* credential_bundle_dir = get_opt_string "credential_bundle_dir" in
       let* ssh_key_path = get_opt_string "ssh_key_path" in
       let* gpg_key_id = get_opt_string "gpg_key_id" in
       let* cred_type =
@@ -93,7 +93,7 @@ let credential_of_json (json : Yojson.Safe.t) :
           Repo_manager_types.id;
           cred_type;
           username;
-          gh_config_dir;
+          credential_bundle_dir;
           ssh_key_path;
           gpg_key_id;
           state = Unmaterialized;
@@ -101,20 +101,20 @@ let credential_of_json (json : Yojson.Safe.t) :
         }
   | _ -> Error "expected JSON object body"
 
-let default_github_gh_config_dir ~base_path ~credential_id =
+let default_github_credential_bundle_dir ~base_path ~credential_id =
   (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
   Filename.concat
-    (Config_dir_resolver.repo_cli_identities_dir ~base_path)
+    (Config_dir_resolver.credentials_dir ~base_path)
     (Filename.concat credential_id "gh")
 
 let apply_base_path_defaults ~base_path
     (credential : Repo_manager_types.credential) =
-  match credential.cred_type, credential.gh_config_dir with
+  match credential.cred_type, credential.credential_bundle_dir with
   | Repo_manager_types.Github, None ->
       { credential with
-        gh_config_dir =
+        credential_bundle_dir =
           Some
-            (default_github_gh_config_dir ~base_path
+            (default_github_credential_bundle_dir ~base_path
                ~credential_id:credential.id)
       }
   | _ -> credential
@@ -231,7 +231,7 @@ let add_routes router =
                      let base_path = state.Mcp_server.workspace_config.base_path in
                      (* Sanity-check the credential id so it can be
                         embedded in a path safely (used both for
-                        server-derived gh_config_dir and for any
+                        server-derived credential_bundle_dir and for any
                         downstream filesystem reference). *)
                      let id_safe =
                        (not (String.contains credential.id '/'))
@@ -279,11 +279,11 @@ let add_routes router =
                                       "with_token oauth_method requires a \
                                        \"token\" field"
                                 | Some token -> (
-                                    match credential.gh_config_dir with
+                                    match credential.credential_bundle_dir with
                                     | None ->
                                         response `Bad_request
                                           "with_token oauth_method \
-                                           requires gh_config_dir or a \
+                                           requires credential_bundle_dir or a \
                                            server-derived default"
                                     | Some dir -> (
                                         match
@@ -293,7 +293,7 @@ let add_routes router =
                                               credential.id
                                             ~identity_label:
                                               credential.username
-                                            ~gh_config_dir:dir ~token
+                                            ~credential_bundle_dir:dir ~token
                                             ()
                                         with
                                         | Error msg ->
@@ -317,7 +317,7 @@ let add_routes router =
                                                .f1_gate_check
                                                  ~credential_id:
                                                    credential.id
-                                                 ~gh_config_dir:dir
+                                                 ~credential_bundle_dir:dir
                                              with
                                              | Credential_materializer
                                                .F1_shared_with_operator ->

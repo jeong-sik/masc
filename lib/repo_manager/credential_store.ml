@@ -13,7 +13,7 @@ let default_credential =
     id = "default";
     cred_type = Local;
     username = "default";
-    gh_config_dir = None;
+    credential_bundle_dir = None;
     ssh_key_path = None;
     gpg_key_id = None;
     state = Unmaterialized;
@@ -71,7 +71,7 @@ let credential_of_toml toml id =
         (Printf.sprintf "TOML field %s: expected %s (%s)"
            (String.concat "." path) expected message)
   in
-  let* gh_config_dir = optional_string "gh_config_dir" in
+  let* credential_bundle_dir = optional_string "credential_bundle_dir" in
   let* ssh_key_path = optional_string "ssh_key_path" in
   let* gpg_key_id = optional_string "gpg_key_id" in
   let state = credential_state_of_toml toml id in
@@ -81,7 +81,7 @@ let credential_of_toml toml id =
       id;
       cred_type;
       username;
-      gh_config_dir;
+      credential_bundle_dir;
       ssh_key_path;
       gpg_key_id;
       state;
@@ -111,8 +111,8 @@ let toml_of_credential cred =
     ]
   in
   let fields =
-    match cred.gh_config_dir with
-    | Some dir -> ("gh_config_dir", Otoml.string dir) :: fields
+    match cred.credential_bundle_dir with
+    | Some dir -> ("credential_bundle_dir", Otoml.string dir) :: fields
     | None -> fields
   in
   let fields =

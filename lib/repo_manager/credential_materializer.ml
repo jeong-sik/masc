@@ -2,7 +2,7 @@
 
     Decides the on-disk lifecycle status of a credential record:
 
-    | gh_config_dir input | action | resulting state |
+    | credential_bundle_dir input | action | resulting state |
     |---------------------|--------|-----------------|
     | None / empty | none | [Unmaterialized] |
     | non-empty dir, missing on disk | none | [Unmaterialized] |
@@ -42,7 +42,7 @@ let scrubbed_gh_env_key = function
   | key when String.equal key git_terminal_prompt_key -> true
   | _ -> false
 
-let gh_bundle_env ~gh_config_dir =
+let gh_bundle_env ~credential_bundle_dir =
   let inherited =
     Unix.environment ()
     |> Array.to_list
@@ -51,7 +51,7 @@ let gh_bundle_env ~gh_config_dir =
   Array.of_list
     (inherited
      @ [
-         "GH_CONFIG_DIR=" ^ gh_config_dir;
+         "GH_CONFIG_DIR=" ^ credential_bundle_dir;
          git_terminal_prompt_env;
          "GH_PROMPT_DISABLED=1";
        ])
@@ -64,20 +64,20 @@ let status_ok = function
     whether it succeeded.  The child process receives a bundle-scoped
     environment only, so ambient GH_TOKEN/GITHUB_TOKEN values cannot
     make a stale bundle look materialized. *)
-let gh_cli_probe_ok ~gh_config_dir argv =
+let gh_cli_probe_ok ~credential_bundle_dir argv =
   try
     let full_argv = "gh" :: argv in
     let status, _stdout, _stderr =
       Process_eio.run_argv_with_status_split
-        ~env:(gh_bundle_env ~gh_config_dir)
+        ~env:(gh_bundle_env ~credential_bundle_dir)
         full_argv
     in
     status_ok status
   with Sys_error _ | Unix.Unix_error _ ->
     false
 
-let hosts_yml_has_oauth_token ~gh_config_dir =
-  let path = Filename.concat gh_config_dir gh_hosts_yml in
+let hosts_yml_has_oauth_token ~credential_bundle_dir =
+  let path = Filename.concat credential_bundle_dir gh_hosts_yml in
   if not (Sys.file_exists path) then false
   else
     try
@@ -94,11 +94,11 @@ let hosts_yml_has_oauth_token ~gh_config_dir =
               <> "")
     with Sys_error _ | Unix.Unix_error _ -> false
 
-let gh_auth_status_ok ~gh_config_dir =
-  gh_cli_probe_ok ~gh_config_dir [ "auth"; "status" ]
+let gh_auth_status_ok ~credential_bundle_dir =
+  gh_cli_probe_ok ~credential_bundle_dir [ "auth"; "status" ]
 
-let gh_graphql_viewer_ok ~gh_config_dir =
-  gh_cli_probe_ok ~gh_config_dir
+let gh_graphql_viewer_ok ~credential_bundle_dir =
+  gh_cli_probe_ok ~credential_bundle_dir
     [ "api";
       "graphql";
       "-f";
@@ -107,26 +107,26 @@ let gh_graphql_viewer_ok ~gh_config_dir =
       ".data.viewer.login";
     ]
 
-(** Compute the new state for [gh_config_dir] without writing anywhere.
+(** Compute the new state for [credential_bundle_dir] without writing anywhere.
     Pure with respect to credential records; reads filesystem + invokes
     [gh] subprocess. *)
-let verify_state ~gh_config_dir : credential_state =
-  if String.equal (String.trim gh_config_dir) "" then Unmaterialized
-  else if not (Sys.file_exists gh_config_dir) then Unmaterialized
-  else if not (Sys.is_directory gh_config_dir) then
-    Stale { reason = "gh_config_dir is not a directory" }
-  else if not (hosts_yml_has_oauth_token ~gh_config_dir) then
+let verify_state ~credential_bundle_dir : credential_state =
+  if String.equal (String.trim credential_bundle_dir) "" then Unmaterialized
+  else if not (Sys.file_exists credential_bundle_dir) then Unmaterialized
+  else if not (Sys.is_directory credential_bundle_dir) then
+    Stale { reason = "credential_bundle_dir is not a directory" }
+  else if not (hosts_yml_has_oauth_token ~credential_bundle_dir) then
     Stale
       {
         reason =
-          "gh_config_dir has no hosts.yml oauth_token; keyring-backed \
+          "credential_bundle_dir has no hosts.yml oauth_token; keyring-backed \
            GitHub auth cannot be projected into Docker. Re-materialize \
            this identity with `gh auth login --with-token \
            --insecure-storage` into the bundle.";
       }
-  else if not (gh_auth_status_ok ~gh_config_dir) then
+  else if not (gh_auth_status_ok ~credential_bundle_dir) then
     Stale { reason = "gh auth status returned non-zero exit code" }
-  else if not (gh_graphql_viewer_ok ~gh_config_dir) then
+  else if not (gh_graphql_viewer_ok ~credential_bundle_dir) then
     Stale { reason = "gh api graphql viewer returned non-zero exit code" }
   else
     Materialized { last_verified_at = now_unix_ms () }
@@ -159,12 +159,12 @@ let strip_value_decorations raw =
   then String.sub trimmed 1 (n - 2)
   else trimmed
 
-(* Read the [oauth_token] line from a [hosts.yml] under [gh_config_dir].
+(* Read the [oauth_token] line from a [hosts.yml] under [credential_bundle_dir].
    Returns [None] if the file is missing or the token line is absent.
    The token value never escapes this function; callers receive only
    its [sha256_prefix]. *)
-let read_token_from_hosts_yml ~gh_config_dir =
-  let path = Filename.concat gh_config_dir gh_hosts_yml in
+let read_token_from_hosts_yml ~credential_bundle_dir =
+  let path = Filename.concat credential_bundle_dir gh_hosts_yml in
   if not (Sys.file_exists path) then None
   else
     try
@@ -186,12 +186,12 @@ let read_token_from_hosts_yml ~gh_config_dir =
     with Sys_error _ | Unix.Unix_error _ -> None
 
 (** Compute the SHA-256 prefix of the [oauth_token] stored in
-    [<gh_config_dir>/hosts.yml].  Returns [None] when the bundle has not
+    [<credential_bundle_dir>/hosts.yml].  Returns [None] when the bundle has not
     been materialised yet (no hosts.yml on disk).  Callers that need the
     full hash should not — the prefix is sufficient for F-1 comparison
     and intentionally short enough to be safe to surface. *)
-let compute_token_sha256_prefix ~gh_config_dir : string option =
-  match read_token_from_hosts_yml ~gh_config_dir with
+let compute_token_sha256_prefix ~credential_bundle_dir : string option =
+  match read_token_from_hosts_yml ~credential_bundle_dir with
   | None -> None
   | Some token -> Some (sha256_prefix token)
 
@@ -240,8 +240,8 @@ type f1_gate_outcome =
   | F1_distinct
   | F1_shared_with_operator
 
-let f1_gate_check ~credential_id:_ ~gh_config_dir : f1_gate_outcome =
-  match compute_token_sha256_prefix ~gh_config_dir with
+let f1_gate_check ~credential_id:_ ~credential_bundle_dir : f1_gate_outcome =
+  match compute_token_sha256_prefix ~credential_bundle_dir with
   | None -> F1_skipped "bundle has no oauth_token to fingerprint"
   | Some bundle_prefix ->
       (match read_operator_ambient_token () with
@@ -262,13 +262,13 @@ let f1_gate_check ~credential_id:_ ~gh_config_dir : f1_gate_outcome =
     explicit second call. *)
 let ensure (cred : credential) : credential =
   let new_state, new_prefix =
-    match cred.gh_config_dir with
+    match cred.credential_bundle_dir with
     | None -> Unmaterialized, None
     | Some dir ->
-        let s = verify_state ~gh_config_dir:dir in
+        let s = verify_state ~credential_bundle_dir:dir in
         let p =
           match s with
-          | Materialized _ -> compute_token_sha256_prefix ~gh_config_dir:dir
+          | Materialized _ -> compute_token_sha256_prefix ~credential_bundle_dir:dir
           | Unmaterialized | Stale _ -> None
         in
         s, p
@@ -285,8 +285,8 @@ let ensure (cred : credential) : credential =
     operator's audit shows the real GitHub login as a fallback.  Any
     failure is reflected in the [state] field by the next
     [verify_state] call. *)
-let relabel_hosts_yml ~gh_config_dir ~identity_label =
-  let path = Filename.concat gh_config_dir gh_hosts_yml in
+let relabel_hosts_yml ~credential_bundle_dir ~identity_label =
+  let path = Filename.concat credential_bundle_dir gh_hosts_yml in
   if not (Sys.file_exists path) then ()
   else
     try
@@ -321,14 +321,14 @@ let relabel_hosts_yml ~gh_config_dir ~identity_label =
 (* RFC-0019 PR-B Slice 2 + §8 R3: refuse paths that escape via [..]
    segments.  Absolute or relative are both allowed; what is not allowed
    is any segment equal to [".."], anywhere in the path.  This guards
-   the operator-supplied [gh_config_dir] from being used to write into
+   the operator-supplied [credential_bundle_dir] from being used to write into
    arbitrary host directories via crafted POST bodies. *)
 let path_safe path : (unit, string) result =
   let segments = String.split_on_char '/' path in
   if List.exists (fun s -> String.equal s "..") segments then
     Result.Error
       (Printf.sprintf
-         "gh_config_dir %S contains a forbidden \"..\" segment" path)
+         "credential_bundle_dir %S contains a forbidden \"..\" segment" path)
   else Result.Ok ()
 
 (* Recursive mkdir for the provisioner; mirrors [Fs_compat.mkdir_p]
@@ -356,7 +356,7 @@ let rec mkdir_p path mode =
     - [stderr] and [stdout] of [gh auth login] are redirected to
       [/dev/null] so partial-failure messages from [gh] cannot
       accidentally surface a user-supplied token.
-    - [gh_config_dir] is rejected if it contains a [".."] segment.
+    - [credential_bundle_dir] is rejected if it contains a [".."] segment.
     - [gh] receives only bundle-scoped GitHub auth env and is forced to
       [--insecure-storage], so the token is written into
       [GH_CONFIG_DIR/hosts.yml] instead of an operator keyring that a
@@ -370,22 +370,22 @@ let rec mkdir_p path mode =
     plane without recording the credential-specific environment in
     approval-gate telemetry. *)
 let provision_via_with_token ?credential_id ?identity_label
-    ~gh_config_dir ~token () : (credential_state, string) result =
-  match path_safe gh_config_dir with
+    ~credential_bundle_dir ~token () : (credential_state, string) result =
+  match path_safe credential_bundle_dir with
   | Error _ as e -> e
   | Ok () ->
       if String.equal (String.trim token) "" then
         Error "with_token provisioning requires a non-empty token"
       else (
-        (try mkdir_p gh_config_dir 0o700
+        (try mkdir_p credential_bundle_dir 0o700
          with Unix.Unix_error _ -> ());
-        if not (Sys.file_exists gh_config_dir) then
+        if not (Sys.file_exists credential_bundle_dir) then
           Error
             (Printf.sprintf
-               "could not create gh_config_dir %S" gh_config_dir)
+               "could not create credential_bundle_dir %S" credential_bundle_dir)
         else
             try
-              let env = gh_bundle_env ~gh_config_dir in
+              let env = gh_bundle_env ~credential_bundle_dir in
               let argv =
                 [
                   "gh";
@@ -412,7 +412,7 @@ let provision_via_with_token ?credential_id ?identity_label
                       with the real GitHub login).  Best-effort. *)
                    Option.iter
                      (fun label ->
-                       relabel_hosts_yml ~gh_config_dir
+                       relabel_hosts_yml ~credential_bundle_dir
                          ~identity_label:label)
                      identity_label;
                    (* RFC-0019 PR-C: F-1 gate is invoked by the caller
@@ -421,14 +421,14 @@ let provision_via_with_token ?credential_id ?identity_label
                       from repo_manager.  The [credential_id] arg is
                       accepted here for API symmetry only. *)
                    ignore credential_id;
-                   Ok (verify_state ~gh_config_dir)
+                   Ok (verify_state ~credential_bundle_dir)
                | Unix.WEXITED n ->
                    Error
                      (Printf.sprintf
                         "gh auth login --with-token failed (exit %d). \
                          Token contents are not logged. Run `GH_CONFIG_DIR=%s \
                          gh auth status` manually to diagnose."
-                        n gh_config_dir)
+                        n credential_bundle_dir)
                | Unix.WSIGNALED n ->
                    Error
                      (Printf.sprintf

@@ -110,8 +110,8 @@ let docker_log_has_container_execution log =
   contains_substring ("\n" ^ log) "\nrun "
   || contains_substring ("\n" ^ log) "\nexec "
 
-let repo_cli_config_mount_spec repo_cli_dir =
-  repo_cli_dir
+let credential_bundle_mount_spec credential_bundle_dir =
+  credential_bundle_dir
   ^ ":"
   ^ Filename.concat Masc_mcp.Keeper_host_config_provider.cred_root ".config/gh"
   ^ ":ro"
@@ -313,48 +313,48 @@ let with_tool_policy_config f =
   | Ok () -> f ()
   | Error msg -> Alcotest.failf "init_policy_config failed: %s" msg
 
-let write_fake_github_hosts repo_cli_dir =
-  ensure_dir repo_cli_dir;
+let write_fake_github_hosts credential_bundle_dir =
+  ensure_dir credential_bundle_dir;
   write_file
-    (Filename.concat repo_cli_dir "hosts.yml")
+    (Filename.concat credential_bundle_dir "hosts.yml")
     "github.com:\n\
     \    oauth_token: ghp_fake_test_token_for_docker_route\n\
     \    user: test-user\n"
 
 let ensure_credential_identity_bundle ~config credential_identity =
   let masc_dir = Filename.concat config.Workspace.base_path Common.masc_dirname in
-  let repo_cli_dir =
+  let credential_bundle_dir =
     Filename.concat
       (Filename.concat
-         (Filename.concat masc_dir "repo-cli-identities")
+         (Filename.concat masc_dir "credentials")
          credential_identity)
       "gh"
   in
-  write_fake_github_hosts repo_cli_dir
+  write_fake_github_hosts credential_bundle_dir
 
-let repo_cli_config_dir_for_credential ~config credential_identity =
+let credential_bundle_dir_for_credential ~config credential_identity =
   let masc_dir = Filename.concat config.Workspace.base_path Common.masc_dirname in
   Filename.concat
     (Filename.concat
-       (Filename.concat masc_dir "repo-cli-identities")
+       (Filename.concat masc_dir "credentials")
        credential_identity)
     "gh"
 
-let seed_repo_cli_credential_mapping
-    ?(credential_identity = Masc_mcp.Repo_cli_credentials.root_credential_identity)
+let seed_credential_bundle_mapping
+    ?(credential_identity = Masc_mcp.Credential_bundle.root_credential_identity)
     ?(repository_ids = [])
     ~config
     ~keeper_name
     () =
-  let gh_config_dir = repo_cli_config_dir_for_credential ~config credential_identity in
-  write_fake_github_hosts gh_config_dir;
+  let credential_bundle_dir = credential_bundle_dir_for_credential ~config credential_identity in
+  write_fake_github_hosts credential_bundle_dir;
   let credential_id = "cred-" ^ keeper_name ^ "-" ^ credential_identity in
   let credential : Repo_manager_types.credential =
     {
       id = credential_id;
       cred_type = Repo_manager_types.Github;
       username = credential_identity;
-      gh_config_dir = Some gh_config_dir;
+      credential_bundle_dir = Some credential_bundle_dir;
       ssh_key_path = None;
       gpg_key_id = None;
       state = Repo_manager_types.Unmaterialized;
@@ -384,7 +384,7 @@ let seed_default_mapping_if_missing ~config ~keeper_name =
       ~base_path:config.Workspace.base_path
       ~keeper_id:keeper_name
   with
-  | Ok [] -> seed_repo_cli_credential_mapping ~config ~keeper_name ()
+  | Ok [] -> seed_credential_bundle_mapping ~config ~keeper_name ()
   | Ok _ -> ()
   | Error msg -> Alcotest.failf "read keeper credential mapping: %s" msg
 
@@ -989,7 +989,7 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
+  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1021,11 +1021,11 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
     (contains_substring log "run -d");
   Alcotest.(check bool) "credentialed git used docker exec" true
     (contains_substring log "\nexec ");
-  let root_repo_cli_dir =
-    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
+  let root_credential_bundle_dir =
+    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
   in
-  Alcotest.(check bool) "generic typed Execute does not mount repo CLI identity bundle" false
-    (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
+  Alcotest.(check bool) "generic typed Execute does not mount credential bundle" false
+    (contains_substring log (credential_bundle_mount_spec root_credential_bundle_dir))
 
 let test_execute_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -1124,7 +1124,7 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
+  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   let worktree = Filename.concat repo ".worktrees/task-229" in
   ensure_dir worktree;
@@ -1158,7 +1158,7 @@ let test_execute_git_push_requires_write_tool_access_before_docker () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_credential_identity_bundle ~config Masc_mcp.Repo_cli_credentials.root_credential_identity;
+  ensure_credential_identity_bundle ~config Masc_mcp.Credential_bundle.root_credential_identity;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1190,7 +1190,7 @@ let test_execute_git_push_routes_through_git_creds_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
+  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1214,17 +1214,17 @@ let test_execute_git_push_routes_through_git_creds_docker () =
     (contains_substring log "run -d");
   Alcotest.(check bool) "git push used typed docker exec argv" true
     (contains_substring log "\nexec ");
-  let root_repo_cli_dir =
-    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
+  let root_credential_bundle_dir =
+    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
   in
-  Alcotest.(check bool) "generic typed push does not mount repo CLI identity bundle" false
-    (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
+  Alcotest.(check bool) "generic typed push does not mount credential bundle" false
+    (contains_substring log (credential_bundle_mount_spec root_credential_bundle_dir))
 
 let test_execute_env_wrapped_git_uses_git_creds_factory () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
+  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1246,17 +1246,17 @@ let test_execute_env_wrapped_git_uses_git_creds_factory () =
   Alcotest.(check (option bool)) "env git succeeds via fake docker" (Some true)
     (parse_bool_field raw "ok");
   let log = read_file log_path in
-  let root_repo_cli_dir =
-    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
+  let root_credential_bundle_dir =
+    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
   in
   Alcotest.(check bool) "env-wrapped git uses credentialed factory" true
-    (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
+    (contains_substring log (credential_bundle_mount_spec root_credential_bundle_dir))
 
 let test_execute_pipeline_gh_uses_git_creds_factory () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
+  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1279,11 +1279,11 @@ let test_execute_pipeline_gh_uses_git_creds_factory () =
   Alcotest.(check (option bool)) "pipeline gh succeeds via fake docker" (Some true)
     (parse_bool_field raw "ok");
   let log = read_file log_path in
-  let root_repo_cli_dir =
-    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
+  let root_credential_bundle_dir =
+    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
   in
   Alcotest.(check bool) "pipeline gh uses credentialed factory" true
-    (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
+    (contains_substring log (credential_bundle_mount_spec root_credential_bundle_dir))
 
 let test_tool_search_files_repo_review_is_unsupported () =
   with_tool_policy_config @@ fun () ->
@@ -1821,11 +1821,11 @@ let test_git_creds_mounts_numeric_user_identity () =
     with_env "GITHUB_TOKEN" "github-token" @@ fun () ->
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
   in
-  let root_repo_cli_dir =
-    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
+  let root_credential_bundle_dir =
+    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
   in
-  check_line_contains "root repo CLI identity bundle mounted" line
-    (repo_cli_config_mount_spec root_repo_cli_dir);
+  check_line_contains "root credential bundle mounted" line
+    (credential_bundle_mount_spec root_credential_bundle_dir);
   Alcotest.(check bool) "ambient GH_TOKEN not forwarded" false
     (contains_substring line "GH_TOKEN=");
   Alcotest.(check bool) "ambient GITHUB_TOKEN not forwarded" false
@@ -1850,7 +1850,7 @@ let test_git_creds_uses_mapped_credential_identity () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name
+  seed_credential_bundle_mapping ~config ~keeper_name:meta.name
     ~credential_identity:"anyang-keepers" ();
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   let line =
@@ -1869,40 +1869,40 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
   let identity_a = "keeper-a-gh" in
   let identity_b = "keeper-b-gh" in
   ensure_credential_identity_bundle ~config
-    Masc_mcp.Repo_cli_credentials.root_credential_identity;
+    Masc_mcp.Credential_bundle.root_credential_identity;
   ensure_credential_identity_bundle ~config identity_a;
   ensure_credential_identity_bundle ~config identity_b;
-  let root_repo_cli_dir = Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config in
-  let repo_cli_dir id =
-    Masc_mcp.Repo_cli_credentials.repo_cli_config_dir_of_bundle
-      (Masc_mcp.Repo_cli_credentials.bundle_root config ~credential_identity:id)
+  let root_credential_bundle_dir = Masc_mcp.Credential_bundle.root_credential_bundle_dir config in
+  let credential_bundle_dir id =
+    Masc_mcp.Credential_bundle.credential_bundle_dir_of_root
+      (Masc_mcp.Credential_bundle.bundle_root config ~credential_identity:id)
   in
   let run_for ~(meta : Keeper_meta_contract.keeper_meta) ~playground ~credential_identity
       ~other_identity ~log_name =
-    seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name
+    seed_credential_bundle_mapping ~config ~keeper_name:meta.name
       ~credential_identity ();
     let log_path = Filename.concat config.Workspace.base_path log_name in
     let line =
       run_git_creds_docker_shell ~config ~meta ~playground ~log_path
     in
-    let selected_repo_cli = repo_cli_dir credential_identity in
-    let other_repo_cli = repo_cli_dir other_identity in
+    let selected_credential_bundle = credential_bundle_dir credential_identity in
+    let other_credential_bundle = credential_bundle_dir other_identity in
     let mounted_playground =
       Keeper_alerting_path.normalize_path_for_check playground
       |> Keeper_alerting_path.strip_trailing_slashes
     in
     check_line_contains
-      (credential_identity ^ " selected repo CLI bundle mounted read-only")
+      (credential_identity ^ " selected credential bundle mounted read-only")
       line
-      (repo_cli_config_mount_spec selected_repo_cli);
+      (credential_bundle_mount_spec selected_credential_bundle);
     Alcotest.(check bool)
-      (credential_identity ^ " root fallback bundle not mounted")
+      (credential_identity ^ " default credential bundle not mounted")
       false
-      (contains_substring line (repo_cli_config_mount_spec root_repo_cli_dir));
+      (contains_substring line (credential_bundle_mount_spec root_credential_bundle_dir));
     Alcotest.(check bool)
       (credential_identity ^ " sibling keeper bundle not mounted")
       false
-      (contains_substring line (repo_cli_config_mount_spec other_repo_cli));
+      (contains_substring line (credential_bundle_mount_spec other_credential_bundle));
     Alcotest.(check bool)
       (credential_identity ^ " own playground mounted")
       true
@@ -2400,7 +2400,7 @@ let () =
             `Quick
             test_sandbox_root_git_cwd_cd_chain_is_not_interpreted;
           Alcotest.test_case
-            "repo CLI --repo api misuse uses shell semantics"
+            "GitHub CLI --repo api misuse uses shell semantics"
             `Quick
             test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics;
           Alcotest.test_case

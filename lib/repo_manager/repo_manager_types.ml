@@ -39,7 +39,7 @@ type credential_type =
       bundle exists on disk yet.  Keeper resolve from this credential
       surfaces a clear remediation message rather than a silent 401.
     - [Materialized { last_verified_at }]: [gh auth status] succeeded
-      against [gh_config_dir] at the timestamp.
+      against [credential_bundle_dir] at the timestamp.
     - [Stale { reason }]: a prior verify failed; consumers should treat
       the credential as unusable until a re-verify or re-provisioning. *)
 type credential_state =
@@ -52,7 +52,7 @@ type credential = {
   id : string;
   cred_type : credential_type;
   username : string;
-  gh_config_dir : string option [@default None];
+  credential_bundle_dir : string option [@default None];
   ssh_key_path : string option [@default None];
   gpg_key_id : string option [@default None];
   (* RFC-0019 PR-B §4.2: credential state lifecycle.  Default keeps

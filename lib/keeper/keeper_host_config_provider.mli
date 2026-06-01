@@ -1,4 +1,4 @@
-(** Keeper repo CLI credential provider.
+(** Keeper GitHub credential provider.
 
     Resolves a keeper through [keeper_repo_mappings.toml] and the credential
     store.  Missing or unreadable mappings fail closed; keeper TOML no longer
@@ -34,6 +34,6 @@ module For_testing : sig
 
   val compose_ro_mounts_result :
     ?keeper_name:string ->
-    Repo_cli_credentials.keeper_binding ->
+    Credential_bundle.keeper_binding ->
     (Keeper_credential_provider.ro_mount list, string) result
 end

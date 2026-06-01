@@ -91,12 +91,12 @@ let write_mapping ?credential_id base_path keeper_id repo_ids =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let make_credential ~id ~username ~gh_config_dir : credential =
+let make_credential ~id ~username ~credential_bundle_dir : credential =
   {
     id;
     cred_type = Github;
     username;
-    gh_config_dir = Some gh_config_dir;
+    credential_bundle_dir = Some credential_bundle_dir;
     ssh_key_path = None;
     gpg_key_id = None;
     state = Unmaterialized;
@@ -155,7 +155,7 @@ let test_single_repo_single_credential () =
   with_temp_base_path (fun base_path ->
       seed_credential ~base_path
         (make_credential ~id:"cred-A" ~username:"user-A"
-           ~gh_config_dir:"/tmp/cred-A/gh");
+           ~credential_bundle_dir:"/tmp/cred-A/gh");
       seed_repo ~base_path (make_repo ~id:"repo-1" ~credential_id:"cred-A");
       write_mapping base_path "keeper-1" [ "repo-1" ];
       match
@@ -176,7 +176,7 @@ let test_two_repos_same_credential_deduped () =
   with_temp_base_path (fun base_path ->
       seed_credential ~base_path
         (make_credential ~id:"cred-A" ~username:"user-A"
-           ~gh_config_dir:"/tmp/cred-A/gh");
+           ~credential_bundle_dir:"/tmp/cred-A/gh");
       seed_repo ~base_path (make_repo ~id:"repo-1" ~credential_id:"cred-A");
       seed_repo ~base_path (make_repo ~id:"repo-2" ~credential_id:"cred-A");
       write_mapping base_path "keeper-1" [ "repo-1"; "repo-2" ];
@@ -199,10 +199,10 @@ let test_distinct_credentials_surfaced () =
   with_temp_base_path (fun base_path ->
       seed_credential ~base_path
         (make_credential ~id:"cred-A" ~username:"user-A"
-           ~gh_config_dir:"/tmp/cred-A/gh");
+           ~credential_bundle_dir:"/tmp/cred-A/gh");
       seed_credential ~base_path
         (make_credential ~id:"cred-B" ~username:"user-B"
-           ~gh_config_dir:"/tmp/cred-B/gh");
+           ~credential_bundle_dir:"/tmp/cred-B/gh");
       seed_repo ~base_path (make_repo ~id:"repo-1" ~credential_id:"cred-A");
       seed_repo ~base_path (make_repo ~id:"repo-2" ~credential_id:"cred-B");
       write_mapping base_path "keeper-1" [ "repo-1"; "repo-2" ];
@@ -247,10 +247,10 @@ let test_wildcard_mapping_returns_all_credentials () =
   with_temp_base_path (fun base_path ->
       seed_credential ~base_path
         (make_credential ~id:"cred-A" ~username:"user-A"
-           ~gh_config_dir:"/tmp/cred-A/gh");
+           ~credential_bundle_dir:"/tmp/cred-A/gh");
       seed_credential ~base_path
         (make_credential ~id:"cred-B" ~username:"user-B"
-           ~gh_config_dir:"/tmp/cred-B/gh");
+           ~credential_bundle_dir:"/tmp/cred-B/gh");
       seed_repo ~base_path (make_repo ~id:"repo-1" ~credential_id:"cred-A");
       seed_repo ~base_path (make_repo ~id:"repo-2" ~credential_id:"cred-B");
       seed_repo ~base_path (make_repo ~id:"repo-3" ~credential_id:"cred-A");
@@ -274,7 +274,7 @@ let test_direct_mapping_returns_selected_credential () =
   with_temp_base_path (fun base_path ->
       seed_credential ~base_path
         (make_credential ~id:"cred-selected" ~username:"keeper-user"
-           ~gh_config_dir:"/tmp/selected/gh");
+           ~credential_bundle_dir:"/tmp/selected/gh");
       seed_repo ~base_path
         (make_repo ~id:"repo-1" ~credential_id:"cred-missing-repo");
       write_mapping ~credential_id:"cred-selected" base_path "keeper-1"

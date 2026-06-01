@@ -101,9 +101,6 @@ val auth_dir : base_path:string -> string
 val credentials_dir : base_path:string -> string
 (** [<base_path>/.masc/credentials/]. Per-credential file storage. *)
 
-val repo_cli_identities_dir : base_path:string -> string
-(** [<base_path>/.masc/repo-cli-identities/]. Repo CLI identity bundles. *)
-
 val agent_runtime_dir : base_path:string -> string
 (** [<base_path>/.masc/runtime/agent/]. Per-session agent runtime markers. *)
 

@@ -24,7 +24,7 @@ header — but the *parseable surface* is much wider:
 
 - `keeper_types_profile.ml` lists ~40 fields the parser accepts,
   including `sandbox_profile`, `network_mode`, `keepalive_interval_sec`,
-  `git_identity_mode`, `keeper_assignable`, `max_context_tokens`, etc.
+  `retired_git_author_config`, `keeper_assignable`, `max_context_tokens`, etc.
 - `runtime_toml_materializer.ml:356` lists ~20 valid runtime fields
   including `sticky_ttl_ms`, `latency_baseline_ms`,
   `rate_limit_recency_window_s`, `server_error_decay_base`, etc.
@@ -84,7 +84,7 @@ type tier = Basic | Advanced | Godmode
 
 let field_tier : string -> tier = function
   | "name" | "persona" | "tier" | "tools" | "work_source"
-  | "git_identity_mode" -> Basic
+  | "retired_git_author_config" -> Basic
   | "sandbox_profile" | "network_mode" | "keepalive_interval_sec"
   | "max_retries" | "max_context_tokens"
   | "keeper_assignable" -> Advanced

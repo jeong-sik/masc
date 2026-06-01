@@ -62,12 +62,7 @@ let state_of kind = List.assoc kind _state_for_kind
 let note_acquire state = Atomic.incr state.in_flight
 
 let note_release state =
-  let rec loop () =
-    let current = Atomic.get state.in_flight in
-    let next = max 0 (current - 1) in
-    if not (Atomic.compare_and_set state.in_flight current next) then loop ()
-  in
-  loop ()
+  Lockfree_atomic.update state.in_flight (fun current -> max 0 (current - 1))
 
 (* Shared FD-pressure gate — when Keeper_fd_pressure.active () is true,
    all top-level kinds serialize through one global slot. Nested cross-kind

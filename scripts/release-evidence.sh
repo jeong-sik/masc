@@ -10,7 +10,7 @@ The bundle includes:
   - artifact install smoke (`--version` from an installed location)
   - local boot + /health capture
   - MCP initialize + tools/list + masc_status captures
-  - dashboard read-path captures for mission + namespace truth
+  - dashboard read-path captures for project snapshot + namespace truth
 
 Raw files are written next to OUTPUT_MARKDOWN.
 EOF
@@ -54,9 +54,9 @@ tools_json="$out_dir/tools-list.json"
 status_headers="$out_dir/masc-status.headers"
 status_body="$out_dir/masc-status.body"
 status_json="$out_dir/masc-status.json"
-mission_headers="$out_dir/dashboard-mission.headers"
-mission_body="$out_dir/dashboard-mission.body"
-mission_json="$out_dir/dashboard-mission.json"
+project_snapshot_headers="$out_dir/dashboard-project-snapshot.headers"
+project_snapshot_body="$out_dir/dashboard-project-snapshot.body"
+project_snapshot_json="$out_dir/dashboard-project-snapshot.json"
 namespace_headers="$out_dir/namespace-truth.headers"
 namespace_body="$out_dir/namespace-truth.body"
 namespace_json="$out_dir/namespace-truth.json"
@@ -312,10 +312,10 @@ post_json "$MCP_URL" "$status_payload" "$status_headers" "$status_body" \
   -H "Mcp-Protocol-Version: ${protocol_version}"
 normalize_json "$status_body" "$status_json"
 
-curl -sS -D "$mission_headers" -o "$mission_body" \
+curl -sS -D "$project_snapshot_headers" -o "$project_snapshot_body" \
   -H 'Accept: application/json' \
-  "${BASE_URL}/api/v1/dashboard/mission"
-normalize_json "$mission_body" "$mission_json"
+  "${BASE_URL}/api/v1/dashboard/project-snapshot"
+normalize_json "$project_snapshot_body" "$project_snapshot_json"
 
 curl -sS -D "$namespace_headers" -o "$namespace_body" \
   -H 'Accept: application/json' \
@@ -333,7 +333,7 @@ python3 - \
   "$health_json" \
   "$tools_json" \
   "$status_json" \
-  "$mission_json" \
+  "$project_snapshot_json" \
   "$namespace_json" \
   "$initialize_json" \
   "$server_log" <<'PY'
@@ -353,7 +353,7 @@ from datetime import datetime, timezone
     health_json,
     tools_json,
     status_json,
-    mission_json,
+    project_snapshot_json,
     namespace_json,
     initialize_json,
     server_log,
@@ -366,7 +366,7 @@ def load(path):
 health = load(health_json)
 tools = load(tools_json)
 status = load(status_json)
-mission = load(mission_json)
+project_snapshot = load(project_snapshot_json)
 namespace_truth = load(namespace_json)
 initialize = load(initialize_json)
 
@@ -378,7 +378,7 @@ for item in content:
       status_text = item.get("text", "")
       break
 
-mission_keys = sorted(mission.keys())[:10]
+project_snapshot_keys = sorted(project_snapshot.keys())[:10]
 namespace_keys = sorted(namespace_truth.keys())[:10]
 health_keys = sorted(health.keys())[:10]
 generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -419,7 +419,7 @@ md = f"""# Release Evidence Bundle
 
 ## Dashboard Read Paths
 
-- `/api/v1/dashboard/mission` returned HTTP-shaped JSON with keys: `{", ".join(mission_keys)}`
+- `/api/v1/dashboard/project-snapshot` returned HTTP-shaped JSON with keys: `{", ".join(project_snapshot_keys)}`
 - `/api/v1/dashboard/namespace-truth` returned keys: `{", ".join(namespace_keys)}`
 
 ## Raw Captures
@@ -431,7 +431,7 @@ md = f"""# Release Evidence Bundle
 - `initialize.json`
 - `tools-list.json`
 - `masc-status.json`
-- `dashboard-mission.json`
+- `dashboard-project-snapshot.json`
 - `namespace-truth.json`
 - `server.log`
 

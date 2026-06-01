@@ -610,10 +610,8 @@ export interface DashboardRuntimeModelMetric {
   max_peak_memory_gb?: number | null
   /**
    * Fraction [0.0, 1.0] of turns in the window where the model received
-   * think=true. Reflects the Keeper_turn_intent adaptive classifier decision
-   * (Cognitive=true → thinking, Mechanical=false → no thinking). Null when no
-   * entry in the window reported thinking_enabled (older rows or providers
-   * that don't expose the field).
+   * think=true. Null when no entry in the window reported thinking_enabled
+   * (older rows or providers that don't expose the field).
    */
   thinking_fraction?: number | null
   avg_latency_ms?: number | null

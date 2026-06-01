@@ -78,7 +78,7 @@ type model_stats = {
   max_peak_memory_gb : float option;
   thinking_fraction : float option;
     (** Fraction [0.0, 1.0] of turns in window where the model was sent
-        think=true (Keeper_turn_intent adaptive classifier decision).
+        think=true.
         [None] when no entry in the window reported [thinking_enabled]
         (older jsonl rows predating the field, or providers that don't
         expose it). Denominator = count of reporting entries. *)

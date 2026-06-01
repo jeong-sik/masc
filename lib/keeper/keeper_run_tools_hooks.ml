@@ -267,33 +267,6 @@ let assemble_hooks
                 Keeper_registry.mark_sdk_turn_started
                   ~base_path:config.base_path
                   meta.name;
-                let intent =
-                  if Keeper_config.keeper_adaptive_thinking_mode ()
-                  then (
-                    let last_tool_calls =
-                      let rev = List.rev messages in
-                      let rec scan = function
-                        | [] -> []
-                        | (msg : Agent_sdk.Types.message) :: rest ->
-                          let names =
-                            List.filter_map
-                              (function
-                                | Agent_sdk.Types.ToolUse { name; _ } -> Some name
-                                | _ -> None)
-                              msg.content
-                          in
-                          if names <> [] then names else scan rest
-                      in
-                      scan rev
-                    in
-                    let retry_count = if is_retry then 1 else 0 in
-                    Some
-                      (Keeper_turn_intent.classify
-                         ~last_tool_calls
-                         ~last_user_message:(Some user_message)
-                         ~retry_count))
-                  else None
-                in
                 let runtime_seed =
                   Runtime_inference.for_runtime ~name:runtime_id_string
                 in
@@ -307,16 +280,7 @@ let assemble_hooks
                     ~enabled:(Keeper_config.keeper_adaptive_thinking_enabled ())
                     ~is_retry
                     ~last_tool_results
-                    ~user_message
-                    ~dynamic_context
                     ~current_budget
-                    ~intent
-                in
-                let adaptive_thinking_override =
-                  match intent with
-                  | Some i ->
-                    Some (Keeper_turn_intent.equal i Keeper_turn_intent.Cognitive)
-                  | None -> None
                 in
                 let current_params =
                   { current_params with
@@ -324,10 +288,7 @@ let assemble_hooks
                   ; enable_thinking =
                       (match runtime_seed.thinking_enabled with
                        | Some false -> Some false
-                       | _ ->
-                         (match adaptive_thinking_override with
-                          | Some _ as v -> v
-                          | None -> current_params.enable_thinking))
+                       | _ -> current_params.enable_thinking)
                   }
                 in
                 let ctx =

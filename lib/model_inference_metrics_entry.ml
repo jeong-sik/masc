@@ -82,8 +82,7 @@ type model_stats =
   ; (* Peak memory reported by the provider for the turn. We keep the
      maximum because summing memory across turns is meaningless. *)
     max_peak_memory_gb : float option
-  ; (* Fraction of turns in window where the model received think=true. Reflects
-     Keeper_turn_intent adaptive classifier (Cognitive=true, Mechanical=false).
+  ; (* Fraction of turns in window where the model received think=true.
      None when no entry in window reported thinking_enabled (older jsonl rows
      before the field was emitted, or providers that don't expose it). *)
     thinking_fraction : float option

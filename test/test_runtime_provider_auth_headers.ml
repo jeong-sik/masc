@@ -145,6 +145,30 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
   check string "attempt detail source" "runtime_agent_terminal"
     observation.attempt_details_source
 
+let test_capacity_key_separates_models_on_shared_base_url () =
+  let provider_config model_id =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id
+      ~base_url:"https://shared-runtime.example/v1"
+      ()
+  in
+  let key_a =
+    provider_config "model-a"
+    |> Runtime_candidate.of_provider_config
+    |> Runtime_candidate.capacity_key
+  in
+  let key_b =
+    provider_config "model-b"
+    |> Runtime_candidate.of_provider_config
+    |> Runtime_candidate.capacity_key
+  in
+  check bool "capacity keys differ by model" true (not (String.equal key_a key_b));
+  check bool "model-a appears in key" true
+    (Astring.String.is_infix ~affix:"model-a" key_a);
+  check bool "model-b appears in key" true
+    (Astring.String.is_infix ~affix:"model-b" key_b)
+
 let () =
   run "runtime_provider_auth_headers"
     [ ( "provider_config"
@@ -160,5 +184,9 @@ let () =
             "runtime agent terminal observation carries model identity"
             `Quick
             test_runtime_agent_terminal_observation_uses_runtime_identity
+        ; test_case
+            "runtime capacity key separates models on shared base_url"
+            `Quick
+            test_capacity_key_separates_models_on_shared_base_url
         ] )
     ]

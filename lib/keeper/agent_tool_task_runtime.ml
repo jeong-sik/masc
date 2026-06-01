@@ -101,17 +101,6 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
                 (String.concat ", " goal_ids)))
 ;;
 
-let parse_task_contract_arg args =
-  match Json_util.assoc_member_opt "contract" args with
-  | Some `Null -> Ok None
-  | Some (`Assoc _ as json) -> (
-      match Masc_domain.task_contract_of_yojson json with
-      | Ok contract -> Ok (Some contract)
-      | Error message ->
-          Error (Printf.sprintf "Invalid contract payload: %s" message))
-  | _ -> Error "contract must be an object when provided"
-;;
-
 (* RFC-0034.v2: per-goal task creation cap moved to
    [Workspace_task_capacity] so all 5 task creation entrypoints share the
    same guard. Pre-RFC-0034.v2, these helpers (and the constant
@@ -478,7 +467,15 @@ let handle_keeper_task_tool
       match resolve_task_create_goal_id ~config ~meta args with
       | Error message -> error_json message
       | Ok goal_id ->
-          (match parse_task_contract_arg args with
+          (* De-duplicated: this keeper-internal path now shares the canonical
+             [Tool_task_args.parse_task_contract] used by the public
+             masc_task_create facade. The previous local copy
+             [parse_task_contract_arg] had regressed — it rejected an OMITTED
+             optional [contract] via a catch-all that conflated None(omitted)
+             with a wrong-typed value, which falsely failed keeper_task_create
+             and tripped the keeper failure circuit breaker. Same lib, no
+             dependency wall; the canonical parser handles [None | Some `Null]. *)
+          (match Tool_task_args.parse_task_contract args with
            | Error message -> error_json message
            | Ok contract ->
               let capacity_error =

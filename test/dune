@@ -1652,6 +1652,8 @@
 
 (include stanzas/test_tool_name.inc)
 
+(include stanzas/test_tool_task_args.inc)
+
 (include stanzas/test_tool_task_completion_example.inc)
 
 (include stanzas/test_trajectory_atomicity.inc)

@@ -564,6 +564,42 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
     then Alcotest.failf "expected stale worktree root, got: %s" err
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
+let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  let config = Workspace.default_config base in
+  let meta = make_local_meta "sangsu" in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  let missing_worktree = Filename.concat repo_dir ".worktrees/task-missing" in
+  ensure_dir repo_dir;
+  run_process_ok ~cwd:repo_dir "git" [ "init"; "-q"; "--initial-branch=main" ];
+  let raw =
+    Agent_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "ls"
+           ; "argv", `List []
+           ; "cwd", `String "repos/masc-mcp/.worktrees/task-missing"
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    Alcotest.(check bool) "sandbox_repo_not_ready"
+      true
+      (String_util.contains_substring err "sandbox_repo_not_ready");
+    Alcotest.(check bool) "missing worktree was not materialized"
+      false
+      (Sys.file_exists missing_worktree)
+  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+
 let test_tool_execute_elapsed_duration_preserves_positive_sub_ms () =
   let elapsed = Agent_tool_command_runtime.For_testing.elapsed_duration_ms in
   Alcotest.(check int) "sub-ms positive duration rounds up to 1" 1
@@ -1352,6 +1388,10 @@ let () =
             "stale worktree path arg rejects parent clone"
             `Quick
             test_tool_execute_rejects_stale_worktree_path_arg
+        ; Alcotest.test_case
+            "missing worktree cwd rejects without mkdir"
+            `Quick
+            test_tool_execute_missing_worktree_cwd_does_not_create_directory
         ] )
     ; ( "edge"
       , [ Alcotest.test_case

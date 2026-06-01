@@ -88,11 +88,18 @@ let handle_tool_execute_typed
   match Agent_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
     | Ok cwd ->
+      let execution_location_fields cwd =
+        [ ( "execution_location"
+          , Agent_tool_execute_path.execution_location_json ~config ~meta ~args ~cwd )
+        ]
+      in
       let typed_args = assoc_upsert "cwd" (`String cwd) args in
       match Agent_tool_execute_typed_input.of_json typed_args with
       | Error e ->
         error_json
-          ~fields:[ "typed", `Bool true; "cwd", `String cwd ]
+          ~fields:
+            ([ "typed", `Bool true; "cwd", `String cwd ]
+             @ execution_location_fields cwd)
           e
       | Ok input ->
         let cmd = typed_input_command_text input in
@@ -150,13 +157,16 @@ let handle_tool_execute_typed
            error_json
              ~fields:
                ([ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+                @ execution_location_fields cwd
                 @ fields)
              message
          | Ok (dispatch_sandbox, sandbox_extra_fields) ->
         match root_git_cwd_error with
         | Some e ->
           error_json
-            ~fields:[ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+            ~fields:
+              ([ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+               @ execution_location_fields cwd)
             e
         | None ->
         (* RFC-0160 S1: lower-then-classify. Typed argv → Shell IR
@@ -169,6 +179,7 @@ let handle_tool_execute_typed
           let alts = Agent_tool_execute_typed_input.validation_error_alternatives e in
           let fields =
             [ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+            @ execution_location_fields cwd
             @
             (match alts with
              | [] -> []
@@ -190,6 +201,7 @@ let handle_tool_execute_typed
         in
         let typed_error_fields =
           [ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
+          @ execution_location_fields cwd
         in
         let blocked_result ?deterministic_reason ~error ~reason ~alternatives () =
           (* RFC-0208 P1: a blocked typed command emits a Keeper-level audit
@@ -221,9 +233,11 @@ let handle_tool_execute_typed
                ~extra:
                  (deterministic_retry_fields
                   @ [ "cmd", `String cmd_for_log
+                    ; "cwd", `String cwd
                     ; "typed", `Bool true
                     ; "execution_time_ms", `Int 0
-                    ])
+                    ]
+                  @ execution_location_fields cwd)
                ())
         in
         let envelope = Agent_tool_execute_shell_ir.classify ir in
@@ -297,7 +311,9 @@ let handle_tool_execute_typed
               meta.name
               cmd_for_log
               (message_for_log e);
-            error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
+            error_json
+              ~fields:(("blocked_cmd", `String cmd_for_log) :: typed_error_fields)
+              e
           | Ok result ->
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry
@@ -341,7 +357,8 @@ let handle_tool_execute_typed
                       ; "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms
                       ; "timeout_sec", `Float timeout_sec
-                      ])
+                      ]
+                    @ execution_location_fields cwd)
                  ~status:result.status
                  ~output
                  ~env_snapshot:env_snap

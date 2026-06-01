@@ -23,6 +23,17 @@ val validate_repo_path_args_ready :
     commands run from the playground root with arguments like
     [./repos/masc-mcp/lib/foo.ml]. *)
 
+val execution_location_json :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  args:Yojson.Safe.t ->
+  cwd:string ->
+  Yojson.Safe.t
+(** Structured cwd contract for Execute responses.  The JSON tells the agent
+    whether the effective cwd is the keeper playground root, a sandbox repo,
+    or a sandbox worktree, and records that relative argv paths resolve against
+    that effective cwd. *)
+
 val auto_correct_path :
   meta:Keeper_meta_contract.keeper_meta -> string -> string option
 (** Auto-correct common LLM-hallucinated path prefixes

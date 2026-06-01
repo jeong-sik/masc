@@ -824,6 +824,84 @@ let parse_hint raw =
   |> Json.member "hint"
   |> Json.to_string_option
 
+let test_tool_execute_runtime_error_reports_default_execution_location () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  Keeper_registry.clear ();
+  let meta = make_readonly_meta "exec-location" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let playground_canonical = normalize_path_for_containment playground in
+  ensure_dir playground;
+  let raw =
+    Agent_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "ls"
+           ; "argv", `List [ `String "definitely-missing" ]
+           ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "runtime failure is surfaced" false
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check string) "top-level cwd is default playground" playground
+    (json |> Json.member "cwd" |> Json.to_string);
+  let loc = json |> Json.member "execution_location" in
+  Alcotest.(check string) "scope" "playground_root"
+    (loc |> Json.member "scope" |> Json.to_string);
+  Alcotest.(check string) "cwd source" "default_playground_root"
+    (loc |> Json.member "cwd_source" |> Json.to_string);
+  Alcotest.(check string) "relative cwd" "."
+    (loc |> Json.member "relative_cwd" |> Json.to_string);
+  Alcotest.(check string) "relative path base" playground_canonical
+    (loc |> Json.member "relative_path_base" |> Json.to_string);
+  Alcotest.(check bool) "argv paths resolve against cwd" true
+    (loc
+     |> Json.member "argv_relative_paths_resolve_against_cwd"
+     |> Json.to_bool)
+
+let test_execution_location_classifies_repo_worktree_subpath () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let meta = make_readonly_meta "exec-location-worktree" in
+  let playground = Filename.concat base_path (playground_path_of meta.name) in
+  let cwd =
+    Filename.concat playground "repos/masc-mcp/.worktrees/task-123/lib"
+  in
+  let loc =
+    Masc_mcp.Agent_tool_execute_path.execution_location_json
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ ( "cwd"
+             , `String "repos/masc-mcp/.worktrees/task-123/lib" )
+           ])
+      ~cwd
+  in
+  Alcotest.(check string) "scope" "repo_worktree_subpath"
+    (loc |> Json.member "scope" |> Json.to_string);
+  Alcotest.(check string) "cwd source" "explicit_cwd"
+    (loc |> Json.member "cwd_source" |> Json.to_string);
+  Alcotest.(check string) "repo name" "masc-mcp"
+    (loc |> Json.member "repo_name" |> Json.to_string);
+  Alcotest.(check string)
+    "relative cwd"
+    "repos/masc-mcp/.worktrees/task-123/lib"
+    (loc |> Json.member "relative_cwd" |> Json.to_string);
+  Alcotest.(check string)
+    "worktree root"
+    (normalize_path_for_containment
+       (Filename.concat playground "repos/masc-mcp/.worktrees/task-123"))
+    (loc |> Json.member "worktree_root" |> Json.to_string)
+
 let test_tool_execute_typed_process_runs_via_shell_ir () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
@@ -1429,6 +1507,14 @@ let () =
         ] )
     ; ( "typed_shell_ir"
       , [ Alcotest.test_case
+            "runtime errors report default execution location"
+            `Quick
+            test_tool_execute_runtime_error_reports_default_execution_location
+        ; Alcotest.test_case
+            "execution location classifies worktree subpaths"
+            `Quick
+            test_execution_location_classifies_repo_worktree_subpath
+        ; Alcotest.test_case
             "typed process runs via Shell IR"
             `Quick
             test_tool_execute_typed_process_runs_via_shell_ir

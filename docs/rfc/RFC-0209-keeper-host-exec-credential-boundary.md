@@ -1,15 +1,15 @@
 ---
-rfc: RFC-0209
-title: Keeper Host-Exec Credential Boundary
-author: jeong-sik
-created: 2026-06-02
+rfc: "0209"
+title: "Keeper Host-Exec Credential Boundary"
 status: Draft
-related:
-  - RFC-0019 (Keeper Credential Unification — F-1 invariant)
-  - RFC-0070 (Keeper Sandbox Pure/Edge Separation — §82-83 host-path credential brokering defer)
-  - RFC-0126 (Silent Fallback Discipline — fail-closed)
+created: 2026-06-01
+updated: 2026-06-01
+author: jeong-sik
+supersedes: []
+superseded_by: null
+related: ["0019", "0070", "0126"]
+implementation_prs: []
 issue: "#19770"
-supersedes: -
 ---
 
 # RFC-0209: Keeper Host-Exec Credential Boundary
@@ -66,7 +66,7 @@ RFC-0019 P1: "The credential boundary IS the token. Two identities with the same
 `Exec_dispatch.dispatch_decided`의 production 호출처는 정확히 둘이다:
 
 1. **keeper chokepoint** — `lib/keeper/agent_tool_execute_shell_ir.ml:145` (`dispatch_classified`). 모든 keeper Host producer가 여기로 수렴.
-2. **server 자체** — `lib/.../worker_dev_tools.ml:482` (`for_keeper_command = false`, keeper 모듈 우회).
+2. **server 자체** — `lib/worker_dev_tools.ml:482` (`for_keeper_command = false`, keeper 모듈 우회).
 
 `dispatch`/`dispatch_simple`/`dispatch_pipeline`은 public이지만 production 호출처 없음(테스트/문서만). 따라서 **scrub을 keeper chokepoint에만 적용하면 비-keeper(서버) 경로는 구조적으로 무영향**이다.
 

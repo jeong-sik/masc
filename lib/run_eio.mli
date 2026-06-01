@@ -21,6 +21,8 @@ type run_record = {
 
 type log_entry = {
   timestamp : string;
+  kind : string;
+  task_id : string;
   note : string;
 }
 

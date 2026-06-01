@@ -127,7 +127,7 @@ let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
   ; root_arg = "."
   ; mind_arg = "mind"
   ; repos_arg = "repos"
-  ; task_overlay_pattern = "repos/<repo>/.worktrees/<keeper>-<task_id>"
+  ; task_overlay_pattern = "repos/<repo>"
   }
 
 let allowed_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) : string =

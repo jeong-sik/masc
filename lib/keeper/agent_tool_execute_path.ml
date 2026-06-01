@@ -40,12 +40,10 @@ let repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel =
   Printf.sprintf
     "sandbox_repo_not_ready: sandbox path is under repos/%s, but %s is not an \
      independent git checkout (git_toplevel=%s). Repair or reclone the sandbox \
-     repo under repos/%s, then retry with cwd=\"repos/%s\" or \
-     cwd=\"repos/%s/.worktrees/<task>\"."
+     repo under repos/%s, then retry with cwd=\"repos/%s\"."
     repo_name
     path_root
     (Option.value ~default:"<none>" git_toplevel)
-    repo_name
     repo_name
     repo_name
 

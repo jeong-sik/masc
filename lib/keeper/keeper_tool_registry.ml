@@ -309,7 +309,7 @@ let keeper_tool_search_schema : Masc_domain.tool_schema =
                     ; ( "description"
                       , `String
                           "Natural language description of what you need to do, e.g. \
-                           'create a git worktree' or 'manage auth tokens'" )
+                           'inspect a repo' or 'manage auth tokens'" )
                     ] )
               ; ( "max_results"
                 , `Assoc

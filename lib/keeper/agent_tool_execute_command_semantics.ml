@@ -280,10 +280,9 @@ let resolve_sandbox_root_git_cwd_of_stages
         ( cwd
         , Some
             (Printf.sprintf
-               "sandbox root cannot run git/gh: mount point %s is not a git repository and \
+                "sandbox root cannot run git/gh: mount point %s is not a git repository and \
                 no sandbox git clones exist under repos/. First clone a repo with \
-                the visible clone tool, then retry with cwd=\"repos/<repo>\" or \
-                cwd=\"repos/<repo>/.worktrees/<task>\"."
+                the visible clone tool, then retry with cwd=\"repos/<repo>\"."
                host_root) )
       | example_repo :: _ as many ->
         let suggested_cwd =

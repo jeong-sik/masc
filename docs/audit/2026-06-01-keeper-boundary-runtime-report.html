@@ -236,7 +236,7 @@
         <li>Command: `masc_keeper_status echo/analyst`; checked 2026-06-01 16:54 KST; confidence High for receipt/status payload, Medium overall because runtime restarted during audit.</li>
         <li>Command: `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/telemetry/summary'`; checked 2026-06-01 22:11 KST; confidence High for telemetry source health.</li>
         <li>Command: `curl -fsS 'http://127.0.0.1:8935/api/v1/models/metrics'`; checked 2026-06-01 22:18 KST; confidence High for metrics payload, Medium for provider identity because current rows still have null provider.</li>
-        <li>Command: `git rev-parse --short=10 origin/main`, `git -C /Users/dancer/me/workspace/yousleepwhen/masc-mcp rev-parse --short=12 HEAD`, and `/health?full=1.build`; checked 2026-06-01 22:18 KST; confidence High for source and live commit.</li>
+        <li>Command: `git rev-parse --short=10 origin/main`, `git -C &lt;repo_root&gt; rev-parse --short=12 HEAD`, and `/health?full=1.build`; checked 2026-06-01 22:18 KST; confidence High for source and live commit.</li>
       </ul>
     </div>
 

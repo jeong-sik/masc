@@ -2,6 +2,8 @@
    Pure statistics over fixed inputs — no I/O, no provider, fully reproducible.
    Runnable as a standalone executable; exits non-zero on the first failure. *)
 
+module Eval_variance = Masc_mcp.Eval_variance
+
 let failures = ref 0
 
 let check name cond =

@@ -39,6 +39,18 @@ let test_transition_release_matches () =
     true
     (RA.matches ~tool_name:"masc_transition" ~input ~risk_level:RL.Low)
 
+let test_transition_approve_matches () =
+  let input = transition_input "approve" in
+  Alcotest.(check bool) "approve matches"
+    true
+    (RA.matches ~tool_name:"masc_transition" ~input ~risk_level:RL.Medium)
+
+let test_transition_reject_matches () =
+  let input = transition_input "reject" in
+  Alcotest.(check bool) "reject matches"
+    true
+    (RA.matches ~tool_name:"masc_transition" ~input ~risk_level:RL.Medium)
+
 (* ── matches: NOT allowlisted (still gated) ─────────────────── *)
 
 let test_transition_cancel_not_matched () =
@@ -354,6 +366,10 @@ let () =
             test_transition_done_matches;
           Alcotest.test_case "release auto-approves" `Quick
             test_transition_release_matches;
+          Alcotest.test_case "approve auto-approves" `Quick
+            test_transition_approve_matches;
+          Alcotest.test_case "reject auto-approves" `Quick
+            test_transition_reject_matches;
           Alcotest.test_case "case-insensitive action" `Quick
             test_case_insensitive_action;
         ] );

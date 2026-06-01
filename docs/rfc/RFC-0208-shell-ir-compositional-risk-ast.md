@@ -203,32 +203,47 @@ let rec typed_risk_of_ir (ir : Shell_ir.t) : risk_class =
 
 **Status: implemented** (`lib/exec/test/test_shell_ir_differential.ml`).
 The harness asserts the monotone-safety invariant over a curated corpus
-and reports floor-retirement readiness. Initial run (2026-06-01, 31-command
-corpus): typed_hit 90%, floor-redundant 77%, **NOT READY** — 7 command
-classes still need the floor because `risk_of_typed` does not yet read
-their typed fields:
+and reports floor-retirement readiness. Baseline run (2026-06-01, 31-command
+corpus): typed_hit 90%, floor-redundant **77%**, NOT READY — 7 command
+classes needed the floor because `risk_of_typed` did not read their typed
+fields. The harness then drove P3 (below).
 
-| command | typed_only | floor |
-|---------|-----------|-------|
-| `git checkout -b` | R0 | R1 |
-| `git reset --hard` | R0 | R2 |
-| `gh pr create` | R0 | R1 |
-| `gh pr merge` | R0 | R2 |
-| `gh api -X DELETE` | R0 | R2 |
-| `gh api -X POST` | R0 | R1 |
-| `gh api graphql` mutation | R0 | R2 |
+### P3 · Harness-driven typed-classifier completion
 
-This is the evidence-driven work-list for P3: teach `risk_of_typed` to
-read `Git_checkout.new_branch`, `Git_reset.mode`, and the `Gh`
-method/graphql-body fields. A command class leaves the floor (P6) only
-when the harness shows it floor-redundant.
+Close the floor-redundancy gaps the harness reports, using fields the
+typed model already carries plus shared sub-classifiers (no new
+duplicate surface). Progress (floor-redundant 77% → **94%**, 5/7 closed):
 
-### P3 · morbig spike + CST→AST lowering · P4 · AST node extension ·
-### P5 · spellbook spec registry · P6 · floor retirement (per-class, gated) ·
-### P7 · risk-taxonomy unification (retire phantom 3-level) ·
-### P8 · TLA+ spec extension (model Generic/Pipeline/floor `max_risk`)
+| command | before | after | how |
+|---------|--------|-------|-----|
+| `git checkout` | R0 | R1 | typed arm matches the floor (working-tree write) |
+| `git reset` | R0 | R2 | typed arm matches the floor |
+| `gh pr create` | R0 | R1 | delegate to the shared `classify_repo_hosting_cli` |
+| `gh pr merge` | R0 | R2 | delegate (round-trip preserves subcommand/action) |
+| `gh api graphql` mutation | R0 | R2 | delegate (round-trip preserves the body) |
+| `gh api -X DELETE` | R0 | R0 | **blocked → P4** |
+| `gh api -X POST` | R0 | R0 | **blocked → P4** |
 
-(Detailed per-phase design lands as each phase's PR; P3+ depends on the P3
+The two remaining need a field the typed `Gh` shape lacks: the HTTP
+method (`-X DELETE`) is carried in the untyped `rest`, and the
+`to_simple` round-trip does not recover it (`Gh` has no `method` field,
+unlike `Curl.method_`). That is the precise P4 target.
+
+### P4 · Typed-shape field completion
+
+Add the missing typed fields the harness still flags — first
+`Gh.method` (mirroring `Curl.method_`), parsed and round-tripped
+faithfully, so `gh api -X METHOD` becomes typed (dropping the P3
+delegation for it). Closes the last floor-redundancy gaps for the
+current corpus.
+
+### P5 · morbig front-end + AST nodes (And/Or/Seq/Subshell/CmdSubst) ·
+### P6 · spellbook spec registry ·
+### P7 · floor retirement (per-class, gated on harness 100% for the class) ·
+### P8 · risk-taxonomy unification (retire phantom 3-level) ·
+### P9 · TLA+ spec extension (model Generic/Pipeline/floor `max_risk`)
+
+(Detailed per-phase design lands as each phase's PR; P5+ depends on the morbig
 spike outcome.)
 
 ## §5 · Workaround Rejection Bar (self-check)

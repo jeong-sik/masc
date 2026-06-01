@@ -456,10 +456,18 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Git_rebase _) -> R0_Read
   | W (Git_merge _) -> R0_Read
   | W (Git_branch _) -> R0_Read
-  | W (Git_checkout _) -> R0_Read
+  (* RFC-0208 P3: checkout mutates the working tree / HEAD (and -b creates
+     a branch); the word-list floor classifies all [git checkout] as a
+     write (R1). Match it on the typed path so the floor is redundant
+     here. *)
+  | W (Git_checkout _) -> R1_Reversible_mutation
   | W (Git_fetch _) -> R0_Read
   | W (Git_show _) -> R0_Read
-  | W (Git_reset _) -> R0_Read
+  (* RFC-0208 P3: the word-list floor classifies all [git reset] as R2
+     (classify_write_detail). Match it on the typed path. A future,
+     deliberate de-escalation could rate --soft/--mixed as R1, but only
+     by lowering the floor in lockstep — never below it (monotone). *)
+  | W (Git_reset _) -> R2_Irreversible
   | W (Git_blame _) -> R0_Read
   | W (Git_add _) -> R0_Read
   (* network commands the word-list leaves at R0 (option B: unchanged) *)
@@ -547,11 +555,16 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
      "rm"/"git push" arms never fired (silent R0). Privilege escalation
      always requires approval. *)
   | W (Sudo _) -> Destructive_protected
-  (* gh: the typed [Gh] constructor buries the HTTP method (-X DELETE)
-     and graphql body in [rest], so the type alone cannot decide gh
-     risk. [classify]'s word-list floor supplies it; revisit here once
-     the typed model captures the method + graphql body. *)
-  | W (Gh _) -> R0_Read
+  (* RFC-0208 P3: gh risk lives in the HTTP method (-X DELETE) and the
+     graphql body, which the typed [Gh] constructor still carries as an
+     untyped [rest]. Round-trip the command back to its words and reuse
+     the SAME gh classifier the floor uses, so the floor becomes redundant
+     for gh without a second gh-risk implementation. Capturing the method
+     and graphql body as typed fields (dropping this delegation) is P4. *)
+  | W (Gh _ as gh) ->
+    (match literal_words_of_simple (Shell_ir_typed.to_simple gh) with
+     | Some words -> classify_repo_hosting_cli words
+     | None -> R0_Read)
   | W (Docker _) -> R0_Read
   (* File operations — cp/mv/ln/touch are reversible or low-risk mutations *)
   | W (Cp _) -> R1_Reversible_mutation

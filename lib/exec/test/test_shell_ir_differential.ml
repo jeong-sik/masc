@@ -194,8 +194,31 @@ let test_report_floor_readiness () =
   Alcotest.(check bool) "harness ran over a non-empty corpus" true (n > 0)
 ;;
 
+(* RFC-0208 P3 ratchet: these classes were closed by typed-classifier
+   completion (git checkout/reset typed arms; gh pr/graphql via the shared
+   classifier) and must stay floor-redundant. A regression here means a
+   typed arm was weakened back below the floor. *)
+let test_p3_closed_redundant () =
+  let closed =
+    [ S ("git", [ "checkout"; "-b"; "feature" ])
+    ; S ("git", [ "reset"; "--hard"; "HEAD~1" ])
+    ; S ("gh", [ "pr"; "create"; "--title"; "t" ])
+    ; S ("gh", [ "pr"; "merge"; "123" ])
+    ; S ("gh", [ "api"; "graphql"; "-f"; "query=mutation{deleteRef}" ])
+    ]
+  in
+  List.iter
+    (fun e ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s floor-redundant (typed_only >= floor)" (label e))
+         true
+         (ge (typed_only (ir_of e)) (Risk.classify_words (words_of e))))
+    closed
+;;
+
 let () =
   test_monotone_safety ();
   test_report_floor_readiness ();
+  test_p3_closed_redundant ();
   print_endline "test_shell_ir_differential: harness passed"
 ;;

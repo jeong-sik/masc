@@ -1,12 +1,8 @@
 (** Keeper_tool_selection - deterministic keeper tool-surface selection. *)
 
-(** Allow a deterministic-prefilter tool only when the user's [query_text]
-    passes the corresponding code-* gate; everything else passes through
-    unchanged. *)
-val allow_deterministic_tool : query_text:string -> string -> bool
-
 (** Deterministic BM25 prefilter: pull tools from [search_index] that are NOT
-    in [core], pass [allow_deterministic_tool], and limit to [selection_limit]. *)
+    in [core], dedupe them, and limit to [selection_limit]. Tool relevance
+    comes from the descriptor-backed index rather than query substring gates. *)
 val deterministic_prefilter_names
   :  search_index:Agent_sdk.Tool_index.t
   -> query_text:string

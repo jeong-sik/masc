@@ -104,7 +104,6 @@ val keeper_slot_pool_size : unit -> int
 val keeper_slot_id : string -> int option
 val keeper_enable_thinking : unit -> bool
 val keeper_adaptive_thinking_enabled : unit -> bool
-val keeper_adaptive_thinking_mode : unit -> bool
 val ensure_runtime_params_init : unit -> unit
 type sandbox_profile =
   Keeper_types_profile_sandbox.sandbox_profile =

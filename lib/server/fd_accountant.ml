@@ -44,16 +44,25 @@ let read_cap kind =
 (* Per-kind state: configured cap + semaphore (lazily realised; first
    acquire is during startup which is sequential, so a Lazy.force race
    is harmless). *)
-type slot_state = { cap : int ; sem : Eio.Semaphore.t }
+type slot_state =
+  { cap : int
+  ; sem : Eio.Semaphore.t
+  ; in_flight : int Atomic.t
+  }
 
 let _state_for_kind : (kind * slot_state) list =
   List.map
     (fun kind ->
       let cap = read_cap kind in
-      (kind, { cap ; sem = Eio.Semaphore.make cap }))
+      (kind, { cap ; sem = Eio.Semaphore.make cap ; in_flight = Atomic.make 0 }))
     all_kinds
 
 let state_of kind = List.assoc kind _state_for_kind
+
+let note_acquire state = Atomic.incr state.in_flight
+
+let note_release state =
+  Lockfree_atomic.update state.in_flight (fun current -> max 0 (current - 1))
 
 (* Shared FD-pressure gate — when Keeper_fd_pressure.active () is true,
    all top-level kinds serialize through one global slot. Nested cross-kind
@@ -101,11 +110,14 @@ let with_slot ~kind f =
     f ()
   else
     let release_pressure = acquire_pressure_gate_if_needed () in
-    let { sem ; _ } = state_of kind in
+    let ({ sem ; _ } as state) = state_of kind in
     Eio.Switch.run @@ fun sw ->
     Eio.Switch.on_release sw release_pressure ;
     Eio.Semaphore.acquire sem ;
-    Eio.Switch.on_release sw (fun () -> Eio.Semaphore.release sem) ;
+    note_acquire state ;
+    Eio.Switch.on_release sw (fun () ->
+        note_release state ;
+        Eio.Semaphore.release sem) ;
     let held = { kind ; active = Atomic.make true } in
     Fun.protect
       ~finally:(fun () -> Atomic.set held.active false)
@@ -113,14 +125,16 @@ let with_slot ~kind f =
 
 let acquire_lifetime_slot ~kind () =
   let release_pressure = acquire_pressure_gate_if_needed () in
-  let { sem ; _ } = state_of kind in
+  let ({ sem ; _ } as state) = state_of kind in
   (try Eio.Semaphore.acquire sem with
    | exn ->
      release_pressure ();
      raise exn);
+  note_acquire state;
   let released = Atomic.make false in
   fun () ->
     if Atomic.compare_and_set released false true then (
+      note_release state;
       Eio.Semaphore.release sem;
       release_pressure ())
 
@@ -184,13 +198,13 @@ let () =
   install_autonomy_exec_sandbox_exec_guard ();
   install_bg_sandbox_exec_guard ()
 
-(* In-flight count = configured cap minus current semaphore credits.
-   Eio.Semaphore exposes [get_value] which returns the available credit
-   count; in-flight = cap − available. *)
+(* Use explicit atomic counters instead of reading semaphore credits here.
+   Dashboard projections run on worker domains, while the semaphores are used
+   by the main Eio domain; observing them through [get_value] can cross Eio
+   domain ownership boundaries. *)
 let in_flight kind =
-  let { cap ; sem } = state_of kind in
-  let available = Eio.Semaphore.get_value sem in
-  max 0 (cap - available)
+  let { in_flight ; _ } = state_of kind in
+  max 0 (Atomic.get in_flight)
 
 (* Best-effort FD-open count using /dev/fd (macOS) or /proc/self/fd
    (Linux). Returns -1 on other platforms. *)

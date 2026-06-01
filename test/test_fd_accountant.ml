@@ -11,6 +11,7 @@
 open Alcotest
 module FA = Masc_mcp.Fd_accountant
 module DST = Masc_mcp.Docker_spawn_throttle
+module DP = Domain_pool
 
 let tmpdir prefix =
   Filename.concat
@@ -125,6 +126,19 @@ let test_snapshot_shape () =
   let expected = Masc_mcp.Keeper_fd_pressure.active () in
   check bool "pressure_active mirrors Keeper_fd_pressure" expected
     s.pressure_active
+
+let test_snapshot_safe_from_worker_domain () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = DP.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let caller_domain = (Domain.self () :> int) in
+  let worker_domain, snapshot =
+    DP.submit_io pool (fun () -> ((Domain.self () :> int), FA.fd_snapshot ()))
+  in
+  check bool "snapshot ran off caller domain" true
+    (worker_domain <> caller_domain);
+  check int "worker snapshot covers all kinds" (List.length FA.all_kinds)
+    (List.length snapshot.per_kind)
 
 let log_writer_in_flight () =
   let snapshot = FA.fd_snapshot () in
@@ -496,7 +510,11 @@ let () =
             test_docker_delegation_consistent ;
         ] ) ;
       ( "snapshot",
-        [ test_case "shape" `Quick test_snapshot_shape ] ) ;
+        [
+          test_case "shape" `Quick test_snapshot_shape ;
+          test_case "safe from worker domain" `Quick
+            test_snapshot_safe_from_worker_domain ;
+        ] ) ;
       ( "log writer",
         [
           test_case "Dated_jsonl append uses slot" `Quick

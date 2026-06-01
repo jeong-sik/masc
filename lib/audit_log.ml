@@ -106,6 +106,12 @@ let action_to_string = function
   | Custom name -> "custom:" ^ name
   | Unknown raw -> raw
 
+let unknown_action raw =
+  (* [Unknown] is the forward-compatible unknown-action variant for audit-log
+     wire strings. Keep this path named so the parser does not look like a
+     silent coercion to a normal concrete action. *)
+  Unknown raw
+
 let string_to_action s =
   (* Split on first ':' to separate tag from payload for parameterized
      variants.  Simple action names without ':' match directly.  This
@@ -121,7 +127,7 @@ let string_to_action s =
      | "governance_decision" ->
          GovernanceDecision (governance_audit_decision_of_string payload)
      | "custom" -> Custom payload
-     | _ -> Unknown s)
+     | _ -> unknown_action s)
   | None ->
     (match s with
      | "claim_task" -> ClaimTask
@@ -136,7 +142,7 @@ let string_to_action s =
      | "circuit_open" -> CircuitOpen
      | "circuit_close" -> CircuitClose
      | "search_refinement" -> SearchRefinement
-     | _ -> Unknown s)
+     | _ -> unknown_action s)
 
 let outcome_to_json = function
   | Success -> `Assoc [("status", `String "success")]

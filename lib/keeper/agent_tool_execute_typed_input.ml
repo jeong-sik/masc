@@ -571,14 +571,13 @@ let executable_not_allowlisted_hint ~name ~mode =
     | _, "mkdir" ->
       Some
         "Directory materialization is handled by structured file/write or \
-         worktree workflows, not by Execute. Use tool_write_file/tool_edit_file \
-         for file changes, or a git/worktree workflow when a repo checkout is \
-         needed."
+         worktree workflows, not by Execute. Use Write/Edit when visible for \
+         file changes, or a git/worktree workflow when a repo checkout is needed."
     | _, "touch" ->
       Some
         "Empty placeholder creation is not an Execute capability. Use \
-         tool_write_file with the intended content, or skip the placeholder \
-         when no content is needed."
+         Write with the intended content, or skip the placeholder when no \
+         content is needed."
     | _, "test" ->
       Some
         "Shell conditionals are not standalone Execute programs. Use stat, ls, \

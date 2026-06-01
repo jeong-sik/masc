@@ -333,7 +333,7 @@ let test_not_allowlisted_hints_self_correction () =
   check_not_allowlisted_hint
     ~name:"touch"
     ~mode:Execute_input.Dev_full
-    ~needle:"tool_write_file"
+    ~needle:"Write"
     ();
   check_not_allowlisted_hint
     ~name:"test"

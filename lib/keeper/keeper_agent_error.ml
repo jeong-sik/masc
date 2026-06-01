@@ -84,8 +84,6 @@ let sdk_termination_semantics = function
   | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
   | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
     Oas_agent_execution_timeout
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
-    Oas_agent_execution_timeout
   | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
     Oas_turn_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) ->

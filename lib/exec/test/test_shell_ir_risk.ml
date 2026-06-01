@@ -181,6 +181,40 @@ let test_classify_pipeline_first_stage_destructive () =
   Alcotest.(check bool) "pipeline with destructive first stage"
     true (Risk.is_destructive envelope)
 
+(* RFC-0208 P0: privilege escalation / destructive command in a NON-head
+   pipeline stage. Before the per-stage compositional fold these were
+   silent R0_Read — the typed path read no stage ([Pipeline -> R0_Read])
+   and the word-list floor matches only the flattened head token. *)
+
+let test_classify_pipeline_nonhead_escalation () =
+  let is_destructive stages =
+    Risk.is_destructive (Risk.classify (Risk.undecided (pipeline_ir stages)))
+  in
+  let risk_of stages = (Risk.classify (Risk.undecided (pipeline_ir stages))).Risk.risk in
+  (* sudo in a non-head stage -> Destructive_protected via [W (Sudo)]. *)
+  Alcotest.(check bool) "echo x | sudo tee /etc/passwd is destructive"
+    true
+    (is_destructive [ ("echo", [ "x" ]); ("sudo", [ "tee"; "/etc/passwd" ]) ]);
+  (* sudo as the head of a pipeline: the pipeline path never ran the typed
+     Sudo arm before this fix. *)
+  Alcotest.(check bool) "sudo cat /etc/shadow | grep x is destructive"
+    true
+    (is_destructive [ ("sudo", [ "cat"; "/etc/shadow" ]); ("grep", [ "x" ]) ]);
+  (* git push --force to a protected branch in a non-head stage escalates
+     above R0 (the flat floor saw only the head "cat"). *)
+  let push_risk =
+    risk_of [ ("cat", [ "f" ]); ("git", [ "push"; "--force"; "origin"; "main" ]) ]
+  in
+  Alcotest.(check bool)
+    (Printf.sprintf "cat f | git push --force escalates above R0 (got %s)"
+       (Risk.string_of_risk_class push_risk))
+    true
+    (push_risk <> Masc_exec.Shell_ir_risk.R0_Read);
+  (* benign read pipelines stay R0 — no over-escalation. *)
+  Alcotest.(check bool) "ls | grep x stays R0"
+    true
+    (Risk.is_r0 (Risk.classify (Risk.undecided (pipeline_ir [ ("ls", []); ("grep", [ "x" ]) ]))))
+
 (* --- classify: repo-hosting CLI read-only prefix equivalence (P9a) --- *)
 
 let test_classify_repo_hosting_cli_read_only_prefixes_equivalence () =
@@ -252,6 +286,9 @@ let stamp_invariant_cases =
   (* Pipeline *)
   ; pipeline_ir [ ("git", [ "push"; "--force"; "origin"; "main" ]); ("cat", []) ]
   ; pipeline_ir [ ("ls", []); ("grep", [ "pattern" ]) ]
+  (* Pipeline — non-head escalation (RFC-0208 P0) *)
+  ; pipeline_ir [ ("echo", [ "x" ]); ("sudo", [ "tee"; "/etc/passwd" ]) ]
+  ; pipeline_ir [ ("cat", [ "f" ]); ("git", [ "push"; "--force"; "origin"; "main" ]) ]
   ]
 
 let test_s7_stamp_invariant () =
@@ -361,9 +398,10 @@ let () =
   test_classify_repo_hosting_cli_api_get_r0 ();
   test_classify_repo_hosting_cli_api_graphql_r1 ();
   test_classify_pipeline_first_stage_destructive ();
+  test_classify_pipeline_nonhead_escalation ();
   test_classify_repo_hosting_cli_read_only_prefixes_equivalence ();
   test_classify_unknown_read ();
   test_s7_stamp_invariant ();
   test_typed_escalation_closes_wordlist_gaps ();
   test_monotone_floor_invariant ();
-  print_endline "test_shell_ir_risk: 18/18 passed"
+  print_endline "test_shell_ir_risk: 19/19 passed"

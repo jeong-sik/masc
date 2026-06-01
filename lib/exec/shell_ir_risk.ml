@@ -577,19 +577,50 @@ let risk_rank = function
 
 let max_risk a b = if risk_rank a >= risk_rank b then a else b
 
-(* The decision is the stricter of the typed-shape opinion and the
-   word-list floor, so it is monotone-safe by construction: never lower
-   than the legacy word-list verdict. The typed path contributes
-   escalations the substring path missed (Sudo/Su/Mkfs); the word-list
-   floor covers what the type cannot fully see (gh -X METHOD, Generic,
-   multi-stage pipelines). Removing the floor is gated on the typed
-   model becoming complete enough to subsume it (RFC-0160 follow-up). *)
-let classify (T ir : undecided t) : decided decided_ir =
-  let word_risk = classify_words (flat_stage_words ir) in
-  let typed_risk =
-    match ir with
-    | Shell_ir.Simple s -> risk_of_typed (Shell_ir_typed.of_simple s)
-    | Shell_ir.Pipeline _ -> R0_Read
+(* Per-[Simple] decision: the stricter of the typed-shape opinion and
+   the word-list floor for that single command. Both opinions are scoped
+   to one command's own words, so a pipeline can compose them stage by
+   stage instead of flattening every stage into one head-anchored list. *)
+let decision_of_simple (s : Shell_ir.simple) : risk_class =
+  let typed = risk_of_typed (Shell_ir_typed.of_simple s) in
+  let floor =
+    match literal_words_of_simple s with
+    | Some words -> classify_words words
+    | None -> R0_Read
   in
-  { ir; risk = max_risk typed_risk word_risk }
+  max_risk typed floor
+;;
+
+(* RFC-0208 P0: compose the per-stage decision across a pipeline with
+   [max_risk], rather than the previous blanket [Pipeline -> R0_Read]
+   for the typed path. Before this, a privilege-escalation or destructive
+   command in any non-head pipeline stage (e.g.
+   [echo x | sudo tee /etc/passwd], [cat f | git push --force origin main],
+   [sudo cat f | grep y]) was invisible to both the typed path (which
+   read no stage) and the word-list floor (which matches only the head
+   token of the flattened word list). The fold reuses the existing
+   per-constructor [risk_of_typed] and [classify_words] per stage — in
+   particular the [W (Sudo)] arm now fires for sudo anywhere in a
+   pipeline — so it adds no new string classifier. *)
+let rec composed_decision (ir : Shell_ir.t) : risk_class =
+  match ir with
+  | Shell_ir.Simple s -> decision_of_simple s
+  | Shell_ir.Pipeline stages ->
+    List.fold_left
+      (fun acc stage -> max_risk acc (composed_decision stage))
+      R0_Read
+      stages
+;;
+
+(* The decision is the stricter of the per-stage composed verdict and the
+   flattened word-list floor, so it is monotone-safe by construction:
+   never lower than the legacy flat verdict and never lower than the
+   typed verdict. [composed_decision] dominates the flat floor for every
+   input the floor is head-anchored over, but the flat floor is retained
+   as a conservative lower bound (it can still catch a cross-stage
+   concatenation the per-stage scope does not). Retiring the floor is
+   gated on the differential-safety harness (RFC-0208 P2/P6). *)
+let classify (T ir : undecided t) : decided decided_ir =
+  let flat_floor = classify_words (flat_stage_words ir) in
+  { ir; risk = max_risk flat_floor (composed_decision ir) }
 ;;

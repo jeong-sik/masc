@@ -401,8 +401,11 @@ let classify_words (words : string list) : risk_class =
    (curl/sed/git pull stay R0; git push/commit stay R1; rm -rf protected
    stays Destructive). [Gh] and [Generic] return R0 here because the
    type cannot see their risk-bearing tokens (gh -X METHOD / graphql
-   body live in [rest]); the word-list floor in [classify] supplies it.
-   Dropping that floor is gated on the typed model subsuming it. *)
+   body / -f fields live in argv strings, not the typed shape); the
+   word-list floor in [classify] supplies it. For gh this is by design
+   and permanent — gh risk is irreducibly string-borne, so floor
+   retirement (P7) is scoped to structurally-typed classes and never
+   covers gh. *)
 
 let npm_write_subcommands =
   [ "add"; "install"; "link"; "prune"; "publish"; "remove"; "unlink";
@@ -555,16 +558,20 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
      "rm"/"git push" arms never fired (silent R0). Privilege escalation
      always requires approval. *)
   | W (Sudo _) -> Destructive_protected
-  (* RFC-0208 P3: gh risk lives in the HTTP method (-X DELETE) and the
-     graphql body, which the typed [Gh] constructor still carries as an
-     untyped [rest]. Round-trip the command back to its words and reuse
-     the SAME gh classifier the floor uses, so the floor becomes redundant
-     for gh without a second gh-risk implementation. Capturing the method
-     and graphql body as typed fields (dropping this delegation) is P6. *)
-  | W (Gh _ as gh) ->
-    (match literal_words_of_simple (Shell_ir_typed.to_simple gh) with
-     | Some words -> classify_repo_hosting_cli words
-     | None -> R0_Read)
+  (* RFC-0208: gh risk is irreducibly string-borne. The HTTP method
+     (-X DELETE), -f/--field key=values, the graphql mutation body, and a
+     large, evolving set of subcommands all live in argv strings, not in
+     the command's typed shape. Unlike [rm -rf] / [git reset] / [sudo],
+     whose risk IS structural and typeable, gh has no risk-bearing typed
+     shape for [risk_of_typed] to read, so it returns R0 and [classify]'s
+     word-list floor ([classify_words] -> [classify_repo_hosting_cli] on
+     the original, un-round-tripped words) owns gh risk by design. This is
+     the honest boundary: an earlier version round-tripped the IR back to
+     words here to fake a typed opinion, but the round-trip mis-parsed
+     `-X DELETE` and silently under-classified it to R0 — strictly worse
+     than the floor it duplicated. gh stays floor-owned; P7 floor
+     retirement is scoped to structurally-typed classes only. *)
+  | W (Gh _) -> R0_Read
   | W (Docker _) -> R0_Read
   (* File operations — cp/mv/ln/touch are reversible or low-risk mutations *)
   | W (Cp _) -> R1_Reversible_mutation

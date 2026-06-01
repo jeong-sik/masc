@@ -248,6 +248,41 @@ current corpus.
 (Detailed per-phase design lands as each phase's PR; P5+ depends on the morbig
 spike outcome.)
 
+### Revision (2026-06-02): gh is string-borne — P4 withdrawn, P7 scoped
+
+P4 above proposed a typed `Gh.method` field to make `gh api -X METHOD`
+typed-redundant and complete floor retirement for gh. **That direction is
+withdrawn.** An adversarial audit (11-agent workflow + 3-lens refutation)
+showed gh risk is *irreducibly string-borne*: beyond `-X METHOD`, a write
+is also implied by bare `-f`/`--field`/`--raw-field` (forces POST), by the
+graphql mutation body (`body_contains_r2_mutation`), and by a large,
+evolving set of subcommands. Typing only `method` silently under-classifies
+`gh api -f title=… /repos/o/r/issues` (R1 today → R0). Typing *all* of it
+would re-implement `classify_repo_hosting_cli` reading from typed fields —
+a **second** gh-risk implementation, i.e. more duplication, not less. And
+because `classify = max(risk_of_typed, floor)`, typing the structural subset
+(`pr merge`, `repo delete`) changes nothing at the gate — it is cosmetic.
+
+Decision (B1): the typed path returns `R0` for `Gh`, and the word-list floor
+(`classify_repo_hosting_cli`, on the original words) owns gh risk **by
+design and permanently**. This removes the fake P3 round-trip (which had
+mis-parsed `-X DELETE` to R0) and the duplicate invocation —
+`classify_repo_hosting_cli` is now called from one site (the floor). The
+boundary: **structural** risk (`rm -rf`, `git reset`, `sudo`) is typed;
+**string-borne** risk (gh) is floor-owned. P7 floor retirement is therefore
+scoped to structurally-typed classes only and never covers gh; the
+differential harness reports structural vs string-borne load-bearing
+separately so "READY" means "every structural class is typed," not "gh is
+typed." The capability axis (`Gh → \`Audited`) is unaffected (P10).
+
+Incident note: PR #19762's squash dropped the P4 commit (`40e6f7e265`)
+entirely, so merged `d33d87dc2f` was 94% (gh `-X` load-bearing), not the
+100% reported from the branch tip. Only re-running the harness *on the
+merged tree* caught it — `@check` EXIT=0 ("compiles") did not. The quick
+suite runs the harness but is `continue-on-error` (non-gating), so it could
+not block the drop. B1 adds a hard-fail focused harness gate in the `build`
+job (`@lib/exec/test/runtest-test_shell_ir_differential`).
+
 ## §5 · Workaround Rejection Bar (self-check)
 
 | Signature | This RFC |

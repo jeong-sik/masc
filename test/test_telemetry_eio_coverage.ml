@@ -347,6 +347,48 @@ let test_event_json_roundtrip () =
        | _ -> fail "wrong event type")
   | Error e -> fail ("json decode failed: " ^ e)
 
+(* Legacy variant migration: Agent_joined → Agent_session_bound.
+   Records written before the rename must still deserialize. *)
+let test_legacy_agent_joined_migration () =
+  let legacy_json =
+    `Assoc [
+      ("timestamp", `Float 1000.0);
+      ("event", `List [
+        `String "Agent_joined";
+        `Assoc [("agent_id", `String "keeper-test"); ("capabilities", `List [])]
+      ]);
+    ]
+  in
+  let parsed = Telemetry_eio.parse_event_records [ legacy_json ] in
+  check int "legacy Agent_joined produces 1 record" 1 (List.length parsed);
+  let record = List.hd parsed in
+  check bool "event is Agent_session_bound" true
+    (match record.event with
+     | Telemetry_eio.Agent_session_bound r ->
+       String.equal r.agent_id "keeper-test" &&
+       List.length r.capabilities = 0
+     | _ -> false)
+
+let test_legacy_agent_left_migration () =
+  let legacy_json =
+    `Assoc [
+      ("timestamp", `Float 1000.0);
+      ("event", `List [
+        `String "Agent_left";
+        `Assoc [("agent_id", `String "keeper-test"); ("reason", `String "leave")]
+      ]);
+    ]
+  in
+  let parsed = Telemetry_eio.parse_event_records [ legacy_json ] in
+  check int "legacy Agent_left produces 1 record" 1 (List.length parsed);
+  let record = List.hd parsed in
+  check bool "event is Agent_unbound" true
+    (match record.event with
+     | Telemetry_eio.Agent_unbound r ->
+       String.equal r.agent_id "keeper-test" &&
+       String.equal r.reason "leave"
+     | _ -> false)
+
 (* Drop observability: malformed payload increments
    masc_persistence_read_drops_total{surface=telemetry_eio,reason=invalid_payload}.
    Pairs with WARN log via Safe_ops.report_persistence_read_drop. *)
@@ -653,6 +695,10 @@ let () =
       test_case "metrics" `Quick test_metrics_json_roundtrip;
       test_case "drop increments persistence_read_drops counter" `Quick
         test_parse_event_records_drop_increments_counter;
+      test_case "legacy Agent_joined migrates to Agent_session_bound" `Quick
+        test_legacy_agent_joined_migration;
+      test_case "legacy Agent_left migrates to Agent_unbound" `Quick
+        test_legacy_agent_left_migration;
     ];
     "event_to_json", [
       test_case "agent_session_bounded" `Quick test_event_to_json_agent_session_bounded;

@@ -560,7 +560,7 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
      untyped [rest]. Round-trip the command back to its words and reuse
      the SAME gh classifier the floor uses, so the floor becomes redundant
      for gh without a second gh-risk implementation. Capturing the method
-     and graphql body as typed fields (dropping this delegation) is P4. *)
+     and graphql body as typed fields (dropping this delegation) is P6. *)
   | W (Gh _ as gh) ->
     (match literal_words_of_simple (Shell_ir_typed.to_simple gh) with
      | Some words -> classify_repo_hosting_cli words

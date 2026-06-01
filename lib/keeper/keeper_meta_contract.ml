@@ -669,7 +669,7 @@ let effective_meta_of_profile_defaults
         apply_profile_default defaults.network_mode default_network_mode
       in
       let tool_access =
-        match defaults.tool_custom_list with
+        match defaults.tool_access with
         | Some tools -> normalize_tool_names tools
         | None -> meta.tool_access
       in

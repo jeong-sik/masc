@@ -300,8 +300,9 @@ let resolve_sandbox_profile ~preferred ~fallback =
   |> Option.value ~default:default_sandbox_profile
 
 let resolve_network_mode ~preferred ~fallback =
-  Dashboard_utils.first_some preferred fallback
-  |> Option.value ~default:Network_inherit
+  match Dashboard_utils.first_some preferred fallback with
+  | Some mode -> mode
+  | None -> Network_inherit
 
 let sandbox_allowed_path_has_forbidden_segments path =
   let has_glob =

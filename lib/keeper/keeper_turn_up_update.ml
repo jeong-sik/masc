@@ -90,7 +90,9 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     Option.value ~default:old.sandbox_profile p.sandbox_profile_opt
   in
   let network_mode =
-    Option.value ~default:old.network_mode p.network_mode_opt
+    match p.network_mode_opt with
+    | Some mode -> mode
+    | None -> old.network_mode
   in
   let autoboot_enabled =
     match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with

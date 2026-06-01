@@ -160,7 +160,7 @@ let bare_worktrees_path token =
   || String.starts_with ~prefix:".worktrees/" token
   || String.starts_with ~prefix:"./.worktrees/" token
 
-let git_global_c_paths_of_stages stages =
+let git_global_c_path_groups_of_stages stages =
   let rec scan_git_args acc = function
     | "-C" :: path :: rest -> scan_git_args (path :: acc) rest
     | "-C" :: [] -> List.rev acc
@@ -178,7 +178,7 @@ let git_global_c_paths_of_stages stages =
     | _ :: _ -> List.rev acc
     | [] -> List.rev acc
   in
-  List.find_map (fun stage ->
+  List.filter_map (fun stage ->
     if normalize_command_name stage.bin = "git"
     then (
       match scan_git_args [] stage.args with
@@ -302,30 +302,56 @@ let resolve_sandbox_root_git_cwd_of_stages
                suggested_cwd
                (String.concat ", " many)) )
     in
-    let explicit_git_c_paths = git_global_c_paths_of_stages stages in
-    match explicit_git_c_paths with
-    | Some [ path ] when bare_worktrees_path path -> resolve_without_explicit_git_c ()
-    | Some paths ->
+    let explicit_git_c_path_groups = git_global_c_path_groups_of_stages stages in
+    let base_for_git_c_paths = function
+      | first :: _ when bare_worktrees_path first ->
+        (match repos_in_playground () with
+         | [ single_repo ] ->
+           Some (Filename.concat (Filename.concat host_root "repos") single_repo)
+         | _ -> None)
+      | _ -> Some cwd_normalized
+    in
+    let git_c_target_from_paths ~base paths =
+      List.fold_left
+        (fun cwd path ->
+           normalize_cwd_relative_path
+             ~container_root:(Keeper_sandbox.container_root meta.name)
+             ~host_root
+             ~cwd
+             path)
+        base
+        paths
+    in
+    let validate_git_c_paths paths =
+      match base_for_git_c_paths paths with
+      | None -> Ok ()
+      | Some base ->
       let target =
-        List.fold_left
-          (fun cwd path ->
-             normalize_cwd_relative_path
-               ~container_root:(Keeper_sandbox.container_root meta.name)
-               ~host_root
-               ~cwd
-               path)
-          cwd_normalized
-          paths
+        git_c_target_from_paths ~base paths
       in
       if path_is_existing_dir target
-      then cwd, None
+      then Ok ()
       else
-        cwd,
-        Some
+        Error
           (Printf.sprintf
              "cwd_not_directory: %s (git -C target must be an existing directory)"
              target)
-    | _ -> resolve_without_explicit_git_c ())
+    in
+    match explicit_git_c_path_groups with
+    | [] -> resolve_without_explicit_git_c ()
+    | groups ->
+      (match List.find_map
+               (fun paths ->
+                  match validate_git_c_paths paths with
+                  | Ok () -> None
+                  | Error msg -> Some msg)
+               groups
+       with
+       | Some msg -> cwd, Some msg
+       | None ->
+         if List.exists (List.exists bare_worktrees_path) groups
+         then resolve_without_explicit_git_c ()
+         else cwd, None))
   else cwd, None
 
 let effective_stages_of_cmd cmd =

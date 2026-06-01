@@ -42,18 +42,50 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
        | json :: _ -> Some json
        | [] -> None)
 
-let lightweight_runtime_contract_json ~runtime_blocker_class =
+let first_some candidates =
+  List.find_map Fun.id candidates
+
+let selected_model_of_runtime_trust runtime_trust =
+  let top_level =
+    first_some
+      [ (Json_util.assoc_string_opt "selected_model" runtime_trust
+         |> Option.map (fun model -> model, "runtime_trust.selected_model"))
+      ; (Json_util.assoc_string_opt "active_model" runtime_trust
+         |> Option.map (fun model -> model, "runtime_trust.active_model"))
+      ]
+  in
+  match top_level with
+  | Some _ as value -> value
+  | None ->
+      Option.bind
+        (Json_util.assoc_member_opt "execution" runtime_trust)
+        (fun execution ->
+           Json_util.assoc_string_opt "provider_selected_model" execution
+           |> Option.map (fun model ->
+             model, "runtime_trust.execution.provider_selected_model"))
+
+let lightweight_runtime_contract_json ~runtime_blocker_class ~selected_model =
+  let model, source =
+    match selected_model with
+    | Some (model, source) -> Some model, source
+    | None -> None, "none"
+  in
   let proof_note =
-    "Provider/model identity is owned by OAS. MASC status exposes only \
-     control-plane signals."
+    match selected_model with
+    | Some _ ->
+        "Selected model was observed from runtime trust / receipt. Concrete \
+         provider identity remains OAS-owned."
+    | None ->
+        "Provider/model identity is owned by OAS. MASC status exposes only \
+         control-plane signals."
   in
   `Assoc
-    [ "source", `String "none"
-    ; "verified", `Bool false
+    [ "source", `String source
+    ; "verified", `Bool (Option.is_some model)
     ; "provider_scope", `Null
     ; "provider_reachable", `Null
     ; "healthy_runtime_count", `Null
-    ; "actual_model_id", `Null
+    ; "actual_model_id", Json_util.string_opt_to_json model
     ; "actual_slots", `Null
     ; "actual_ctx", `Null
     ; "chat_completion_compatible", `Null
@@ -61,12 +93,17 @@ let lightweight_runtime_contract_json ~runtime_blocker_class =
     ; "note", `String proof_note
     ]
 
-let attempt_summary_json latest_runtime =
+let attempt_summary_json ?selected_model latest_runtime =
   match latest_runtime with
   | None ->
+      let summary =
+        match selected_model with
+        | Some (_, source) ->
+            Printf.sprintf "Runtime selected model observed from %s." source
+        | None -> "No recent runtime observation for current keeper config."
+      in
       `Assoc
-        [ ( "summary"
-          , `String "No recent runtime observation for current keeper config." )
+        [ ( "summary", `String summary )
         ; "attempts_observed", `Null
         ; "selected_index", `Null
         ; "fallback_hops", `Null
@@ -97,22 +134,27 @@ let attempt_summary_json latest_runtime =
       in
       let selected_position = Option.map (fun idx -> idx + 1) selected_index in
       let summary =
-        match fallback_applied, fallback_hops, selected_position with
-        | true, Some hops, Some pos ->
+        match fallback_applied, fallback_hops, selected_position, selected_model with
+        | true, Some hops, Some pos, _ ->
             Printf.sprintf
               "%d attempt(s); fallback after %d hop(s); selected candidate index %d."
               attempts_observed
               hops
               pos
-        | false, _, Some 1 ->
+        | false, _, Some 1, _ ->
             Printf.sprintf
               "%d attempt(s); selected first healthy candidate."
               attempts_observed
-        | false, _, Some pos ->
+        | false, _, Some pos, _ ->
             Printf.sprintf
               "%d attempt(s); selected candidate index %d without fallback."
               attempts_observed
               pos
+        | _, _, _, Some (_, source) ->
+            Printf.sprintf
+              "%d attempt(s); selected model observed from %s."
+              attempts_observed
+              source
         | _ -> "Runtime observation is present but incomplete."
       in
       `Assoc
@@ -147,10 +189,12 @@ let latest_runtime_for_current_config ~current_runtime_id latest_metrics =
       in
       if runtime_id_matches then Some runtime else None
 
-let model_observability_json ~current_runtime_id ~runtime_blocker_fields latest_metrics =
+let model_observability_json ~current_runtime_id ~runtime_blocker_fields
+    ~runtime_trust latest_metrics =
   let latest_runtime =
     latest_runtime_for_current_config ~current_runtime_id latest_metrics
   in
+  let selected_model = selected_model_of_runtime_trust runtime_trust in
   let runtime_blocker_class =
     assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
   in
@@ -160,11 +204,13 @@ let model_observability_json ~current_runtime_id ~runtime_blocker_fields latest_
   `Assoc
     [ ( "runtime_id"
       , if runtime_id = "" then `Null else `String runtime_id )
-    ; "recent_turn_observation", `Bool (Option.is_some latest_runtime)
+    ; ( "recent_turn_observation"
+      , `Bool (Option.is_some latest_runtime || Option.is_some selected_model) )
     ; "configured_labels", `List []
     ; "resolved_candidates", `List []
-    ; "selected_model", `Null
-    ; "attempt_summary", attempt_summary_json latest_runtime
+    ; ( "selected_model"
+      , Json_util.string_opt_to_json (Option.map fst selected_model) )
+    ; "attempt_summary", attempt_summary_json ?selected_model latest_runtime
     ; ( "runtime_contract"
-      , lightweight_runtime_contract_json ~runtime_blocker_class )
+      , lightweight_runtime_contract_json ~runtime_blocker_class ~selected_model )
     ]

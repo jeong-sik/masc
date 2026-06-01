@@ -71,7 +71,11 @@ failure just because a keeper uses the Docker backend.
   must serialize `runtime.selected_model`, and runtime-trust status may fall
   back from decision telemetry to the latest receipt model. Public dashboards
   may keep provider/model lanes redacted, but keeper operator surfaces must show
-  either observed attribution or a typed runtime/provider blocker.
+  either observed attribution or a typed runtime/provider blocker. The
+  `model_observability` status block must reuse the same runtime-trust /
+  receipt fallback; it must not report `selected_model=null` when
+  `runtime_trust.selected_model` or
+  `runtime_trust.execution.provider_selected_model` is present.
 - Telemetry coverage gaps are historical evidence, not permanent health
   latches. Dashboard source health may report `coverage_gap` only for active
   gaps: a gap is active until the same source has a durable row with a timestamp

@@ -1,4 +1,5 @@
 module K = Masc_mcp.Keeper_runtime_trust_snapshot
+module O = Masc_mcp.Keeper_status_detail_observability
 module P = Masc_mcp.Prometheus
 
 let rec remove_tree path =
@@ -163,6 +164,44 @@ let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
          (snapshot |> member "execution" |> member "provider_selected_model" |> to_string))
 ;;
 
+let test_model_observability_uses_runtime_trust_selected_model () =
+  let runtime_trust =
+    `Assoc
+      [ "selected_model", `String "receipt-model"
+      ; ( "execution"
+        , `Assoc [ "provider_selected_model", `String "execution-model" ] )
+      ]
+  in
+  let json =
+    O.model_observability_json
+      ~current_runtime_id:"runtime-test"
+      ~runtime_blocker_fields:[]
+      ~runtime_trust
+      None
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "runtime-trust model counts as recent observation"
+    true
+    (json |> member "recent_turn_observation" |> to_bool);
+  Alcotest.(check string)
+    "selected model falls through to model_observability"
+    "receipt-model"
+    (json |> member "selected_model" |> to_string);
+  Alcotest.(check bool)
+    "runtime contract marks selected model proof verified"
+    true
+    (json |> member "runtime_contract" |> member "verified" |> to_bool);
+  Alcotest.(check string)
+    "runtime contract source records trust field"
+    "runtime_trust.selected_model"
+    (json |> member "runtime_contract" |> member "source" |> to_string);
+  Alcotest.(check string)
+    "runtime contract exposes observed selected model"
+    "receipt-model"
+    (json |> member "runtime_contract" |> member "actual_model_id" |> to_string)
+;;
+
 let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
@@ -177,6 +216,10 @@ let () =
             "receipt runtime model feeds trust snapshot when decision is absent"
             `Quick
             test_snapshot_uses_receipt_runtime_model_when_decision_absent
+        ; Alcotest.test_case
+            "status model observability reuses runtime-trust selected model"
+            `Quick
+            test_model_observability_uses_runtime_trust_selected_model
         ] )
     ]
 ;;

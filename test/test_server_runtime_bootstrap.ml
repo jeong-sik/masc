@@ -1388,10 +1388,16 @@ let test_health_json_surfaces_internal_mcp_auth_diagnostics () =
     Server_routes_http_runtime.make_health_json request
     |> member "internal_mcp_auth"
   in
+  let missing_names json =
+    json |> member "missing" |> to_list |> List.map to_string
+  in
   Alcotest.(check string) "auth schema" "masc.internal_mcp_auth.v1"
     (degraded |> member "schema" |> to_string);
   Alcotest.(check string) "missing token degrades" "degraded"
     (degraded |> member "status" |> to_string);
+  Alcotest.(check (list string)) "missing token reasons"
+    [ "env_token"; "token_hash_file" ]
+    (missing_names degraded);
   Alcotest.(check bool) "env token absent" false
     (degraded |> member "env_token_present" |> to_bool);
   Alcotest.(check bool) "hash file absent" false
@@ -1415,8 +1421,31 @@ let test_health_json_surfaces_internal_mcp_auth_diagnostics () =
     (ready |> member "keeper_internal_runtime_mcp_ready" |> to_bool);
   Alcotest.(check bool) "no operator action when ready" false
     (ready |> member "operator_action_required" |> to_bool);
+  Alcotest.(check string) "ready operator next action" "none"
+    (ready |> member "operator_next_action" |> to_string);
   Alcotest.(check bool) "raw token not exposed" false
-    (contains_substring (Yojson.Safe.to_string ready) raw_token)
+    (contains_substring (Yojson.Safe.to_string ready) raw_token);
+  let hash_file = Auth.internal_keeper_token_hash_file dir in
+  write_file hash_file " \n";
+  let empty_hash =
+    Server_routes_http_runtime.make_health_json request
+    |> member "internal_mcp_auth"
+  in
+  Alcotest.(check bool) "empty hash is absent" false
+    (empty_hash |> member "token_hash_file_present" |> to_bool);
+  Alcotest.(check bool) "empty hash asks for hash file" true
+    (List.mem "token_hash_file" (missing_names empty_hash));
+  Alcotest.(check bool) "empty hash is not mismatch" false
+    (List.mem "token_hash_mismatch" (missing_names empty_hash));
+  write_file hash_file (Auth.sha256_hash (raw_token ^ "-stale"));
+  let mismatch =
+    Server_routes_http_runtime.make_health_json request
+    |> member "internal_mcp_auth"
+  in
+  Alcotest.(check bool) "mismatch keeps hash present" true
+    (mismatch |> member "token_hash_file_present" |> to_bool);
+  Alcotest.(check bool) "mismatch reason is explicit" true
+    (List.mem "token_hash_mismatch" (missing_names mismatch))
 
 let test_health_response_default_is_light_probe () =
   let request = Httpun.Request.create `GET "/health" in

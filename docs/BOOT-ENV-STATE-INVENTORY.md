@@ -32,8 +32,8 @@ Scope:
 
 | Input | What it controls | Used by |
 | --- | --- | --- |
-| `--base-path` | Startup runtime root selection. `main_eio` exports this to `MASC_BASE_PATH`. | `bin/main_eio.ml`, all `.masc` path helpers |
-| `MASC_BASE_PATH` | Runtime base path once the server is running. `.masc` lives under this directory. | `Env_config_core`, `Workspace_utils`, keeper/board/control-plane/logging paths |
+| `--base-path` | Startup workspace root selection. `main_eio` exports this to `MASC_BASE_PATH`; runtime state is under `<base-path>/.masc`. | `bin/main_eio.ml`, all `.masc` path helpers |
+| `MASC_BASE_PATH` | Runtime base path once the server is running. This is the workspace root, not the `.masc` directory itself. | `Env_config_core`, `Workspace_utils`, keeper/board/control-plane/logging paths |
 | `MASC_CONFIG_DIR` | Explicit config root override. Highest-precedence config selector. | `Config_dir_resolver`, bootstrap, keeper/persona config resolution |
 | `MASC_PERSONAS_DIR` | Explicit personas root override. | `Config_dir_resolver`, keeper/persona loading |
 | `MASC_STORAGE_TYPE` | Runtime backend selector. Only `filesystem` is active; PostgreSQL backend was removed. | bootstrap and backend setup |
@@ -406,7 +406,7 @@ Current observed state on the inspected host:
 
 Interpretation:
 
-- `/Users/dancer/me/.masc` is the current canonical runtime root.
+- `/Users/dancer/me/.masc` is the current canonical runtime root for base path `/Users/dancer/me`; do not shorten this to `~/.masc`, which means `/Users/dancer/.masc` in a shell.
 - `/Users/dancer/me/.masc/.masc` should be treated as historical drift from earlier runs that used `/Users/dancer/me/.masc` itself as `base_path`.
 - The active config root should be treated as the resolved runtime config root under `/Users/dancer/me/.masc/config` unless `MASC_CONFIG_DIR` explicitly points elsewhere.
 - The checked-in repo `config/` tree is the versioned default/seed source, not the live runtime truth by itself.
@@ -439,6 +439,7 @@ Current log sink observed today:
 1. Pick one base-path convention per environment and stick to it.
    - `--base-path /Users/dancer/me` produces `/Users/dancer/me/.masc`
    - `--base-path /Users/dancer/me/.masc` normalizes to `/Users/dancer/me` and warns
+   - Avoid bare `~/.masc` in docs and runbooks; write `<base-path>/.masc` or the fully resolved path.
 2. Pick one active config root.
    - If `MASC_CONFIG_DIR` is set, that wins.
    - If you want the base-path config root to become active, unset `MASC_CONFIG_DIR` and restart.

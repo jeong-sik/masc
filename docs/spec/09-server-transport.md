@@ -741,7 +741,7 @@ sequenceDiagram
 |---------|--------|------|
 | `MASC_HOST` | `127.0.0.1` | 바인드 주소 |
 | `--port` / `-p` | `8935` | 리스닝 포트 |
-| `--base-path` | `$MASC_BASE_PATH` or `cwd` | `.masc` 데이터 디렉토리 위치 |
+| `--base-path` | `$MASC_BASE_PATH` or `cwd` | workspace/base 경로. runtime root는 `<base-path>/.masc` |
 
 ### 15.2 트랜스포트 설정
 

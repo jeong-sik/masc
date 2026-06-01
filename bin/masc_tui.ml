@@ -105,7 +105,9 @@ let parse_args () =
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
     ("--workspace", Arg.Set_string workspace, "Workspace name (default: from base path)");
     ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
-    ("--base", Arg.Set_string base_path, "Base path (default: MASC_BASE_PATH or cwd)");
+    ( "--base",
+      Arg.Set_string base_path,
+      "Workspace/base path; .masc lives below it (default: MASC_BASE_PATH or cwd)" );
   ] in
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";

@@ -55,7 +55,7 @@ code_refs:
 
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
-| `MASC_BASE_PATH` | string | `.` | `.masc` 데이터 디렉토리의 기준 경로 |
+| `MASC_BASE_PATH` | string | `.` | workspace/base 경로. runtime data root는 `<MASC_BASE_PATH>/.masc` |
 | `MASC_CONFIG_DIR` | string | 자동 탐색 | resolved config root override. 하위 항목: `keeper_runtime.toml`, `prompts/`, `keepers/`, `personas/` |
 | `MASC_PERSONAS_DIR` | string | unset | persona root override. 설정 시 resolved config root의 `personas/` 대신 이 디렉토리를 사용 |
 | `MASC_HTTP_PORT` | string | `"8935"` | HTTP 서버 포트 |
@@ -63,7 +63,7 @@ code_refs:
 | `MASC_HOST` | string | - | 바인드 호스트 (base URL 미설정 시 필수) |
 | `LIBDATACHANNEL_PATH` | string | 자동 탐색 | WebRTC 라이브러리 경로 |
 
-runtime data root는 `MASC_BASE_PATH`를 사용한다. 운영 공식은 `<base-path>/.masc`다. 미설정 시 일부 경로는 현재 작업 디렉토리 기준 fallback을 사용한다.
+runtime data root는 `MASC_BASE_PATH` 자체가 아니라 `<MASC_BASE_PATH>/.masc`다. `MASC_BASE_PATH`에는 workspace root를 넣고, `.masc` 디렉토리 자체를 넣지 않는다. 미설정 시 일부 경로는 현재 작업 디렉토리 기준 fallback을 사용한다.
 resolved config root는 별도 탐색 규칙을 가진다: `MASC_CONFIG_DIR` -> `<MASC_BASE_PATH>/.masc/config` -> missing/uninitialized. repo `config/`는 체크인된 default/example seed source이며, live root fallback이 아니다.
 
 ### 3.2 Runtime (Env_config_runtime)
@@ -519,7 +519,7 @@ masc_set_param(key, value)
 |------|--------|------|
 | `-p`, `--port` | 8935 | HTTP 리스닝 포트 |
 | `--host` | `127.0.0.1` | 바인드 주소 |
-| `--base-path` | `MASC_BASE_PATH` 또는 `cwd` | `.masc` 폴더 위치 |
+| `--base-path` | `MASC_BASE_PATH` 또는 `cwd` | workspace/base 경로. runtime root는 `<base-path>/.masc` |
 
 ---
 

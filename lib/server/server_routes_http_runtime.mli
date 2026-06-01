@@ -121,8 +121,8 @@ val make_health_json :
 
     [status] / [server] / [version] / [release_version] /
     [build] / [protocol] (default + listener + supported list) /
-    [transport] / [paths] / [uptime] / [sse_clients] /
-    [startup] / [subsystems] / [feature_flags] / [gc] /
+    [transport] / [paths] / [internal_mcp_auth] / [uptime] /
+    [sse_clients] / [startup] / [subsystems] / [feature_flags] / [gc] /
     [keeper_fibers] / [keeper_fd_pressure] / [fd_accountant] /
     [keeper_fleet_safety] / [keeper_reaction_ledger] / [paused_keepers] /
     [keeper_config_parse_error_count] / [keeper_config_parse_errors] /

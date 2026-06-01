@@ -1377,6 +1377,76 @@ let test_health_json_surfaces_log_ring_summary () =
     (latest |> member "details" = `Null);
   ignore (logs |> member "file_sink" |> member "enabled" |> to_bool)
 
+let test_health_json_surfaces_internal_mcp_auth_diagnostics () =
+  with_temp_dir "health-internal-mcp-auth" @@ fun dir ->
+  with_env Auth.internal_keeper_token_env_key None @@ fun () ->
+  with_cwd dir @@ fun () ->
+  Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+  let request = Httpun.Request.create `GET "/health" in
+  let open Yojson.Safe.Util in
+  let degraded =
+    Server_routes_http_runtime.make_health_json request
+    |> member "internal_mcp_auth"
+  in
+  let missing_names json =
+    json |> member "missing" |> to_list |> List.map to_string
+  in
+  Alcotest.(check string) "auth schema" "masc.internal_mcp_auth.v1"
+    (degraded |> member "schema" |> to_string);
+  Alcotest.(check string) "missing token degrades" "degraded"
+    (degraded |> member "status" |> to_string);
+  Alcotest.(check (list string)) "missing token reasons"
+    [ "env_token"; "token_hash_file" ]
+    (missing_names degraded);
+  Alcotest.(check bool) "env token absent" false
+    (degraded |> member "env_token_present" |> to_bool);
+  Alcotest.(check bool) "hash file absent" false
+    (degraded |> member "token_hash_file_present" |> to_bool);
+  Alcotest.(check bool) "not ready" false
+    (degraded |> member "keeper_internal_runtime_mcp_ready" |> to_bool);
+  let raw_token = Auth.ensure_internal_keeper_token dir in
+  let ready =
+    Server_routes_http_runtime.make_health_json request
+    |> member "internal_mcp_auth"
+  in
+  Alcotest.(check string) "verified token is ok" "ok"
+    (ready |> member "status" |> to_string);
+  Alcotest.(check bool) "env token present" true
+    (ready |> member "env_token_present" |> to_bool);
+  Alcotest.(check bool) "hash file present" true
+    (ready |> member "token_hash_file_present" |> to_bool);
+  Alcotest.(check bool) "env token verifies" true
+    (ready |> member "env_token_verifies" |> to_bool);
+  Alcotest.(check bool) "ready" true
+    (ready |> member "keeper_internal_runtime_mcp_ready" |> to_bool);
+  Alcotest.(check bool) "no operator action when ready" false
+    (ready |> member "operator_action_required" |> to_bool);
+  Alcotest.(check string) "ready operator next action" "none"
+    (ready |> member "operator_next_action" |> to_string);
+  Alcotest.(check bool) "raw token not exposed" false
+    (contains_substring (Yojson.Safe.to_string ready) raw_token);
+  let hash_file = Auth.internal_keeper_token_hash_file dir in
+  write_file hash_file " \n";
+  let empty_hash =
+    Server_routes_http_runtime.make_health_json request
+    |> member "internal_mcp_auth"
+  in
+  Alcotest.(check bool) "empty hash is absent" false
+    (empty_hash |> member "token_hash_file_present" |> to_bool);
+  Alcotest.(check bool) "empty hash asks for hash file" true
+    (List.mem "token_hash_file" (missing_names empty_hash));
+  Alcotest.(check bool) "empty hash is not mismatch" false
+    (List.mem "token_hash_mismatch" (missing_names empty_hash));
+  write_file hash_file (Auth.sha256_hash (raw_token ^ "-stale"));
+  let mismatch =
+    Server_routes_http_runtime.make_health_json request
+    |> member "internal_mcp_auth"
+  in
+  Alcotest.(check bool) "mismatch keeps hash present" true
+    (mismatch |> member "token_hash_file_present" |> to_bool);
+  Alcotest.(check bool) "mismatch reason is explicit" true
+    (List.mem "token_hash_mismatch" (missing_names mismatch))
+
 let test_health_response_default_is_light_probe () =
   let request = Httpun.Request.create `GET "/health" in
   let json = Server_routes_http_runtime.make_health_response_json request in
@@ -1389,6 +1459,8 @@ let test_health_response_default_is_light_probe () =
     (match json |> member "startup" with `Assoc _ -> true | _ -> false);
   Alcotest.(check bool) "paths stay on default health" true
     (match json |> member "paths" with `Assoc _ -> true | _ -> false);
+  Alcotest.(check bool) "internal mcp auth stays on default health" true
+    (match json |> member "internal_mcp_auth" with `Assoc _ -> true | _ -> false);
   Alcotest.(check bool) "default health skips reaction ledger" true
     (json |> member "keeper_reaction_ledger" = `Null);
   Alcotest.(check bool) "default health skips cdal snapshot" true
@@ -2715,6 +2787,10 @@ let () =
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;
           Alcotest.test_case "health json surfaces log ring summary" `Quick
             test_health_json_surfaces_log_ring_summary;
+          Alcotest.test_case
+            "health json surfaces internal mcp auth diagnostics"
+            `Quick
+            test_health_json_surfaces_internal_mcp_auth_diagnostics;
           Alcotest.test_case "default health response is light probe" `Quick
             test_health_response_default_is_light_probe;
           Alcotest.test_case "full health query uses snapshot cache" `Quick

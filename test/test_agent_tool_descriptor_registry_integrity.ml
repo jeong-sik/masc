@@ -100,6 +100,19 @@ let test_internal_name_uniqueness () =
 
 let is_blank s = String.trim s = ""
 
+let string_contains ~sub text =
+  let text_len = String.length text in
+  let sub_len = String.length sub in
+  let rec loop idx =
+    if idx + sub_len > text_len
+    then false
+    else if String.sub text idx sub_len = sub
+    then true
+    else loop (idx + 1)
+  in
+  sub_len = 0 || loop 0
+;;
+
 let test_no_blank_names () =
   List.iter
     (fun d ->
@@ -137,6 +150,34 @@ let test_internal_name_snake_case () =
 let test_registry_not_empty () =
   if all_descriptors () = []
   then Alcotest.failf "Agent_tool_descriptor.all_descriptors () returned []"
+
+let required_public_descriptor name =
+  match Descriptor.find_public name with
+  | Some descriptor -> descriptor
+  | None -> Alcotest.failf "missing public descriptor: %s" name
+;;
+
+let schema_property_description schema name =
+  let open Yojson.Safe.Util in
+  schema |> member "properties" |> member name |> member "description"
+  |> to_string_option
+;;
+
+let test_read_descriptor_spells_out_path_basis () =
+  let descriptor = required_public_descriptor "Read" in
+  let file_path_description =
+    schema_property_description descriptor.input_schema "file_path"
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool)
+    "Read description says it has no implicit cwd"
+    true
+    (string_contains ~sub:"no implicit cwd" descriptor.description);
+  Alcotest.(check bool)
+    "Read file_path schema says it does not inherit Execute cwd"
+    true
+    (string_contains ~sub:"does not inherit Execute cwd" file_path_description)
+;;
 
 let test_masc_board_registry_has_descriptor_projection () =
   List.iter
@@ -434,6 +475,12 @@ let () =
     ; ( "format"
       , [ test_case "no blank name fields" `Quick test_no_blank_names
         ; test_case "internal_name is snake_case" `Quick test_internal_name_snake_case
+        ] )
+    ; ( "agent-contract"
+      , [ test_case
+            "Read path basis is explicit"
+            `Quick
+            test_read_descriptor_spells_out_path_basis
         ] )
     ; ( "masc-board"
       , [ test_case

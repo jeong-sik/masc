@@ -38,11 +38,13 @@ val actionable_path_error
 
 val file_not_found_prefix : string
 
-(** Render a missing-file JSON envelope with the error and path.
+(** Render a missing-file JSON envelope with the error, path, and
+    path-resolution guidance.
     #10349: directory entries are intentionally excluded to prevent
     sandbox oracle leaks when keeper identity drifts. *)
 val missing_file_error_json
   :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
   -> target:string
   -> fallback_dir:string
   -> error:string

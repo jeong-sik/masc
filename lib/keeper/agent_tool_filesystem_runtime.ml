@@ -78,6 +78,7 @@ let handle_read_file
        in
        missing_file_error_json
          ~config
+         ~meta
          ~target
          ~fallback_dir
          ~error:
@@ -137,7 +138,7 @@ let handle_read_file
              else (
                match Safe_ops.read_file_safe target with
                | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
-                 missing_file_error_json ~config ~target ~fallback_dir ~error:e
+                 missing_file_error_json ~config ~meta ~target ~fallback_dir ~error:e
                | Error e -> error_json ~fields:[ "path", `String target ] e
                | Ok content ->
                  let total = String.length content in

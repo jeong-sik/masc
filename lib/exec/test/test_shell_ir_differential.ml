@@ -153,6 +153,7 @@ let test_monotone_safety () =
    typed model — i.e. the floor cannot be dropped for these yet. *)
 let test_report_floor_readiness () =
   let n = List.length corpus in
+  Alcotest.(check bool) "harness ran over a non-empty corpus" true (n > 0);
   let typed_hits = List.filter (fun e -> Risk.typed_hit_of_ir (ir_of e)) corpus in
   let load_bearing =
     List.filter
@@ -191,7 +192,7 @@ let test_report_floor_readiness () =
          "NOT READY — %d command-class(es) still need the floor"
          (List.length load_bearing));
   (* The harness reports; it never auto-retires the floor. *)
-  Alcotest.(check bool) "harness ran over a non-empty corpus" true (n > 0)
+  ()
 ;;
 
 (* RFC-0208 P3 ratchet: these classes were closed by typed-classifier

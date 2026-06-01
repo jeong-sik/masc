@@ -201,12 +201,14 @@ let rec typed_risk_of_ir (ir : Shell_ir.t) : risk_class =
   dominates the floor on the corpus.
 - Extends `audit-shell-ir-consumption.sh` with a runtime-coverage KPI.
 
-**Status: implemented** (`lib/exec/test/test_shell_ir_differential.ml`).
-The harness asserts the monotone-safety invariant over a curated corpus
-and reports floor-retirement readiness. Baseline run (2026-06-01, 31-command
-corpus): typed_hit 90%, floor-redundant **77%**, NOT READY — 7 command
-classes needed the floor because `risk_of_typed` did not read their typed
-fields. The harness then drove P3 (below).
+**Status: implemented as deterministic corpus coverage**
+(`lib/exec/test/test_shell_ir_differential.ml`). The harness asserts the
+monotone-safety invariant over a curated corpus and reports floor-retirement
+readiness. The QCheck property above remains future expansion rather than part
+of the current P2 implementation. Baseline run (2026-06-01, 31-command corpus):
+typed_hit 90%, floor-redundant **77%**, NOT READY — 7 command classes needed the
+floor because `risk_of_typed` did not read their typed fields. The harness then
+drove P3 (below).
 
 ### P3 · Harness-driven typed-classifier completion
 

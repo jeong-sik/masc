@@ -326,6 +326,21 @@ let test_not_allowlisted_hints_self_correction () =
     ~needle:"Shell interpreters"
     ();
   check_not_allowlisted_hint
+    ~name:"mkdir"
+    ~mode:Execute_input.Dev_full
+    ~needle:"structured file/write"
+    ();
+  check_not_allowlisted_hint
+    ~name:"touch"
+    ~mode:Execute_input.Dev_full
+    ~needle:"Write"
+    ();
+  check_not_allowlisted_hint
+    ~name:"test"
+    ~mode:Execute_input.Dev_full
+    ~needle:"Shell conditionals"
+    ();
+  check_not_allowlisted_hint
     ~name:"chmod"
     ~mode:Execute_input.Dev_full
     ~needle:"privileged/destructive"

@@ -1,6 +1,7 @@
 open Alcotest
 module KTO = Masc_mcp.Keeper_tool_observation
 module Resolution = Masc_mcp.Keeper_tool_resolution
+module Surface = Masc_mcp.Keeper_agent_tool_surface
 module KTS = Masc_mcp.Keeper_tool_selection
 
 let test_unexpected_tool_names_accepts_keeper_surface () =
@@ -232,6 +233,66 @@ let test_contract_filter_empty_input () =
        [])
 ;;
 
+let test_active_task_actionable_signal_requests_gate () =
+  check
+    bool
+    "owned active task with executable tool requests gate"
+    true
+    (Surface.actionable_signal_requires_active_task_tool_gate
+       ~actionable_signal:true
+       ~has_current_task:true
+       ~turn_affordances:[ "task_claim" ]
+       ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim"; "Edit" ]);
+  check
+    bool
+    "no actionable signal does not request gate"
+    false
+    (Surface.actionable_signal_requires_active_task_tool_gate
+       ~actionable_signal:false
+       ~has_current_task:true
+       ~turn_affordances:[ "task_claim" ]
+       ~allowed_tool_names:[ "Edit" ]);
+  check
+    bool
+    "no owned active task leaves claim intake ungated"
+    false
+    (Surface.actionable_signal_requires_active_task_tool_gate
+       ~actionable_signal:true
+       ~has_current_task:false
+       ~turn_affordances:[ "task_claim" ]
+       ~allowed_tool_names:[ "keeper_task_claim"; "Edit" ]);
+  check
+    bool
+    "passive plus claim-only cannot advance owned active task"
+    false
+    (Surface.actionable_signal_requires_active_task_tool_gate
+       ~actionable_signal:true
+       ~has_current_task:true
+       ~turn_affordances:[ "task_claim" ]
+       ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim" ])
+;;
+
+let test_required_gate_surface_excludes_owned_task_claim_context () =
+  check
+    (list string)
+    "owned task gate keeps only execution progress tools"
+    [ "Edit"; "Write" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~has_current_task:true
+       ~tool_gate_requested:true
+       ~required_tool_names:[]
+       [ "Read"; "Grep"; "keeper_task_claim"; "keeper_stay_silent"; "Edit"; "Write" ]);
+  check
+    (list string)
+    "explicit required tool is preserved even when claim-like"
+    [ "keeper_task_claim" ]
+    (Surface.tool_names_for_required_gate_surface
+       ~has_current_task:true
+       ~tool_gate_requested:true
+       ~required_tool_names:[ "keeper_task_claim" ]
+       [ "Read"; "keeper_task_claim" ])
+;;
+
 let () =
   run
     "keeper_tool_surface_guard"
@@ -303,6 +364,16 @@ let () =
             test_contract_filter_strips_passive
         ; test_case "all passive: returns empty" `Quick test_contract_filter_all_passive
         ; test_case "empty input: empty output" `Quick test_contract_filter_empty_input
+        ] )
+    ; ( "required_gate"
+      , [ test_case
+            "active task actionable signal requests gate"
+            `Quick
+            test_active_task_actionable_signal_requests_gate
+        ; test_case
+            "active task gate excludes claim context"
+            `Quick
+            test_required_gate_surface_excludes_owned_task_claim_context
         ] )
     ]
 ;;

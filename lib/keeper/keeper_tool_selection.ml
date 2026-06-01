@@ -91,12 +91,11 @@ let merge_tool_selection_boundary
   : string list
   =
   let sorted_discovered = List.sort String.compare discovered in
-  (* BM25-relevant tools first: when downstream truncation caps at
-     max_tools, the tail is dropped.  Placing deterministic_prefilter
-     and discovered before core ensures context-relevant tools survive
-     while generic core tools are truncated first.
-     Core tools that also appear in deterministic_prefilter are deduped
-     (first occurrence wins), so they naturally keep their BM25 rank. *)
+  (* Keep deterministic BM25 hits and explicit discoveries ahead of generic
+     core tools. This ordering preserves relevance signals without imposing a
+     global visible-tool count limit. Core tools that also appear in
+     deterministic_prefilter are deduped (first occurrence wins), so they
+     naturally keep their BM25 rank. *)
   let deterministic_floor =
     Keeper_types_profile_toml_normalizers.dedupe_keep_order (deterministic_prefilter @ sorted_discovered @ core)
   in

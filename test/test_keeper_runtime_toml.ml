@@ -184,13 +184,10 @@ let test_applies_turn_execution_overrides () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 7" 7 count;
+  check int "applied 6" 6 count;
   check (option string) "tool cost ceiling"
     (Some "1.25")
     (List.assoc_opt "MASC_KEEPER_TOOL_COST_MAX_USD" overrides);
-  check (option string) "max tools per turn"
-    (Some "64")
-    (List.assoc_opt "MASC_KEEPER_MAX_TOOLS_PER_TURN" overrides);
   check (option string) "llm rerank"
     (Some "true")
     (List.assoc_opt "MASC_KEEPER_LLM_RERANK" overrides);

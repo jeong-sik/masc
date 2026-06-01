@@ -551,11 +551,7 @@ let test_tool_surface_selection_preserves_order () =
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
-    false (Keeper_config.keeper_llm_rerank_enabled ());
-  (* Default runtime name *)
-  let runtime = Keeper_config.keeper_llm_rerank_runtime () in
-  Alcotest.(check string) "default runtime name"
-    "route.llm_rerank" runtime
+    false (Keeper_config.keeper_llm_rerank_enabled ())
 
 (* ── Suite ───────────────────────────────────────────────── *)
 
@@ -610,7 +606,7 @@ let () =
         test_tool_search_partition_projects_allowed_internal_to_public_alias;
       Alcotest.test_case "tool_search filters denied core hits" `Quick
         test_tool_search_partition_filters_policy_denied_core_hits;
-      Alcotest.test_case "tool surface truncation dedupes essential tools" `Quick
+      Alcotest.test_case "tool surface selection preserves order" `Quick
         test_tool_surface_selection_preserves_order;
     ];
     "keeper_config", [

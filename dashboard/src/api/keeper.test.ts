@@ -235,9 +235,6 @@ describe('keeper runtime trace', () => {
             tools: ['Execute', 'SearchFiles'],
             successful_tools: ['Execute', 'SearchFiles'],
             failed_tools: [],
-            sandbox_profiles: ['docker'],
-            network_modes: ['inherit'],
-            docker_visible: true,
             latest_at: '2026-05-13T00:00:01Z',
           },
         },
@@ -324,7 +321,6 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.axes.provider_lane.resolved).toBe(false)
     expect(result.runtime_lens.axes.provider_attempt.terminal_status).toBe('timeout')
     expect(result.runtime_lens.axes.runtime_proof.status).toBe('pass')
-    expect(result.runtime_lens.axes.runtime_proof.docker_visible).toBe(true)
     expect(result.runtime_lens.axes.runtime_proof.tools).toEqual(['Execute', 'SearchFiles'])
     expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
@@ -498,7 +494,6 @@ describe('keeper lifecycle', () => {
         session_dir: '/tmp/trace-keeper-test',
         current: null,
         history: [],
-        legacy_shadow_count: 0,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -533,7 +528,6 @@ describe('keeper lifecycle', () => {
           session_dir: '/tmp/trace-keeper-test',
           current: null,
           history: [],
-          legacy_shadow_count: 0,
         },
       }), {
         status: 200,

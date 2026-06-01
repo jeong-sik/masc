@@ -2151,27 +2151,6 @@ function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['de
   }
 }
 
-
-function normalizeKeeperSandboxEnvironment(
-  raw: unknown,
-): KeeperConfig['sandbox_environment'] {
-  if (!isRecord(raw)) return undefined
-  return {
-    base_path: asNullableString(raw.base_path),
-    project_root: asNullableString(raw.project_root),
-    docker_playground_enabled: asLooseBoolean(raw.docker_playground_enabled),
-    docker_container_name: asNullableString(raw.docker_container_name),
-    container_playground_root: asNullableString(raw.container_playground_root),
-    docker_image: asNullableString(raw.docker_image),
-    pids_limit: asInt(raw.pids_limit),
-    memory: asNullableString(raw.memory),
-    tmpfs_size: asNullableString(raw.tmpfs_size),
-    seccomp_profile: asNullableString(raw.seccomp_profile),
-    require_rootless: asLooseBoolean(raw.require_rootless),
-    require_userns: asLooseBoolean(raw.require_userns),
-  }
-}
-
 function normalizePerProviderTimeoutMode(
   raw: unknown,
   perProviderTimeoutSec: number | null,
@@ -2197,7 +2176,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const tools = isRecord(data.tools) ? data.tools : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
-  const sandboxEnvironment = normalizeKeeperSandboxEnvironment(data.sandbox_environment)
   const perProviderTimeoutSec = asLooseNullableNumber(execution.per_provider_timeout_sec)
   const lastLatencyMs = asInt(metrics.last_latency_ms)
 
@@ -2207,9 +2185,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
-    effective_sandbox_image: asNullableString(data.effective_sandbox_image),
-    private_workspace_root: asNullableString(data.private_workspace_root),
-    sandbox_environment: sandboxEnvironment,
     allowed_paths: normalizeStringList(data.allowed_paths),
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
     prompt: {
@@ -2287,8 +2262,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       keepalive_running: asLooseBoolean(runtime.keepalive_running),
       registry_state: asNullableString(runtime.registry_state),
       fiber_health: asNullableString(runtime.fiber_health) ?? 'unknown',
-      presence_keepalive: asLooseBoolean(runtime.presence_keepalive),
-      presence_keepalive_sec: asInt(runtime.presence_keepalive_sec) ?? 0,
       runtime_blocker_class: asKeeperRuntimeBlockerClass(runtime.runtime_blocker_class),
       active_model_label: null,
       last_model_used_label: null,

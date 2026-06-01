@@ -933,8 +933,6 @@ export interface Keeper {
   runtime_canonical?: string | null
   selected_runtime_canonical?: string | null
   status: string
-  presence_keepalive?: boolean
-  presence_keepalive_sec?: number
   keepalive_running?: boolean
   diagnostic?: KeeperDiagnostic | null
   registry_state?: string | null
@@ -963,7 +961,6 @@ export interface Keeper {
   sandbox_profile?: 'local' | 'docker' | null
   sandbox_target?: string | null
   sandbox_last_error?: string | null
-  effective_sandbox_image?: string | null
   blocked_task_count?: number | null
   goal_progress?: {
     active_goal_count?: number
@@ -1275,8 +1272,6 @@ interface KeeperConfigRuntime {
   keepalive_running: boolean
   registry_state?: string | null
   fiber_health: string
-  presence_keepalive: boolean
-  presence_keepalive_sec: number
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   active_model_label?: string | null
   last_model_used_label?: string | null
@@ -1328,21 +1323,6 @@ interface KeeperConfigMetrics {
   compaction_count: number
 }
 
-export interface KeeperSandboxEnvironment {
-  base_path?: string | null
-  project_root?: string | null
-  docker_playground_enabled: boolean
-  docker_container_name?: string | null
-  container_playground_root?: string | null
-  docker_image?: string | null
-  pids_limit?: number | null
-  memory?: string | null
-  tmpfs_size?: string | null
-  seccomp_profile?: string | null
-  require_rootless: boolean
-  require_userns: boolean
-}
-
 export interface KeeperHookSlot {
   active: boolean
   source: string
@@ -1365,9 +1345,6 @@ export interface KeeperConfig {
   sandbox_profile?: 'local' | 'docker' | string
   network_mode?: 'none' | 'inherit' | string
   sandbox_last_error?: string | null
-  effective_sandbox_image?: string | null
-  private_workspace_root?: string | null
-  sandbox_environment?: KeeperSandboxEnvironment
   allowed_paths: string[]
   effective_allowed_paths: string[]
   prompt: KeeperConfigPrompt

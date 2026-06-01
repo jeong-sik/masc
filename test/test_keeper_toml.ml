@@ -777,22 +777,6 @@ let with_config_dir f =
       Config_dir_resolver.reset ();
       f config_dir)
 
-let test_profile_rejects_legacy_allowed_providers () =
-  let input = {|
-[keeper]
-goal = "test"
-allowed_providers = ["Ollama", "GLM"]
-runtime_id = "primary"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected removed TOML key error"
-     | Error msg ->
-       check bool "mentions removed allowed_providers key" true
-         (contains_substring msg "keeper.allowed_providers"))
-
 let test_profile_max_turns_overrides () =
   let input = {|
 [keeper]
@@ -1852,8 +1836,6 @@ let () =
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
-          test_case "legacy allowed_providers rejected" `Quick
-            test_profile_rejects_legacy_allowed_providers;
           test_case "runtime_id parsed" `Quick
             test_profile_accepts_runtime_id;
           test_case "max_turns overrides parsed and applied" `Quick

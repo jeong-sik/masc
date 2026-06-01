@@ -419,7 +419,6 @@ export interface KeeperCheckpointInventory {
   session_dir: string
   current: KeeperCheckpointSummary | null
   history: KeeperCheckpointSummary[]
-  legacy_shadow_count: number
 }
 
 interface KeeperCheckpointDeleteResponse {
@@ -844,9 +843,6 @@ export interface KeeperRuntimeLensRuntimeProofAxis {
   tools: string[]
   successful_tools: string[]
   failed_tools: string[]
-  sandbox_profiles: string[]
-  network_modes: string[]
-  docker_visible: boolean
   latest_at: string | null
 }
 
@@ -1310,9 +1306,6 @@ function parseRuntimeLensRuntimeProofAxis(raw: unknown): KeeperRuntimeLensRuntim
     tools: stringListField(obj, 'tools'),
     successful_tools: stringListField(obj, 'successful_tools'),
     failed_tools: stringListField(obj, 'failed_tools'),
-    sandbox_profiles: stringListField(obj, 'sandbox_profiles'),
-    network_modes: stringListField(obj, 'network_modes'),
-    docker_visible: obj.docker_visible === true,
     latest_at: nullableStringField(obj, 'latest_at'),
   }
 }

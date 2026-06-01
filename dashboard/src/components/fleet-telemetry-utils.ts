@@ -58,7 +58,6 @@ export interface FleetRow {
   active_goal_count: number
   sandbox_profile: string | null
   sandbox_last_error: string | null
-  effective_sandbox_image: string | null
   decision_required: boolean
   budget_source: 'override' | 'override_invalid' | 'env' | null
   provider_health_status: 'healthy' | 'degraded' | 'unhealthy' | null
@@ -463,7 +462,6 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             active_goal_count: keeper.active_goal_ids?.length ?? 0,
             sandbox_profile: keeper.sandbox_profile ?? null,
             sandbox_last_error: keeper.sandbox_last_error ?? null,
-            effective_sandbox_image: keeper.effective_sandbox_image ?? null,
             decision_required: keeper.runtime_blocker_continue_gate === true,
             budget_source:
               keeper.turn_budget?.reactive.source === 'override' ||

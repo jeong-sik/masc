@@ -1079,9 +1079,7 @@ export function RuntimeLensSection({
         <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
         <${SignalRow} label="runtime proof" value=${`${proof.status} / ${proof.matched_tool_call_count} calls`} />
-        <${SignalRow} label="sandbox proof" value=${proof.docker_visible ? formatLensList(proof.sandbox_profiles, 'docker') : 'not observed'} />
         <${SignalRow} label="proof tools" value=${formatLensList(proof.tools)} />
-        <${SignalRow} label="network proof" value=${formatLensList(proof.network_modes)} />
         <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
         <${SignalRow} label="working loops" value=${context.active_open_loop_count} />
         <${SignalRow} label="memory flush" value=${formatIndependentCounters({ leftLabel: 'success', leftValue: memory.memory_flush_success_count, rightLabel: 'error', rightValue: memory.memory_flush_error_count })} />

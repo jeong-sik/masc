@@ -381,74 +381,12 @@ let keeper_config_json (config : Workspace.config) (name : string)
         | Some entry -> entry.last_error
         | None -> None
       in
-      let effective_sandbox_image =
-        if m.sandbox_profile = Keeper_types_profile_sandbox.Docker
-        then Some (Env_config_sandbox.Runtime.docker_image ())
-        else None
-      in
-      let sandbox_preflight_json =
-        Keeper_sandbox_runtime.docker_preflight ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ()) ()
-        |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
-      in
-      let sandbox_preflight =
-        match effective_sandbox_image, sandbox_preflight_json with
-        | Some _, Some preflight -> Some preflight
-        | _ -> None
-      in
-      let private_workspace_root =
-        Keeper_sandbox.host_root_abs_of_meta ~config m
-      in
-      let sandbox_environment =
-        let string_or_null value =
-          let trimmed = String.trim value in
-          if trimmed = "" then `Null else `String trimmed
-        in
-        `Assoc [
-          ("base_path", `String config.base_path);
-          ("project_root",
-            `String (Keeper_alerting_path.project_root_of_config config));
-          ("docker_playground_enabled",
-            `Bool (Env_config_sandbox.Runtime.docker_playground_enabled ()));
-          ("docker_container_name",
-            string_or_null
-              (Env_config_sandbox.Runtime.docker_playground_container_name ()));
-          ("container_playground_root",
-            string_or_null
-              (Env_config_sandbox.Runtime.docker_playground_container_root ()));
-          ("docker_image",
-            match effective_sandbox_image with
-            | Some img -> string_or_null img
-            | None -> `Null);
-          ("pids_limit", `Int (Env_config_sandbox.Hardening.pids_limit ()));
-          ("memory",
-            string_or_null (Env_config_sandbox.Hardening.memory ()));
-          ("tmpfs_size",
-            string_or_null (Env_config_sandbox.Hardening.tmpfs_size ()));
-          ("relax_fs",
-            `Bool (Env_config_sandbox.Hardening.relax_fs ()));
-          ("seccomp_profile",
-            string_or_null
-              (Env_config_sandbox.Hardening.seccomp_profile ()));
-          ("require_rootless",
-            `Bool (Env_config_sandbox.Hardening.require_rootless ()));
-          ("require_userns",
-            `Bool (Env_config_sandbox.Hardening.require_userns ()));
-          ("preflight",
-            Json_util.option_to_yojson Fun.id sandbox_preflight);
-        ]
-      in
       (`OK,
        `Assoc [
          ("name", `String m.name);
          ("active_goal_ids", active_goal_ids_json);
          ("sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
          ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
-         ("sandbox_preflight",
-           Json_util.option_to_yojson Fun.id sandbox_preflight);
-         ("effective_sandbox_image",
-           Json_util.string_opt_to_json effective_sandbox_image);
-         ("private_workspace_root", `String private_workspace_root);
-         ("sandbox_environment", sandbox_environment);
          ("allowed_paths",
            `List (List.map (fun s -> `String s) m.allowed_paths));
          ("effective_allowed_paths",

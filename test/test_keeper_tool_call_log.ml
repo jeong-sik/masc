@@ -410,7 +410,7 @@ let test_route_evidence_stored_for_git_push () =
                `String "repos/masc-mcp-keeper-direct-proof-20260506-1039" );
            ])
       ~output_text:
-        {|{"ok":true,"via":"docker","cwd":"repos/masc-mcp-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","effective_sandbox_image":"masc-keeper-sandbox:local","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+        {|{"ok":true,"via":"docker","cwd":"repos/masc-mcp-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
       ~success:true
       ~duration_ms:42.0
       ();
@@ -463,7 +463,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
           bytes = 8192;
           mime = "application/json";
           preview =
-            {|{"ok":true,"via":"docker","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","effective_sandbox_image":"masc-keeper-sandbox:local","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|};
+            {|{"ok":true,"via":"docker","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|};
         })
     in
     Keeper_tool_call_log.log_call

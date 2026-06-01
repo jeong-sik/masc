@@ -28,14 +28,12 @@ val approval_queue_stale_max_wait_sec : float
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
 val prompt_render_max_bytes : int
-val legacy_provider_filter_name : string
 
 (* ── Removed / rejected keeper input keys ───────────────────── *)
 
 val removed_keeper_input_key_names : string list
 val non_public_keeper_input_key_names : string list
 val removed_keeper_msg_input_key_names : string list
-val removed_keeper_meta_key_names : string list
 
 val present_json_keys : string list -> Yojson.Safe.t -> string list
 

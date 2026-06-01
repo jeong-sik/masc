@@ -567,9 +567,7 @@ let test_masc_keeper_up_schema () =
           Alcotest.(check bool) "omits allowed_models" false
             (List.mem_assoc "allowed_models" props);
           Alcotest.(check bool) "omits active_model" false
-            (List.mem_assoc "active_model" props);
-          Alcotest.(check bool) "omits presence_keepalive" false
-            (List.mem_assoc "presence_keepalive" props)
+            (List.mem_assoc "active_model" props)
       | None -> Alcotest.fail "masc_keeper_up missing properties"
 
 let test_masc_keeper_msg_schema () =

@@ -13,7 +13,6 @@ val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
-val legacy_provider_filter_name : string
 val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool
 val bool_of_env_default : string -> default:bool -> bool
@@ -27,7 +26,6 @@ val clamp_int : int -> min_v:int -> max_v:int -> int
 val validate_name : string -> bool
 val removed_keeper_input_key_names : string list
 val removed_keeper_msg_input_key_names : string list
-val removed_keeper_meta_key_names : string list
 val present_json_keys : string list -> Yojson.Safe.t -> string list
 val reject_removed_keeper_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result

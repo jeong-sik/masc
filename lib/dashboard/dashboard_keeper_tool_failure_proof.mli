@@ -8,8 +8,6 @@ type tool_keeper_stat = {
   keepers : string list;
   successful_keepers : string list;
   failed_keepers : string list;
-  sandbox_profiles : string list;
-  network_modes : string list;
   task_ids : string list;
   goal_ids : string list;
   latest_ts : float option;

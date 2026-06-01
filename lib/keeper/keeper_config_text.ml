@@ -51,7 +51,6 @@ let approval_queue_stale_max_wait_sec = 600.0
 let default_goal_horizon_max_chars = 480
 let default_drift_max_clauses = 6
 let prompt_render_max_bytes = 320
-let legacy_provider_filter_name = "allowed_providers"
 
 (* ── Removed / rejected keeper input keys ───────────────────── *)
 
@@ -60,9 +59,6 @@ let removed_keeper_input_key_names =
     "models";
     "allowed_models";
     "active_model";
-    legacy_provider_filter_name;
-    "presence_keepalive";
-    "presence_keepalive_sec";
     "trigger_mode";
     "policy_action_budget";
     "initiative_scope";
@@ -100,12 +96,6 @@ let removed_keeper_msg_input_key_names =
     "new_needs";
     "new_desires";
   ]
-
-let removed_keeper_meta_key_names =
-  [
-    "persona_profile_path";
-  ]
-  @ removed_keeper_input_key_names
 
 let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list =
   match json with

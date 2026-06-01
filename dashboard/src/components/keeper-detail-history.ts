@@ -207,9 +207,6 @@ export function KeeperCheckpointPanel({
       <div class="flex items-center justify-between gap-3">
         <div class="text-2xs text-[var(--color-fg-muted)]">
           current OAS checkpoint와 OAS snapshot history만 노출합니다.
-          ${inventory && inventory.legacy_shadow_count > 0
-            ? html`<span class="block mt-1 text-[var(--color-status-warn)]">retired shadow ${inventory.legacy_shadow_count}개는 picker에서 제외됩니다.</span>`
-            : null}
         </div>
         <div class="flex items-center gap-2">
           <${ActionButton}

@@ -19,7 +19,6 @@ let route_candidate_has_fields json =
            ; "git_creds_enabled"
            ; "network_mode"
            ; "status"
-           ; "effective_sandbox_image"
            ])
       fields
 ;;
@@ -108,9 +107,6 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
            (Option.map
               (Observability_redact.preview_json_strings ~max_len:max_output_len)
               (Json_util.assoc_member_opt "status" output_json))
-      |> add_string
-           "effective_sandbox_image"
-           (Json_util.assoc_string_opt "effective_sandbox_image" output_json)
       |> add_string "network_mode" (Json_util.assoc_string_opt "network_mode" output_json)
       |> add_bool "git_creds_enabled" (Json_util.assoc_bool_opt "git_creds_enabled" output_json)
       |> add_string "sandbox_profile" (Json_util.assoc_string_opt "sandbox_profile" output_json)

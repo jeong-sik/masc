@@ -212,7 +212,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0204 | Dashboard Read Serving Isolation from Fleet Compute | Draft | a7296801a7 2026-06-01 | - |
 | 0205 | Keeper Module Consolidation — Eliminate Facade Anti-Pattern | Draft | a7296801a7 2026-06-01 | - |
 | 0206 | Runtime 개념 — runtime→Runtime 재탄생 | Draft | a7296801a7 2026-06-01 | - |
-| 0207 | Per-keeper LLM runtime routing | Draft | c98bcf0088 2026-06-01 | - |
+| 0207 | Per-keeper LLM runtime routing | Draft | 34c33bcbd1 2026-06-01 | - |
+
+
 
 
 

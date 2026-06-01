@@ -347,11 +347,13 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
            String.trim label
            |> Runtime.max_context_of_runtime_id
            |> Option.map clamp)
+    (* Labels are an ordered runtime-budget preference list. If none resolve,
+       the precomputed default runtime budget preserves config-less tests.
+       DET-OK: dispatch still fail-fast validates the selected runtime id before
+       provider execution. *)
     |> Option.value ~default:default_budget
   in
-  (* RFC-0207: budget against the same per-keeper runtime id that dispatch uses.
-     If no label resolves yet (for config-less tests), retain the default
-     runtime/fallback budget. *)
+  (* RFC-0207: budget against the same per-keeper runtime id that dispatch uses. *)
   let primary_budget = runtime_budget in
   let turn_budget =
     match requested_override with

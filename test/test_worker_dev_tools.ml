@@ -1189,6 +1189,33 @@ let () =
         Alcotest.(check bool) "still suggests tool_edit_file for A.B names"
           true
           (contains_substring msg "Edit"));
+      Alcotest.test_case "blocked-command hints use canonical file tool names" `Quick (fun () ->
+        let messages =
+          [ Worker_dev_tools.block_reason_to_string
+              (Worker_dev_tools.Command_not_allowed "sed")
+          ; Worker_dev_tools.block_reason_to_string
+              (Worker_dev_tools.Command_not_allowed "find")
+          ; Worker_dev_tools.block_reason_to_string
+              (Worker_dev_tools.Command_not_allowed "Foo.bar")
+          ; Worker_dev_tools.block_reason_to_string Worker_dev_tools.Chain_or_redirect
+          ; Worker_dev_tools.block_reason_to_string Worker_dev_tools.Injection
+          ]
+        in
+        let joined = String.concat "\n" messages in
+        List.iter
+          (fun retired ->
+             Alcotest.(check bool)
+               ("does not mention " ^ retired)
+               false
+               (contains_substring joined retired))
+          [ "ReadFile"; "EditFile"; "WriteFile"; "SearchFiles" ];
+        List.iter
+          (fun canonical ->
+             Alcotest.(check bool)
+               ("mentions " ^ canonical)
+               true
+               (contains_substring joined canonical))
+          [ "Read"; "Edit"; "Write"; "Grep" ]);
     ];
     "attribution", [
       Alcotest.test_case "Ok () → Passed with cmd in evidence" `Quick (fun () ->

@@ -53,8 +53,8 @@ let command_blocked_hint ?allowed_commands name =
   let alt =
     match name with
     | "sort" | "uniq" -> " Use rg or jq for filtering."
-    | "sed" | "awk" -> " Use EditFile or WriteFile for file changes."
-    | "find" -> " Use rg --files or SearchFiles."
+    | "sed" | "awk" -> " Use Edit or Write for file changes."
+    | "find" -> " Use rg --files or Grep."
     | "curl" | "wget" ->
       " Use masc_web_fetch to fetch page content, or masc_web_search to find sources."
     | "gh" ->
@@ -80,8 +80,8 @@ let command_blocked_hint ?allowed_commands name =
          through masc_web_search or masc_web_fetch tools."
         name
     | _ when looks_like_source_code name ->
-      " This looks like source code, not a shell command - use EditFile / \
-       WriteFile / ReadFile instead."
+      " This looks like source code, not a shell command - use Edit / Write / \
+       Read instead."
     | _ -> ""
   in
   let list_label, commands =
@@ -91,8 +91,8 @@ let command_blocked_hint ?allowed_commands name =
   in
   Printf.sprintf
     "Command blocked: '%s' is not allowed. %s: %s.%s See \
-     keeper_tools_list for the exhaustive tool surface, and ReadFile / \
-     EditFile / WriteFile for file operations."
+     keeper_tools_list for the exhaustive tool surface, and Read / Edit / \
+     Write for file operations."
     name
     list_label
     commands
@@ -116,13 +116,13 @@ let block_reason_to_string = function
      per call. To change directory, use the `cwd` argument instead of `cd` - Good: \
      cwd='repos/masc-mcp', cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc-mcp && dune \
      build'. For pipelines like `rg foo | wc -l`, run the primary command and process \
-     output at the LLM layer. To write files, use WriteFile."
+     output at the LLM layer. To write files, use Write."
   | Injection ->
     "Shell injection syntax (;, &&, standalone &, `, $) not allowed. Run ONE command per \
      call. To change directory, use the `cwd` argument - Good: cwd='repos/masc-mcp', \
      cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc-mcp && dune build' or cmd='cmd1 ; cmd2'. \
      Relative paths resolve from `cwd` (defaults to playground root). For file writes, \
-     use EditFile or WriteFile."
+     use Edit or Write."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."
   | Unsafe_redirect ->
     "Redirect syntax is not allowed in this shell surface. Consume stdout/stderr \

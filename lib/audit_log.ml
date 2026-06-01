@@ -45,6 +45,7 @@ type action =
   | SearchRefinement [@tla.symbol "search_refinement"]
   | GovernanceDecision of governance_audit_decision [@tla.symbol "governance_decision"]
   | Custom of string [@tla.symbol "custom"]
+  | Unknown of string [@tla.symbol "unknown"]
 [@@deriving tla]
 
 type audit_entry = {
@@ -103,6 +104,7 @@ let action_to_string = function
   | GovernanceDecision decision ->
       "governance_decision:" ^ governance_audit_decision_to_string decision
   | Custom name -> "custom:" ^ name
+  | Unknown raw -> raw
 
 let string_to_action s =
   (* Split on first ':' to separate tag from payload for parameterized
@@ -119,7 +121,7 @@ let string_to_action s =
      | "governance_decision" ->
          GovernanceDecision (governance_audit_decision_of_string payload)
      | "custom" -> Custom payload
-     | _ -> Custom s)
+     | _ -> Unknown s)
   | None ->
     (match s with
      | "claim_task" -> ClaimTask
@@ -134,7 +136,7 @@ let string_to_action s =
      | "circuit_open" -> CircuitOpen
      | "circuit_close" -> CircuitClose
      | "search_refinement" -> SearchRefinement
-     | _ -> Custom s)
+     | _ -> Unknown s)
 
 let outcome_to_json = function
   | Success -> `Assoc [("status", `String "success")]

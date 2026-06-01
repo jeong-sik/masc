@@ -180,10 +180,29 @@ let handle_tool_execute_typed
           Exec_policy.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
           |> Exec_policy.truncate_for_log
         in
+        let message_for_log s =
+          String.map
+            (function
+              | '\n' | '\r' | '\t' -> ' '
+              | c -> c)
+            s
+          |> Exec_policy.truncate_for_log
+        in
         let typed_error_fields =
           [ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
         in
         let blocked_result ?deterministic_reason ~error ~reason ~alternatives () =
+          (* RFC-0208 P1: a blocked typed command emits a Keeper-level audit
+             line so denials are greppable, not only returned as tool_error
+             JSON to the agent. Covers destructive-block and write-gate; the
+             [error] code distinguishes them. *)
+          Log.Keeper.warn
+            "shell_ir blocked keeper=%s error=%s reason=%s typed_hit=%b cmd=%s"
+            meta.name
+            error
+            (message_for_log reason)
+            (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir)
+            cmd_for_log;
           let deterministic_retry_fields =
             match deterministic_reason with
             | Some deterministic_reason ->
@@ -261,10 +280,23 @@ let handle_tool_execute_typed
               envelope
           in
           match dispatch_result with
-          | Error (Agent_tool_execute_shell_ir.Gate_reject diagnostic) -> typed_error_json diagnostic
+          | Error (Agent_tool_execute_shell_ir.Gate_reject diagnostic) ->
+            (* RFC-0208 P1: gate denial audit line. *)
+            Log.Keeper.warn
+              "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
+              meta.name
+              cmd_for_log
+              (message_for_log diagnostic);
+            typed_error_json diagnostic
           | Error Agent_tool_execute_shell_ir.Cannot_parse -> typed_error_json "Cannot parse command"
           | Error Agent_tool_execute_shell_ir.Too_complex -> typed_error_json "Command too complex"
           | Error (Agent_tool_execute_shell_ir.Path_reject e) ->
+            (* RFC-0208 P1: path-policy denial audit line. *)
+            Log.Keeper.warn
+              "shell_ir path_reject keeper=%s cmd=%s reason=%s"
+              meta.name
+              cmd_for_log
+              (message_for_log e);
             error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
           | Ok result ->
             let elapsed_ms =
@@ -272,12 +304,19 @@ let handle_tool_execute_typed
                  span recorded immediately below. *)
               elapsed_duration_ms ~start_time:t0 ~end_time:(Unix.gettimeofday ())
             in
+            (* RFC-0208 P1: risk_class + typed_hit make the typed-coverage
+               of live traffic observable. An offline scan of typed_hit=true
+               / total gives the real exercise rate of the typed model vs the
+               Generic escape hatch. *)
             Log.Keeper.info
-              "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
+              "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d risk_class=%s typed_hit=%b"
               meta.name
               (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
               (Keeper_sandbox_exec_failure.status_label result.status)
-              elapsed_ms;
+              elapsed_ms
+              (Masc_exec.Shell_ir_risk.string_of_risk_class
+                 (Masc_exec.Shell_ir_risk.risk_class envelope))
+              (Masc_exec.Shell_ir_risk.typed_hit_of_ir ir);
             let output =
               if String.equal result.stderr ""
               then result.stdout

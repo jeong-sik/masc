@@ -380,6 +380,31 @@ let test_monotone_floor_invariant () =
          (rank full >= rank floor))
     corpus
 
+(* --- RFC-0208 P1: typed-coverage instrument ------------------------
+
+   [typed_hit_of_ir] is the observability signal that distinguishes a real
+   typed-constructor match from the [Generic] escape hatch, so the
+   dispatch log / harness can measure how much of the 110-constructor
+   typed model real traffic actually exercises. *)
+
+let test_typed_hit_coverage () =
+  let hit ir = Risk.typed_hit_of_ir ir in
+  (* typed constructors -> hit *)
+  Alcotest.(check bool) "ls is a typed hit" true (hit (simple_ir "ls" []));
+  Alcotest.(check bool) "cat is a typed hit" true (hit (simple_ir "cat" [ "f" ]));
+  Alcotest.(check bool) "sudo is a typed hit" true
+    (hit (simple_ir "sudo" [ "rm"; "-rf"; "/" ]));
+  Alcotest.(check bool) "git status is a typed hit" true
+    (hit (simple_ir "git" [ "status" ]));
+  (* unknown binary -> Generic escape hatch -> not a hit *)
+  Alcotest.(check bool) "unknown command falls to Generic" false
+    (hit (simple_ir "my-custom-tool" [ "--help" ]));
+  (* pipeline: a typed hit only when ALL stages are typed *)
+  Alcotest.(check bool) "ls | cat fully typed" true
+    (hit (pipeline_ir [ ("ls", []); ("cat", [ "f" ]) ]));
+  Alcotest.(check bool) "ls | unknown not fully typed" false
+    (hit (pipeline_ir [ ("ls", []); ("my-custom-tool", []) ]))
+
 (* --- test runner --- *)
 
 let () =
@@ -403,4 +428,5 @@ let () =
   test_s7_stamp_invariant ();
   test_typed_escalation_closes_wordlist_gaps ();
   test_monotone_floor_invariant ();
-  print_endline "test_shell_ir_risk: 19/19 passed"
+  test_typed_hit_coverage ();
+  print_endline "test_shell_ir_risk: 20/20 passed"

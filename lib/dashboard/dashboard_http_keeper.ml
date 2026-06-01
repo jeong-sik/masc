@@ -340,7 +340,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             attention_fields_json config m
           in
           let runtime_contract =
-            Keeper_runtime_contract.runtime_contract_json ~config m
+            Keeper_runtime_contract.runtime_observability_contract_json ~config m
           in
           let goal_progress =
             Option.value ~default:`Null (Json_util.assoc_member_opt "goal_progress" runtime_contract)

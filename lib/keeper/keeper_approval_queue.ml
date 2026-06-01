@@ -145,6 +145,7 @@ let audit_approval_event
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?sandbox_target
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -175,6 +176,7 @@ let audit_approval_event
          ; "goal_id", Json_util.string_opt_to_json goal_id
          ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
          ; "selected_model", `Null
+         ; "sandbox_target", Json_util.string_opt_to_json sandbox_target
          ; "disposition", Json_util.string_opt_to_json disposition
          ; "disposition_reason", Json_util.string_opt_to_json disposition_reason
          ]
@@ -326,6 +328,9 @@ let create_entry
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -337,13 +342,23 @@ let create_entry
   =
   let action_key = action_key_of_input ~tool_name ~input in
   let input_hash = normalized_input_hash input in
-  let sandbox_target = sandbox_target_of_runtime_contract runtime_contract in
+  let sandbox_target =
+    match nonempty_string_opt sandbox_target with
+    | Some target -> target
+    | None -> sandbox_target_of_runtime_contract runtime_contract
+  in
+  let sandbox_profile =
+    sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract
+  in
+  let backend = backend_of_runtime_context ?backend runtime_contract in
   { id
   ; keeper_name
   ; tool_name
   ; action_key
   ; input_hash
   ; sandbox_target
+  ; sandbox_profile
+  ; backend
   ; input
   ; risk_level
   ; requested_at = Unix.gettimeofday ()
@@ -450,6 +465,7 @@ let record_pending (entry : pending_approval) =
     ?task_id:entry.task_id
     ?goal_id:entry.goal_id
     ~goal_ids:entry.goal_ids
+    ~sandbox_target:entry.sandbox_target
     ?runtime_contract:entry.runtime_contract
     ?selected_model:entry.selected_model
     ?disposition:entry.disposition
@@ -477,6 +493,7 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
     ?task_id:entry.task_id
     ?goal_id:entry.goal_id
     ~goal_ids:entry.goal_ids
+    ~sandbox_target:entry.sandbox_target
     ?runtime_contract:entry.runtime_contract
     ?selected_model:entry.selected_model
     ?disposition:entry.disposition
@@ -612,6 +629,9 @@ let submit_and_await
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -634,6 +654,9 @@ let submit_and_await
       ?task_id
       ?goal_id
       ~goal_ids
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -681,6 +704,7 @@ let submit_and_await
            ?task_id
            ?goal_id
            ~goal_ids
+           ~sandbox_target:entry.sandbox_target
            ?runtime_contract
            ?selected_model
            ~decision:(Approval_expired reason)
@@ -707,6 +731,7 @@ let submit_and_await
            ?task_id
            ?goal_id
            ~goal_ids
+           ~sandbox_target:entry.sandbox_target
            ?runtime_contract
            ?selected_model
            ?disposition
@@ -726,6 +751,9 @@ let submit_pending
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -736,7 +764,11 @@ let submit_pending
   =
   let action_key = action_key_of_input ~tool_name ~input in
   let input_hash = normalized_input_hash input in
-  let sandbox_target = sandbox_target_of_runtime_contract runtime_contract in
+  let sandbox_target =
+    match nonempty_string_opt sandbox_target with
+    | Some target -> target
+    | None -> sandbox_target_of_runtime_contract runtime_contract
+  in
   let rec submit () =
     let map = Atomic.get pending in
     match
@@ -764,6 +796,9 @@ let submit_pending
           ?task_id
           ?goal_id
           ~goal_ids
+          ~sandbox_target
+          ?sandbox_profile
+          ?backend
           ?runtime_contract
           ?selected_model
           ?disposition
@@ -811,6 +846,8 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
           ~tool_name:entry.tool_name
           ~input:entry.input
           ~risk_level:entry.risk_level
+          ?sandbox_profile:entry.sandbox_profile
+          ?backend:entry.backend
           ?runtime_contract:entry.runtime_contract
           ?created_by
           ~source_approval_id:entry.id
@@ -1004,6 +1041,7 @@ let expire_stale ~max_wait_s =
          ?task_id:entry.task_id
          ?goal_id:entry.goal_id
          ~goal_ids:entry.goal_ids
+         ~sandbox_target:entry.sandbox_target
          ?runtime_contract:entry.runtime_contract
          ?selected_model:entry.selected_model
          ?disposition:entry.disposition

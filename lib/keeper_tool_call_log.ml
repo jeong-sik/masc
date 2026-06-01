@@ -687,7 +687,7 @@ let log_call
         semantic_outcome_of_output ~success safe_output
       in
       let runtime_contract =
-        Keeper_runtime_contract.runtime_contract_json_from_fields
+        Keeper_runtime_contract.runtime_observability_contract_json_from_fields
           ~keeper_name
           ?agent_name
           ?trace_id

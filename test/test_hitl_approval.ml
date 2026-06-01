@@ -49,6 +49,10 @@ let contains_substring s needle =
   in
   n_len = 0 || loop 0
 
+let has_assoc_key key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
+
 let rec yield_until ?(attempts = 50) predicate =
   if predicate () || attempts <= 0 then ()
   else (
@@ -749,6 +753,57 @@ let test_approval_queue_get_pending_detail () =
   Alcotest.(check int) "entry removed"
     initial_count (AQ.pending_count ())
 
+let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
+  let runtime_contract =
+    Masc_mcp.Keeper_runtime_contract.runtime_contract_json_from_fields
+      ~keeper_name:"redacted-contract-keeper"
+      ~sandbox_profile:"docker"
+      ~network_mode:"none"
+      ()
+  in
+  Alcotest.(check bool)
+    "keeper-visible runtime_contract has no backend"
+    false
+    (has_assoc_key "backend" runtime_contract);
+  Alcotest.(check bool)
+    "keeper-visible runtime_contract has no sandbox_profile"
+    false
+    (has_assoc_key "sandbox_profile" runtime_contract);
+  let id =
+    AQ.submit_pending
+      ~keeper_name:"redacted-contract-keeper"
+      ~tool_name:"tool_execute"
+      ~input:(`Assoc [ ("cmd", `String "git status") ])
+      ~risk_level:AQ.Medium
+      ~sandbox_target:"docker"
+      ~sandbox_profile:"docker"
+      ~backend:"docker"
+      ~runtime_contract
+      ~on_resolution:(fun _ -> ())
+      ()
+  in
+  let open Yojson.Safe.Util in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore (AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "cleanup")))
+    (fun () ->
+      let detail =
+        match AQ.get_pending_json ~id with
+        | Some json -> json
+        | None -> Alcotest.fail "expected pending approval detail"
+      in
+      Alcotest.(check string) "operator sandbox target" "docker"
+        (detail |> member "sandbox_target" |> to_string);
+      let detail_contract = detail |> member "runtime_contract" in
+      Alcotest.(check bool)
+        "detail runtime_contract keeps backend redacted"
+        false
+        (has_assoc_key "backend" detail_contract);
+      Alcotest.(check bool)
+        "detail runtime_contract keeps sandbox_profile redacted"
+        false
+        (has_assoc_key "sandbox_profile" detail_contract))
+
 let test_approval_get_dispatch_success () =
   let initial_count = AQ.pending_count () in
   let callback_result = ref None in
@@ -1443,6 +1498,8 @@ let () =
         test_background_pending_distinct_inputs_do_not_reuse_entry;
       Alcotest.test_case "get pending detail includes full input" `Quick
         test_approval_queue_get_pending_detail;
+      Alcotest.test_case "runtime_contract redacts sandbox backend" `Quick
+        test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract;
       Alcotest.test_case "dispatch approval_get success" `Quick
         test_approval_get_dispatch_success;
       Alcotest.test_case "dispatch approval_get missing id" `Quick

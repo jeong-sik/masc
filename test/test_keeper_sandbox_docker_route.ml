@@ -160,32 +160,57 @@ let docker_image_available image =
   in
   Sys.command cmd = 0
 
-let make_meta ?(tool_access = []) ~name ~sandbox () =
+let make_meta ?tool_access ~name ~sandbox () =
+  let fields =
+    [
+      ("name", `String name);
+      ("agent_name", `String ("agent-" ^ name));
+      ("trace_id", `String ("trace-" ^ name));
+      ("goal", `String "shell docker route test");
+      ("allowed_paths", `List [ `String "*" ]);
+      ( "sandbox_profile",
+        `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
+    ]
+  in
+  let fields =
+    match tool_access with
+    | None -> fields
+    | Some tool_access ->
+      fields
+      @ [ ( "tool_access",
+            Keeper_meta_tool_access.tool_access_to_json tool_access ) ]
+  in
   let json =
-    `Assoc
-      ([
-         ("name", `String name);
-         ("agent_name", `String ("agent-" ^ name));
-         ("trace_id", `String ("trace-" ^ name));
-         ("goal", `String "shell docker route test");
-         ("allowed_paths", `List [ `String "*" ]);
-         ( "sandbox_profile",
-           `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
-         ( "tool_access",
-           Keeper_meta_tool_access.tool_access_to_json tool_access );
-       ]
-      )
+    `Assoc fields
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error e -> Alcotest.fail e
+
+let test_make_meta_tool_access_matches_production_default () =
+  let meta =
+    make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker ()
+  in
+  Alcotest.(check (list string))
+    "missing tool_access uses production default"
+    (Keeper_meta_tool_access.default_tool_access_of_meta_json ())
+    meta.tool_access;
+  let explicit_empty =
+    make_meta ~name:"no-tools" ~sandbox:Keeper_types_profile_sandbox.Docker
+      ~tool_access:[]
+      ()
+  in
+  Alcotest.(check (list string))
+    "explicit empty tool_access remains empty"
+    []
+    explicit_empty.tool_access
 
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   f ()
 
-let setup ~sandbox f =
+let setup ?tool_access ~sandbox f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
@@ -196,7 +221,7 @@ let setup ~sandbox f =
   let config = Workspace.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_meta ~name:"minjae" ~sandbox () in
+  let meta = make_meta ?tool_access ~name:"minjae" ~sandbox () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   f ~config ~meta ~playground
@@ -780,7 +805,7 @@ let check_typed_validation_error needle raw =
     (response_mentions raw "error" needle)
 
 let test_execute_typed_env_wrapper_target_rejected () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
@@ -1168,7 +1193,7 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
 let test_execute_git_push_requires_write_preset_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   ensure_repo_cli_identity_bundle ~config Masc_mcp.Repo_cli_credentials.root_repo_cli_identity;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -2221,6 +2246,9 @@ let () =
     [
       ( "docker_route_fires",
         [
+          Alcotest.test_case
+            "fixture meta defaults to production tool access"
+            `Quick test_make_meta_tool_access_matches_production_default;
           Alcotest.test_case
             "docker tool execute ops route through docker"
             `Quick test_readonly_ops_route_through_docker;

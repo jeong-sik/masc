@@ -169,11 +169,11 @@
         <div class="card">
           <h3>Model Runtime</h3>
           <p><span class="badge bad">NOT VERIFIED</span></p>
-          <p>Model metrics are volatile and currently expose no verified provider/model rows (`total_entries=0`, `models=[]`). MASC가 실제 provider/model 실행을 keeper boundary에서 검증했다고 말할 수 없다.</p>
+          <p>Model metrics are volatile and currently expose runtime lanes, but provider identity is still null (`total_entries=216`, `model_count=2`, provider `null`, coverage `partial`/`none`). MASC가 실제 provider/model 실행을 keeper boundary에서 검증했다고 말할 수 없다.</p>
         </div>
       </div>
       <p><strong>최종 판정:</strong> 운영은 살아 있고 commit truth는 회복됐지만, live config schema가 `keeper.git_identity_mode` unknown-key로 blocked라 아직 green이 아니다. 이 문서의 현재 PR slice는 그 schema blocker를 canonical TOML field로 수용하는 것이다.</p>
-      <p class="small">Generated: 2026-06-01 21:46 KST. Source branch head: `1a12abafae`; live root/main/runtime: `7156fa2eef`. The PR branch is not live until merge/rebuild/restart.</p>
+      <p class="small">Generated: 2026-06-01 22:11 KST. Source branch head: `b7e1aaceab`; live root/main/runtime: `7156fa2eef`. The PR branch is not live until merge/rebuild/restart.</p>
     </div>
 
     <div class="section">
@@ -189,12 +189,12 @@
         <tbody>
           <tr>
             <td>`/health?full=1`</td>
-            <td>`keeper_fibers=7`, fleet `degraded`, blocker `reaction_capacity_below_target`, `no_executable_keeper_fibers=false`, config schema `blocked`, parse errors `0`, unknown keys `16` all `keeper.git_identity_mode`.</td>
+            <td>`keeper_fibers=4`, fleet `degraded`, blocker `reaction_capacity_below_target`, `no_executable_keeper_fibers=false`, config schema `blocked`, parse errors `0`, unknown keys `16` all `keeper.git_identity_mode`.</td>
             <td>Fleet boot는 살아 있지만 paused autoboot keepers 5개 때문에 reaction capacity가 target보다 5 부족하다. Schema gate는 별도로 live config를 막고 있다. Operator next action은 `remove_unknown_keeper_toml_keys`로 나오지만, docs already declare the key canonical, so parser/schema support is the right fix.</td>
           </tr>
           <tr>
             <td>Runtime/source commits</td>
-            <td>Root checkout, `origin/main`, and live runtime all report `7156fa2eef` from `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/_build/default/bin/main_eio.exe`.</td>
+            <td>Root checkout, `origin/main`, and live runtime all report `7156fa2eef` from repo-relative `_build/default/bin/main_eio.exe`.</td>
             <td>Commit truth is stable for current main. This PR branch is not live yet; acceptance still requires merge/rebuild/restart.</td>
           </tr>
           <tr>
@@ -497,8 +497,8 @@
 
 	    <div class="section">
 	      <h2>Acceptance Checks</h2>
-      <pre>git -C /Users/dancer/me/workspace/yousleepwhen/masc-mcp fetch origin main
-git -C /Users/dancer/me/workspace/yousleepwhen/masc-mcp status --short --branch
+      <pre>git -C &lt;masc-mcp-repo&gt; fetch origin main
+	git -C &lt;masc-mcp-repo&gt; status --short --branch
 curl -fsS 'http://127.0.0.1:8935/health?full=1' | jq '{build, keeper_fibers, keeper_fleet_safety, keeper_config_schema_status}'
 masc_keeper_sandbox_status(name="analyst", include_preflight=true)
 masc_keeper_status(name="analyst", fast=true)

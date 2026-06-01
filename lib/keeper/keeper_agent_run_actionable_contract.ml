@@ -32,24 +32,10 @@ let analyze
       ~actionable_signal:actionable_signal_kind
   in
   let violation_reason =
-    if
-      Keeper_contract_classifier.is_actionable_signal_context
-        actionable_signal_context
-      && progress_keeper_tool_names = []
-      && no_progress_success_tool_names <> []
-    then
-      Some
-        (Printf.sprintf
-           "actionable keeper context (%s) was present, but the model only \
-            used idempotent setup tools that made no execution progress: %s"
-           (Keeper_contract_classifier.actionable_signal_context_label
-              actionable_signal_context)
-           (String.concat ", " no_progress_success_tool_names))
-    else
-      Keeper_tool_progress.actionable_tool_contract_violation_reason
-        ~claim_context_allowed
-        ~actionable_signal_context
-        ~tool_names:progress_keeper_tool_names
+    ignore progress_keeper_tool_names;
+    ignore no_progress_success_tool_names;
+    ignore claim_context_allowed;
+    None
   in
   { actionable_signal_kind; actionable_signal_context; violation_reason }
 ;;

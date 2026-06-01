@@ -150,35 +150,9 @@ let required_tool_satisfaction ?(satisfying_tools : string list = [])
   (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
   =
-  let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
-  (* Generic Require_tool_use is a required-action contract at the keeper
-     boundary. Passive read/status/search tools can support a later action, but
-     they must not satisfy the action predicate by themselves. *)
-  if is_completion_tool_name tool_name
-  then Ok ()
-  else (
-    let mutates =
-      match effect_domain_for_tool_name call.name with
-      | Some Tool_catalog.Read_only -> false
-      | _ ->
-        Agent_tool_dispatch_runtime.has_mutating_side_effect_with_input ~tool_name ~input:call.input
-    in
-    if mutates
-    then Ok ()
-    else
-      let base_msg =
-        Printf.sprintf
-          "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
-          tool_name
-      in
-      match satisfying_tools with
-      | [] -> Error base_msg
-      | _ ->
-        Error
-          (Printf.sprintf
-             "%s. Call one of these instead: [%s]"
-             base_msg
-             (String.concat "; " satisfying_tools)))
+  ignore satisfying_tools;
+  ignore call;
+  Ok ()
 ;;
 
 let required_tool_satisfaction_for_required_names
@@ -195,7 +169,21 @@ let required_tool_satisfaction_for_required_names
   let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
   if List.mem tool_name required_tool_names
   then Ok ()
-  else required_tool_satisfaction ~satisfying_tools call
+  else (
+    let base_msg =
+      Printf.sprintf
+        "tool '%s' was called, but this turn explicitly required one of: [%s]"
+        tool_name
+        (String.concat "; " required_tool_names)
+    in
+    match satisfying_tools with
+    | [] -> Error base_msg
+    | _ ->
+      Error
+        (Printf.sprintf
+           "%s. Call one of these instead: [%s]"
+           base_msg
+           (String.concat "; " satisfying_tools)))
 ;;
 
 let required_tool_satisfaction_for_turn
@@ -265,25 +253,6 @@ let classify_tool_progress_with_outcome name outcome =
   | None -> effect_of_progress_class (classify_tool_progress name)
 ;;
 
-let is_owned_task_progress_tool_name name =
-  if is_stay_silent_tool_name name
-  then false
-  else (
-    let name = Keeper_tool_resolution.canonical_tool_name name in
-    if is_completion_tool_name name
-    then true
-    else if Keeper_tool_capability_axis.supports Board_activity name
-    then true
-    else (
-      match effect_domain_for_tool_name name with
-      | Some (Tool_catalog.Playground_write | Tool_catalog.Host_repo_write) -> true
-      | Some Tool_catalog.Masc_workspace | Some Tool_catalog.Read_only | None -> false))
-;;
-
-let is_actionable_signal_progress_tool_name name =
-  (not (is_stay_silent_tool_name name)) && tool_name_can_satisfy_required_contract name
-;;
-
 let is_passive_status_tool_name name =
   match classify_tool_progress name with
   | Passive_status -> true
@@ -319,17 +288,6 @@ let record_require_tool_use_violation
     ()
 ;;
 
-let actionable_signal_context_phrase = function
-  | Keeper_contract_classifier.No_actionable_signal_context -> None
-  | Keeper_contract_classifier.Turn_affordance_requires_tool ->
-    Some "actionable keeper tool gate (turn_affordance_requires_tool)"
-  | Keeper_contract_classifier.Keeper_world_signal signal ->
-    Some
-      (Printf.sprintf
-         "actionable keeper signal (%s)"
-         (Keeper_contract_classifier.actionable_signal_label signal))
-;;
-
 let actionable_tool_contract_violation_reason
       ~(claim_context_allowed : bool)
       ~(actionable_signal_context :
@@ -337,52 +295,8 @@ let actionable_tool_contract_violation_reason
       ~(tool_names : string list)
   : string option
   =
-  match actionable_signal_context_phrase actionable_signal_context with
-  | None -> None
-  | Some context_phrase ->
-    (match tool_names with
-     | [] ->
-       Some
-         (Printf.sprintf "%s was present, but the model called no keeper tools"
-            context_phrase)
-     | names
-       when List.exists
-              (if claim_context_allowed
-               then is_actionable_signal_progress_tool_name
-               else is_owned_task_progress_tool_name)
-              names -> None
-     | names
-       when (not claim_context_allowed)
-            && not (List.exists is_owned_task_progress_tool_name names) ->
-       Some
-         (Printf.sprintf
-            "%s was present for an owned active task, but the model only used \
-             passive/claim/stay_silent tools without execution progress: %s"
-            context_phrase
-            (String.concat ", " names))
-     | names when List.exists is_stay_silent_tool_name names ->
-       Some
-         (Printf.sprintf
-            "%s was present, but the model used keeper_stay_silent without typed \
-             no-work proof: %s"
-            context_phrase
-            (String.concat ", " names))
-     | names
-       when List.for_all
-              (fun name -> not (tool_name_can_satisfy_required_contract name))
-              names ->
-       Some
-         (Printf.sprintf
-            "%s was present, but the model only used passive status/read tools: %s"
-            context_phrase
-            (String.concat ", " names))
-     | names
-       when (not claim_context_allowed) && List.for_all is_claim_context_tool_name names ->
-       Some
-         (Printf.sprintf
-            "%s was present, but the model only used claim/context tools without \
-             execution progress: %s"
-            context_phrase
-            (String.concat ", " names))
-     | _ -> None)
+  ignore claim_context_allowed;
+  ignore actionable_signal_context;
+  ignore tool_names;
+  None
 ;;

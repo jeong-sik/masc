@@ -152,9 +152,7 @@ val turn_affordances_require_tool_gate : string list -> bool
 val tools_for_gated_affordance : turn_affordance -> string list
 
 (** Compute the satisfying tools for a set of turn affordances,
-    intersected with [allowed_tool_names] and deduplicated.
-    Used to provide actionable alternatives in required-tool contract
-    violation messages. *)
+    intersected with [allowed_tool_names] and deduplicated. *)
 val satisfying_tools_for_turn :
   turn_affordances:string list -> allowed_tool_names:string list -> string list
 
@@ -164,9 +162,9 @@ val preferred_tool_names_for_turn_affordances : string list -> string list
 
 (** Like [turn_affordances_require_tool_gate] but only fires when at
     least one of the gating affordance's tools is in
-    [allowed_tool_names] and can satisfy the required-tool contract.
-    Passive read/status tools may still be visible, but they cannot be
-    the sole reason to force [Require_tool_use]. *)
+    [allowed_tool_names] and can act on the signal. Generic actionable
+    signals no longer force [Require_tool_use]; this remains for surface
+    telemetry and explicit tool-choice callers. *)
 val turn_affordances_require_tool_gate_with_allowed :
      ?record_suppression_metric:bool
   -> allowed_tool_names:string list

@@ -18,22 +18,22 @@ let satisfies_explicit_required_tool ~required_tool_names name input =
        (required_tool_call name input))
 ;;
 
-let test_required_tool_satisfaction_rejects_passive_tools () =
-  check bool "global masc_status remains passive" false
+let test_required_tool_satisfaction_accepts_passive_tools () =
+  check bool "global masc_status satisfies generic presence" true
     (satisfies_required_tool "masc_status" (`Assoc []));
-  check bool "keeper_tasks_list cannot satisfy required-action contract" false
+  check bool "keeper_tasks_list satisfies generic presence" true
     (satisfies_required_tool "keeper_tasks_list" (`Assoc []));
-  check bool "keeper_context_status cannot satisfy required-action contract" false
+  check bool "keeper_context_status satisfies generic presence" true
     (satisfies_required_tool "keeper_context_status" (`Assoc []));
-  check bool "keeper_memory_search cannot satisfy required-action contract" false
+  check bool "keeper_memory_search satisfies generic presence" true
     (satisfies_required_tool "keeper_memory_search" (`Assoc []));
-  check bool "keeper_tool_search cannot satisfy required-action contract" false
+  check bool "keeper_tool_search satisfies generic presence" true
     (satisfies_required_tool "keeper_tool_search" (`Assoc []));
-  check bool "keeper_board_get cannot satisfy required-action contract" false
+  check bool "keeper_board_get satisfies generic presence" true
     (satisfies_required_tool "keeper_board_get" (`Assoc []));
-  check bool "keeper_board_list cannot satisfy required-action contract" false
+  check bool "keeper_board_list satisfies generic presence" true
     (satisfies_required_tool "keeper_board_list" (`Assoc []));
-  check bool "keeper_time_now cannot satisfy required-action contract" false
+  check bool "keeper_time_now satisfies generic presence" true
     (satisfies_required_tool "keeper_time_now" (`Assoc []));
   check bool "keeper_memory_search remains passive progress" true
     (KTP.is_passive_status_tool_name "keeper_memory_search");
@@ -41,13 +41,13 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (KTP.is_execution_progress_tool_name "keeper_memory_search");
   check bool "keeper_stay_silent satisfies as completion" true
     (satisfies_required_tool "keeper_stay_silent" (`Assoc []));
-  check bool "Read alias cannot satisfy required-action contract" false
+  check bool "Read alias satisfies generic presence" true
     (satisfies_required_tool "Read" (`Assoc []));
-  check bool "Grep alias cannot satisfy required-action contract" false
+  check bool "Grep alias satisfies generic presence" true
     (satisfies_required_tool "Grep" (`Assoc []));
-  check bool "mcp-prefixed Grep remains passive" false
+  check bool "mcp-prefixed Grep satisfies generic presence" true
     (satisfies_required_tool "mcp__masc__Grep" (`Assoc []));
-  check bool "WebSearch alias cannot satisfy required-action contract" false
+  check bool "WebSearch alias satisfies generic presence" true
     (satisfies_required_tool "WebSearch" (`Assoc []));
   check bool "Read alias remains passive progress" true
     (KTP.is_passive_status_tool_name "Read");
@@ -55,7 +55,7 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (KTP.is_passive_status_tool_name "Grep");
   check bool "WebSearch alias remains passive progress" true
     (KTP.is_passive_status_tool_name "WebSearch");
-  check bool "tool_search_files gh op does not satisfy required-action contract" false
+  check bool "tool_search_files gh op satisfies generic presence" true
     (satisfies_required_tool
        "tool_search_files"
        (`Assoc [ "op", `String "gh"; "cmd", `String "pr view 123" ]))
@@ -87,7 +87,7 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
 ;;
 
 let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
-  check bool "generic masc_web_search remains passive" false
+  check bool "generic masc_web_search satisfies presence" true
     (satisfies_required_tool "masc_web_search" (`Assoc []));
   check bool "explicit masc_web_search satisfies required contract" true
     (satisfies_explicit_required_tool
@@ -107,10 +107,10 @@ let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
 ;;
 
 let test_turn_required_tool_satisfaction_keeps_generic_presence_separate () =
-  check bool "generic required-action predicate still rejects passive board read" false
+  check bool "generic required-action predicate accepts passive board read" true
     (satisfies_required_tool "keeper_board_get" (`Assoc []));
   check bool
-    "turn-level generic gate accepts passive tool presence for post-run classification" true
+    "turn-level generic gate accepts passive tool presence" true
     (Result.is_ok
        (KTP.required_tool_satisfaction_for_turn
           ~required_tool_names:[]
@@ -128,21 +128,14 @@ let test_turn_required_tool_satisfaction_keeps_generic_presence_separate () =
 ;;
 
 let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
-  let base_error =
-    KTP.required_tool_satisfaction (required_tool_call "masc_status" (`Assoc []))
-  in
-  check string "base rejection has no suggestion suffix"
-    "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool contract"
-    (Result.get_error base_error);
-  let hinted_error =
-    KTP.required_tool_satisfaction
-      ~satisfying_tools:[ "keeper_board_post"; "keeper_board_comment" ]
-      (required_tool_call "masc_status" (`Assoc []))
-  in
-  check string "hinted rejection includes satisfying tools"
-    "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool \
-     contract. Call one of these instead: [keeper_board_post; keeper_board_comment]"
-    (Result.get_error hinted_error);
+  check bool "base generic presence succeeds" true
+    (Result.is_ok
+       (KTP.required_tool_satisfaction (required_tool_call "masc_status" (`Assoc []))));
+  check bool "hinted generic presence still succeeds" true
+    (Result.is_ok
+       (KTP.required_tool_satisfaction
+          ~satisfying_tools:[ "keeper_board_post"; "keeper_board_comment" ]
+          (required_tool_call "masc_status" (`Assoc []))));
   check bool "mutating tool still satisfies regardless of satisfying_tools" true
     (Result.is_ok
        (KTP.required_tool_satisfaction
@@ -154,10 +147,7 @@ let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
       ~satisfying_tools:[]
       (required_tool_call "keeper_tasks_list" (`Assoc []))
   in
-  check string "empty satisfying_tools uses base message"
-    "tool 'keeper_tasks_list' is read-only/passive and cannot satisfy a required-tool \
-     contract"
-    (Result.get_error empty_hint_error);
+  check bool "empty hint generic presence succeeds" true (Result.is_ok empty_hint_error);
   let turn_hinted =
     KTP.required_tool_satisfaction_for_turn
       ~satisfying_tools:[ "keeper_task_claim" ]
@@ -165,8 +155,8 @@ let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
       (required_tool_call "masc_status" (`Assoc []))
   in
   check string "turn-level rejection forwards satisfying_tools hint"
-    "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool \
-     contract. Call one of these instead: [keeper_task_claim]"
+    "tool 'masc_status' was called, but this turn explicitly required one of: \
+     [tool_execute]. Call one of these instead: [keeper_task_claim]"
     (Result.get_error turn_hinted)
 ;;
 
@@ -230,7 +220,7 @@ let () =
       , [ test_case
             "required tool predicate handles passive tools"
             `Quick
-            test_required_tool_satisfaction_rejects_passive_tools
+            test_required_tool_satisfaction_accepts_passive_tools
         ; test_case
             "required tool predicate accepts mutating tools"
             `Quick

@@ -16,19 +16,6 @@ let no_actionable_context =
     ~actionable_signal:KCC.No_actionable_signal
 ;;
 
-let contains_substring haystack needle =
-  let hay_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop i =
-    if i + needle_len > hay_len
-    then false
-    else if String.sub haystack i needle_len = needle
-    then true
-    else loop (i + 1)
-  in
-  needle_len = 0 || loop 0
-;;
-
 let test_claim_tool_classification_covers_supported_claim_tools () =
   check
     bool
@@ -149,19 +136,14 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_board_comment" ]);
-  (match
-     KTP.actionable_tool_contract_violation_reason
+  check
+    (option string)
+    "owned task board-only turn no longer violates contract"
+    None
+    (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]
-   with
-   | Some reason ->
-     check
-       bool
-       "owned task board-only turn requires execution progress"
-       true
-       (contains_substring reason "without execution progress")
-   | None -> fail "expected owned task board-only turn to violate contract");
+       ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]);
   check
     (option string)
     "worktree creation satisfies owned task progress"
@@ -199,19 +181,14 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     "completion tool set includes stay_silent"
     true
     (KTP.is_completion_tool_name "keeper_stay_silent");
-  (match
-     KTP.actionable_tool_contract_violation_reason
+  check
+    (option string)
+    "stay_silent actionable turn no longer violates"
+    None
+    (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]
-   with
-   | Some reason ->
-     check
-       bool
-       "reason mentions typed no-work proof"
-       true
-       (contains_substring reason "typed no-work proof")
-   | None -> fail "expected stay_silent actionable violation");
+       ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]);
   check
     (option string)
     "execution plus stay_silent remains accepted"
@@ -237,14 +214,13 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
        ~actionable_signal_context:no_actionable_context
        ~tool_names:[ "keeper_stay_silent" ]);
   check
-    bool
-    "passive-only still violates"
-    true
-    (Option.is_some
+    (option string)
+    "passive-only no longer violates"
+    None
        (KTP.actionable_tool_contract_violation_reason
           ~claim_context_allowed:true
           ~actionable_signal_context:unclaimed_task_context
-          ~tool_names:[ "keeper_tasks_list"; "masc_status" ]))
+          ~tool_names:[ "keeper_tasks_list"; "masc_status" ])
 ;;
 
 let () =

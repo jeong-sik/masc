@@ -17,31 +17,6 @@ let inc_contract_violation ~keeper_name ~kind ~signal =
     ()
 ;;
 
-let record_passive
-      ~keeper_name
-      ~has_current_task
-      ~contract_status
-      ~actionable_signal_kind
-      ~turns
-      ~actual_keeper_tool_names
-      ~reason
-  =
-  record_require_tool_use_violation
-    ~keeper_name
-    ~has_current_task
-    ~contract_status;
-  let signal_label = signal_label actionable_signal_kind in
-  Log.Keeper.error
-    "keeper:%s required tool contract violated (turn=%d, tools=%d, signal=%s). \
-     Rejecting no-op/passive actionable turn. Reason: %s"
-    keeper_name
-    turns
-    (List.length actual_keeper_tool_names)
-    signal_label
-    reason;
-  inc_contract_violation ~keeper_name ~kind:"passive" ~signal:signal_label
-;;
-
 let completion_contract_to_string = function
   | Keeper_tool_completion_contract.Allow_text_or_tool -> "Allow_text_or_tool"
   | Keeper_tool_completion_contract.Require_tool_use -> "Require_tool_use"

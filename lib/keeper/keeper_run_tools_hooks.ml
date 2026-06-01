@@ -521,25 +521,11 @@ let assemble_hooks
                       (preferred_tool_choice_for_required_tool_names
                          ~required_tool_names:computed_surface.required_tool_names
                          ~allowed_tool_names:turn_visible_tool_names)
-                  else if
-                    (not computed_surface.is_last_turn)
-                    && computed_surface.tool_gate_requested
-                    && turn_visible_tool_names <> []
-                  then
-                    Some
-                      (preferred_tool_choice_for_required_turn
-                         ~has_current_task:(keeper_has_owned_active_task ())
-                         ~turn_affordances
-                         ~allowed_tool_names:turn_visible_tool_names)
                   else clear_inherited_strict_tool_choice current_params.tool_choice
                 in
                 let turn_completion_contract =
-                  match computed_surface.tool_gate_requested, tool_choice with
-                  | true, Some Agent_sdk.Types.Auto ->
-                    Keeper_tool_completion_contract.completion_contract_of_tool_choice tool_choice
-                  | true, _ -> Keeper_tool_completion_contract.Require_tool_use
-                  | false, _ ->
-                    Keeper_tool_completion_contract.completion_contract_of_tool_choice tool_choice
+                  Keeper_tool_completion_contract.completion_contract_of_tool_choice
+                    tool_choice
                 in
                 acc.completion_contract <- turn_completion_contract;
                 if turn_completion_contract = Keeper_tool_completion_contract.Require_tool_use

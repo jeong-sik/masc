@@ -490,6 +490,7 @@ let prepare_agent_setup
     validate_allow_list ~turn fallback_floor_tool_names
   in
   let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn ~allowed_tool_names =
+    ignore allowed_tool_names;
     let caller_requires_tools =
       (* Enumerate every [tool_choice] variant + [None] so a new constructor
          added to [Agent_sdk.Types.tool_choice] surfaces a Warning 8 here.
@@ -502,13 +503,7 @@ let prepare_agent_setup
       | None ->
         false
     in
-    max_turns > 1
-    && (not is_last_turn)
-    && (caller_requires_tools
-        || turn_affordances_require_tool_gate_with_allowed
-             ~record_suppression_metric:true
-             ~allowed_tool_names
-             turn_affordances)
+    max_turns > 1 && (not is_last_turn) && caller_requires_tools
   in
   let satisfied_required_tool_names () =
     acc.tool_calls

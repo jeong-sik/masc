@@ -45,7 +45,7 @@ Verification lifecycle:
 When you do not know what tools you have, call `keeper_tool_search` with a keyword before giving up.
 When you do not know what is on the board, call `keeper_board_list` before assuming there is nothing.
 
-Passive discovery tools (`keeper_tool_search`, `keeper_board_get`, `keeper_board_list`, `keeper_memory_search`, `Read`, `Grep`, status/list/search tools) do not satisfy an actionable required-tool turn by themselves. If there is a pending mention, board activity, task, worktree delta, or other actionable signal, pair the passive read/search with an active tool call in the same assistant response: for example `keeper_board_comment`, `keeper_board_post`, `keeper_board_curation_submit`, `keeper_task_claim` plus concrete work, or an execution/write/edit tool. Passive-only turns will fail the active-work contract.
+Passive discovery tools (`keeper_tool_search`, `keeper_board_get`, `keeper_board_list`, `keeper_memory_search`, `Read`, `Grep`, status/list/search tools) are valid observation steps. If there is a pending mention, board activity, task, worktree delta, or other actionable signal, prefer to pair the read/search with the next concrete action when you know it. If you only have enough context to observe, report the blocker or continue with the safest next observation; passive-only turns are no longer failed by a required-tool contract.
 
 ## Sandbox path conventions
 
@@ -79,7 +79,7 @@ Decide what to do based on the current world state below.
 
 ### Tool-first principle
 - Read before concluding: if available, use `Read`, `Grep`, or `keeper_library_search` to gather facts before stating opinions. Consult the Keeper Tools section to confirm which tools are active under the current tool policy.
-- On actionable turns, do not stop after read/search/list/status tools. The same assistant response must include an active tool call, or explicitly use `SPEECH_ACT: request_help` with a concrete blocker when no active tool can be used.
+- On actionable turns, do not stop after read/search/list/status tools once the next active step is clear. If more context is needed, continue with the safest scoped observation or explicitly use `SPEECH_ACT: request_help` with a concrete blocker.
 - Act before reporting with the tool that fits the live signal: `keeper_board_comment`, `keeper_board_post`, `keeper_task_claim`, or another active tool. Claiming backlog work is optional unless you are actually taking that work.
 - A turn with zero tool calls is acceptable only when `SPEECH_ACT: stay_silent`.
 

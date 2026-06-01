@@ -791,9 +791,7 @@ let run_turn
                    let actionable_signal_kind =
                      actionable_contract.actionable_signal_kind
                    in
-                   let actionable_tool_contract_violation_reason =
-                     actionable_contract.violation_reason
-                   in
+                   ignore actionable_contract.violation_reason;
                    let tool_contract_status ()
                        : Keeper_execution_receipt.tool_contract_result =
                      Contract_helpers.observed_tool_contract_status
@@ -813,34 +811,14 @@ let run_turn
                          ~required_tool_use_seen:acc.required_tool_use_seen
                      in
                      match
-                       ( Keeper_tool_completion_contract.validate_completion_contract_presence
-                           ~contract:effective_completion_contract
-                           ~tool_present:acc.keeper_surface_tool_used
-                       , actionable_tool_contract_violation_reason )
+                       Keeper_tool_completion_contract.validate_completion_contract_presence
+                         ~contract:effective_completion_contract
+                         ~tool_present:acc.keeper_surface_tool_used
                      with
-                     | Ok (), Some reason ->
-                       let contract_status
-                           : Keeper_execution_receipt.tool_contract_result =
-                         Contract_helpers.passive_violation_contract_status
-                           ~actual_keeper_tool_names
-                           ~progress_keeper_tool_names
-                           ~fallback:tool_contract_status
-                       in
-                       acc.receipt_tool_contract_result <- contract_status;
-                       Keeper_agent_run_contract_violation_log.record_passive
-                         ~keeper_name:meta.name
-                         ~has_current_task:(keeper_has_owned_active_task ())
-                         ~contract_status
-                         ~actionable_signal_kind
-                         ~turns:result.turns
-                         ~actual_keeper_tool_names
-                         ~reason;
-                       Error
-                         (Contract_helpers.completion_contract_violation_error reason)
-                     | Ok (), None ->
+                     | Ok () ->
                        acc.receipt_tool_contract_result <- tool_contract_status ();
                        Ok (`Provider_text text)
-                     | Error reason, _ ->
+                     | Error reason ->
                        let contract_status
                            : Keeper_execution_receipt.tool_contract_result =
                          Contract_helpers.text_only_violation_contract_status

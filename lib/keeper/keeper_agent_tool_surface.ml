@@ -206,11 +206,9 @@ let turn_affordances_require_tool_gate turn_affordances =
       | None -> false)
     (List.map turn_affordance_of_string turn_affordances)
 
-(* Affordance -> minimum viable tools that can satisfy that affordance.
+(* Affordance -> minimum viable tools that can act on that affordance.
    The list is intentionally narrow ("at least one of these is enough").
-   Keepers without any matching tool cannot satisfy a [Require_tool_use]
-   contract for that affordance and must be allowed to respond with text
-   instead. [Task_claim] is advisory: visible claimable backlog is an intake
+   Generic affordances are advisory: visible claimable backlog is an intake
    opportunity, not proof that this keeper must take new work before responding
    to stronger live signals. *)
 let tools_for_gated_affordance = function
@@ -267,12 +265,10 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
        )
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
-(* Filtered variant of [turn_affordances_require_tool_gate]:  a gated
-   affordance only counts when the keeper actually has a tool that can
-   satisfy it.  Without this filter, narrow tool_access lists (which
-   excludes claim/execution tools) get [Require_tool_use] forced on
-   them whenever the board lists unclaimed tasks, leading to repeated
-   [Failure_run_error] turns the keeper cannot resolve. *)
+(* Filtered variant of [turn_affordances_require_tool_gate]: a gated
+   affordance only counts when the keeper actually has a tool that can act on
+   it. Kept for surface telemetry and explicit tool-choice callers; generic
+   actionable signals no longer force [Require_tool_use]. *)
 let turn_affordances_require_tool_gate_with_allowed
     ?(record_suppression_metric = false)
     ~(allowed_tool_names : string list) turn_affordances : bool =
@@ -461,16 +457,9 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
           && progress_tool_available "keeper_task_done"
   then Agent_sdk.Types.Any
   else if not has_current_task then
-    (* #10008: no active task and no applicable specific claim tool
-       to force.  Fall back to [Auto] instead of [Any] so the model
-       can respond with an honest refusal ("no eligible task to
-       claim", "no matching affordance to exercise") without
-       triggering the [Require_tool_use] contract violation.  The
-       caller ([Keeper_agent_run]) reads [tool_choice = Auto] as
-       "MASC dropped the specific-tool demand" and relaxes the
-       completion contract to [Allow_text_or_tool].  Otherwise the
-       affordance-driven gate would self-contradict — force a tool
-       call when no applicable tool exists. *)
+    (* #10008: no active task and no applicable specific claim tool to force.
+       Fall back to [Auto] so the model can respond with an honest refusal
+       ("no eligible task to claim", "no matching affordance to exercise"). *)
     Agent_sdk.Types.Auto
   else if not executable_progress_tool_available then
     (* Active-task gates are intentionally strict only when at least one

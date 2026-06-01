@@ -2,6 +2,8 @@ type analysis =
   { actionable_signal_kind : Keeper_contract_classifier.actionable_signal
   ; actionable_signal_context : Keeper_contract_classifier.actionable_signal_context
   ; violation_reason : string option
+        (** Deprecated: generic actionable signals no longer produce
+            required-tool contract violations. This remains [None]. *)
   }
 
 val analyze

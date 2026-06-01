@@ -63,17 +63,19 @@ val is_completion_tool_name : string -> bool
     passive keeper observation tools remain [false]. *)
 val tool_name_can_satisfy_required_contract : string -> bool
 
-(** Validate an observed generic [Require_tool_use] call. This accepts mutating
-    tools and completion tools. Keeper-local observation/discovery tools and
-    LLM-native read/search aliases remain passive. *)
+(** Validate an observed generic [Require_tool_use] call.
+
+    Generic keeper required-tool gates are presence-only. Passive/read-only
+    tools must not turn an otherwise useful observation turn into an OAS
+    contract retry. *)
 val required_tool_satisfaction
   :  ?satisfying_tools:string list
   -> Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 
 (** Variant of [required_tool_satisfaction] for an explicit [required_tools]
-    contract. A non-keeper read-only tool can satisfy the turn only when the
-    operator/task contract named that exact tool. *)
+    contract. Explicit task/operator contracts still require one of the named
+    tools, but no longer reject tools because they are read-only/passive. *)
 val required_tool_satisfaction_for_required_names
   :  ?satisfying_tools:string list
   -> required_tool_names:string list
@@ -82,8 +84,7 @@ val required_tool_satisfaction_for_required_names
 
 (** OAS-level satisfaction callback for keeper turns.
 
-    Generic required-tool gates use OAS to enforce tool presence only; MASC
-    classifies passive-only / no-execution-progress calls after the run.
+    Generic required-tool gates use OAS to enforce tool presence only.
     Explicit [required_tool_names] still require the named tool. *)
 val required_tool_satisfaction_for_turn
   :  ?satisfying_tools:string list
@@ -109,9 +110,9 @@ val record_require_tool_use_violation
   -> contract_status:string
   -> unit
 
-(** Build an actionable contract-violation reason describing why the keeper
-    failed [Require_tool_use], or [None] when the actionable signal context does
-    not apply. *)
+(** Deprecated no-op: required-tool active-progress enforcement has been cut.
+    The helper remains temporarily so older telemetry/tests can compile while
+    callers migrate away from contract-violation terminology. *)
 val actionable_tool_contract_violation_reason
   :  claim_context_allowed:bool
   -> actionable_signal_context:Keeper_contract_classifier.actionable_signal_context

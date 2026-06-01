@@ -560,7 +560,31 @@ jobs:
           # See: https://github.com/jeong-sik/masc-mcp/issues/2957
           DUNE_JOBS: 1
         run: |
-          opam exec -- dune build
+          set -euo pipefail
+
+          opam exec -- dune build &
+          build_pid=$!
+
+          (
+            elapsed=0
+            while kill -0 "${build_pid}" 2>/dev/null; do
+              sleep 60
+              elapsed=$((elapsed + 60))
+              if kill -0 "${build_pid}" 2>/dev/null; then
+                echo "[ci-heartbeat] dune build still running (${elapsed}s elapsed)"
+              fi
+            done
+          ) &
+          heartbeat_pid=$!
+
+          set +e
+          wait "${build_pid}"
+          build_status=$?
+          set -e
+
+          kill "${heartbeat_pid}" 2>/dev/null || true
+          wait "${heartbeat_pid}" 2>/dev/null || true
+          exit "${build_status}"
 
       - name: Runtime TOML validity gate
         # RFC-0058 §9: config/keeper_runtime.toml is the authoring SSOT.

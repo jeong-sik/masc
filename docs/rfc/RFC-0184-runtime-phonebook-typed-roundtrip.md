@@ -92,7 +92,7 @@ Interim mitigation (no code change): add an entry to `pr-rfc-check.sh`'s grep th
 
 - **Evidence**: 
   - `lib/runtime/runtime_phonebook_types.ml` lines 17-44 (current hand-rolled `_of_string` / `_to_string` with literal alt-forms)
-  - PR #18837 commit `1e0f96365` body (false-premise documentation) + diff vs main (`chat_completions_v1_http` vs `chat_completions_v1_http`)
+  - PR #18837 commit `1e0f96365` body (false-premise documentation) + diff vs main (`provider_d-http` vs `chat_completions_v1_http`)
   - `git show 57ac702a245:test/test_runtime_phonebook.ml | rg "protocol = "` → all `chat_completions_v1_http` (underscore)
   - `git show origin/main:test/test_runtime_phonebook.ml | rg "protocol = "` → all `chat_completions_v1_http` (underscore)
   - `rg "^protocol\s*=" <MASC_BASE>/.masc/config/keeper_runtime.toml` → all `chat_completions_v1_http` (underscore)

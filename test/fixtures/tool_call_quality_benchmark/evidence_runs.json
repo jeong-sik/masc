@@ -2,7 +2,7 @@
   "runs": [
     {
       "case_id": "read_search_prompt_fingerprint",
-      "provider": "chat-completions-v1",
+      "provider": "chat_completions_v1",
       "model": "model-d-5.4",
       "keeper_profile": "bench-analyst",
       "run_id": "run-chat-completions-v1-analyst-1",
@@ -40,7 +40,7 @@
     },
     {
       "case_id": "read_search_prompt_fingerprint",
-      "provider": "chat-completions-v1",
+      "provider": "chat_completions_v1",
       "model": "model-d-5.4",
       "keeper_profile": "bench-analyst",
       "run_id": "run-chat-completions-v1-analyst-2",
@@ -78,7 +78,7 @@
     },
     {
       "case_id": "read_search_prompt_fingerprint",
-      "provider": "chat-completions-v1",
+      "provider": "chat_completions_v1",
       "model": "model-d-5.4",
       "keeper_profile": "bench-executor",
       "run_id": "run-chat-completions-v1-executor-1",
@@ -124,7 +124,7 @@
     },
     {
       "case_id": "text_only_triage",
-      "provider": "chat-completions-v1",
+      "provider": "chat_completions_v1",
       "model": "model-d-5.4",
       "keeper_profile": "bench-analyst",
       "run_id": "run-chat-completions-v1-text-only-1",
@@ -145,7 +145,7 @@
     },
     {
       "case_id": "recovery_after_failed_read",
-      "provider": "chat-completions-v1",
+      "provider": "chat_completions_v1",
       "model": "model-d-5.4-mini",
       "keeper_profile": "bench-verifier",
       "run_id": "run-chat-completions-v1-verifier-1",
@@ -191,7 +191,7 @@
     },
     {
       "case_id": "recovery_after_failed_read",
-      "provider": "chat-completions-v1",
+      "provider": "chat_completions_v1",
       "model": "model-d-5.4-mini",
       "keeper_profile": "bench-verifier",
       "run_id": "run-chat-completions-v1-verifier-2",

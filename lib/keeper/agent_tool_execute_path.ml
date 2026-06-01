@@ -29,10 +29,12 @@ let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
         let repo_root = Filename.concat repos_root repo_name in
         let worktree_root =
           Filename.concat (Filename.concat repo_root ".worktrees") task_name
+          |> normalize_repo_cwd_path
         in
-        Some (repo_name, repo_root, worktree_root, [ worktree_root ])
+        Some (repo_name, normalize_repo_cwd_path repo_root, worktree_root, [ worktree_root ])
       | repo_name :: _ when Keeper_repo_readiness.safe_repo_component repo_name ->
         let repo_root = Filename.concat repos_root repo_name in
+        let repo_root = normalize_repo_cwd_path repo_root in
         Some (repo_name, repo_root, repo_root, [ repo_root ])
       | _ -> None
 
@@ -96,13 +98,17 @@ let execution_location_json
     | Some [] -> Playground_root, [], None, None, None
     | Some ("repos" :: repo_name :: rest)
       when Keeper_repo_readiness.safe_repo_component repo_name ->
-      let repo_root = Filename.concat (Filename.concat playground "repos") repo_name in
+      let repo_root =
+        Filename.concat (Filename.concat playground "repos") repo_name
+        |> normalize_repo_cwd_path
+      in
       (match rest with
        | [] -> Repo_root, [ "repos"; repo_name ], Some repo_name, Some repo_root, None
        | ".worktrees" :: task_name :: tail
          when Keeper_repo_readiness.safe_repo_component task_name ->
          let worktree_root =
            Filename.concat (Filename.concat repo_root ".worktrees") task_name
+           |> normalize_repo_cwd_path
          in
          let scope =
            match tail with

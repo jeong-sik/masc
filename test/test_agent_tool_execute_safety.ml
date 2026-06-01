@@ -897,6 +897,11 @@ let test_execution_location_classifies_repo_worktree_subpath () =
     "repos/masc-mcp/.worktrees/task-123/lib"
     (loc |> Json.member "relative_cwd" |> Json.to_string);
   Alcotest.(check string)
+    "repo root"
+    (normalize_path_for_containment
+       (Filename.concat playground "repos/masc-mcp"))
+    (loc |> Json.member "repo_root" |> Json.to_string);
+  Alcotest.(check string)
     "worktree root"
     (normalize_path_for_containment
        (Filename.concat playground "repos/masc-mcp/.worktrees/task-123"))

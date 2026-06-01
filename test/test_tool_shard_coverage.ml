@@ -13,13 +13,7 @@ module Tool_shard_types_schemas_execute = Masc_mcp.Tool_shard_types_schemas_exec
 module Types = Masc_domain
 
 let contains text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop index =
-    index + needle_len <= text_len
-    && (String.sub text index needle_len = needle || loop (index + 1))
-  in
-  needle_len = 0 || loop 0
+  Astring.String.is_infix ~affix:needle text
 ;;
 
 let check_contains label needle text =

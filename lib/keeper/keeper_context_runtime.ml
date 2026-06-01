@@ -253,13 +253,27 @@ let dispatch_post_turn_lifecycle_events
     ~keeper_name
     (lifecycle : post_turn_lifecycle) =
   if lifecycle.compaction.attempted then
-    if lifecycle.compaction.applied then
+    if lifecycle.compaction.applied then begin
+      (* The on_compaction_started callback in apply_post_turn_lifecycle
+         dispatches Compaction_started, but is wrapped in Cancel_safe.observe
+         which swallows exceptions.  If the dispatch fails (registry
+         contention, stale entry), the compaction stage stays at
+         accumulating while the save succeeds (applied = true).
+         Without this guard, Compaction_completed would attempt the
+         forbidden accumulating -> done transition.
+         Compaction_started is idempotent from compacting state, so
+         dispatching it here is safe even if the callback succeeded. *)
+      dispatch_keeper_phase_event ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
+        Keeper_state_machine.Compaction_started;
       dispatch_compaction_completed
         ~config
         ~origin:Keeper_registry.Post_turn_lifecycle
         ~keeper_name
         ~before_tokens:lifecycle.compaction.before_tokens
         ~after_tokens:lifecycle.compaction.after_tokens
+    end
     else
       dispatch_keeper_phase_event
         ~config

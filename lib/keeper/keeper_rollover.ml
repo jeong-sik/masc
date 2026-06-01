@@ -250,11 +250,15 @@ let maybe_rollover_oas_handoff
            single fleet-wide invariant: any lifecycle callback that
            can't reach the registry must surface as a counter+warn and
            durable telemetry gap, never silently abort the rollover. *)
-        (try on_started ()
-         with
-         | exn ->
-             Keeper_callback_failure.record ~base_dir ~meta:base_meta
-               ~callback:"on_handoff_started" exn);
+        let () =
+          Cancel_safe.observe
+            ~on_exn:(fun exn ->
+              Prometheus.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+                ~labels:[ ("keeper", base_meta.name); ("callback", "on_handoff_started") ] ();
+              Keeper_callback_failure.record ~base_dir ~meta:base_meta
+                ~callback:"on_handoff_started" exn)
+            on_started
+        in
         (try
           let new_session =
             create_session ~session_id:new_trace_id ~base_dir

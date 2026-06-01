@@ -102,10 +102,8 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
-          ("runtime_id", `String (Masc_mcp.Keeper_config.default_runtime_id ()));
           ("last_model_used", `String "llama:auto");
-          ("sandbox_profile", `String "local");
-          ("network_mode", `String "inherit");
+          ("tool_access", `List []);
         ])
   with
   | Ok meta -> meta

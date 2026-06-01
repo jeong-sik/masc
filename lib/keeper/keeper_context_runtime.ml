@@ -263,11 +263,20 @@ let dispatch_post_turn_lifecycle_events
          and we must dispatch Compaction_started first.  The Started
          dispatch is idempotent from compacting, so this is safe in
          both cases. *)
-      if not lifecycle.compaction.started_dispatched then
+      if not lifecycle.compaction.started_dispatched then begin
+        Prometheus.inc_counter Keeper_metrics.(to_string CompactionCallbackRecoveries)
+          ~labels:[ ("keeper", keeper_name) ] ();
+        Log.Keeper.warn
+          "%s: on_compaction_started callback did not fire — \
+           dispatching Compaction_started before Completed to recover \
+           FSM path.  If this repeats, investigate registry contention \
+           or keeper registration timing."
+          keeper_name;
         dispatch_keeper_phase_event ~config
           ~origin:Keeper_registry.Post_turn_lifecycle
           ~keeper_name
-          Keeper_state_machine.Compaction_started;
+          Keeper_state_machine.Compaction_started
+      end;
       dispatch_compaction_completed
         ~config
         ~origin:Keeper_registry.Post_turn_lifecycle

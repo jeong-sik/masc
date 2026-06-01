@@ -156,14 +156,15 @@ let apply_post_turn_lifecycle_with_resilience_handles =
 let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
-let record_lifecycle_dispatch_rejection ~keeper_name event ~error =
+let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
   Prometheus.inc_counter
     Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
     ();
   Log.Keeper.warn
-    "%s: post-turn lifecycle dispatch failed event=%s error=%s"
+    "%s: keeper lifecycle dispatch rejected origin=%s event=%s error=%s"
     keeper_name
+    (Keeper_registry.lifecycle_event_origin_to_string origin)
     (Keeper_state_machine.event_to_string event)
     error
 
@@ -183,11 +184,13 @@ let dispatch_keeper_phase_event
   | Error err ->
       record_lifecycle_dispatch_rejection
         ~keeper_name
+        ~origin
         event
         ~error:(Keeper_state_machine.transition_error_to_string err)
   | exception (Keeper_registry_types.Compaction_transition_violation _ as exn) ->
       record_lifecycle_dispatch_rejection
         ~keeper_name
+        ~origin
         event
         ~error:(Printexc.to_string exn)
 

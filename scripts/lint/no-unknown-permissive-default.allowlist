@@ -37,7 +37,3 @@
 # Allowlist now nearly empty. Keep this file as a lint contract record — any
 # new entry requires a justifying comment, and self-verify will force removal
 # once the pattern is migrated.
-
-# Audit replay compatibility (#19760): unknown action wire strings are preserved
-# as Custom s instead of being silently coerced to a known action constructor.
-lib/audit_log.ml::string_to_action

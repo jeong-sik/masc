@@ -281,6 +281,12 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
      propagates without per-site discipline drift. *)
   Cancel_safe.observe
     ~on_exn:(fun exn ->
+      (* Keep existing GuardsFailures metric for backward compatibility
+         (test_keeper_guards.ml asserts this counter). *)
+      Prometheus.inc_counter
+        Keeper_metrics.(to_string GuardsFailures)
+        ~labels:[("keeper", event.keeper_name); ("site", "gate_observer")]
+        ();
       Prometheus.inc_counter
         Keeper_metrics.(to_string LifecycleCallbackFailures)
         ~labels:[("keeper", event.keeper_name); ("callback", "on_gate_decision")]

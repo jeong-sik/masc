@@ -67,6 +67,16 @@ let freshness_fields ~now latest_ts =
       ("latest_age_s", `Null);
     ]
 
+let coverage_gap_recovered ~latest_ts gap =
+  match latest_ts, latest_ts_of_record gap with
+  | Some source_ts, Some gap_ts when Stdlib.Float.compare source_ts gap_ts >= 0
+    ->
+    true
+  | _ -> false
+
+let active_coverage_gaps ~latest_ts gaps =
+  List.filter (fun gap -> not (coverage_gap_recovered ~latest_ts gap)) gaps
+
 let health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
     ?coverage_gap () =
   let health, stale_reason =
@@ -111,7 +121,10 @@ let metadata_fields ~source_name ~source_producer ~dashboard_surface
     if exists then Option.bind latest_record latest_ts_of_record else None
   in
   let coverage_gaps = coverage_gaps_for_store ~source_name ~durable_store in
-  let coverage_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
+  let active_coverage_gaps = active_coverage_gaps ~latest_ts coverage_gaps in
+  let coverage_gap =
+    List.rev active_coverage_gaps |> List.find_opt (fun _ -> true)
+  in
   [
     ("source", `String source_name);
     ("producer", `String source_producer);
@@ -122,6 +135,7 @@ let metadata_fields ~source_name ~source_producer ~dashboard_surface
     ("exists", `Bool exists);
     ("coverage_gaps", `List coverage_gaps);
     ("coverage_gap_count", `Int (List.length coverage_gaps));
+    ("active_coverage_gap_count", `Int (List.length active_coverage_gaps));
   ]
   @ freshness_fields ~now latest_ts
   @ health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s

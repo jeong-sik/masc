@@ -147,6 +147,15 @@ let coverage_gaps masc_root =
 let latest_coverage_gap gaps =
   List.rev gaps |> List.find_opt (fun _ -> true)
 
+let coverage_gap_recovered ~latest_ts gap =
+  match latest_ts, ts_of_record gap with
+  | Some source_ts, Some gap_ts when Float.compare source_ts gap_ts >= 0 ->
+    true
+  | _ -> false
+
+let active_coverage_gaps ~latest_ts gaps =
+  List.filter (fun gap -> not (coverage_gap_recovered ~latest_ts gap)) gaps
+
 let synthetic_store_gap ~durable_store ~stale_reason ~error =
   let now = Time_compat.now () in
   `Assoc
@@ -353,7 +362,8 @@ let source_metadata_json ~masc_root =
     else
       gaps
   in
-  let coverage_gap = latest_coverage_gap coverage_gaps in
+  let active_coverage_gaps = active_coverage_gaps ~latest_ts coverage_gaps in
+  let coverage_gap = latest_coverage_gap active_coverage_gaps in
   `Assoc
     ([
        ("source", `String source_name);
@@ -365,6 +375,7 @@ let source_metadata_json ~masc_root =
        ("exists", `Bool exists);
        ("coverage_gaps", `List coverage_gaps);
        ("coverage_gap_count", `Int (List.length coverage_gaps));
+       ("active_coverage_gap_count", `Int (List.length active_coverage_gaps));
      ]
     @ freshness_fields ~now latest_ts
     @ source_health_fields

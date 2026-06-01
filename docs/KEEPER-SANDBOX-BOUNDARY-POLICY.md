@@ -72,6 +72,12 @@ failure just because a keeper uses the Docker backend.
   back from decision telemetry to the latest receipt model. Public dashboards
   may keep provider/model lanes redacted, but keeper operator surfaces must show
   either observed attribution or a typed runtime/provider blocker.
+- Telemetry coverage gaps are historical evidence, not permanent health
+  latches. Dashboard source health may report `coverage_gap` only for active
+  gaps: a gap is active until the same source has a durable row with a timestamp
+  equal to or newer than the gap timestamp. Summary payloads must keep
+  historical `coverage_gap_count` visible and expose
+  `active_coverage_gap_count` for current health decisions.
 - Command semantics may only interpret commands accepted by the typed
   bash subset parser. Unsupported shell constructs fail closed and must
   not be reinterpreted with space splitting or fallback token scans.
@@ -84,6 +90,8 @@ Focused behavioral tests verify path and command behavior:
 - `test_keeper_effective_meta_overlay`
 - `test_keeper_runtime_trust_snapshot`
 - `test_runtime_provider_auth_headers`
+- `test_telemetry_unified` recovered coverage-gap summary test
+- `test_keeper_tool_call_log` recovered tool-call coverage-gap aggregate test
 - `test_keeper_sandbox_docker_route`
 
 Source-level boundary tests prevent regressions in layer ownership:
@@ -123,3 +131,5 @@ The boundary test intentionally fails if:
 - completed or partial-completed runtime turns stop producing terminal runtime
   observation for receipts, or runtime-trust status stops surfacing receipt
   `runtime.selected_model` when decision telemetry is absent.
+- recovered historical telemetry coverage gaps force source health to remain
+  `coverage_gap` after a newer durable row exists for that source.

@@ -188,7 +188,8 @@ code_refs:
   - canonical surface inventory + readiness refs
 
 ## Supporting / Compatibility Read Models
-- `GET /api/v1/dashboard/mission`
+- `GET /api/v1/dashboard/briefing`
+- `GET /api/v1/dashboard/briefing/sections`
 - `GET /api/v1/dashboard/execution`
 - `GET /api/v1/dashboard/governance`
 - `GET /api/v1/dashboard/proof`

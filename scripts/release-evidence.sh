@@ -10,7 +10,7 @@ The bundle includes:
   - artifact install smoke (`--version` from an installed location)
   - local boot + /health capture
   - MCP initialize + tools/list + masc_status captures
-  - dashboard read-path captures for project snapshot + namespace truth
+  - dashboard read-path captures for briefing + namespace truth
 
 Raw files are written next to OUTPUT_MARKDOWN.
 EOF
@@ -54,9 +54,9 @@ tools_json="$out_dir/tools-list.json"
 status_headers="$out_dir/masc-status.headers"
 status_body="$out_dir/masc-status.body"
 status_json="$out_dir/masc-status.json"
-project_snapshot_headers="$out_dir/dashboard-project-snapshot.headers"
-project_snapshot_body="$out_dir/dashboard-project-snapshot.body"
-project_snapshot_json="$out_dir/dashboard-project-snapshot.json"
+briefing_headers="$out_dir/dashboard-briefing.headers"
+briefing_body="$out_dir/dashboard-briefing.body"
+briefing_json="$out_dir/dashboard-briefing.json"
 namespace_headers="$out_dir/namespace-truth.headers"
 namespace_body="$out_dir/namespace-truth.body"
 namespace_json="$out_dir/namespace-truth.json"
@@ -112,6 +112,25 @@ PY
 status_code() {
   local header_file="$1"
   awk 'toupper($1) ~ /^HTTP\/[0-9.]+$/ { code=$2 } END { print code }' "$header_file"
+}
+
+normalize_http_json() {
+  local headers="$1"
+  local body="$2"
+  local dest="$3"
+  local label="$4"
+  local code
+  code="$(status_code "$headers")"
+  case "$code" in
+    2*) ;;
+    *)
+      echo "release-evidence: ${label} returned HTTP ${code:-<missing>}" >&2
+      head -c 400 "$body" >&2 || true
+      echo >&2
+      exit 1
+      ;;
+  esac
+  normalize_json "$body" "$dest"
 }
 
 header_value() {
@@ -312,15 +331,17 @@ post_json "$MCP_URL" "$status_payload" "$status_headers" "$status_body" \
   -H "Mcp-Protocol-Version: ${protocol_version}"
 normalize_json "$status_body" "$status_json"
 
-curl -sS -D "$project_snapshot_headers" -o "$project_snapshot_body" \
+curl -sS -D "$briefing_headers" -o "$briefing_body" \
   -H 'Accept: application/json' \
-  "${BASE_URL}/api/v1/dashboard/project-snapshot"
-normalize_json "$project_snapshot_body" "$project_snapshot_json"
+  "${BASE_URL}/api/v1/dashboard/briefing"
+normalize_http_json "$briefing_headers" "$briefing_body" "$briefing_json" \
+  "/api/v1/dashboard/briefing"
 
 curl -sS -D "$namespace_headers" -o "$namespace_body" \
   -H 'Accept: application/json' \
   "${BASE_URL}/api/v1/dashboard/namespace-truth"
-normalize_json "$namespace_body" "$namespace_json"
+normalize_http_json "$namespace_headers" "$namespace_body" "$namespace_json" \
+  "/api/v1/dashboard/namespace-truth"
 
 python3 - \
   "$OUTFILE" \
@@ -333,7 +354,7 @@ python3 - \
   "$health_json" \
   "$tools_json" \
   "$status_json" \
-  "$project_snapshot_json" \
+  "$briefing_json" \
   "$namespace_json" \
   "$initialize_json" \
   "$server_log" <<'PY'
@@ -353,7 +374,7 @@ from datetime import datetime, timezone
     health_json,
     tools_json,
     status_json,
-    project_snapshot_json,
+    briefing_json,
     namespace_json,
     initialize_json,
     server_log,
@@ -366,7 +387,7 @@ def load(path):
 health = load(health_json)
 tools = load(tools_json)
 status = load(status_json)
-project_snapshot = load(project_snapshot_json)
+briefing = load(briefing_json)
 namespace_truth = load(namespace_json)
 initialize = load(initialize_json)
 
@@ -378,7 +399,7 @@ for item in content:
       status_text = item.get("text", "")
       break
 
-project_snapshot_keys = sorted(project_snapshot.keys())[:10]
+briefing_keys = sorted(briefing.keys())[:10]
 namespace_keys = sorted(namespace_truth.keys())[:10]
 health_keys = sorted(health.keys())[:10]
 generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -419,7 +440,7 @@ md = f"""# Release Evidence Bundle
 
 ## Dashboard Read Paths
 
-- `/api/v1/dashboard/project-snapshot` returned HTTP-shaped JSON with keys: `{", ".join(project_snapshot_keys)}`
+- `/api/v1/dashboard/briefing` returned HTTP-shaped JSON with keys: `{", ".join(briefing_keys)}`
 - `/api/v1/dashboard/namespace-truth` returned keys: `{", ".join(namespace_keys)}`
 
 ## Raw Captures
@@ -431,7 +452,7 @@ md = f"""# Release Evidence Bundle
 - `initialize.json`
 - `tools-list.json`
 - `masc-status.json`
-- `dashboard-project-snapshot.json`
+- `dashboard-briefing.json`
 - `namespace-truth.json`
 - `server.log`
 

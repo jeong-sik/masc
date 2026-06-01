@@ -526,8 +526,12 @@ export async function decideGovernanceExecutionOrder(
   throw governanceCasesRetiredError()
 }
 
+export function fetchDashboardBriefing(): Promise<DashboardMissionResponse> {
+  return get('/api/v1/dashboard/briefing')
+}
+
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
-  return get('/api/v1/dashboard/mission')
+  return fetchDashboardBriefing()
 }
 
 export function fetchDashboardMissionSession(
@@ -1279,7 +1283,7 @@ export function fetchDashboardMissionBriefing(
   opts?: { signal?: AbortSignal },
 ): Promise<DashboardMissionBriefingResponse> {
   const query = force ? '?force=1' : ''
-  return get(`/api/v1/dashboard/mission/briefing${query}`, { signal: opts?.signal })
+  return get(`/api/v1/dashboard/briefing/sections${query}`, { signal: opts?.signal })
 }
 
 export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {

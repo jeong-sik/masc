@@ -282,7 +282,7 @@ const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
   '/api/v1/dashboard/workspace-truth',
   '/api/v1/dashboard/execution',
   '/api/v1/dashboard/planning',
-  '/api/v1/dashboard/mission',
+  '/api/v1/dashboard/briefing',
 ])
 
 import { isRecord } from '../lib/type-guards'
@@ -452,7 +452,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
           violations: [],
         },
       }
-    case '/api/v1/dashboard/mission':
+    case '/api/v1/dashboard/briefing':
       return {
         generated_at: generatedAt,
         summary: {

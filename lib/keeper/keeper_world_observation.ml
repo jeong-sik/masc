@@ -427,7 +427,6 @@ let collect_board_events_without_advancing_cursor
 include Keeper_world_observation_provider_cooldown
 
 let observe
-      ~allowed_tool_names
       ~(pending_board_events : pending_board_event list option)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -442,7 +441,7 @@ let observe
       , pending_verification_count
       , backlog_updated_since_last_scheduled_autonomous )
     =
-    read_backlog_counts ~allowed_tool_names ~config ~meta
+    read_backlog_counts ~config ~meta
   in
   let provider_capacity_blocked_task_count =
     provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
@@ -483,10 +482,7 @@ let observe
   }
 ;;
 
-let observe_direct_keeper_msg
-      ~allowed_tool_names
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
+let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   : world_observation
   =
   let ( unclaimed_task_count
@@ -495,7 +491,7 @@ let observe_direct_keeper_msg
       , pending_verification_count
       , backlog_updated_since_last_scheduled_autonomous )
     =
-    read_backlog_counts ~allowed_tool_names ~config ~meta
+    read_backlog_counts ~config ~meta
   in
   let provider_capacity_blocked_task_count =
     provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
@@ -522,7 +518,6 @@ let observe_direct_keeper_msg
 ;;
 
 let durable_signal_present
-      ~allowed_tool_names
       ~pending_board_events
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -537,7 +532,7 @@ let durable_signal_present
       , pending_verification_count
       , _backlog_updated_since_last_scheduled_autonomous )
     =
-    read_backlog_counts ~allowed_tool_names ~config ~meta
+    read_backlog_counts ~config ~meta
   in
   let pending_board_events =
     match pending_board_events with

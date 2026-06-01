@@ -55,7 +55,7 @@ val claim_task :
 
 val claim_task_r :
   config -> agent_name:string -> task_id:string ->
-  ?agent_tool_names:string list -> unit -> claim_outcome Masc_domain.masc_result
+  unit -> claim_outcome Masc_domain.masc_result
 
 (** {1 Release/reclaim helpers} *)
 

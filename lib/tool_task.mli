@@ -9,12 +9,12 @@ type context = {
 
 val handle_add_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_batch_add_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_claim : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_claim_next : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_claim : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_claim_next : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_release : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_done : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_cancel_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_transition : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_transition : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_update_priority : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_task_history : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
@@ -22,7 +22,6 @@ val task_history_events_json :
   Workspace.config -> task_id:string -> limit:int -> Yojson.Safe.t
 
 val dispatch :
-  ?agent_tool_names:string list ->
   context ->
   name:string ->
   args:Yojson.Safe.t ->

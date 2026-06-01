@@ -94,7 +94,6 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
 let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     Keeper_world_observation.world_observation =
   Keeper_world_observation.observe_direct_keeper_msg
-    ~allowed_tool_names:None
     ~config
     ~meta
 

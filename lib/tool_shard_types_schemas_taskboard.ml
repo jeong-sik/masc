@@ -289,9 +289,8 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       [ "type", `String "object"
                       ; ( "description"
                         , `String
-                            "Optional persisted task contract. Use required_tools to \
-                             prevent routing execution work to keepers without needed \
-                             tools." )
+                            "Optional persisted task contract for deterministic \
+                             completion and verification evidence." )
                       ; ( "properties"
                         , `Assoc
                             [ "strict", `Assoc [ "type", `String "boolean" ]
@@ -299,21 +298,6 @@ let taskboard_tools : Masc_domain.tool_schema list =
                               , `Assoc
                                   [ "type", `String "array"
                                   ; "items", `Assoc [ "type", `String "string" ]
-                                  ] )
-                            ; ( "required_tools"
-                              , `Assoc
-                                  [ "type", `String "array"
-                                  ; "items", `Assoc [ "type", `String "string" ]
-                                  ; ( "description"
-                                    , `String
-                                        "Tool names required to claim this task, e.g. \
-                                         Execute or SearchFiles. PR creation tasks \
-                                         should include Execute and SearchFiles so \
-                                         claim_next routes them only to capable \
-                                         keepers. PR review mutation tasks must \
-                                         route code/review work through sandboxed \
-                                         repo worktrees with Execute rather than \
-                                         dedicated review wrappers." )
                                   ] )
                             ; ( "required_evidence"
                               , `Assoc

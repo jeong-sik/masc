@@ -61,11 +61,6 @@ Example: %s({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description:
           ("properties", `Assoc [
             ("strict", `Assoc [ ("type", `String "boolean") ]);
             ("completion_contract", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
-            ("required_tools", `Assoc [
-              ("type", `String "array");
-              ("items", `Assoc [ ("type", `String "string") ]);
-              ("description", `String "Tool names required to claim this task, e.g. Execute.");
-            ]);
             ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("verify_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
@@ -123,11 +118,6 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', prior
                 ("properties", `Assoc [
                   ("strict", `Assoc [ ("type", `String "boolean") ]);
                   ("completion_contract", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
-                  ("required_tools", `Assoc [
-                    ("type", `String "array");
-                    ("items", `Assoc [ ("type", `String "string") ]);
-                    ("description", `String "Tool names required to claim this task, e.g. Execute.");
-                  ]);
                   ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                   ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                   ("verify_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);

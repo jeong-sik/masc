@@ -43,33 +43,23 @@ let active_goal_ids_are_auto_keeper_goals config ~(meta : keeper_meta) goal_ids 
          | None -> false)
        goal_ids
 
-let task_is_eligible_for_claim ?agent_tool_names latest_verification_status task =
+let task_is_eligible_for_claim latest_verification_status task =
   Workspace_task_schedule.task_is_claim_pool_candidate task
   && not
        (Workspace_task_schedule.verification_blocks_claim
           latest_verification_status
           task)
-  && Workspace_task_schedule.required_tools_allowed
-       ?agent_tool_names
-       (Workspace_task_schedule.task_required_tools task)
 
-let active_goal_ids_have_eligible_claim_task
-    ?agent_tool_names
-    config
-    goal_ids
-  =
+let active_goal_ids_have_eligible_claim_task config goal_ids =
   let latest_verification_status =
     Workspace_task_schedule.latest_verification_status_by_task config
   in
   Workspace.get_tasks_safe config
   |> List.exists (fun task ->
        task_is_linked_to_keeper_goals goal_ids task
-       && task_is_eligible_for_claim
-            ?agent_tool_names
-            latest_verification_status
-            task)
+       && task_is_eligible_for_claim latest_verification_status task)
 
-let resolve_claim_goal_scope ?agent_tool_names
+let resolve_claim_goal_scope
     ?(allow_empty_goal_scope_fallback = false) ~(config : Workspace.config)
     ~(meta : keeper_meta) () =
   match meta.active_goal_ids with
@@ -82,10 +72,7 @@ let resolve_claim_goal_scope ?agent_tool_names
       }
   | goal_ids ->
       let has_scoped_tasks =
-        active_goal_ids_have_eligible_claim_task
-          ?agent_tool_names
-          config
-          goal_ids
+        active_goal_ids_have_eligible_claim_task config goal_ids
       in
       let is_auto_goal =
         active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
@@ -122,13 +109,12 @@ let resolve_claim_goal_scope ?agent_tool_names
           fallback_reason = None;
         }
 
-let resolve_observation_claim_goal_scope ?agent_tool_names ~(config : Workspace.config)
+let resolve_observation_claim_goal_scope ~(config : Workspace.config)
     ~(meta : keeper_meta) () =
   let allow_empty_goal_scope_fallback =
     active_goal_ids_are_auto_keeper_goals config ~meta meta.active_goal_ids
   in
-  resolve_claim_goal_scope ?agent_tool_names ~allow_empty_goal_scope_fallback
-    ~config ~meta ()
+  resolve_claim_goal_scope ~allow_empty_goal_scope_fallback ~config ~meta ()
 
 let task_is_blocked (task : Masc_domain.task) =
   (* Enumerate every [task_status] variant so the compiler flags any new

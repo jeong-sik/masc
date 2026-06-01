@@ -165,29 +165,6 @@ let runtime_mcp_tool_surface_class allowed_tool_names =
   else
     "mixed"
 
-let runtime_mcp_current_task_required_tools
-    ~(config : Workspace.config)
-    (entry : Keeper_registry.registry_entry) =
-  match entry.meta.current_task_id with
-  | None -> []
-  | Some task_id ->
-      let task_id = Keeper_id.Task_id.to_string task_id in
-      let tasks =
-        try Workspace.get_tasks_raw config
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-            Log.Keeper.warn
-              "keeper:%s runtime MCP failed to load current task contract for %s: %s"
-              entry.name task_id (Printexc.to_string exn);
-            []
-      in
-      tasks
-      |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-      |> Option.map Workspace.task_required_tools
-      |> Option.value ~default:[]
-      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-
 let runtime_mcp_keeper_log_context_of_entry
     ?mcp_session_id
     (entry : Keeper_registry.registry_entry)
@@ -214,18 +191,12 @@ let runtime_mcp_keeper_log_context_of_entry
     | [] -> None
     | ids -> Some ids
   in
-  let config = Workspace.default_config entry.base_path in
   let allowed_tool_names =
     Keeper_tool_policy.keeper_allowed_tool_names
       ~phase:entry.phase
       entry.meta
   in
-  let required_tools =
-    runtime_mcp_current_task_required_tools ~config entry
-  in
-  let missing_required_tools =
-    Workspace.missing_required_tools ~allowed:allowed_tool_names required_tools
-  in
+  let config = Workspace.default_config entry.base_path in
   let profile_defaults =
     Keeper_types_profile.load_keeper_profile_defaults entry.meta.name
   in
@@ -255,8 +226,8 @@ let runtime_mcp_keeper_log_context_of_entry
     tool_surface_class =
       Some (runtime_mcp_tool_surface_class allowed_tool_names);
     visible_tool_count = Some (List.length allowed_tool_names);
-    required_tools = Some required_tools;
-    missing_required_tools = Some missing_required_tools;
+    required_tools = Some [];
+    missing_required_tools = Some [];
     runtime_profile = Some (Keeper_meta_contract.runtime_id_of_meta entry.meta);
   }
 

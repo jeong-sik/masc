@@ -1,6 +1,5 @@
-(** Receipt helpers used by task scheduling claim gates. *)
+(** Receipt helpers used by task scheduling. *)
 
-val build_allowed_set : string list -> (string, unit) Hashtbl.t
 val underscore_name : string -> string
 val hyphen_name : string -> string
 val keeper_name_from_agent_name : string -> string option
@@ -20,9 +19,3 @@ val latest_execution_receipt_json
   :  Workspace_utils.config
   -> agent_name:string
   -> Yojson.Safe.t option
-
-val latest_receipt_blocks_required_tool_claim
-  :  Workspace_utils.config
-  -> agent_name:string
-  -> required_tools:string list
-  -> bool

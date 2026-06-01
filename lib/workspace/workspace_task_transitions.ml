@@ -13,7 +13,6 @@ let transition_task_r
       ~agent_name
       ~task_id
       ~action
-      ?agent_tool_names
       ?prepare_verification_request
       ?prepare_verification_verdict
       ?expected_version
@@ -61,19 +60,6 @@ let transition_task_r
           match task_opt with
           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
           | Some task -> Ok task
-        in
-        let* () =
-          match action with
-          | Masc_domain.Claim ->
-            required_tool_claim_guard config ~agent_name ?agent_tool_names task
-          | Masc_domain.Release
-          | Masc_domain.Start
-          | Masc_domain.Submit_for_verification
-          | Masc_domain.Submit_pr_evidence
-          | Masc_domain.Approve_verification
-          | Masc_domain.Reject_verification
-          | Masc_domain.Done_action
-          | Masc_domain.Cancel -> Ok ()
         in
         let* () =
           match action with

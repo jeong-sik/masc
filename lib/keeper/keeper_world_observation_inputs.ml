@@ -19,14 +19,9 @@ let backlog_updated_since_last_scheduled_autonomous
     | None -> false)
 ;;
 
-let claim_goal_scope_filter ?agent_tool_names ~(config : Workspace.config)
-    ~(meta : keeper_meta) () =
+let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta) () =
   let scope =
-    Keeper_runtime_contract.resolve_observation_claim_goal_scope
-      ?agent_tool_names
-      ~config
-      ~meta
-      ()
+    Keeper_runtime_contract.resolve_observation_claim_goal_scope ~config ~meta ()
   in
   scope.task_filter
 ;;
@@ -50,7 +45,7 @@ let task_has_actionable_verification actionable_request_ids
 ;;
 
 (** Read workspace backlog counts. *)
-let read_backlog_counts ~allowed_tool_names ~(config : Workspace.config) ~(meta : keeper_meta)
+let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
   : int * int * int * int * bool
   =
   try
@@ -61,24 +56,13 @@ let read_backlog_counts ~allowed_tool_names ~(config : Workspace.config) ~(meta 
         backlog.tasks
     in
     let unclaimed = List.length unclaimed_tasks in
-    let claim_scope_filter =
-      claim_goal_scope_filter ?agent_tool_names:allowed_tool_names ~config ~meta ()
-    in
-    (* Build the allowed-set once and reuse across all candidates in
-       the [unclaimed_tasks] filter below -- see PR #14826 for the
-       O(R+A) rationale. *)
-    let required_tools_allowed =
-      Workspace_task_schedule.make_required_tools_predicate
-        ?agent_tool_names:allowed_tool_names
-        ()
-    in
+    let claim_scope_filter = claim_goal_scope_filter ~config ~meta () in
     let claimable =
       List.length
         (List.filter
            (fun task ->
               Workspace_task_schedule.task_is_claim_pool_candidate task
-              && claim_scope_filter task
-              && required_tools_allowed (Workspace_task_schedule.task_required_tools task))
+              && claim_scope_filter task)
            unclaimed_tasks)
     in
     let failed =

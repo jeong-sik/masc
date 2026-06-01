@@ -10,8 +10,7 @@ val backlog_updated_since_last_scheduled_autonomous
   -> bool
 
 val read_backlog_counts
-  :  allowed_tool_names:string list option
-  -> config:Workspace.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> int * int * int * int * bool
 

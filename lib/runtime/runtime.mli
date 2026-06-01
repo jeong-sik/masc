@@ -18,6 +18,14 @@ type t =
 val id_of_binding : binding -> string
 val of_binding : config -> binding -> t option
 val load_list : config_path:string -> (t list * t, string) result
+val runtime_ids : t list -> string list
+
+val runtime_supports_required_tools : t -> bool
+(** [true] when a runtime can carry required keeper tool-use turns through
+    runtime MCP tooling and model-level tool-choice support. *)
+
+val required_tool_runtime_ids : t list -> string list
+(** Tool-capable runtime ids, preserving the TOML binding order. *)
 
 (** {1 Lazy default runtime singleton}
 
@@ -27,6 +35,9 @@ val load_list : config_path:string -> (t list * t, string) result
 
 val init_default : config_path:string -> (unit, string) result
 val get_default_runtime : unit -> t option
+val get_runtimes : unit -> t list
+val get_runtime_ids : unit -> string list
+val get_required_tool_runtime_ids : unit -> string list
 
 val get_default_runtime_id : unit -> string
 (** @raise Failure if {!init_default} has not run. No silent fallback

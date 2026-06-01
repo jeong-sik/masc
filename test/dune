@@ -181,6 +181,7 @@
   test_keeper_behavioral_regime
   test_keeper_toml
   test_keeper_runtime_toml
+  test_runtime_required_tool_fallback
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
   test_keeper_tool_name_projection
@@ -443,6 +444,7 @@
   test_keeper_behavioral_regime
   test_keeper_toml
   test_keeper_runtime_toml
+  test_runtime_required_tool_fallback
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
   test_keeper_tool_name_projection

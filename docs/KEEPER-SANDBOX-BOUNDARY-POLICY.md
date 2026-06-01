@@ -1,6 +1,6 @@
 # Keeper Sandbox Boundary Policy
 
-Last updated: 2026-05-25
+Last updated: 2026-06-01
 
 ## Goal
 
@@ -59,6 +59,12 @@ failure just because a keeper uses the Docker backend.
 - Tool modules must not branch on `meta.sandbox_profile = Docker` or call
   `Keeper_sandbox_docker` directly. They pass host/backend command
   projections to `Keeper_sandbox_runner`.
+- Status, list, operator, and sandbox-status surfaces must read effective
+  keeper meta via `Keeper_meta_store.read_effective_meta*`, not raw persisted
+  JSON, before displaying `sandbox_profile`, `network_mode`, `tool_access`, or
+  sandbox live state. Persisted runtime JSON intentionally omits TOML-owned
+  fields; raw reads can otherwise report `local` while receipts and tool
+  execution correctly use `docker`.
 - Command semantics may only interpret commands accepted by the typed
   bash subset parser. Unsupported shell constructs fail closed and must
   not be reinterpreted with space splitting or fallback token scans.
@@ -68,6 +74,7 @@ failure just because a keeper uses the Docker backend.
 Focused behavioral tests verify path and command behavior:
 
 - `test_keeper_path_ssot`
+- `test_keeper_effective_meta_overlay`
 - `test_keeper_sandbox_docker_route`
 
 Source-level boundary tests prevent regressions in layer ownership:
@@ -78,6 +85,7 @@ Source-level boundary tests prevent regressions in layer ownership:
 The boundary test intentionally fails if:
 
 - tool code reintroduces Docker path literals or profile detection;
+- status/sandbox-status surfaces bypass TOML-overlaid effective keeper meta;
 - workspace repo-path helpers reintroduce Docker container-root construction
   or sandbox-profile parsing;
 - Docker shell code re-exports generic command classification or parses

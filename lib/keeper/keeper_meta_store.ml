@@ -186,6 +186,25 @@ let read_meta config name : (Keeper_meta_contract.keeper_meta option, string) re
   | Error _ as err -> err
 ;;
 
+let read_effective_meta_resolved config name
+    : ((string * Keeper_meta_contract.keeper_meta) option, string) result =
+  match read_meta_resolved config name with
+  | Error _ as err -> err
+  | Ok None -> Ok None
+  | Ok (Some (resolved_name, meta)) -> (
+      match Keeper_meta_contract.effective_meta_result meta with
+      | Ok meta -> Ok (Some (resolved_name, meta))
+      | Error msg -> Error msg)
+;;
+
+let read_effective_meta config name
+    : (Keeper_meta_contract.keeper_meta option, string) result =
+  match read_effective_meta_resolved config name with
+  | Ok (Some (_resolved_name, meta)) -> Ok (Some meta)
+  | Ok None -> Ok None
+  | Error _ as err -> err
+;;
+
 (** Read keeper meta only if the file's mtime has changed since [last_mtime].
     Returns [Some (meta, new_mtime)] when the file changed, [None] when
     unchanged. Avoids parsing JSON on every heartbeat cycle when no

@@ -138,7 +138,7 @@ masc_matches=$(
 )
 if [ -n "$masc_matches" ]; then
   echo "WARN: MASC files contain OAS-reserved concepts (verify they call OAS, not reimplement):"
-  echo "$masc_matches" | head -20
+  head -20 <<< "$masc_matches"
 fi
 
 # 3. MASC using Oas_worker raw/internal interfaces instead of public API.
@@ -154,7 +154,7 @@ internal_matches=$(
 )
 if [ -n "$internal_matches" ]; then
   echo "FAIL: MASC uses Oas_worker raw/internal identifiers (route through Masc_oas_bridge or Oas_worker public API):"
-  echo "$internal_matches" | head -20
+  head -20 <<< "$internal_matches"
   exit_code=1
 else
   echo "PASS: no Oas_worker raw/internal access in MASC keeper/bridge files"

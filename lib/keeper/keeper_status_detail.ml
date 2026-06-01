@@ -162,7 +162,7 @@ let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : str
           [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
          requested_name)
   else
-    match read_meta_resolved config requested_name with
+    match read_effective_meta_resolved config requested_name with
     | Error e -> Error e
     | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
     | Ok None ->
@@ -171,11 +171,21 @@ let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : str
 let resolve_status_target (ctx : _ context) args =
   resolve_status_target_config ~config:ctx.config ~agent_name:ctx.agent_name args
 
-(** Hash the status-affecting args so different parameter combos
-    get separate cache entries (e.g. fast=true vs fast=false). *)
-let hash_status_args _config resolved_name args =
+(** Hash the status-affecting args and the effective meta snapshot so different
+    parameter combos (e.g. fast=true vs fast=false) and TOML/persona overlays
+    get separate cache entries. Persisted JSON writes update [updated_at], but
+    external [keepers/<name>.toml] edits do not. *)
+let hash_status_args _config resolved_name (meta : keeper_meta) args =
+  let effective_meta_hash =
+    meta
+    |> Keeper_meta_json.meta_to_json
+    |> Yojson.Safe.to_string
+    |> Digest.string
+    |> Digest.to_hex
+  in
   let parts = [
     resolved_name;
+    effective_meta_hash;
     (* Keeper_manual_reconcile.cache_key removed with reconcile system. *)
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);
@@ -202,8 +212,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
   | Error err -> tool_result_error err
   | Ok (name, m) ->
       let cache_key = status_cache_key ~base_path:config.base_path ~name in
-      let args_hash = hash_status_args config name args in
-      (* Cache hit: same updated_at + same args → return cached response.
+      let args_hash = hash_status_args config name m args in
+      (* Cache hit: same updated_at + same args/effective-meta hash → return cached response.
          The read is taken under [cache_mu] so it cannot interleave with
          an eviction from [invalidate_status_cache_{for,all}]. *)
       (match

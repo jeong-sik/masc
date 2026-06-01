@@ -92,17 +92,29 @@ let handle_keeper_sandbox_status ctx args : tool_result =
       let resolved =
         candidate_names
         |> List.filter_map (fun name ->
-             match read_meta ctx.config name with
+             match read_effective_meta ctx.config name with
              | Ok (Some meta) -> Some meta
              | Ok None when List.mem name configured_names -> (
                  match load_or_materialize_boot_meta ctx name with
-                 | Ok { meta; _ } -> Some meta
+                 | Ok { meta; _ } -> (
+                     match Keeper_meta_contract.effective_meta_result meta with
+                     | Ok effective_meta -> Some effective_meta
+                     | Error msg ->
+                         Log.Keeper.warn
+                           "keeper_sandbox_status fleet: failed to overlay effective meta for materialized keeper %s: %s"
+                           name msg;
+                         None)
                  | Error msg ->
                      Log.Keeper.warn
                        "keeper_sandbox_status fleet: failed to materialize configured keeper %s: %s"
                        name msg;
                      None)
-             | Ok None | Error _ -> None)
+             | Ok None -> None
+             | Error msg ->
+                 Log.Keeper.warn
+                   "keeper_sandbox_status fleet: failed to read effective meta for %s: %s"
+                   name msg;
+                 None)
       in
       let seen = Hashtbl.create 16 in
       let unique_metas =

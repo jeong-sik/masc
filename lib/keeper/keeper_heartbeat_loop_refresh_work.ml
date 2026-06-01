@@ -36,6 +36,7 @@ let refresh_work_as_heartbeat
   then (
     let hb_ok =
       try
+        (* fire-and-forget: heartbeat persistence is enough; loop records only success/failure. *)
         ignore (Workspace.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name);
         true
       with

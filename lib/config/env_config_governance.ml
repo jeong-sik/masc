@@ -122,7 +122,9 @@ module Operator = struct
   (** Operator judge interval, clamped to >= 15s. Default: 60. *)
   let judge_interval_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_INTERVAL_SEC")
 
-  (** Workspace TTL for operator judge cleanup, clamped to >= 15s. Default: 60. *)
+  (** Workspace TTL for operator judge cleanup, clamped to >= 15s. Default: 60.
+      @category Timeouts
+      @ops_class operator *)
   let workspace_ttl_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC")
 
   (** Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. *)

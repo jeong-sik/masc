@@ -61,6 +61,11 @@ git diff --unified=0 --diff-filter=ACMR "$BASE" "$HEAD" -- '*.ml' '*.mli' \
       }
     ' > "$tmp_added"
 
+# Keep this diff ratchet aligned with scripts/lint-ignore-without-comment.sh:
+# test files are fixture-heavy and excluded from the baseline lint by default.
+grep -Ev '(^test/|/test/)' "$tmp_added" > "$tmp_added.notest" || true
+mv "$tmp_added.notest" "$tmp_added"
+
 if [[ ! -s "$tmp_added" ]]; then
   echo "No new ignore() sites in PR diff."
   exit 0

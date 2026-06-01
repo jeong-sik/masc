@@ -186,6 +186,7 @@ let run ?(config = default_config) (workspace_config : Workspace.config) : sweep
   (* Write updated goal state — use update_state so the file lock protects
      the read-modify-write cycle. Prevents truncation races (#17229). *)
   if partial.purged > 0 || partial.stagnated > 0 then
+    (* See Goal_store.update_state return contract: janitor only needs the persisted side effect. *)
     ignore (Goal_store.update_state workspace_config (fun _state ->
       { goals = goals'; version = st.version + 1; updated_at = Masc_domain.now_iso () }));
   (* Prune active_goal_ids from all keeper metas *)

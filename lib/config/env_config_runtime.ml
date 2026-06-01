@@ -945,7 +945,9 @@ module Workspace_git = struct
       would silently kill perfectly healthy commands.
 
       Network-bound ops (fetch, push) intentionally use a separate
-      knob — see {!Env_config_core.git_fetch_timeout_sec}. *)
+      knob — see {!Env_config_core.git_fetch_timeout_sec}.
+      @category Timeouts
+      @ops_class operator *)
   let local_op_timeout_sec =
     Float.max 5.0
       (get_float ~default:30.0 "MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC")

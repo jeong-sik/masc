@@ -34,12 +34,16 @@ let build_runtime_execution
     Keeper_context_runtime.effective_model_labels_for_turn meta
   in
   match Keeper_types_support.ensure_api_keys_for_labels model_labels with
-  | Error e -> Error (Agent_sdk.Error.Internal e)
+  | Error e ->
+    Log.Keeper.error "pre_dispatch: ensure_api_keys_for_labels failed: %s" e;
+    Error (Agent_sdk.Error.Internal e)
   | Ok () ->
     (match
        Keeper_turn_helpers.ensure_local_discovery_ready model_labels
      with
-     | Error e -> Error (Agent_sdk.Error.Internal e)
+     | Error e ->
+       Log.Keeper.error "pre_dispatch: ensure_local_discovery_ready failed: %s" e;
+       Error (Agent_sdk.Error.Internal e)
      | Ok () ->
        let max_context_resolution =
          Keeper_context_runtime.resolve_max_context_resolution
@@ -74,6 +78,8 @@ let build_runtime_execution
             raw_max_tokens
         with
         | Error err ->
+          Log.Keeper.error "pre_dispatch: validate_max_tokens_within_ceiling failed: %s"
+            (Keeper_internal_error.kind_of_masc_internal_error err);
           Error
             (Keeper_internal_error.sdk_error_of_masc_internal_error err)
         | Ok max_tokens ->

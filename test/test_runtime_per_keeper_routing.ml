@@ -193,6 +193,28 @@ let test_context_budget_uses_selected_runtime () =
       selected_budget.Keeper_context_runtime.effective_budget)
 ;;
 
+(* Production path: [resolve_max_context_resolution_of_meta] must budget against
+   the keeper's persona runtime (openai.gpt = 64000), NOT [runtime].default
+   (runpod_mtp.qwen = 128000).  Without prepending [runtime_id_of_meta], the
+   projection labels (global, runtime-id-agnostic) would size against the
+   default and admit oversized prompts for a per-keeper routed persona. *)
+let test_of_meta_budgets_against_persona_runtime () =
+  with_config_dir (fun config_dir ->
+    write_keeper_toml config_dir "budgettest" {|[keeper]
+goal = "route to a smaller-context runtime"
+model = "openai.gpt"
+|};
+    with_runtime_initialized (fun () ->
+      let res =
+        Keeper_context_runtime.resolve_max_context_resolution_of_meta
+          (make_meta "budgettest")
+      in
+      Alcotest.(check int)
+        "of_meta budgets against persona runtime (openai.gpt=64000), not default (128000)"
+        64000
+        res.Keeper_context_runtime.effective_budget))
+;;
+
 let () =
   Alcotest.run
     "runtime_per_keeper_routing"
@@ -215,6 +237,10 @@ let () =
             "context budget uses selected runtime max-context"
             `Quick
             test_context_budget_uses_selected_runtime
+        ; Alcotest.test_case
+            "of_meta budgets against the persona runtime (production path)"
+            `Quick
+            test_of_meta_budgets_against_persona_runtime
         ] )
     ]
 ;;

@@ -364,7 +364,17 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
 
 let resolve_max_context_resolution_of_meta (m : keeper_meta)
     : max_context_resolution =
-  let labels = effective_model_labels_for_turn m in
+  (* RFC-0207: the per-keeper routed runtime ([runtime_id_of_meta] — the same id
+     [keeper_turn_driver] dispatches to) is the authoritative budget source.
+     [effective_model_labels_for_turn] projects through
+     [Provider_runtime_projection.default_execution_model_strings], which ignores
+     the runtime id and returns the GLOBAL preferred labels (an RFC-0206
+     single-binding artifact), so on its own the budget would size against
+     [runtime].default and could admit prompts exceeding a smaller per-keeper
+     model's window.  Prepend the routed id so [resolve_max_context_resolution]'s
+     [find_map] sizes against it first; the projection labels remain as
+     fallback. *)
+  let labels = runtime_id_of_meta m :: effective_model_labels_for_turn m in
   resolve_max_context_resolution
     ~requested_override:m.max_context_override labels
 

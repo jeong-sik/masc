@@ -115,6 +115,7 @@ let compaction_decision_applied =
 type compaction_event = Keeper_post_turn.compaction_event = {
   attempted : bool;
   applied : bool;
+  started_dispatched : bool;
   failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
@@ -254,19 +255,19 @@ let dispatch_post_turn_lifecycle_events
     (lifecycle : post_turn_lifecycle) =
   if lifecycle.compaction.attempted then
     if lifecycle.compaction.applied then begin
-      (* The on_compaction_started callback in apply_post_turn_lifecycle
-         dispatches Compaction_started, but is wrapped in Cancel_safe.observe
-         which swallows exceptions.  If the dispatch fails (registry
-         contention, stale entry), the compaction stage stays at
-         accumulating while the save succeeds (applied = true).
-         Without this guard, Compaction_completed would attempt the
-         forbidden accumulating -> done transition.
-         Compaction_started is idempotent from compacting state, so
-         dispatching it here is safe even if the callback succeeded. *)
-      dispatch_keeper_phase_event ~config
-        ~origin:Keeper_registry.Post_turn_lifecycle
-        ~keeper_name
-        Keeper_state_machine.Compaction_started;
+      (* FSM boundary: compaction_stage must be Compaction_compacting
+         before we dispatch Compaction_completed.  If the
+         on_compaction_started callback succeeded (started_dispatched =
+         true), the FSM is already in compacting.  If it failed or was
+         never called (recovery path), the FSM is still at accumulating
+         and we must dispatch Compaction_started first.  The Started
+         dispatch is idempotent from compacting, so this is safe in
+         both cases. *)
+      if not lifecycle.compaction.started_dispatched then
+        dispatch_keeper_phase_event ~config
+          ~origin:Keeper_registry.Post_turn_lifecycle
+          ~keeper_name
+          Keeper_state_machine.Compaction_started;
       dispatch_compaction_completed
         ~config
         ~origin:Keeper_registry.Post_turn_lifecycle

@@ -156,8 +156,7 @@ let compose_ro_mounts_result ?keeper_name
             @ mount_if_present ~host:ssh_dir
                 ~container:(Filename.concat cred_root ".ssh")))
 
-let resolve_git_identity (kb : Credential_bundle.keeper_binding) ~keeper_name =
-  ignore keeper_name;
+let resolve_git_identity (kb : Credential_bundle.keeper_binding) =
   ( kb.credential_identity,
     kb.credential_identity ^ "@users.noreply.github.com" )
 
@@ -185,7 +184,7 @@ let count_resolve_outcome ~keeper_name ~source ~reason =
 let bind_from_keeper_binding ?ssh_key_path ~keeper_name
     (kb : Credential_bundle.keeper_binding) ~extra_metadata =
   let git_author_name, git_author_email =
-    resolve_git_identity kb ~keeper_name
+    resolve_git_identity kb
   in
   let ssh_key_container =
     Option.map (fun _ -> explicit_ssh_key_container_path) ssh_key_path

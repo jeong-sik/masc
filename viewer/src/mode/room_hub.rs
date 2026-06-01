@@ -22,7 +22,7 @@ pub(super) const ROOM_HUB_RUNNING_ONLY_STORAGE_KEY: &str = "masc_viewer_room_hub
 const INLINE_SELECTOR_MAX_OPTIONS: usize = 5;
 const ROOM_AUTO_FOCUS_DEFAULT_ROOM_ONLY: bool = true;
 const ROOM_AUTO_FOCUS_SCORE_RUNNING: u8 = 4;
-const ROOM_AUTO_FOCUS_SCORE_LOBBY: u8 = 3;
+const ROOM_AUTO_FOCUS_SCORE_IDLE: u8 = 3;
 const ROOM_AUTO_FOCUS_SCORE_STOPPED: u8 = 2;
 const ROOM_AUTO_FOCUS_SCORE_LOADING: u8 = 1;
 
@@ -83,7 +83,7 @@ fn room_display_label(room_id: &str) -> String {
 fn auto_focus_score(status: &str) -> Option<u8> {
     match TrpgLifecycleState::from_status(status) {
         TrpgLifecycleState::Running => Some(ROOM_AUTO_FOCUS_SCORE_RUNNING),
-        TrpgLifecycleState::Lobby => Some(ROOM_AUTO_FOCUS_SCORE_LOBBY),
+        TrpgLifecycleState::Idle => Some(ROOM_AUTO_FOCUS_SCORE_IDLE),
         TrpgLifecycleState::Stopped => Some(ROOM_AUTO_FOCUS_SCORE_STOPPED),
         TrpgLifecycleState::Loading => Some(ROOM_AUTO_FOCUS_SCORE_LOADING),
         _ => None,
@@ -132,10 +132,10 @@ mod tests {
     }
 
     #[test]
-    fn ended_default_prefers_running_over_lobby() {
+    fn ended_default_prefers_running_over_idle() {
         let rooms = vec![
             snapshot("default", "ended", 11),
-            snapshot("lobby-room", "lobby", 99),
+            snapshot("idle-room", "idle", 99),
             snapshot("running-room", "running", 1),
         ];
         assert_eq!(
@@ -211,7 +211,14 @@ mod tests {
             "default".to_string(),
         ];
         let rooms = inline_selector_rooms("beta-room", &known);
-        assert_eq!(rooms, vec!["beta-room".to_string(), "default".to_string(), "alpha-room".to_string()]);
+        assert_eq!(
+            rooms,
+            vec![
+                "beta-room".to_string(),
+                "default".to_string(),
+                "alpha-room".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -255,7 +262,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
     let mut current = Vec::new();
     let mut running = Vec::new();
     let mut stopped = Vec::new();
-    let mut lobby = Vec::new();
+    let mut idle = Vec::new();
     let mut unavailable = Vec::new();
     let mut ended_hidden_count = 0usize;
 
@@ -301,7 +308,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
             "stopped" => stopped.push(card),
             "unavailable" => unavailable.push(card),
             "ended" => ended_hidden_count += 1,
-            _ => lobby.push(card),
+            _ => idle.push(card),
         }
     }
 
@@ -319,7 +326,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
         )
     };
 
-    let previous_count = running.len() + stopped.len() + lobby.len() + unavailable.len();
+    let previous_count = running.len() + stopped.len() + idle.len() + unavailable.len();
     let hidden_ended_note = if ended_hidden_count > 0 {
         format!(" · 종료 {}개 숨김", ended_hidden_count)
     } else {
@@ -337,7 +344,7 @@ fn render_room_hub(doc: &web_sys::Document, rooms: &[RoomSnapshot], selected_roo
             lane_html("현재 게임", current, "current"),
             lane_html("진행 중", running, "running"),
             lane_html("멈춤", stopped, "stopped"),
-            lane_html("로비", lobby, "lobby"),
+            lane_html("대기", idle, "idle"),
             lane_html("오류", unavailable, "unavailable")
         )
     };
@@ -597,7 +604,10 @@ fn save_room_hub_running_only(enabled: bool) {
 fn sync_room_hub_top_offset(doc: &web_sys::Document) {
     let top_px = doc
         .get_element_by_id("top-bar")
-        .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().map(|bar| bar.offset_height()))
+        .and_then(|el| {
+            el.dyn_ref::<web_sys::HtmlElement>()
+                .map(|bar| bar.offset_height())
+        })
         .map(|height| height.max(84))
         .unwrap_or(84);
     if let Some(hub) = doc
@@ -773,7 +783,7 @@ fn apply_room_switch_from_ui(doc: &web_sys::Document, raw_room: &str, manual_inp
                 "현재 게임: {} · 빈 방(세션 없음, 새 게임 필요)",
                 room_label
             )));
-            let _ = pill.set_attribute("data-lifecycle", TrpgLifecycleState::Lobby.css_class());
+            let _ = pill.set_attribute("data-lifecycle", TrpgLifecycleState::Idle.css_class());
             let _ = pill.set_attribute(
                 "title",
                 "해당 방에 세션이 없을 수 있습니다. 새 게임에서 시작할 수 있습니다.",
@@ -878,7 +888,7 @@ pub(super) async fn refresh_rooms_from_server(
         .unwrap_or("idle");
 
     // Auto-round is a gameplay convenience for active rounds only.
-    // Keep it off in lobby/ended/unavailable to avoid confusing "auto running"
+    // Keep it off in idle/ended/unavailable to avoid confusing "auto running"
     // signals when the room cannot actually advance.
     if TrpgLifecycleState::from_status(current_status) != TrpgLifecycleState::Running {
         if let Some(dashboard) = doc.get_element_by_id("dashboard") {

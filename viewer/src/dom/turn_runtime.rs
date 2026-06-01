@@ -40,7 +40,7 @@ fn room_status_class(state: TrpgLifecycleState) -> &'static str {
         TrpgLifecycleState::Ended => "status-ended",
         TrpgLifecycleState::Unavailable => "status-unavailable",
         TrpgLifecycleState::Loading => "status-loading",
-        TrpgLifecycleState::Lobby | TrpgLifecycleState::Unknown => "status-idle",
+        TrpgLifecycleState::Idle | TrpgLifecycleState::Unknown => "status-idle",
     }
 }
 
@@ -610,7 +610,7 @@ fn build_next_action_hint(
             TrpgLifecycleState::Unavailable => {
                 "엔진/키퍼 연결을 복구한 뒤 다시 시도하세요.".to_string()
             }
-            TrpgLifecycleState::Lobby => "세션을 시작한 뒤 라운드 실행을 누르세요.".to_string(),
+            TrpgLifecycleState::Idle => "세션을 시작한 뒤 라운드 실행을 누르세요.".to_string(),
             TrpgLifecycleState::Unknown => "상태 확인 후 라운드 실행을 다시 누르세요.".to_string(),
             TrpgLifecycleState::Running => "진행 상태를 확인하세요.".to_string(),
         };
@@ -673,8 +673,8 @@ fn build_flow_banner(
                 "is-waiting",
                 "초기화/동기화 중입니다. 완료 후 라운드를 실행하세요.".to_string(),
             ),
-            TrpgLifecycleState::Lobby | TrpgLifecycleState::Unknown => (
-                "로비",
+            TrpgLifecycleState::Idle | TrpgLifecycleState::Unknown => (
+                "대기",
                 "is-idle",
                 "새 게임을 시작하거나 실행 가능한 방으로 이동하세요.".to_string(),
             ),
@@ -736,7 +736,7 @@ fn build_flow_action_signature(
     let mut parts = Vec::new();
     if matches!(
         lifecycle,
-        TrpgLifecycleState::Lobby
+        TrpgLifecycleState::Idle
             | TrpgLifecycleState::Loading
             | TrpgLifecycleState::Ended
             | TrpgLifecycleState::Unavailable
@@ -852,7 +852,7 @@ fn collect_flow_banner_actions(
 
     if matches!(
         lifecycle,
-        TrpgLifecycleState::Lobby
+        TrpgLifecycleState::Idle
             | TrpgLifecycleState::Loading
             | TrpgLifecycleState::Ended
             | TrpgLifecycleState::Unavailable
@@ -1109,7 +1109,7 @@ fn set_ops_hud_value(document: &web_sys::Document, id: &str, text: &str, status_
 fn runtime_compact_lifecycle(lifecycle: TrpgLifecycleState) -> bool {
     matches!(
         lifecycle,
-        TrpgLifecycleState::Lobby
+        TrpgLifecycleState::Idle
             | TrpgLifecycleState::Loading
             | TrpgLifecycleState::Ended
             | TrpgLifecycleState::Unavailable
@@ -1164,7 +1164,7 @@ fn sync_runtime_advanced_toggle_ui(document: &web_sys::Document) {
         let text = if show_advanced {
             "상태 전이, 라운드 진단, DM 음성 설정"
         } else if is_compact {
-            "기본 정보만 표시 중 (로비/종료 단순 모드)"
+            "기본 정보만 표시 중 (대기/종료 단순 모드)"
         } else {
             "핵심 정보만 표시 중"
         };
@@ -1192,7 +1192,8 @@ fn ensure_runtime_advanced_toggle_binding(document: &web_sys::Document) {
             .get_attribute("data-show-advanced")
             .map(|raw| raw == "1")
             .unwrap_or(false);
-        let _ = dashboard.set_attribute("data-show-advanced", if show_advanced { "0" } else { "1" });
+        let _ =
+            dashboard.set_attribute("data-show-advanced", if show_advanced { "0" } else { "1" });
         sync_runtime_advanced_toggle_ui(&document);
     }) as Box<dyn FnMut(_)>);
     let _ = toggle.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());

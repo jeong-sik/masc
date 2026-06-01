@@ -374,7 +374,7 @@ pub fn apply_auth_headers(headers: &web_sys::Headers) -> Result<(), wasm_bindgen
 
 // ─── Room ID Management ─────────────────────
 
-/// Get current room ID from DOM attribute (set by dashboard/lobby) or URL param.
+/// Get current room ID from DOM attribute (set by dashboard/home) or URL param.
 pub fn current_room_id() -> String {
     #[cfg(target_arch = "wasm32")]
     {
@@ -422,7 +422,7 @@ pub fn set_current_room_id(room_id: &str) {
                     .search()
                     .ok()
                     .and_then(|search| parse_query_param(&search, "mode"))
-                    .filter(|mode| !mode.trim().is_empty() && mode != "lobby");
+                    .filter(|mode| !mode.trim().is_empty() && mode != "home");
                 let url = match mode_param {
                     Some(mode) => format!("?mode={}&room={}", mode, room_id),
                     None => format!("?room={}", room_id),
@@ -509,7 +509,7 @@ pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
         ViewerMode::Monitor => Some(build_masc_url("sse?room=monitor")),
         ViewerMode::Experiment => Some(build_masc_url("sse?room=experiment")),
         ViewerMode::Social => Some(build_masc_url("sse?room=social")),
-        ViewerMode::Lobby => None,
+        ViewerMode::Home => None,
     }
 }
 

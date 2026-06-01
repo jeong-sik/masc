@@ -7,13 +7,13 @@
     <link data-trunk rel="css" href="style.css" />
     <link data-trunk rel="copy-dir" href="assets" />
 </head>
-<body class="mode-lobby">
+<body class="mode-home">
 
-    <!-- ═══ Lobby Screen (Mode Selector) ═══ -->
-    <div id="lobby-screen">
-        <div class="lobby-header">
-            <h1 class="lobby-title">MASC Viewer</h1>
-            <p class="lobby-subtitle">Multi-Agent Streaming Coordination</p>
+    <!-- ═══ Home Screen (Mode Selector) ═══ -->
+    <div id="home-screen">
+        <div class="home-header">
+            <h1 class="home-title">MASC Viewer</h1>
+            <p class="home-subtitle">Multi-Agent Streaming Coordination</p>
         </div>
 
         <div id="mode-cards" class="mode-grid">
@@ -42,7 +42,7 @@
             </button>
         </div>
 
-        <div class="lobby-footer">
+        <div class="home-footer">
             <span class="theme-label">Theme</span>
             <select id="theme-selector">
                 <option value="dark-fantasy" selected>Dark Fantasy</option>
@@ -64,7 +64,7 @@
         <div class="mode-panel-header">
             <h2>System Monitor</h2>
             <div id="monitor-status" class="mode-status status-disconnected">연결 대기 중</div>
-            <button class="back-btn" data-back="lobby">◂ Back</button>
+            <button class="back-btn" data-back="home">◂ Back</button>
         </div>
         <div class="mode-panel-content">
             <div class="monitor-grid">
@@ -94,7 +94,7 @@
     <div id="social-panel" class="mode-panel" style="display: none;">
         <div class="mode-panel-header">
             <h2>Social Board</h2>
-            <button class="back-btn" data-back="lobby">◂ Back</button>
+            <button class="back-btn" data-back="home">◂ Back</button>
         </div>
         <div class="mode-panel-content">
             <div class="panel-header">
@@ -111,7 +111,7 @@
     <div id="experiment-panel" class="mode-panel" style="display: none;">
         <div class="mode-panel-header">
             <h2>Experiments</h2>
-            <button class="back-btn" data-back="lobby">◂ Back</button>
+            <button class="back-btn" data-back="home">◂ Back</button>
         </div>
         <div class="mode-panel-content">
             <div class="panel-header">
@@ -128,7 +128,7 @@
     <div id="dashboard" style="display: none;" data-auto-round="0">
         <!-- Top Bar -->
         <header id="top-bar">
-            <button id="back-to-lobby" class="icon-btn" title="Back to Lobby">◂</button>
+            <button id="back-to-home" class="icon-btn" title="Back to Home">◂</button>
             <span id="mode-title">—</span>
             <div class="top-bar-right">
                 <div class="room-switch-inline">
@@ -297,7 +297,7 @@
         </section>
 
         <section id="trpg-surface-nav" class="trpg-surface-nav" style="display: none;" aria-label="TRPG 운영 콘솔">
-            <button class="trpg-surface-tab" type="button" data-trpg-surface="lobby" aria-pressed="false">Lobby</button>
+            <button class="trpg-surface-tab" type="button" data-trpg-surface="idle" aria-pressed="false">Idle</button>
             <button class="trpg-surface-tab" type="button" data-trpg-surface="overview" aria-pressed="true">Overview</button>
             <button class="trpg-surface-tab" type="button" data-trpg-surface="timeline" aria-pressed="false">Timeline</button>
             <button class="trpg-surface-tab" type="button" data-trpg-surface="control" aria-pressed="false">Control</button>
@@ -472,13 +472,13 @@
                     <div id="state-legend" class="state-legend runtime-advanced">
                         <span class="state-chip state-running">RUNNING: 라운드 순환 중</span>
                         <span class="state-chip state-stopped">STOPPED: 일시 정지/재개 대기</span>
-                        <span class="state-chip state-lobby">LOBBY: 세션 시작 전</span>
+                        <span class="state-chip state-idle">IDLE: 세션 시작 전</span>
                         <span class="state-chip state-ended">ENDED: 세션 종료</span>
                         <span class="state-chip state-unavailable">UNAVAILABLE: 연결/키퍼 오류</span>
                     </div>
                     <div id="lifecycle-diagram" class="lifecycle-diagram runtime-advanced" aria-label="TRPG 상태 전이 다이어그램">
                         <div class="lifecycle-track">
-                            <span class="lifecycle-node" data-state="lobby">LOBBY</span>
+                            <span class="lifecycle-node" data-state="idle">IDLE</span>
                             <span class="lifecycle-edge">→</span>
                             <span class="lifecycle-node" data-state="running">RUNNING</span>
                             <span class="lifecycle-edge">↔</span>
@@ -700,7 +700,7 @@
         const body = document.body;
         let booted = false;
 
-        function hideLoading(forceLobby, message) {
+        function hideLoading(forceHome, message) {
             if (!loading) return;
             loading.classList.add('hidden');
             loading.style.opacity = '0';
@@ -708,8 +708,8 @@
             if (message && loadingText) {
                 loadingText.textContent = message;
             }
-            if (forceLobby && body) {
-                body.classList.add('mode-lobby');
+            if (forceHome && body) {
+                body.classList.add('mode-home');
             }
         }
 

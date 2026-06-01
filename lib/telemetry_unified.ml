@@ -193,14 +193,32 @@ let source_optional_when_missing = function
   | Keeper_metric | Agent_event | Tool_call_io | Trajectory_tool_call
   | Tool_usage | Oas_event | Execution_receipt | Tool_metric -> false
 
-let latest_coverage_gap_for_source gaps source =
+let coverage_gap_recovered ~latest_ts gap =
+  match latest_ts, extract_ts gap with
+  | Some source_ts, gap_ts
+    when gap_ts > 0.0 && Float.compare source_ts gap_ts >= 0 ->
+      true
+  | _ -> false
+
+let coverage_gaps_for_source gaps source =
   let source_name = source_to_string source in
   gaps
-  |> List.rev
-  |> List.find_opt (fun gap ->
+  |> List.filter (fun gap ->
        String.equal
          (Safe_ops.json_string ~default:"" "source" gap)
          source_name)
+
+let active_coverage_gaps ~latest_ts gaps =
+  List.filter (fun gap -> not (coverage_gap_recovered ~latest_ts gap)) gaps
+
+let coverage_gap_status_fields gaps source ~latest_ts =
+  let source_gaps = coverage_gaps_for_source gaps source in
+  let active_gaps = active_coverage_gaps ~latest_ts source_gaps in
+  ( [
+      ("coverage_gap_count", `Int (List.length source_gaps));
+      ("active_coverage_gap_count", `Int (List.length active_gaps));
+    ],
+    List.rev active_gaps |> List.find_opt (fun _ -> true) )
 
 (* ── Semantic duplicate suppression ───────────────── *)
 
@@ -786,7 +804,6 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
   let source_json_and_count source =
     let freshness_slo_s = source_freshness_slo_s source in
     let metadata_fields = source_metadata_fields ~base_path ~masc_root source in
-    let coverage_gap = latest_coverage_gap_for_source coverage_gaps source in
     let keeper_dir_fields dirs =
       [
         ( "keepers",
@@ -801,6 +818,10 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
     match source with
     | Keeper_metric ->
       let exists = keeper_dirs <> [] in
+      let coverage_gap_fields, coverage_gap =
+        coverage_gap_status_fields coverage_gaps source
+          ~latest_ts:keeper_latest_ts
+      in
       ( `Assoc
           ([
              ("source", `String (source_to_string source));
@@ -812,8 +833,9 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
                     keeper_dirs) );
              ("keeper_count", `Int (List.length keeper_dirs));
              ("entry_count", `Int keeper_total);
-           ]
+          ]
           @ metadata_fields
+          @ coverage_gap_fields
           @ freshness_fields ~now keeper_latest_ts
           @ source_health_fields ~now ~exists ~entry_count:keeper_total
               ~latest_ts:keeper_latest_ts ~freshness_slo_s
@@ -844,15 +866,19 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
         if dir_state = Store_directory then trajectory_tool_call_summary_stats ~masc_root
         else (0, None)
       in
+      let coverage_gap_fields, coverage_gap =
+        coverage_gap_status_fields coverage_gaps source ~latest_ts
+      in
       ( `Assoc
           ([
              ("source", `String (source_to_string source));
              ("path", `String trajectories_root);
              ("exists", `Bool exists);
              ("entry_count", `Int count);
-           ]
+          ]
           @ keeper_dir_fields dirs
           @ metadata_fields
+          @ coverage_gap_fields
           @ freshness_fields ~now latest_ts
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
               ~freshness_slo_s
@@ -878,15 +904,19 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
         if dir_state = Store_directory then execution_receipt_summary_stats ~masc_root
         else (0, None)
       in
+      let coverage_gap_fields, coverage_gap =
+        coverage_gap_status_fields coverage_gaps source ~latest_ts
+      in
       ( `Assoc
           ([
              ("source", `String (source_to_string source));
              ("path", `String (Filename.concat keepers_root "*/execution-receipts"));
              ("exists", `Bool exists);
              ("entry_count", `Int count);
-           ]
+          ]
           @ keeper_dir_fields dirs
           @ metadata_fields
+          @ coverage_gap_fields
           @ freshness_fields ~now latest_ts
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
               ~freshness_slo_s
@@ -900,14 +930,18 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
         if exists then goal_event_summary_stats ~masc_root
         else (0, None)
       in
+      let coverage_gap_fields, coverage_gap =
+        coverage_gap_status_fields coverage_gaps source ~latest_ts
+      in
       ( `Assoc
           ([
              ("source", `String (source_to_string source));
              ("path", `String path);
              ("exists", `Bool exists);
              ("entry_count", `Int count);
-           ]
+          ]
           @ metadata_fields
+          @ coverage_gap_fields
           @ freshness_fields ~now latest_ts
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
               ~freshness_slo_s
@@ -939,14 +973,18 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           latest_store_ts source dir (source_to_string source)
         else None
       in
+      let coverage_gap_fields, coverage_gap =
+        coverage_gap_status_fields coverage_gaps source ~latest_ts
+      in
       ( `Assoc
           ([
              ("source", `String (source_to_string source));
              ("path", `String dir);
              ("exists", `Bool exists);
              ("entry_count", `Int count);
-           ]
+          ]
           @ metadata_fields
+          @ coverage_gap_fields
           @ freshness_fields ~now latest_ts
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
               ~freshness_slo_s

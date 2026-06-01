@@ -164,7 +164,7 @@
         <div class="card">
           <h3>Tool Surface</h3>
           <p><span class="badge warn">PARTIAL</span></p>
-          <p>Keeper는 도구를 실제로 보고 실행한다. Echo/Analyst 모두 allowed tools 39개, 최근 receipt는 `satisfied_execution`이다. 하지만 `tool_usage`, `tool_call_io`, `trajectory`, `execution_receipt` telemetry에는 coverage gap이 남아 있다.</p>
+          <p>Keeper는 도구를 실제로 보고 실행한다. Echo/Analyst 모두 allowed tools 39개, 최근 receipt는 `satisfied_execution`이다. Historical coverage gap이 현재 health를 계속 붙잡는 판정 버그는 active-gap 기준으로 패치됐다. live runtime 반영 후 `tool_call_io`, `trajectory_tool_call`, `execution_receipt`는 최신 성공 row가 과거 gap보다 새로우면 `ok`로 회복되어야 한다.</p>
         </div>
         <div class="card">
           <h3>Model Runtime</h3>
@@ -214,8 +214,8 @@
           </tr>
           <tr>
             <td>`/api/v1/dashboard/telemetry/summary`</td>
-            <td>`tool_call_io`, `trajectory_tool_call`, `tool_usage`, `execution_receipt` show coverage gaps; `oas_event` is ok.</td>
-            <td>Runtime/tool evidence is being produced in places, but durable dashboard observability is incomplete.</td>
+            <td>Before this slice, `tool_call_io`, `trajectory_tool_call`, `tool_usage`, `execution_receipt` showed coverage gaps even when newer successful rows existed; `oas_event` was ok.</td>
+            <td>Dashboard summary now separates historical `coverage_gap_count` from `active_coverage_gap_count`; only active gaps can force source health to `coverage_gap`.</td>
           </tr>
           <tr>
             <td>`masc_keeper_persona_audit(include_ok=false)`</td>
@@ -318,8 +318,8 @@
       <div class="finding good">
         <strong>Finding T1:</strong> Tools are not simply missing. Echo and Analyst can see and execute tools; recent receipts show `satisfied_execution` and descriptor route evidence.
       </div>
-      <div class="finding critical">
-        <strong>Finding T2:</strong> Tool observability is not green. `tool_usage_append_failed`, `tool_call_io_append_failed`, `trajectory_append_failed`, and `execution_receipt_append_failed` mean dashboard-level proof is incomplete.
+      <div class="finding warn">
+        <strong>Finding T2:</strong> Tool observability had stale red health. `tool_usage_append_failed`, `tool_call_io_append_failed`, `trajectory_append_failed`, and `execution_receipt_append_failed` remain retained as historical evidence, but dashboard health now treats them as active only until a newer durable source row proves recovery.
       </div>
 
       <h3>3. Model-Provider Runtime Path</h3>
@@ -422,7 +422,7 @@
         <li><strong>Stabilize commit truth.</strong> Bring root checkout to current `origin/main`, rebuild/restart once, and require `/health?full=1` to report the same commit as `git rev-parse origin/main`. Do not evaluate Keeper behavior while runtime is warming or flapping.</li>
         <li><strong>Repair fleet boot first.</strong> After restart, wait one startup window. If `keeper_fibers=0`, inspect supervisor startup logs and meta decode errors. Acceptance: `keeper_fleet_safety.status` is `ok` or a bounded degraded state with named keepers, not `no_executable_keeper_fibers`.</li>
         <li><strong>Converge sandbox truth.</strong> Make `masc_keeper_sandbox_status`, `masc_keeper_status.policy`, `runtime_trust.runtime_contract`, and receipt sandbox summary read the same overlay source. Acceptance: Analyst TOML docker yields status docker and receipt docker, or an explicit local override is shown with source.</li>
-        <li><strong>Lock tool surface evidence.</strong> Treat descriptor route evidence as canonical and fix coverage gap appenders. Acceptance: `tool_usage`, `tool_call_io`, `trajectory_tool_call`, and `execution_receipt` are `ok` or carry a fresh, actionable error with one failing source.</li>
+        <li><strong>Lock tool surface evidence.</strong> Treat descriptor route evidence as canonical and make coverage gap health active-only. Acceptance: `tool_usage`, `tool_call_io`, `trajectory_tool_call`, and `execution_receipt` are `ok` or carry `active_coverage_gap_count &gt; 0` with a fresh, actionable error for the failing source.</li>
         <li><strong>Make runtime identity observable.</strong> Add internal-safe provider/model attribution to runtime observation and receipt. Public dashboards may keep redacted runtime lanes, but Keeper status must say either `verified=true` with source or a concrete provider blocker. Acceptance: one controlled turn produces non-null runtime observation or a named failure class.</li>
         <li><strong>Clean persona/fleet drift.</strong> Remove stale active goal IDs, restore missing registry entries, decide whether `tech_glutton` should stay paused, and create or remove missing `base` runtime meta. Acceptance: `masc_keeper_persona_audit(include_ok=false)` returns only intentional issues.</li>
         <li><strong>Clean docs/routes.</strong> Update stale capacity/dashboard route docs after the live route sweep. Acceptance: docs do not point operators to 404/410 endpoints for runtime capacity or dashboard batch state.</li>
@@ -468,9 +468,9 @@
 	          </tr>
 	          <tr>
 	            <td>Telemetry append gaps</td>
-	            <td><span class="badge warn">remaining</span></td>
-	            <td>No telemetry appender repair in this slice.</td>
-	            <td>`tool_usage`, `tool_call_io`, `trajectory_tool_call`, and `execution_receipt` need fresh ok status or a single actionable append error.</td>
+	            <td><span class="badge good">patched</span></td>
+	            <td>`Telemetry_unified.summary_json`, `Dashboard_tool_source_freshness`, and `Tool_usage_log.source_metadata_json` now keep historical `coverage_gaps` visible while filtering health through active gaps only. A source row whose timestamp is equal to or newer than the gap timestamp proves recovery; source summaries expose `coverage_gap_count` and `active_coverage_gap_count`. Regression tests cover recovered `tool_call_io` summary and tool-quality aggregate behavior.</td>
+	            <td>After rebuild/restart, `/api/v1/dashboard/telemetry/summary` should report `active_coverage_gap_count=0` for recovered lanes. If a lane still reports `coverage_gap`, the gap must be newer than the latest durable source row and include the single actionable append error.</td>
 	          </tr>
 	        </tbody>
 	      </table>
@@ -484,7 +484,7 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' | jq '{build, keeper_fibers, kee
 masc_keeper_sandbox_status(name="analyst", include_preflight=true)
 masc_keeper_status(name="analyst", fast=true)
 masc_keeper_status(name="echo", fast=true)
-curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/telemetry/summary' | jq '.sources[] | {source, health, stale_reason, latest_ts_iso}'
+curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/telemetry/summary' | jq '.sources[] | {source, health, stale_reason, latest_ts_iso, coverage_gap_count, active_coverage_gap_count}'
 curl -fsS 'http://127.0.0.1:8935/api/v1/models/metrics' | jq '{total_entries,total_error_entries,models}'
 masc_keeper_persona_audit(include_ok=false)</pre>
       <p>Pass condition: source commit truth stable, keeper fibers executable, sandbox surfaces converged, tool telemetry gap closed or sharply explained, runtime model observation verified or explicitly blocked.</p>

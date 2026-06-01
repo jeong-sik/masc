@@ -852,6 +852,36 @@ let test_dashboard_aggregate_surfaces_coverage_gap () =
     Alcotest.(check int) "coverage gap count" 1
       (Safe_ops.json_int ~default:0 "coverage_gap_count" summary))
 
+let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
+  with_tmp_log_dir (fun dir ->
+    let masc_root = Filename.concat dir ".masc" in
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"tool_call_io"
+      ~producer:"keeper_hooks_oas"
+      ~durable_store:(Filename.concat masc_root "tool_calls")
+      ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+      ~stale_reason:"tool_call_io_append_failed"
+      ~keeper_name:"k"
+      ~trace_id:"trace-gap"
+      ();
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~success:true ~duration_ms:2.0
+      ~trace_id:"trace-recovered" ();
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check (option string)) "recovered gap health"
+      (Some "ok")
+      (Safe_ops.json_string_opt "health" summary);
+    Alcotest.(check (option string)) "recovered gap stale reason cleared"
+      None
+      (Safe_ops.json_string_opt "stale_reason" summary);
+    Alcotest.(check int) "historical gap count" 1
+      (Safe_ops.json_int ~default:0 "coverage_gap_count" summary);
+    Alcotest.(check int) "active gap count" 0
+      (Safe_ops.json_int ~default:(-1) "active_coverage_gap_count" summary))
+
 (* ── UTF-8 sanitization ────────────────────────────── *)
 
 (* Regression guard: tool output may contain invalid UTF-8 bytes from
@@ -1084,6 +1114,8 @@ let () =
             test_append_failure_records_coverage_gap
         ; eio_test "dashboard aggregate surfaces coverage gap"
             test_dashboard_aggregate_surfaces_coverage_gap
+        ; eio_test "dashboard aggregate ignores recovered coverage gap"
+            test_dashboard_aggregate_ignores_recovered_coverage_gap
         ] )
     ; ( "utf8_sanitize",
         [ eio_test "invalid UTF-8 bytes scrubbed before persist"

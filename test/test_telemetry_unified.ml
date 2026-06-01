@@ -1069,6 +1069,52 @@ let test_summary_surfaces_coverage_gaps () =
       (json_string_field "stale_reason" source_summary)
   | _ -> Alcotest.fail "expected Assoc"
 
+let test_summary_ignores_recovered_coverage_gap () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_summary_recovered_gap" in
+  let root = masc_root dir in
+  Telemetry_coverage_gap.record
+    ~masc_root:root
+    ~source:"tool_call_io"
+    ~producer:"keeper_hooks_oas"
+    ~durable_store:(Filename.concat root "tool_calls")
+    ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+    ~stale_reason:"tool_call_io_append_failed"
+    ~error:"old fd pressure"
+    ();
+  let recovered_ts = Unix.gettimeofday () +. 10.0 in
+  write_jsonl
+    (Filename.concat root "tool_calls")
+    [
+      `Assoc
+        [
+          ("ts", `Float recovered_ts);
+          ("keeper", `String "alice");
+          ("tool", `String "masc_status");
+          ("success", `Bool true);
+        ];
+    ];
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let tool_summary = source_summary "tool_call_io" json in
+  Alcotest.(check string) "recovered gap health" "ok"
+    (json_string_field "health" tool_summary);
+  Alcotest.(check string) "recovered gap stale reason cleared" ""
+    (json_string_field "stale_reason" tool_summary);
+  Alcotest.(check int) "historical gap count" 1
+    (json_int_field "coverage_gap_count" tool_summary);
+  Alcotest.(check int) "active gap count" 0
+    (json_int_field "active_coverage_gap_count" tool_summary);
+  match json with
+  | `Assoc fields ->
+    let gaps =
+      match List.assoc_opt "coverage_gaps" fields with
+      | Some (`List values) -> values
+      | _ -> Alcotest.fail "expected coverage_gaps"
+    in
+    Alcotest.(check int) "historical gap retained" 1 (List.length gaps)
+  | _ -> Alcotest.fail "expected Assoc"
+
 let test_summary_counts_all_entries_beyond_recent_cap () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1231,6 +1277,8 @@ let () =
             test_summary_includes_trajectory_and_execution_receipt_sources;
           Alcotest.test_case "surfaces coverage gaps" `Quick
             test_summary_surfaces_coverage_gaps;
+          Alcotest.test_case "ignores recovered coverage gaps" `Quick
+            test_summary_ignores_recovered_coverage_gap;
           Alcotest.test_case "goal_event missing reports not_yet" `Quick
             test_goal_event_missing_reports_not_yet;
           Alcotest.test_case "tool_call_io missing stays missing" `Quick

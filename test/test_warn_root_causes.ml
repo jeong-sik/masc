@@ -49,11 +49,11 @@ let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
-(** Build the allowed_exec_set: preset-allowed internal names resolved to
+(** Build the policy_allowed_tool_set: preset-allowed internal names resolved to
     public names (via descriptor registry) + core_always_tools.
     RFC-0179 moved core_discovery_tools to public names while
     keeper_allowed_tool_names still returns internal names. *)
-let build_allowed_exec_set (meta : Keeper_meta_contract.keeper_meta) =
+let build_policy_allowed_tool_set (meta : Keeper_meta_contract.keeper_meta) =
   let allowed_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let internal_set = Keeper_tool_policy.tool_name_set allowed_names in
   (* Map internal names to public names via descriptor registry *)
@@ -72,9 +72,9 @@ let build_allowed_exec_set (meta : Keeper_meta_contract.keeper_meta) =
 
 (** Filter core_discovery_tools by preset (the fix). *)
 let filter_core_by_preset (meta : Keeper_meta_contract.keeper_meta) =
-  let allowed_set = build_allowed_exec_set meta in
+  let policy_allowed_tool_set = build_policy_allowed_tool_set meta in
   List.filter
-    (fun name -> Keeper_tool_policy.StringSet.mem name allowed_set)
+    (fun name -> Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set)
     Keeper_tool_registry.core_discovery_tools
 
 (* Direct write tools require delivery/full presets. *)
@@ -95,7 +95,6 @@ let test_core_tools_filtered_by_research_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-research" ()) with
-      tool_access = [];
       tool_denylist = [] }
   in
   (* Precondition: direct write tools ARE in unfiltered core *)
@@ -131,7 +130,6 @@ let test_core_tools_include_write_for_delivery_preset () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-delivery" ()) with
-      tool_access = [];
       tool_denylist = [] }
   in
   let filtered = filter_core_by_preset meta in

@@ -3,7 +3,7 @@
 **Date**: 2026-05-12 · **Iteration**: 83 (`/loop` FSM/TLA+/OCaml drift hunt) · **Phase**: R (line-ref sweep, cluster #2)
 **Spec**: `specs/keeper-state-machine/KeeperToolSurface.tla` (372 LOC, bug-model paired)
 **OCaml**: `lib/keeper/keeper_run_tools.ml` — `compute_tool_surface` (the tool-surface construction pipeline, the function this spec models) · `lib/keeper/keeper_tool_selection.ml` — `contract_enforcement_filter`
-**Verdict**: **~16 `keeper_run_tools.ml:NNN` line-range citations (lines 794-1011) all stale, symbol/stage-anchored comment-only**. `keeper_run_tools.ml` is ~1.7k LOC and the surface pipeline (`merged` → `required_tool_names` → `all_allowed` through fallback floor / last-turn safety / contract filter / max-tools truncation) all lives inside one function, `compute_tool_surface` (now at line 640). The spec cited the pipeline's *stages* by line range; those have drifted. Re-anchored: the 7-row OCaml↔TLA+ mapping table now carries the lint-checkable `lib/keeper/<file>.ml:<symbol>` form (verified by `scripts/lint/spec-line-refs.sh` — the symbol must resolve in the file) with the pipeline-stage detail in a separate "semantic" column; in-prose mentions use the bare `compute_tool_surface` symbol name + the stage's descriptive name. Model body unchanged; TLC re-verified (clean = no error, 814 distinct states; buggy = `SafetyInvariant` violated).
+**Verdict**: **~16 `keeper_run_tools.ml:NNN` line-range citations (lines 794-1011) all stale, symbol/stage-anchored comment-only**. `keeper_run_tools.ml` is ~1.7k LOC and the surface pipeline (`merged` → `required_tool_names` → `turn_visible_tool_names` through fallback floor / last-turn safety / contract filter) all lives inside one function, `compute_tool_surface` (now at line 640). The spec cited the pipeline's *stages* by line range; those have drifted. Re-anchored: the 7-row OCaml↔TLA+ mapping table now carries the lint-checkable `lib/keeper/<file>.ml:<symbol>` form (verified by `scripts/lint/spec-line-refs.sh` — the symbol must resolve in the file) with the pipeline-stage detail in a separate "semantic" column; in-prose mentions use the bare `compute_tool_surface` symbol name + the stage's descriptive name. Model body unchanged; TLC re-verified (clean = no error, 814 distinct states; buggy = `SafetyInvariant` violated).
 
 ## Why this cluster (line-ref sweep #2)
 
@@ -17,10 +17,10 @@ The whole surface pipeline is the body of `compute_tool_surface` (`lib/keeper/ke
 |---|---|---|
 | `pre_floor` (merged tools after overlay compose + validate) | `keeper_run_tools.ml:830-836` | `compute_tool_surface — merged-tools step (after overlay compose + validate)` |
 | `floor_fired` (`tool_surface_fallback_used = true`) | `keeper_run_tools.ml:844-850` (×3, incl. inline) | `compute_tool_surface — fallback-floor conditional (sets tool_surface_fallback_used)` |
-| `after_floor` (all_allowed post fallback floor) | `keeper_run_tools.ml:850` | `compute_tool_surface — all_allowed after the fallback floor` |
+| `after_floor` (turn_visible_tool_names post fallback floor) | `keeper_run_tools.ml:850` | `compute_tool_surface — turn_visible_tool_names after the fallback floor` |
 | `after_last_turn_safe` (`Intersect_with safe_last_turn_tools`) | `keeper_run_tools.ml:866-873` (×2) | `compute_tool_surface — Intersect_with safe_last_turn_tools step (when is_last_turn)` |
 | `after_passive` (`contract_enforcement_filter` output) | `keeper_run_tools.ml:882-888` (×2) | `lib/keeper/keeper_tool_selection.ml:contract_enforcement_filter` (mapping table) / `contract_enforcement_filter output (invoked from compute_tool_surface)` (prose) — *the filter is defined in `Keeper_tool_selection`, not `keeper_run_tools.ml`; the old `lib/keeper/keeper_run_tools.ml:882-888` cited the wrong file* |
-| `emitted` / truncation (all_allowed final return) | `keeper_run_tools.ml:909-944` (×3) | `compute_tool_surface — max_tools-truncation step (essential / non_essential split)` |
+| `emitted` / final visible surface (turn_visible_tool_names final return) | `keeper_run_tools.ml:909-944` (×3) | `compute_tool_surface — final visible tool surface` |
 | `required` (post-satisfaction required set) | `keeper_run_tools.ml:794-797` | `compute_tool_surface — outstanding_required_tool_names (post-satisfaction required set)` |
 | classification near the return (tool_surface_class / lane / tool_requirement) | `keeper_run_tools.ml:949-973` | `compute_tool_surface — classification block near the return (tool_surface_class / lane / tool_requirement)` |
 | validate gate + merged step | `keeper_run_tools.ml:805-806/830-836` | `compute_tool_surface — validate_allow_list gate + merged-tools step` |
@@ -29,7 +29,7 @@ The whole surface pipeline is the body of `compute_tool_surface` (`lib/keeper/ke
 
 **Bonus correctness fix**: the `after_passive` rows cited `lib/keeper/keeper_run_tools.ml:882-888` for `contract_enforcement_filter` — but that function is in `Keeper_tool_selection` (`keeper_tool_selection.ml`); `keeper_run_tools.ml`'s `compute_tool_surface` only *calls* `Keeper_tool_selection.contract_enforcement_filter`. The new anchor names the right file.
 
-Verification of current positions (`keeper_run_tools.ml`, 1725 LOC): `compute_tool_surface`@640; `merged`@792/825; `required_tool_names_raw`@799, `outstanding_required_tool_names`@807; `all_allowed`@842/856/878/894/915; `tool_surface_fallback_used` assignment@856-860; `safe_last_turn_tools`@877; `Keeper_tool_selection.contract_enforcement_filter` call@894-895; truncation `essential`/`non_essential`/`budget`@~945-953; `tool_surface_class`/`lane`/`tool_requirement`@~961-975; the returned record@~995-1010.
+Verification of current positions (`keeper_run_tools.ml`, 1725 LOC): `compute_tool_surface`@640; `merged`@792/825; `required_tool_names_raw`@799, `outstanding_required_tool_names`@807; `turn_visible_tool_names`@842/856/878/894/915; `tool_surface_fallback_used` assignment@856-860; `safe_last_turn_tools`@877; `Keeper_tool_selection.contract_enforcement_filter` call@894-895; `tool_surface_class`/`lane`/`tool_requirement`@~961-975; the returned record@~995-1010.
 
 ## Cross-checks (pass)
 

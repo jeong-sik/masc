@@ -147,7 +147,7 @@ let failure_count_jump_to counts key ~target =
    After this many seconds, a scope block expires and the agent may
    retry the same (tool, task, action) scope — e.g. after creating a PR
    externally and re-submitting for verification. *)
-let workflow_block_ttl_seconds = 1800.
+let workflow_block_ttl_seconds = Keeper_tools_oas_workflow.workflow_block_ttl_seconds
 
 let workflow_rejection_count_record counts key =
   Mutex.protect counts.mutex (fun () ->

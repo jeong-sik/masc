@@ -37,6 +37,11 @@ type workflow_rejection_block =
   ; blocked_at : float
   }
 
+(* TTL for workflow rejection scope blocks (#18500).
+   Shared with the task-claim exclusion registry so both loop breakers expire
+   together. *)
+let workflow_block_ttl_seconds = 1800.
+
 let json_assoc_field_opt = Json_util.assoc_member_opt
 let json_assoc_string_opt = Json_util.assoc_string_opt
 let detail_json_opt = Keeper_tools_oas_json.detail_json_opt
@@ -50,6 +55,12 @@ let json_nonempty_string_opt key json =
     let value = String.trim value in
     if String.equal value "" then None else Some value
   | _ -> None
+;;
+
+let workflow_task_id_of_input_or_info ~input (info : workflow_rejection_info) =
+  match json_nonempty_string_opt "task_id" input with
+  | Some _ as task_id -> task_id
+  | None -> info.task_id
 ;;
 
 let workflow_rejection_info_of_json json =

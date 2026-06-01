@@ -84,7 +84,7 @@ let execute_with_observers
                      info);
                 (* F4: also register the task ID in the workspace-scoped
                    blocked-task registry so [claim_next_r] can exclude it. *)
-                (match info.task_id with
+                (match workflow_task_id_of_input_or_info ~input info with
                  | Some tid ->
                    Tool_task.register_scope_blocked_task_id config tid
                  | None -> ())

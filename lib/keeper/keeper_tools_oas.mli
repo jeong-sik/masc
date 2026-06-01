@@ -49,6 +49,8 @@ type failure_counts
 
 val create_failure_counts : unit -> failure_counts
 
+val workflow_block_ttl_seconds : float
+
 val failure_count_get : failure_counts -> string -> int
 
 val failure_count_record_failure : failure_counts -> string -> int

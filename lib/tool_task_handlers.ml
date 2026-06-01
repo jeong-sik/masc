@@ -53,10 +53,9 @@ let current_task_owner_hooks () = Atomic.get task_owner_hooks
 (* Workflow rejection scope-blocked task registry. When a tool execution yields
    a [Block_scope] workflow rejection, the task ID is recorded here so that
    [handle_claim_next] can exclude it from the next [claim_next_r] call. Entries
-   expire after [blocked_task_ttl_seconds] to match the per-keeper
-   [workflow_block_ttl_seconds] in [Keeper_tools_oas]. *)
+   expire with the same TTL as the per-tool workflow scope block. *)
 
-let blocked_task_ttl_seconds = 1800.
+let blocked_task_ttl_seconds = Keeper_tools_oas_workflow.workflow_block_ttl_seconds
 
 let blocked_task_ids_table : (string * string, float) Hashtbl.t = Hashtbl.create 16
 let blocked_task_ids_mutex = Mutex.create ()

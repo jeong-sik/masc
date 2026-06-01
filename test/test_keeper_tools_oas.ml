@@ -1307,6 +1307,38 @@ let test_workflow_rejection_scope_policy_block_scope () =
       (Keeper_tools_oas_workflow.workflow_rejection_should_scope_block info)
 ;;
 
+let test_workflow_rejection_task_id_prefers_input () =
+  let info task_id : Keeper_tools_oas_workflow.workflow_rejection_info =
+    { task_id
+    ; rule_id = Some "submit_verification_missing_evidence"
+    ; tool_suggestion = None
+    ; hint = None
+    ; scope_policy = Keeper_tools_oas_workflow.Block_scope
+    }
+  in
+  check
+    (option string)
+    "input task_id wins"
+    (Some "task-input")
+    (Keeper_tools_oas_workflow.workflow_task_id_of_input_or_info
+       ~input:(`Assoc [ "task_id", `String " task-input " ])
+       (info (Some "task-output")));
+  check
+    (option string)
+    "empty input falls back to rejection info"
+    (Some "task-output")
+    (Keeper_tools_oas_workflow.workflow_task_id_of_input_or_info
+       ~input:(`Assoc [ "task_id", `String " " ])
+       (info (Some "task-output")));
+  check
+    (option string)
+    "missing both stays none"
+    None
+    (Keeper_tools_oas_workflow.workflow_task_id_of_input_or_info
+       ~input:(`Assoc [])
+       (info None))
+;;
+
 let test_workflow_rejection_retry_policy_requires_explicit_markers () =
   let should_skip raw =
     match
@@ -1664,7 +1696,12 @@ let test_workflow_rejection_scope_blocks_transition_variants () =
               bool
               "first rejection asks self correction"
               true
-              (json_bool "self_correction_required" json)
+              (json_bool "self_correction_required" json);
+            check
+              bool
+              "input task_id registered for claim_next exclusion"
+              true
+              (List.mem "task-001" (Tool_task.scope_blocked_task_ids config))
           | Ok _ -> fail "missing verification evidence should reject");
          let variant_args =
            `Assoc
@@ -1992,6 +2029,10 @@ let () =
             "workflow rejection scope policy block_scope"
             `Quick
             test_workflow_rejection_scope_policy_block_scope
+        ; test_case
+            "workflow rejection task_id prefers input"
+            `Quick
+            test_workflow_rejection_task_id_prefers_input
         ; test_case
             "workflow rejection retry policy requires explicit markers"
             `Quick

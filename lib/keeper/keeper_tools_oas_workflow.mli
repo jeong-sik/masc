@@ -115,6 +115,11 @@ val workflow_rejection_recovery_fields
 (** Extract a non-empty string value from JSON. *)
 val json_nonempty_string_opt : string -> Yojson.Safe.t -> string option
 
+val workflow_task_id_of_input_or_info
+  :  input:Yojson.Safe.t
+  -> workflow_rejection_info
+  -> string option
+
 (** Check if handoff_context has non-empty evidence_refs. *)
 val json_has_nonempty_evidence_refs : Yojson.Safe.t -> bool
 
@@ -136,6 +141,8 @@ type workflow_rejection_block =
   ; hint : string option
   ; blocked_at : float
   }
+
+val workflow_block_ttl_seconds : float
 
 (** Build structured recovery fields from a workflow rejection block. *)
 val workflow_rejection_scope_block_fields

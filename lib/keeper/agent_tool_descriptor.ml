@@ -193,9 +193,16 @@ let read_file_schema =
     [ property
         "file_path"
         "string"
-        "Existing file path to read. Read has no implicit cwd and does not inherit \
-         Execute cwd; use an absolute path, a sandbox-relative path, or a path returned \
-         by Grep/Execute listing."
+        "Existing file path to read. Relative paths resolve against cwd when cwd is \
+         provided, otherwise against the keeper sandbox. Read does not inherit Execute \
+         cwd implicitly; pass cwd explicitly or use a sandbox-relative repos/<repo>/... \
+         path."
+    ; property
+        "cwd"
+        "string"
+        "Optional sandbox-relative directory to resolve file_path from, e.g. \
+         repos/masc-mcp. This is explicit only; Read never inherits the previous \
+         Execute cwd."
     ; property
         "limit"
         "integer"
@@ -439,8 +446,8 @@ let public_descriptors =
       ~public_name:"Read"
       ~internal_name:"tool_read_file"
       ~description:
-        "Read one existing file from the keeper sandbox or an allowed path. Read has no \
-         implicit cwd; list or search first when the exact path is unclear."
+        "Read one existing file from the keeper sandbox or an allowed path. Pass cwd \
+         explicitly for repo-relative reads; Read never inherits Execute cwd."
       ~input_schema:read_file_schema
       ~policy:
         (policy

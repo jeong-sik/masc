@@ -62,7 +62,7 @@ Boundary health는 `B+`로 본다.
 - 가장 큰 위험은 workshop-inspired 기능을 편의상 OAS 안으로 몰아 넣는 구현 유혹이다.
 - red line은 네 가지다.
   - OAS hook가 accept/reject나 policy update를 계산하지 않는다.
-  - fresh-context evaluator는 README / design docs / room-task history를 읽지 않는다.
+  - fresh-context evaluator는 README / design docs / workspace-task history를 읽지 않는다.
   - transcript는 artifact로 남기되 hidden prompt / memory로 주입하지 않는다.
   - MCP SDK는 hook / transcript / verdict 같은 workload semantics를 wire에 올리지 않는다.
 
@@ -208,6 +208,6 @@ RFC rollback 절에 다음을 추가했다.
 5. cross-repo schema sharing은 JSON schema + fixtures로 시작해야 한다.
 6. workshop alignment red line이 구현에서 유지되어야 한다.
    - OAS hook는 accept/reject나 policy update를 계산하지 않는다.
-   - fresh-context evaluator는 README / design docs / room-task history를 읽지 않는다.
+   - fresh-context evaluator는 README / design docs / workspace-task history를 읽지 않는다.
    - transcript는 artifact로 남기되 hidden prompt / memory로 주입하지 않는다.
 7. boundary health는 현재 `B+`이며, convenience-driven leakage가 보이면 구현 전 중단하고 재검토한다.

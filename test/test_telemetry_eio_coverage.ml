@@ -10,7 +10,7 @@
 open Alcotest
 
 module Telemetry_eio = Masc_mcp.Telemetry_eio
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Prometheus = Masc_mcp.Prometheus
 
 let error_kind value = Telemetry_eio.error_kind_of_string value
@@ -73,7 +73,7 @@ let write_dated_file dir month day lines =
    event Type Tests
    ============================================================ *)
 
-let test_event_agent_session_bound () =
+let test_event_agent_session_bounded () =
   let e = Telemetry_eio.Agent_session_bound {
     agent_id = "agent_llm_a-001";
     capabilities = ["code"; "review"];
@@ -84,15 +84,15 @@ let test_event_agent_session_bound () =
       check int "capabilities" 2 (List.length r.capabilities)
   | _ -> fail "expected Agent_session_bound"
 
-let test_event_agent_left () =
-  let e = Telemetry_eio.Agent_left {
+let test_event_agent_unbound () =
+  let e = Telemetry_eio.Agent_unbound {
     agent_id = "agent_llm_a-001";
     reason = "session ended";
   } in
   match e with
-  | Telemetry_eio.Agent_left r ->
+  | Telemetry_eio.Agent_unbound r ->
       check string "reason" "session ended" r.reason
-  | _ -> fail "expected Agent_left"
+  | _ -> fail "expected Agent_unbound"
 
 let test_event_task_started () =
   let e = Telemetry_eio.Task_started {
@@ -392,7 +392,7 @@ let test_metrics_json_roundtrip () =
    event_to_json Tests
    ============================================================ *)
 
-let test_event_to_json_agent_session_bound () =
+let test_event_to_json_agent_session_bounded () =
   let e = Telemetry_eio.Agent_session_bound {
     agent_id = "test";
     capabilities = ["a"; "b"];
@@ -421,24 +421,24 @@ let test_count_active_agents_empty () =
   let events : Telemetry_eio.event_record list = [] in
   check int "empty" 0 (Telemetry_eio.count_active_agents events)
 
-let test_count_active_agents_one_joined () =
+let test_count_active_agents_one_bound () =
   let events : Telemetry_eio.event_record list = [
     { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
   ] in
-  check int "one joined" 1 (Telemetry_eio.count_active_agents events)
+  check int "one bound" 1 (Telemetry_eio.count_active_agents events)
 
-let test_count_active_agents_joined_then_left () =
+let test_count_active_agents_bound_then_unbound () =
   let events : Telemetry_eio.event_record list = [
     { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
-    { timestamp = 2.0; event = Agent_left { agent_id = "a1"; reason = "done" } };
+    { timestamp = 2.0; event = Agent_unbound { agent_id = "a1"; reason = "done" } };
   ] in
-  check int "joined then left" 0 (Telemetry_eio.count_active_agents events)
+  check int "bound then unbound" 0 (Telemetry_eio.count_active_agents events)
 
 let test_count_active_agents_multiple () =
   let events : Telemetry_eio.event_record list = [
     { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
     { timestamp = 2.0; event = Agent_session_bound { agent_id = "a2"; capabilities = [] } };
-    { timestamp = 3.0; event = Agent_left { agent_id = "a1"; reason = "x" } };
+    { timestamp = 3.0; event = Agent_unbound { agent_id = "a1"; reason = "x" } };
   ] in
   check int "multiple" 1 (Telemetry_eio.count_active_agents events)
 
@@ -564,7 +564,7 @@ let test_summarize_tool_usage_reads_date_split_store_without_fs () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Coord.default_config base_dir in
+      let config = Workspace.default_config base_dir in
       Telemetry_eio.track_tool_called config ~tool_name:"masc_status"
         ~success:true ~duration_ms:42 ~agent_id:"agent_code" ();
       let summary = Telemetry_eio.summarize_tool_usage config in
@@ -583,7 +583,7 @@ let test_track_applies_default_retention_days () =
       with_temp_dir (fun base_dir ->
         Eio_main.run @@ fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        let config = Coord.default_config base_dir in
+        let config = Workspace.default_config base_dir in
         let telemetry_dir = telemetry_dir base_dir in
         let old_file =
           Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
@@ -599,7 +599,7 @@ let test_track_applies_telemetry_max_bytes () =
       with_temp_dir (fun base_dir ->
         Eio_main.run @@ fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        let config = Coord.default_config base_dir in
+        let config = Workspace.default_config base_dir in
         let telemetry_dir = telemetry_dir base_dir in
         let old_file_1 =
           Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
@@ -626,8 +626,8 @@ let test_track_applies_telemetry_max_bytes () =
 let () =
   run "Telemetry Eio Coverage" [
     "event", [
-      test_case "agent_session_bound" `Quick test_event_agent_session_bound;
-      test_case "agent_left" `Quick test_event_agent_left;
+      test_case "agent_session_bounded" `Quick test_event_agent_session_bounded;
+      test_case "agent_unbound" `Quick test_event_agent_unbound;
       test_case "task_started" `Quick test_event_task_started;
       test_case "task_completed" `Quick test_event_task_completed;
       test_case "handoff_triggered" `Quick test_event_handoff_triggered;
@@ -655,13 +655,13 @@ let () =
         test_parse_event_records_drop_increments_counter;
     ];
     "event_to_json", [
-      test_case "agent_session_bound" `Quick test_event_to_json_agent_session_bound;
+      test_case "agent_session_bounded" `Quick test_event_to_json_agent_session_bounded;
       test_case "task_completed" `Quick test_event_to_json_task_completed;
     ];
     "count_active_agents", [
       test_case "empty" `Quick test_count_active_agents_empty;
-      test_case "one joined" `Quick test_count_active_agents_one_joined;
-      test_case "joined then left" `Quick test_count_active_agents_joined_then_left;
+      test_case "one bound" `Quick test_count_active_agents_one_bound;
+      test_case "bound then unbound" `Quick test_count_active_agents_bound_then_unbound;
       test_case "multiple" `Quick test_count_active_agents_multiple;
     ];
     "count_tasks_in_progress", [

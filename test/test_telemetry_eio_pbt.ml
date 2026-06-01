@@ -41,7 +41,7 @@ let gen_event : Telemetry_eio.event QCheck.Gen.t =
   | 1 ->
       let* agent_id = string_small in
       let* reason = string_small in
-      return (Telemetry_eio.Agent_left { agent_id; reason })
+      return (Telemetry_eio.Agent_unbound { agent_id; reason })
   | 2 ->
       let* task_id = string_small in
       let* agent_id = string_small in

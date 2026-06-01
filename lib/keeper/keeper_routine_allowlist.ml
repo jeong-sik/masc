@@ -190,7 +190,7 @@ let sandbox_worktree_code_path path =
   && not (path_has_git_dir path)
 
 let sandboxed_code_write_rule_label
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~tool_name
       ~input

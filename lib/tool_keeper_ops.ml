@@ -17,7 +17,7 @@ module Status = Keeper_status
 module Persona = Keeper_persona
 module Persona_audit = Tool_keeper_persona_audit
 type 'a context = 'a Keeper_types_profile.context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
@@ -105,7 +105,7 @@ let attach_assoc_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: fields)
   | other -> other
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let maybe_reseed_keeper_identity_config ~(config : Coord.config) (meta : keeper_meta) =
+let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : keeper_meta) =
   let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
   if String.equal expected_agent_name meta.agent_name then
     Ok (meta, None)
@@ -320,7 +320,7 @@ let with_keeper_name args name =
       `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
   | other -> other
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let prepare_passive_keeper_identity_config ~(config : Coord.config) ~(agent_name : string) args =
+let prepare_passive_keeper_identity_config ~(config : Workspace.config) ~(agent_name : string) args =
   let requested_name =
     match String.trim (get_string args "name" "") with
     | "" -> String.trim agent_name
@@ -402,7 +402,7 @@ let handle_keeper_up ctx args : tool_result =
    from threaded Eio resources and delegate to the existing
    [Turn.handle_keeper_up] (via execute_keeper_up). *)
 let keeper_up_body
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(agent_name : string)
       ~(sw : Eio.Switch.t)
       ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
@@ -415,7 +415,7 @@ let keeper_up_body
   with_keeper_startup_gate (fun () -> execute_keeper_up keeper_ctx args)
 ;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_status_body ~(config : Coord.config) ~(agent_name : string) args : tool_result =
+let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
   match prepare_passive_keeper_identity_config ~config ~agent_name args with
   | Error err -> tool_result_error err
   | Ok (prepared_args, identity_reseed) ->
@@ -441,7 +441,7 @@ let keeper_status_body ~(config : Coord.config) ~(agent_name : string) args : to
 let handle_keeper_status ctx args : tool_result =
   keeper_status_body ~config:ctx.config ~agent_name:ctx.agent_name args
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let resolve_keeper_name_config ~(config : Coord.config) args =
+let resolve_keeper_name_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
   match read_meta_resolved config name with
   | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
@@ -456,7 +456,7 @@ let resolve_keeper_name ctx args =
    threaded Eio resources and delegates to the existing [Turn.preflight_*]
    / [Turn.handle_keeper_msg] handlers. *)
 let keeper_msg_body
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(agent_name : string)
       ~(sw : Eio.Switch.t)
       ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
@@ -551,7 +551,7 @@ let handle_keeper_msg ctx args : tool_result =
          tool_result_ok (Yojson.Safe.to_string json))
 ;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_msg_result_body ~(config : Coord.config) args : tool_result =
+let keeper_msg_result_body ~(config : Workspace.config) args : tool_result =
   let request_id = get_string args "request_id" "" in
   if String.equal request_id "" then
     tool_result_error {|{"error":"request_id is required"}|}
@@ -584,7 +584,7 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
              (annotate_keeper_json ~runtime_class:"keeper" json))
       end
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let resolve_keeper_meta_config ~(config : Coord.config) args =
+let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
   match read_meta_resolved config name with
   | Ok (Some (_resolved_name, meta)) -> Ok meta
@@ -620,7 +620,7 @@ let resolve_playground_working_dir =
    actually consumed.  The previous [ignore (ctx.sw, ctx.clock,
    ctx.config)] line was warning-suppression scaffolding for a future
    real implementation. *)
-let keeper_repair_body ~(config : Coord.config) ~(agent_name : string) args : tool_result =
+let keeper_repair_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error err
   | Ok meta -> (

@@ -1,7 +1,7 @@
 (** See [server_dashboard_snapshot_select.mli] for the contract. *)
 
 let select_shell_json
-      ?clock ?request ?timing ?(light = false) (config : Coord.config)
+      ?clock ?request ?timing ?(light = false) (config : Workspace.config)
   : Yojson.Safe.t
   =
   let timing_obj =
@@ -50,7 +50,7 @@ let select_shell_json
         ?clock ?request ~timing:timing_obj ~light config)
 ;;
 let select_tools_json
-      ?actor ?timing (config : Coord.config)
+      ?actor ?timing (config : Workspace.config)
   : Yojson.Safe.t
   =
   let timing_obj =
@@ -70,7 +70,7 @@ let select_tools_json
 ;;
 
 let select_telemetry_summary_json
-      ?timing (config : Coord.config)
+      ?timing (config : Workspace.config)
   : Yojson.Safe.t
   =
   let timing_obj =
@@ -91,7 +91,7 @@ let select_telemetry_summary_json
        The narrow window without dedup is acceptable for a per-process
        once-only path. *)
     let base_path = config.base_path in
-    let masc_root = Coord.masc_root_dir config in
+    let masc_root = Workspace.masc_root_dir config in
     Server_timing.measure
       timing_obj
       Server_timing.Telemetry_summary_aggregate

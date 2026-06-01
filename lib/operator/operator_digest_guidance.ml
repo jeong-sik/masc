@@ -6,11 +6,18 @@
 
 module U = Yojson.Safe.Util
 
-let fresh_operator_judgment config =
-  match Operator_judgment.latest_active config ~surface:"command.namespace" with
-  | Some value when Operator_judgment.is_fresh value ->
-      Some (Operator_judgment.to_yojson value)
-  | _ -> None
+let fresh_operator_judgment config ~target_type ~target_id =
+  match Operator_judgment.target_type_of_string target_type with
+  | None -> None
+  | Some target_type ->
+    let latest =
+      Operator_judgment.latest_active config ~surface:"command.namespace"
+        ~target_type ~target_id
+    in
+    (match latest with
+    | Some value when Operator_judgment.is_fresh value ->
+        Some (Operator_judgment.to_yojson value)
+    | _ -> None)
 
 let judgment_summary_json judgment_json =
   `Assoc
@@ -26,13 +33,14 @@ let judgment_summary_json judgment_json =
       ("disagreement_with_truth", judgment_json |> U.member "disagreement_with_truth");
     ]
 
-let active_guidance_fields ~config ~actor ~fallback_recommendations ~fallback_summary =
+let active_guidance_fields ~config ~actor ~target_type ~target_id
+    ~fallback_recommendations ~fallback_summary =
   let fallback_recommendation_json =
     `List
       (List.map (Operator_digest_types.recommended_action_to_yojson ~actor)
          fallback_recommendations)
   in
-  match fresh_operator_judgment config with
+  match fresh_operator_judgment config ~target_type ~target_id with
   | Some judgment_json ->
       let recommended_action_opt =
         Json_util.get_object judgment_json "recommended_action"

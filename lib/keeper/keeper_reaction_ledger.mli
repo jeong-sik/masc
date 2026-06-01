@@ -60,7 +60,7 @@ val record_board_cursor_ack :
     ack row. *)
 
 val record_execution_receipt_reaction :
-  Coord.config ->
+  Workspace.config ->
   keeper_name:string ->
   trace_id:string ->
   ?turn_count:int ->

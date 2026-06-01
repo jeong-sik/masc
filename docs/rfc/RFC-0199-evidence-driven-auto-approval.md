@@ -116,11 +116,11 @@ val evaluate :
 - ❌ String 분류기: `gh_ci_check` 결과를 *substring match* 로 pass/fail 분기 금지 — typed variant 그대로 사용
 - ❌ N-of-M: PR_merged + CI_pass 두 evidence kind 만 구현하고 나머지 후속 PR 로 미루기 금지 — Phase B 첫 PR 에서 6 kind *전부* + Custom_check escape hatch
 
-### Phase C (P1): `coord_task_transitions` hook
+### Phase C (P1): `workspace_task_transitions` hook
 
 **Principle**: submit time 에만 평가. heartbeat / polling 추가 금지 (runtime budget pressure 방지).
 
-Hook point: `lib/coord/coord_task_transitions.ml` 의 submit_for_verification path.
+Hook point: `lib/workspace/workspace_task_transitions.ml` 의 submit_for_verification path.
 
 ```ocaml
 (* Pseudo-code *)

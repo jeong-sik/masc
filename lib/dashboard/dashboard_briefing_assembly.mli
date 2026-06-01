@@ -39,7 +39,7 @@ end
 (** {1 Brief / context builders} *)
 
 val build_keeper_briefs :
-  Coord.config -> Yojson.Safe.t list -> Yojson.Safe.t list
+  Workspace.config -> Yojson.Safe.t list -> Yojson.Safe.t list
 (** Assembles the keeper brief list from a raw [keepers]
     JSON list.  Looks up each keeper through the
     {!Keeper_registry}, falling back to in-band fields

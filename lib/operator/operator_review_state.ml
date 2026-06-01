@@ -58,7 +58,7 @@ let compare_review_decision (left : review_decision) (right : review_decision) =
   String.compare right.at left.at
 
 let raw_review_decisions config =
-  match Coord_utils.read_json_opt config (review_state_path config) with
+  match Workspace_utils.read_json_opt config (review_state_path config) with
   | None -> []
   | Some (`List rows) ->
       rows

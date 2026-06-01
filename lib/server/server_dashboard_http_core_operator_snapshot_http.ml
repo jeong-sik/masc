@@ -44,7 +44,7 @@ module Core_operator_query = Server_dashboard_http_core_operator_query
 open Server_dashboard_http_runtime_support
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
-  let config = state.Mcp_server.coord_config in
+  let config = state.Mcp_server.workspace_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
   let actor =
@@ -181,7 +181,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
           ~surface:"operator_snapshot"
           ~started_at
           ~extra:
-            [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
+            [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json () ]
           json
       | Error `Timeout ->
         `Assoc
@@ -198,7 +198,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
        a 5s SWR cache keyed on the full parameter tuple so rapid
        polling (Bond-Web 3s default) hits the cache; mutations
        continue to invalidate via the existing
-       [Coord_hooks.on_task_mutation_fn] path. *)
+       [Workspace_hooks.on_task_mutation_fn] path. *)
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
       ~ttl:standard_cache_ttl_s

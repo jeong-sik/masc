@@ -266,5 +266,5 @@ migration. No hidden include chains. Grep reveals true ownership.
    descriptive names (e.g., `type id` instead of `type t` in `keeper_id.ml`)?
    This would improve grep-ability but break OCaml convention.
 
-3. **Other subsystems** — coord/, types/, dashboard/ have similar patterns
+3. **Other subsystems** — workspace/, types/, dashboard/ have similar patterns
    (71 total include sites). Should this RFC scope cover them, or follow up?

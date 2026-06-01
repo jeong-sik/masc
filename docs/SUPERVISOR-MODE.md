@@ -76,6 +76,6 @@ Supervisor Mode is not for:
 ## Notes
 
 - Treat dashboard surfaces as read models, not canonical write paths.
-- For implementation work, start from repo coordination and keeper/runtime tools.
+- For implementation work, start from repo workspace collaboration and keeper/runtime tools.
 - For benchmark work, use [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md) or
   [INTEGRATED-BENCHMARK-RUNBOOK.md](./INTEGRATED-BENCHMARK-RUNBOOK.md).

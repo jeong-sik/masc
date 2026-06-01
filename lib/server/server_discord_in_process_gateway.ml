@@ -73,7 +73,7 @@ let handle_message_create ~dispatch
            currently extracts only [author_id]. Keeping the user
            identity stable (id only) is acceptable for keeper
            context; richer display naming is a follow-up. *)
-      ; channel_room_id = channel_id
+      ; channel_workspace_id = channel_id
       ; keeper_name
       ; content
       ; idempotency_key = Printf.sprintf "discord-msg-%s" message_id
@@ -127,7 +127,7 @@ let start ~sw ~env ~clock ~state =
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net
-        ~config:state.Mcp_server.coord_config
+        ~config:state.Mcp_server.workspace_config
     in
     let policy_label =
       match policy with

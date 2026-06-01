@@ -176,7 +176,7 @@ let composite_config_drift_json ~config ~keeper_name =
       ]
 ;;
 
-let composite_execution_receipt_json ~(config : Coord.config) ~keeper_name =
+let composite_execution_receipt_json ~(config : Workspace.config) ~keeper_name =
   let claim_scope = composite_claim_scope_json ~keeper_name in
   let config_drift = composite_config_drift_json ~config ~keeper_name in
   match Keeper_execution_receipt.latest_json config keeper_name with

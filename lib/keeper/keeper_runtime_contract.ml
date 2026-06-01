@@ -44,14 +44,14 @@ let active_goal_ids_are_auto_keeper_goals config ~(meta : keeper_meta) goal_ids 
        goal_ids
 
 let task_is_eligible_for_claim ?agent_tool_names latest_verification_status task =
-  Coord_task_schedule.task_is_claim_pool_candidate task
+  Workspace_task_schedule.task_is_claim_pool_candidate task
   && not
-       (Coord_task_schedule.verification_blocks_claim
+       (Workspace_task_schedule.verification_blocks_claim
           latest_verification_status
           task)
-  && Coord_task_schedule.required_tools_allowed
+  && Workspace_task_schedule.required_tools_allowed
        ?agent_tool_names
-       (Coord_task_schedule.task_required_tools task)
+       (Workspace_task_schedule.task_required_tools task)
 
 let active_goal_ids_have_eligible_claim_task
     ?agent_tool_names
@@ -59,9 +59,9 @@ let active_goal_ids_have_eligible_claim_task
     goal_ids
   =
   let latest_verification_status =
-    Coord_task_schedule.latest_verification_status_by_task config
+    Workspace_task_schedule.latest_verification_status_by_task config
   in
-  Coord.get_tasks_safe config
+  Workspace.get_tasks_safe config
   |> List.exists (fun task ->
        task_is_linked_to_keeper_goals goal_ids task
        && task_is_eligible_for_claim
@@ -70,7 +70,7 @@ let active_goal_ids_have_eligible_claim_task
             task)
 
 let resolve_claim_goal_scope ?agent_tool_names
-    ?(allow_empty_goal_scope_fallback = false) ~(config : Coord.config)
+    ?(allow_empty_goal_scope_fallback = false) ~(config : Workspace.config)
     ~(meta : keeper_meta) () =
   match meta.active_goal_ids with
   | [] ->
@@ -122,7 +122,7 @@ let resolve_claim_goal_scope ?agent_tool_names
           fallback_reason = None;
         }
 
-let resolve_observation_claim_goal_scope ?agent_tool_names ~(config : Coord.config)
+let resolve_observation_claim_goal_scope ?agent_tool_names ~(config : Workspace.config)
     ~(meta : keeper_meta) () =
   let allow_empty_goal_scope_fallback =
     active_goal_ids_are_auto_keeper_goals config ~meta meta.active_goal_ids
@@ -158,7 +158,7 @@ let goal_progress_json ?config (meta : keeper_meta) =
         ]
   | Some config ->
       let tasks =
-        Coord.get_tasks_safe config
+        Workspace.get_tasks_safe config
         |> List.filter (task_is_linked_to_keeper_goals meta.active_goal_ids)
       in
       let linked_task_count = List.length tasks in
@@ -197,7 +197,7 @@ let goal_progress_json ?config (meta : keeper_meta) =
 let approval_policy_effective_json ?config (meta : keeper_meta) =
   let base_path =
     match config with
-    | Some (config : Coord.config) -> config.base_path
+    | Some (config : Workspace.config) -> config.base_path
     | None -> Env_config_core.base_path ()
   in
   Keeper_approval_queue.policy_summary_json ~base_path ~keeper_name:meta.name

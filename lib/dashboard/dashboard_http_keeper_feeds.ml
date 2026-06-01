@@ -10,7 +10,7 @@ open Dashboard_http_keeper_types
     This closes the Phase-2 gap between runtime metrics (already in
     /api/v1/models/metrics) and per-agent spend (required by preview). *)
 let keeper_cost_aggregates_json
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
     ~(window_minutes : int)
   : Yojson.Safe.t =
@@ -134,7 +134,7 @@ let keeper_cost_aggregates_json
     the dashboard can render a single chronology without knowing the
     original schema variants. *)
 let keeper_decisions_json
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
@@ -455,7 +455,7 @@ let decisions_feed_cache :
   Jsonl_incremental_projection.create ()
 
 let keeper_decisions_log_json
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
@@ -503,7 +503,7 @@ let memory_feed_cache :
   Jsonl_incremental_projection.create ()
 
 let keeper_memory_log_json
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()

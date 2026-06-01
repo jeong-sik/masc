@@ -71,7 +71,7 @@ All 7 rejection signatures: NO.
 - `rg -i 'agent-llm-a|provider-f|agent-code|provider-c|provider-a|provider-k|llama' lib/ bin/` returns only:
   - RFC-0166 / RFC-0167 closeout comments (self-documenting).
   - `runtime_metrics.ml` describing how `keeper_runtime.toml` `"llama:..."` labels behaved before the removal (operator-facing release note context, kept in comment form pending a separate docs sweep).
-  - `coord/nickname.ml` `"llama"` animal name (false positive).
+  - `workspace/nickname.ml` `"llama"` animal name (false positive).
 
 ## 7. Migration
 

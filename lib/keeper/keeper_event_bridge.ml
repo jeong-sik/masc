@@ -707,7 +707,7 @@ type bridge_relay_result = relay_result
 let oas_event_store ~config =
   let retention_days = oas_event_retention_days () in
   Dated_jsonl.create
-    ~base_dir:(Filename.concat (Coord.masc_root_dir config) "oas-events")
+    ~base_dir:(Filename.concat (Workspace.masc_root_dir config) "oas-events")
     ?retention_days
     ()
 ;;
@@ -769,7 +769,7 @@ module For_testing = struct
   ;;
 end
 
-let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
+let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   let store = ref (oas_event_store ~config) in
   let sub =
     Agent_sdk_metrics_bridge.subscribe
@@ -803,7 +803,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
 ;;
 
 (** Background fiber: drain events and relay to SSE. *)
-let start ~sw ~clock ~(config : Coord.config) ~bus =
+let start ~sw ~clock ~(config : Workspace.config) ~bus =
   start_impl ~interval_s:(drain_interval_s ()) ~sw ~clock ~config ~bus
 ;;
 
@@ -811,7 +811,7 @@ let start_with_interval
       ~drain_interval_s:interval_s
       ~sw
       ~clock
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~bus
   =
   start_impl ~interval_s ~sw ~clock ~config ~bus

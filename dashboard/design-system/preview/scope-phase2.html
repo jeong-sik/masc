@@ -544,12 +544,12 @@
         <p class="lbl">Real data</p>
         <p class="data">
           <b>.masc/messages/*_broadcast.json</b> · 909 entries<br/>
-          fields: <em>seq</em>, <em>room_id</em>, <em>mentions</em> (e.g. @nick0cave), <em>[STATE]…[/STATE]</em> blocks<br/>
+          fields: <em>seq</em>, <em>workspace_id</em>, <em>mentions</em> (e.g. @nick0cave), <em>[STATE]…[/STATE]</em> blocks<br/>
           keeper의 <em>last_seen_message_seq</em>로 미독 계산
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
-          <li><span><b>A · Room Timeline</b>seq 정렬, broadcast vs DM 시각 구분</span></li>
+          <li><span><b>A · Workspace Timeline</b>seq 정렬, broadcast vs DM 시각 구분</span></li>
           <li><span><b>B · Mention Inbox</b>선택 keeper에 온 mention만</span></li>
           <li><span><b>C · State-Block Reader</b>[STATE] 블록을 별도 panel로</span></li>
         </ul>
@@ -565,7 +565,7 @@
           <h3 class="ztitle">Composer v2</h3>
           <span class="zkind">comms</span>
         </div>
-        <p class="lead">기존 Composer 확장. mention(@), [STATE] block, broadcast vs DM, room 선택 토글.</p>
+        <p class="lead">기존 Composer 확장. mention(@), [STATE] block, broadcast vs DM, workspace 선택 토글.</p>
         <p class="lbl">Real data</p>
         <p class="data">
           현 broadcast 메시지 패턴: 본문 + <em>[STATE]…[/STATE]</em> + <em>@nick0cave</em> 등<br/>
@@ -573,7 +573,7 @@
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
-          <li><span><b>A · Broadcast</b>모든 방에 송출, room chip 표시</span></li>
+          <li><span><b>A · Broadcast</b>모든 방에 송출, workspace chip 표시</span></li>
           <li><span><b>B · DM</b>특정 keeper에게 직접</span></li>
           <li><span><b>C · State Block</b>[STATE] 블록 편집 helper</span></li>
         </ul>

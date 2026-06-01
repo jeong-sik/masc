@@ -158,7 +158,7 @@ val update_metrics_from_failure :
   Keeper_meta_contract.keeper_meta
 
 val append_metrics_snapshot :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   result:Keeper_agent_run.run_result ->
@@ -179,7 +179,7 @@ val append_metrics_snapshot :
   unit
 
 val append_decision_record :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->

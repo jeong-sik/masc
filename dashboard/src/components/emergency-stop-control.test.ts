@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   fetchPauseStatus,
-  pauseRoom,
-  resumeRoom,
+  pauseWorkspace,
+  resumeWorkspace,
   flowState,
   flowLoading,
   shellAuthSummary,
@@ -13,8 +13,8 @@ const {
   authAccess,
 } = vi.hoisted(() => ({
   fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
-  pauseRoom: vi.fn().mockResolvedValue(undefined),
-  resumeRoom: vi.fn().mockResolvedValue(undefined),
+  pauseWorkspace: vi.fn().mockResolvedValue(undefined),
+  resumeWorkspace: vi.fn().mockResolvedValue(undefined),
   flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
   flowLoading: { value: false },
   shellAuthSummary: { value: null },
@@ -24,8 +24,8 @@ const {
 
 vi.mock('./flow-control/flow-control-state', () => ({
   fetchPauseStatus,
-  pauseRoom,
-  resumeRoom,
+  pauseWorkspace,
+  resumeWorkspace,
   flowState,
   flowLoading,
 }))
@@ -83,7 +83,7 @@ describe('EmergencyStopControl', () => {
     await flushUi()
 
     expect(requestConfirm).toHaveBeenCalledTimes(1)
-    expect(pauseRoom).toHaveBeenCalledTimes(1)
+    expect(pauseWorkspace).toHaveBeenCalledTimes(1)
   })
 
   it('does not pause when the confirmation is declined', async () => {
@@ -96,7 +96,7 @@ describe('EmergencyStopControl', () => {
     await flushUi()
 
     expect(requestConfirm).toHaveBeenCalledTimes(1)
-    expect(pauseRoom).not.toHaveBeenCalled()
+    expect(pauseWorkspace).not.toHaveBeenCalled()
   })
 
   it('hides the Emergency Stop button when worker access is denied', async () => {
@@ -127,7 +127,7 @@ describe('EmergencyStopControl', () => {
     btn.click()
     await flushUi()
 
-    expect(resumeRoom).toHaveBeenCalledTimes(1)
+    expect(resumeWorkspace).toHaveBeenCalledTimes(1)
   })
 
   it('renders nothing while the flow state is unknown', async () => {

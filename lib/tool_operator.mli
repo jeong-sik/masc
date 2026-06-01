@@ -15,7 +15,7 @@
 (** {1 Per-call context} *)
 
 type 'a context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;

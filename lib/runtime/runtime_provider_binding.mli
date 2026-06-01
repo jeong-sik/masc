@@ -40,6 +40,25 @@ val runtime_kind_of_binding : Runtime_binding.t -> string
 
 val default_local_openai_runtime_provider_id : unit -> string option
 
+val local_runtime_label : string -> string
+
+val default_local_runtime_label : unit -> string
+
+val runtime_health_keys_of_labels : string list -> string list
+
+val runtime_id_of_label_or_raw : string -> string
+
+val normalize_runtime_name_for_bucket : string -> string
+
+val label_matches_runtime_id : label:string -> runtime_id:string -> bool
+
+type context_window_hint =
+  { context_window : int
+  ; is_local_model : bool
+  }
+
+val context_window_hint_of_labels : string list -> context_window_hint
+
 val provider_name_matches_default_local_openai_runtime : string -> bool
 
 val provider_name_matches_kind_default :

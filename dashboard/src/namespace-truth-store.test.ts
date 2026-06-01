@@ -52,7 +52,7 @@ describe('refreshNamespaceTruth', () => {
 
     await namespaceTruthStore.refreshNamespaceTruth({ force: true })
 
-    const roomStatus = namespaceTruthStore.namespaceTruth.value?.root.status as
+    const workspaceStatus = namespaceTruthStore.namespaceTruth.value?.root.status as
       | { build?: { commit?: string | null } }
       | undefined
     const mergedBuild = store.serverStatus.value as
@@ -65,7 +65,7 @@ describe('refreshNamespaceTruth', () => {
           }
         }
       | null
-    expect(roomStatus?.build?.commit).toBe('2897da06')
+    expect(workspaceStatus?.build?.commit).toBe('2897da06')
     expect(mergedBuild?.build).toEqual({
       release_version: '2.148.0',
       commit: '2897da06',

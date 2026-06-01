@@ -20,8 +20,8 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
      opt-in seed PR (PR-Eg4).  The audit is fail-soft: any unexpected
      exception is logged and swallowed so a misbehaving keepers/ tree
      can't keep the server from starting. *)
-  let config = state.Mcp_server.coord_config in
-  let keepers_dir = Filename.concat (Coord.masc_root_dir config) "keepers" in
+  let config = state.Mcp_server.workspace_config in
+  let keepers_dir = Filename.concat (Workspace.masc_root_dir config) "keepers" in
   let metas =
     if not (Sys.file_exists keepers_dir) then []
     else
@@ -87,7 +87,7 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
   end
 
 let sync_admin_token_env (state : Mcp_server.server_state) =
-  let base_path = state.Mcp_server.coord_config.base_path in
+  let base_path = state.Mcp_server.workspace_config.base_path in
   let admin_agent_name =
     match Auth.read_initial_admin base_path with
     | Some name ->
@@ -136,19 +136,19 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
              (Masc_domain.masc_error_to_string err))
 
 let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
-  let base_path = state.Mcp_server.coord_config.base_path in
+  let base_path = state.Mcp_server.workspace_config.base_path in
   let raw_token = Auth.ensure_internal_keeper_token base_path in
   Unix.putenv "MASC_INTERNAL_MCP_TOKEN" raw_token;
   Log.Server.info
     "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
 
 let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
-  let base_path = state.Mcp_server.coord_config.base_path in
+  let base_path = state.Mcp_server.workspace_config.base_path in
   let keeper_names =
-    Keeper_runtime.bootable_keeper_names state.Mcp_server.coord_config
+    Keeper_runtime.bootable_keeper_names state.Mcp_server.workspace_config
   in
   let excluded_keepers =
-    Keeper_runtime.autoboot_excluded_keeper_reasons state.Mcp_server.coord_config
+    Keeper_runtime.autoboot_excluded_keeper_reasons state.Mcp_server.workspace_config
   in
   let keeper_agent_names =
     List.map Keeper_identity.keeper_agent_name keeper_names

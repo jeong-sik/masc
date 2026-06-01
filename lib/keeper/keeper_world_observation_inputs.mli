@@ -11,10 +11,10 @@ val backlog_updated_since_last_scheduled_autonomous
 
 val read_backlog_counts
   :  allowed_tool_names:string list option
-  -> config:Coord.config
+  -> config:Workspace.config
   -> meta:keeper_meta
   -> int * int * int * int * bool
 
-val count_active_agents : config:Coord.config -> int
+val count_active_agents : config:Workspace.config -> int
 val compute_idle_seconds : meta:keeper_meta -> int
-val read_context_ratio : config:Coord.config -> meta:keeper_meta -> float
+val read_context_ratio : config:Workspace.config -> meta:keeper_meta -> float

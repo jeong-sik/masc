@@ -108,7 +108,7 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
   if not meta.paused
   then false
   else
-    match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+    match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with
     | Some updated_ts -> updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec
     | None -> false
 ;;
@@ -138,7 +138,7 @@ let paused_meta_auto_resume_due ~now (meta : keeper_meta) =
     match meta.auto_resume_after_sec with
     | None -> false
     | Some resume_after_sec ->
-      (match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+      (match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with
        | Some paused_ts -> paused_ts > 0.0 && now -. paused_ts >= resume_after_sec
        | None -> false)
 ;;

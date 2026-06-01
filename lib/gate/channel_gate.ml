@@ -11,7 +11,7 @@ type inbound_message = Gate_protocol.inbound_message = {
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
   keeper_name : string;
   content : string;
   idempotency_key : string;
@@ -49,7 +49,7 @@ type dispatch_fn =
   channel:string ->
   channel_user_id:string ->
   channel_user_name:string ->
-  channel_room_id:string ->
+  channel_workspace_id:string ->
   keeper_name:string ->
   content:string ->
   Gate_protocol.dispatch_result
@@ -161,7 +161,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
   | Error e ->
       Channel_gate_metrics.record_attempt
         ~channel
-        ~room_id:msg.channel_room_id
+        ~workspace_id:msg.channel_workspace_id
         ~keeper:(String.trim msg.keeper_name)
         ~duration_ms:0
         (match e with
@@ -181,7 +181,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
           ~channel
           ~channel_user_id:msg.channel_user_id
           ~channel_user_name:msg.channel_user_name
-          ~channel_room_id:msg.channel_room_id
+          ~channel_workspace_id:msg.channel_workspace_id
           ~keeper_name:keeper
           ~content:(String.trim msg.content)
       in
@@ -193,7 +193,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
            in
            Channel_gate_metrics.record_attempt
              ~channel
-             ~room_id:msg.channel_room_id
+             ~workspace_id:msg.channel_workspace_id
              ~keeper
              ~duration_ms
              Channel_gate_metrics.Success;
@@ -201,7 +201,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
        | Gate_protocol.Keeper_error_result err ->
            Channel_gate_metrics.record_attempt
              ~channel
-             ~room_id:msg.channel_room_id
+             ~workspace_id:msg.channel_workspace_id
              ~keeper
              ~duration_ms:0
              (Channel_gate_metrics.Keeper_error err);
@@ -209,7 +209,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
        | Gate_protocol.Unavailable_result ->
            Channel_gate_metrics.record_attempt
              ~channel
-             ~room_id:msg.channel_room_id
+             ~workspace_id:msg.channel_workspace_id
              ~keeper
              ~duration_ms:0
              Channel_gate_metrics.Dispatch_unavailable;

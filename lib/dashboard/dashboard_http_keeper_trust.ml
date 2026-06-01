@@ -1,7 +1,7 @@
 open Dashboard_http_keeper_types
 
 let keeper_trust_json ?(include_receipt = false)
-    (config : Coord.config) (meta : Keeper_meta_contract.keeper_meta) =
+    (config : Workspace.config) (meta : Keeper_meta_contract.keeper_meta) =
   let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
   let runtime_trust =
     if include_receipt

@@ -3,7 +3,7 @@
 # Meta-issue: #9519
 #
 # CONTRACT:
-#   - Upstream OAS must remain coordinator-agnostic. When an OAS
+#   - Upstream OAS must remain agent-stream-agnostic. When an OAS
 #     checkout provides scripts/check-sdk-independence.sh, delegate to it.
 #     The pinned OAS API surface fingerprint (scripts/oas-api-surface.json)
 #     is checked locally for masc_ back-references — no OAS checkout needed.
@@ -49,7 +49,7 @@ resolve_oas_repo() {
   return 1
 }
 
-# 1. Upstream OAS SDK should not learn MASC coordinator vocabulary.
+# 1. Upstream OAS SDK should not learn MASC agent stream vocabulary.
 echo "=== Scan: Upstream OAS SDK independence ==="
 if oas_repo="$(resolve_oas_repo)"; then
   echo "OAS checkout: ${oas_repo}"
@@ -112,7 +112,7 @@ PYEOF
   if [[ -n "$masc_in_surface" ]]; then
     echo "FAIL: OAS API surface fingerprint contains masc_ back-reference(s):"
     echo "$masc_in_surface"
-    echo "  OAS must not learn MASC coordinator vocabulary."
+    echo "  OAS must not learn MASC agent stream vocabulary."
     echo "  repair: remove the masc_-prefixed item from OAS, refresh scripts/oas-api-surface.json"
     exit_code=1
   else

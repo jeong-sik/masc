@@ -131,13 +131,13 @@ type surface =
   | System_internal
 
 let public_mcp_surface_tools =
-  [ (* Coord lifecycle *)
+  [ (* Workspace lifecycle *)
     "masc_start"
   ; "masc_status"
   ; (* Messaging *)
     "masc_broadcast"
   ; "masc_messages"
-  ; (* Task coordination *)
+  ; (* Task workspace *)
     "masc_add_task"
   ; "masc_batch_add_tasks"
   ; "masc_tasks"
@@ -382,7 +382,7 @@ let system_internal_surface_tools =
 (* before exposing them to agents.                                 *)
 (* ================================================================ *)
 
-let coordination_role_tools : string list =
+let workspace_role_tools : string list =
   [ "masc_status"
   ; "masc_tasks"
   ; "masc_add_task"

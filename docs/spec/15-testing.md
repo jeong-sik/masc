@@ -216,7 +216,7 @@ proposed_action -> verifier_core: risk_level 분류 (Safe/Moderate/Dangerous)
 
 ### 5.6 Keeper Contract (RETIRED)
 
-`lib/keeper/keeper_contract.ml`는 keeper 정책/런타임 enum의 typed 표현(예: room-targeting enum legacy variant)을 제공했고, single-room 통합 과정에서 해당 타입이 제거됐다 (`grep -rn 'type .*scope' lib/keeper` 기준 legacy scope enum hit 없음).
+`lib/keeper/keeper_contract.ml`는 keeper 정책/런타임 enum의 typed 표현(예: workspace-targeting enum legacy variant)을 제공했고, single-workspace 통합 과정에서 해당 타입이 제거됐다 (`grep -rn 'type .*scope' lib/keeper` 기준 legacy scope enum hit 없음).
 
 Keeper 관련 enum의 현재 typed boundary는 05-keeper-agent 스펙의 §2 module table을 따른다.
 
@@ -254,7 +254,7 @@ scripts/dune-local.sh build ./test/test_sse_storm_e2e.exe
 | Contract | 파일 | 검증 대상 |
 |----------|------|----------|
 | Streamable HTTP | `streamable_http_contract.sh` | MCP Streamable HTTP transport 프로토콜 |
-| Golden Path | `golden_path_1_contract.sh` | Room join -> task add -> claim -> transition 기본 경로 |
+| Golden Path | `golden_path_1_contract.sh` | Workspace join -> task add -> claim -> transition 기본 경로 |
 
 Contract harness는 hermetic bootstrap으로 실행된다. 사전 서버 실행을 요구하지 않는다.
 

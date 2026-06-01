@@ -132,7 +132,7 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_SSE_RETRY_MS` | int | 3000 | SSE 재접속 힌트 (ms) |
 | `MASC_LOG_TRUNCATION_LEN` | int | 1500 | 로그 출력 절삭 길이 |
 | `MASC_CP_CLEANUP_DAYS` | int | 14 | CP 데이터 정리 임계일 |
-| `MASC_MESSAGE_MAX_COUNT` | int | 200 | Room당 메시지 최대 보유 수 |
+| `MASC_MESSAGE_MAX_COUNT` | int | 200 | Workspace당 메시지 최대 보유 수 |
 | `MASC_CHAIN_JUDGE_MODEL` | string | `"provider-f"` | Chain judge 모델 |
 
 ### 3.3 Governance (Env_config_governance)

@@ -82,7 +82,7 @@ val handle_provider_timeout_pause
       ~resume_policy] is the turn-context SSOT for pausing a keeper.
     See the implementation file for full behavioural contract. *)
 val handle_auto_pause_from_meta
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> reason_tag:string
   -> ?metric_name:string

@@ -80,12 +80,12 @@ describe('journalEventKindLabel', () => {
     expect(journalEventKindLabel(makeEntry({ eventType: 'broadcast' }))).toBe('broadcast')
   })
 
-  it('returns "joined" for agent_joined eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_joined' }))).toBe('joined')
+  it('returns "joined" for agent_bound eventType', () => {
+    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_bound' }))).toBe('joined')
   })
 
-  it('returns "left" for agent_left eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_left' }))).toBe('left')
+  it('returns "left" for agent_unbound eventType', () => {
+    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_unbound' }))).toBe('left')
   })
 
   it('returns "task" for task_update eventType', () => {

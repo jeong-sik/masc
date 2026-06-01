@@ -58,7 +58,7 @@ type error_code =
   | Timeout               (** Operation timed out. *)
   | Not_implemented       (** Feature exists in schema but not in runtime. *)
   | Internal_error        (** Unexpected server-side failure. *)
-  | Precondition_failed   (** Required precondition not met (e.g. coord not session-bound). *)
+  | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound). *)
 
 val error_code_to_string : error_code -> string
 

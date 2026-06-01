@@ -1,14 +1,14 @@
 (** Stay-silent loop recovery helpers for the unified keeper turn. *)
 
 val mark_loop_detected
-  :  config:Coord.config
+  :  config:Workspace.config
   -> Keeper_meta_contract.keeper_meta
   -> streak:int
   -> threshold:int
   -> Keeper_meta_contract.keeper_meta
 
 val clear_if_recovered
-  :  config:Coord.config
+  :  config:Workspace.config
   -> Keeper_meta_contract.keeper_meta
   -> previous_streak:int
   -> was_latched:bool

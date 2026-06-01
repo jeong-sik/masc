@@ -28,9 +28,9 @@ val belief_rules : Meta_cognition_types.belief_rule list
     - [belief:masc_tools_blocked] — keeper-class agents
       believe [masc_*] introspection/admin tools are
       blocked
-    - [belief:idle_backlog_empty] — coord believes backlog is
+    - [belief:idle_backlog_empty] — workspace believes backlog is
       empty and agents are idle
-    - [belief:operator_needed] — coord believes operator
+    - [belief:operator_needed] — workspace believes operator
       intervention or new privileged surface is needed *)
 
 val tension_rules : Meta_cognition_types.tension_rule list
@@ -47,7 +47,7 @@ val desire_rules : Meta_cognition_types.desire_rule list
       (actionability: [operator_or_platform])
     - [desire:operator_guidance] (actionability: [operator])
     - [desire:synthetic_exercise]
-      (actionability: [coord_or_operator])
+      (actionability: [workspace_or_operator])
 
     The actionability literals match
     {!Meta_cognition_interpret.operator_actionability}'s

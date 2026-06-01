@@ -8,7 +8,7 @@ This runbook is the local operator path for dashboard-side keeper lifecycle acti
 
 Those routes are stricter than normal local `/mcp` calls:
 
-- they require room auth enabled
+- they require workspace auth enabled
 - they require `require_token=true`
 - they require an admin bearer token
 
@@ -75,7 +75,7 @@ Useful interpretations:
 - `agent-code-mcp-client is role=worker, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/runtime/config/raw.`
   - the dashboard is presenting a worker bearer, so raw runtime save is expected to 403
 - `token_bound_admin_http_ready: no`
-  - room auth may be enabled, but no usable admin bearer source was found
+  - workspace auth may be enabled, but no usable admin bearer source was found
 - `dashboard_dev_token: available=yes`
   - the easiest local bootstrap path is `GET /api/v1/dashboard/dev-token`
 - `codex_mcp.token_status=unset` or `invalid_or_expired`
@@ -229,7 +229,7 @@ own client roster.
 
 ## 6. Supported Local Start
 
-When running from a worktree but using a shared local coordination root, start the server with an explicit base path:
+When running from a worktree but using a shared local workspace collaboration root, start the server with an explicit base path:
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"

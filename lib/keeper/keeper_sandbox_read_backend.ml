@@ -90,7 +90,7 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
   @ Keeper_sandbox_runtime.docker_config_mount_args
       ~base_path
       ~container_root:croot
-  @ Keeper_sandbox_runtime.docker_coord_state_mount_args
+  @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
       ~base_path
       ~container_root:croot
   @ [
@@ -100,7 +100,7 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
 
 let container_name_of meta =
   Printf.sprintf "masc-keeper-read-%s-%d-%d"
-    (Coord_utils.safe_filename meta.name)
+    (Workspace_utils.safe_filename meta.name)
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 

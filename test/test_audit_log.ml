@@ -30,7 +30,7 @@ let test_system_internal_details_deduplicate_canonical_keys () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
+      let config = Workspace.default_config base_dir in
       Audit_log.log_system_internal_tool_call config ~agent_id:"agent_code"
         ~tool_name:"masc_status" ~success:true ~error_msg:None
         ~details:
@@ -61,7 +61,7 @@ let entry ~timestamp ~agent_id ~action ~outcome =
     Audit_log.timestamp;
     agent_id;
     action;
-    coord_id = None;
+    workspace_id = None;
     details = `Null;
     outcome;
     cost_estimate = None;

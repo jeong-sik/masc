@@ -4,7 +4,7 @@
     dispatch code does not need to know keeper runtime context internals. *)
 
 type 'a context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
@@ -13,7 +13,7 @@ type 'a context = {
 }
 
 val create :
-  config:Coord.config ->
+  config:Workspace.config ->
   agent_name:string ->
   sw:Eio.Switch.t ->
   clock:'a Eio.Time.clock ->

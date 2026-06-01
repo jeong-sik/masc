@@ -47,7 +47,7 @@ let with_config_dir f =
     3. Call ensure_keeper_meta
     4. Assert the returned (and persisted) denylist matches the TOML *)
 let test_ensure_keeper_meta_resyncs_denylist_from_toml () =
-  with_temp_dir "keeper-runtime-denylist-room" @@ fun room_dir ->
+  with_temp_dir "keeper-runtime-denylist-workspace" @@ fun workspace_dir ->
   with_config_dir @@ fun config_dir ->
   Fs_compat.clear_fs ();
   Eio_main.run @@ fun env ->
@@ -63,7 +63,7 @@ goal = "Test denylist resync"
 tool_denylist = ["toml-tool-x", "toml-tool-y"]
 |};
   (* 2. Write keeper meta with a stale denylist *)
-  let config = Coord.default_config room_dir in
+  let config = Workspace.default_config workspace_dir in
   let initial_meta =
     match
       Masc_test_deps.meta_of_json_fixture

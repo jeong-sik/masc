@@ -11,9 +11,9 @@ open Keeper_runtime
 include Tool_keeper_ops
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path.  Uses
-   [Coord.config] only (no Eio fields), letting Tool_keeper register
+   [Workspace.config] only (no Eio fields), letting Tool_keeper register
    masc_keeper_list with [Keeper_dispatch_ref] at module load. *)
-let keeper_list_body ~(config : Coord.config) args : tool_result =
+let keeper_list_body ~(config : Workspace.config) args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
   let cache_key =
@@ -164,7 +164,7 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                tool_result_ok (Yojson.Safe.pretty_to_string json)))
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_sandbox_start_body ~(config : Coord.config) args : tool_result =
+let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error err
   | Ok meta ->
@@ -198,7 +198,7 @@ let handle_keeper_sandbox_start ctx args : tool_result =
   keeper_sandbox_start_body ~config:ctx.config args
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_sandbox_stop_body ~(config : Coord.config) args : tool_result =
+let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
   let timeout_sec = Stdlib.Float.min 30.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 10.0)) in
   let prune_stale = get_bool args "prune_stale" false in
   let container_kind_raw =
@@ -286,7 +286,7 @@ let maybe_bootstrap_existing_keepalives ctx ~name ~args =
 let resolve_ctx ctx ~name:_ _args = ctx
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_reset_body ~(config : Coord.config) args : tool_result =
+let keeper_reset_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error err
   | Ok meta ->
@@ -325,7 +325,7 @@ let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option)
     keeper's latest checkpoint via OAS checkpoint recovery.  Returns
     before/after token counts on success. *)
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_compact_body ~(config : Coord.config) args : tool_result =
+let keeper_compact_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_name_config ~config args with
   | Error err -> tool_result_error err
   | Ok name ->
@@ -437,7 +437,7 @@ let handle_keeper_compact ctx args : tool_result =
     optionally preserving the system prompt.  Dispatches
     [Operator_clear_requested] to reset overflow-related FSM conditions. *)
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_clear_body ~(config : Coord.config) args : tool_result =
+let keeper_clear_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_name_config ~config args with
   | Error err -> tool_result_error err
   | Ok name ->

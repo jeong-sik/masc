@@ -569,7 +569,7 @@ Worker name: %s
 Model: %s
 %s%s
 Operate through the provided MASC tools.
-Use tools when state inspection, task coordination, work delegation, or room updates are needed.
+Use tools when state inspection, task updates, work delegation, or status updates are needed.
 Keep responses concise and task-focused.
 If a tool schema includes agent_name and you omit it, the runtime will inject %s automatically.
 Do not invent tool names or arguments that are not in schema.

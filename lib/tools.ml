@@ -21,8 +21,8 @@ let dedupe_schemas_by_name (schemas : tool_schema list) =
 (** Tool schemas from modules that do NOT depend on Config
     (avoids Tools -> Config -> Tools cycle) *)
 let raw_schemas : tool_schema list =
-  Tool_schemas_coord_core.schemas
-  @ Tool_schemas_coord_extra.schemas
+  Tool_schemas_workspace_core.schemas
+  @ Tool_schemas_workspace_extra.schemas
   @ Tool_schemas_inline.schemas
   (* Tool_schemas_plan.schemas moved into Tool_descriptors_gen
      (Tool_schemas_misc.schemas chain) via RFC-0057 PR-2 *)

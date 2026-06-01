@@ -197,34 +197,34 @@ let rec count_lock_files path =
       0
   with Sys_error _ -> 0
 
-let count_locks_for_dir (config : Coord_utils.config) locks_dir =
+let count_locks_for_dir (config : Workspace_utils.config) locks_dir =
   match config.backend with
-  | Coord_utils.FileSystem _ -> count_lock_files locks_dir
-  | Coord_utils.Memory _ ->
-      (match Coord_utils.key_of_path config locks_dir with
+  | Workspace_utils.FileSystem _ -> count_lock_files locks_dir
+  | Workspace_utils.Memory _ ->
+      (match Workspace_utils.key_of_path config locks_dir with
        | Some key_prefix ->
-           (match Coord_utils.backend_list_keys config ~prefix:(key_prefix ^ ":") with
+           (match Workspace_utils.backend_list_keys config ~prefix:(key_prefix ^ ":") with
             | Ok keys -> List.length keys
             | Error _ -> 0)
        | None -> 0)
 
-let count_locks_for_workspace (config : Coord_utils.config) =
-  let locks_dir = Filename.concat (Coord.masc_dir config) "locks" in
+let count_locks_for_workspace (config : Workspace_utils.config) =
+  let locks_dir = Filename.concat (Workspace.masc_dir config) "locks" in
   count_locks_for_dir config locks_dir
 
-let tempo_section (config : Coord_utils.config) : section =
+let tempo_section (config : Workspace_utils.config) : section =
   let state = Tempo.get_tempo config in
   let content = [Tempo.format_state state] in
   { title = "Tempo"; content; empty_msg = "" }
 
 let active_workspace_id = "workspace"
 
-let workspace_snapshot (config : Coord_utils.config) =
+let workspace_snapshot (config : Workspace_utils.config) =
   {
     workspace_id = active_workspace_id;
-    agents = Coord.get_active_agents config;
-    tasks = Coord.get_tasks_safe config;
-    messages = Coord.get_messages_raw config ~since_seq:0 ~limit:(max_recent_messages ());
+    agents = Workspace.get_active_agents config;
+    tasks = Workspace.get_tasks_safe config;
+    messages = Workspace.get_messages_raw config ~since_seq:0 ~limit:(max_recent_messages ());
     locks = count_locks_for_workspace config;
   }
 
@@ -272,11 +272,11 @@ let locks_section locks : section =
   let content = [Printf.sprintf "%d" locks] in
   { title = "Locks"; content; empty_msg = "0" }
 
-let count_locks (config : Coord_utils.config) : int =
+let count_locks (config : Workspace_utils.config) : int =
   count_locks_for_workspace config
 
 (* Agent workflow summaries: recent activity per active agent *)
-let agent_workflow_section now (_config : Coord_utils.config) (agents : Masc_domain.agent list) : section =
+let agent_workflow_section now (_config : Workspace_utils.config) (agents : Masc_domain.agent list) : section =
   let content =
     agents
     |> List.filter (fun (a : Masc_domain.agent) ->
@@ -423,7 +423,7 @@ let attention_section now (snapshots : workspace_snapshot list) : section =
   let content = Dashboard_attention.format_items items in
   { title = "Attention Required"; content; empty_msg = "No action needed" }
 
-let generate ?(scope = All) (config : Coord_utils.config) : string =
+let generate ?(scope = All) (config : Workspace_utils.config) : string =
   let now = Time_compat.now () in
   let timestamp =
     let tm = Unix.localtime now in
@@ -465,7 +465,7 @@ let generate ?(scope = All) (config : Coord_utils.config) : string =
   let section_strs = List.map format_section sections in
   String.concat "\n\n" ([header] @ section_strs @ [footer])
 
-let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
+let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
   let _scope = scope in
   let now = Time_compat.now () in
   let snapshots = [ workspace_snapshot config ] in
@@ -543,13 +543,13 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
         + (Prometheus.metric_total Keeper_metrics.(to_string ReconcileFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string DecisionAuditFlushFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string PersonaDriftMissing) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string CoordInitFailures) |> int_of_float)
+        + (Prometheus.metric_total Keeper_metrics.(to_string WorkspaceInitFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string PresenceSyncFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string SelfPreservationUniversal) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string CycleExceptions) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string SnapshotWriteFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string SseBroadcastFailures) |> int_of_float)
-        + (Prometheus.metric_total Keeper_metrics.(to_string CoordHeartbeatFailures) |> int_of_float)
+        + (Prometheus.metric_total Keeper_metrics.(to_string WorkspaceHeartbeatFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string TurnMetricsSnapshotFailures) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string OasExecutionErrors) |> int_of_float)
         + (Prometheus.metric_total Keeper_metrics.(to_string EpisodeCreateFailures) |> int_of_float)

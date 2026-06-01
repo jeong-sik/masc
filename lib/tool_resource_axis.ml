@@ -8,7 +8,7 @@ type t =
   | Filesystem_read
   | Filesystem_write
   | Board_write
-  | Coordination_write
+  | Workspace_write
   | Web
   | Generic_write
 
@@ -20,7 +20,7 @@ let to_string = function
   | Filesystem_read -> "filesystem_read"
   | Filesystem_write -> "filesystem_write"
   | Board_write -> "board_write"
-  | Coordination_write -> "coordination_write"
+  | Workspace_write -> "workspace_write"
   | Web -> "web"
   | Generic_write -> "generic_write"
 ;;
@@ -155,7 +155,7 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   | Task_done
   | Task_submit_for_verification
   | Task_force_done
-  | Task_force_release -> Coordination_write
+  | Task_force_release -> Workspace_write
   | Broadcast | Voice_agent | Voice_listen | Voice_session_start | Voice_speak -> Generic_write
   | Board_curation_read
   | Board_get
@@ -207,7 +207,7 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Tool_grant
   | Tool_revoke
   | Transition
-  | Update_priority -> Coordination_write
+  | Update_priority -> Workspace_write
   | Agent_update
   | Broadcast
   | Cleanup_zombies
@@ -259,7 +259,7 @@ let classify_masc_keeper_tool (tool : Tool_name.Masc_keeper.t) =
   | Sandbox_stop
   | Sandbox_status -> Docker
   | Clear | Compact | Create_from_persona | Down | Msg | Repair | Reset | Up ->
-    Coordination_write
+    Workspace_write
   | List | Msg_result | Persona_audit | Status -> Ungated
 ;;
 

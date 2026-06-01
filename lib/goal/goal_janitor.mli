@@ -82,4 +82,4 @@ val audit_unclaimed_goal_orphan_tasks :
 
 (** Run a full sweep: goal purge / stagnate, then keeper
     [active_goal_ids] prune. Writes updated state to disk. *)
-val run : ?config:sweep_config -> Coord.config -> sweep_result
+val run : ?config:sweep_config -> Workspace.config -> sweep_result

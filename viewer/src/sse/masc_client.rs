@@ -53,8 +53,8 @@ const MASC_SSE_EVENT_TYPES: &[&str] = &[
     // Core events
     "broadcast",
     "heartbeat",
-    "agent_joined",
-    "agent_left",
+    "agent_bound",
+    "agent_unbound",
     "task_update",
     "endpoint",
     // Experiment (A/B testing)

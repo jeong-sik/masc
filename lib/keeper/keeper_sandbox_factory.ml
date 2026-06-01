@@ -1,5 +1,5 @@
 type t = {
-  config : Coord.config;
+  config : Workspace.config;
   meta : Keeper_meta_contract.keeper_meta;
   turn_id : int;
   default_network_override : Keeper_types_profile_sandbox.network_mode option;
@@ -9,7 +9,7 @@ type t = {
 }
 
 let create ?default_network_override
-    ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) ?(turn_id = 0) () =
+    ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ?(turn_id = 0) () =
   {
     config;
     meta;

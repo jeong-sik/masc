@@ -1,8 +1,8 @@
 (** RFC-0182 §3.1 — keeper dispatch dependency inversion ref.
 
-    Same pattern as [Coord_dispatch_ref] and [Persona_dispatch_ref].
+    Same pattern as [Workspace_dispatch_ref] and [Persona_dispatch_ref].
     [Tool_keeper] lives in lib/ (late in module order) but is the
-    natural home of keeper coordination tools.  Importing it from
+    natural home of keeper workspace tools.  Importing it from
     [Agent_tool_in_process_runtime] (early in lib/keeper) would close
     a cycle.
 
@@ -24,7 +24,7 @@
     when the optional defaults apply. *)
 
 val dispatch
-  : (config:Coord.config
+  : (config:Workspace.config
      -> agent_name:string
      -> ?sw:Eio.Switch.t
      -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

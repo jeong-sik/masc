@@ -6,7 +6,7 @@ import type {
 } from './types'
 
 export const operatorSnapshot = signal<OperatorSnapshot | null>(null)
-export const operatorRoomDigest = signal<OperatorDigest | null>(null)
+export const operatorWorkspaceDigest = signal<OperatorDigest | null>(null)
 export const operatorLoading = signal(false)
 export const operatorError = signal<string | null>(null)
 export const operatorErrorStatus = signal<number | null>(null)

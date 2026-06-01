@@ -65,7 +65,7 @@ val prompt_json : prompt_def -> Yojson.Safe.t
     contract is uniform across prompts. *)
 
 val get_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   name:string ->
   arguments:Yojson.Safe.t ->
   Masc_domain.tool_schema list ->
@@ -96,5 +96,5 @@ val get_json :
       a matching [match] arm here).
 
     The [config] parameter is currently unused but kept in the
-    signature so a future prompt that needs room/agent context can
+    signature so a future prompt that needs workspace/agent context can
     consume it without changing the contract. *)

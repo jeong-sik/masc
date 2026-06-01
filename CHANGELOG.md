@@ -242,7 +242,7 @@
 
 ### Added
 - `lib/server/`: SSE close frames and `Session_lifecycle` publisher hook for the RFC-0099 session close path.
-- `lib/keeper/`: required-tool candidate surfacing, Docker sandbox room-state exposure, and disk-pressure circuit breaker support for the keeper resource-gate lane.
+- `lib/keeper/`: required-tool candidate surfacing, Docker sandbox workspace-state exposure, and disk-pressure circuit breaker support for the keeper resource-gate lane.
 - `lib/admission/`: Tool-resource-gate snapshots are exposed through the admission queue for the PR-6 resource-gate lane.
 - `scripts/`: lint coverage for OCaml block-comment terminator traps so `_*)`-style failures are caught before PR merge.
 
@@ -539,7 +539,7 @@ Release-build recovery patch after the `v0.19.1` tag landed before the latest ma
 ### Fixed
 
 - Monitoring keeper detail routes now render safely from direct URLs when live keeper data exists but `selectedKeeper` starts empty, covering the `insertBefore` dashboard crash class (#12431).
-- Main branch release builds now compile after the `Tool_coord.tool_result` record conversion and `Task_sandbox.create ?repo_name` signature drift (#12453).
+- Main branch release builds now compile after the `Tool_workspace.tool_result` record conversion and `Task_sandbox.create ?repo_name` signature drift (#12453).
 - Gemini CLI admin policy now explicitly denies `ask_user`, preventing headless keepers from hanging on an interactive-only tool surface (#12455).
 
 ## [0.19.1] - 2026-05-01
@@ -621,7 +621,7 @@ Post-v0.18.23 release-truth follow-up for the silent-failure cleanup, keeper eve
 
 ### Fixed
 
-- Server, coordination, governance anomaly, mention inbox, runtime route, dashboard delete-action, and task-tool paths now avoid silent failure patterns by surfacing ignored exceptions or error details through structured logging and explicit handling (#12395).
+- Server, workspace collaboration, governance anomaly, mention inbox, runtime route, dashboard delete-action, and task-tool paths now avoid silent failure patterns by surfacing ignored exceptions or error details through structured logging and explicit handling (#12395).
 - The 0.18.24 release bump also repairs the #12395 logging follow-up type errors by stringifying board/auth/schema errors at the correct boundaries (#12397).
 
 ## [0.18.23] - 2026-05-01
@@ -884,17 +884,17 @@ This release also rolls up substantial operational and infrastructure work merge
 - The autonomous Cycle 24-44 series is documented in `~/me/planning/claude-plans/30m-users-dancer-downloads-kimi-agent-ke-wobbly-shell.md` §19.
 - All 20 spec/docs PRs in the Cycle 24-44 series are behavior-change 0; they affect only TLA+ and OCaml comments. The release boundary is largely a marker for the broader 254-commit corpus.
 
-## [0.18.8] - 2026-04-28 — patch: keeper fleet reliability (goal repair + auto-task-start + preset coordination)
+## [0.18.8] - 2026-04-28 — patch: keeper fleet reliability (goal repair + auto-task-start + preset workspace collaboration)
 
 Aggregate of 8 commits since v0.18.7 (3 feat / 2 fix / 2 test / 1 chore). No breaking API changes.
 
-Keeper fleet reliability release: empty `active_goal_ids` now auto-repairs via persona audit (PR1 #11351), claimed tasks auto-start immediately (PR2 #11364), and social/dispatch presets gained coordination tool access (PR3 #11345).
+Keeper fleet reliability release: empty `active_goal_ids` now auto-repairs via persona audit (PR1 #11351), claimed tasks auto-start immediately (PR2 #11364), and social/dispatch presets gained workspace collaboration tool access (PR3 #11345).
 
 ### Added (keeper reliability)
 
 - **keeper_goal_repair**: detect and repair keepers with empty `active_goal_ids` by creating goals from persona purpose statements. New module `Keeper_goal_repair` with dry-run and execute modes.
 - **auto-task-start**: `keeper_task_claim` now automatically calls `masc_transition(action=start)` after successful claim, eliminating the claim-without-start pattern that caused task abandonment.
-- **preset coordination tools**: social and dispatch tool presets now include `masc.coordination` group, granting access to `masc_transition`, `masc_claim_next` and related coordination tools.
+- **preset workspace collaboration tools**: social and dispatch tool presets now include `masc.workspace collaboration` group, granting access to `masc_transition`, `masc_claim_next` and related workspace collaboration tools.
 
 ### Fixed
 
@@ -948,7 +948,7 @@ Operational hardening release: keeper recovery surfaces (oas_timeout retry guard
 - `#11066` dashboard — KpiCell primitive (cb-group-a, Stage A)
 - `#11088` dashboard — TickerItem + TickerStrip primitives (cb-group-a)
 - `#11075` transport — P1 failure-path counters for SSE broadcast
-- `#11068` coord — extract local git op timeout to env (SSOT, #10426)
+- `#11068` workspace — extract local git op timeout to env (SSOT, #10426)
 
 ### Changed (design-system canonical SPEC tokens)
 - `#11095` adopt canonical SPEC tokens in handwritten CSS files
@@ -972,8 +972,8 @@ Operational hardening release: keeper recovery surfaces (oas_timeout retry guard
 
 ### Fixed (build / types / dashboard)
 - `#11092` main — restore green build broken by #11077 + #11078
-- `#11093` coord — Eio 1.0+ types in `coord_utils_backend_setup.mli`
-- `#11078` coord — add missing `.mli` files for coord_utils and worktree
+- `#11093` workspace — Eio 1.0+ types in `workspace_utils_backend_setup.mli`
+- `#11078` workspace — add missing `.mli` files for workspace_utils and worktree
 - `#11094` dashboard — surface 6 P2 silent failures (telemetry gaps)
 - `#11072` auth — add token hash prefix to dashboard fallback warn
 - `#11041` server-auth — decompose dashboard fallback `err_kind` beyond `[other]`
@@ -1036,7 +1036,7 @@ Follow-up patch that closes the dashboard a11y round (#10930 focus trap + aria-e
 
 ### Fixed
 - `#10930` dashboard a11y — focus trap, aria-expanded, readability (final round-6 landing after rebase cycle)
-- `#11001` coord/task — extend worktree auto-cleanup to Cancel and Release transitions (continuation of v0.18.3 #10956 root fix)
+- `#11001` workspace/task — extend worktree auto-cleanup to Cancel and Release transitions (continuation of v0.18.3 #10956 root fix)
 - `#10999` keeper-watchdog — emit fleet batch-termination ERROR when ≥3 keepers stop in 30s (#10765 follow-up)
 - `#11008` build — drop 5 redundant catch-all arms after provider_kind exhaustive sweep
 - `#11019` provider — exhaust provider_kind matches for lint (broader sweep)
@@ -1084,7 +1084,7 @@ Follow-up to v0.18.2 stability hardening. This release closes two long-standing 
 
 ### Fixed (leak root cause)
 - `autoresearch`: auto-cleanup managed worktree on terminal transition (#10892, #10968) — `Switch.on_release` pattern, prevents per-job dir accumulation (~91 MB / job pre-fix).
-- `coord/task`: auto-cleanup playground worktree on task done (#10899, #10956) — `Coord_hooks` task_done pattern, closes contract gap when keeper crashes mid-task / watchdog stale-termination / SP-suppression / LLM forgets to call `masc_worktree_remove`.
+- `workspace/task`: auto-cleanup playground worktree on task done (#10899, #10956) — `Workspace_hooks` task_done pattern, closes contract gap when keeper crashes mid-task / watchdog stale-termination / SP-suppression / LLM forgets to call `masc_worktree_remove`.
 
 ### Fixed (keeper / fleet hot path)
 - `server`: wire `approval_janitor` fork to break HITL death-spiral (#10973).
@@ -1093,7 +1093,7 @@ Follow-up to v0.18.2 stability hardening. This release closes two long-standing 
 
 ### Added (keeper observability)
 - `keeper`: surface deliberate-skip reasons on stale watchdog kill (#10962).
-- `coord/task`: Prometheus counter + warn log for `task_claim_next` implicit auto-release (#10421, #10977).
+- `workspace/task`: Prometheus counter + warn log for `task_claim_next` implicit auto-release (#10421, #10977).
 - `masc_oas_bridge`: cancel reason bucket + inner exception (#10954) — surfaces OAS cancellation provenance.
 
 ### Added (dev tooling / SSOT)
@@ -1113,7 +1113,7 @@ Follow-up to v0.18.2 stability hardening. This release closes two long-standing 
 - `dashboard`: localize Idle snapshot headline (round-71), substring-safe headlines (round-73), keeper directory error panel (round-78), composite-fsm-flowchart, sectionLabel for fleet-health/safe-autonomy (#10939 / #10943 / #10964 / #10984 / #10976).
 
 ### Docs
-- `docs/coord`: add `coord_gc.mli` + `coord_git.mli` (#10751 batch — #10958 / #10960).
+- `docs/workspace`: add `workspace_gc.mli` + `workspace_git.mli` (#10751 batch — #10958 / #10960).
 - `scripts`: add `cleanup-autoresearch.sh` interim TTL quarantine + help-text polish (#10913 / #10967).
 
 ### Bumps
@@ -1136,7 +1136,7 @@ Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of ke
 ### Fixed (keeper / fleet hot path)
 - `keeper-watchdog`: suppress idle-stale events during an active turn; add a separate turn-timeout (default 600s) so watchdog stops misclassifying mid-turn LLM waits as stalls (#10940).
 - `keeper`: cap runtime rotation at 1 for `required_tool_contract_violation` so a single proactive contract miss can't cycle through every provider (#10851).
-- `coord/task`: emit warn when a task crosses the 5-cycle oscillation threshold so operators see escalation candidates (#10719, #10920).
+- `workspace/task`: emit warn when a task crosses the 5-cycle oscillation threshold so operators see escalation candidates (#10719, #10920).
 - `server/autoboot`: per-task boot guard so a single hung lazy task can't block keeper boot — restore_sessions now degrades gracefully instead of hanging the boot pipeline (#10857).
 - `boot`: start `Runtime_legacy_runner` actor consumer fiber that was dropped in a refactor and left the runtime actor without a reader (#10895).
 - `runtime-filter`: per-provider rejection diagnostics for #10681 so runtime-skip reasons are visible per provider, not aggregate (#10852).
@@ -1145,13 +1145,13 @@ Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of ke
 - `auth`: stop classifying `keeper-<id>-agent` as a transient alias so per-keeper credentials don't churn (#10867).
 - `auth`: surface `error_kind` + `actor_hint` in `dashboard_actor_fallback` warn payload for easier triage (#10933).
 - `post_verifier`: add Korean filler phrases (filler detector previously English-only, #10882, #10938).
-- `coord/config`: memoize `default_config` to drop 1745 redundant inits / 2 days (#10919, #10937).
+- `workspace/config`: memoize `default_config` to drop 1745 redundant inits / 2 days (#10919, #10937).
 
 ### Fixed (dashboard / health / hygiene)
 - `health`: replace `List.hd` with pattern match in `keepers_directory` (#10926).
 - `dashboard`: a11y restore `role=status`/`role=alert` on loading/error indicators (#10874).
 - `dashboard`: update test expectations for i18n-localized flag tooltips (#10929).
-- `coord/backend`: demote per-call backend init logs to DEBUG (1745 events / 2d, #10919, #10928).
+- `workspace/backend`: demote per-call backend init logs to DEBUG (1745 events / 2d, #10919, #10928).
 - `keeper/watchdog`: demote all-default tick log to DEBUG (1638 events / 2d, 92% all-healthy, #10908, #10910).
 - `ws-transport`: downgrade per-session lifecycle log to DEBUG (4029 events / 31min, #10875, #10881).
 
@@ -1194,7 +1194,7 @@ The v0.18.0 tag exists but its GitHub release workflow failed: the OAS pin bump 
 
 ### Fixed
 - Watchdog: extract to standalone module, cover autoboot path (#10698).
-- Coord: resolve `git_clone` policy at canonical `.masc/config/` path (#10693).
+- Workspace: resolve `git_clone` policy at canonical `.masc/config/` path (#10693).
 - Keeper: auto-pause on `runtime_exhausted` to break supervisor restart loop (task-074, #10691).
 - Keeper: use container path for `default_cwd` / `private_workspace_root` in `masc_keeper_status` (#10650, #10686).
 - Deploy: build dashboard SPA in Dockerfile multi-stage build (#10684).
@@ -1324,7 +1324,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 ### Added (feat)
 - Keeper observability counters: per-keeper turn-latency buckets (#10124), livelock observer (#10123), context_max drift (#10122), require_tool_use violations (#10099), proactive skip-reason (#10060), compaction outcome (#10011), usage-trust Prometheus (#10021), Hebbian per-outcome edge (#10048), metric-emit drops (#10053).
 - Keeper runtime: affordance-tool intersection at `Require_tool_use` gate (#10141), Ollama `keep_alive`/`num_ctx` forwarding from keeper_runtime.toml (#9985), wire `Gh_exit_class` into docker sandbox (#9974), persona authoring wizard (#9940).
-- Coord/FSM: per-agent FSM drift counter (#10152), Prometheus task FSM drift (#10082).
+- Workspace/FSM: per-agent FSM drift counter (#10152), Prometheus task FSM drift (#10082).
 - Dashboard: gRPC `events_dropped` strip (#10114), WS delivery counters (#10106, #10107), WS-only cutover flag (#10102), websocket route slice expansion (#9963), a11y high-contrast + forced-colors support (#10080).
 - OAS/runtime: per-kind `masc_oas_error` counter (#10039), resolved_model_id metric label (#9962), context_overflow_imminent action signal (#9954).
 - Keeper CLI: auto-construct Claude Code / Kimi CLI MCP config behind flag (#10059).
@@ -1336,7 +1336,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 - Telemetry: dedupe websocket delivery schema (#10151), legacy degenerate row scrub at init (#10095), heuristic-theatre Prometheus migration follow-up (#10044).
 - Governance: auto-approve `masc_transition` + `keeper_board_post` for autonomous flow (#10148), default judge timeout raised to 180s (#10132), anti-rationalization gate-2 demoted to LLM advisory (#10116).
 - Filesystem: `save_file_atomic` orphan boot sweep (#10131), test-executable HOME guard (#10085).
-- Board/coord: keeper actor identity unified (#10133), original vote timestamp persisted across flush (#10093), fixture-vote quarantine (#10079).
+- Board/workspace: keeper actor identity unified (#10133), original vote timestamp persisted across flush (#10093), fixture-vote quarantine (#10079).
 - A11y: ARIA on vis-timeline/vis-network/filter chips (#10138), keeper-phase ARIA (#10142), GraphQL Playground viewport zoom (#10134).
 - Auth/usage: bearer-token cross-agent mismatch counter (#10129), Anthropic cache provider-kind evidence requirement (#10163).
 - Tool registry: shard tool registration completeness (#10105).
@@ -1753,7 +1753,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 - **`Docker_with_git` sandbox profile + git/gh per-command dispatch.** New `sandbox_profile = "docker_with_git"` keeps every `Docker_hardened` guard (cap-drop, no-new-privs, read-only rootfs, tmpfs, pids/memory limits, no nested runtimes) but adds `--network bridge` and read-only mounts for `~/.config/gh`, `~/.gitconfig`, optionally `~/.ssh` (opt-in via `MASC_KEEPER_SANDBOX_SSH_DIR`). Optional `GH_TOKEN` env forward via `MASC_KEEPER_SANDBOX_GH_TOKEN`. A `Docker_hardened` keeper still gets git/gh access for free: `keeper_bash` automatically routes commands whose first token is `git` or `gh` through the new profile (toggle `MASC_KEEPER_SANDBOX_GIT_DISPATCH=false` to disable). Closes the gap that left coding keepers with `repo clone 차단: allowed org mismatch` board posts and 16 days of zero `keeper_bash` git activity.
 
 - **Legendary Bash P1–P6 (`feature/legendary-bash-p1`, PR #8721).**
-  Reworks `keeper_bash` along six coordinated axes.  Every surface
+  Reworks `keeper_bash` along six aligned axes.  Every surface
   is additive and opt-in; the default JSON shape is unchanged.
   - **P1 — typed semantic exit.**  New `Exec_semantic` variant
     (`Ok / Fail / Timeout / Signaled / Git_not_a_repo / Oom_killed /
@@ -1872,7 +1872,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   try/with 으로 pipe fd leak 을 막았지만, 같은 패턴을 여러 곳에서 재유도하면
   drift 가 발생한다. 공통 combinator `With_process.with_process_in` /
   `with_process_args_in` 을 `lib/process/with_process.ml` 에 추출하고
-  `doctor_dispatch.ml`, `server_routes_http_routes_dashboard.ml`,
+  `diagnostic_dispatch.ml`, `server_routes_http_routes_dashboard.ml`,
   `worktree_live_context.ml` 세 site 를 SSOT 에 귀속시켜 drift vector 제거.
   `test/test_with_process_coverage.ml` 이 error path 별 fd 회수와 100-iter
   stress 를 검증한다. `Fun.protect` 대신 수동 try/with 을 선택한 근거:
@@ -1946,7 +1946,7 @@ observation and fix — silent cost of the pre-fix contract shape.
   - Honour declared `max_checkpoint_messages` default on create (#8256).
   - Synchronous `is_registered` check after `start_keepalive` (#8247).
   - Tool-policy validator recognises admin-dispatched keeper tools (#8241).
-  - `coord_gc` quarantines broken agent files instead of deleting (#8253).
+  - `workspace_gc` quarantines broken agent files instead of deleting (#8253).
   - `keeper_tool_affinity.configured_max_k`/`lookback_days` treat empty
     or whitespace-only env values as unset; optional `?getenv` injection
     seam for tests (#8190).
@@ -2099,7 +2099,7 @@ belong to this release.
   `docs/design/masc-capsule-execution-plan.md` Slices A–C targeted the retired
   `team_session` subsystem (9 dead `lib/team_session/*` and
   `lib/tool_team_session_*` module refs). Slices preserved as migration context
-  for future `board_posts` + keeper-FSM coordination work. Product Thesis,
+  for future `board_posts` + keeper-FSM workspace collaboration work. Product Thesis,
   Boundary Rules, Execution Order, Social Runtime Invariants, and Review Gate
   sections remain the current design stance.
 
@@ -2138,7 +2138,7 @@ Bulk merge cycle (2 `/loop` batches, admin override) covering dashboard UX, keep
 
 - **Spec / docs / tooling.**
   - TLA+: `KeeperConditionsGovernPhase` liveness spec + clean/buggy cfg pair (#7965).
-  - Spec §2 module table + §17 references synced with `lib/coord/` (room → coord rename) (#7954).
+  - Spec §2 module table + §17 references synced with `lib/workspace/` (workspace → workspace rename) (#7954).
   - Comprehensive glossary sync: Chain/CP/agent_ecosystem/context_budget retired (#7964).
   - Keeper spec §05 synced with current keeper module layout (#7972).
   - Dead `code_refs` dropped (`sdk_version.ml`, `agent_ecosystem`, `message_schema`); §6 retired (#7945).
@@ -2364,7 +2364,7 @@ No code changes. Bump captures the documentation/hygiene cycle as a tagged relea
 - CI: pin `ocaml/setup-ocaml` to avoid upstream opam-binary regression
   (#7499).
 - Dashboard: activity_graph events_shown vs events_store_total (#7502).
-- Coord: before-state snapshots in error path logging (#7512), unified
+- Workspace: before-state snapshots in error path logging (#7512), unified
   transition log_event JSON (#7504), correlation_id/run_id on task
   activity (#7511).
 
@@ -2481,8 +2481,8 @@ had the full Phase 2 release to migrate.
   picks the first healthy provider, and passes a single provider to the
   single-provider SDK. Falls back to `core+prefilter+discovered` on
   no-healthy-provider (same as before).
-- **`Room` module retired** (#7355): split into `room_state.ml` + renamed
-  remainder to `Coord`.
+- **`Workspace` module retired** (#7355): split into `workspace_state.ml` + renamed
+  remainder to `Workspace`.
 - **Hashtbl → immutable StringMap/StringSet** across 14+ modules: `exec_memory`
   (#7414 #7416), `memory_bank` (#7429), `memory_recall` (#7421), `hooks_oas`
   (#7428), `tool_diversity` (#7425), `types_profile` (#7423), `rate_limit`
@@ -2496,7 +2496,7 @@ had the full Phase 2 release to migrate.
 
 - Dashboard: 50-task hard cap removed (#7432); legacy composite payload
   normalized (#7412); duplicate cache timeout WARN in bg-revalidate (#7446);
-  repeat shell cache timeout on rooms with many board posts (#7402).
+  repeat shell cache timeout on workspaces with many board posts (#7402).
 - Keeper: deduplicated tool_use_failure + cycle-failure WARN/ERROR
   (#7454, #7451); `gh` timeout floor + org allowlist in `validate_gh_command`
   (#7433); status tails sorted + continuity fallback marker (#7363); real-cause
@@ -2523,9 +2523,9 @@ had the full Phase 2 release to migrate.
   handlers, schemas, permission entries, and dispatch arms for 25+
   system-internal tools (agent eval, error tracking, lock/unlock,
   cancellation, subscription, progress, feature_flags, init,
-  governance_set, set_room, etc.). keeper_denied surface reduced to
+  governance_set, set_workspace, etc.). keeper_denied surface reduced to
   `masc_reset`, `masc_spawn` only. masc_heartbeat dispatch relocated
-  from deleted tool_heartbeat.ml to tool_room.ml.
+  from deleted tool_heartbeat.ml to tool_workspace.ml.
 
 ### Added
 - Operator-facing context overflow recovery tools (#7115). Two new MCP
@@ -2590,7 +2590,7 @@ had the full Phase 2 release to migrate.
   (#7016), `tool_shard` agent_shards read-modify-write (#6985).
 - Pin `agent_sdk` to 0.134.0 (#7012).
 - CI `ci_core=true` no longer forces TLA+, saving ~14 min per run (#7024).
-- Dashboard: remove unused config binding in `ordered_room_ids` (#7021).
+- Dashboard: remove unused config binding in `ordered_workspace_ids` (#7021).
 
 ## [0.6.0] - 2026-04-14
 
@@ -2691,7 +2691,7 @@ had the full Phase 2 release to migrate.
 ### Fixed
 - CP unit: bound descendant_units_of_kind recursion (#6647)
 - Prompt registry: merge validate+write into single mutex transaction (#6646)
-- Room task schedule: reuse Room_task.update_local_agent_state on agent writes (#6642)
+- Workspace task schedule: reuse Workspace_task.update_local_agent_state on agent writes (#6642)
 
 ### Changed
 - Bump OAS pin for min_p capability gate fix (#6653)
@@ -2706,8 +2706,8 @@ had the full Phase 2 release to migrate.
 
 ### Fixed
 - CP unit: bound descendant_ids recursion with max_tree_depth guard (#6635)
-- Room task: hold with_file_lock on agent state writes (#6634)
-- Room/CP: hold with_file_lock around archive read-modify-write (#6632)
+- Workspace task: hold with_file_lock on agent state writes (#6634)
+- Workspace/CP: hold with_file_lock around archive read-modify-write (#6632)
 - Session: hold registry.lock on all hashtable reads, drop dead unregister_sync (#6628)
 - Auth: gate cross-agent create_token and revoke on initial_admin (#6627)
 - Channel gate: wire dedup_cleanup into orchestrator pulse (#6612)
@@ -2906,7 +2906,7 @@ had the full Phase 2 release to migrate.
 - OAS pin SSOT and diagnostics checks relaxation (#6113)
 
 ### Fixed
-- Discord keeper session isolation per room (#6094)
+- Discord keeper session isolation per workspace (#6094)
 - Keeper post-commit timeout classification (#6102)
 - Worker model_id hardcoded "turn-exhausted" in MaxTurnsExceeded response (#6087)
 - Dashboard error prefix stripping before JSON categorization (#6057)

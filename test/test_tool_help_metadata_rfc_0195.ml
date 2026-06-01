@@ -49,7 +49,7 @@ let lookup name =
    - Four are registered in Config.raw_all_tool_schemas and
      therefore round-trip through find_entry. Those are the
      ones this test pins.
-   - One (masc_plan_set_task) is a coordination-side tool whose schema lives on
+   - One (masc_plan_set_task) is a workspace-side tool whose schema lives on
      a different surface that this PR does not modify. Its manual_help
      entry is written here as future-proofing — it takes
      effect the moment those schemas join the keeper-side

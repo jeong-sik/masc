@@ -46,7 +46,7 @@ let validate_target_files target_files =
         match kind with
         | Adversarial_eval.Readme -> "README"
         | Adversarial_eval.Design_doc -> "design_doc"
-        | Adversarial_eval.Coord_history -> "coord_history"
+        | Adversarial_eval.State_history -> "state_history"
         | Adversarial_eval.Task_history -> "task_history"
         | Adversarial_eval.Governance_history -> "governance_history"
       in
@@ -122,7 +122,7 @@ let error_workflow_json
 let handle_deep_review
       ~tool_name
       ~start_time
-      (config : Coord.config)
+      (config : Workspace.config)
       args
   : Tool_result.result
   =
@@ -193,7 +193,7 @@ let tool_definitions = [
   ("masc_deep_review",
    {|Request adversarial code review with isolated context. The reviewer sees ONLY the specified files and your question — no JIRA, Slack, memory, or design docs. Use this to catch structural bugs that domain context might mask.|},
    [
-     ("target_files", "array", true, "List of file paths relative to room base (e.g., [\"lib/foo.ml\"])");
+     ("target_files", "array", true, "List of file paths relative to the workspace base (e.g., [\"lib/foo.ml\"])");
      ("question", "string", true, "Specific question for the reviewer (e.g., 'Are there off-by-one errors?')");
    ]);
 ]

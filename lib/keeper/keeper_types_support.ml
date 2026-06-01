@@ -8,12 +8,12 @@ include Keeper_config
 
 let ensure_dir_ = Keeper_fs.ensure_dir
 
-let keeper_dir_ (config : Coord.config) =
-  let d = Filename.concat (Coord.masc_root_dir config) "keepers" in
+let keeper_dir_ (config : Workspace.config) =
+  let d = Filename.concat (Workspace.masc_root_dir config) "keepers" in
   ensure_dir_ d
 
-let session_base_dir_ (config : Coord.config) =
-  let d = Filename.concat (Coord.masc_root_dir config) "traces" in
+let session_base_dir_ (config : Workspace.config) =
+  let d = Filename.concat (Workspace.masc_root_dir config) "traces" in
   ensure_dir_ d
 
 (** RFC-0206 single-binding: API keys for the default runtime are resolved at

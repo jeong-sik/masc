@@ -17,7 +17,7 @@
 (** {1 Types} *)
 
 type context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
 }
 (** Concrete record because callers

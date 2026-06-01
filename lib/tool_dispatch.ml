@@ -226,7 +226,7 @@ type module_tag =
   | Mod_local_runtime
   | Mod_run
   | Mod_compact
-  | Mod_agent | Mod_task | Mod_coord
+  | Mod_agent | Mod_task | Mod_state
   | Mod_control | Mod_agent_timeline | Mod_misc
   | Mod_library | Mod_keeper
   | Mod_inline
@@ -285,7 +285,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Goal_verify
     | Heartbeat
     | Reset
-    | Status -> Some Mod_coord
+    | Status -> Some Mod_state
     | Config
     | Cleanup_zombies
     | Dashboard

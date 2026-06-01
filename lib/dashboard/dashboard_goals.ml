@@ -51,7 +51,7 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.kee
 
 
 
-let build_forest ~(config : Coord.config) ~goals ~tasks =
+let build_forest ~(config : Workspace.config) ~goals ~tasks =
   let goal_ids = List.map (fun (goal : Goal_store.goal) -> goal.id) goals in
   let is_root (goal : Goal_store.goal) =
     match goal.parent_goal_id with
@@ -95,7 +95,7 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
 
 
 
-let build_goal_verification_projection ~(config : Coord.config) goals =
+let build_goal_verification_projection ~(config : Workspace.config) goals =
   let requests =
     Goal_verification.read_state config |> fun (state : Goal_verification.state) ->
     state.requests
@@ -108,7 +108,7 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
   in
   let goal_events =
     let path = Goal_verification.events_path config in
-    if Coord.path_exists config path then
+    if Workspace.path_exists config path then
       Fs_compat.load_jsonl path
     else
       []
@@ -277,10 +277,10 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
 
 
 
-let goal_detail_json ~(config : Coord.config) ~goal_id :
+let goal_detail_json ~(config : Workspace.config) ~goal_id :
     (Yojson.Safe.t, string) result =
   let goals = Goal_store.list_goals config () in
-  let tasks = Coord.get_tasks_safe config in
+  let tasks = Workspace.get_tasks_safe config in
   let ( effective_policy_for_goal,
         open_request_for_goal,
         latest_request_for_goal,
@@ -350,9 +350,9 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
                 (build_goal_timeline node keeper_details approvals goal_events) );
           ])
 
-let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
+let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
-  let tasks = Coord.get_tasks_safe config in
+  let tasks = Workspace.get_tasks_safe config in
   let ( effective_policy_for_goal,
         open_request_for_goal,
         latest_request_for_goal,

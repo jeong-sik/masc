@@ -82,7 +82,7 @@ masc-mcp contract 표면은 두 갈래:
 현재 `lib/sse.ml` 은 `Yojson.Safe.t` 를 ad-hoc 조립한다. 정형 타입이 없으므로 codegen 을 붙일 수 없다.
 
 **범위 실측 (2026-04-17 작성 시점)** — dashboard 가 소비하는 60+ `SSEEventType` 리터럴 중:
-- masc-mcp 자체 emit: 약 **40개** (`agent_*`, `keeper_*`, `board_*`, `approval_*`, `room_*`, `transport_*`, `execution_*` 등)
+- masc-mcp 자체 emit: 약 **40개** (`agent_*`, `keeper_*`, `board_*`, `approval_*`, `workspace_*`, `transport_*`, `execution_*` 등)
 - **OAS bridge relay**: **21개** (`oas:*` 접두어) — `agent_sdk` 라이브러리의 `Event_bus.payload` variant 를 `lib/oas_event_bridge.ml` 이 릴레이
 
 **Resume 시점 재실측 (2026-05-17, HEAD `ccf0d9d3f0`)**:
@@ -116,14 +116,14 @@ type oas_envelope = {
 }
 
 type sse_event = [
-  | Agent_joined of agent_joined_payload
+  | Agent_bound of agent_bound_payload
   | Keeper_heartbeat of keeper_heartbeat_payload
   | Oas of oas_event_wrapper  (* ~ opaque *)
   | ...
 ] <json adapter.ocaml="Sse_event_adapter">
 ```
 
-`<json adapter>` 가 variant tag 를 `{"type":"agent_joined", ...fields}` 형태로 flatten. `masc/board_post`, `oas:turn_completed` 등 특수 문자는 adapter 내부에서 OCaml constructor (`Masc_board_post`) ↔ wire string (`"masc/board_post"`) 매핑.
+`<json adapter>` 가 variant tag 를 `{"type":"agent_bound", ...fields}` 형태로 flatten. `masc/board_post`, `oas:turn_completed` 등 특수 문자는 adapter 내부에서 OCaml constructor (`Masc_board_post`) ↔ wire string (`"masc/board_post"`) 매핑.
 
 **emit 경로 교체 전략**:
 - Phase A0 은 도메인별 sub-PR (agent_*, keeper_*, oas_*, board_*) 분할 가능 — 각 sub-PR 은 **byte-equal golden test** 로 기존 emit 동일성 보장

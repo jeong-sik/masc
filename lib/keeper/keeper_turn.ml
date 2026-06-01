@@ -91,7 +91,7 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
   updated_meta
 
-let direct_turn_observation ~(config : Coord.config) (meta : keeper_meta) :
+let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     Keeper_world_observation.world_observation =
   Keeper_world_observation.observe_direct_keeper_msg
     ~allowed_tool_names:None
@@ -221,7 +221,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
          slots, starving the synchronous run_turn call (Issue #2610). *)
       (* auto execution session interception removed in #2908 *)
       (* === Harness: trajectory accumulator + eval gate config === *)
-      let masc_root = Coord.masc_root_dir ctx.config in
+      let masc_root = Workspace.masc_root_dir ctx.config in
       let trajectory_acc =
         Trajectory.create_accumulator
           ~masc_root

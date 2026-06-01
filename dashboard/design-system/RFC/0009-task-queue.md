@@ -15,7 +15,7 @@
 
 ## 1. Motivation
 
-MASC's coordination model issues *tasks* — units of work claimed by
+MASC's workspace collaboration model issues *tasks* — units of work claimed by
 one agent at a time, with priority, progress, and result. The
 dashboard renders task state in three places today:
 

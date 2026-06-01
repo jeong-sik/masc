@@ -170,22 +170,22 @@ val public_projection_of_decision : Yojson.Safe.t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
 
 val execution_receipt_path_for_today :
-  Coord.config -> keeper_name:string -> string
+  Workspace.config -> keeper_name:string -> string
 
 (** [.masc/keepers/<keeper>/runtime-manifests]. *)
-val base_dir : Coord.config -> keeper_name:string -> string
+val base_dir : Workspace.config -> keeper_name:string -> string
 
 (** [.masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl].
     [trace_id] is sanitized as a path segment. *)
-val path_for_trace : Coord.config -> keeper_name:string -> trace_id:string -> string
+val path_for_trace : Workspace.config -> keeper_name:string -> trace_id:string -> string
 
 val append_to_path : string -> t -> (unit, string) result
-val append : Coord.config -> t -> (unit, string) result
-val append_best_effort : ?site:string -> Coord.config -> t -> unit
+val append : Workspace.config -> t -> (unit, string) result
+val append_best_effort : ?site:string -> Workspace.config -> t -> unit
 
 val append_unfinished_provider_attempt_finished_best_effort :
   ?site:string ->
-  Coord.config ->
+  Workspace.config ->
   turn_context ->
   status:string ->
   error:string ->

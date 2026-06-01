@@ -38,7 +38,7 @@ type caller =
           (e.g. tool_local_runtime_verify).  Default 15.0s, matching
           the previous inline budget. *)
   | Startup
-      (** Server bootstrap and room takeover read paths.
+      (** Server bootstrap and workspace takeover read paths.
           Default 30.0s — preserves the [server_bootstrap_loops]
           docker preflight budget.  Note: the
           [server_startup_takeover] [ps] probe was previously 1s —
@@ -53,8 +53,8 @@ type caller =
   | Voice
       (** Voice bridge local playback subprocess.  Default 60.0s —
           preserves the previous inline budget. *)
-  | Coord_identity
-      (** Coord tty identity probe.  Default 5.0s. *)
+  | Workspace_identity
+      (** Workspace tty identity probe.  Default 5.0s. *)
   | Http_routes
       (** Workspace API git command invoked via the HTTP routes layer.
           Default 15.0s. *)

@@ -160,7 +160,7 @@ check_json_eventually \
 check_json \
   "namespace-truth exposes provenance" \
   "$BASE/api/v1/dashboard/namespace-truth" \
-  "d.get('dashboard_surface') == '/api/v1/dashboard/namespace-truth' and d.get('source') == 'namespace_truth_read_model' and '/api/v1/dashboard/room-truth' not in d.get('dashboard_aliases', []) and d.get('retention', {}).get('scope') == 'dashboard_namespace_truth'" \
+  "d.get('dashboard_surface') == '/api/v1/dashboard/namespace-truth' and d.get('source') == 'namespace_truth_read_model' and '/api/v1/dashboard/workspace-truth' not in d.get('dashboard_aliases', []) and d.get('retention', {}).get('scope') == 'dashboard_namespace_truth'" \
   '^True$'
 check_http "goal-loop status 200" "$BASE/api/v1/dashboard/goal-loop/status" "200"
 check_json "goal-loop status exposes phases" "$BASE/api/v1/dashboard/goal-loop/status" "'overall_status' in d and 'phases' in d" '^True$'

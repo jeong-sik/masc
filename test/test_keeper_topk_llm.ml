@@ -370,7 +370,7 @@ let test_deterministic_prefilter_surfaces_source_symbols_for_explicit_symbol_int
 let test_deterministic_prefilter_hides_source_navigation_without_source_intent () =
   let selected =
     deterministic_prefilter_for
-      ~query_text:"show me activity overview for the room"
+      ~query_text:"show me activity overview for the workspace"
       ~selection_limit:5
   in
   Alcotest.(check bool) "source search stays hidden for non-source query"

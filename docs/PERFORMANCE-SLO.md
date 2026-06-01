@@ -34,7 +34,7 @@
 - 두 스크립트 모두 `initialize -> notifications/initialized -> Mcp-Session-Id 재사용` 흐름으로 측정한다.
 - `quick-bench.sh`는 `mcp_session_init`, 주요 MCP read/write path, `masc_runtime_verify`를 한 번에 보여준다.
 - `quick-bench.sh`는 `BENCH_ITERATIONS`, `BENCH_WARMUP_ITERATIONS`로 반복 수와 warmup 제외 횟수를 조정할 수 있다.
-- `benchmark.sh`는 `session`, `read`, `coordination`, `runtime`, `a2a`, `lock` lane을 분리하고 `avg/p50/p95/max`를 CSV로 남긴다.
+- `benchmark.sh`는 `session`, `read`, `workspace collaboration`, `runtime`, `a2a`, `lock` lane을 분리하고 `avg/p50/p95/max`를 CSV로 남긴다.
 - `benchmark.sh`는 기본적으로 tool lane당 warmup 1회를 제외하고, 결과 CSV 옆에 metadata와 baseline diff를 같이 남긴다.
 - `runtime` lane 숫자는 MCP transport가 아니라 local runtime ceiling 영향을 크게 받는다.
 - `local64`는 target runtime profile 이름이지 achieved fact가 아니다. 실제 용량은 `masc_runtime_verify`의 `configured_capacity`, `healthy_runtime_count`로 확인한다.

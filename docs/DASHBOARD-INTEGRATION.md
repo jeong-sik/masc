@@ -205,8 +205,8 @@ code_refs:
 - 현재 v1 shell이 직접 반응하는 최소 이벤트 클래스:
   - `broadcast`
   - `task_*`
-  - `agent_joined`
-  - `agent_left`
+  - `agent_bound`
+  - `agent_unbound`
   - `board_post`
   - `board_comment`
   - `decision_*`

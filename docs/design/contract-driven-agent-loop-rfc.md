@@ -69,7 +69,7 @@ code_refs:
 - 모든 workload를 완전 자동화하겠다고 약속하지 않는다.
 - 모든 모델/프로바이더에 동일한 autonomy를 허용하지 않는다.
 - MASC에 inference prompt logic을 누적하지 않는다.
-- OAS에 cross-run orchestration과 room/domain state를 넣지 않는다.
+- OAS에 cross-run orchestration과 workspace/domain state를 넣지 않는다.
 - MCP SDK에서 workload policy나 supervisor semantics를 소유하지 않는다.
 
 ## 3. Current State
@@ -264,7 +264,7 @@ OAS MUST:
 OAS MUST NOT:
 
 - cross-run acceptability를 최종 판정하지 않는다.
-- room/task/governance 같은 domain state를 소유하지 않는다.
+- workspace/task/governance 같은 domain state를 소유하지 않는다.
 
 ### MASC
 
@@ -272,7 +272,7 @@ MASC는 **whether a run is acceptable** 를 결정한다.
 
 MASC MUST:
 
-- run-level proof를 session/operation/room 단위로 종합해야 한다.
+- run-level proof를 session/operation/workspace 단위로 종합해야 한다.
 - risk-aware digest와 intervention surface를 제공해야 한다.
 - baseline vs swarm 비교를 같은 budget에서 수행해야 한다.
 - acceptability 판정은 OAS evidence를 소비해 계산하되, 그 판정 로직을 OAS session state 안으로 밀어 넣지 않아야 한다.
@@ -309,9 +309,9 @@ MCP SDK MUST NOT:
 다음 변경은 boundary leak로 간주하고 reject한다.
 
 - MASC가 provider-specific prompt logic, model fallback order, tool-call formatting을 소유하려는 변경
-- OAS가 room/task/governance/session acceptability를 영속 상태로 소유하려는 변경
+- OAS가 workspace/task/governance/session acceptability를 영속 상태로 소유하려는 변경
 - MCP SDK가 `coding_task`, `repo_synthesis`, supervisor digest 같은 workload/domain vocabulary를 wire type에 넣으려는 변경
-- proof bundle schema에 room-local policy나 UI-specific wording을 직접 박아 넣는 변경
+- proof bundle schema에 workspace-local policy나 UI-specific wording을 직접 박아 넣는 변경
 - proof / transcript artifact를 OAS hidden prompt / memory로 직접 주입하는 변경
 - stage gate가 OAS 내부의 workflow policy로 고정되는 변경
 
@@ -543,7 +543,7 @@ Operational guidance:
 1차 primary gate는 full-context structural eval이지만, 후속 ablation으로 fresh-context adversarial eval profile을 둘 수 있다.
 
 - 입력은 diff, 현재 changed file state, type signature, interface contract 같은 structural surface로 제한한다.
-- README, design docs, room/task history, governance history는 주지 않는다.
+- README, design docs, workspace/task history, governance history는 주지 않는다.
 - 이 profile은 Layer 3 adversarial review처럼 domain-aware reviewer가 놓치는 structural defect를 찾기 위한 별도 MASC evaluator다.
 - 1차에서는 advisory / comparison 용도이며, canonical acceptability gate로 승격하지 않는다.
 
@@ -683,7 +683,7 @@ artifact는 ownership과 lifecycle이 분명해야 한다.
 - OAS는 producer이므로 execution contract / proof bundle schema의 canonical JSON shape를 소유한다.
 - MASC는 동일 schema를 소비하고, fixture-based decoder/conformance test로 호환성을 검증한다.
 - shared opam package는 schema가 안정화된 뒤에만 고려한다.
-- OAS는 keeper, room, governance, board 같은 MASC domain semantics를 알 필요가 없다.
+- OAS는 keeper, workspace, governance, board 같은 MASC domain semantics를 알 필요가 없다.
 - MASC는 OAS runtime internals를 직접 읽거나 수정하지 않고, versioned contract / proof / evidence artifacts만 소비한다.
 
 이 선택은 초기 실험 단계에서 repo release cadence를 느슨하게 유지하고, boundary를 schema와 artifact 수준에서 고정하기 위한 것이다.

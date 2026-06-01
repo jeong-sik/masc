@@ -46,7 +46,7 @@ let http_auth_bind_is_loopback () =
 
 let strict_http_auth_error endpoint =
   Printf.sprintf
-    "%s requires coord auth enabled with require_token=true when server is \
+    "%s requires workspace auth enabled with require_token=true when server is \
      bound to a non-loopback host or MASC_HTTP_BASE_URL points to a public address."
     endpoint
 
@@ -232,7 +232,7 @@ let verify_operator_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   if not auth_config.Masc_domain.enabled then
     Error
-      "/mcp/operator requires coord auth enabled with require_token=true."
+      "/mcp/operator requires workspace auth enabled with require_token=true."
   else if not auth_config.require_token then
     Error "/mcp/operator requires bearer token auth (require_token=true)."
   else
@@ -834,7 +834,7 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
     Error
       (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
          { reason = Missing_token
-         ; message = "HTTP mutation requires coord auth enabled with require_token=true."
+         ; message = "HTTP mutation requires workspace auth enabled with require_token=true."
          }))
   else if not auth_cfg.require_token then
     Error
@@ -887,7 +887,7 @@ and with_read_auth handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.coord_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_read_request ~base_path request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -899,7 +899,7 @@ and with_permission_auth ~permission handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.coord_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_permission_request ~base_path ~permission request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -911,7 +911,7 @@ and with_tool_auth ~tool_name handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.coord_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_tool_request ~base_path ~tool_name request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -923,7 +923,7 @@ and with_token_permission_auth ~permission handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.coord_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_token_bound_permission_request ~base_path ~permission request with
       | Ok agent_name ->
           (match check_agent_rate_limit request reqd with

@@ -16,7 +16,7 @@ let auto_execution_session_surface_json () =
   `Assoc [ "status", `String "removed"; "enabled", `Bool false ]
 ;;
 
-let coordination_surface_json (meta : keeper_meta) =
+let workspace_surface_json (meta : keeper_meta) =
   `Assoc
     [ "mention_targets", Json_util.json_string_list meta.mention_targets
     ]
@@ -68,7 +68,7 @@ let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaul
   |> maybe_string_override "prompt.desires" defaults.desires meta.desires
   |> maybe_string_override "prompt.instructions" defaults.instructions meta.instructions
   |> nonempty_string_list_override
-       "coordination.mention_targets"
+       "workspace.mention_targets"
        defaults.mention_targets
        meta.mention_targets
   |> maybe_string_list_override
@@ -98,15 +98,15 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
   live_override_details meta defaults |> List.map (fun detail -> detail.field)
 ;;
 
-let runtime_registry_entry (config : Coord_utils.config) name =
+let runtime_registry_entry (config : Workspace_utils.config) name =
   Keeper_registry.get ~base_path:config.base_path name
 ;;
 
-let runtime_keepalive_running (config : Coord_utils.config) (meta : keeper_meta) =
+let runtime_keepalive_running (config : Workspace_utils.config) (meta : keeper_meta) =
   Keeper_registry.is_running ~base_path:config.base_path meta.name
 ;;
 
-let runtime_keepalive_started_at (config : Coord_utils.config) (meta : keeper_meta) =
+let runtime_keepalive_started_at (config : Workspace_utils.config) (meta : keeper_meta) =
   Keeper_registry.started_at ~base_path:config.base_path meta.name
 ;;
 
@@ -270,7 +270,7 @@ let runtime_blocker_surface_of_progress_narrative config (meta : keeper_meta) =
      | None -> None)
 ;;
 
-let runtime_blocker_surface_opt (config : Coord_utils.config) (meta : keeper_meta) =
+let runtime_blocker_surface_opt (config : Workspace_utils.config) (meta : keeper_meta) =
   let derived =
     match meta.runtime.last_blocker with
     | Some info ->
@@ -320,7 +320,7 @@ let runtime_blocker_facts_json (meta : keeper_meta) =
     ]
 ;;
 
-let runtime_blocker_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
+let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
   match runtime_blocker_surface_opt config meta with
   | Some blocker ->
     [ "runtime_blocker_class", `String blocker.blocker_class
@@ -336,7 +336,7 @@ let runtime_blocker_fields_json (config : Coord_utils.config) (meta : keeper_met
     ]
 ;;
 
-let runtime_state_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
+let runtime_state_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
   let runtime_blocker = runtime_blocker_surface_opt config meta in
   let pause_state = if meta.paused then "paused" else "active" in
   let blocker_state =
@@ -348,7 +348,7 @@ let runtime_state_fields_json (config : Coord_utils.config) (meta : keeper_meta)
   [ "pause_state", `String pause_state; "runtime_blocker_state", `String blocker_state ]
 ;;
 
-let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
+let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in

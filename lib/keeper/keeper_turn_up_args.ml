@@ -318,7 +318,7 @@ let private_workspace_root_rel ~sandbox_profile keeper_name =
   Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_name
   |> Keeper_alerting_path.strip_trailing_slashes
 
-let private_workspace_root_abs ~(config : Coord.config) ~sandbox_profile keeper_name =
+let private_workspace_root_abs ~(config : Workspace.config) ~sandbox_profile keeper_name =
   Filename.concat
     (Keeper_alerting_path.project_root_of_config config)
     (private_workspace_root_rel ~sandbox_profile keeper_name)
@@ -340,7 +340,7 @@ let sandbox_allowed_path_has_forbidden_segments path =
            | _ -> false))
 
 let sandbox_allowed_path_within_private_root
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~keeper_name
     ~sandbox_profile
     path =
@@ -366,7 +366,7 @@ let sandbox_allowed_path_within_private_root
     || String.starts_with ~prefix:(private_root ^ "/") candidate
 
 let validate_sandbox_settings
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~keeper_name
     ~repo_cli_identity
     ~sandbox_profile

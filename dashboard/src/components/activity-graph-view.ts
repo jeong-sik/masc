@@ -56,7 +56,7 @@ function kindLabel(kind: string): string {
     case 'operation': return '작전'
     case 'debate': return '토론'
     case 'post': return '게시글'
-    case 'room': return '프로젝트'
+    case 'workspace': return '프로젝트'
     default: return kind
   }
 }

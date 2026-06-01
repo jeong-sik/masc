@@ -33,10 +33,10 @@ let backend_to_string = function
   | Local -> "local"
   | Docker -> "docker"
 
-let backend_of_config_agent ~(config : Coord.config) ~(agent_name : string) =
+let backend_of_config_agent ~(config : Workspace.config) ~(agent_name : string) =
   match
     Keeper_sandbox_config.sandbox_profile_of_agent
-      ~base_path:config.Coord.base_path
+      ~base_path:config.Workspace.base_path
       ~agent_name
   with
   | Keeper_sandbox_config.Local -> Local
@@ -60,21 +60,21 @@ let host_root_rel_of_profile sandbox_profile name =
 
 let host_root_rel_of_config_agent ~config ~agent_name =
   Keeper_sandbox_config.host_root_rel_of_agent
-    ~base_path:config.Coord.base_path
+    ~base_path:config.Workspace.base_path
     ~agent_name
 
 let host_root_abs_of_config_agent ~config ~agent_name =
   Keeper_sandbox_config.host_root_abs_of_agent
-    ~base_path:config.Coord.base_path
+    ~base_path:config.Workspace.base_path
     ~agent_name
 
 let host_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   host_root_rel_of_profile meta.sandbox_profile meta.name
 
-let host_root_abs_of_backend ~(config : Coord.config) ~(backend : backend) name =
+let host_root_abs_of_backend ~(config : Workspace.config) ~(backend : backend) name =
   Filename.concat config.base_path (host_root_rel_of_backend ~backend name)
 
-let host_root_abs_of_meta ~(config : Coord.config)
+let host_root_abs_of_meta ~(config : Workspace.config)
     (meta : Keeper_meta_contract.keeper_meta) =
   Filename.concat config.base_path (host_root_rel_of_meta ~meta)
 
@@ -105,13 +105,13 @@ let host_path_of_visible_path ~config ~agent_name raw_path =
         else
           raw_path
 
-let keeper_visible_root_abs_of_meta ~(config : Coord.config)
+let keeper_visible_root_abs_of_meta ~(config : Workspace.config)
     (meta : Keeper_meta_contract.keeper_meta) =
   match backend_of_profile meta.sandbox_profile with
   | Local -> host_root_abs_of_meta ~config meta
   | Docker -> container_root meta.name
 
-let of_meta ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) : t =
+let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : t =
   let backend = backend_of_profile meta.sandbox_profile in
   { keeper_name = meta.name
   ; sandbox_id = sandbox_id_of_name meta.name

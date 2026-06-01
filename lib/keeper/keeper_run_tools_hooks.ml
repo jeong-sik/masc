@@ -43,7 +43,7 @@ type ctx =
       current_tool_choice:Agent_sdk.Types.tool_choice option ->
       decay_discovered:bool -> ?actionable_signal:bool -> unit ->
       computed_tool_surface
-  ; config : Coord.config
+  ; config : Workspace.config
   ; keeper_tool_bundle : Keeper_tools_oas.tool_bundle
   ; keeper_has_owned_active_task : unit -> bool
   ; manifest_keeper_turn_id : int option
@@ -730,7 +730,7 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    let base_dir = Coord.masc_root_dir config in
+    let base_dir = Workspace.masc_root_dir config in
     let memory_session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let memory_bundle =
       Memory_oas_bridge.create_memory_with_backend

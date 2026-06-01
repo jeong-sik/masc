@@ -258,7 +258,7 @@ let run_keepalive_unified_turn
             in
             let paused_since_sec =
               match
-                Coord_resilience.Time.parse_iso8601_opt meta_after_triage.updated_at
+                Workspace_resilience.Time.parse_iso8601_opt meta_after_triage.updated_at
               with
               | Some ts -> int_of_float (max 0.0 (Time_compat.now () -. ts))
               | None -> -1
@@ -367,7 +367,7 @@ let run_keepalive_unified_turn
         should_run_turn
         && not
              (Keeper_disk_pressure.admit_turn
-                ~masc_root:(Coord.masc_root_dir ctx.config)
+                ~masc_root:(Workspace.masc_root_dir ctx.config)
                 ())
       then (
         Log.Keeper.debug
@@ -455,7 +455,7 @@ let visible_consumer_count = Keeper_heartbeat_visibility_gate.visible_consumer_c
 let visibility_gate_decision = Keeper_heartbeat_visibility_gate.visibility_gate_decision
 
 let run_smart_heartbeat_gate
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(clock : _ Eio.Time.clock)
       ~(stop : bool Atomic.t)
       ~(wakeup : bool Atomic.t)
@@ -684,7 +684,7 @@ let run_heartbeat_loop
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
-     Updated ONLY on Coord.heartbeat success after turn. *)
+     Updated ONLY on Workspace.heartbeat success after turn. *)
   let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
   let max_silence () =
@@ -763,7 +763,7 @@ let run_heartbeat_loop
           ~last_successful_heartbeat_ts
           ~last_heartbeat_cycle_ts
       then (
-        (* Phase 1: skip presence sync when recent room heartbeat proves freshness *)
+        (* Phase 1: skip presence sync when recent workspace heartbeat proves freshness *)
         let meta_current =
           sync_keeper_presence
             ~ctx
@@ -863,7 +863,7 @@ let run_heartbeat_loop
             (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
           raise Keeper_registry.Keeper_fiber_crash);
         (* Phase 1: work-as-heartbeat — renew point (b).
-                 After turn, call Coord.heartbeat to prove room I/O health.
+                 After turn, call Workspace.heartbeat to prove workspace I/O health.
                  On success: refresh freshness lease + reset consecutive_failures.
                  On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
         refresh_work_as_heartbeat

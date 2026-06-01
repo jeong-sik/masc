@@ -255,7 +255,7 @@ let post_classification_reason (p : post) =
             "Automation classification based on source=keeper_board_post, author=%s, and the automation post_kind contract."
             author
       | Automation_post, Some "dashboard_board_post" ->
-          "Dashboard board post classified as automation for a joined agent author."
+          "Dashboard board post classified as automation for a bound agent author."
       | Automation_post, Some source ->
           Printf.sprintf "Automation provenance source: %s." source
       | Automation_post, None ->

@@ -14,7 +14,7 @@
 
     Session kinds:
     [Observer] sessions receive dashboard snapshots but not agent
-    coordination traffic.  [Coordinator] sessions receive heartbeats
+    workspace traffic.  [Agent_stream] sessions receive heartbeats
     and task events but not dashboard snapshots.  [Presence] sessions
     receive ephemeral liveness/awareness updates through the bufferless
     presence channel.  [broadcast_to All] reaches every durable session
@@ -38,7 +38,7 @@ let run_test_hook hook =
 
 type session_kind =
   | Observer [@tla.symbol "observer"]    (** Dashboard / read-only viewers *)
-  | Coordinator [@tla.symbol "coordinator"] (** MCP agent connections *)
+  | Agent_stream [@tla.symbol "agent_stream"] (** MCP agent connections *)
   | Presence [@tla.symbol "presence"]    (** Ephemeral liveness / awareness channel *)
 [@@deriving tla]
 
@@ -46,7 +46,7 @@ type session_kind =
 type broadcast_target =
   | All          (** Every connected session (backward-compatible default) *)
   | Observers    (** Only [Observer] sessions *)
-  | Coordinators (** Only [Coordinator] sessions *)
+  | Agent_streams (** Only [Agent_stream] sessions *)
   | Presence_only (** Only [Presence] sessions; never replay-buffered *)
 
 (** Maximum concurrent SSE clients -- prevents connection storm on restart.
@@ -111,7 +111,7 @@ type session_snapshot = {
 
 let session_kind_to_string = function
   | Observer -> "observer"
-  | Coordinator -> "coordinator"
+  | Agent_stream -> "agent_stream"
   | Presence -> "presence"
 
 let take = List.take
@@ -128,7 +128,7 @@ let sync_transport_snapshot () =
      on every [broadcast_impl] invocation, so the saved allocation
      compounds with the fan-out itself. *)
   let observer = ref 0 in
-  let coordinator = ref 0 in
+  let agent_stream = ref 0 in
   let presence = ref 0 in
   let queue_sum = ref 0 in
   let max_queue_depth = ref 0 in
@@ -140,7 +140,7 @@ let sync_transport_snapshot () =
     max_queue_depth := max !max_queue_depth queue_depth;
     (match client.kind with
      | Observer -> incr observer
-     | Coordinator -> incr coordinator
+     | Agent_stream -> incr agent_stream
      | Presence -> incr presence);
     incr total_sessions_acc;
     sessions_acc :=
@@ -178,7 +178,7 @@ let sync_transport_snapshot () =
          })
   in
   Transport_metrics.set_sse_sessions ~kind:"observer" !observer;
-  Transport_metrics.set_sse_sessions ~kind:"coordinator" !coordinator;
+  Transport_metrics.set_sse_sessions ~kind:"agent_stream" !agent_stream;
   Transport_metrics.set_sse_sessions ~kind:"presence" !presence;
   Transport_metrics.set_sse_queue_snapshot ~avg_depth
     ~max_depth:!max_queue_depth ~hot_sessions
@@ -229,7 +229,7 @@ let buffer_event event_id event_str =
 let event_matches_session_kind kind event =
   match kind with
   | Observer -> true
-  | Coordinator -> Sse_jsonrpc_filter.event_string_jsonrpc_message_for_coordinator event
+  | Agent_stream -> Sse_jsonrpc_filter.event_string_jsonrpc_message_for_agent_stream event
   | Presence -> false
 
 (** Get events after given ID for replay (MCP spec MUST) *)
@@ -389,7 +389,7 @@ let invoke_disconnect_hook_for session_id =
     published to [clients] — closes the race window where a concurrent
     [broadcast] could observe the new entry, hit queue overflow, fire
     [unregister], and find no hook to wake the drain fiber. *)
-let register ?(kind = Coordinator) ?on_disconnect session_id ~last_event_id =
+let register ?(kind = Agent_stream) ?on_disconnect session_id ~last_event_id =
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
   let last_event_id = Atomic.make last_event_id in
   let event_stream = Eio.Stream.create stream_capacity in
@@ -552,10 +552,10 @@ let client_matches_target target ~jsonrpc_payload (client : client) =
   | All -> (
       match client.kind with
       | Observer -> true
-      | Coordinator -> jsonrpc_payload
+      | Agent_stream -> jsonrpc_payload
       | Presence -> false)
   | Observers -> client.kind = Observer
-  | Coordinators -> client.kind = Coordinator && jsonrpc_payload
+  | Agent_streams -> client.kind = Agent_stream && jsonrpc_payload
   | Presence_only -> client.kind = Presence
 
 (** {1 External Subscriber Hook}
@@ -763,7 +763,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
   let t0 = Time_compat.now () in
   let data = Yojson.Safe.to_string json in
   let jsonrpc_payload =
-    Sse_jsonrpc_filter.jsonrpc_message_for_coordinator json
+    Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json
   in
   (* Atomically allocate the event id so two concurrent broadcasts
      cannot observe the same peeked counter value and emit duplicates. *)
@@ -779,7 +779,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
   let target_label = match target with
     | All -> "all"
     | Observers -> "observers"
-    | Coordinators -> "coordinators"
+    | Agent_streams -> "agent_streams"
     | Presence_only -> "presence"
   in
   let clients_entries = (Atomic.get clients).entries in
@@ -846,7 +846,7 @@ let broadcast json = broadcast_impl All json
 (** Broadcast event to sessions matching [target].
     - [All]: every session (same as [broadcast])
     - [Observers]: dashboard / read-only viewers only
-    - [Coordinators]: MCP agent sessions only *)
+    - [Agent_streams]: MCP agent sessions only *)
 let broadcast_to target json = broadcast_impl target json
 
 (** Broadcast an ephemeral presence/awareness event. Presence events are live
@@ -860,7 +860,7 @@ let broadcast_presence json =
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)
 let send_to session_id json =
-  if not (Sse_jsonrpc_filter.jsonrpc_message_for_coordinator json) then
+  if not (Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json) then
     Log.Server.warn
       "Dropping non-JSON-RPC payload sent via Sse.send_to for session %s"
       session_id

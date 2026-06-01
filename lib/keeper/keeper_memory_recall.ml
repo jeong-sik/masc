@@ -102,7 +102,7 @@ let record_memory_recall_read_error ~site path exn_class =
    this variant instead of the legacy
    [read_keeper_memory_summary]/[empty-summary] silent fallback. *)
 let read_keeper_memory_summary_result
-    (config : Coord.config)
+    (config : Workspace.config)
     ~(name : string)
     ~(max_bytes : int)
     ~(max_lines : int)
@@ -145,7 +145,7 @@ let memory_horizon_counts_from_lines (lines : string list) :
 (* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
    horizon rows recorded") from [Error class] ("bank read failed"). *)
 let read_memory_horizon_counts_result
-    (config : Coord.config)
+    (config : Workspace.config)
     ~(name : string)
     ~(max_bytes : int)
     ~(max_lines : int) :
@@ -193,7 +193,7 @@ let recent_memory_texts_from_lines
    recent texts for this horizon") from [Error class] ("bank read
    failed"). *)
 let read_recent_memory_texts_result
-    (config : Coord.config)
+    (config : Workspace.config)
     ~(name : string)
     ~(horizon : string)
     ~(max_bytes : int)

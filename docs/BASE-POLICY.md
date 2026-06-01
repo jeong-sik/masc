@@ -16,7 +16,7 @@
 | `lib/` (top-level)   | 97 | 100 | 96 |
 | `lib/config/`        |  0 |   0 |  0 |
 | `lib/goal/`          |  0 |   0 |  0 |
-| `lib/coord/`         |  0 |   0 |  0 |
+| `lib/workspace/`         |  0 |   0 |  0 |
 | `lib/keeper/`        |  0 |   0 |  0 |
 | `lib/exec/`          |  0 |   0 |  0 |
 | `lib/server/`        |  0 |   0 |  0 |
@@ -25,7 +25,7 @@
 | `lib/shared_audit/`  |  0 |   0 |  0 |
 | `lib/types/`         |  0 |   0 |  0 |
 
-**Key observation**: Sub-packages (`config`, `goal`, `coord`, `keeper`,
+**Key observation**: Sub-packages (`config`, `goal`, `workspace`, `keeper`,
 `exec`, `server`, `runtime`, `shared_audit`, `types`) are already
 Base-free.  The concentration is in the top-level `lib/` tool and
 dashboard modules.

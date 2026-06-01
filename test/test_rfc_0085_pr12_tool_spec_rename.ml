@@ -69,10 +69,10 @@ let test_renamed_bindings_present () =
 
 let test_list_mem_callers_preserved () =
   let n =
-    Ast_grep.count_calls ~module_path:"lib/tool_coord.ml" ~callee:"List.mem"
+    Ast_grep.count_calls ~module_path:"lib/tool_workspace.ml" ~callee:"List.mem"
   in
   if n < 1
-  then failf "tool_coord.ml expected List.mem caller; got %d" n
+  then failf "tool_workspace.ml expected List.mem caller; got %d" n
 ;;
 
 let () =

@@ -410,7 +410,7 @@ let post_eval
   in
 
   (* Warn on unusually long execution.
-     30s threshold: most MASC tool calls complete in <5s (room ops, broadcasts).
+     30s threshold: most MASC tool calls complete in <5s (workspace ops, broadcasts).
      The slowest normal operations (Neo4j queries, runtime LLM calls) take 10-20s.
      30s indicates either a hung connection or an unexpectedly large operation
      that may be consuming shared resources. *)

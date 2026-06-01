@@ -95,7 +95,7 @@ let agent_card_json request =
     [
       ("schema", `String "masc.agent_card.v1");
       ("name", `String "MASC-MCP");
-      ("description", `String "MASC multi-agent coordination MCP server");
+      ("description", `String "MASC multi-agent workspace MCP server");
       ("url", `String base_url);
       ("version", `String build.release_version);
       ( "build",
@@ -128,7 +128,7 @@ let agent_card_json request =
       ( "capabilities",
         `Assoc
           [
-            ("coordination", `Bool true);
+            ("workspace", `Bool true);
             ("task_backlog", `Bool true);
             ("keeper_runtime", `Bool true);
             ("dashboard", `Bool true);
@@ -279,7 +279,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   let fleet_meta_scan =
     match current_server_state_opt () with
     | Some state ->
-      Some (keeper_fleet_meta_scan state.Mcp_server.coord_config)
+      Some (keeper_fleet_meta_scan state.Mcp_server.workspace_config)
     | None -> None
   in
   let paused_keepers_json =

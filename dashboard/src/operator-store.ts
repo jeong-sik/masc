@@ -1,7 +1,7 @@
 // Operator store grouped exports from operator-signals, operator-normalizers, and operator-actions.
 export {
   operatorSnapshot,
-  operatorRoomDigest,
+  operatorWorkspaceDigest,
   operatorLoading,
   operatorError,
   operatorDigestLoading,
@@ -15,7 +15,7 @@ export {
 } from './operator-normalizers'
 export {
   refreshOperatorSnapshot,
-  refreshOperatorRoomDigest,
+  refreshOperatorWorkspaceDigest,
   dispatchOperatorAction,
   confirmOperatorPendingAction,
 } from './operator-actions'

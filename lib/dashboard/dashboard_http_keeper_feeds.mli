@@ -1,18 +1,18 @@
 val keeper_cost_aggregates_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   window_minutes:int ->
   Yojson.Safe.t
 
 val keeper_decisions_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->
   Yojson.Safe.t
 
 val keeper_decisions_log_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->
@@ -41,7 +41,7 @@ val decision_event_to_yojson : decision_event -> Yojson.Safe.t
     the feed output. Exposed for tests. *)
 
 val keeper_memory_log_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keepers:Keeper_meta_contract.keeper_meta list ->
   ?limit:int ->
   unit ->

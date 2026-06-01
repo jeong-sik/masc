@@ -104,7 +104,7 @@ window.MASC_P2 = (function () {
   ];
 
   // ─── C2 · MESSAGES / BROADCAST ───────────────────────────────────
-  const rooms = [
+  const workspaces = [
     { id:"default",        name:"default",       members:9, unread:14, last_seq:296 },
     { id:"merge-blockers", name:"merge-blockers",members:4, unread:3,  last_seq:118 },
     { id:"runtime",        name:"runtime",       members:5, unread:0,  last_seq:74  },
@@ -112,14 +112,14 @@ window.MASC_P2 = (function () {
   ];
 
   const messages = [
-    { seq:296, room:"default", from:"sangsu",        kind:"broadcast", at:"16:32:01Z", body:"@nick0cave PR #9712 commit 51f062 confirmed in da11b0632. closing the dup task.", mentions:["nick0cave"], state:null },
-    { seq:295, room:"default", from:"nick0cave",     kind:"broadcast", at:"16:31:44Z", body:"claimed task-031. backporting to release-0.42 next.", mentions:[], state:"[STATE]\nGoal: goal-merge-blockers\nNext: rebase + ci\n[/STATE]" },
-    { seq:294, room:"merge-blockers",from:"qa-king", kind:"broadcast", at:"16:31:17Z", body:"suite-merge-blockers · 3 FAIL / 47 PASS. flake suspected on test_runtime_retry.", mentions:[], state:null },
-    { seq:293, room:"default", from:"taskmaster",    kind:"broadcast", at:"16:30:55Z", body:"task-038 was a duplicate of task-031. cancelled. open-task limit per-goal=3.", mentions:[], state:null },
-    { seq:292, room:"default", from:"masc-improver", kind:"dm",        at:"16:30:18Z", body:"@sangsu plan for keeper.claim() — split decision tree from invocation. ok?", mentions:["sangsu"], state:null },
-    { seq:291, room:"runtime", from:"ramarama",      kind:"broadcast", at:"16:29:50Z", body:"runtime hit @step=2 — provider-a→provider-b, 1.24s. logging in research/runtime-step2.", mentions:[], state:null },
-    { seq:290, room:"default", from:"scholar",       kind:"broadcast", at:"16:29:22Z", body:"verifier keeper still not in masc_keeper_status. cross_verifier flag blocking registration.", mentions:[], state:null },
-    { seq:289, room:"default", from:"janitor",       kind:"broadcast", at:"16:28:30Z", body:"pruned 4 expired posts. board live count: 78.", mentions:[], state:null },
+    { seq:296, workspace:"default", from:"sangsu",        kind:"broadcast", at:"16:32:01Z", body:"@nick0cave PR #9712 commit 51f062 confirmed in da11b0632. closing the dup task.", mentions:["nick0cave"], state:null },
+    { seq:295, workspace:"default", from:"nick0cave",     kind:"broadcast", at:"16:31:44Z", body:"claimed task-031. backporting to release-0.42 next.", mentions:[], state:"[STATE]\nGoal: goal-merge-blockers\nNext: rebase + ci\n[/STATE]" },
+    { seq:294, workspace:"merge-blockers",from:"qa-king", kind:"broadcast", at:"16:31:17Z", body:"suite-merge-blockers · 3 FAIL / 47 PASS. flake suspected on test_runtime_retry.", mentions:[], state:null },
+    { seq:293, workspace:"default", from:"taskmaster",    kind:"broadcast", at:"16:30:55Z", body:"task-038 was a duplicate of task-031. cancelled. open-task limit per-goal=3.", mentions:[], state:null },
+    { seq:292, workspace:"default", from:"masc-improver", kind:"dm",        at:"16:30:18Z", body:"@sangsu plan for keeper.claim() — split decision tree from invocation. ok?", mentions:["sangsu"], state:null },
+    { seq:291, workspace:"runtime", from:"ramarama",      kind:"broadcast", at:"16:29:50Z", body:"runtime hit @step=2 — provider-a→provider-b, 1.24s. logging in research/runtime-step2.", mentions:[], state:null },
+    { seq:290, workspace:"default", from:"scholar",       kind:"broadcast", at:"16:29:22Z", body:"verifier keeper still not in masc_keeper_status. cross_verifier flag blocking registration.", mentions:[], state:null },
+    { seq:289, workspace:"default", from:"janitor",       kind:"broadcast", at:"16:28:30Z", body:"pruned 4 expired posts. board live count: 78.", mentions:[], state:null },
   ];
 
   // ─── O1 · RUNTIME INSPECTOR ──────────────────────────────────────
@@ -249,9 +249,9 @@ window.MASC_P2 = (function () {
     { ts:"15:54:12Z", module:"keeper_hooks_oas", site:"failure_streak",            value:1,   threshold:1,   triggered:true,  detail:"qa-king" },
   ];
   const stress = [
-    { agent:"qa-king",       kind:"failure_streak", count:1, room:"default", at:"15:54:12Z" },
-    { agent:"sangsu",        kind:"runtime_burn",   count:3, room:"default", at:"16:31:27Z" },
-    { agent:"executor",      kind:"stale_claim",    count:1, room:"default", at:"15:08:00Z" },
+    { agent:"qa-king",       kind:"failure_streak", count:1, workspace:"default", at:"15:54:12Z" },
+    { agent:"sangsu",        kind:"runtime_burn",   count:3, workspace:"default", at:"16:31:27Z" },
+    { agent:"executor",      kind:"stale_claim",    count:1, workspace:"default", at:"15:08:00Z" },
   ];
 
   // ─── K1 · KEEPER INSPECTOR (BDI etc, real values from sangsu.json) ─
@@ -265,7 +265,7 @@ window.MASC_P2 = (function () {
       long_goal:"작업이 항상 재현, 수정, 검증의 짧은 루프로 끝나게 만든다.",
       runtime:"tool_use_strict", tools_preset:"coding", mention:["sangsu","코딩","developer","coder"],
       sandbox:"docker", network:"inherit", auto_handoff:true, handoff_threshold:0.85,
-      tokens:{in:966400, out:29800}, last_handoff:"15:51:27Z", room_seq:296,
+      tokens:{in:966400, out:29800}, last_handoff:"15:51:27Z", workspace_seq:296,
       proactive_idle_sec:120, social_model:"bdi_speech_v1",
     },
     { id:"nick0cave",     role:"Captain",
@@ -275,7 +275,7 @@ window.MASC_P2 = (function () {
       short_goal:"PR #9712 backport 완료", mid_goal:"release-0.42 cut", long_goal:"flake-free CI",
       runtime:"keeper_unified", tools_preset:"shell+git", mention:["nick0cave","captain","merge"],
       sandbox:"docker", network:"inherit", auto_handoff:false, handoff_threshold:0.95,
-      tokens:{in:480200, out:21400}, last_handoff:"—", room_seq:295,
+      tokens:{in:480200, out:21400}, last_handoff:"—", workspace_seq:295,
       proactive_idle_sec:60, social_model:"bdi_speech_v1",
     },
     { id:"masc-improver", role:"Improver",
@@ -285,7 +285,7 @@ window.MASC_P2 = (function () {
       short_goal:"keeper.claim() 분리", mid_goal:"keeper-clarity 파이프라인", long_goal:"clarity 8/8",
       runtime:"keeper_unified", tools_preset:"coding", mention:["masc-improver","improver","refactor"],
       sandbox:"docker", network:"inherit", auto_handoff:true, handoff_threshold:0.80,
-      tokens:{in:392100, out:18900}, last_handoff:"14:42:18Z", room_seq:292,
+      tokens:{in:392100, out:18900}, last_handoff:"14:42:18Z", workspace_seq:292,
       proactive_idle_sec:90, social_model:"bdi_speech_v1",
     },
     { id:"qa-king",       role:"QA",
@@ -295,7 +295,7 @@ window.MASC_P2 = (function () {
       short_goal:"suite-merge-blockers 정리", mid_goal:"flake 분류기 정착", long_goal:"전 suite green",
       runtime:"keeper_unified", tools_preset:"test", mention:["qa-king","qa","test"],
       sandbox:"docker", network:"none", auto_handoff:false, handoff_threshold:0.90,
-      tokens:{in:188300, out:9100}, last_handoff:"—", room_seq:294,
+      tokens:{in:188300, out:9100}, last_handoff:"—", workspace_seq:294,
       proactive_idle_sec:180, social_model:"bdi_speech_v1",
     },
     { id:"ramarama",      role:"Researcher",
@@ -305,7 +305,7 @@ window.MASC_P2 = (function () {
       short_goal:"runtime regression RC", mid_goal:"research/runtime-step2 close", long_goal:"research SOP",
       runtime:"keeper_unified", tools_preset:"research", mention:["rama","ramarama","research"],
       sandbox:"docker", network:"inherit", auto_handoff:true, handoff_threshold:0.75,
-      tokens:{in:410800, out:14200}, last_handoff:"15:32:00Z", room_seq:291,
+      tokens:{in:410800, out:14200}, last_handoff:"15:32:00Z", workspace_seq:291,
       proactive_idle_sec:300, social_model:"bdi_speech_v1",
     },
   ];
@@ -346,7 +346,7 @@ window.MASC_P2 = (function () {
     branches, nudges,
     goals, goalSnapshots,
     tasks, ledger, responsibility,
-    boardPosts, boardComments, rooms, messages,
+    boardPosts, boardComments, workspaces, messages,
     runtimeAudit, auditEvents, safeAutonomy, costs, heuristics, stress,
     keepersFull, decisions, memoryEntries, episodes,
   };

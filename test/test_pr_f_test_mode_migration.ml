@@ -7,7 +7,7 @@ open Alcotest
     [lib/config_dir_resolver.ml:55] [running_under_test_executable].
 
     The other 4 sites enumerated in PR-12 mli §1.5 live in lower-level
-    sub-libraries ([masc_config], [masc_coord], [fs_compat]) which
+    sub-libraries ([masc_config], [masc_workspace], [fs_compat]) which
     cannot call [Host_config] without inverting the dune
     dependency graph; their migration is deferred to a separate RFC
     (Host_config extraction to a shared lower-level library).  The 6th

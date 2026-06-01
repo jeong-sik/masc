@@ -18,14 +18,14 @@ Issue: #1736
 ## Principle
 
 OAS manages **agent state** — the lifecycle of an individual agent or collaboration session.
-MASC manages **domain state** — the coordination domain: rooms, tasks, governance, board posts, keeper profiles.
+MASC manages **domain state** — the workspace collaboration domain: workspaces, tasks, governance, board posts, keeper profiles.
 
 The boundary is the **tool call**: an agent (managed by OAS) invokes a domain tool (managed by MASC), which mutates domain state and returns a result. The agent incorporates that result into its own state. Neither side reaches into the other's storage.
 
 ```
                     tool call
   OAS Agent State ───────────> MASC Domain State
-  (turns, messages,            (rooms, tasks, votes,
+  (turns, messages,            (workspaces, tasks, votes,
    memory, context,             governance, board,
    checkpoint, usage)           keeper profiles)
 ```
@@ -50,7 +50,7 @@ State that describes an agent's runtime, cognitive context, and operational life
 
 ## 2. Domain State (belongs in MASC)
 
-State that describes the coordination domain — not how an agent thinks, but what it does within the MASC system.
+State that describes the workspace collaboration domain — not how an agent thinks, but what it does within the MASC system.
 
 | Category | Data | Current Owner | Target Owner |
 |----------|------|---------------|--------------|
@@ -58,9 +58,9 @@ State that describes the coordination domain — not how an agent thinks, but wh
 | Task claims | task files, `assignee`, `status` | MASC | MASC (correct) |
 | Board posts | `board_posts`, `board_comments`, `board_votes` | MASC | MASC (correct) |
 | Governance | petitions, cases, rulings, execution orders | MASC (`governance_v2`) | MASC (correct) |
-| Room votes | vote proposals, vote casts | MASC (`room_vote`) | MASC (correct) |
+| Workspace votes | vote proposals, vote casts | MASC (`workspace_vote`) | MASC (correct) |
 | Agent economy | token economy, reputation | MASC (`agent_economy`, `agent_reputation`) | MASC (correct) |
-| Broadcasts | room event log, SSE events | MASC | MASC (correct) |
+| Broadcasts | workspace event log, SSE events | MASC | MASC (correct) |
 | Institution rules | institution.json, norms | MASC (`institution_eio`) | MASC (correct) |
 
 ## 3. Current Boundary Violations
@@ -94,9 +94,9 @@ So the flattened operational surface is roughly 83 fields. Approximately 29-30 o
 - `context_budget` — context window budget ratio
 
 **Domain state fields in keeper_meta (correct placement):**
-- `mention_targets`, `proactive_*` — operational coordination policy
+- `mention_targets`, `proactive_*` — operational workspace collaboration policy
 - `last_seen_message_seq` — single-feed read cursor
-- `autonomy_level`, `active_goal_ids` — coordination state
+- `autonomy_level`, `active_goal_ids` — workspace collaboration state
 
 **Impact**: Every keeper turn reads the full keeper record, updates agent-runtime fields, and writes it back. This couples domain persistence (MASC JSONL/PG) with agent-runtime state that OAS should own.
 
@@ -145,7 +145,7 @@ type vote = {
 
 This is a governance/domain concept that leaked into the OAS wire protocol. OAS `Collaboration.t` already replaced this with generic `contribution`, but `Runtime.session` still carries the legacy field.
 
-**Impact**: OAS carries governance vocabulary. MASC has its own separate `room_vote.ml` with `VotePending | VoteApproved | VoteRejected | VoteTied`. Two vote systems, neither connected.
+**Impact**: OAS carries governance vocabulary. MASC has its own separate `workspace_vote.ml` with `VotePending | VoteApproved | VoteRejected | VoteTied`. Two vote systems, neither connected.
 
 ### V6: `Memory_oas_bridge` seeds MASC domain knowledge into OAS Memory
 
@@ -260,8 +260,8 @@ The retired petition bridge no longer creates decorative `Collaboration.t` recor
 
 In OAS, complete the `Runtime.session` -> `Collaboration.t` migration:
 - Remove `votes : vote list` from `Runtime.session`
-- Governance voting stays in MASC `room_vote.ml` / `Governance_v2`
-- OAS `Collaboration.t` uses generic `contribution` for agent coordination signals
+- Governance voting stays in MASC `workspace_vote.ml` / `Governance_v2`
+- OAS `Collaboration.t` uses generic `contribution` for agent workspace collaboration signals
 
 **Effort**: Medium. OAS-side change. Wire protocol change requires version bump.
 **Risk**: Medium — breaking change for any consumer reading `Runtime.session.votes`.
@@ -293,5 +293,5 @@ Replace `Memory_oas_bridge.seed_*` imperative calls with OAS hook registration:
 2. OAS never reads MASC domain files (`.masc/`, governance, board) — it receives domain data through registered hooks/callbacks
 3. `keeper_meta` contains only domain profile fields — runtime stats live in OAS
 4. Checkpoint format is OAS-native — MASC does not define its own serialization
-5. `Collaboration.t` is used for actual multi-agent coordination, not as decoration for domain operations
+5. `Collaboration.t` is used for actual multi-agent workspace collaboration, not as decoration for domain operations
 6. `Runtime.session` does not contain governance vocabulary (votes, petitions, rulings)

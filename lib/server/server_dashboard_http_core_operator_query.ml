@@ -14,10 +14,10 @@ let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_r
 let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
-let operator_retention_json ~(config : Coord.config) ~scope ~producer =
+let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
   `Assoc
     [ "scope", `String scope
-    ; "coordination_root", `String config.base_path
+    ; "workspace_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "producer", `String producer
     ; "store_kind", `String "process_cache"
@@ -51,9 +51,13 @@ let operator_snapshot_query_json ~actor ~view ~include_messages ~include_keepers
     ]
 ;;
 
-let operator_digest_query_json ~actor ~include_workers ~default_namespace_request =
+let operator_digest_query_json ~actor ~target_type ~target_id ~include_workers
+    ~effective_target_type ~default_namespace_request =
   `Assoc
     [ "actor", Json_util.string_opt_to_json actor
+    ; "target_type", Json_util.string_opt_to_json target_type
+    ; "target_id", Json_util.string_opt_to_json target_id
+    ; "effective_target_type", `String effective_target_type
     ; "include_workers", Json_util.bool_opt_to_json include_workers
     ; "default_namespace_request", `Bool default_namespace_request
     ]
@@ -133,6 +137,9 @@ let operator_snapshot_default_query () =
 let operator_digest_default_query () =
   operator_digest_query_json
     ~actor:None
+    ~target_type:None
+    ~target_id:None
     ~include_workers:None
+    ~effective_target_type:"workspace"
     ~default_namespace_request:true
 ;;

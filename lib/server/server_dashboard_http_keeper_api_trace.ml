@@ -28,7 +28,7 @@ let dedupe_thinking_lines (lines : Trajectory.trajectory_line list)
     lines
 ;;
 
-let read_internal_history_lines ~(config : Coord.config) ~(trace_id : string)
+let read_internal_history_lines ~(config : Workspace.config) ~(trace_id : string)
   : Trajectory.trajectory_line list
   =
   let path = Keeper_types_support.keeper_internal_history_path config trace_id in
@@ -48,7 +48,7 @@ let read_internal_history_lines ~(config : Coord.config) ~(trace_id : string)
   |> List.rev
 ;;
 
-let merge_keeper_trace_lines ~(config : Coord.config) ~(trace_id : string)
+let merge_keeper_trace_lines ~(config : Workspace.config) ~(trace_id : string)
       (trajectory_lines : Trajectory.trajectory_line list)
   : Trajectory.trajectory_line list
   =

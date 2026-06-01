@@ -20,7 +20,7 @@
     [Eio.Cancel.Cancelled] re-raised on both the append and the
     coverage-gap try-with blocks. *)
 val append_with_coverage_gap
-  :  config:Coord.config
+  :  config:Workspace.config
   -> receipt:Keeper_execution_receipt.t
   -> keeper_name:string
   -> trace_id:string

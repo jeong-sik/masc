@@ -56,7 +56,7 @@ let repair_result_to_yojson r =
     without this, every repair turn creates a fresh goal id even when the
     purpose has not changed (auto-goal accretion, observed live 2026-05-17:
     3 identical verifier goals across 10 days in Goal Store). *)
-let find_existing_auto_goal (config : Coord.config) ~(title : string)
+let find_existing_auto_goal (config : Workspace.config) ~(title : string)
     : Goal_store.goal option =
   let st = Goal_store.read_state config in
   List.find_opt (fun (g : Goal_store.goal) ->
@@ -77,9 +77,9 @@ let goal_title_of_purpose (purpose : string) : string =
     base ^ " (auto)"
 
 (** Scan all keeper metas and return names with empty active_goal_ids. *)
-let find_empty_goal_keepers (config : Coord.config) : string list =
+let find_empty_goal_keepers (config : Workspace.config) : string list =
   let keeper_dir =
-    Filename.concat (Coord.masc_dir config) "keepers"
+    Filename.concat (Workspace.masc_dir config) "keepers"
   in
   if not (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir) then []
   else begin
@@ -100,7 +100,7 @@ let find_empty_goal_keepers (config : Coord.config) : string list =
     same derived title, or create a new one. Then assign to the keeper's
     [active_goal_ids]. Returns [Ok action] on success, [Error msg] on
     failure. *)
-let repair_keeper (config : Coord.config) (name : string) : (repair_action, string) result =
+let repair_keeper (config : Workspace.config) (name : string) : (repair_action, string) result =
   match Keeper_meta_store.read_meta config name with
   | Error e -> Error (Printf.sprintf "read_meta failed: %s" e)
   | Ok None -> Error "keeper meta not found"
@@ -138,7 +138,7 @@ let repair_keeper (config : Coord.config) (name : string) : (repair_action, stri
 (** Dry-run: returns what would be repaired without making changes. The
     [source] field on each action records whether the live repair would
     [`Reused] an existing auto-goal or [`Created] a new one. *)
-let dry_run (config : Coord.config) : repair_result =
+let dry_run (config : Workspace.config) : repair_result =
   let names = find_empty_goal_keepers config in
   List.fold_left (fun acc name ->
     match Keeper_meta_store.read_meta config name with
@@ -161,7 +161,7 @@ let dry_run (config : Coord.config) : repair_result =
   |> fun r -> { actions = List.rev r.actions; skipped = List.rev r.skipped; errors = List.rev r.errors }
 
 (** Execute repairs: create goals and assign to keepers. *)
-let run (config : Coord.config) : repair_result =
+let run (config : Workspace.config) : repair_result =
   let names = find_empty_goal_keepers config in
   List.fold_left (fun acc name ->
     match repair_keeper config name with

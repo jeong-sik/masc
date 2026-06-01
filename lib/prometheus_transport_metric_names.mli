@@ -15,7 +15,7 @@ val metric_sse_queue_depth_avg : string
 val metric_sse_queue_depth_max : string
 val metric_sse_external_subscribers : string
 val metric_sse_client_evictions : string
-val metric_coord_broadcast_duration : string
+val metric_workspace_broadcast_duration : string
 val metric_file_lock_retries : string
 val metric_file_lock_acquire_seconds : string
 val metric_grpc_active_streams : string

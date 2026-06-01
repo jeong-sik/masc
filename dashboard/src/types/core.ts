@@ -126,7 +126,7 @@ export interface Message {
   content: string
   timestamp?: string
   type?: string
-  room?: string
+  workspace?: string
 }
 
 // --- Board ---
@@ -1284,9 +1284,9 @@ interface KeeperConfigRuntime {
   runtime_blocker_continue_gate?: boolean | null
 }
 
-interface KeeperConfigCoordination {
+interface KeeperConfigWorkspace {
   mention_targets: string[]
-  joined_room_ids: string[]
+  bound_workspace_ids: string[]
   active_goal_ids: string[]
   active_goals: KeeperConfigActiveGoal[]
   active_goal_count: number
@@ -1379,7 +1379,7 @@ export interface KeeperConfig {
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime
   runtime_trust?: KeeperConfigRuntimeTrust | null
-  coordination: KeeperConfigCoordination
+  workspace collaboration: KeeperConfigWorkspace
   tools: KeeperConfigTools
   sources: KeeperConfigSources
   metrics: KeeperConfigMetrics

@@ -31,7 +31,7 @@ let pp_error = function
 
 module type S = sig
   val resolve :
-    config:Coord.config -> identity:string -> (binding, error) result
+    config:Workspace.config -> identity:string -> (binding, error) result
 
   val finalize :
     binding -> container_id:string -> (unit, error) result

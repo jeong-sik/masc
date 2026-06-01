@@ -15,7 +15,7 @@ let make_meta () =
   | Ok meta -> meta
   | Error e -> Alcotest.fail e
 
-let config = Coord.default_config "/tmp/masc-read-runner-test"
+let config = Workspace.default_config "/tmp/masc-read-runner-test"
 let meta = make_meta ()
 
 module Calls = struct

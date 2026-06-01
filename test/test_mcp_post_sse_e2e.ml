@@ -385,7 +385,7 @@ let rec join_until_ready ~port ~retries_left =
       ~session_id:"legacy-agent-name-preservation"
       ~extra_headers:[ "X-MASC-Agent: dashboard-header-actor" ]
       ~payload:
-        (tool_payload ~id:202 ~name:"masc_join"
+        (tool_payload ~id:202 ~name:"masc_bind"
            ~arguments:(`Assoc [ ("agent_name", `String "provider_f") ]))
       ()
   in

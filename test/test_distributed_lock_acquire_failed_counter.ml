@@ -1,7 +1,7 @@
 (* #9645: pin canonical metric name + label vocabulary for the
    distributed lock acquire-failed counter.
 
-   [Coord_utils_ops] fires this counter when the retry budget is
+   [Workspace_utils_ops] fires this counter when the retry budget is
    exhausted (50 attempts) and the caller's lock acquire either
    raises [Invalid_argument] or returns [IoError].  Production
    observed [tasks:.backlog] starvation under 16-keeper load —
@@ -9,7 +9,7 @@
 
 let counter_for ~key ~attempts =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Coord.distributed_lock_acquire_failed_metric
+    Masc_mcp.Workspace.distributed_lock_acquire_failed_metric
     ~labels:[ ("key", key); ("attempts", string_of_int attempts) ]
     ()
 
@@ -17,13 +17,13 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "distributed lock acquire failed canonical name"
     Masc_mcp.Prometheus.metric_distributed_lock_acquire_failed
-    Masc_mcp.Coord.distributed_lock_acquire_failed_metric
+    Masc_mcp.Workspace.distributed_lock_acquire_failed_metric
 
 let test_record_increments () =
   let key = "tasks:.backlog-9645-test" in
   let attempts = 50 in
   let before = counter_for ~key ~attempts in
-  Masc_mcp.Coord.record_distributed_lock_acquire_failed
+  Masc_mcp.Workspace.record_distributed_lock_acquire_failed
     ~key ~attempts;
   Alcotest.(check (float 0.0001))
     "+1 after record"
@@ -37,7 +37,7 @@ let test_key_isolation () =
   let key_a = "tasks:.backlog-iso-9645" in
   let key_b = "keepers:state-iso-9645" in
   let before_a = counter_for ~key:key_a ~attempts in
-  Masc_mcp.Coord.record_distributed_lock_acquire_failed
+  Masc_mcp.Workspace.record_distributed_lock_acquire_failed
     ~key:key_b ~attempts;
   Alcotest.(check (float 0.0001))
     "key_a counter unaffected by key_b record"
@@ -50,7 +50,7 @@ let test_attempts_label_carried () =
      stay in distinct series. *)
   let key = "tasks:.backlog-attempts-iso-9645" in
   let before_50 = counter_for ~key ~attempts:50 in
-  Masc_mcp.Coord.record_distributed_lock_acquire_failed
+  Masc_mcp.Workspace.record_distributed_lock_acquire_failed
     ~key ~attempts:20;
   Alcotest.(check (float 0.0001))
     "50-attempt counter unaffected by 20-attempt record"

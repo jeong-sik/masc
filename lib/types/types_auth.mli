@@ -96,14 +96,14 @@ val agent_credential_of_yojson :
 
 type auth_config = {
   enabled : bool;
-  coord_secret_hash : string option;  [@default None]
+  workspace_secret_hash : string option;  [@default None]
   require_token : bool;  [@default false]
   token_expiry_hours : int;  [@default 24]
 }
 [@@deriving show]
 
 val default_auth_config : auth_config
-(** [enabled = true; coord_secret_hash = None; require_token = true;
+(** [enabled = true; workspace_secret_hash = None; require_token = true;
        token_expiry_hours = 24]. *)
 
 val auth_config_to_yojson : auth_config -> Yojson.Safe.t

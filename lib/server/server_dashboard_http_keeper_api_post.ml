@@ -61,7 +61,7 @@ let handle_keeper_tools_post state req reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name required"
     else
-      let config = state.Mcp_server.coord_config in
+      let config = state.Mcp_server.workspace_config in
       match Keeper_meta_store.read_meta config name with
       | Error msg -> respond_error ~status:`Not_found reqd msg
       | Ok None -> respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
@@ -147,7 +147,7 @@ let turn_identity_summary_json =
   Server_dashboard_http_keeper_api_summary_aggregates.turn_identity_summary_json
 ;;
 
-let keeper_runtime_trace_json (config : Coord.config) (name : string)
+let keeper_runtime_trace_json (config : Workspace.config) (name : string)
     ?trace_id ?turn_id ?(limit = 200) ()
     : [ `OK | `Not_found ] * Yojson.Safe.t =
   if not (Keeper_config.validate_name name) then
@@ -285,7 +285,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
   if String.length name = 0 then
     respond_error ~ok:false reqd "keeper name is required"
   else
-    let config = state.Mcp_server.coord_config in
+    let config = state.Mcp_server.workspace_config in
     try
       let args = Yojson.Safe.from_string body_str in
       let action = Safe_ops.json_string ~default:"" "action" args in
@@ -350,7 +350,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let config = state.Mcp_server.coord_config in
+    let config = state.Mcp_server.workspace_config in
     match Keeper_meta_store.read_meta config name with
     | Error msg -> respond_error ~status:`Not_found reqd msg
     | Ok None ->
@@ -440,7 +440,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
   | Error msg ->
       respond_error ~ok:false reqd msg
     | Ok directive ->
-        let config = state.Mcp_server.coord_config in
+        let config = state.Mcp_server.workspace_config in
         let action_str =
           match directive with
           | `Pause -> "pause"
@@ -613,7 +613,7 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
         (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
         reqd
   | Ok (names, directive) ->
-      let config = state.Mcp_server.coord_config in
+      let config = state.Mcp_server.workspace_config in
       let action_str =
         match directive with
         | `Pause -> "pause"

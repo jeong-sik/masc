@@ -15,7 +15,7 @@
 
     - Pure (no Eio, no I/O, no global state).
     - Additive only at the variant level — adding a new
-      {!actor_kind} or {!event_type} requires a coordinated
+      {!actor_kind} or {!event_type} requires a synchronized
       dashboard release because the read model rejects unknown
       strings.
     - JSON-shape stable: serialisation uses a custom codec, not

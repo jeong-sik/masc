@@ -50,7 +50,7 @@ pub mod paths {
     #[cfg(not(target_arch = "wasm32"))]
     pub const MOOD_AMBIGUOUS_CALM: &str = "moods/mood_ambiguous_calm.png";
 
-    // Props — The Room scenario (512x512, PNG, transparent background)
+    // Props — The Workspace scenario (512x512, PNG, transparent background)
     #[cfg(not(target_arch = "wasm32"))]
     pub const PROP_COMPASS: &str = "props/compass_broken.png";
     #[cfg(not(target_arch = "wasm32"))]

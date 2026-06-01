@@ -2,8 +2,10 @@ open Operator_pending_confirm
 open Result.Syntax
 
 include Operator_digest_types
+(* Operator_digest_session removed — team session cleanup *)
 open Operator_digest_guidance
 
+(* Retained from Operator_digest_session — used for workspace-level attention health *)
 let health_from_attention_items (items : attention_item list) =
   if
     List.exists
@@ -47,7 +49,7 @@ let recent_tool_host_failures ~now () =
                     severity =
                       operator_severity_of_failure_envelope envelope.severity;
                     summary = envelope.summary;
-                    target_type = "";
+                    target_type = "workspace";
                     target_id = None;
                     actor = None;
                     evidence =
@@ -65,7 +67,7 @@ let recent_tool_host_failures ~now () =
   Log.Ring.recent ~limit:12 ~module_filter:Failure_envelope.tool_host_log_module_name ()
   |> dedup [] []
 
-let build_operator_attention_items config =
+let build_workspace_attention_items config =
   let pending_confirms = read_pending_confirms config in
   let pending_items =
     if pending_confirms = [] then []
@@ -77,7 +79,7 @@ let build_operator_attention_items config =
           summary =
             Printf.sprintf "%d pending confirmation(s) are waiting for operator input"
               (List.length pending_confirms);
-          target_type = "";
+          target_type = "workspace";
           target_id = None;
           actor = None;
           evidence = `Assoc [ ("count", `Int (List.length pending_confirms)) ];
@@ -195,26 +197,41 @@ let keeper_attention_projection_items config =
     | Ok (Some meta) -> keeper_attention_projection config meta
     | Ok None | Error _ -> None)
 
-let operator_recommendations _config =
+let workspace_recommendations _config =
   dedup_recommendations []
 
-let digest_json ?actor ?target_type ?target_id ?include_workers:_include_workers
+let workspace_state_json config =
+  if not (Workspace.is_initialized config) then
+    `Assoc
+      [
+        ("project", `String (Filename.basename config.base_path));
+        ("cluster", `String (Env_config_core.cluster_name ()));
+        ("paused", `Bool false);
+        ("pause_reason", `Null);
+      ]
+  else
+    let state = Workspace.read_state config in
+    `Assoc
+      [
+        ("project", `String state.project);
+        ("cluster", `String (Env_config_core.cluster_name ()));
+        ("paused", `Bool state.paused);
+        ("pause_reason", Json_util.string_opt_to_json state.pause_reason);
+      ]
+
+let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_include_workers
     (ctx : 'a context) :
     (Yojson.Safe.t, string) result =
   let config = ctx.config in
-  let* _ = normalize_digest_target_type target_type in
-  let* () =
-    match Option.bind target_id String_util.trim_to_option with
-    | None -> Ok ()
-    | Some _ -> Error "target_id must be omitted"
-  in
-  if not (Coord.is_initialized config) then
+  if not (Workspace.is_initialized config) then
     let recent_reviews = Operator_review_state.recent_review_decisions_json ~limit:12 config in
-	    Ok
-	      (`Assoc
-	        [
-	          ("trace_id", `String (trace_id "opsd"));
-	          ("health", `String "ok");
+    Ok
+      (`Assoc
+        [
+          ("trace_id", `String (trace_id "opsd"));
+          ("target_type", `String "workspace");
+          ("target_id", `Null);
+          ("health", `String "ok");
           ("judgment_owner", `String "fallback_read_model");
           ("authoritative_judgment_available", `Bool false);
           ("judgment", `Null);
@@ -232,46 +249,54 @@ let digest_json ?actor ?target_type ?target_id ?include_workers:_include_workers
           ("fallback_recommended_actions", `List []);
           ("recent_reviews", recent_reviews);
         ])
-	  else
-	    let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
-	        let confirm_scope = pending_confirm_scope ?actor config in
-	        let keeper_attention, keeper_recommendations =
-	          keeper_attention_projection_items config |> List.split
+  else
+    let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
+    let* target_type = normalize_digest_target_type target_type in
+    let workspace_state_json = workspace_state_json config in
+    match target_type with
+    | "workspace" ->
+        let confirm_scope = pending_confirm_scope ?actor config in
+        let keeper_attention, keeper_recommendations =
+          keeper_attention_projection_items config |> List.split
         in
         let attention_items =
-          build_operator_attention_items config
+          build_workspace_attention_items config
           @ keeper_attention
           |> List.sort compare_attention
         in
         let recommended_actions =
           dedup_recommendations
-            (operator_recommendations config @ keeper_recommendations)
+            (workspace_recommendations config @ keeper_recommendations)
         in
         let fallback_recommendation_summary =
           summary_of_recommendations ~actor:actor_name recommended_actions
-	        in
-	        let active_guidance =
-	          active_guidance_fields ~config ~actor:actor_name
-	            ~fallback_recommendations:recommended_actions
-	            ~fallback_summary:fallback_recommendation_summary
-	        in
+        in
+        let active_guidance =
+          active_guidance_fields ~config ~actor:actor_name ~target_type:"workspace"
+            ~target_id:None ~fallback_recommendations:recommended_actions
+            ~fallback_summary:fallback_recommendation_summary
+        in
         let recent_reviews =
           Operator_review_state.recent_review_decisions_json ~limit:12 config
         in
         Ok
-	          (`Assoc
-	            ([
-	              ("trace_id", `String (trace_id "opsd"));
-	              ("health", `String (health_from_attention_items attention_items));
-	              ("operator_judge_runtime", operator_judge_runtime_json config);
+          (`Assoc
+            ([
+              ("trace_id", `String (trace_id "opsd"));
+              ("target_type", `String "workspace");
+              ("target_id", `Null);
+              ("health", `String (health_from_attention_items attention_items));
+              ("operator_judge_runtime", operator_judge_runtime_json config);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ("attention_summary", summary_of_attention_items attention_items);
               ("pending_confirm_summary", pending_confirm_summary_json_of_scope confirm_scope);
               ( "recommended_actions",
                 `List
                   (List.map (recommended_action_to_yojson ~actor:actor_name)
-	                     recommended_actions) );
-	              ("recommendation_summary", fallback_recommendation_summary);
-	            ]
-	            @ [ ("recent_reviews", recent_reviews) ]
-	            @ active_guidance))
+                     recommended_actions) );
+              ("recommendation_summary", fallback_recommendation_summary);
+              ("workspace", workspace_state_json);
+            ]
+            @ [ ("recent_reviews", recent_reviews) ]
+            @ active_guidance))
+    | _ -> Error "unsupported target_type"

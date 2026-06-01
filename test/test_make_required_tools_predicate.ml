@@ -1,6 +1,6 @@
 open Alcotest
 
-module CTS = Coord_task_schedule
+module CTS = Workspace_task_schedule
 
 let test_none_rejects_non_empty_required_tools () =
   let pred = CTS.make_required_tools_predicate () in

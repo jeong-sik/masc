@@ -10,7 +10,7 @@ let keeper_internal_list : string list =
     "masc_web_fetch"
   ; "masc_web_search"
     (* === Wave 2 (PR #14633) === *)
-    (* coord/inline admin observability (PR-N5 audit verdict, #14618) *)
+    (* workspace/inline admin observability (PR-N5 audit verdict, #14618) *)
   ; "masc_check"
   ; "masc_reset"
   ; "masc_mcp_session" (* plan management (keeper persona authoring) *)

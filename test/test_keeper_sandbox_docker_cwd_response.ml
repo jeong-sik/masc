@@ -58,7 +58,7 @@ let test_container_path_translation_under_sandbox () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-      let config = Coord.default_config base in
+      let config = Workspace.default_config base in
       let meta = make_docker_meta ~name:"cwd-pin-keeper" in
       let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
       let host_cwd = Filename.concat host_root "repos/foo" in

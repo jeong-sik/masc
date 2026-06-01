@@ -277,13 +277,13 @@ let make_executed_tool_result ?outcome raw_output =
   { raw_output; outcome; payload_shape }
 ;;
 
-(* Coordination tools dispatch through [Agent_tool_runtime.handle_internal].
+(* Workspace tools dispatch through [Agent_tool_runtime.handle_internal].
    Outcome is inferred from raw JSON via [classify_tool_result_payload]. *)
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
 
 let execute_keeper_tool_call_with_outcome
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory
@@ -497,7 +497,7 @@ let execute_keeper_tool_call_with_outcome
 ;;
 
 let execute_keeper_tool_call
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ?turn_sandbox_factory

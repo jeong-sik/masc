@@ -267,7 +267,7 @@ let request_is_actionable (req : verification_request) =
 
     Prior implementation (#7544) combined [Time_compat.now ()] with
     [Hashtbl.hash (Unix.gettimeofday ())], which collided inside the
-    same millisecond. Now shared with [Coord_task]'s verification_id
+    same millisecond. Now shared with [Workspace_task]'s verification_id
     generation via [Random_id], so the algorithm is defined once. *)
 let generate_id () =
   Random_id.prefixed ~prefix:"vrf-" ~bytes:16
@@ -354,10 +354,10 @@ let validate_cross_agent ~worker ~verifier =
 
 (** File-based storage *)
 
-let verifications_dir = Coord_verification_store.verifications_dir
+let verifications_dir = Workspace_verification_store.verifications_dir
 
 let request_path base_path req_id =
-  Coord_verification_store.request_path base_path req_id
+  Workspace_verification_store.request_path base_path req_id
 
 (* [list_requests] used to walk [verifications/*.json] on every dashboard
    refresh: one [Safe_ops.list_dir_safe] for the directory followed by

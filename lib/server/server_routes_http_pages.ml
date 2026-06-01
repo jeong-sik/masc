@@ -113,7 +113,7 @@ let graphql_playground_html ~nonce =
       </svg>
       <div class="text">Loading <strong>GraphQL Playground</strong></div>
     </div>
-    <div id="playground-root"></div>
+    <div id="workspace"></div>
     <script nonce="|};
     nonce;
     {|">
@@ -122,7 +122,7 @@ let graphql_playground_html ~nonce =
         if (loading) {
           loading.classList.add("fadeOut");
         }
-        var root = document.getElementById("playground-root");
+        var root = document.getElementById("workspace");
         if (!root) {
           return;
         }
@@ -431,6 +431,7 @@ let keepers_summary_from_registry ~base_path
   K.{
     keepers;
     cycle;
+    workspace = Some (Filename.basename base_path);
     generated_at = Masc_domain.now_iso ();
   }
 
@@ -444,7 +445,7 @@ let bonsai_api_keepers_summary request reqd =
         (`Assoc [ ("error", `String "server state not initialized") ])
   | Some state ->
       let resp =
-        keepers_summary_from_registry ~base_path:state.coord_config.base_path
+        keepers_summary_from_registry ~base_path:state.workspace_config.base_path
       in
       respond_public_read_json_value request reqd
         (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
@@ -515,7 +516,7 @@ let handle_post_graphql request reqd =
         respond_json_with_cors ~status:`Internal_server_error request reqd
           (server_state_error_json message)
     | Ok state ->
-        let response = Graphql_api.handle_request ~config:state.coord_config body_str in
+        let response = Graphql_api.handle_request ~config:state.workspace_config body_str in
         let status = http_status_of_graphql response.status in
         let headers = Httpun.Headers.of_list (
           ("content-length", string_of_int (String.length response.body))

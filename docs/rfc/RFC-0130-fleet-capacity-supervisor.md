@@ -17,7 +17,7 @@ implementation_prs: []
 
 `/health` exposes `reaction_capacity_shortfall_count`, `reaction_capacity_below_target`, and `keeper_fleet_safety.status=degraded` (PR #16050, 2026-05-18, closing issue #16047). The fields are computed correctly. No code path consumes them.
 
-`rg "reaction_capacity_shortfall_count|reaction_capacity_below_target" lib/keeper/ lib/coord/` returns zero hits. The shortfall signal terminates at the HTTP runtime JSON emitter and the dashboard chip. Operators must visually notice the chip and run `masc_keeper_up` manually to restore capacity.
+`rg "reaction_capacity_shortfall_count|reaction_capacity_below_target" lib/keeper/ lib/workspace/` returns zero hits. The shortfall signal terminates at the HTTP runtime JSON emitter and the dashboard chip. Operators must visually notice the chip and run `masc_keeper_up` manually to restore capacity.
 
 Existing admission code (`Keeper_fd_pressure.admission_decision`, `Keeper_disk_pressure`, `keeper_tool_resolution.ml` RFC-0080 chain) is all **deny-side**: it blocks launch/turn admission when low resources are detected. None of it spawns to a target.
 
@@ -125,7 +125,7 @@ Fleet_capacity_supervisor.tick               (new)
        ▼
 Fleet_capacity_supervisor.execute
    ├── Spawn → Masc_keeper_up.run sw env ~base_path ~names
-   ├── Backpressure → Coord.publish_backpressure ~reason
+   ├── Backpressure → Workspace.publish_backpressure ~reason
    └── Noop → Lifecycle event only
 ```
 

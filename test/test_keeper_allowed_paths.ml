@@ -56,7 +56,7 @@ let with_temp_config f =
   with_temp_dir "keeper_allowed_paths_" (fun dir ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    f (Masc_mcp.Coord.default_config dir))
+    f (Masc_mcp.Workspace.default_config dir))
 
 let ensure_dir path =
   let rec loop p =

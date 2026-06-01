@@ -103,7 +103,7 @@
    ;; [Masc_exec_command_gate.Shell_command_gate] directly.
    (re_export masc_mcp.masc_exec_command_gate)
    (re_export masc_mcp.masc_exec_bash_parser)
-   (re_export masc_coord)
+   (re_export masc_workspace)
    (re_export masc_types)
    (re_export mirage-crypto)
    (re_export mirage-crypto-rng)

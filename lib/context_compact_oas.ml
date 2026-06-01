@@ -24,7 +24,7 @@
     into this lightweight record. *)
 type observation_context = {
   context_ratio : float;          (** [0.0, 1.0] — current context window utilization *)
-  active_agent_count : int;       (** Agents currently active in the coord *)
+  active_agent_count : int;       (** Agents currently active in the workspace *)
   unclaimed_task_count : int;     (** Pending tasks in the backlog *)
   is_single_focused_task : bool;  (** Keeper working on exactly one task *)
   context_window : int;           (** Model context window in tokens *)
@@ -257,7 +257,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.t =
     OAS Dynamic is turn-scoped and message-scoped — it answers
     "given this conversation state, which single reduction to apply?".
     MASC Dynamic is world-scoped — it answers "given the multi-agent
-    coord state, which {i combination} of reductions is appropriate?".
+    workspace state, which {i combination} of reductions is appropriate?".
 
     They operate at different abstraction levels:
     - OAS Dynamic:  per-conversation, single strategy, inside [reduce]
@@ -311,7 +311,7 @@ let observation_summary = function
 
 (** Default dynamic strategy selector.
     Chooses strategies based on observation context:
-    - High context + multi-agent: aggressive compaction (preserve coordination)
+    - High context + multi-agent: aggressive compaction (preserve workspace)
     - High context + single task: summarize old + drop low importance
     - Small local model: prefer pruning (cheaper, faster)
     - Large-context cloud (>= 500K): quality-preserving with summarization
@@ -341,7 +341,7 @@ let small_local_ctx_floor = Env_config.ContextCompact.small_local_floor
 
 let default_dynamic_selector (obs : observation_context) : strategy list =
   if obs.context_ratio >= dynamic_multi_agent_ctx && obs.active_agent_count > 1 then
-    (* Dense coordination: preserve recent turns, aggressive pruning *)
+    (* Dense workspace: preserve recent turns, aggressive pruning *)
     [PruneToolOutputs; DropLowImportance; MergeContiguous]
   else if obs.context_ratio >= dynamic_focused_ctx && obs.is_single_focused_task then
     (* Focused work near budget: summarize old context *)

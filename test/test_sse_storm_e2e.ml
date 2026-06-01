@@ -310,14 +310,14 @@ let test_ag_ui_rejects_reconnect_then_recovers () =
   let headers = [("Accept", "text/event-stream"); ("Mcp-Session-Id", sid)] in
 
   (* Stay well inside the 1s reconnect guard so the next request is truly immediate. *)
-  let first = run_curl ~headers ~max_time:0.2 ~port ~path:"/ag-ui/events?room=default" () in
+  let first = run_curl ~headers ~max_time:0.2 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "first /ag-ui/events connect accepted" 200 first;
 
-  let second = run_curl ~headers ~max_time:0.5 ~port ~path:"/ag-ui/events?room=default" () in
+  let second = run_curl ~headers ~max_time:0.5 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "immediate /ag-ui/events reconnect rejected" 429 second;
 
   Unix.sleepf 2.0;
-  let third = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?room=default" () in
+  let third = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "cooldown /ag-ui/events reconnect recovers" 200 third
 
 let () =

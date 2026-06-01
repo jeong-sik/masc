@@ -13,6 +13,12 @@ let normalize_judgment_surface value =
   | "intervene" -> Ok normalized
   | _ -> Error "surface must be one of command.namespace, intervene"
 
+let normalize_judgment_target_type value =
+  let normalized = String.trim value |> String.lowercase_ascii in
+  if Operator_digest_types.is_root_target_type normalized then
+    Ok ("workspace", Operator_judgment.Workspace)
+  else Error "target_type must be root"
+
 let default_fresh_ttl_sec surface =
   match surface with
   | "command.namespace" -> 60
@@ -21,8 +27,10 @@ let default_fresh_ttl_sec surface =
 
 let judgment_write_json (ctx : 'a context) args =
   let* surface = normalize_judgment_surface (get_string args "surface" "") in
+  let* _, judgment_target_type =
+    normalize_judgment_target_type (get_string args "target_type" "")
+  in
   let target_id = get_string_opt args "target_id" in
-  ignore target_id;
   let summary = get_string args "summary" "" |> String.trim in
   if summary = "" then Error "summary is required"
   else
@@ -48,7 +56,7 @@ let judgment_write_json (ctx : 'a context) args =
     let recommended_action = Json_util.get_object args "recommended_action" in
     let judgment =
       Operator_judgment.record ctx.config ~surface
-        ~summary ~confidence
+        ~target_type:judgment_target_type ~target_id ~summary ~confidence
         ?model_name:(get_string_opt args "model_name")
         ?runtime_name:(get_string_opt args "runtime_name")
         ?recommended_action ~evidence_refs
@@ -64,12 +72,15 @@ let judgment_write_json (ctx : 'a context) args =
 
 let judgment_latest_json (_ctx : 'a context) args =
   let* surface = normalize_judgment_surface (get_string args "surface" "") in
+  let* _, judgment_target_type =
+    normalize_judgment_target_type (get_string args "target_type" "")
+  in
   let target_id = get_string_opt args "target_id" in
-  ignore target_id;
   let require_fresh = get_bool args "require_fresh" true in
   let judgment =
     match
       Operator_judgment.latest_active _ctx.config ~surface
+        ~target_type:judgment_target_type ~target_id
     with
     | Some value when (not require_fresh) || Operator_judgment.is_fresh value ->
         Some value
@@ -96,16 +107,16 @@ let canonical_action_type action_type = action_type
 
 let normalize_action_target_type target_type =
   let normalized = String.trim target_type |> String.lowercase_ascii in
-  if Operator_digest_types.is_omitted_target_type normalized then Ok ""
+  if Operator_digest_types.is_root_target_type normalized then Ok "workspace"
   else match normalized with
   | "keeper" as value -> Ok value
   | "" -> Ok ""
-  | _ -> Error "target_type must be omitted or keeper"
+  | _ -> Error "target_type must be root or keeper"
 
 let default_target_type_for action_type =
   match action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject"
-    -> ""
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
+    -> "workspace"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | _ -> ""
 
@@ -170,7 +181,7 @@ let normalize_request_target_type (request : action_request) =
   Ok { request with target_type }
 
 (** Resolve tool name for an action_type. Looks up available_actions first,
-    then uses the explicit action mapping for unlisted actions. *)
+    falls back to legacy mapping for unlisted actions. *)
 let delegated_tool_for action_type =
   match
     List.find_opt
@@ -188,14 +199,9 @@ let preview_of_action (request : action_request) =
     [
       ("actor", `String request.actor);
       ("action_type", `String request.action_type);
+      ("target_type", `String request.target_type);
+      ("target_id", Json_util.string_opt_to_json request.target_id);
     ]
-    @
-    if request.target_type = "" then []
-    else [ ("target_type", `String request.target_type) ]
-    @
-    match request.target_id with
-    | None -> []
-    | Some value -> [ ("target_id", `String value) ]
   in
   let payload_fields =
     match request.payload with
@@ -208,7 +214,8 @@ let validate_target_type expected request =
   if String.equal request.target_type expected then Ok ()
   else
     Error
-      (Printf.sprintf "invalid target_type for %s" request.action_type)
+      (Printf.sprintf "invalid target_type for %s (expected %s)"
+         request.action_type expected)
 
 let require_target_id request =
   match request.target_id with
@@ -219,3 +226,5 @@ let require_payload_field payload key error_message =
   match get_string_opt payload key with
   | Some value -> Ok value
   | None -> Error error_message
+
+(* parse_turn_kind removed — team session turn types deleted. *)

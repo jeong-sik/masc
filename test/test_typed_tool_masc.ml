@@ -49,7 +49,7 @@ let test_handler_success () =
   match Tool_broadcast_typed.handle_broadcast "hello @agent_llm_a" with
   | Ok output ->
     Alcotest.(check bool) "delivered" true output.delivered;
-    Alcotest.(check string) "message" "hello @agent_llm_a" output.coord_message;
+    Alcotest.(check string) "message" "hello @agent_llm_a" output.broadcast_message;
     Alcotest.(check (option string)) "mention" (Some "agent_llm_a") output.mention
   | Error e -> Alcotest.fail ("handler failed: " ^ e)
 
@@ -60,19 +60,19 @@ let test_handler_empty () =
 
 let test_handler_trim () =
   match Tool_broadcast_typed.handle_broadcast "  trimmed  " with
-  | Ok output -> Alcotest.(check string) "trimmed" "trimmed" output.coord_message
+  | Ok output -> Alcotest.(check string) "trimmed" "trimmed" output.broadcast_message
   | Error e -> Alcotest.fail e
 
 let test_encode_mention () =
   let output : Tool_broadcast_typed.broadcast_output =
-    { delivered = true; coord_message = "hi"; mention = Some "alice" } in
+    { delivered = true; broadcast_message = "hi"; mention = Some "alice" } in
   let json = Tool_broadcast_typed.encode_broadcast output in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "mention" "alice" (json |> member "mention" |> to_string)
 
 let test_encode_no_mention () =
   let output : Tool_broadcast_typed.broadcast_output =
-    { delivered = true; coord_message = "hi"; mention = None } in
+    { delivered = true; broadcast_message = "hi"; mention = None } in
   let json = Tool_broadcast_typed.encode_broadcast output in
   let open Yojson.Safe.Util in
   Alcotest.(check bool) "delivered" true (json |> member "delivered" |> to_bool)
@@ -100,8 +100,8 @@ let test_e2e_coerced_input () =
     let result = Yojson.Safe.from_string content in
     let open Yojson.Safe.Util in
     Alcotest.(check bool) "delivered" true (result |> member "delivered" |> to_bool);
-    Alcotest.(check string) "coord_message" "99"
-      (result |> member "coord_message" |> to_string)
+    Alcotest.(check string) "broadcast_message" "99"
+      (result |> member "broadcast_message" |> to_string)
   | Error e -> Alcotest.fail ("expected coercion success: " ^ e.message)
 
 let test_e2e_handler_error () =

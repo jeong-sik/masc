@@ -22,7 +22,7 @@ include Keeper_unified_turn_types
 include Keeper_unified_turn_phase_plan
 
 let run_keeper_cycle
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
@@ -268,7 +268,7 @@ let run_keeper_cycle
                       base_dir
                       (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
                in
-               let masc_root = Coord.masc_root_dir config in
+               let masc_root = Workspace.masc_root_dir config in
                let trajectory_acc =
                  Trajectory.create_accumulator
                    ~masc_root

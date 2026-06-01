@@ -15,8 +15,8 @@ type MockOperatorSnapshot = {
 
 const {
   fetchPauseStatus,
-  pauseRoom,
-  resumeRoom,
+  pauseWorkspace,
+  resumeWorkspace,
   runGarbageCollection,
   cleanupZombies,
   flowState,
@@ -27,8 +27,8 @@ const {
   operatorSnapshot,
 } = vi.hoisted(() => ({
   fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
-  pauseRoom: vi.fn().mockResolvedValue(undefined),
-  resumeRoom: vi.fn().mockResolvedValue(undefined),
+  pauseWorkspace: vi.fn().mockResolvedValue(undefined),
+  resumeWorkspace: vi.fn().mockResolvedValue(undefined),
   runGarbageCollection: vi.fn().mockResolvedValue(undefined),
   cleanupZombies: vi.fn().mockResolvedValue(undefined),
   flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
@@ -46,8 +46,8 @@ vi.mock('./flow-control-state', () => ({
   flowState,
   maintenanceLoading,
   maintenanceResult,
-  pauseRoom,
-  resumeRoom,
+  pauseWorkspace,
+  resumeWorkspace,
   runGarbageCollection,
 }))
 

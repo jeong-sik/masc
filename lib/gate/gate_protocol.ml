@@ -7,7 +7,7 @@ type inbound_message = {
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
   keeper_name : string;
   content : string;
   idempotency_key : string;
@@ -108,7 +108,7 @@ let inbound_of_json json =
       channel;
       channel_user_id = str "channel_user_id";
       channel_user_name = str "channel_user_name";
-      channel_room_id = str "channel_room_id";
+      channel_workspace_id = str "channel_workspace_id";
       keeper_name;
       content = str "content";
       idempotency_key = str "idempotency_key";

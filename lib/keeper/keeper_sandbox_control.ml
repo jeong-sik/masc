@@ -61,8 +61,8 @@ let managed_container_counter : int Atomic.t = Atomic.make 0
 let managed_container_name ~(meta : keeper_meta) ~(network_label : string) =
   let seq = Atomic.fetch_and_add managed_container_counter 1 in
   Printf.sprintf "masc-keeper-managed-%s-%s-%d-%d-%d"
-    (Coord_utils.safe_filename meta.name)
-    (Coord_utils.safe_filename network_label)
+    (Workspace_utils.safe_filename meta.name)
+    (Workspace_utils.safe_filename network_label)
     (Unix.getpid ())
     (now_ms ())
     seq
@@ -72,7 +72,7 @@ let configured_effective_network network_mode = network_mode
 let live_containers ~config ~meta ~timeout_sec =
   Keeper_sandbox_runtime.list_containers
     ~keeper_name:meta.name
-    ~base_path:config.Coord.base_path
+    ~base_path:config.Workspace.base_path
     ~timeout_sec
     ()
 
@@ -100,7 +100,7 @@ let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_err
 ;;
 
 let start_managed_container
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(network_mode : network_mode)
     ~(ttl_sec : float)
@@ -257,7 +257,7 @@ let start_managed_container
                     Error message))
     | Error err -> Error err
 
-let stop_containers ?keeper_name ~scope ~(config : Coord.config)
+let stop_containers ?keeper_name ~scope ~(config : Workspace.config)
     ~(timeout_sec : float) () =
   let container_kind =
     match scope with
@@ -272,11 +272,11 @@ let stop_containers ?keeper_name ~scope ~(config : Coord.config)
     ~timeout_sec
     ()
 
-let stop_managed_containers ?keeper_name ~(config : Coord.config)
+let stop_managed_containers ?keeper_name ~(config : Workspace.config)
     ~(timeout_sec : float) () =
   stop_containers ?keeper_name ~scope:Stop_managed ~config ~timeout_sec ()
 
-let cleanup_stale ~(config : Coord.config) ~(timeout_sec : float) () =
+let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
   Keeper_sandbox_runtime.cleanup_stale_containers
     ~base_path:config.base_path
     ~timeout_sec
@@ -324,7 +324,7 @@ let git_string_opt repo_path args =
     (fun () ->
       let argv = "git" :: "-C" :: repo_path :: args in
       let status, out =
-        Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git
+        Masc_exec.Exec_gate.run_argv_with_status ~actor:`Workspace_git
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper sandbox git metadata"
           ~timeout_sec:git_metadata_timeout_sec
@@ -418,7 +418,7 @@ let filesystem_playground_repo_names playground_abs =
     with
     | Sys_error _ -> []
 
-let playground_repos_json ~(config : Coord.config) ~(meta : keeper_meta) =
+let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let playground_abs =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> normalize_path
@@ -534,7 +534,7 @@ let live_status_json ?(include_preflight = true)
     ?preflight_override
     ?containers_override
     ?(include_playground_repos = true)
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(timeout_sec : float)
     ~(verbose : bool)

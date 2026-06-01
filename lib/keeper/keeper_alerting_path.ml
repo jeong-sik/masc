@@ -97,7 +97,7 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
     ()
 ;;
 
-let project_root_of_config (config : Coord.config) : string =
+let project_root_of_config (config : Workspace.config) : string =
   let base = config.base_path in
   if Filename.basename base = Common.masc_dirname then Filename.dirname base else base
 ;;
@@ -262,14 +262,14 @@ let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list
     allowed_norms
 ;;
 
-let absolute_allowed_paths ~(config : Coord.config) ~(allowed_paths : string list)
+let absolute_allowed_paths ~(config : Workspace.config) ~(allowed_paths : string list)
   : string list
   =
   let root = project_root_of_config config in
   allowed_paths |> List.filter_map (normalize_allowed_path_for_check ~root)
 ;;
 
-let absolute_allowed_paths_result ~(config : Coord.config) ~(allowed_paths : string list)
+let absolute_allowed_paths_result ~(config : Workspace.config) ~(allowed_paths : string list)
   : (string list, string) result
   =
   let normalized = absolute_allowed_paths ~config ~allowed_paths in
@@ -322,7 +322,7 @@ let raw_looks_like_playground_subdir (raw : string) : bool =
 ;;
 
 let resolve_keeper_target_path
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(allowed_paths : string list)
       ~(raw_path : string)
   : (string, keeper_path_rejection) result
@@ -384,14 +384,14 @@ let sandbox_bundle_paths_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   [ root ^ "/"; root ^ "/mind/"; root ^ "/repos/" ]
 ;;
 
-let ensure_playground_bundle ~(config : Coord.config) ~(name : string) : string list =
+let ensure_playground_bundle ~(config : Workspace.config) ~(name : string) : string list =
   let root = project_root_of_config config in
   playground_bundle_paths name
   |> List.map (Filename.concat root)
   |> List.map Keeper_fs.ensure_dir
 ;;
 
-let ensure_sandbox_bundle ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta)
+let ensure_sandbox_bundle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
   : string list
   =
   let root = project_root_of_config config in
@@ -401,7 +401,7 @@ let ensure_sandbox_bundle ~(config : Coord.config) ~(meta : Keeper_meta_contract
 ;;
 
 let ensure_sandbox_bundle_for_profile
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(name : string)
       ~(sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile)
   : string list
@@ -437,7 +437,7 @@ let effective_write_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : s
     allowlist. The allowlist is usually the keeper sandbox root
     plus any explicit custom paths. *)
 let resolve_keeper_read_path
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(allowed_paths : string list)
       ~(raw_path : string)
   : (string, keeper_path_rejection) result

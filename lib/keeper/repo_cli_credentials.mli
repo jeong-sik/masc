@@ -25,40 +25,40 @@ val root_repo_cli_identity : string
 val credential_scope_to_string : credential_scope -> string
 
 (** Resolve the root fallback repo CLI config dir when it exists. *)
-val config_dir : Coord.config -> string option
+val config_dir : Workspace.config -> string option
 
 (** [bundle_root config ~repo_cli_identity] is the on-disk root of the repo CLI
     identity bundle: [$base_path/.masc/repo-cli-identities/<id>]. *)
-val bundle_root : Coord.config -> repo_cli_identity:string -> string
+val bundle_root : Workspace.config -> repo_cli_identity:string -> string
 
-val root_bundle_root : Coord.config -> string
+val root_bundle_root : Workspace.config -> string
 
 (** [repo_cli_config_dir_of_bundle bundle_root] is the [gh/] subdir of a repo
     CLI identity bundle. *)
 val repo_cli_config_dir_of_bundle : string -> string
 
-val root_repo_cli_config_dir : Coord.config -> string
+val root_repo_cli_config_dir : Workspace.config -> string
 
 val git_config_env_entries : string list
 
 val git_config_env_pairs : (string * string) list
 
-val root_repo_cli_config_dir_exists : Coord.config -> bool
+val root_repo_cli_config_dir_exists : Workspace.config -> bool
 
 (** Resolve the keeper's repo CLI identity binding, or an error string
     explaining why the binding cannot be established (missing identity
     in profile defaults, missing GH config dir on disk, etc.). *)
 val keeper_binding :
-  Coord.config -> keeper_name:string -> (keeper_binding, string) result
+  Workspace.config -> keeper_name:string -> (keeper_binding, string) result
 
 (** Convenience: extract just the [gh_config_dir] from the binding. *)
 val keeper_config_dir :
-  Coord.config -> keeper_name:string -> (string, string) result
+  Workspace.config -> keeper_name:string -> (string, string) result
 
 (** Prepend [GH_CONFIG_DIR=<dir>] to a gh shell command when a
     keeper-scoped config exists. Scoped to the single subprocess
     invocation — the operator's terminal is unaffected. *)
-val with_env : Coord.config -> string -> string
+val with_env : Workspace.config -> string -> string
 
 (** Compose the base environment for a repo CLI/git subprocess: scrub
     long-lived host credentials, inject non-interactive git constants,
@@ -71,10 +71,10 @@ val compose_base_with_repo_cli_config : dir:string -> string array
 
 (** [process_env config] returns the composed env for the root repo CLI
     identity path. It never uses the operator's ambient GH config. *)
-val process_env : Coord.config -> string array option
+val process_env : Workspace.config -> string array option
 
 (** [keeper_process_env config ~keeper_name] returns the composed env
     for a specific keeper's repo CLI identity, or an error if the binding
     cannot be resolved. *)
 val keeper_process_env :
-  Coord.config -> keeper_name:string -> (string array option, string) result
+  Workspace.config -> keeper_name:string -> (string array option, string) result

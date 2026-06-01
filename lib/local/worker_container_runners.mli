@@ -26,11 +26,11 @@ end
 val run_worker_oas :
   sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
-  coord_config:Coord.config option ->
+  workspace_config:Workspace.config option ->
   Worker_execution_spec.t ->
   unit ->
   (run_result, string) result
-(** [run_worker_oas ~sw ?net ~coord_config spec] returns a thunk
+(** [run_worker_oas ~sw ?net ~workspace_config spec] returns a thunk
     that runs (or resumes) the worker via OAS:
 
     - Resolve net (from [?net] or {!Eio_context}).

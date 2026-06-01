@@ -71,7 +71,7 @@ let parse_benchmark_timestamp path =
          (String.length base - String.length prefix - String.length suffix))
 ;;
 
-let current_worktree_results_dir (config : Coord.config) =
+let current_worktree_results_dir (config : Workspace.config) =
   let cwd = Sys.getcwd () in
   let worktrees_root = Filename.concat config.base_path ".worktrees" in
   if String.equal cwd worktrees_root
@@ -94,13 +94,13 @@ let current_worktree_results_dir (config : Coord.config) =
   else None
 ;;
 
-let display_benchmark_path (config : Coord.config) path =
+let display_benchmark_path (config : Workspace.config) path =
   match path_relative_to ~root:config.base_path path with
   | Some relative -> relative
   | None -> Filename.basename path
 ;;
 
-let benchmark_results_dir_candidates (config : Coord.config) =
+let benchmark_results_dir_candidates (config : Workspace.config) =
   let env_dir =
     match Sys.getenv_opt "MASC_BENCHMARK_RESULTS_DIR" with
     | Some "" | None -> None
@@ -140,7 +140,7 @@ let latest_file_by_mtime files =
   |> list_hd_opt
 ;;
 
-let latest_benchmark_result_file (config : Coord.config) =
+let latest_benchmark_result_file (config : Workspace.config) =
   benchmark_results_dir_candidates config
   |> List.concat_map benchmark_result_files
   |> latest_file_by_mtime
@@ -371,7 +371,7 @@ let verdict_counts_json rows =
     ]
 ;;
 
-let dashboard_perf_compute (config : Coord.config) : Yojson.Safe.t =
+let dashboard_perf_compute (config : Workspace.config) : Yojson.Safe.t =
   match latest_benchmark_result_file config with
   | None ->
     `Assoc
@@ -470,8 +470,8 @@ let dashboard_perf_compute (config : Coord.config) : Yojson.Safe.t =
    is high enough that any sub-minute refresh is dominated by I/O. *)
 let perf_cache_ttl_s = 30.0
 
-let dashboard_perf_http_json (config : Coord.config) : Yojson.Safe.t =
-  let cache_key = Printf.sprintf "perf:%s" config.Coord.base_path in
+let dashboard_perf_http_json (config : Workspace.config) : Yojson.Safe.t =
+  let cache_key = Printf.sprintf "perf:%s" config.Workspace.base_path in
   Dashboard_cache.get_or_compute cache_key ~ttl:perf_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       dashboard_perf_compute config))

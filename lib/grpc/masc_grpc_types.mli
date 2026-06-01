@@ -1,7 +1,7 @@
-(** MASC gRPC Coordination Masc_domain.
+(** MASC gRPC Workspace Masc_domain.
 
     Wire format: protobuf binary over gRPC framing.
-    Types are generated from proto/masc_coordination.proto via ocaml-protoc-plugin.
+    Types are generated from proto/masc_workspace.proto via ocaml-protoc-plugin.
 
     Each message provides [to_bytes] and [of_bytes] for both server
     (request decode + response encode) and client (request encode +

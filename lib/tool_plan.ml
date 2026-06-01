@@ -24,7 +24,7 @@ module Float = Stdlib.Float
 
 (** Tool handler context *)
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
 }
 
 open Tool_args

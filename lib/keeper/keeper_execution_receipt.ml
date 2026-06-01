@@ -805,7 +805,7 @@ let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
     event.seq
 ;;
 
-let append (config : Coord.config) (receipt : t) =
+let append (config : Workspace.config) (receipt : t) =
   let store =
     Keeper_types_support.keeper_execution_receipt_store config receipt.keeper_name
   in
@@ -997,14 +997,14 @@ let emit_stale_keeper_broadcast
     event.seq
 ;;
 
-let latest_json (config : Coord.config) keeper_name =
+let latest_json (config : Workspace.config) keeper_name =
   let store = Keeper_types_support.keeper_execution_receipt_store config keeper_name in
   match Dated_jsonl.read_recent store 1 with
   | [ json ] -> Some json
   | _ -> None
 ;;
 
-let latest_json_by_keeper (config : Coord.config) keeper_names =
+let latest_json_by_keeper (config : Workspace.config) keeper_names =
   keeper_names
   |> List.filter_map (fun keeper_name ->
     match latest_json config keeper_name with

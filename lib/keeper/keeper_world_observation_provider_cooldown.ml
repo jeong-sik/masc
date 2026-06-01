@@ -30,7 +30,7 @@ let provider_cooldown_remaining_sec_for_runtime
   =
   let runtime_health_keys =
     Provider_runtime_projection.default_execution_model_strings runtime_id
-    |> Runtime_candidate.runtime_health_keys_of_labels
+    |> Runtime_provider_binding.runtime_health_keys_of_labels
   in
   match runtime_health_keys with
   | [] -> None

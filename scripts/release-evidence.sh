@@ -390,7 +390,7 @@ md = f"""# Release Evidence Bundle
 - `tools/list` returned `{tool_count}` tools on the default surface.
 - Initialize response keys: `{", ".join(sorted(initialize.keys()))}`
 
-## Repo Coordination Read Path
+## Repo Workspace Read Path
 
 - `masc_status` completed through MCP after initialization.
 

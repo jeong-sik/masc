@@ -127,7 +127,7 @@ class IMessageBot:
             keeper_name=keeper,
             content=msg.text,
             sender=msg.sender,
-            chat_id=msg.room_id,
+            chat_id=msg.workspace_id,
             message_rowid=msg.rowid,
         )
 

@@ -1,7 +1,7 @@
 open Alcotest
 open Masc_mcp
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Keeper_meta_store = Masc_mcp.Keeper_meta_store
 module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
@@ -36,8 +36,8 @@ let with_store f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = tmpdir "keeper_feature_proof" in
-  let config = Coord.default_config base_dir in
-  ignore (Coord.init config ~agent_name:None);
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:None);
   Keeper_tool_call_log.reset_for_testing ();
   Keeper_tool_call_log.init ~base_path:base_dir ();
   Fun.protect

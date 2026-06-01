@@ -67,7 +67,7 @@ Evaluated and rejected:
 | Approach                      | Reason for rejection                                                            |
 | ----------------------------- | ------------------------------------------------------------------------------- |
 | Literal 3-D cube (three.js)   | Operators can't compare two cells at a glance under rotation; overkill for <100 cells. |
-| Parallel coordinates          | Good for continuous axes; discrete states render as overlapping horizontal bands. |
+| Parallel orchestrates          | Good for continuous axes; discrete states render as overlapping horizontal bands. |
 | UpSet plot                    | Strong for static co-occurrence, weak for temporal trajectories.                |
 | Cartesian product grid        | 12 × 5 × 4 × 5 × 3 = 3,600 cells; hits product-state explosion the spec is built to prevent. |
 

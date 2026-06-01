@@ -357,8 +357,8 @@ module Sidecar : sig
   val schema_generation_timeout_sec : float
 end
 
-(** {1 Coord local git operation timeouts} *)
+(** {1 Workspace local git operation timeouts} *)
 
-module Coord_git : sig
+module Workspace_git : sig
   val local_op_timeout_sec : float
 end

@@ -346,7 +346,7 @@ let init ~base_path =
     match !store_path_ref with
     | Some _ -> () (* idempotent *)
     | None ->
-      let masc_dir = Coord_utils.masc_dir_from_base_path ~base_path in
+      let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
       let path = Filename.concat masc_dir "heuristic_metrics.jsonl" in
       let _ = scrub_legacy_degenerate_rows path in
       store_path_ref := Some path;

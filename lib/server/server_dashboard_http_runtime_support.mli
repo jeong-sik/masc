@@ -36,8 +36,8 @@ val run_dashboard_compute :
   ?runtime:runtime ->
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
-  config:Coord.config ->
-  (config:Coord.config -> sw:Eio.Switch.t -> 'a) ->
+  config:Workspace.config ->
+  (config:Workspace.config -> sw:Eio.Switch.t -> 'a) ->
   'a
 (** Dispatch [compute] under the chosen [mode] (defaults to
     [Offloaded_readonly]).

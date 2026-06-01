@@ -65,7 +65,7 @@ let make_meta ~name ~sandbox =
 
 let test_legacy_keeper_always_allowed () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_meta ~name:"alice" ~sandbox:Keeper_types_profile_sandbox.Local in
   let outside = "/etc/passwd" in
   Alcotest.(check bool)
@@ -77,7 +77,7 @@ let test_legacy_keeper_always_allowed () =
 
 let test_docker_keeper_blocks_outside () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let outside = "/etc/passwd" in
   match
@@ -95,7 +95,7 @@ let test_docker_keeper_blocks_outside () =
 
 let test_docker_keeper_allows_inside_playground () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let bundle = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let inside = Filename.concat bundle "mind/scratch.md" in
@@ -107,7 +107,7 @@ let test_docker_keeper_allows_inside_playground () =
 
 let test_docker_git_creds_contained () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_meta ~name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let outside = "/etc/passwd" in
   Alcotest.(check bool) "Docker is also subject to containment"
@@ -118,7 +118,7 @@ let test_docker_git_creds_contained () =
 
 let test_path_just_outside_playground_blocked () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
   (* Sibling directory with a name that LOOKS like a prefix of the playground
      path; must still be blocked (prevents the classic prefix-without-slash

@@ -2,7 +2,7 @@
     file tree returned by [/api/v1/workspace/tree].
 
     Before this PR, [scan_dir] excluded [.masc/] (the keeper
-    coordination store) but not [.masc-ide/] (the keeper annotation
+    workspace store) but not [.masc-ide/] (the keeper annotation
     store). With [?repo_id=<id>] resolving the workspace base to a
     registered repository and the IDE seeding its file explorer from
     the response, the agent's own annotation directory was leaking

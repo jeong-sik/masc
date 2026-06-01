@@ -521,7 +521,7 @@ let keeper_keepalive_entries =
     entry ~default:"600.0" "MASC_KEEPER_TURN_TIMEOUT_SEC"
       "Wall-clock timeout for a single unified turn (clamped 60-900 seconds)";
     entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
-      "Successful room heartbeat after turn counts as presence proof (feature flag)";
+      "Successful workspace heartbeat after turn counts as presence proof (feature flag)";
   ]
 
 let keeper_metrics_entries =
@@ -593,7 +593,7 @@ let memory_entries =
 let message_gc_entries =
   [
     entry ~default:"200" "MASC_MESSAGE_MAX_COUNT"
-      "Maximum message files retained per room";
+      "Maximum message files retained per workspace";
   ]
 
 let model_routing_entries =
@@ -626,8 +626,8 @@ let operator_entries =
       "Operator judge background loop (feature flag)";
     entry ~default:"60" "MASC_OPERATOR_JUDGE_INTERVAL_SEC"
       "Operator judge interval (clamped >=15 seconds)";
-    entry ~default:"60" "MASC_OPERATOR_JUDGE_TTL_SEC"
-      "Judgment TTL for operator judge cleanup (clamped >=15 seconds)";
+    entry ~default:"60" "MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC"
+      "Workspace TTL for operator judge cleanup (clamped >=15 seconds)";
     entry ~default:"300" "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC"
       "Session TTL for operator judge cleanup (clamped >=30 seconds)";
   ]

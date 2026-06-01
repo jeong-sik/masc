@@ -50,7 +50,7 @@ let strategies_static =
       "Permanent error in the primary path — switch to a known \
        fallback (cache, alternate provider, degraded payload)." );
     ( "Handoff",
-      "Multi-actor coordination required — escalate to a peer \
+      "Multi-actor workspace required — escalate to a peer \
        keeper or operator." );
     ( "Abort",
       "Unrecoverable — abandon the turn, surface the failure to \

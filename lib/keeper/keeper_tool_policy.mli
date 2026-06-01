@@ -108,8 +108,8 @@ val is_masc_write_allowed : string -> bool
 
     Two layers:
     - Shard floor: [removable=false] shards (currently [base] = local core).
-    - Essential MASC: coordination + web lookup so a Failing keeper can
-      check coordination state, look up information for recovery, and
+    - Essential MASC: workspace + web lookup so a Failing keeper can
+      check workspace state, look up information for recovery, and
       defer to operator approval. Mirrors [masc.essential] in
       [config/tool_policy.toml]. Sync regression in
       [test_failing_minimum_essential]. *)

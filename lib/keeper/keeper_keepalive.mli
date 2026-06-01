@@ -21,7 +21,7 @@ val process_directive : agent_name:string -> string -> unit
 (** Test-visible helper for the [current_task_id] sent in gRPC heartbeats.
     This may reconcile registry state against the task backlog before reading
     the value, and returns an empty string when reconciliation cannot be trusted. *)
-val current_task_id_for_agent : config:Coord.config -> string -> string
+val current_task_id_for_agent : config:Workspace.config -> string -> string
 
 (** Wake up a specific keeper immediately. Used by broadcast notification
     when a @mention targets a running keeper.
@@ -290,7 +290,7 @@ val effective_keepalive_meta :
   keeper_meta
 
 val wakeup_relevant_keeper_for_board_signal :
-  config:Coord.config -> Board_dispatch.keeper_board_signal -> unit
+  config:Workspace.config -> Board_dispatch.keeper_board_signal -> unit
 
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)

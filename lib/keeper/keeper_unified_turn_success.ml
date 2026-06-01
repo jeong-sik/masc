@@ -441,7 +441,7 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
       turns_used
       limit;
     Keeper_registry.reset_turn_failures
-      ~base_path:config.Coord.base_path
+      ~base_path:config.Workspace.base_path
       updated_meta.name
   | Runtime_agent.MutationBoundaryReached { tool_name; _ } ->
     Log.Keeper.info

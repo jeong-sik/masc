@@ -7,13 +7,13 @@
 
 (** Hook invoked after each successful [write_meta] /
     [write_meta_with_merge]. Reset by the runtime to keep
-    [Coord_state] caches in sync. *)
+    [Workspace_state] caches in sync. *)
 val runtime_meta_write_sync_hook :
-  (Coord.config -> Keeper_meta_contract.keeper_meta -> unit) ref
+  (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) ref
 
 (** Replace [runtime_meta_write_sync_hook] with [f]. *)
 val register_runtime_meta_write_sync :
-  (Coord.config -> Keeper_meta_contract.keeper_meta -> unit) -> unit
+  (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) -> unit
 
 (** Pre-compiled regex matching the CAS [meta version conflict]
     error message. Exposed for symmetry — used internally by
@@ -36,13 +36,13 @@ val is_keeper_meta_file : string -> bool
 
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
-val persisted_keeper_names : Coord.config -> string list
+val persisted_keeper_names : Workspace.config -> string list
 
 (** List keeper names declared in TOML config (overlay sources). *)
-val configured_keeper_names : Coord.config -> string list
+val configured_keeper_names : Workspace.config -> string list
 
 (** Primary keeper discovery: persisted JSON names. *)
-val keeper_names : Coord.config -> string list
+val keeper_names : Workspace.config -> string list
 
 (** Default autoboot policy when a keeper has TOML config but no
     persisted JSON yet. *)
@@ -51,30 +51,30 @@ val declarative_autoboot_enabled_by_default : string -> bool
 (** Names of keepers eligible for the keepalive fiber set —
     autoboot enabled, not paused. Logs and excludes on read failure
     (issue #8377). *)
-val keepalive_keeper_names : Coord.config -> string list
+val keepalive_keeper_names : Workspace.config -> string list
 
 (** Names of keepers expected to persist across sessions. Mirrors
     [keepalive_keeper_names] for readers caring about durability
     rather than the keepalive fiber. *)
-val persistent_agent_names : Coord.config -> string list
+val persistent_agent_names : Workspace.config -> string list
 
 (** Read the keeper meta for [name]. The name is the canonical keeper
     filename component; agent-name aliases are not retried here. Callers
     that accept aliases must normalize explicitly before reading. *)
 val read_meta_resolved :
-  Coord.config ->
+  Workspace.config ->
   string ->
   ((string * Keeper_meta_contract.keeper_meta) option, string) result
 
 (** Like [read_meta_resolved] but discards the filename component. *)
 val read_meta :
-  Coord.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
+  Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
 
 (** Read keeper meta only if the canonical [name] file's mtime exceeds
     [last_mtime]. Returns [Some (meta, mtime)] when changed, [None] when
     unchanged, missing, or unparsable (logs the parse-failure case). *)
 val read_meta_if_changed :
-  Coord.config ->
+  Workspace.config ->
   string ->
   last_mtime:float ->
   (Keeper_meta_contract.keeper_meta * float) option
@@ -83,19 +83,19 @@ val read_meta_if_changed :
     Best-effort: a missing progress file is a no-op; other failures
     increment [metric_keeper_progress_updated_line_failures] and log a
     warning. *)
-val refresh_progress_updated_line : Coord.config -> string -> unit
+val refresh_progress_updated_line : Workspace.config -> string -> unit
 
 (** Atomic write of [persisted] to [path]; runs the
     [runtime_meta_write_sync_hook] and refreshes the progress
     timestamp on success. *)
 val persist_meta :
-  Coord.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
+  Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
 (** Persist [m] with a CAS bump on [meta_version]. When [force] is
     set, the version is bumped without checking the disk version. *)
 val write_meta :
   ?force:bool ->
-  Coord.config ->
+  Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
 
@@ -110,6 +110,6 @@ val is_version_conflict_error : string -> bool
 val write_meta_with_merge :
   ?max_retries:int ->
   merge:(latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta) ->
-  Coord.config ->
+  Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result

@@ -122,7 +122,7 @@ let alert_dedup_table : (string, float) Hashtbl.t = Hashtbl.create 32
 
 (** Mutex protecting [alert_dedup_table].  [is_alert_deduplicated] runs
     from every keeper's alert scoring path, and keepers execute
-    concurrently in the same room — so the previous implementation
+    concurrently in the same workspace — so the previous implementation
     interleaved [Hashtbl.length] / [Hashtbl.filter_map_inplace] /
     [Hashtbl.find_opt] / [Hashtbl.replace] from multiple fibers with
     no serialisation.  The [find_opt + replace] pair is a TOCTOU that
@@ -468,7 +468,7 @@ let post_keeper_alert_github
     in
     let (status, out) =
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`Coord_git
+        ~actor:`Workspace_git
         ~raw_source:(String.concat " " args)
         ~summary:"keeper alert gh issue create"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())

@@ -56,7 +56,7 @@ class GateClient(GateClientBase):
             "channel": "imessage",
             "channel_user_id": sender,
             "channel_user_name": sender,
-            "channel_room_id": chat_id,
+            "channel_workspace_id": chat_id,
         }
         return await super().send_message(
             keeper_name=keeper_name,

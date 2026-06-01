@@ -10,7 +10,7 @@ let tool_ok ?(tool_name = "") message =
 ;;
 
 let ensure_wildcard_repo_mapping config keeper_name =
-  let masc_root = Common.masc_dir_from_base_path ~base_path:config.Coord.base_path in
+  let masc_root = Common.masc_dir_from_base_path ~base_path:config.Workspace.base_path in
   let config_dir = Filename.concat masc_root "config" in
   Fs_compat.mkdir_p config_dir;
   let mapping_path = Filename.concat config_dir "keeper_repo_mappings.toml" in
@@ -71,7 +71,7 @@ let test_make_tools_returns_nonempty () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        let tools = Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot () in
        check bool "tools nonempty" true (List.length tools > 0))
 ;;
@@ -97,7 +97,7 @@ let test_tools_have_valid_schemas () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        let tools = Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot () in
        List.iter
          (fun (tool : Agent_sdk.Tool.t) ->
@@ -135,7 +135,7 @@ let test_tool_count_matches_allowed () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        let tools = Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot () in
        let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
        let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools in
@@ -180,7 +180,7 @@ let ensure_read_repo_dir config meta =
 
 let make_registered_tools ~config ~meta ~ctx_snapshot () =
   let keeper_name = meta.Keeper_meta_contract.name in
-  ignore (Keeper_registry.register ~base_path:config.Coord.base_path keeper_name meta);
+  ignore (Keeper_registry.register ~base_path:config.Workspace.base_path keeper_name meta);
   ensure_wildcard_repo_mapping config keeper_name;
   Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot ()
 ;;
@@ -241,7 +241,7 @@ let test_public_alias_descriptions_are_frontdoor_safe () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        let tools = Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot () in
        let execute = find_tool "Execute" tools in
        let search_files = find_tool "Grep" tools in
@@ -285,7 +285,7 @@ let test_tool_side_effect_failures_are_observed () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        ensure_read_repo_dir config meta;
        let decision_path =
          Keeper_types_support.keeper_decision_log_path config meta.name
@@ -353,7 +353,7 @@ let test_handler_does_not_write_tool_call_io_without_observer () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        Keeper_tool_call_log.reset_for_testing ();
        Keeper_tool_call_log.init ~base_path:dir ();
        Keeper_tool_call_log.set_turn_context
@@ -386,7 +386,7 @@ let test_post_tool_hook_is_single_tool_call_log_writer () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        Keeper_tool_call_log.reset_for_testing ();
        Keeper_tool_call_log.init ~base_path:dir ();
        Keeper_tool_call_log.set_turn_context
@@ -450,7 +450,7 @@ let test_oas_wrapper_records_keeper_internal_tool_call () =
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        Tool_registry.reset ();
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        let bundle = Keeper_tools_oas_bundle.make_tool_bundle ~config ~meta ~ctx_snapshot () in
        Fun.protect
          ~finally:(fun () ->
@@ -480,8 +480,8 @@ let test_oas_tool_callbacks_respect_resource_gate () =
   let run env =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     let clock = Eio.Stdenv.clock env in
-    let config = Coord.default_config dir in
-    ignore (Keeper_registry.register ~base_path:config.Coord.base_path meta.name meta);
+    let config = Workspace.default_config dir in
+    ignore (Keeper_registry.register ~base_path:config.Workspace.base_path meta.name meta);
     Tool_resource_gate.For_testing.set_limits ~shell:1 ();
     with_env "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" "0.05" (fun () ->
       let bundle =
@@ -574,7 +574,7 @@ let test_error_json_is_returned_as_tool_error () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        ensure_read_repo_dir config meta;
        let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
        let tool = find_read_tool tools in
@@ -624,7 +624,7 @@ let test_oas_handler_rejects_missing_required_args () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        ensure_read_repo_dir config meta;
        let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
        let tool = find_read_tool tools in
@@ -675,7 +675,7 @@ let test_error_result_logs_at_error_level () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        ensure_read_repo_dir config meta;
        let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
        let tool = find_read_tool tools in
@@ -723,7 +723,7 @@ let test_missing_file_error_redacts_directory_suggestions () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        let read_dir =
          Filename.concat (Keeper_alerting_path.project_root_of_config config)
            (read_repo_dir meta)
@@ -776,7 +776,7 @@ let test_repeated_error_results_are_blocked () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        ensure_read_repo_dir config meta;
        let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
        let tool = find_read_tool tools in
@@ -815,7 +815,7 @@ let test_failure_count_resets_after_success () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        let read_dir =
          Filename.concat (Keeper_alerting_path.project_root_of_config config)
            (read_repo_dir meta)
@@ -877,7 +877,7 @@ let test_failure_tracking_is_independent_per_args () =
        Eio_main.run
        @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
+       let config = Workspace.default_config dir in
        ensure_read_repo_dir config meta;
        let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
        let tool = find_read_tool tools in
@@ -1441,15 +1441,15 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
          @@ fun env ->
          Fs_compat.set_fs (Eio.Stdenv.fs env);
          Agent_tool_shared_runtime.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
-         let config = Coord.default_config dir in
-         ignore (Coord.init config ~agent_name:(Some meta.agent_name));
+         let config = Workspace.default_config dir in
+         ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
          ignore
-           (Coord.add_task
+           (Workspace.add_task
               config
               ~title:"Needs verification evidence"
               ~priority:1
               ~description:"");
-         ignore (Coord.claim_task config ~agent_name:meta.agent_name ~task_id:"task-001");
+         ignore (Workspace.claim_task config ~agent_name:meta.agent_name ~task_id:"task-001");
          let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
          let transition = find_tool "masc_transition" tools in
          let deterministic_metric_labels =
@@ -1533,15 +1533,15 @@ let test_workflow_rejection_scope_blocks_transition_variants () =
          @@ fun env ->
          Fs_compat.set_fs (Eio.Stdenv.fs env);
          Agent_tool_shared_runtime.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
-         let config = Coord.default_config dir in
-         ignore (Coord.init config ~agent_name:(Some meta.agent_name));
+         let config = Workspace.default_config dir in
+         ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
          ignore
-           (Coord.add_task
+           (Workspace.add_task
               config
               ~title:"Needs verification evidence"
               ~priority:1
               ~description:"");
-         ignore (Coord.claim_task config ~agent_name:meta.agent_name ~task_id:"task-001");
+         ignore (Workspace.claim_task config ~agent_name:meta.agent_name ~task_id:"task-001");
          let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
          let transition = find_tool "masc_transition" tools in
          let first_args =

@@ -19,7 +19,7 @@ open Dashboard_http_helpers
 
 let normalize_model_name s =
   let s = String.trim s in
-  Runtime_candidate.normalize_runtime_name_for_bucket s
+  Runtime_provider_binding.normalize_runtime_name_for_bucket s
 
 type keeper_gen_window_stats = {
   mutable turns: int;

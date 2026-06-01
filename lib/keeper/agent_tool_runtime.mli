@@ -10,7 +10,7 @@
    for [Some] and return a typed "Eio context not provided" failure
    when unset. *)
 type context =
-  { config : Coord.config
+  { config : Workspace.config
   ; meta : Keeper_meta_contract.keeper_meta
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option

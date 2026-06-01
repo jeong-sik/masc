@@ -72,7 +72,7 @@ let core_discovery_tools =
   @ List.map
       Tool_name.to_string
       Tool_name.
-        [ (* Coordination *)
+        [ (* Workspace *)
           Keeper Broadcast
         ; Keeper Tasks_list
         ; Keeper Task_claim
@@ -108,7 +108,7 @@ let is_core_always_tool (name : string) : bool = Hashtbl.mem core_always_set nam
 (* ── Read-only keeper tools ───────────────────────────────────── *)
 
 (** Descriptor-projected read-only tools. This covers non-shard tools and
-    descriptor-backed public/coordination tools without adding new string
+    descriptor-backed public/workspace tools without adding new string
     mirrors to the registry. *)
 let descriptor_read_only_tools = Agent_tool_descriptor.readonly_internal_names ()
 
@@ -156,7 +156,7 @@ let descriptor_boundary_exempt tool_name =
   | Some descriptor ->
     (match descriptor.Agent_tool_descriptor.policy.effect_domain with
      | Some Tool_catalog.Read_only
-     | Some Tool_catalog.Masc_coordination
+     | Some Tool_catalog.Masc_workspace
      | Some Tool_catalog.Playground_write -> Some true
      | Some Tool_catalog.Host_repo_write -> Some false
      | None -> None)
@@ -164,7 +164,7 @@ let descriptor_boundary_exempt tool_name =
 
 let effect_domain_boundary_exempt = function
   | Some Tool_catalog.Read_only
-  | Some Tool_catalog.Masc_coordination
+  | Some Tool_catalog.Masc_workspace
   | Some Tool_catalog.Playground_write -> Some true
   | Some Tool_catalog.Host_repo_write -> Some false
   | None -> None
@@ -185,7 +185,7 @@ let catalog_boundary_exempt tool_name =
 (* ── Input-aware mutation-boundary bypass ────────────────────
    Some tools do mutate state, but they should not open the
    main-worktree checkpoint boundary because they either:
-   - only touch MASC coordination state (tasks, board, broadcast), or
+   - only touch MASC workspace state (tasks, board, broadcast), or
    - operate inside an explicit playground sandbox.
 
    Keep these tools mutating for reconcile/error handling; this predicate

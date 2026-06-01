@@ -220,7 +220,7 @@ let test_generate_probe_decision_reports_typed_reasons () =
     (decision ~generate_when_unloaded:false ());
   check string "default path with no status runs when enabled" "run_generate"
     (decision ());
-  check string "resident model runs even with cold-load disabled" "run_generate"
+  check string "loaded model runs even with cold-load disabled" "run_generate"
     (decision ~before_status:200 ~generate_when_unloaded:false
        ~effective_model_loaded_before:true ())
 

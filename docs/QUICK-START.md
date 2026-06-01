@@ -97,7 +97,7 @@ flowchart TD
     I --> J["heartbeat snapshot 기록"]
     J --> K["board events 수집"]
     K --> L["unified proactive turn"]
-    L --> M["Room heartbeat 갱신"]
+    L --> M["Workspace heartbeat 갱신"]
     M --> N["recurring dispatch"]
     N --> O["improve loop tick"]
     O --> P["jitter 포함 sleep"]
@@ -185,16 +185,16 @@ masc_claim_next()
 # masc_plan_set_task(task_id="task-001")  # only if current_task is still missing
 ```
 
-수동 제어가 필요해도 기본 온보딩은 `masc_start(path=...)` 를 유지한다. 이 호출이 project scope 설정과 default namespace join까지 처리하므로, 같은 흐름에서 `masc_join(...)` 를 바로 이어 호출하지 않는다.
+수동 제어가 필요해도 기본 온보딩은 `masc_start(path=...)` 를 유지한다. 이 호출이 project scope 설정과 default namespace join까지 처리하므로, 같은 흐름에서 `masc_bind(...)` 를 바로 이어 호출하지 않는다.
 
 ## 5. 현재 front door
 
-지원하는 front door는 repo coordination, keeper runtime, 그리고 dashboard/operator read visibility다.
+지원하는 front door는 repo workspace collaboration, keeper runtime, 그리고 dashboard/operator read visibility다.
 
-- repo coordination: `masc_start`, `masc_status`, `masc_transition`, `masc_plan_set_task`, `masc_heartbeat`
+- repo workspace collaboration: `masc_start`, `masc_status`, `masc_transition`, `masc_plan_set_task`, `masc_heartbeat`
 - keeper runtime: `masc_keeper_up`, `masc_keeper_msg`, `masc_keeper_status`, `masc_keeper_down`
 
-retired orchestration surfaces are historical only. 새 사용자는 repo coordination과 keeper runtime에서 시작하고, read visibility가 필요할 때만 dashboard/operator surface로 내려간다.
+retired orchestration surfaces are historical only. 새 사용자는 repo workspace collaboration과 keeper runtime에서 시작하고, read visibility가 필요할 때만 dashboard/operator surface로 내려간다.
 
 ## 6. Tool Surface
 
@@ -251,7 +251,7 @@ Failed tool calls include recovery hints automatically. Common patterns:
 | Error | Recovery |
 |-------|----------|
 | "not initialized" | `masc_init` or `masc_start(path=...)` |
-| "not joined" | `masc_join` or `masc_start(...)` |
+| "not joined" | `masc_bind` or `masc_start(...)` |
 | "no unclaimed tasks" | `masc_add_task(title="...")` |
 | "task not found" | `masc_status` to see available tasks |
 
@@ -305,7 +305,7 @@ active root 기준: `MASC_CONFIG_DIR`가 있으면 그 값, 없으면 `/srv/masc
 Boot/path/state inventory: `docs/BOOT-ENV-STATE-INVENTORY.md`
 
 호환성 참고:
-- 전체 부트스트랩 단축 경로 없이 에이전트만 연결하려는 경우에도 명시적 join 흐름을 계속 지원한다: `masc_join(agent_name="codex")`
+- 전체 부트스트랩 단축 경로 없이 에이전트만 연결하려는 경우에도 명시적 join 흐름을 계속 지원한다: `masc_bind(agent_name="codex")`
 
 ## References
 

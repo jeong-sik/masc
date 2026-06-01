@@ -65,7 +65,7 @@ Two files, **comments-only**, no `VARIABLES` / `Action` / `Invariant` / `Init` t
 Lines 24-29 — six lines covering `Keeper_state_machine.mli:139-144` and three adjacent `line N` references rewritten to anchor by `[Context_measured]` / `[type event]` symbols only; the explanation that the spec uses symbols (because the OCaml compiler keeps names honest while line numbers don't) is moved inline.
 
 ```
-\*   1. shared_measurement is the coordination hub (Context_measured event,
+\*   1. shared_measurement is the workspace collaboration hub (Context_measured event,
 \*      Keeper_state_machine.mli -- [Context_measured] constructor of
 \*      [type event], auto_rules_summary). Cite by symbol -- iter 64 N-2.a
 \*      (line numbers drift on every edit; [type event] / [Context_measured]

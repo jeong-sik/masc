@@ -139,15 +139,15 @@ let () =
               check bool "masc_board_delete -> Mod_inline" true
                 (Tool_dispatch.lookup_tag "masc_board_delete"
                  = Some Tool_dispatch.Mod_inline);
-              check bool "masc_status -> Mod_coord" true
+              check bool "masc_status -> Mod_state" true
                 (Tool_dispatch.lookup_tag "masc_status"
-                 = Some Tool_dispatch.Mod_coord);
-              check bool "masc_check -> Mod_coord" true
+                 = Some Tool_dispatch.Mod_state);
+              check bool "masc_check -> Mod_state" true
                 (Tool_dispatch.lookup_tag "masc_check"
-                 = Some Tool_dispatch.Mod_coord);
-              check bool "masc_goal_list -> Mod_coord" true
+                 = Some Tool_dispatch.Mod_state);
+              check bool "masc_goal_list -> Mod_state" true
                 (Tool_dispatch.lookup_tag "masc_goal_list"
-                 = Some Tool_dispatch.Mod_coord);
+                 = Some Tool_dispatch.Mod_state);
               check bool "tool_execute -> Mod_shard" true
                 (Tool_dispatch.lookup_tag "tool_execute"
                  = Some Tool_dispatch.Mod_shard));
@@ -205,7 +205,7 @@ let () =
           test_case "find_similar_names returns close match" `Quick (fun () ->
               register_full ~tool_name:"__sim_masc_claim_next" ~handler:echo_handler ();
               register_full ~tool_name:"__sim_masc_add_task" ~handler:echo_handler ();
-              register_full ~tool_name:"__sim_masc_join" ~handler:echo_handler ();
+              register_full ~tool_name:"__sim_masc_bind" ~handler:echo_handler ();
               let suggestions =
                 Tool_dispatch.find_similar_names
                   ~query:"__sim_masc_claim_task" ()

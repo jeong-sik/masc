@@ -1,4 +1,4 @@
-;; Protobuf code generation for MASC coordination protocol.
+;; Protobuf code generation for MASC workspace protocol.
 ;; Uses ocaml-protoc-plugin to generate OCaml types with binary serialization.
 
 (library
@@ -7,7 +7,7 @@
  (libraries ocaml-protoc-plugin))
 
 (rule
- (targets masc_coordination.ml)
- (deps masc_coordination.proto)
+ (targets masc_workspace.ml)
+ (deps masc_workspace.proto)
  (action
-  (run protoc --ocaml_out=int64_as_int=false:. -I . masc_coordination.proto)))
+  (run protoc --ocaml_out=int64_as_int=false:. -I . masc_workspace.proto)))

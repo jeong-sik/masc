@@ -161,7 +161,7 @@ val keeper_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
     Guards against double "keeper-" prefix. See #5104. *)
 
 val execute_keeper_tool_call_with_outcome
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
@@ -179,7 +179,7 @@ val execute_keeper_tool_call_with_outcome
   -> executed_tool_result
 
 val execute_keeper_tool_call
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t

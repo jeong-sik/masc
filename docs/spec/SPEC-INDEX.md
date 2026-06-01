@@ -13,7 +13,7 @@ code_refs:
 > Last Updated: 2026-05-24
 > Snapshot baseline: `dune-project` version `0.19.35`
 
-MASC (Multi-Agent Streaming Coordination)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 AI 에이전트(Agent-LLM-A, Provider-F, Agent-Code, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때 발생하는 조율 문제를 해결한다. Room 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper 자율 에이전트, dashboard/operator read visibility를 제공하며, MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다. Retired orchestration surfaces and internal references remain only as migration context.
+MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 AI 에이전트(Agent-LLM-A, Provider-F, Agent-Code, 로컬 LLM 등)가 동일 코드베이스에서 동시에 작업할 때 발생하는 조율 문제를 해결한다. Workspace 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper 자율 에이전트, dashboard/operator read visibility를 제공하며, MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다. Retired orchestration surfaces and internal references remain only as migration context.
 
 ## Snapshot Metadata
 
@@ -39,7 +39,7 @@ graph TB
     L5["Layer 5: Surface<br/>dashboard, operator, TUI, web"]
     L4["Layer 4: Protocol<br/>MCP server, HTTP transport, gRPC, SSE"]
     L3["Layer 3: Engine<br/>chain, keeper, swarm"]
-    L2["Layer 2: Domain<br/>room, board"]
+    L2["Layer 2: Domain<br/>workspace, board"]
     L1["Layer 1: Storage<br/>backend, dated_jsonl, memory"]
     L0["Layer 0: Primitives<br/>types, core, log, time_compat, fs_compat"]
 
@@ -58,7 +58,7 @@ graph TB
 | `00-glossary.md` | Glossary | 용어 정의, 약어 목록 | Draft |
 | `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
 | `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
-| `03-room-coordination.md` | Room Coordination | Room 생명주기, session 관리, agent join/leave | Draft |
+| `03-workspace-state collaboration.md` | Workspace State | Workspace 생명주기, session 관리, agent join/leave | Draft |
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
 | `06-command-plane.md` | Command Plane v2 | Internal command-plane reference and migration context | Historical |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
@@ -111,7 +111,7 @@ graph TB
 
 | Prefix | Subsystem |
 |--------|-----------|
-| `INV-ROOM` | Room lifecycle |
+| `INV-WORKSPACE` | Workspace lifecycle |
 | `INV-TASK` | Task state machine |
 | `INV-KPR` | Keeper engine |
 | `INV-CHAIN` | Chain execution |
@@ -127,7 +127,7 @@ graph TB
 
 - Spec 간: `./NN-filename.md#section-anchor`
 - 코드: `lib/<module_name>.ml:L123`
-- Invariant: `INV-ROOM-001`
+- Invariant: `INV-WORKSPACE-001`
 - 외부 문서: `docs/<document-name>.md`
 
 ### Supersession

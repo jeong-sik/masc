@@ -48,7 +48,7 @@ The 8 specs are listed below in fan-out order, prioritised by hot-path proximity
 |---|---|
 | Spec | `specs/masc-ecosystem/MASCEcosystem.tla` (119 LOC) |
 | Critical safety property | (currently only `TypeOK` declared in cfg — first need a real safety inv) |
-| Subject of bug action | Agent/keeper/persona/room interaction. A plausible bug: a keeper accepts a task while another agent has it claimed |
+| Subject of bug action | Agent/keeper/persona/workspace interaction. A plausible bug: a keeper accepts a task while another agent has it claimed |
 | Suggested `BugAction` | `DoubleClaim`: keeper sets `agent_tasks[k] = t` while `agent_tasks[a] = t` for some other `a` |
 | Prerequisite | Add `AtMostOneAgentPerTask` invariant before adding the bug action — current cfg invariants are too weak to catch the bug |
 | Owner | TBD |

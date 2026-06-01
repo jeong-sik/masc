@@ -154,7 +154,7 @@ jq -s '
     elif test("fs_read|code_read") then "file"
     elif test("board|social") then "board"
     elif test("search|symbols") then "search"
-    elif test("task|claim|broadcast|heartbeat|transition") then "coord"
+    elif test("task|claim|broadcast|heartbeat|transition") then "workspace"
     elif test("memory|recall|context") then "memory"
     elif test("status|dashboard|agents") then "status"
     else "other"

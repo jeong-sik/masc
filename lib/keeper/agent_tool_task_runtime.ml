@@ -113,7 +113,7 @@ let parse_task_contract_arg args =
 ;;
 
 (* RFC-0034.v2: per-goal task creation cap moved to
-   [Coord_task_capacity] so all 5 task creation entrypoints share the
+   [Workspace_task_capacity] so all 5 task creation entrypoints share the
    same guard. Pre-RFC-0034.v2, these helpers (and the constant
    [keeper_task_create_goal_open_limit]) lived here as introduced by
    #13981. *)
@@ -240,13 +240,13 @@ let no_eligible_blocker_summary
 ;;
 
 let missing_required_tools_for_claim_scope config ~agent_tool_names ~task_filter =
-  Coord.get_tasks_raw config
-  |> List.filter Coord_task_schedule.task_is_claim_pool_candidate
+  Workspace.get_tasks_raw config
+  |> List.filter Workspace_task_schedule.task_is_claim_pool_candidate
   |> List.filter task_filter
   |> List.concat_map (fun task ->
-       Coord_task_classify.missing_required_tools
+       Workspace_task_classify.missing_required_tools
          ~allowed:agent_tool_names
-         (Coord_task_schedule.task_required_tools task))
+         (Workspace_task_schedule.task_required_tools task))
   |> List.sort_uniq String.compare
 ;;
 
@@ -310,7 +310,7 @@ let wip_admission_result_fields rejections =
 ;;
 
 let find_task_goal_id config task_id =
-  Coord.get_tasks_raw config
+  Workspace.get_tasks_raw config
   |> List.find_map (fun (task : Masc_domain.task) ->
          if String.equal task.id task_id then task.goal_id else None)
 ;;
@@ -324,7 +324,7 @@ let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
 ;;
 
 let sync_keeper_meta_current_task
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(task_id : string)
   =
@@ -382,7 +382,7 @@ let task_op_of_name = function
 ;;
 
 let handle_keeper_task_tool
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(name : string)
       ~(args : Yojson.Safe.t)
@@ -395,7 +395,7 @@ let handle_keeper_task_tool
     let status_filter = Safe_ops.json_string_opt "status" args in
     let include_done = Safe_ops.json_bool ~default:false "include_done" args in
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
-    let result = Coord.list_tasks ?status:status_filter ~include_done config in
+    let result = Workspace.list_tasks ?status:status_filter ~include_done config in
     (match Yojson.Safe.from_string result with
      | `List items ->
        Yojson.Safe.to_string (`List (List.filteri (fun i _ -> i < limit) items))
@@ -405,7 +405,7 @@ let handle_keeper_task_tool
        String.concat "\n" (List.filteri (fun i _ -> i < limit + 2) lines))
     | Tasks_audit ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
-    let orphans = Coord.audit_orphan_tasks config in
+    let orphans = Workspace.audit_orphan_tasks config in
     let orphans = List.filteri (fun i _ -> i < limit) orphans in
     let items =
       List.map
@@ -448,7 +448,7 @@ let handle_keeper_task_tool
          required, minLength:1 field for audit-trail reasons: this is
          an admin override of the normal release path and the operator
          must record why. The previous implementation accepted an empty
-         reason and emitted "(reason: no reason given)" to the room,
+         reason and emitted "(reason: no reason given)" to the workspace,
          which both contradicted the schema and left a silent audit
          gap. Enforce the schema here. *)
       error_json
@@ -457,7 +457,7 @@ let handle_keeper_task_tool
     else (
       let agent = keeper_agent_sender ~meta in
       let _ =
-        Coord.broadcast
+        Workspace.broadcast
           config
           ~from_agent:agent
           ~content:
@@ -468,7 +468,7 @@ let handle_keeper_task_tool
       in
       keeper_task_result_json
         ~typed_outcome:(Some Keeper_tool_outcome.Progress)
-        (Coord.force_release_task_r config ~agent_name:agent ~task_id ()))
+        (Workspace.force_release_task_r config ~agent_name:agent ~task_id ()))
     | Task_force_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
@@ -480,7 +480,7 @@ let handle_keeper_task_tool
          required, minLength:1 field — this is an admin override of
          the normal done path and the operator must record completion
          evidence. The previous implementation accepted an empty
-         [notes] and silently passed it through to Coord, contradicting
+         [notes] and silently passed it through to Workspace, contradicting
          the schema and leaving a silent audit gap. Enforce the
          schema here. *)
       error_json
@@ -489,7 +489,7 @@ let handle_keeper_task_tool
     else
       keeper_task_result_json
         ~typed_outcome:(Some Keeper_tool_outcome.Progress)
-        (Coord.force_done_task_r
+        (Workspace.force_done_task_r
            config
            ~agent_name:(keeper_agent_sender ~meta)
            ~task_id
@@ -501,7 +501,7 @@ let handle_keeper_task_tool
     then error_json "message is required. Good: message='Build complete, all tests pass.'."
     else (
       let _ =
-        Coord.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
+        Workspace.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
       in
       Yojson.Safe.to_string
         (`Assoc
@@ -525,17 +525,17 @@ let handle_keeper_task_tool
            | Error message -> error_json message
            | Ok contract ->
               let capacity_error =
-                let backlog = Coord.read_backlog config in
-                Coord_task_capacity.check ?goal_id backlog
+                let backlog = Workspace.read_backlog config in
+                Workspace_task_capacity.check ?goal_id backlog
               in
               (match capacity_error with
-               | Some error -> Coord_task_capacity.error_to_json_string error
+               | Some error -> Workspace_task_capacity.error_to_json_string error
                | None ->
               let result =
-                Coord_task.add_task
+                Workspace_task.add_task
                   ?contract
                   ?goal_id
-                  ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id)
+                  ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id)
                   config
                   ~title
                   ~priority
@@ -581,7 +581,7 @@ let handle_keeper_task_tool
         false
     in
     let result =
-      Coord.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names
+      Workspace.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names
         ~task_filter:claim_goal_scope.task_filter
         ~admission_filter:wip_admission_filter
         ()
@@ -589,14 +589,14 @@ let handle_keeper_task_tool
     let wip_rejections = List.rev !wip_rejections in
     let auto_started_ok = ref false in
     (match result with
-     | Coord.Claim_next_claimed { task_id; _ } ->
+     | Workspace.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
        (* Guard: claim_next_r returns existing active tasks via Existing_claim
-          (coord_task_schedule.ml:302). When the task is already InProgress,
+          (task_state_schedule.ml:302). When the task is already InProgress,
           dispatching Start produces an InvalidState transition error every
           cycle. Only auto-start when the task is in a pre-start state. *)
        let needs_start =
-         let tasks = Coord.get_tasks_raw config in
+         let tasks = Workspace.get_tasks_raw config in
          match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
          | Some { task_status = Masc_domain.InProgress _; _ } -> false
          | Some { task_status = Masc_domain.Done _ | Masc_domain.Cancelled _
@@ -615,9 +615,9 @@ let handle_keeper_task_tool
          auto_started_ok := Tool_result.is_success start_result
        end else
          auto_started_ok := true
-     | Coord.Claim_next_no_unclaimed
-     | Coord.Claim_next_no_eligible _
-     | Coord.Claim_next_error _ -> ());
+     | Workspace.Claim_next_no_unclaimed
+     | Workspace.Claim_next_no_eligible _
+     | Workspace.Claim_next_error _ -> ());
     let accountability_warning =
       if
         Keeper_accountability.accountability_risk_is_high config
@@ -630,11 +630,11 @@ let handle_keeper_task_tool
     in
     let message =
       match result with
-      | Coord.Claim_next_claimed { message; _ } ->
+      | Workspace.Claim_next_claimed { message; _ } ->
           if !auto_started_ok then message ^ " Task auto-started — begin work now."
           else message
-      | Coord.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-      | Coord.Claim_next_no_eligible
+      | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Workspace.Claim_next_no_eligible
           { excluded_count
           ; blocked_count
           ; verification_blocked_count
@@ -665,11 +665,11 @@ let handle_keeper_task_tool
              ~verification_blocked_count
              ~scope_excluded_count
              ~required_tool_excluded_count)
-      | Coord.Claim_next_error e -> Printf.sprintf "Error: %s" e
+      | Workspace.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
     let claim_scope, claimed_task_fields =
       match result with
-      | Coord.Claim_next_claimed { task_id; title; priority; released_task_id; _ } ->
+      | Workspace.Claim_next_claimed { task_id; title; priority; released_task_id; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
           ( active_goal_scope_json ~meta ?matched_goal_id
               ~effective_mode:claim_goal_scope.mode
@@ -692,7 +692,7 @@ let handle_keeper_task_tool
                       Json_util.string_opt_to_json released_task_id );
                   ] );
             ] )
-      | Coord.Claim_next_no_eligible
+      | Workspace.Claim_next_no_eligible
           { excluded_count
           ; blocked_count
           ; verification_blocked_count
@@ -718,7 +718,7 @@ let handle_keeper_task_tool
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
               ?fallback_reason:claim_goal_scope.fallback_reason ()
           , [] )
-      | Coord.Claim_next_no_unclaimed | Coord.Claim_next_error _ ->
+      | Workspace.Claim_next_no_unclaimed | Workspace.Claim_next_error _ ->
           ( active_goal_scope_json ~meta ~effective_mode:claim_goal_scope.mode
               ~effective_goal_ids:claim_goal_scope.effective_goal_ids
               ?fallback_reason:claim_goal_scope.fallback_reason ()
@@ -726,7 +726,7 @@ let handle_keeper_task_tool
     in
     let typed_outcome_field =
       match result with
-      | Coord.Claim_next_no_eligible
+      | Workspace.Claim_next_no_eligible
           { scope_excluded_count
           ; blocked_count
           ; verification_blocked_count

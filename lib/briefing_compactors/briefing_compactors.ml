@@ -25,7 +25,7 @@ let session_recent_enough ~now_ts session_json =
   | [] -> false
 
 let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
-  let coord_matches session_json =
+  let workspace_matches session_json =
     match String_util.option_trim (Some current_namespace) with
     | None -> true
     | Some project ->
@@ -35,14 +35,14 @@ let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
           match String_util.option_trim (Some (string_field "project" session_json)) with
           | Some value -> value
           | None ->
-              String_util.option_trim (Some (string_field "coord_id" session_json))
+              String_util.option_trim (Some (string_field "workspace_id" session_json))
               |> Option.value ~default:""
         in
         String.equal project session_project
   in
   sessions
   |> List.filter (fun session_json ->
-         coord_matches session_json
+         workspace_matches session_json
          &&
          let status_detail = member_assoc "status" session_json in
          let status =
@@ -122,7 +122,7 @@ let compact_session_json session_json =
       ("goal", string_json ~default:"unassigned" ~max_len:160 (member_assoc "goal" session));
       ( "project",
         match member_assoc "project" session with
-        | `Null -> string_json ~default:"default" (member_assoc "coord_id" session)
+        | `Null -> string_json ~default:"default" (member_assoc "workspace_id" session)
         | value -> string_json ~default:"default" value );
       ("status", string_json ~default:"unknown" (member_assoc "status" session));
       ("agent_names", string_list_json (member_assoc "agent_names" session));

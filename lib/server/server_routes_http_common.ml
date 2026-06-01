@@ -6,8 +6,8 @@ module Http_h2 = Http_server_h2
 module Mcp_session = Mcp_session
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
-module Coord = Coord
-module Coord_utils = Coord_utils
+module Workspace = Workspace
+module Workspace_utils = Workspace_utils
 module Tool_keeper = Tool_keeper
 module Keeper_types = Keeper_types
 module Keeper_alerting = Keeper_alerting
@@ -176,7 +176,7 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
             | Some sw, Some clock ->
                 Ok
                   {
-                    base_path = state.Mcp_server.coord_config.base_path;
+                    base_path = state.Mcp_server.workspace_config.base_path;
                     sw;
                     clock;
                     handle_request =
@@ -197,7 +197,7 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
     get_base_path =
       (fun () ->
         match current_server_state_opt () with
-        | Some state -> state.Mcp_server.coord_config.base_path
+        | Some state -> state.Mcp_server.workspace_config.base_path
         | None -> Server_mcp_transport_http.default_base_path ());
     verify_mcp_auth =
       (fun ~base_path request ->
@@ -258,7 +258,7 @@ let handle_presence_events request reqd =
    Executor_pool ([Domain_pool_ref.submit_io_or_inline]). ~20 routes inline
    this 2-call nesting; ~28 dashboard GET routes still omit it and recompute
    uncached on the main HTTP domain per request. The uncached ones (e.g.
-   /branches spawning `git branch`, /coords querying up to 1000 messages,
+   /branches spawning `git branch`, /workspaces querying up to 1000 messages,
    /status) head-of-line-block other requests when a dashboard page fires
    many calls in parallel — a 12-way parallel probe converged every endpoint
    (incl. ms-cached ones) to ~3.4s because the uncached handlers held the

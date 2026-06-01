@@ -79,7 +79,7 @@ type model_stats =
     hw_decode_avg_tok_per_sec : float option
   ; hw_decode_p50_tok_per_sec : float option
   ; hw_decode_p95_tok_per_sec : float option
-  ; (* Peak resident memory reported by the provider for the turn. We keep the
+  ; (* Peak memory reported by the provider for the turn. We keep the
      maximum because summing memory across turns is meaningless. *)
     max_peak_memory_gb : float option
   ; (* Fraction of turns in window where the model received think=true. Reflects

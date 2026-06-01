@@ -108,7 +108,7 @@ gaps. Both are **additive** — no public-API break.
 **Status**: proposed, **not** yet implemented.
 
 `Context_intent.intent` currently has 5 variants:
-`Conversational | Task_command | Status_check | Knowledge_query | Coordination`.
+`Conversational | Task_command | Status_check | Knowledge_query | Workspace`.
 
 The host-side cognitive layer fires queries that don't fit any of these
 cleanly — e.g. "rank these candidates by gravity", "predict next action".

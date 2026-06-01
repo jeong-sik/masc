@@ -110,13 +110,13 @@ val docker_config_container_root : container_root:'a -> string
 val docker_config_available : string -> bool
 val docker_config_mount_args :
   base_path:string -> container_root:'a -> string list
-type coord_state_mount_kind = Coord_state_file | Coord_state_dir
-val docker_coord_state_mounts : (coord_state_mount_kind * string) list
-val coord_state_path_available : coord_state_mount_kind -> string -> bool
+type workspace_state_mount_kind = Workspace_state_file | Workspace_state_dir
+val docker_workspace_state_mounts : (workspace_state_mount_kind * string) list
+val workspace_state_path_available : workspace_state_mount_kind -> string -> bool
 val unique_preserving_order : 'a list -> 'a list
-val docker_coord_state_mount_specs :
+val docker_workspace_state_mount_specs :
   base_path:string -> container_root:'a -> string list
-val docker_coord_state_mount_args :
+val docker_workspace_state_mount_args :
   base_path:string -> container_root:'a -> string list
 val docker_config_env_args :
   base_path:string -> container_root:'a -> string list

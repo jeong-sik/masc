@@ -16,7 +16,7 @@ interface IdeExplorerProps {
   // Optional source-hint wiring: when provided, [SourceHint] renders a
   // small status block under the EXPLORER header on
   // [playground_missing] / [keeper_unknown] resolutions. Decoded from
-  // the [X-Workspace-Source] header by the data coordinator. When
+  // the [X-Workspace-Source] header by the data workspace store. When
   // omitted (e.g. tests), the hint stays hidden — default is
   // [{ kind: 'project' }] which renders nothing.
   readonly workspaceSource?: () => WorkspaceSource

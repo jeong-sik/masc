@@ -81,13 +81,13 @@ val handover_of_json : Yojson.Safe.t -> handover_record option
 (** {1 Persistence}
 
     All persistence operations take an
-    [fs] (Eio filesystem capability) and a {!Coord_utils.config}.
+    [fs] (Eio filesystem capability) and a {!Workspace_utils.config}.
     They run synchronously inside whatever fiber the caller
     supplies. *)
 
 val save_handover :
   fs:_ Eio.Path.t ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   handover_record ->
   (unit, string) result
 (** [save_handover ~fs config h] writes \[<config>/handovers/<h.id>.json\].
@@ -96,7 +96,7 @@ val save_handover :
 
 val load_handover :
   fs:_ Eio.Path.t ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   string ->
   (handover_record, string) result
 (** [load_handover ~fs config handover_id] reads + parses
@@ -105,7 +105,7 @@ val load_handover :
 
 val list_handovers :
   fs:_ Eio.Path.t ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   handover_record list
 (** [list_handovers ~fs config] returns all handovers in the
     persistence directory, sorted by [created_at] descending
@@ -116,14 +116,14 @@ val list_handovers :
 
 val get_pending_handovers :
   fs:_ Eio.Path.t ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   handover_record list
 (** [get_pending_handovers ~fs config] is {!list_handovers}
     filtered to records with [to_agent = None]. *)
 
 val claim_handover :
   fs:_ Eio.Path.t ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   handover_id:string ->
   agent_name:string ->
   (handover_record, string) result

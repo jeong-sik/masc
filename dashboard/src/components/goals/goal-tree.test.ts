@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
       postId: null,
     },
   },
-  coordinationFsmSnapshot: { value: null },
+  workspace collaborationFsmSnapshot: { value: null },
 }))
 
 vi.mock('../../api/dashboard', () => ({
@@ -41,7 +41,7 @@ vi.mock('../../router', () => ({
 }))
 
 vi.mock('../../store', () => ({
-  coordinationFsmSnapshot: mocks.coordinationFsmSnapshot,
+  workspace collaborationFsmSnapshot: mocks.workspace collaborationFsmSnapshot,
 }))
 
 vi.mock('../task-manage/task-create-form', () => ({
@@ -149,7 +149,7 @@ describe('GoalTree', () => {
       params: { section: 'planning' },
       postId: null,
     }
-    mocks.coordinationFsmSnapshot.value = null
+    mocks.workspace collaborationFsmSnapshot.value = null
     hydrateGoalTreeSnapshot({ tree: [], summary: emptySummary() })
   })
 

@@ -25,7 +25,7 @@ val repo_hosting_cli_repo_flag_api_misuse_of_stages :
     pre-computed stages. *)
 
 val resolve_sandbox_root_git_cwd_of_stages :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   cmd:string ->

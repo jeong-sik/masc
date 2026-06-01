@@ -1,14 +1,14 @@
-(** MASC gRPC Coordination Masc_domain.
+(** MASC gRPC Workspace Masc_domain.
 
     Wire format: protobuf binary over gRPC framing.
-    Types are generated from proto/masc_coordination.proto via ocaml-protoc-plugin.
+    Types are generated from proto/masc_workspace.proto via ocaml-protoc-plugin.
 
     Each message type provides [to_bytes] and [of_bytes] for the
     grpc-direct handler interface (string -> string).
 
-    The generated protobuf modules live under [Masc_proto.Masc_coordination.Masc.Coordination.V1]. *)
+    The generated protobuf modules live under [Masc_proto.Masc_workspace.Masc.Workspace.V1]. *)
 
-module P = Masc_proto.Masc_coordination.Masc.Coordination.V1
+module P = Masc_proto.Masc_workspace.Masc.Workspace.V1
 
 (** {1 Protobuf Serialization Helpers} *)
 

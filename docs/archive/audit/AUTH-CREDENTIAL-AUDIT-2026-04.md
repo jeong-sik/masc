@@ -12,7 +12,7 @@
 - `lib/auth.{ml,mli}` — orchestrator
 - `lib/auth_resolve.{ml,mli}` — token resolution (runtime dispatch)
 - `lib/auth_login.{ml,mli}` — bearer token lifecycle
-- `lib/auth_doctor.{ml,mli}` — validation + health check
+- `lib/auth_diagnostic.{ml,mli}` — validation + health check
 - `lib/auth_error_kind.{ml,mli}` — error taxonomy
 - `lib/auth_strict_mode.{ml,mli}` — strict mode flag + policy
 - `lib/types/types_auth.{ml,mli}` — shared type definitions
@@ -23,7 +23,7 @@
 - `lib/agent_identity.{ml,mli}`
 - `lib/build_identity.{ml,mli}`
 - `lib/keeper/keeper_identity.{ml,mli}`
-- `lib/coord/coord_identity.{ml,mli}`
+- `lib/workspace/workspace_identity.{ml,mli}`
 
 **Credential + allowlist (4 pairs)**:
 - `lib/keeper/credential_provider.{ml,mli}` — credential trait (RFC-0008)
@@ -45,15 +45,15 @@ Phase 1 marks these as **candidates**, not certainties. Phase 2 will narrow per-
 | Class | Scope | Candidate count | Severity |
 |---|---|---|---|
 | C1: Token refresh / rotation without dedicated tests | `auth_login.ml`, `tool_token.ml`, `credential_provider.ml` lifecycle methods | 3 | Medium |
-| C2: Identity resolution without telemetry | `agent_identity`, `keeper_identity`, `coord_identity`, `build_identity` | 4 | Medium |
+| C2: Identity resolution without telemetry | `agent_identity`, `keeper_identity`, `workspace_identity`, `build_identity` | 4 | Medium |
 | C3: Allowlist / role semantics without property tests | `keeper_routine_allowlist.ml`, `tool_access_role.ml` | 2 | Medium-High |
-| C4: Credential storage paths without redaction audit | `credential_provider.ml`, `auth_doctor.ml` | 2 | High |
+| C4: Credential storage paths without redaction audit | `credential_provider.ml`, `auth_diagnostic.ml` | 2 | High |
 | C5: Already well-covered (telemetry + guard) | `server_auth.ml`, `auth_strict_mode.ml`, `auth_resolve.ml` | 3 | Low (anchor) |
 
 Conservative candidates flagged for Phase 2 verification:
 - `auth_login.ml:refresh_bearer_token` — possibly inline rotation logic; Phase 2 will check whether a dedicated rotation module is needed
 - `keeper_persona_authoring_contract.ml` — "contract" suggests validation; Phase 2 will check property-test coverage
-- `auth_doctor.ml` — health check vs. live validation responsibilities may be conflated
+- `auth_diagnostic.ml` — health check vs. live validation responsibilities may be conflated
 
 ## 3. Severity rationale
 
@@ -74,7 +74,7 @@ auth_modules_with_prometheus_guards (INC, floor TBD)
 auth_identity_modules_with_telemetry (INC, floor 0)
   Purpose: drive identity-module telemetry from 0 → ≥3.
   Goal: one Prometheus counter per identity module
-        (agent_identity, keeper_identity, coord_identity).
+        (agent_identity, keeper_identity, workspace_identity).
 
 credential_paths_without_redaction_audit (DEC, floor TBD)
   Purpose: cap regression on host-path-leak surface area.

@@ -2,7 +2,7 @@
 (** Public facade for keeper MCP tools. *)
 
 type 'a context = 'a Keeper_types_profile.context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;

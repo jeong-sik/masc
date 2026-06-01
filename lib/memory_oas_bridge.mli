@@ -194,7 +194,7 @@ val load_world_text :
     deliberation/prompt path. *)
 
 val load_institution_text :
-  config:Coord_utils.config -> string option
+  config:Workspace_utils.config -> string option
 (** Reads the structured [institution.json] under [config]
     and renders the welcome banner via
     {!Institution_eio.load_and_format_for_welcome}.

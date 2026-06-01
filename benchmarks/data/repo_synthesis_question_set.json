@@ -24,7 +24,7 @@
   {
     "question_id": "supervisor-boundary",
     "title": "Supervisor boundary after team-session retirement",
-    "question": "What does Supervisor Mode coordinate through now that team-session tools are retired?",
+    "question": "What does Supervisor Mode align through now that team-session tools are retired?",
     "artifact_scope": [
       "docs/SUPERVISOR-MODE.md",
       "docs/COMMAND-PLANE-RUNBOOK.md",

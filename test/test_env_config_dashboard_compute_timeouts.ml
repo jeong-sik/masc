@@ -19,7 +19,7 @@
        on full's work.
     3. Render budget comfortably exceeds inner compute budgets. The
        outer render guard at [dashboard_execution.ml:376] must give the
-       inner [Dashboard_cache.get_or_compute_with_timeout] sites room
+       inner [Dashboard_cache.get_or_compute_with_timeout] sites workspace
        to report their own "compute timeout" rather than being killed
        by the outer wrapper.
     4. Floor clamps prevent operators from configuring degenerate values. *)

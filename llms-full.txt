@@ -6,11 +6,11 @@ Public MCP surface boundaries, compatibility aliases, and internal prompt-plane 
 
 ## Goal
 
-Use namespace/task coordination as the default front door. Keepers run on the OAS-backed runtime. Team-session, operator, and command-plane lanes are legacy compatibility surfaces, not supported front-door workflows.
+Use namespace/task workspace collaboration as the default front door. Keepers run on the OAS-backed runtime. Team-session, operator, and command-plane lanes are legacy compatibility surfaces, not supported front-door workflows.
 
 ## Primary entities
 
-- `namespace`: repo-root coordination scope
+- `namespace`: repo-root workspace collaboration scope
 - `task`: backlog work item
 - `trace`: keeper/runtime lineage across turns and checkpoints
 

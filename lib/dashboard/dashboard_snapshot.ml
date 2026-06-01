@@ -47,7 +47,7 @@ let current () = Atomic.get slot
    [Atomic.compare_and_set] keeps only one winner and the loser's work
    is discarded.  Acceptable: bootstrap happens at most a few times per
    process lifetime. *)
-let bootstrap ~(config : Coord.config) : t =
+let bootstrap ~(config : Workspace.config) : t =
   let shell =
     try
       Server_dashboard_http_core.dashboard_shell_payload_json config
@@ -75,7 +75,7 @@ let bootstrap ~(config : Coord.config) : t =
   let telemetry_summary =
     try
       let base_path = config.base_path in
-      let masc_root = Coord.masc_root_dir config in
+      let masc_root = Workspace.masc_root_dir config in
       Telemetry_unified.summary_json ~base_path ~masc_root ()
     with exn ->
       Log.Dashboard.warn "dashboard_snapshot bootstrap telemetry_summary failed: %s"
@@ -174,7 +174,7 @@ let refresh_loop
     let telemetry_summary =
       safe "telemetry_summary" (fun () ->
         let base_path = config.base_path in
-        let masc_root = Coord.masc_root_dir config in
+        let masc_root = Workspace.masc_root_dir config in
         Telemetry_unified.summary_json ~base_path ~masc_root ())
     in
     let namespace_truth =

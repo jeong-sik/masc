@@ -107,7 +107,7 @@ let test_classifies_host_local_bottlenecks () =
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "bash" ]));
   check string "board write" "board_write" (classify "masc_board_post");
-  check string "transition" "coordination_write" (classify "masc_transition");
+  check string "transition" "workspace_write" (classify "masc_transition");
   check string "worker shell_exec" "shell" (classify "shell_exec");
   check
     string
@@ -264,7 +264,7 @@ let test_mixed_24_keeper_burst_stays_bounded () =
            ~docker:1
            ~filesystem_write:3
            ~board_write:2
-           ~coordination_write:2
+           ~workspace_write:2
            ();
          with_env "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" "3.0" (fun () ->
            let clock = Eio.Stdenv.clock env in
@@ -273,7 +273,7 @@ let test_mixed_24_keeper_burst_stays_bounded () =
            let docker = lane_tracker "docker" 1 in
            let fs_write = lane_tracker "filesystem_write" 3 in
            let board = lane_tracker "board_write" 2 in
-           let coord = lane_tracker "coordination_write" 2 in
+           let workspace = lane_tracker "workspace_write" 2 in
            let cases =
              []
              |> add_cases 4
@@ -299,7 +299,7 @@ let test_mixed_24_keeper_burst_stays_bounded () =
                   , "tool_write_file"
                   , `Assoc [ "path", `String "x"; "content", `String "y" ] )
              |> add_cases 4 (board, "masc_board_post", `Assoc [])
-             |> add_cases 4 (coord, "masc_transition", `Assoc [])
+             |> add_cases 4 (workspace, "masc_transition", `Assoc [])
            in
            let successes = Atomic.make 0 in
            Eio.Switch.run (fun sw ->
@@ -332,7 +332,7 @@ let test_mixed_24_keeper_burst_stays_bounded () =
                   (Atomic.get tracker.max_inflight <= tracker.limit);
                 check int (tracker.lane ^ " permit released") 0
                   (Atomic.get tracker.inflight))
-             [ shell; github; docker; fs_write; board; coord ])))
+             [ shell; github; docker; fs_write; board; workspace ])))
 ;;
 
 let () =

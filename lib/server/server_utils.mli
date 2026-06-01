@@ -69,7 +69,7 @@ val max_filtered_board_window : int
     flag is active.  Pinned because the dashboard pagination
     contract depends on it: the worst-case fetch fans out to 5200
     rows when both filters are on, then the page is sliced.  A
-    future "let's bump the window" change must coordinate with
+    future "let's bump the window" change must orchestrate with
     the dashboard scroll-buffer behaviour. *)
 
 val board_fetch_limit :
@@ -168,7 +168,7 @@ val board_contributor_quality_json :
     reputation record into the compact board contributor-quality contract. *)
 
 val board_contributor_quality_lookup :
-  ?config:Coord.config -> unit -> string -> Yojson.Safe.t option
+  ?config:Workspace.config -> unit -> string -> Yojson.Safe.t option
 (** [board_contributor_quality_lookup ?config ()] returns a request-local
     memoized lookup by author.  Without [config], it returns [None]. *)
 

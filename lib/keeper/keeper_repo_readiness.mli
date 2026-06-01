@@ -34,7 +34,7 @@ val repo_name_of_repo_arg : project_root:string -> string -> string
 (** Sandbox clone path for [repo_name] under the keeper's
     backend-scoped repos lane. *)
 val clone_path :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   repo_name:string ->
   string
@@ -60,7 +60,7 @@ val int_opt_field :
     [{ ok; state; keeper; repo; repo_name; clone_path; sandbox_repos;
        default_branch; next_action; exists; is_git_repo; ... }]. *)
 val inspect :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?repo_name:string ->
   ?repo:string ->
@@ -70,11 +70,11 @@ val inspect :
 
 (** Look up the repository URL from [repositories.toml] by repo name. *)
 val find_repo_url :
-  config:Coord.config -> repo_name:string -> string option
+  config:Workspace.config -> repo_name:string -> string option
 
 (** Resolve the keeper's mapped credential from [keeper_repo_mappings.toml]. *)
 val resolve_keeper_credential :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   (Repo_manager_types.credential, string) result
 
@@ -84,7 +84,7 @@ val resolve_keeper_credential :
     keeper's mapped credential. Returns [Ok ()] when the repo is ready,
     or [Error msg] if repair failed or was not possible. *)
 val ensure_ready :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   repo_name:string ->
   unit ->

@@ -30,11 +30,11 @@ type caller =
   | Shell_probe               (** PATH probes via [command -v <name>] (2s) *)
   | Graphql                   (** Graphql_client.{request,query,mutate} HTTP calls (10s) *)
   | Http                      (** http_post_json_text_with_status probes (15s) *)
-  | Startup                   (** server bootstrap docker preflight + room takeover read (30s) *)
+  | Startup                   (** server bootstrap docker preflight + workspace takeover read (30s) *)
   | Auto_responder            (** auto_responder cli spawn with stdin prompt (120s) *)
   | Build_identity            (** build identity git probe (5s) *)
   | Voice                     (** voice bridge local playback subprocess (60s) *)
-  | Coord_identity            (** coord tty identity probe (5s) *)
+  | Workspace_identity            (** workspace tty identity probe (5s) *)
   | Http_routes               (** workspace api git command via http (15s) *)
   | Repo_manager_git          (** repo_manager clone/fetch/push git operations (300s) *)
   | Test                      (** test fixtures driving exec runtime (30s) *)
@@ -65,7 +65,7 @@ let caller_key = function
   | Auto_responder -> "auto_responder"
   | Build_identity -> "build_identity"
   | Voice -> "voice"
-  | Coord_identity -> "coord_identity"
+  | Workspace_identity -> "workspace_identity"
   | Http_routes -> "http_routes"
   | Repo_manager_git -> "repo_manager_git"
   | Test -> "test"
@@ -94,7 +94,7 @@ let known_callers () =
     Auto_responder;
     Build_identity;
     Voice;
-    Coord_identity;
+    Workspace_identity;
     Http_routes;
     Repo_manager_git;
     Test;
@@ -127,7 +127,7 @@ let known_default_sec = function
   | Auto_responder -> Some 120.0  (* auto_responder cli spawn was 120s — under-budget regression risk *)
   | Build_identity -> Some 5.0    (* git probe was 5s *)
   | Voice -> Some 60.0            (* local playback was 60s — under-budget regression risk *)
-  | Coord_identity -> Some 5.0    (* tty probe was 5s *)
+  | Workspace_identity -> Some 5.0    (* tty probe was 5s *)
   | Http_routes -> Some 15.0      (* workspace git command via http was 15s *)
   | Repo_manager_git -> Some 300.0 (* repo_manager git was 300s — clone/fetch on slow networks *)
   | Test -> Some 30.0             (* test fixtures, slow_command path keeps 30s ceiling *)

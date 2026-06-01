@@ -24,7 +24,7 @@ reviews:
         resource safety, and removal of hidden partial failures.
     - path: "trpg/**/*.ml"
       instructions: >
-        Validate TRPG state transitions for deterministic turn flow, room/session isolation, and
+        Validate TRPG state transitions for deterministic turn flow, workspace/session isolation, and
         idempotent updates on retries.
     - path: "**/*.proto"
       instructions: >

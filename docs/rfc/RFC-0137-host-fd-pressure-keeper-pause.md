@@ -207,7 +207,7 @@ New file: `lib/server/host_fd_pressure_poller.ml`.
 
 | level | cooldown | rationale |
 |---|---|---|
-| WARN (≥30%) | 600s (10min) | give keepers room to drain in-flight turns; resume if pressure clears |
+| WARN (≥30%) | 600s (10min) | give keepers workspace to drain in-flight turns; resume if pressure clears |
 | CRIT (≥75%) | 1800s (30min) | panic is imminent; sysmon's own macOS notification advises user restart in parallel |
 
 Durations are env-overrideable: `MASC_HOST_PRESSURE_COOLDOWN_WARN_SEC`,

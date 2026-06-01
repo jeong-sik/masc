@@ -14,12 +14,12 @@ let backlog_updated_since_last_scheduled_autonomous
   if last_ts <= 0.0
   then backlog.tasks <> []
   else (
-    match Coord_resilience.Time.parse_iso8601_opt backlog.last_updated with
+    match Workspace_resilience.Time.parse_iso8601_opt backlog.last_updated with
     | Some updated_at -> updated_at > last_ts
     | None -> false)
 ;;
 
-let claim_goal_scope_filter ?agent_tool_names ~(config : Coord.config)
+let claim_goal_scope_filter ?agent_tool_names ~(config : Workspace.config)
     ~(meta : keeper_meta) () =
   let scope =
     Keeper_runtime_contract.resolve_observation_claim_goal_scope
@@ -31,8 +31,8 @@ let claim_goal_scope_filter ?agent_tool_names ~(config : Coord.config)
   scope.task_filter
 ;;
 
-let actionable_verification_request_ids ~(config : Coord.config) : string list =
-  Verification.list_requests config.Coord.base_path
+let actionable_verification_request_ids ~(config : Workspace.config) : string list =
+  Verification.list_requests config.Workspace.base_path
   |> List.filter Verification.request_is_actionable
   |> List.map (fun (req : Verification.verification_request) -> req.id)
 ;;
@@ -49,12 +49,12 @@ let task_has_actionable_verification actionable_request_ids
   | Masc_domain.Cancelled _ -> false
 ;;
 
-(** Read coord backlog counts. *)
-let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : keeper_meta)
+(** Read workspace backlog counts. *)
+let read_backlog_counts ~allowed_tool_names ~(config : Workspace.config) ~(meta : keeper_meta)
   : int * int * int * int * bool
   =
   try
-    let backlog = Coord.read_backlog config in
+    let backlog = Workspace.read_backlog config in
     let unclaimed_tasks =
       List.filter
         (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
@@ -68,7 +68,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : ke
        the [unclaimed_tasks] filter below -- see PR #14826 for the
        O(R+A) rationale. *)
     let required_tools_allowed =
-      Coord_task_schedule.make_required_tools_predicate
+      Workspace_task_schedule.make_required_tools_predicate
         ?agent_tool_names:allowed_tool_names
         ()
     in
@@ -76,15 +76,15 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : ke
       List.length
         (List.filter
            (fun task ->
-              Coord_task_schedule.task_is_claim_pool_candidate task
+              Workspace_task_schedule.task_is_claim_pool_candidate task
               && claim_scope_filter task
-              && required_tools_allowed (Coord_task_schedule.task_required_tools task))
+              && required_tools_allowed (Workspace_task_schedule.task_required_tools task))
            unclaimed_tasks)
     in
     let failed =
       (* "Failed" here means still-auditable active work. Terminal Cancelled
          tasks are historical evidence, not a reason to wake every keeper. *)
-      Coord.audit_orphan_tasks config
+      Workspace.audit_orphan_tasks config
       |> List.map fst
       |> List.filter claim_scope_filter
       |> List.length
@@ -116,9 +116,9 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : ke
     0, 0, 0, 0, false
 ;;
 
-(** Count active agents in coord. *)
-let count_active_agents ~(config : Coord.config) : int =
-  try List.length (Coord.get_agents_raw config) with
+(** Count active agents in workspace. *)
+let count_active_agents ~(config : Workspace.config) : int =
+  try List.length (Workspace.get_agents_raw config) with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
     Prometheus.inc_counter
@@ -134,14 +134,14 @@ let count_active_agents ~(config : Coord.config) : int =
 let compute_idle_seconds ~(meta : keeper_meta) : int =
   let now_ts = Time_compat.now () in
   let created_ts =
-    Coord_resilience.Time.parse_iso8601_opt meta.created_at |> Option.value ~default:0.0
+    Workspace_resilience.Time.parse_iso8601_opt meta.created_at |> Option.value ~default:0.0
   in
   let activity_ts = List.fold_left max created_ts [ meta.runtime.proactive_rt.last_ts ] in
   if activity_ts <= 0.0 then 0 else int_of_float (max 0.0 (now_ts -. activity_ts))
 ;;
 
 (** Read context ratio from checkpoint if available. *)
-let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
+let read_context_ratio ~(config : Workspace.config) ~(meta : keeper_meta) : float =
   try
     let runtime_models = Keeper_model_labels.configured_model_labels_of_meta meta in
     let primary_max_context =

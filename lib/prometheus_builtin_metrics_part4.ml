@@ -307,8 +307,8 @@ let register
      vocabulary>. Eio.Cancel.Cancelled is re-raised and not counted."
     `Counter;
   add
-    metric_coord_telemetry_drop
-    "Total times a Coord lifecycle/transition hook dropped its Audit_log + Telemetry \
+    metric_workspace_telemetry_drop
+    "Total times a Workspace lifecycle/transition hook dropped its Audit_log + Telemetry \
      emit because the dispatch happened outside an Eio scheduler. Labels: event_family \
      (one of agent_lifecycle | task_transition | accountability) and event_kind (the \
      variant). event_kind values: agent_lifecycle uses session_bound | session_rebound | session_ended (3 values); \
@@ -319,7 +319,7 @@ let register
      silent (#10358 attrition root cause)."
     `Counter;
   add
-    metric_coord_claim_post_provision_failures
+    metric_workspace_claim_post_provision_failures
     "Total best-effort claim post-provision hook failures. Labels: site (claim_task | \
      claim_next) and agent_name. Task IDs are logged but not labeled to keep series \
      cardinality bounded."
@@ -379,8 +379,8 @@ let register
      fallback_used (true | false)."
     `Counter;
   add
-    metric_coord_join_normalize_outcome
-    "Total Coord.bind_session identity normalizations by Keeper_identity.normalize_all_names \
+    metric_workspace_bind_normalize_outcome
+    "Total Workspace.bind_session identity normalizations by Keeper_identity.normalize_all_names \
      (RFC P3-a). Labels: outcome (ok | empty_input | persona_not_found | \
      credential_missing | name_ambiguous | ephemeral_suffix_rejected). Non-ok outcomes \
      reject agent session binding at the fail-closed identity gate; pair with \
@@ -452,9 +452,9 @@ let register
      consumers can drain."
     `Counter;
   register_histogram
-    ~name:metric_coord_broadcast_duration
+    ~name:metric_workspace_broadcast_duration
     ~help:
-      "Coord_broadcast.broadcast latency (next_seq + agent.json read + msg.json write + \
+      "Workspace_broadcast.broadcast latency (next_seq + agent.json read + msg.json write + \
        activity emit + on_broadcast_mention). Pairs with \
        masc_sse_broadcast_duration_seconds. Labels: msg_type."
     ();

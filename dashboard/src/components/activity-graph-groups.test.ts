@@ -27,7 +27,7 @@ function makeEvent(
     actor: options.actor ? { id: options.actor } : {},
     summary: kind,
     subject: options.subjectId ? { id: options.subjectId, type: 'entity' } : null,
-    room_id: 'default',
+    workspace_id: 'default',
     tags: [],
     payload: options.payload ?? {},
   }

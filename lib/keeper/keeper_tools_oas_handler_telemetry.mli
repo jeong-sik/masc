@@ -40,7 +40,7 @@ val broadcast_keeper_tool_call_event
 (** Append a decision-log entry for a tool execution, swallowing
     non-cancellation exceptions. *)
 val append_tool_exec_decision_log
-  :  config:Coord.config
+  :  config:Workspace.config
   -> keeper_name:string
   -> site:string
   -> Yojson.Safe.t

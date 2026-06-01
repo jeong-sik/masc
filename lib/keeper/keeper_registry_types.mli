@@ -436,7 +436,7 @@ type registry_entry = {
   grpc_close : (unit -> unit) option Atomic.t;
   done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
   done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
-      (** Exposed so keeper lifecycle coordinators can resolve stop/crash exactly once.
+      (** Exposed so keeper lifecycle agents can resolve stop/crash exactly once.
           Callers must preserve a single terminal outcome per keeper run. *)
   restart_count : int;
   last_restart_ts : float;

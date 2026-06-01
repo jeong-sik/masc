@@ -15,7 +15,7 @@ let briefing_sections_criteria =
     "no_model_status_inference";
     "communication_from_message_and_session_counts";
     "alignment_from_active_agents_and_focus_bindings";
-    "watch_from_coord_health_and_incident_counts";
+    "watch_from_workspace_health_and_incident_counts";
     "metadata_gaps_reported_separately";
   ]
 
@@ -129,14 +129,19 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
          dashboard surfaces. The briefing only needs session status/events;
          keeper metadata can come from briefing_json. Pulling keepers,
          command-plane, and message payloads here duplicates the heaviest
-         snapshot path and can spike memory on coords with many keepers. *)
+         snapshot path and can spike memory on workspaces with many keepers. *)
       Operator_control.snapshot_json ~actor:actor_name ~view:"summary"
         ~include_messages:false ~include_keepers:false
         ~include_summary_fields:false
         ~lightweight_summary:true ctx
     in
+    let scope_json =
+      match snapshot_json |> member_assoc "workspace" with
+      | `Assoc _ as value -> value
+      | _ -> snapshot_json |> member_assoc "workspace"
+    in
     let current_namespace =
-      match String_util.option_trim (Some (snapshot_json |> string_field "project")) with
+      match String_util.option_trim (Some (scope_json |> string_field "project")) with
       | Some value -> value
       | None -> "default"
     in
@@ -181,10 +186,10 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
     in
     List.iter observe_session_last_event_source compact_sessions;
     let compact_keepers = take 3 (List.map Briefing_compactors.compact_keeper_json keepers) in
-    let agents_json = Coord.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
+    let agents_json = Workspace.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
     let compact_agents = take 5 agents_json in
     let messages_json =
-      Coord.get_messages_raw config ~since_seq:0 ~limit:4
+      Workspace.get_messages_raw config ~since_seq:0 ~limit:4
       |> List.map (fun (message : Masc_domain.message) ->
              `Assoc
                [
@@ -197,7 +202,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       let summary = member_assoc "summary" briefing_json in
       `Assoc
         [
-          ("coord_health", member_assoc "coord_health" summary);
+          ("workspace_health", member_assoc "workspace_health" summary);
           ("active_agents", member_assoc "active_agents" summary);
           ("keeper_pressure", member_assoc "keeper_pressure" summary);
           ("active_operations", member_assoc "active_operations" summary);

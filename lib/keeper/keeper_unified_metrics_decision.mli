@@ -1,7 +1,7 @@
 (** Decision-record append for unified keeper cycle metrics. *)
 
 val append_decision_record :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->

@@ -3,7 +3,7 @@
  *
  * Mirrors the keeper-state.ts module-level signal pattern. Keeps a
  * flat array of nodes plus an expansion set, derives the visible
- * subset on demand. Seed data is supplied by the IDE data coordinator
+ * subset on demand. Seed data is supplied by the IDE data workspace store
  * from the workspace tree route.
  *
  * Headless-friendly: the store has zero DOM/render dependencies and

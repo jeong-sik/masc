@@ -1,6 +1,6 @@
 (** RFC-0182 §3.1 — persona dispatch dependency inversion ref.
 
-    Same pattern as [Coord_dispatch_ref]. The persona cluster
+    Same pattern as [Workspace_dispatch_ref]. The persona cluster
     handlers in [Keeper_persona] / [Keeper_persona_authoring] are
     pure with respect to keeper context but the modules themselves
     transitively import [Keeper_turn] / [Keeper_turn_driver], which

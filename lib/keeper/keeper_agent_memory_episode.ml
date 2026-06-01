@@ -4,7 +4,7 @@
     the keeper runner as a thin orchestration layer. *)
 
 let record_activity_emit_gap ~config ~keeper_name ~outcome_label ~error =
-  let masc_root = Coord_utils.masc_dir config in
+  let masc_root = Workspace_utils.masc_dir config in
   try
     Telemetry_coverage_gap.record
       ~masc_root
@@ -26,7 +26,7 @@ let record_activity_emit_gap ~config ~keeper_name ~outcome_label ~error =
       keeper_name outcome_label (Printexc.to_string gap_exn)
 
 let emit_flush_activity
-    ~(config : Coord_utils.config)
+    ~(config : Workspace_utils.config)
     ~(keeper_name : string)
     ~(turn : int)
     ?(oas_turn_count : int option)
@@ -50,8 +50,8 @@ let emit_flush_activity
          | Some value -> [ ("outcome", `String value) ])
     in
     try
-      (Atomic.get Coord_hooks.activity_emit_fn) config
-        ~actor:Coord_hooks.{ kind = "keeper"; id = keeper_name }
+      (Atomic.get Workspace_hooks.activity_emit_fn) config
+        ~actor:Workspace_hooks.{ kind = "keeper"; id = keeper_name }
         ~kind:"episode.flush"
         ~payload:(`Assoc payload)
         ~tags
@@ -75,7 +75,7 @@ let emit_flush_activity
         keeper_name outcome_label error
 
 let record_success
-    ~(config : Coord_utils.config)
+    ~(config : Workspace_utils.config)
     ~(keeper_name : string)
     ~(memory : Agent_sdk.Memory.t)
     ~(turn : int)
@@ -109,7 +109,7 @@ let record_success
 
 
 let record_failure
-    ~(config : Coord_utils.config)
+    ~(config : Workspace_utils.config)
     ~(keeper_name : string)
     ~(memory : Agent_sdk.Memory.t)
     ~(turn : int)

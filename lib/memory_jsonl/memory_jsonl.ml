@@ -21,7 +21,7 @@ let max_file_size = 50 * 1024 * 1024
 (** Observability hook fired on every [parse_line] silent drop with a
     closed-vocabulary reason label.  The leaf [masc_mcp_memory_jsonl]
     sub-library cannot depend on [Prometheus] (cycle), so emission is
-    wired from [lib/coord.ml] at startup via this Atomic ref (mirrors
+    wired from [lib/workspace.ml] at startup via this Atomic ref (mirrors
     [File_lock_eio.on_lock_attempt_fn] / [on_cas_retry_fn] pattern).
 
     [reason] is one of [no_key | not_assoc | json_parse_error] — bounded

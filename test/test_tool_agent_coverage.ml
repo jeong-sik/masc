@@ -9,7 +9,7 @@ module Tool_result = Tool_result
 module Meta_cognition = Masc_mcp.Meta_cognition
 
 module Tool_agent = Masc_mcp.Tool_agent
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 
 let test_counter = ref 0
 
@@ -35,8 +35,8 @@ let with_ctx f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
-  let config = Coord.default_config base_dir in
-  ignore (Coord.init config ~agent_name:(Some "test-agent"));
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_agent.context = { config; agent_name = "test-agent" } in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -257,11 +257,9 @@ let test_agent_fitness_specific () =
 
 let test_meta_cognition_snapshot_detects_signals () =
   with_ctx (fun ctx ->
-  (* See: fixture session setup; returned agent record is not used. *)
-  ignore (Coord.bind_session ctx.config ~agent_name:"peer" ~capabilities:[] ());
-  (* See: fixture session setup; returned agent record is not used. *)
-  ignore (Coord.bind_session ctx.config ~agent_name:"observer" ~capabilities:[] ());
-  let masc_dir = Coord.masc_dir ctx.config in
+  ignore (Workspace.bind_session ctx.config ~agent_name:"peer" ~capabilities:[] ());
+  ignore (Workspace.bind_session ctx.config ~agent_name:"observer" ~capabilities:[] ());
+  let masc_dir = Workspace.masc_dir ctx.config in
   save_jsonl
     (Filename.concat masc_dir "board_posts.jsonl")
     [
@@ -326,7 +324,7 @@ let test_meta_cognition_snapshot_detects_signals () =
 
 let test_meta_cognition_snapshot_marks_contested_belief () =
   with_ctx (fun ctx ->
-  let masc_dir = Coord.masc_dir ctx.config in
+  let masc_dir = Workspace.masc_dir ctx.config in
   save_jsonl
     (Filename.concat masc_dir "board_posts.jsonl")
     [

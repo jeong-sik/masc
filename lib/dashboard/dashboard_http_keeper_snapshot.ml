@@ -7,7 +7,7 @@ open Dashboard_http_keeper_types
 open Dashboard_http_helpers
 open Keeper_status_bridge
 
-let recent_keeper_metric_jsons (config : Coord.config) name =
+let recent_keeper_metric_jsons (config : Workspace.config) name =
   let metrics_store = Keeper_types_support.keeper_metrics_store config name in
   let lines =
     let dated = Dated_jsonl.read_recent_lines metrics_store 80 in
@@ -70,7 +70,7 @@ let latest_tool_call_json name =
              ("duration_ms", Json_util.float_opt_to_json (Safe_ops.json_float_opt "duration_ms" json));
            ])
 
-let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
+let keeper_bdi_snapshot_json (config : Workspace.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
   match Keeper_meta_store.read_meta config name with
   | Error msg ->
@@ -141,7 +141,7 @@ let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
 
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)
-let keeper_config_json (config : Coord.config) (name : string)
+let keeper_config_json (config : Workspace.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
   match Keeper_meta_store.read_meta config name with
   | Error msg ->
@@ -195,8 +195,8 @@ let keeper_config_json (config : Coord.config) (name : string)
         |> List.filter (fun goal_id ->
                not (List.mem goal_id resolved_active_goal_ids))
       in
-      let coordination =
-        match coordination_surface_json m with
+      let workspace =
+        match workspace_surface_json m with
         | `Assoc fields ->
             `Assoc
               (fields
@@ -475,7 +475,7 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("hooks", Keeper_hooks_oas.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);
          ("runtime_trust", runtime_trust);
-         ("coordination", coordination);
+         ("workspace", workspace);
          ("sources", source_provenance_json config m);
          ("metrics", metrics);
        ])

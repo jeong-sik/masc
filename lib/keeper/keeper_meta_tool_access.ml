@@ -31,7 +31,7 @@ let write_tools = List.map Tool_name.Keeper.to_string write_tools_typed
 ;;
 
 let legacy_keeper_internal_tool_names =
-  (* Keep legacy masc coordination defaults explicit in
+  (* Keep legacy masc workspace defaults explicit in
      [legacy_session_min_tool_names]; new [masc_*] internal tools should not
      silently expand missing [tool_access] migrations.
      Write tools are excluded so that keepers without explicit [tool_access]
@@ -44,7 +44,7 @@ let legacy_keeper_internal_tool_names =
 ;;
 
 let legacy_session_min_tool_names =
-  (* Legacy keepers historically received canonical masc_* coordination tools,
+  (* Legacy keepers historically received canonical masc_* workspace tools,
      not the SDK alias-heavy Session_min surface. Keep this compatibility list
      explicit so missing tool_access migration remains stable after tier removal. *)
   List.map

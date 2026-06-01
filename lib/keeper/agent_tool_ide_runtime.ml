@@ -13,7 +13,7 @@ open Agent_tool_shared_runtime
 open Ide_annotation_types
 
 let handle_ide_annotate
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(args : Yojson.Safe.t)
   : string

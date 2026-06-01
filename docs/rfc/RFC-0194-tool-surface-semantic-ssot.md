@@ -120,7 +120,7 @@ Typed table 이 substring matcher 를 대체할 때 *compile-time 또는 test-ti
 
 ```ocaml
 let classify_capability : Tool_name.t -> capability list = function
-  | Keeper Keeper.Task_claim    -> [Coordination]
+  | Keeper Keeper.Task_claim    -> [Workspace]
   | Keeper Keeper.Task_done     -> [State_modification_task_lifecycle]
   | Masc   Masc.Plan_set_task   -> [State_modification_self_scoped]
   ...

@@ -205,4 +205,4 @@ val set_wake_payload_store_for_testing : base_dir:string -> unit
     eval-calibration stats, recent verdicts, pre-compact
     events, and wake-payload telemetry — clipped to the
     [?since] / [?until] window when provided. *)
-val json : config:Coord.config -> ?since:string -> ?until:string -> unit -> Yojson.Safe.t
+val json : config:Workspace.config -> ?since:string -> ?until:string -> unit -> Yojson.Safe.t

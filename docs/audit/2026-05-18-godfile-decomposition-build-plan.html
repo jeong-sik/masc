@@ -183,7 +183,7 @@
     .lane.keeper { border-left-color: var(--amber); }
     .lane.server { border-left-color: var(--blue); }
     .lane.runtime { border-left-color: var(--violet); }
-    .lane.coord { border-left-color: var(--green); }
+    .lane.workspace { border-left-color: var(--green); }
 
     .callout {
       border: 1px solid #f2c79a;
@@ -371,7 +371,7 @@
             <td class="rank-p1">P1</td><td class="num">2890</td>
             <td><a href="../../lib/keeper/keeper_unified_turn.ml">lib/keeper/keeper_unified_turn.ml</a></td>
             <td>Facade shrink after registry/supervisor/agent-run lanes</td>
-            <td>Largest keeper coordinator, but too coupled to split first without creating churn.</td>
+            <td>Largest keeper agent stream, but too coupled to split first without creating churn.</td>
           </tr>
           <tr>
             <td class="rank-p1">P1</td><td class="num">2496</td>
@@ -431,7 +431,7 @@
           <tr><td>Server</td><td class="num">9</td><td class="num">15,372</td><td><code>server_dashboard_http_keeper_api</code>, <code>server_runtime_bootstrap</code>, <code>server_dashboard_http_core</code></td><td>Handler seams first; route parity after handlers stabilize.</td></tr>
           <tr><td>Runtime</td><td class="num">6</td><td class="num">8,431</td><td><code>runtime_transport</code>, <code>runtime_catalog_runtime</code>, <code>runtime_config</code></td><td>Cut <code>Runtime_runner</code> ownership leak; extract refs/names before transport.</td></tr>
           <tr><td>Dashboard</td><td class="num">3</td><td class="num">5,093</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_safe_autonomy</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
-          <tr><td>Coord</td><td class="num">3</td><td class="num">3,766</td><td><code>coord_worktree</code>, <code>coord_task</code>, <code>coord_task_schedule</code></td><td>Already sub-library; narrow public API and split dangerous filesystem/git helpers.</td></tr>
+          <tr><td>Workspace</td><td class="num">3</td><td class="num">3,766</td><td><code>workspace_worktree</code>, <code>workspace_task</code>, <code>workspace_task_schedule</code></td><td>Already sub-library; narrow public API and split dangerous filesystem/git helpers.</td></tr>
           <tr><td>Config</td><td class="num">2</td><td class="num">2,220</td><td><code>env_config_snapshot</code>, <code>env_config_keeper</code></td><td>Keep in <code>masc_mcp.config</code>; extract typed buckets, not root flat modules.</td></tr>
           <tr><td>Operator / voice / backend</td><td class="num">3</td><td class="num">3,856</td><td><code>operator_control_snapshot</code>, <code>voice_bridge</code>, <code>backend</code></td><td>Lower priority; split after higher fan-in surfaces stop moving.</td></tr>
         </tbody>
@@ -493,7 +493,7 @@
         <div class="panel lane keeper">
           <h3>B. Keeper Runtime</h3>
           <p>Hooks, registry, supervisor, agent-run, unified-turn.</p>
-          <p>Goal: registry model first, coordinator facades last, no premature sub-library cycles.</p>
+          <p>Goal: registry model first, agent stream facades last, no premature sub-library cycles.</p>
         </div>
         <div class="panel lane server">
           <h3>C. Server / Dashboard</h3>
@@ -505,8 +505,8 @@
           <p>Transport, catalog, worker gates, board/keeper tools, shard schema.</p>
           <p>Goal: cut ownership leaks, type schema ownership, CLI/runtime MCP split.</p>
         </div>
-        <div class="panel lane coord">
-          <h3>E. Coord / Worktree</h3>
+        <div class="panel lane workspace">
+          <h3>E. Workspace / Worktree</h3>
           <p>Worktree policy, sandbox clone repair, lifecycle, task transitions.</p>
           <p>Goal: narrow broad includes and contain destructive filesystem/git helpers.</p>
         </div>
@@ -531,7 +531,7 @@
           <tr><td class="rank-p0">03</td><td>Metric-name ownership split</td><td><code>prometheus_metric_names</code>, <code>runtime_metrics</code>, keeper metric constants</td><td>New metric names land in domain modules; no duplicate runtime constants.</td></tr>
           <tr><td class="rank-p1">04</td><td>Model inference telemetry split</td><td><code>model_inference_metrics.ml</code></td><td><code>Model_inference_entry</code>, reader, aggregate, JSON render separated behind current API.</td></tr>
           <tr><td class="rank-p1">05</td><td>Worker command gate split</td><td><code>worker_dev_tools.ml</code></td><td>Path/shell/gh/destructive-op gates are individual modules; facade dispatch unchanged.</td></tr>
-          <tr><td class="rank-p1">06</td><td>Coord worktree safety split</td><td><code>coord_worktree.ml</code>, <code>coord_task*.ml</code></td><td>Policy, repo discovery, sandbox clone, lifecycle, task receipts have narrow interfaces.</td></tr>
+          <tr><td class="rank-p1">06</td><td>Workspace worktree safety split</td><td><code>workspace_worktree.ml</code>, <code>workspace_task*.ml</code></td><td>Policy, repo discovery, sandbox clone, lifecycle, task receipts have narrow interfaces.</td></tr>
           <tr><td class="rank-p1">07</td><td>Runtime ownership leak cleanup</td><td><code>runtime_runner.mli</code>, <code>runtime_transport.ml</code></td><td>Runner no longer re-exports transport internals; callers use owning module.</td></tr>
           <tr><td class="rank-p2">08</td><td>Runtime catalog split</td><td><code>runtime_catalog_runtime.ml</code></td><td>Cache, validate, probe, resolve, JSON modules split with stable catalog API.</td></tr>
           <tr><td class="rank-p2">09</td><td>Runtime transport split</td><td><code>runtime_transport.ml</code></td><td>Runtime MCP policy, CLI config, JSON-stream CLI, tool lane separated.</td></tr>
@@ -568,7 +568,7 @@
           <tr><td>Keeper</td><td><code>test_keeper_registry</code>, <code>test_keeper_state_machine*</code>, <code>test_keeper_supervisor</code>, runtime manifest/receipt tests</td><td><code>scripts/dune-local.sh build test/test_rfc_0086_keeper_namespace_invariant.exe</code></td></tr>
           <tr><td>Server/Dashboard</td><td><code>test_dashboard_http_core</code>, <code>test_dashboard_keeper_routes</code>, <code>test_dashboard_goals</code>, bootstrap tests</td><td><code>scripts/dune-local.sh build @lib/check</code></td></tr>
           <tr><td>Runtime/Tools</td><td>Runtime catalog/transport tests, worker gate tests, tool schema snapshots</td><td><code>bash scripts/lint/godfile-size-regression.sh</code></td></tr>
-          <tr><td>Coord</td><td>worktree policy/lifecycle/task transition tests</td><td><code>scripts/ocaml-structure-ratchet.sh --print</code></td></tr>
+          <tr><td>Workspace</td><td>worktree policy/lifecycle/task transition tests</td><td><code>scripts/ocaml-structure-ratchet.sh --print</code></td></tr>
         </tbody>
       </table>
       <div class="panel">
@@ -620,7 +620,7 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">1636</td><td><a href="../../lib/server/server_dashboard_http.ml">lib/server/server_dashboard_http.ml</a></td><td>server</td></tr>
           <tr><td class="num">1608</td><td><a href="../../lib/dashboard/dashboard_goals_types.ml">lib/dashboard/dashboard_goals_types.ml</a></td><td>dashboard</td></tr>
           <tr><td class="num">1589</td><td><a href="../../lib/keeper/keeper_world_observation.ml">lib/keeper/keeper_world_observation.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1551</td><td><a href="../../lib/coord/coord_worktree.ml">lib/coord/coord_worktree.ml</a></td><td>coord</td></tr>
+          <tr><td class="num">1551</td><td><a href="../../lib/workspace/workspace_worktree.ml">lib/workspace/workspace_worktree.ml</a></td><td>workspace</td></tr>
           <tr><td class="num">1496</td><td><a href="../../lib/tool_task.ml">lib/tool_task.ml</a></td><td>tools</td></tr>
           <tr><td class="num">1482</td><td><a href="../../lib/runtime/runtime_config.ml">lib/runtime/runtime_config.ml</a></td><td>runtime</td></tr>
           <tr><td class="num">1474</td><td><a href="../../lib/server/server_routes_http_routes_sidecar.ml">lib/server/server_routes_http_routes_sidecar.ml</a></td><td>server</td></tr>
@@ -634,7 +634,7 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">1378</td><td><a href="../../lib/keeper/keeper_turn_slot.ml">lib/keeper/keeper_turn_slot.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1298</td><td><a href="../../lib/dashboard/dashboard_safe_autonomy.ml">lib/dashboard/dashboard_safe_autonomy.ml</a></td><td>dashboard</td></tr>
           <tr><td class="num">1247</td><td><a href="../../lib/keeper/keeper_sandbox_runtime.ml">lib/keeper/keeper_sandbox_runtime.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1214</td><td><a href="../../lib/coord/coord_task.ml">lib/coord/coord_task.ml</a></td><td>coord</td></tr>
+          <tr><td class="num">1214</td><td><a href="../../lib/workspace/workspace_task.ml">lib/workspace/workspace_task.ml</a></td><td>workspace</td></tr>
           <tr><td class="num">1206</td><td><a href="../../lib/server/server_bootstrap_loops.ml">lib/server/server_bootstrap_loops.ml</a></td><td>server</td></tr>
           <tr><td class="num">1204</td><td><a href="../../lib/keeper/keeper_memory_bank.ml">lib/keeper/keeper_memory_bank.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1203</td><td><a href="../../lib/telemetry_unified.ml">lib/telemetry_unified.ml</a></td><td>metrics</td></tr>
@@ -647,7 +647,7 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">1128</td><td><a href="../../lib/keeper/keeper_execution_receipt.ml">lib/keeper/keeper_execution_receipt.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1108</td><td><a href="../../lib/server/server_dashboard_http_runtime_info.ml">lib/server/server_dashboard_http_runtime_info.ml</a></td><td>server</td></tr>
           <tr><td class="num">1099</td><td><a href="../../lib/keeper/keeper_status_detail.ml">lib/keeper/keeper_status_detail.ml</a></td><td>keeper</td></tr>
-          <tr><td class="num">1095</td><td><a href="../../lib/coord_goals.ml">lib/coord_goals.ml</a></td><td>coord</td></tr>
+          <tr><td class="num">1095</td><td><a href="../../lib/workspace_goals.ml">lib/workspace_goals.ml</a></td><td>workspace</td></tr>
           <tr><td class="num">1094</td><td><a href="../../lib/runtime/runtime_metrics.ml">lib/runtime/runtime_metrics.ml</a></td><td>runtime</td></tr>
           <tr><td class="num">1090</td><td><a href="../../lib/runtime/runtime_health_tracker.ml">lib/runtime/runtime_health_tracker.ml</a></td><td>runtime</td></tr>
           <tr><td class="num">1088</td><td><a href="../../lib/voice/voice_bridge.ml">lib/voice/voice_bridge.ml</a></td><td>voice</td></tr>
@@ -663,7 +663,7 @@ ocamlformat --check &lt;touched .ml/.mli files&gt;</code></pre>
           <tr><td class="num">1019</td><td><a href="../../lib/memory_oas_bridge.ml">lib/memory_oas_bridge.ml</a></td><td>memory</td></tr>
           <tr><td class="num">1017</td><td><a href="../../lib/keeper/keeper_persona_authoring.ml">lib/keeper/keeper_persona_authoring.ml</a></td><td>keeper</td></tr>
           <tr><td class="num">1005</td><td><a href="../../lib/sse.ml">lib/sse.ml</a></td><td>sse</td></tr>
-          <tr><td class="num">1001</td><td><a href="../../lib/coord/coord_task_schedule.ml">lib/coord/coord_task_schedule.ml</a></td><td>coord</td></tr>
+          <tr><td class="num">1001</td><td><a href="../../lib/workspace/workspace_task_schedule.ml">lib/workspace/workspace_task_schedule.ml</a></td><td>workspace</td></tr>
           <tr><td class="num">1000</td><td><a href="../../lib/backend/backend.ml">lib/backend/backend.ml</a></td><td>backend</td></tr>
         </tbody>
       </table>

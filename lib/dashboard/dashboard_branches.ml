@@ -28,7 +28,7 @@ let run_git ~repo args =
     ~actor:(Masc_exec.Agent_id.of_string "dashboard/branches")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"dashboard branches git"
-    ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
+    ~timeout_sec:Env_config_runtime.Workspace_git.local_op_timeout_sec
     argv
 ;;
 
@@ -233,7 +233,7 @@ let run_git_single_pass ~repo =
     ~actor:(Masc_exec.Agent_id.of_string "dashboard/branches")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"dashboard branches git single-pass"
-    ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
+    ~timeout_sec:Env_config_runtime.Workspace_git.local_op_timeout_sec
     argv
 ;;
 

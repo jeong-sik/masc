@@ -143,7 +143,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~tool_names:[ "tool_execute"; "masc_status" ]);
   check
     (option string)
-    "board coordination can satisfy non-owned board signal"
+    "board workspace can satisfy non-owned board signal"
     None
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true

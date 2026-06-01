@@ -68,7 +68,7 @@ export interface SurfProps {
    *  undefined for purely decorative bg. */
   role?: 'alert' | 'status'
   /** Override the default 12px padding. Some callers want a tighter
-   *  inline strip (auth banner) or a roomier card body (chat error). */
+   *  inline strip (auth banner) or a larger card body (chat error). */
   padding?: SurfPadding
   /** Drop the rounded-[var(--r-1)] corner — used when Surf sits inside a parent
    *  that already provides the radius (e.g. inside a card surface). */

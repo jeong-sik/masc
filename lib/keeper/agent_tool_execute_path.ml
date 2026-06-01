@@ -4,7 +4,7 @@ open Keeper_types_profile
 open Agent_tool_shared_runtime
 
 let resolve_tool_read_cwd
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -32,7 +32,7 @@ let normalize_repo_cwd_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
-let repo_path_context ~(config : Coord.config) ~(meta : keeper_meta) cwd =
+let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
   let playground =
     keeper_playground_root ~config ~meta
     |> normalize_repo_cwd_path
@@ -75,7 +75,7 @@ let repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel =
     repo_name
 
 let validate_repo_path_ready
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(probe_path : string)
       cwd
@@ -119,11 +119,11 @@ let validate_repo_path_ready
        | Ok () -> check_probe ()
        | Error _repair_err -> initial_err)
 
-let validate_repo_cwd_ready ~(config : Coord.config) ~(meta : keeper_meta) cwd =
+let validate_repo_cwd_ready ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
   validate_repo_path_ready ~config ~meta ~probe_path:cwd cwd
 
 let validate_repo_path_args_ready
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
       (ir : Masc_exec.Shell_ir.t)
@@ -187,7 +187,7 @@ let validate_repo_path_args_ready
   |> Result.map (fun _ -> ())
 
 let resolve_tool_write_cwd
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
@@ -218,7 +218,7 @@ let resolve_tool_write_cwd
    The container-side root comes from
    [Env_config_sandbox.Runtime.docker_playground_container_root ()] so the
    mount point is configurable (default "/home/keeper/playground"). *)
-let _docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
+let _docker_playground_cwd ~(config : Workspace.config) ~(meta : keeper_meta) host_cwd =
   let root = Keeper_alerting_path.project_root_of_config config in
   let playground_prefix =
     Filename.concat root Playground_paths.all_playgrounds_prefix
@@ -297,7 +297,7 @@ let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
   | None -> None
 
 let resolve_tool_read_path
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =

@@ -677,13 +677,13 @@ function ConnectorLivePanel({
       )
     : ''
 
-  const observedRooms = uniqueStrings([
+  const observedWorkspaces = uniqueStrings([
     ...(gate?.bindings ?? [])
       .filter(binding => binding.channel === (connector?.channel ?? ''))
-      .map(binding => binding.room_id),
+      .map(binding => binding.workspace_id),
     ...(gate?.recent_events ?? [])
       .filter(event => event.channel === (connector?.channel ?? ''))
-      .map(event => event.room_id),
+      .map(event => event.workspace_id),
     ...configuredBindings.map(binding => binding.channel_id),
   ])
 
@@ -1204,22 +1204,22 @@ function ConnectorLivePanel({
                                   ${ui.channelDraft.trim() && humanizeChannel(names, ui.channelDraft.trim())
                                     ? html`<div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">resolves to ${humanizeChannel(names, ui.channelDraft.trim())}</div>`
                                     : null}
-                                  ${observedRooms.length > 0
+                                  ${observedWorkspaces.length > 0
                                     ? html`
                                         <div class="mt-2 flex flex-wrap gap-1.5">
-                                          ${observedRooms.slice(0, 8).map(roomId => {
-                                            const humanized = humanizeChannel(names, roomId)
+                                          ${observedWorkspaces.slice(0, 8).map(workspaceId => {
+                                            const humanized = humanizeChannel(names, workspaceId)
                                             return html`
                                               <${ActionButton}
                                                 variant="ghost"
                                                 size="sm"
                                                 class="!rounded-[var(--r-0)] !py-0.5"
-                                                title=${roomId}
-                                                ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(roomId, 22)}`}
-                                                onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
+                                                title=${workspaceId}
+                                                ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(workspaceId, 22)}`}
+                                                onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: workspaceId }) }}
                                               >${humanized
-                                                ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>${truncateMiddle(roomId, 10)}</span>`
-                                                : truncateMiddle(roomId, 22)}<//>
+                                                ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>${truncateMiddle(workspaceId, 10)}</span>`
+                                                : truncateMiddle(workspaceId, 22)}<//>
                                             `
                                           })}
                                         </div>
@@ -1349,7 +1349,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
         <div>
           <div class="text-[var(--color-fg-disabled)]">namespaces</div>
-          <div class="font-mono text-[var(--color-fg-primary)]">${ch.room_count}</div>
+          <div class="font-mono text-[var(--color-fg-primary)]">${ch.workspace_count}</div>
         </div>
         <div>
           <div class="text-[var(--color-fg-disabled)]">last active</div>
@@ -1372,7 +1372,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
         <div>
           last namespace
-          <span class="font-mono text-[var(--color-fg-primary)]"> ${ch.last_room_id || '-'}</span>
+          <span class="font-mono text-[var(--color-fg-primary)]"> ${ch.last_workspace_id || '-'}</span>
         </div>
       </div>
 
@@ -1399,7 +1399,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-medium text-[var(--color-fg-primary)]">
-            ${binding.channel} · room ${truncateMiddle(binding.room_id)}
+            ${binding.channel} · workspace ${truncateMiddle(binding.workspace_id)}
           </div>
           <div class="text-3xs uppercase tracking-5 text-[var(--color-fg-disabled)]">
             ${binding.keeper ? `keeper ${binding.keeper}` : 'keeper pending'}
@@ -1445,7 +1445,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 text-2xs text-[var(--color-fg-disabled)]">
           <div class="font-medium text-[var(--color-fg-primary)]">
-            ${event.channel} · ${event.keeper || 'unassigned'} · room ${truncateMiddle(event.room_id)}
+            ${event.channel} · ${event.keeper || 'unassigned'} · workspace ${truncateMiddle(event.workspace_id)}
           </div>
           <div class="mt-1">
             ${timeAgo(event.timestamp)}
@@ -1553,10 +1553,10 @@ function GateAnalyticsSection({
               <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
                 <div>
                   <div class="mb-2 text-3xs uppercase tracking-5 text-[var(--color-fg-disabled)]">
-                    Observed room bindings
+                    Observed workspace bindings
                   </div>
                   ${gate.bindings.length === 0
-                    ? html`<${SurfaceCard} class="!border-dashed !border-[var(--color-border-default)] !px-3 !py-4 text-xs text-[var(--color-fg-disabled)]">관찰된 room 바인딩 없음</${SurfaceCard}>`
+                    ? html`<${SurfaceCard} class="!border-dashed !border-[var(--color-border-default)] !px-3 !py-4 text-xs text-[var(--color-fg-disabled)]">관찰된 workspace 바인딩 없음</${SurfaceCard}>`
                     : html`
                         <div class="space-y-2">
                           ${gate.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}

@@ -10,7 +10,7 @@ if ! SERVER_EXE="$(harness_find_server_exe "$ROOT_DIR" "${SERVER_EXE_HINT}")"; t
   SERVER_EXE=""
 fi
 PORT="${PORT:-$(harness_pick_free_port)}"
-BASE_PATH="${BASE_PATH:-$(harness_mktemp_dir "masc-contract-room")}"
+BASE_PATH="${BASE_PATH:-$(harness_mktemp_dir "masc-contract-workspace")}"
 LOG_FILE="${LOG_FILE:-$(harness_mktemp_file "masc-contract-server" ".log")}"
 KEEP_BASE_PATH="${KEEP_BASE_PATH:-0}"
 KEEP_LOG_FILE="${KEEP_LOG_FILE:-0}"

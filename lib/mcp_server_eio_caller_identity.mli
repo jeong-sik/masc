@@ -13,13 +13,13 @@ type t = {
 val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
 
 val resolve :
-  config:Coord_utils_backend_setup.config ->
+  config:Workspace_utils_backend_setup.config ->
   tool_name:string ->
   arguments:Yojson.Safe.t ->
   identity:Agent_identity.t ->
   cached_resolved_agent:string option ->
   auth_token:string option ->
   internal_keeper_runtime:bool ->
-  coord_initialized:(unit -> bool) ->
+  workspace_initialized:(unit -> bool) ->
   log_mcp_exn:(label:string -> exn -> unit) ->
   t

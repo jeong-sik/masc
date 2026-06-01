@@ -122,7 +122,7 @@ describe('decodeTransportHealthData', () => {
       },
       sse: {
         sessions_observer: 2,
-        sessions_coordinator: 1,
+        sessions_agent_stream: 1,
         sessions_presence: 1,
         sessions_total: 4,
         external_subscribers: 5,
@@ -140,7 +140,7 @@ describe('decodeTransportHealthData', () => {
         relay_drop_broadcast: 1,
         hot_sessions: [
           { session_id: 'sess-1', kind: 'observer', queue_depth: 5, last_event_id: 99, idle_seconds: 3 },
-          { session_id: 'sess-2', kind: 'coordinator', queue_depth: 0, last_event_id: 50, idle_seconds: 30 },
+          { session_id: 'sess-2', kind: 'agent_stream', queue_depth: 0, last_event_id: 50, idle_seconds: 30 },
         ],
       },
       grpc: {
@@ -192,7 +192,7 @@ describe('decodeTransportHealthData', () => {
       },
       cluster: {
         cluster: 'prod',
-        room_id: 'room-1',
+        workspace_id: 'workspace-1',
         topology_available: true,
         topology_source: 'file',
         total_units: 5,

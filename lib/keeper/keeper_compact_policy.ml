@@ -243,7 +243,7 @@ let compact_if_needed_typed
       trigger_human;
     let model_meta =
       let model_labels = Keeper_model_labels.configured_model_labels_of_meta meta in
-      Runtime_candidate.context_window_hint_of_labels model_labels
+      Runtime_provider_binding.context_window_hint_of_labels model_labels
     in
     (* record_pre_compact's JSONL append is wrapped by
        append_store_json_fail_open in Dashboard_harness_health, so this call

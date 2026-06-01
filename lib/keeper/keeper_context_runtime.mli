@@ -211,7 +211,7 @@ val apply_post_turn_lifecycle_with_resilience_handles
   -> post_turn_lifecycle
 
 val dispatch_keeper_phase_event
-  :  config:Coord.config
+  :  config:Workspace.config
   -> ?origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
   -> Keeper_state_machine.event
@@ -248,7 +248,7 @@ val record_compaction_outcome
     [dispatch_post_turn_lifecycle_events] automatic compact); both
     funnel through this helper to keep observability coherent. *)
 val dispatch_compaction_completed
-  :  config:Coord.config
+  :  config:Workspace.config
   -> origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
   -> before_tokens:int
@@ -256,7 +256,7 @@ val dispatch_compaction_completed
   -> unit
 
 val dispatch_post_turn_lifecycle_events
-  :  config:Coord.config
+  :  config:Workspace.config
   -> keeper_name:string
   -> post_turn_lifecycle
   -> unit
@@ -275,7 +275,7 @@ val keeper_board_write_tool_names : string list
 val keeper_write_done : string list -> bool
 val keeper_action_kind_of_tool_names : string list -> string
 
-(** {1 Model and Coord Utilities} *)
+(** {1 Model and Workspace Utilities} *)
 
 val effective_model_labels_for_turn : keeper_meta -> string list
 

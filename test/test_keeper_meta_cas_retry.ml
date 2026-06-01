@@ -54,8 +54,8 @@ let test_no_conflict_writes_first_attempt () =
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
-    let config = Coord.default_config base_dir in
-    ignore (Coord.init config ~agent_name:(Some "operator"));
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"alpha" in
     (* Initial write — no existing file. *)
     (match
@@ -88,8 +88,8 @@ let test_retry_succeeds_after_concurrent_bump () =
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
-    let config = Coord.default_config base_dir in
-    ignore (Coord.init config ~agent_name:(Some "operator"));
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"beta" in
     (match Keeper_meta_store.write_meta ~force:true config m0 with
      | Ok () -> ()

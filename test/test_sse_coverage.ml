@@ -194,31 +194,31 @@ let test_client_count_exact_unregister_decrement () =
 
 let test_client_count_by_kind_tracks_session_roles () =
   let before_observer = Sse.client_count_by_kind Sse.Observer in
-  let before_coordinator = Sse.client_count_by_kind Sse.Coordinator in
+  let before_agent_stream = Sse.client_count_by_kind Sse.Agent_stream in
   let observer = "test_kind_observer_" ^ string_of_int (Random.bits ()) in
-  let coordinator = "test_kind_coord_" ^ string_of_int (Random.bits ()) in
+  let agent_stream = "test_kind_workspace_" ^ string_of_int (Random.bits ()) in
   Fun.protect
     ~finally:(fun () ->
       Sse.unregister observer;
-      Sse.unregister coordinator)
+      Sse.unregister agent_stream)
     (fun () ->
       let (_id1, _, _) = Sse.register ~kind:Sse.Observer observer ~last_event_id:0 in
       let (_id2, _, _) =
-        Sse.register ~kind:Sse.Coordinator coordinator ~last_event_id:0
+        Sse.register ~kind:Sse.Agent_stream agent_stream ~last_event_id:0
       in
       check int "observer count increments"
         (before_observer + 1)
         (Sse.client_count_by_kind Sse.Observer);
-      check int "coordinator count increments"
-        (before_coordinator + 1)
-        (Sse.client_count_by_kind Sse.Coordinator);
+      check int "agent_stream count increments"
+        (before_agent_stream + 1)
+        (Sse.client_count_by_kind Sse.Agent_stream);
       Sse.unregister observer;
       check int "observer count decrements"
         before_observer
         (Sse.client_count_by_kind Sse.Observer);
-      check int "coordinator still present"
-        (before_coordinator + 1)
-        (Sse.client_count_by_kind Sse.Coordinator))
+      check int "agent_stream still present"
+        (before_agent_stream + 1)
+        (Sse.client_count_by_kind Sse.Agent_stream))
 
 let test_unregister_if_current_replacement_count () =
   let before = Sse.client_count () in

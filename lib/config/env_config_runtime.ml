@@ -220,7 +220,7 @@ end
 (** {1 Message GC Configuration} *)
 
 module Message = struct
-  (** Maximum number of message files to retain per room (default 200).
+  (** Maximum number of message files to retain per workspace (default 200).
       Oldest messages (by filename sort) are deleted when count exceeds this. *)
   let max_count =
     get_int ~default:200 "MASC_MESSAGE_MAX_COUNT"
@@ -769,7 +769,7 @@ module Dashboard = struct
       Wraps the entire render pipeline including PG stalls and cold-start
       projection hydration. Default 60s preserves the pre-extraction
       literal at [dashboard_execution.ml:204]. Floor 5s ensures even
-      aggressive operator overrides leave room for cold-start hydration.
+      aggressive operator overrides leave workspace for cold-start hydration.
       Render budget should comfortably exceed the longest inner compute
       budget (currently [briefing_timeout_sec] = 25s). *)
   let render_timeout_sec =
@@ -918,9 +918,9 @@ module Sidecar = struct
       (get_float ~default:10.0 "MASC_SIDECAR_SCHEMA_TIMEOUT_SEC")
 end
 
-(** {1 Coord local git operation timeouts}
+(** {1 Workspace local git operation timeouts}
 
-    Inline literals extracted from {!Coord_git} (#10426 audit).
+    Inline literals extracted from {!Workspace_git} (#10426 audit).
     These sites share the same semantic bucket: local-only git
     operations such as [rev-parse], [status], and [branch] with no
     network IO.  Network-bound git ops (fetch, push) already use
@@ -934,9 +934,9 @@ end
     needlessly.  Conversely, an operator narrowing local ops on a
     fast workstation would not expect to also narrow network ops. *)
 
-module Coord_git = struct
+module Workspace_git = struct
   (** Budget (seconds) for local-only git operations under
-      [Masc_exec.Exec_gate.run_argv*] in {!Coord_git}: [rev-parse],
+      [Masc_exec.Exec_gate.run_argv*] in {!Workspace_git}: [rev-parse],
       [status], [branch], etc.
 
       Default 30.0 preserves the four inline literals.  Floor 5.0
@@ -945,10 +945,12 @@ module Coord_git = struct
       would silently kill perfectly healthy commands.
 
       Network-bound ops (fetch, push) intentionally use a separate
-      knob — see {!Env_config_core.git_fetch_timeout_sec}. *)
+      knob — see {!Env_config_core.git_fetch_timeout_sec}.
+      @category Timeouts
+      @ops_class operator *)
   let local_op_timeout_sec =
     Float.max 5.0
-      (get_float ~default:30.0 "MASC_COORD_GIT_LOCAL_OP_TIMEOUT_SEC")
+      (get_float ~default:30.0 "MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC")
 end
 
 (** {1 Internal Safety Configuration} *)

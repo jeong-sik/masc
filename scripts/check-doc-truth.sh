@@ -95,7 +95,7 @@ require_not_contains docs/TUI-GUIDE.md './start-masc-mcp.sh --tui'
 
 require_contains docs/QUICK-START.md '"method":"initialize"'
 require_contains docs/QUICK-START.md 'Mcp-Session-Id: ${SESSION_ID}'
-require_contains docs/QUICK-START.md 'masc_join(agent_name="codex")'
+require_contains docs/QUICK-START.md 'masc_bind(agent_name="codex")'
 require_contains docs/QUICK-START.md '운영 기준은 항상 `<base-path>/.masc`다.'
 require_contains docs/QUICK-START.md 'scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md'
 
@@ -137,7 +137,7 @@ require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
 require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 1'
 require_not_contains docs/spec/09-server-transport.md '| `server_command_plane_http.ml` |'
 require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed'
-require_not_contains docs/spec/09-server-transport.md '| Room | `/api/v1/room/*`'
+require_not_contains docs/spec/09-server-transport.md '| Workspace | `/api/v1/workspace/*`'
 require_not_contains docs/spec/09-server-transport.md '| Command Plane (R) |'
 
 require_contains docs/spec/10-dashboard.md '| `/api/v1/keepers/:name/config` | POST | Keeper config 수정 (PATCH semantic) |'

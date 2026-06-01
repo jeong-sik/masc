@@ -49,7 +49,7 @@ type route =
 
 module type Backend = sig
   val egress_policy_path :
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     string
 
@@ -63,13 +63,13 @@ module type Backend = sig
   val command_uses_nested_runtime : string -> bool
 
   val private_workspace_cwd :
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     string ->
     string
 
   val run_shell_command_with_status :
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
@@ -79,7 +79,7 @@ module type Backend = sig
     (command_result, string) result
 
   val run_trusted_shell_command_with_status :
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
@@ -90,7 +90,7 @@ module type Backend = sig
 
   val run_credentialed_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
@@ -100,7 +100,7 @@ module type Backend = sig
 
   val run_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
@@ -111,7 +111,7 @@ end
 
 module Make (Backend : Backend) : sig
   val egress_policy_path :
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     string
 
@@ -125,13 +125,13 @@ module Make (Backend : Backend) : sig
   val command_uses_nested_runtime : string -> bool
 
   val private_workspace_cwd :
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     string ->
     string
 
   val run_shell_command_with_status :
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
@@ -141,7 +141,7 @@ module Make (Backend : Backend) : sig
     (command_result, string) result
 
   val run_trusted_shell_command_with_status :
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
@@ -152,7 +152,7 @@ module Make (Backend : Backend) : sig
 
   val run_credentialed_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
@@ -162,7 +162,7 @@ module Make (Backend : Backend) : sig
 
   val run_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
+    config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
@@ -172,7 +172,7 @@ module Make (Backend : Backend) : sig
 end
 
 val egress_policy_path :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   string
 
@@ -186,13 +186,13 @@ val ensure_runtime :
 val command_uses_nested_runtime : string -> bool
 
 val private_workspace_cwd :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string
 
 val run_shell_command_with_status :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
@@ -202,7 +202,7 @@ val run_shell_command_with_status :
   (command_result, string) result
 
 val run_trusted_shell_command_with_status :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
@@ -213,7 +213,7 @@ val run_trusted_shell_command_with_status :
 
 val run_credentialed_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
@@ -223,7 +223,7 @@ val run_credentialed_bash :
 
 val run_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
@@ -232,13 +232,13 @@ val run_bash :
   string
 
 val uses_backend :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   bool
 
 val route_for :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   route
@@ -246,13 +246,13 @@ val route_for :
 val route_label : route -> string
 
 val route_via :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   string
 
 val run_command_with_status :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   timeout_sec:float ->
   host:host_command ->

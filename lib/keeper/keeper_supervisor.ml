@@ -361,7 +361,7 @@ let sweep_and_recover (ctx : _ context) =
     (fun (entry : Keeper_registry.registry_entry) ->
        cleanup_dead_tombstone ctx entry;
        Keeper_lifecycle_hooks.run
-         ~base_dir:(Coord.masc_root_dir ctx.config)
+         ~base_dir:(Workspace.masc_root_dir ctx.config)
          ~meta:entry.meta
          ~keeper_id:entry.name
          Keeper_lifecycle_hooks.Tombstone_reaped)
@@ -370,7 +370,7 @@ let sweep_and_recover (ctx : _ context) =
     Keeper_registry.all ~base_path () |> active_supervision_keeper_count
   in
   let restart_list =
-    let keepers_dir = Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in
+    let keepers_dir = Filename.concat (Workspace.masc_root_dir ctx.config) "keepers" in
     apply_self_preservation ~keepers_dir ~total_keepers:active_count !to_restart
   in
   (* Restart crashed keepers *)
@@ -564,7 +564,7 @@ let sweep_and_recover (ctx : _ context) =
                meta.auto_resume_after_sec
            in
            let paused_ts =
-             Coord_resilience.Time.parse_iso8601_opt meta.updated_at
+             Workspace_resilience.Time.parse_iso8601_opt meta.updated_at
              |> Option.value ~default:0.0
            in
            if paused_ts > 0.0 && now -. paused_ts >= resume_after_sec

@@ -2,7 +2,7 @@
 \* Bug Model: Keeper FSM and Task FSM must stay interlocked across
 \* a Dead transition.
 \*
-\* Background (blog: Anthropic "Multi-Agent Coordination Patterns",
+\* Background (blog: Anthropic "Multi-Agent Workspace Patterns",
 \* Agent Teams + Shared State): when one agent terminates while
 \* holding work claimed from a shared queue, the queue must release
 \* or reassign the work — otherwise the system loses progress
@@ -55,11 +55,11 @@
 \*
 \* What actually restores the invariant:
 \*
-\*   Coord_gc.cleanup_zombies (lib/coord/coord_gc.ml:cleanup_zombies) scans the
+\*   Workspace_gc.cleanup_zombies (lib/workspace/workspace_gc.ml:cleanup_zombies) scans the
 \*   agents directory on a periodic GC cycle, detects agents whose
 \*   last_seen is older than Env_config.Zombie.keeper_threshold_seconds
 \*   ("zombie" agents), and in Phase 3 iterates the backlog calling
-\*   Coord_hooks.force_release_task_fn for every Claimed/InProgress
+\*   Workspace_hooks.force_release_task_fn for every Claimed/InProgress
 \*   task whose assignee is a zombie. This is the **asynchronous,
 \*   heartbeat-timeout-driven** path that eventually restores the
 \*   NoDeadKeeperHoldsTask property.
@@ -72,7 +72,7 @@
 \*   without the GC window. Until that runtime exists, a Dead keeper
 \*   can hold a Claimed task for up to ~keeper_threshold_seconds —
 \*   the transient window is visible on the dashboard Keepers section
-\*   (#6556) and is safe because Coord_task.claim_task_r rejects any
+\*   (#6556) and is safe because Workspace_task.claim_task_r rejects any
 \*   attempt by another agent to re-claim the orphaned task
 \*   (TaskAlreadyClaimed), so no state corruption is possible.
 \*
@@ -311,8 +311,8 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \*      update in keeper_registry.mark_dead leaves task_claimer
 \*      pointing at the dead keeper.
 \*
-\*   2. A separate asynchronous subsystem, Coord_gc.cleanup_zombies
-\*      (lib/coord/coord_gc.ml:cleanup_zombies), periodically scans agents by
+\*   2. A separate asynchronous subsystem, Workspace_gc.cleanup_zombies
+\*      (lib/workspace/workspace_gc.ml:cleanup_zombies), periodically scans agents by
 \*      heartbeat
 \*      last_seen and force-releases Claimed/InProgress tasks whose
 \*      assignee is a zombie agent. This is modelled below as
@@ -325,7 +325,7 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \* it against the TLC runner in tla-check.sh / specs/Makefile.
 
 \* Zombie GC reconciliation: release an orphaned task whose claimer
-\* is dead. Mirrors lib/coord/coord_gc.ml:cleanup_zombies Phase 3 runtime.
+\* is dead. Mirrors lib/workspace/workspace_gc.ml:cleanup_zombies Phase 3 runtime.
 ReconcileByGC(t) ==
     /\ Held(t)
     /\ keeper_phase[task_claimer[t]] = "dead"

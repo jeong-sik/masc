@@ -525,8 +525,8 @@ let test_tool_exec_observer_bridges_to_telemetry () =
       in
       try rm base_dir with _ -> ())
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
       let on_exec ~tool_name ~success ~duration_ms
           ?error_kind:_ ?error_message:_ () =
         Telemetry_eio.track_tool_called ~fs config ~tool_name ~success

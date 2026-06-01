@@ -124,7 +124,7 @@ let test_cursor_ack_is_replayable_state_entry () =
 
 let test_execution_receipt_links_to_reaction_ledger () =
   with_temp_base @@ fun base_path ->
-  let config = Coord.default_config base_path in
+  let config = Workspace.default_config base_path in
   let keeper_name = "receipt-keeper" in
   let receipt_json =
     `Assoc

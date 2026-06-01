@@ -13,7 +13,7 @@
     @see https://docs.ag-ui.com/concepts/events
     @since 2.60.0 *)
 
-(** AG-UI event types — subset relevant to MASC agent coordination *)
+(** AG-UI event types — subset relevant to MASC agent workspace *)
 type event_type =
   | Run_started
   | Run_finished
@@ -137,11 +137,11 @@ let of_agent_session_bound ~agent_name : event =
     ~custom_value:(Some (`Assoc [("agent", `String agent_name)]))
     Run_started
 
-(** Map MASC agent_left to AG-UI RUN_FINISHED *)
-let of_agent_left ~agent_name : event =
+(** Map MASC agent_unbound to AG-UI RUN_FINISHED *)
+let of_agent_unbound ~agent_name : event =
   make_event ~thread_id:default_thread_id
     ~run_id:(Some agent_name)
-    ~custom_name:(Some "AGENT_LEFT")
+    ~custom_name:(Some "AGENT_UNBOUND")
     ~custom_value:(Some (`Assoc [("agent", `String agent_name)]))
     Run_finished
 
@@ -193,8 +193,8 @@ let of_tool_call ~agent_name ~tool_name ~call_id ~args_json : event list =
       Tool_call_end;
   ]
 
-(** Map MASC coord state to AG-UI STATE_SNAPSHOT *)
-let of_coord_state (state : Yojson.Safe.t) : event =
+(** Map MASC workspace state to AG-UI STATE_SNAPSHOT *)
+let of_workspace_state (state : Yojson.Safe.t) : event =
   make_event ~thread_id:default_thread_id
     ~snapshot:(Some state)
     State_snapshot

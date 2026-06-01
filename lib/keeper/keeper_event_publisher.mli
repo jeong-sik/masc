@@ -1,6 +1,6 @@
 (** Keeper_event_publisher — MASC Event_bus publishers for runtime events.
 
-    Publishes MASC coordination events (broadcasts, heartbeats,
+    Publishes MASC workspace events (broadcasts, heartbeats,
     board posts, task transitions, keeper lifecycle, audit) to the
     **MASC-owned** Event_bus.  Events follow dot-separated
     snake_case naming per OAS Custom-name convention:
@@ -44,7 +44,7 @@ val publish_task_transition :
     (#8605 family) — typos at call sites fail to compile.
     Wire format ([["claim"]] / [["start"]] / [["done"]] / ...)
     preserved via {!Masc_domain.task_action_to_string}.  Sibling
-    refactor of #8846 (Coord-side hook for the same transition
+    refactor of #8846 (Workspace-side hook for the same transition
     vocabulary). *)
 
 (** {1 Keeper snapshot + lifecycle} *)

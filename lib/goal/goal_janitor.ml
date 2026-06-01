@@ -127,7 +127,7 @@ let audit_unclaimed_goal_orphan_tasks ?(now = Unix.gettimeofday ())
         Some (task, age_seconds)
     | _ -> None)
 
-let emit_orphan_task_escalation coord_config ~threshold_seconds orphan_tasks =
+let emit_orphan_task_escalation workspace_config ~threshold_seconds orphan_tasks =
   match orphan_tasks with
   | [] -> ()
   | _ ->
@@ -148,7 +148,7 @@ let emit_orphan_task_escalation coord_config ~threshold_seconds orphan_tasks =
                ])
           orphan_tasks
       in
-      Coord.log_event coord_config
+      Workspace.log_event workspace_config
         (`Assoc
            [ ("type", `String "goal_orphan_task_escalation")
            ; ("subsystem", `String "goal_janitor")
@@ -179,33 +179,34 @@ let prune_active_goal_ids ~(valid_goal_ids : string list)
 
 (** Run a full sweep: goals + keeper active_goal_ids.
     Writes updated state to disk. *)
-let run ?(config = default_config) (coord_config : Coord.config) : sweep_result =
-  let st = Goal_store.read_state coord_config in
+let run ?(config = default_config) (workspace_config : Workspace.config) : sweep_result =
+  let st = Goal_store.read_state workspace_config in
   let goals', partial = sweep_goals ~config st.goals in
   let valid_ids = List.map (fun (g : Goal_store.goal) -> g.id) goals' in
   (* Write updated goal state — use update_state so the file lock protects
      the read-modify-write cycle. Prevents truncation races (#17229). *)
   if partial.purged > 0 || partial.stagnated > 0 then
-    ignore (Goal_store.update_state coord_config (fun _state ->
+    (* See Goal_store.update_state return contract: janitor only needs the persisted side effect. *)
+    ignore (Goal_store.update_state workspace_config (fun _state ->
       { goals = goals'; version = st.version + 1; updated_at = Masc_domain.now_iso () }));
   (* Prune active_goal_ids from all keeper metas *)
   let total_orphans = ref 0 in
   let keeper_dir =
-    Filename.concat (Coord.masc_dir coord_config) "keepers"
+    Filename.concat (Workspace.masc_dir workspace_config) "keepers"
   in
   if Sys.file_exists keeper_dir && Sys.is_directory keeper_dir then
     Sys.readdir keeper_dir
     |> Array.iter (fun entry ->
       if Filename.check_suffix entry ".json" then begin
         let name = Filename.chop_suffix entry ".json" in
-        match Keeper_meta_store.read_meta coord_config name with
+        match Keeper_meta_store.read_meta workspace_config name with
         | Ok (Some meta) when meta.active_goal_ids <> [] ->
           let pruned_ids, removed =
             prune_active_goal_ids ~valid_goal_ids:valid_ids meta.active_goal_ids
           in
           if removed > 0 then begin
             let updated = { meta with active_goal_ids = pruned_ids } in
-            match Keeper_meta_store.write_meta coord_config updated with
+            match Keeper_meta_store.write_meta workspace_config updated with
             | Ok () ->
                 total_orphans := !total_orphans + removed
             | Error e ->
@@ -217,11 +218,11 @@ let run ?(config = default_config) (coord_config : Coord.config) : sweep_result 
         | Ok None | Ok (Some _) | Error _ -> ()
       end);
   let orphan_task_rows =
-    Coord.get_tasks_safe coord_config
+    Workspace.get_tasks_safe workspace_config
     |> audit_unclaimed_goal_orphan_tasks ~valid_goal_ids:valid_ids
          ~min_age_seconds:config.orphan_task_escalation_age_seconds
   in
-  emit_orphan_task_escalation coord_config
+  emit_orphan_task_escalation workspace_config
     ~threshold_seconds:config.orphan_task_escalation_age_seconds
     orphan_task_rows;
   let result = { partial with orphans = !total_orphans;

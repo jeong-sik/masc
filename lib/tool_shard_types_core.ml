@@ -44,6 +44,6 @@ let tool_effect_domain name =
   match Tool_name.of_string name with
   | Some (Tool_name.Masc Tool_name.Masc.Tool_list) -> Some Tool_catalog.Read_only
   | Some (Tool_name.Masc (Tool_name.Masc.Tool_grant | Tool_name.Masc.Tool_revoke)) ->
-    Some Tool_catalog.Masc_coordination
+    Some Tool_catalog.Masc_workspace
   | Some _ | None -> None
 ;;

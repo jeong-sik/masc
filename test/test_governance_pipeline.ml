@@ -1,7 +1,7 @@
 (** Tests for Governance_pipeline — risk assessment and governance level policies. *)
 
 module Gp = Masc_mcp.Governance_pipeline
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Tool_result
 
@@ -46,7 +46,7 @@ let cleanup_tmpdir dir =
 (* ── Risk Assessment Tests ──────────────────────────────────── *)
 
 let test_risk_critical_delete () =
-  let risk = Gp.assess_risk ~tool_name:"masc_delete_room" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_delete_workspace" ~input:no_args in
   Alcotest.(check string) "delete is critical"
     "critical" (Gp.risk_level_to_string risk)
 
@@ -76,7 +76,7 @@ let test_risk_critical_remove () =
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_critical_destroy () =
-  let risk = Gp.assess_risk ~tool_name:"masc_destroy_room" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_destroy_workspace" ~input:no_args in
   Alcotest.(check string) "destroy is critical"
     "critical" (Gp.risk_level_to_string risk)
 
@@ -86,7 +86,7 @@ let test_risk_critical_purge () =
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_high_create () =
-  let risk = Gp.assess_risk ~tool_name:"masc_create_room" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_create_workspace" ~input:no_args in
   Alcotest.(check string) "create is high"
     "high" (Gp.risk_level_to_string risk)
 
@@ -133,12 +133,12 @@ let test_risk_medium_transition_claim () =
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_join () =
-  let risk = Gp.assess_risk ~tool_name:"masc_join" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_bind" ~input:no_args in
   Alcotest.(check string) "join is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_leave () =
-  let risk = Gp.assess_risk ~tool_name:"masc_leave" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_unbind" ~input:no_args in
   Alcotest.(check string) "leave is medium"
     "medium" (Gp.risk_level_to_string risk)
 
@@ -153,12 +153,12 @@ let test_risk_medium_stop () =
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_pause () =
-  let risk = Gp.assess_risk ~tool_name:"masc_pause_room" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_pause_workspace" ~input:no_args in
   Alcotest.(check string) "pause is medium"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_resume () =
-  let risk = Gp.assess_risk ~tool_name:"masc_resume_room" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"masc_resume_workspace" ~input:no_args in
   Alcotest.(check string) "resume is medium"
     "medium" (Gp.risk_level_to_string risk)
 
@@ -427,7 +427,7 @@ let test_risk_contract_risk_from_delivery_contract () =
 
 let test_risk_invalid_delivery_contract_falls_back_to_heuristic () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_create_room"
+    Gp.assess_risk ~tool_name:"masc_create_workspace"
       ~input:
         (`Assoc
           [
@@ -445,7 +445,7 @@ let test_risk_invalid_delivery_contract_falls_back_to_heuristic () =
 
 let test_risk_contract_risk_non_object_input_falls_back_to_heuristic () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_create_room"
+    Gp.assess_risk ~tool_name:"masc_create_workspace"
       ~input:(`List [ `String "delivery_contract"; `String "ignored" ])
   in
   Alcotest.(check string) "non-object input keeps heuristic risk"
@@ -453,7 +453,7 @@ let test_risk_contract_risk_non_object_input_falls_back_to_heuristic () =
 
 let test_risk_contract_risk_does_not_downgrade_heuristic () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_create_room"
+    Gp.assess_risk ~tool_name:"masc_create_workspace"
       ~input:
         (`Assoc
           [
@@ -509,7 +509,7 @@ let test_risk_payload_beats_low_override () =
 
 let test_development_allows_all () =
   let d = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_delete_room" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null in
   (match d.action with
    | `Allow -> ()
    | `Require_confirm _ -> Alcotest.fail "development should allow critical"
@@ -532,21 +532,21 @@ let test_production_allows_low () =
 
 let test_production_allows_medium () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_join" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow medium")
 
 let test_production_allows_high () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_create_room" ~input:`Null in
+    ~tool_name:"masc_create_workspace" ~input:`Null in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow high")
 
 let test_production_confirms_critical () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_delete_room" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null in
   (match d.action with
    | `Require_confirm reason ->
        Alcotest.(check bool) "reason non-empty"
@@ -563,14 +563,14 @@ let test_enterprise_allows_low () =
 
 let test_enterprise_allows_medium () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_join" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "enterprise should allow medium")
 
 let test_enterprise_confirms_high () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_create_room" ~input:`Null in
+    ~tool_name:"masc_create_workspace" ~input:`Null in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "enterprise should require confirm for high"
@@ -578,7 +578,7 @@ let test_enterprise_confirms_high () =
 
 let test_enterprise_confirms_critical () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_delete_room" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "enterprise should require confirm for critical"
@@ -593,7 +593,7 @@ let test_paranoid_allows_low () =
 
 let test_paranoid_confirms_medium () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_join" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for medium"
@@ -601,7 +601,7 @@ let test_paranoid_confirms_medium () =
 
 let test_paranoid_confirms_high () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_create_room" ~input:`Null in
+    ~tool_name:"masc_create_workspace" ~input:`Null in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for high"
@@ -609,7 +609,7 @@ let test_paranoid_confirms_high () =
 
 let test_paranoid_confirms_critical () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_delete_room" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for critical"
@@ -648,7 +648,7 @@ let test_hook_development_allows () =
     ~tool_name:"__gov_test_delete"
     ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "ok"));
   let tmpdir = make_tmpdir () in
-  let config = Coord.default_config tmpdir in
+  let config = Workspace.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"development" in
   let result = hook ~name:"__gov_test_delete" ~args:`Null in
   (match result with
@@ -664,7 +664,7 @@ let test_hook_production_blocks_critical () =
     ~tool_name:"__gov_test_delete2"
     ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "should not reach"));
   let tmpdir = make_tmpdir () in
-  let config = Coord.default_config tmpdir in
+  let config = Workspace.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
   let result = hook ~name:"__gov_test_delete2" ~args:`Null in
   (match result with
@@ -682,7 +682,7 @@ let test_hook_production_allows_low () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   let tmpdir = make_tmpdir () in
-  let config = Coord.default_config tmpdir in
+  let config = Workspace.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
   let result = hook ~name:"masc_status" ~args:`Null in
   (match result with
@@ -695,9 +695,9 @@ let test_hook_enterprise_blocks_high () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   let tmpdir = make_tmpdir () in
-  let config = Coord.default_config tmpdir in
+  let config = Workspace.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"enterprise" in
-  let result = hook ~name:"masc_create_room" ~args:`Null in
+  let result = hook ~name:"masc_create_workspace" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
        Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
@@ -711,9 +711,9 @@ let test_hook_paranoid_blocks_medium () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
   let tmpdir = make_tmpdir () in
-  let config = Coord.default_config tmpdir in
+  let config = Workspace.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
-  let result = hook ~name:"masc_join" ~args:`Null in
+  let result = hook ~name:"masc_bind" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
        Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
@@ -728,7 +728,7 @@ let test_blocked_response_structure () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
-  let config = Coord.default_config tmpdir in
+  let config = Workspace.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
   let result = hook ~name:generic_transition_tool ~args:transition_claim_input in
   (match result with
@@ -751,7 +751,7 @@ let test_blocked_response_structure_claim_next () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
-  let config = Coord.default_config tmpdir in
+  let config = Workspace.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
   let result = hook ~name:explicit_claim_tool ~args:`Null in
   (match result with
@@ -771,7 +771,7 @@ let test_unknown_governance_level_fail_closed_on_critical () =
   (* Security gate: typo / unknown level no longer silently allows every tool.
      Mirrors fail-closed posture of audit_threshold. See #7641. *)
   let d = Gp.decide ~governance_level:"nonexistent"
-    ~tool_name:"masc_delete_room" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null in
   (match d.action with
    | `Require_confirm _ -> ()
    | _ -> Alcotest.fail "unknown governance level should require confirm on critical risk")
@@ -779,7 +779,7 @@ let test_unknown_governance_level_fail_closed_on_critical () =
 (* ── Case-insensitive tool name matching ────────────────────── *)
 
 let test_case_insensitive_matching () =
-  let risk = Gp.assess_risk ~tool_name:"MASC_DELETE_ROOM" ~input:`Null in
+  let risk = Gp.assess_risk ~tool_name:"MASC_DELETE_WORKSPACE" ~input:`Null in
   Alcotest.(check string) "uppercase delete is critical"
     "critical" (Gp.risk_level_to_string risk)
 

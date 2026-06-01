@@ -78,7 +78,7 @@ Cross-check: `gh pr list --search "design system OR tokens-drift OR headless OR 
 
 ### 4.1 v2 Iter intersection map
 
-For each prefix family, mark whether subsequent v2 iters must coordinate.
+For each prefix family, mark whether subsequent v2 iters must align.
 
 | Prefix family | Approx count | v2 Iter overlap | Action |
 |---|---:|---|---|
@@ -143,7 +143,7 @@ These checks are part of Iter 1 PR body, not Iter 0. Listed here so Iter 1 doesn
   - **(a) Absorb-then-extend**: Cherry-pick relevant unpushed commits into `feature/ds-v2-iter2-tokens-wave1`, then add v2-specific token names. Preserves the original work's authorship.
   - **(b) Restart-from-source**: Open Iter 2 PR fresh on top of `main`, ignore the `bg-white-*` family. Faster but discards prior work.
   - **Recommendation**: (a). The unpushed commits represent ~14 sites/PR of careful migration; restart wastes that.
-- [ ] Confirm with user/prior author that the unpushed worktrees are not actively edited (heartbeat check via MASC if room is active, otherwise assume idle).
+- [ ] Confirm with user/prior author that the unpushed worktrees are not actively edited (heartbeat check via MASC if workspace is active, otherwise assume idle).
 
 ---
 

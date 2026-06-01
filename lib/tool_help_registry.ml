@@ -316,10 +316,10 @@ let manual_help_entry name =
           name;
           short_description = "List tasks visible to the calling keeper, optionally filtered.";
           when_to_use =
-            "Use to discover what tasks exist before claiming. For coordination-level task lookup (cross-keeper), masc_tasks is the equivalent on the meta surface.";
+            "Use to discover what tasks exist before claiming. For workspace-level task lookup (cross-keeper), masc_tasks is the equivalent on the meta surface.";
           key_constraints =
             [
-              "Visibility honours the caller's role and any coord scoping.";
+              "Visibility honours the caller's role and any workspace scoping.";
               "Default format is human-readable; pass format='json' for structured output.";
             ];
           details_markdown =

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::game::state::RoomState;
+use crate::game::state::WorkspaceState;
 
 /// Tracks the last-rendered turn/phase to avoid redundant DOM updates.
 #[derive(Resource, Default)]
@@ -22,14 +22,14 @@ const PHASES: &[&str] = &[
 ];
 
 /// Updates the turn phase bar in the DOM.
-pub fn update_turn_phase_dom(room_state: Res<RoomState>, mut cache: ResMut<TurnPhaseCache>) {
-    let current_phase = room_state.phase.as_str().to_string();
+pub fn update_turn_phase_dom(workspace_state: Res<WorkspaceState>, mut cache: ResMut<TurnPhaseCache>) {
+    let current_phase = workspace_state.phase.as_str().to_string();
 
     // Skip if nothing changed
-    if cache.last_turn == room_state.turn && cache.last_phase == current_phase {
+    if cache.last_turn == workspace_state.turn && cache.last_phase == current_phase {
         return;
     }
-    cache.last_turn = room_state.turn;
+    cache.last_turn = workspace_state.turn;
     cache.last_phase = current_phase.clone();
 
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -38,7 +38,7 @@ pub fn update_turn_phase_dom(room_state: Res<RoomState>, mut cache: ResMut<TurnP
 
     // Update turn number
     if let Some(el) = document.get_element_by_id("turn-num") {
-        el.set_text_content(Some(&room_state.turn.to_string()));
+        el.set_text_content(Some(&workspace_state.turn.to_string()));
     }
 
     // Update phase highlights

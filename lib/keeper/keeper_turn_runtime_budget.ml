@@ -410,7 +410,7 @@ let context_overflow_event_of_error
             }
 
 let pause_keeper_for_overflow
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(reason : string) : keeper_meta =
   match
@@ -471,7 +471,7 @@ let pause_keeper_for_overflow
 
 let sync_keeper_paused_state_impl
     ~(resume_policy : Keeper_supervisor_pause_policy.crash_pause_resume_policy option)
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(paused : bool) : (keeper_meta, string) result =
   let auto_resume_after_sec =
@@ -537,12 +537,12 @@ let sync_keeper_paused_state_impl
                "registry entry missing after metadata update");
       Ok synced_meta
 
-let sync_keeper_paused_state ~(config : Coord.config) ~(meta : keeper_meta) ~paused
+let sync_keeper_paused_state ~(config : Workspace.config) ~(meta : keeper_meta) ~paused
   =
   sync_keeper_paused_state_impl ~resume_policy:None ~config ~meta ~paused
 
 let sync_keeper_paused_state_with_resume_policy
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(paused : bool)
     ~(resume_policy : Keeper_supervisor_pause_policy.crash_pause_resume_policy)
@@ -554,7 +554,7 @@ let sync_keeper_paused_state_with_resume_policy
     ~meta
     ~paused
 
-let current_keeper_meta ~(config : Coord.config) ~(fallback_meta : keeper_meta) =
+let current_keeper_meta ~(config : Workspace.config) ~(fallback_meta : keeper_meta) =
   match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with
   | Some entry -> entry.meta
   | None -> fallback_meta
@@ -566,14 +566,14 @@ type post_turn_resilience_handles = {
 }
 
 let resilience_audit_dir
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(keeper_name : string) : string =
   let masc_root =
     Common.masc_dir_from_base_path ~base_path:config.base_path
   in
   Filename.concat
     (Filename.concat masc_root "resilience_audit")
-    (Coord_utils.safe_filename keeper_name)
+    (Workspace_utils.safe_filename keeper_name)
 
 let short_resilience_detail detail =
   let detail = String.trim detail in
@@ -597,7 +597,7 @@ let resilience_execution_event_to_string = function
         (short_resilience_detail reason)
 
 let make_post_turn_resilience_executor
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(on_paused : keeper_meta -> unit)
   : Resilience.Recovery.strategy_executor =
@@ -678,7 +678,7 @@ let make_post_turn_resilience_executor
   }
 
 let post_turn_resilience_handles
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta) : post_turn_resilience_handles =
   let paused_meta = ref None in
   let sync_lifecycle_meta lifecycle =
@@ -734,7 +734,7 @@ let post_turn_resilience_handles
         }
 
 let enqueue_partial_commit_continue_gate
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(failure_reason : Keeper_registry.failure_reason)
     ~(committed_tools : string list)

@@ -252,7 +252,7 @@ function KeeperStage({ id, compact = false }) {
               <div><b>agent</b> {k.agent_name}</div>
               <div><b>capabilities</b> {(k.capabilities||[]).join(", ") || "—"}</div>
               <div><b>mention</b> {(k.mention_targets||[]).join(", ") || "—"}</div>
-              <div><b>rooms</b> {(k.joined_rooms||[]).join(", ") || "—"}</div>
+              <div><b>workspaces</b> {(k.joined_workspaces||[]).join(", ") || "—"}</div>
               <div><b>last model</b> {k.last_model || "—"}</div>
               <div><b>autonomous</b> {k.autonomous_turns} turns / {k.autonomous_actions} actions</div>
             </section>

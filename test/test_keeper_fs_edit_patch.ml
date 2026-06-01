@@ -4,7 +4,7 @@
     Provider_a Code [Edit] cognate can be wired through OAS dual
     registration. *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Agent_tool_filesystem_runtime = Masc_mcp.Agent_tool_filesystem_runtime
@@ -74,7 +74,7 @@ let setup ?(sandbox = Keeper_types_profile_sandbox.Local) f =
   ensure_dir (Filename.concat base Common.masc_dirname);
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta = make_meta ~sandbox "tester" in
   let playground =
     Filename.concat base
@@ -113,7 +113,7 @@ let seed_single_playground_repo ~config ~(meta : Keeper_meta_contract.keeper_met
     ; mapped_credential_id = None
     }
   in
-  (match Keeper_repo_mapping.save_mapping ~base_path:config.Coord.base_path mapping with
+  (match Keeper_repo_mapping.save_mapping ~base_path:config.Workspace.base_path mapping with
    | Ok () -> ()
    | Error msg -> Alcotest.failf "seed keeper repo mapping: %s" msg);
   repo

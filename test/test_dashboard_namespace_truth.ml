@@ -96,7 +96,7 @@ let warm_execution_cache () =
     Lib.Server_dashboard_http.execution_cache
     (`Assoc [("status", `String "ok")])
 
-let warm_meta_cognition_summary (config : Lib.Coord.config) =
+let warm_meta_cognition_summary (config : Lib.Workspace.config) =
   let key =
     Lib.Server_dashboard_http.dashboard_cache_key config
       "meta_cognition_summary" "dashboard_shell"
@@ -105,7 +105,7 @@ let warm_meta_cognition_summary (config : Lib.Coord.config) =
     (Lib.Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
          Lib.Meta_cognition.summary_json config));
   Lib.Dashboard_cache.invalidate_prefix
-    (Printf.sprintf "shell:coord=%s:" config.base_path)
+    (Printf.sprintf "shell:workspace=%s:" config.base_path)
 
 let expire_execution_warmup () =
   let surface = Lib.Server_dashboard_http.execution_cache in
@@ -139,7 +139,7 @@ let create_keeper env sw config name =
   | Some result -> fail (Tool_result.message result)
   | None -> fail "missing masc_keeper_up dispatch"
 
-let test_dashboard_namespace_truth_empty_room () =
+let test_dashboard_namespace_truth_empty_workspace () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -188,11 +188,11 @@ let test_dashboard_namespace_truth_empty_room () =
           (match json |> member "generated_at_iso" with
           | `String value -> String.length value > 0
           | _ -> false);
-        check bool "room-truth alias retired"
+        check bool "workspace-truth alias retired"
           false
           (json |> member "dashboard_aliases" |> to_list
            |> List.map to_string
-           |> List.mem "/api/v1/dashboard/room-truth");
+           |> List.mem "/api/v1/dashboard/workspace-truth");
         check bool "readiness status exposed"
           true
           (String.length (json |> member "readiness" |> member "status" |> to_string) > 0);
@@ -230,7 +230,7 @@ let test_dashboard_namespace_truth_execution_fixture () =
           (json |> member "execution" |> member "top_queue" = `Null);
       ))
 
-let test_dashboard_namespace_truth_empty_room_focus_label () =
+let test_dashboard_namespace_truth_empty_workspace_focus_label () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -247,13 +247,13 @@ let test_dashboard_namespace_truth_empty_room_focus_label () =
         in
         let open Yojson.Safe.Util in
         let focus_label = json |> member "focus" |> member "label" |> to_string in
-        check bool "empty room focus mentions no agents"
+        check bool "empty workspace focus mentions no agents"
           true
           (String.length focus_label > 0
            && focus_label <> "지금은 namespace 전체가 비교적 안정적입니다");
       ))
 
-let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
+let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -262,10 +262,10 @@ let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.coord_config in
-      ignore (Lib.Coord.init config ~agent_name:None);
+      let config = state.Mcp_server.workspace_config in
+      ignore (Lib.Workspace.init config ~agent_name:None);
       ignore
-        (Lib.Coord.bind_session config
+        (Lib.Workspace.bind_session config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -284,13 +284,13 @@ let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
             in
             let open Yojson.Safe.Util in
             let focus_label = json |> member "focus" |> member "label" |> to_string in
-            check int "keeper-only room counts general agents as zero"
+            check int "keeper-only workspace counts general agents as zero"
               0
               (json |> member "root" |> member "counts" |> member "agents" |> to_int);
-            check int "keeper-only room still counts keeper meta"
+            check int "keeper-only workspace still counts keeper meta"
               1
               (json |> member "root" |> member "counts" |> member "keepers" |> to_int);
-            check bool "keeper-only room does not report empty room focus"
+            check bool "keeper-only workspace does not report empty workspace focus"
               false
               (String.equal focus_label
                  "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다."))))
@@ -304,16 +304,16 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.coord_config in
-      ignore (Lib.Coord.init config ~agent_name:None);
+      let config = state.Mcp_server.workspace_config in
+      ignore (Lib.Workspace.init config ~agent_name:None);
       ignore
-        (Lib.Coord.bind_session config
+        (Lib.Workspace.bind_session config
            ~agent_name:"agent_code-test-agent"
            ~agent_type_override:(Some "agent_code")
            ~capabilities:["typescript"]
            ());
       ignore
-        (Lib.Coord.bind_session config
+        (Lib.Workspace.bind_session config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -332,13 +332,13 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
             in
             let open Yojson.Safe.Util in
             let focus_label = json |> member "focus" |> member "label" |> to_string in
-            check int "mixed room counts one general agent"
+            check int "mixed workspace counts one general agent"
               1
               (json |> member "root" |> member "counts" |> member "agents" |> to_int);
-            check int "mixed room counts one keeper"
+            check int "mixed workspace counts one keeper"
               1
               (json |> member "root" |> member "counts" |> member "keepers" |> to_int);
-            check bool "mixed room avoids empty runtime fallback"
+            check bool "mixed workspace avoids empty runtime fallback"
               false
               (String.equal focus_label
                  "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다."))))
@@ -378,9 +378,9 @@ let test_dashboard_namespace_truth_promotes_meta_cognition_focus () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.coord_config in
-      ignore (Lib.Coord.init config ~agent_name:None);
-      let masc_dir = Lib.Coord.masc_dir config in
+      let config = state.Mcp_server.workspace_config in
+      ignore (Lib.Workspace.init config ~agent_name:None);
+      let masc_dir = Lib.Workspace.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -443,9 +443,9 @@ let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.coord_config in
-      ignore (Lib.Coord.init config ~agent_name:None);
-      let masc_dir = Lib.Coord.masc_dir config in
+      let config = state.Mcp_server.workspace_config in
+      ignore (Lib.Workspace.init config ~agent_name:None);
+      let masc_dir = Lib.Workspace.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -522,7 +522,7 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Lib.Mcp_server.coord_config in
+      let config = state.Lib.Mcp_server.workspace_config in
       warm_execution_cache ();
       let cached_shell =
         `Assoc
@@ -615,7 +615,7 @@ let test_last_good_shell_fallback_preserves_counts () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      ignore (Lib.Coord.init state.Lib.Mcp_server.coord_config ~agent_name:None);
+      ignore (Lib.Workspace.init state.Lib.Mcp_server.workspace_config ~agent_name:None);
       warm_execution_cache ();
       (* Warm the shell cache so last_good_shell gets populated. *)
       Lib.Server_dashboard_http.warm_shell_cache state;
@@ -687,11 +687,11 @@ let () =
     [
       ( "read_model",
         [
-          test_case "empty room shape" `Quick test_dashboard_namespace_truth_empty_room;
+          test_case "empty workspace shape" `Quick test_dashboard_namespace_truth_empty_workspace;
           test_case "execution fixture surfaces top queue" `Quick test_dashboard_namespace_truth_execution_fixture;
-          test_case "empty room focus label reflects no agents" `Quick test_dashboard_namespace_truth_empty_room_focus_label;
-          test_case "keeper-only room does not look empty" `Quick
-            test_dashboard_namespace_truth_keeper_only_room_not_reported_empty;
+          test_case "empty workspace focus label reflects no agents" `Quick test_dashboard_namespace_truth_empty_workspace_focus_label;
+          test_case "keeper-only workspace does not look empty" `Quick
+            test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty;
           test_case "mixed runtimes keep counts aligned" `Quick
             test_dashboard_namespace_truth_mixed_runtime_counts;
           test_case "operator digest shape matches namespace-truth" `Quick test_operator_digest_shape_matches_namespace_truth;

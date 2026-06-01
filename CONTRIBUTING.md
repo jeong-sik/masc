@@ -1,6 +1,6 @@
 # Contributing to MASC MCP
 
-MASC (Multi-Agent Streaming Coordination) is an OCaml 5.x MCP server for coordinating multiple coding agents inside one repository.
+MASC (Multi-Agent Shared Context) is an OCaml 5.x MCP server for alignment multiple coding agents inside one repository.
 
 ## Quick Start
 
@@ -53,7 +53,7 @@ lib/
 ├── dashboard/                # dashboard providers and read models
 ├── board/                    # board/social surface helpers
 ├── grpc/                     # gRPC transport support
-├── room/                     # room/session/task coordination
+├── workspace/                     # workspace/session/task workspace collaboration
 └── tools.ml                  # tool schema registry entrypoint
 
 dashboard/                    # TypeScript + Preact SPA source
@@ -154,7 +154,7 @@ Every new issue should end with:
 Current label groups:
 
 - `type:bug`, `type:friction`, `type:feature`, `type:architecture`, `type:docs`
-- `area:coordination`, `area:team-session`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental`
+- `area:workspace collaboration`, `area:team-session`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental`
 - `target:now`, `target:next`, `target:later`
 
 Triage defaults:
@@ -177,7 +177,7 @@ PRs should include these sections:
 
 State which promise the PR affects:
 
-- `repo coordination`
+- `repo workspace collaboration`
 - `ops visibility`
 - `none/internal`
 

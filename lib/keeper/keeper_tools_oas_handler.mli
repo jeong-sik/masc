@@ -18,7 +18,7 @@
 val make_keeper_tool_handler
   :  name:string
   -> input_schema:Yojson.Safe.t
-  -> config:Coord.config
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_snapshot:Keeper_types.working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t

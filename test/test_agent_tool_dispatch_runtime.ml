@@ -2,7 +2,7 @@ open Alcotest
 
 module KET = Masc_mcp.Agent_tool_dispatch_runtime
 module KES = Masc_mcp.Agent_tool_shared_runtime
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -79,7 +79,7 @@ let with_exec_fixture ?tool_access name fn =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Masc_mcp.Coord.default_config dir in
+      let config = Masc_mcp.Workspace.default_config dir in
       let meta = make_meta ?tool_access () in
       fn ~config ~meta ~ctx_work:(make_ctx ()))
 
@@ -254,7 +254,7 @@ let test_tool_not_allowed_denied_by_policy_counter () =
   Fun.protect ~finally:cleanup (fun () ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let config = Masc_mcp.Coord.default_config dir in
+    let config = Masc_mcp.Workspace.default_config dir in
     let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
     ignore
       (KET.execute_keeper_tool_call_with_outcome
@@ -310,8 +310,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (json_contains_tool "keeper_board_fake" json);
   check bool "voice tool grouped" true
     (member "voice" "keeper_voice_speak");
-  check bool "task tool grouped as coordination" true
-    (member "coordination" "keeper_task_claim");
+  check bool "task tool grouped as workspace" true
+    (member "workspace" "keeper_task_claim");
   check bool "Grep tool grouped" true
     (member "search_files" "tool_search_files");
   check bool "fs tool grouped" true

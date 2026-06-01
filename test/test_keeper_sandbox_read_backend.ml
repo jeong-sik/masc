@@ -6,7 +6,7 @@
     where docker is available, gated through env-set integration
     tests. *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Keeper_sandbox_read_backend = Masc_mcp.Keeper_sandbox_read_backend
 module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
@@ -134,7 +134,7 @@ let test_docker_git_creds_routes () =
 let setup_config name =
   let base = temp_dir () in
   Unix.mkdir (Filename.concat base Common.masc_dirname) 0o755;
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   let meta =
     make_meta ~name ~sandbox:Keeper_types_profile_sandbox.Docker
   in
@@ -725,7 +725,7 @@ let test_docker_config_mount_and_env_args () =
        ~base_path:base
        ~container_root)
 
-let test_docker_coord_state_mount_args_expose_safe_subset () =
+let test_docker_workspace_state_mount_args_expose_safe_subset () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let masc_root = Filename.concat base ".masc" in
@@ -736,7 +736,7 @@ let test_docker_coord_state_mount_args_expose_safe_subset () =
   write_file (Filename.concat (Filename.concat masc_root "auth") "keeper.token") "secret";
   let container_root = "/home/keeper/playground/minjae" in
   let specs =
-    Keeper_sandbox_runtime.docker_coord_state_mount_specs
+    Keeper_sandbox_runtime.docker_workspace_state_mount_specs
       ~base_path:base
       ~container_root
   in
@@ -1275,8 +1275,8 @@ let run_tests ~clock () =
             test_docker_masc_config_binding_pins_container_runtime_paths;
           Alcotest.test_case "docker config mount and env args" `Quick
             test_docker_config_mount_and_env_args;
-          Alcotest.test_case "docker room state mount exposes safe subset" `Quick
-            test_docker_coord_state_mount_args_expose_safe_subset;
+          Alcotest.test_case "docker workspace state mount exposes safe subset" `Quick
+            test_docker_workspace_state_mount_args_expose_safe_subset;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick

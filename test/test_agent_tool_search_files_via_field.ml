@@ -6,7 +6,7 @@
     the [sandbox_host_root] / [playground_path] leak that #11080 closed
     in [keeper_status_detail.ml]. *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Agent_tool_command_runtime = Masc_mcp.Agent_tool_command_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
@@ -61,7 +61,7 @@ let setup f =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   ensure_dir (Filename.concat base Common.masc_dirname);
-  let config = Coord.default_config base in
+  let config = Workspace.default_config base in
   Keeper_registry.clear ();
   let meta = make_meta ~name:"via-keeper" in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in

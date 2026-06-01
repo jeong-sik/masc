@@ -33,7 +33,7 @@ type run_context =
   }
 
 val prepare_run_context :
-     config:Coord.config
+     config:Workspace.config
   -> meta:keeper_meta
   -> base_dir:string
   -> max_context:int

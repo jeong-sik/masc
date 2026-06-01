@@ -17,7 +17,7 @@
     [grpc_port] / [ws_port] (env-derived), [set_agent_heartbeat_age]
     / [inc_agent_stale] (per-agent labels, internal-only), the
     JSON helpers (\[assoc_field], [int_field], [int_field_opt],
-    [int_option_json], [coord_id_from_config], [cluster_summary_json]),
+    [int_option_json], [workspace_id_from_config], [cluster_summary_json]),
     [http_listener_mode], [primary_path], [queue_pressure],
     [tcp_port_reachable], [hot_session_json], the
     [ws_delivery_metric_names] data table + its type.  All
@@ -41,7 +41,7 @@ type hot_queue_session =
 
 (** [set_sse_sessions ~kind count] sets the [masc_sse_sessions]
     gauge labelled with [kind] (typically ["observer"] /
-    ["coordinator"]). *)
+    ["agent_stream"]). *)
 val set_sse_sessions : kind:string -> int -> unit
 
 (** [observe_broadcast_duration ?target seconds] records a
@@ -306,7 +306,7 @@ val inc_agent_stale : unit -> unit
     derived fields ([primary_path], [queue_pressure],
     [http_listener_mode]).  Reads metric values via
     [Prometheus.metric_value_or_zero] — never raises on missing
-    metrics.  [~config] is currently used for room-id
+    metrics.  [~config] is currently used for workspace-id
     derivation; [cluster_summary_json] is intentionally [None]
     to keep transport health metrics-only (no command-plane I/O). *)
-val transport_health_json : config:Coord.config -> Yojson.Safe.t
+val transport_health_json : config:Workspace.config -> Yojson.Safe.t

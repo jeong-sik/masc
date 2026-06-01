@@ -92,7 +92,7 @@ let rules_path ?base_path () =
     | Some base_path -> base_path
     | None -> Env_config_core.base_path ()
   in
-  Filename.concat (Coord_utils.masc_dir_from_base_path ~base_path) "approval-rules.json"
+  Filename.concat (Workspace_utils.masc_dir_from_base_path ~base_path) "approval-rules.json"
 ;;
 
 let stable_request_key_blocklist =

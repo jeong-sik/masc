@@ -3,7 +3,7 @@
 /**
  * User-visible fallback shown when a board message arrives without a
  * `from` field — three board panels (state-block-messages,
- * mention-inbox, message-room-timeline) used to inline the literal
+ * mention-inbox, message-workspace-timeline) used to inline the literal
  * `'system'` in `row.message.from ?? 'system'`. Captured here so a
  * future relabel (e.g. localising to `'시스템'` or distinguishing
  * automation from system) updates every panel in one place.
@@ -17,7 +17,7 @@ export const SYSTEM_MESSAGE_FROM = 'system'
  * Falls back to `<seq>-<index>` for unposted/draft rows where `id`
  * hasn't been assigned yet, with `'message'` as the seq placeholder.
  *
- * Two board panels (`mention-inbox`, `message-room-timeline`) shipped
+ * Two board panels (`mention-inbox`, `message-workspace-timeline`) shipped
  * this exact body file-internal as `rowKey`. A third (`state-block-messages`)
  * uses a different base (`id ?? seq ?? index` single chain) plus a
  * `state-block.slice(0, 24)` suffix and is left on its own helper —
@@ -38,7 +38,7 @@ export function boardMessageRowKey(message: Message, index: number): string {
  * surfaces `'(state-only message)'` instead because that view is
  * specifically for state-block traffic.
  *
- * Two board panels (`mention-inbox`, `message-room-timeline`) shipped
+ * Two board panels (`mention-inbox`, `message-workspace-timeline`) shipped
  * this exact body file-internal as `previewContent`. The third panel
  * (`state-block-messages`) stays on its own variant — its empty branch
  * is `'(state-only message)'` rather than `'(empty)'`, and the fallback

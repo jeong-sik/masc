@@ -42,7 +42,7 @@ val agent_tool_execute_shell_ir_native_min_timeout_sec : float
     dispatch paths re-clamp independently inside their backend. *)
 
 val rewrite_turn_runtime_paths_to_host :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string
@@ -52,7 +52,7 @@ val rewrite_turn_runtime_paths_to_host :
     for follow-up tool calls. *)
 
 val rewrite_docker_host_paths_to_container :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string
@@ -64,7 +64,7 @@ val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   unit ->
@@ -81,7 +81,7 @@ end
 val handle_tool_search_files :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   string

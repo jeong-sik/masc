@@ -29,7 +29,7 @@ async function loadOps() {
     operatorActionLog: operatorStore.operatorActionLog,
     operatorDigestError: operatorStore.operatorDigestError,
     operatorError: operatorStore.operatorError,
-    operatorRoomDigest: operatorStore.operatorRoomDigest,
+    operatorWorkspaceDigest: operatorStore.operatorWorkspaceDigest,
     operatorSnapshot: operatorStore.operatorSnapshot,
     hydratedWorkflowId: helpers.hydratedWorkflowId,
   }
@@ -62,7 +62,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -79,7 +79,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -145,7 +145,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -166,7 +166,7 @@ describe('Ops surface', () => {
         { action_type: 'broadcast', target_type: 'root' },
       ],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -192,7 +192,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -209,7 +209,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -240,7 +240,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -257,7 +257,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -282,7 +282,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -299,7 +299,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -323,7 +323,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -342,7 +342,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],

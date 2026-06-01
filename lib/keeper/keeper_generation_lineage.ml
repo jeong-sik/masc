@@ -207,7 +207,7 @@ let index_entry_json
     ]
 
 let record_handoff_artifacts
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(parent : keeper_meta)
     ~(child : keeper_meta)
     ~(parent_trace_id : string)
@@ -299,7 +299,7 @@ let rec take n xs =
     | [] -> []
     | x :: tl -> x :: take (n - 1) tl
 
-let surface_json (config : Coord.config) (meta : keeper_meta) ~recent_limit =
+let surface_json (config : Workspace.config) (meta : keeper_meta) ~recent_limit =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let manifest_path = Keeper_types_support.keeper_generation_manifest_path config trace_id in
   let index_path = Keeper_types_support.keeper_generation_index_path config meta.name in

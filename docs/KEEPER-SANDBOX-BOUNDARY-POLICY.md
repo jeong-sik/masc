@@ -16,7 +16,7 @@ failure just because a keeper uses the Docker backend.
 | --- | --- | --- |
 | `Keeper_sandbox_config` | Structured keeper TOML parsing, canonical sandbox profile validation, backend storage-root projection, sandbox-visible path projection | Tool execution, shell command dispatch, Docker process lifecycle |
 | `Keeper_sandbox` | Keeper-facing sandbox contract used by tools and status surfaces | Manual TOML parsing, Docker launch policy |
-| `Coord_worktree_paths` | Worktree shape checks and path consumers | Sandbox-profile parsing, Docker container-root construction |
+| `Workspace_worktree_paths` | Worktree shape checks and path consumers | Sandbox-profile parsing, Docker container-root construction |
 | `Retired_file_tool` / write tools | Tool input validation and sandbox-visible path normalization via `Keeper_sandbox` | Docker prefix literals, profile detection, keeper TOML reads |
 | `Keeper_workspace_op` | Structured `tool_search_files` operation vocabulary and valid op strings | Dispatch implementation, timeout policy, path resolution |
 | `Agent_tool_execute_timeout` | Execute timeout constants, user timeout clamping, typed Shell IR timeout floors | Tool dispatch, command parsing, path resolution |
@@ -78,7 +78,7 @@ Source-level boundary tests prevent regressions in layer ownership:
 The boundary test intentionally fails if:
 
 - tool code reintroduces Docker path literals or profile detection;
-- coord repo-path helpers reintroduce Docker container-root construction
+- workspace repo-path helpers reintroduce Docker container-root construction
   or sandbox-profile parsing;
 - Docker shell code re-exports generic command classification or parses
   raw shell commands directly;

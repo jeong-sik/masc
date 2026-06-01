@@ -395,7 +395,7 @@ export interface DashboardAttentionEvent {
 
 export interface DashboardNamespaceTruthRetention {
   scope?: string
-  coordination_root?: string
+  workspace collaboration_root?: string
   workspace_path?: string
   shell_input?: string
   execution_input?: string
@@ -673,46 +673,46 @@ export interface DashboardPlanningResponse {
     done?: number
     cancelled?: number
   }
-  coordination_fsm?: DashboardCoordinationFsmSnapshot | null
+  workspace collaboration_fsm?: DashboardWorkspaceFsmSnapshot | null
 }
 
-export interface DashboardCoordinationFsmRefs {
+export interface DashboardWorkspaceFsmRefs {
   goal_id?: string | null
   task_ids?: string[]
   post_ids?: string[]
   agent_name?: string | null
 }
 
-export interface DashboardCoordinationFsmEvidence {
+export interface DashboardWorkspaceFsmEvidence {
   source?: string
   kind?: string
   id?: string | null
   label?: string
   detail?: string
   timestamp?: number | null
-  refs?: DashboardCoordinationFsmRefs
+  refs?: DashboardWorkspaceFsmRefs
 }
 
-export interface DashboardCoordinationFsmViolation {
+export interface DashboardWorkspaceFsmViolation {
   axis?: string
   code?: string
   severity?: 'info' | 'warn' | 'error' | string
   message?: string
-  refs?: DashboardCoordinationFsmRefs
-  evidence?: DashboardCoordinationFsmEvidence[]
+  refs?: DashboardWorkspaceFsmRefs
+  evidence?: DashboardWorkspaceFsmEvidence[]
 }
 
-export interface DashboardCoordinationFsmProduct {
-  refs?: DashboardCoordinationFsmRefs
+export interface DashboardWorkspaceFsmProduct {
+  refs?: DashboardWorkspaceFsmRefs
   goal?: string | null
   task?: string
   board?: string
   reward?: string
-  evidence?: DashboardCoordinationFsmEvidence[]
-  violations?: DashboardCoordinationFsmViolation[]
+  evidence?: DashboardWorkspaceFsmEvidence[]
+  violations?: DashboardWorkspaceFsmViolation[]
 }
 
-export interface DashboardCoordinationFsmSummary {
+export interface DashboardWorkspaceFsmSummary {
   products?: number
   violations?: number
   evidence?: number
@@ -723,13 +723,13 @@ export interface DashboardCoordinationFsmSummary {
   }
 }
 
-export interface DashboardCoordinationFsmSnapshot {
+export interface DashboardWorkspaceFsmSnapshot {
   schema_version?: number
   mode?: string
-  summary?: DashboardCoordinationFsmSummary
-  products?: DashboardCoordinationFsmProduct[]
-  evidence?: DashboardCoordinationFsmEvidence[]
-  violations?: DashboardCoordinationFsmViolation[]
+  summary?: DashboardWorkspaceFsmSummary
+  products?: DashboardWorkspaceFsmProduct[]
+  evidence?: DashboardWorkspaceFsmEvidence[]
+  violations?: DashboardWorkspaceFsmViolation[]
   projection_error?: string | null
 }
 
@@ -1028,7 +1028,7 @@ export interface DashboardGoalDetailResponse {
 
 
 export interface ServerStatus {
-  coordination_root?: string
+  workspace collaboration_root?: string
   workspace_path?: string
   workspace_differs?: boolean
   cluster?: string

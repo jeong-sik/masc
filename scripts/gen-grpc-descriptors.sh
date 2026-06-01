@@ -47,8 +47,8 @@ sys.stdout.buffer.write(data[i:])
 
 do_generate() {
   check_protoc
-  echo "--- masc_coordination.proto ---"
-  gen_descriptor_b64 "${PROTO_DIR}/masc_coordination.proto"
+  echo "--- masc_workspace collaboration.proto ---"
+  gen_descriptor_b64 "${PROTO_DIR}/masc_workspace collaboration.proto"
   echo ""
   echo ""
   echo "--- grpc_health_v1.proto ---"
@@ -59,7 +59,7 @@ do_generate() {
 do_check() {
   check_protoc
   local masc_gen
-  masc_gen="$(gen_descriptor_b64 "${PROTO_DIR}/masc_coordination.proto")"
+  masc_gen="$(gen_descriptor_b64 "${PROTO_DIR}/masc_workspace collaboration.proto")"
 
   # Extract current masc descriptor from OCaml source.
   # The descriptor is split across multiple lines with ^ concatenation.
@@ -72,10 +72,10 @@ do_check() {
   )"
 
   if [ "${masc_gen}" = "${masc_current}" ]; then
-    echo "OK: masc_coordination descriptor matches proto source."
+    echo "OK: masc_workspace collaboration descriptor matches proto source."
     exit 0
   else
-    echo "DRIFT: masc_coordination descriptor does not match proto source." >&2
+    echo "DRIFT: masc_workspace collaboration descriptor does not match proto source." >&2
     echo "" >&2
     echo "Generated (first 80 chars): ${masc_gen:0:80}..." >&2
     echo "Current   (first 80 chars): ${masc_current:0:80}..." >&2

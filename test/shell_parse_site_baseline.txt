@@ -5,11 +5,11 @@
 lib/build_identity.ml:68  # argv_subsystem
 lib/chronicle_ingest.ml:33  # argv_subsystem
 lib/chronicle_validate.ml:35  # argv_subsystem
-lib/coord/coord_git.ml:18  # argv_coord
-lib/coord/coord_git.ml:38  # argv_coord
-lib/coord/coord_identity.ml:22  # argv_coord
-lib/coord/playground_repo_cache.ml:18  # argv_coord
-lib/dashboard/dashboard_branches.ml:27  # argv_coord
+lib/workspace/workspace_git.ml:18  # argv_workspace
+lib/workspace/workspace_git.ml:38  # argv_workspace
+lib/workspace/workspace_identity.ml:22  # argv_workspace
+lib/workspace/playground_repo_cache.ml:18  # argv_workspace
+lib/dashboard/dashboard_branches.ml:27  # argv_workspace
 lib/exec/command_gate/shell_command_gate.ml:414  # parser_primary
 lib/exec/exec_dispatch.ml:174  # argv_dispatch
 lib/exec/exec_dispatch.ml:183  # argv_dispatch
@@ -40,7 +40,7 @@ lib/keeper/keeper_turn_sandbox_runtime.ml:226  # argv_keeper
 lib/local/worker_container_types.ml:233  # argv_dispatch
 lib/notify.ml:27  # argv_subsystem
 lib/notify.ml:46  # argv_subsystem
-lib/repo_manager/repo_git.ml:52  # argv_coord
+lib/repo_manager/repo_git.ml:52  # argv_workspace
 lib/server/server_dashboard_http_runtime_info.ml:130  # argv_dispatch
 lib/server/server_dashboard_http_runtime_info.ml:280  # argv_dispatch
 lib/server/server_routes_http_routes_sidecar.ml:594  # argv_dispatch

@@ -166,7 +166,7 @@ val recent_tool_streak_count :
 (** {1 Hook factory} *)
 
 val make_hooks :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   generation:int ->
   ?max_cost_usd:float ->

@@ -166,14 +166,14 @@ let runtime_mcp_tool_surface_class allowed_tool_names =
     "mixed"
 
 let runtime_mcp_current_task_required_tools
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     (entry : Keeper_registry.registry_entry) =
   match entry.meta.current_task_id with
   | None -> []
   | Some task_id ->
       let task_id = Keeper_id.Task_id.to_string task_id in
       let tasks =
-        try Coord.get_tasks_raw config
+        try Workspace.get_tasks_raw config
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
@@ -184,7 +184,7 @@ let runtime_mcp_current_task_required_tools
       in
       tasks
       |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-      |> Option.map Coord.task_required_tools
+      |> Option.map Workspace.task_required_tools
       |> Option.value ~default:[]
       |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
@@ -214,7 +214,7 @@ let runtime_mcp_keeper_log_context_of_entry
     | [] -> None
     | ids -> Some ids
   in
-  let config = Coord.default_config entry.base_path in
+  let config = Workspace.default_config entry.base_path in
   let allowed_tool_names =
     Keeper_tool_policy.keeper_allowed_tool_names
       ~phase:entry.phase
@@ -224,7 +224,7 @@ let runtime_mcp_keeper_log_context_of_entry
     runtime_mcp_current_task_required_tools ~config entry
   in
   let missing_required_tools =
-    Coord.missing_required_tools ~allowed:allowed_tool_names required_tools
+    Workspace.missing_required_tools ~allowed:allowed_tool_names required_tools
   in
   let profile_defaults =
     Keeper_types_profile.load_keeper_profile_defaults entry.meta.name
@@ -300,8 +300,8 @@ let runtime_mcp_masc_root ~base_path =
   match Keeper_tool_call_log.configured_masc_root () with
   | Some masc_root -> masc_root
   | None ->
-      let config = Coord.default_config base_path in
-      Coord.masc_root_dir config
+      let config = Workspace.default_config base_path in
+      Workspace.masc_root_dir config
 
 let record_runtime_mcp_trajectory_coverage_gap
     ~(masc_root : string)
@@ -595,7 +595,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                     timeout_sec name source))
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
-     | Coord.Not_initialized ->
+     | Workspace.Not_initialized ->
        (* RFC-0189: server bootstrap incomplete — Masc_domain
           System NotInitialized.  [Runtime_failure] (caller
           cannot fix; the operator must initialise MASC). *)
@@ -688,7 +688,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
               (if !timeout_hit then 1 else 0) duration_ms truncated)
   in
   let otel_trace_id = Otel_spans.current_trace_id () in
-  Audit_log.log_tool_call state.Mcp_server.coord_config
+  Audit_log.log_tool_call state.Mcp_server.workspace_config
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
   if not success then (
@@ -758,7 +758,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   if telemetry_enabled then
     (match state.Mcp_server.fs with
      | Some fs ->
-         (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.coord_config
+         (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
                 ~source:(Tool_registry.string_of_source source)
                 ?session_id:telemetry_session_id
@@ -834,7 +834,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
 
   (* Emit activity graph event for tool call — enables real-time dashboard tracking *)
   (try
-    ignore (Activity_graph.emit state.Mcp_server.coord_config
+    (* fire-and-forget: activity graph emission must not change the tool-call result. *)
+    ignore (Activity_graph.emit state.Mcp_server.workspace_config
       ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
       ~subject:(Activity_graph.entity ~kind:"tool" name)
       ~kind:"tool.called"

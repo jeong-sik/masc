@@ -65,7 +65,7 @@ let record_escalation_log ~keeper_name ~keeper_turn_id ~turn_id ~reason_string ~
 ;;
 
 let persist_turn_livelock_pause
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(detail : string)
   : unit
@@ -86,7 +86,7 @@ let persist_turn_livelock_pause
 ;;
 
 let handle
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(generation : int)
       ~(keeper_turn_id : int)

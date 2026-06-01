@@ -71,7 +71,7 @@ Cross-run windows require at least:
 Cross-run aggregation must declare both:
 
 - scope
-  - for example keeper, task, room, benchmark cohort, or explicit run set
+  - for example keeper, task, workspace, benchmark cohort, or explicit run set
 - ordering basis
   - for example `ended_at`, evaluator completion time, or manifest creation time
 

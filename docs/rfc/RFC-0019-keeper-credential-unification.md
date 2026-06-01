@@ -149,7 +149,7 @@ let resolve ~config ~identity:keeper_name =
       Error (No_default_credential { candidates = List.map (fun c -> c.id) many })
 
 val resolve_for_repo
-  : config:Coord.config
+  : config:Workspace.config
  -> keeper_name:string
  -> repo_id:string
  -> (binding, error) result
@@ -315,7 +315,7 @@ A bash hook fires before external review publication. It:
 | R3 | Materializer races with operator's manual `gh auth login` outside dashboard | PR-C 2-phase commit + filesystem lock during materialize |
 | R4 | F-1 gate false positive (multi-operator host shares same PAT) | PR-C audit metric distinguishes single- vs multi-operator detection by hash count uniqueness |
 | R5 | RFC-discovery hook creates friction for legitimate small PRs | Default warn-only for first 2 weeks; ramp to block; allow `--skip-rfc-check` with logged reason |
-| R6 | This RFC itself is the next #12304 (designed without coordinating with another in-flight RFC) | RFC-0019 explicitly references RFC-0008; PR-A diff is auto-checked against `docs/rfc/` for any RFC published after 2026-04-30 by this RFC's CI step |
+| R6 | This RFC itself is the next #12304 (designed without aligning with another in-flight RFC) | RFC-0019 explicitly references RFC-0008; PR-A diff is auto-checked against `docs/rfc/` for any RFC published after 2026-04-30 by this RFC's CI step |
 | R7 | The `state` field added to `credential` breaks existing TOML parsing | PR-A `of_toml` accepts missing field as `Unmaterialized`; preserve symmetry with `to_toml` (per `feedback_json-serializer-parser-key-symmetry`) |
 | R8 | F-2 hosts.yml relabel requires Option B (in-container login), still gated | PR-C ships filesystem-side relabel only; full Option B deferred per RFC-0008 P3 ordering |
 

@@ -26,7 +26,7 @@ import {
   tasks,
 } from '../store'
 import {
-  fetchRoomMessages,
+  fetchWorkspaceMessages,
   fetchTaskHistory,
   sendBroadcast,
   fetchAgentTimeline,
@@ -55,7 +55,7 @@ import { KeeperChatPanel } from './keeper-chat-panel'
 type TaskHistoryRow = { taskId: string; text: string }
 
 interface ProfileData {
-  roomActivity: string[]
+  workspaceActivity: string[]
   taskHistories: TaskHistoryRow[]
   agentTimeline: AgentTimelineResponse | null
   agentRelations: AgentRelationsResponse | null
@@ -68,9 +68,9 @@ const sendingMention = signal(false)
 const activityQuery = signal('')
 
 /**
- * Pure filter for the "프로젝트 활동" (roomActivity) string list.
+ * Pure filter for the "프로젝트 활동" (workspaceActivity) string list.
  *
- * Case-insensitive substring match on the full line. `fetchRoomMessages`
+ * Case-insensitive substring match on the full line. `fetchWorkspaceMessages`
  * returns rendered lines that already embed actor/target/text, so a
  * substring pass is enough to isolate all lines mentioning a particular
  * actor, task id, or keyword.
@@ -81,7 +81,7 @@ const activityQuery = signal('')
  *
  * Input is never mutated; caller may pass a readonly array.
  */
-function filterRoomActivity(
+function filterWorkspaceActivity(
   lines: readonly string[],
   query: string,
 ): readonly string[] {
@@ -128,7 +128,7 @@ function loadProfile(name: string): Promise<void> {
   }
   return profileResource.load(async () => {
     const [lines, timeline, relations] = await Promise.all([
-      fetchRoomMessages(80),
+      fetchWorkspaceMessages(80),
       fetchAgentTimeline(name, 4, 20).catch(() => null),
       fetchAgentRelations(name).catch(() => null),
     ])
@@ -154,7 +154,7 @@ function loadProfile(name: string): Promise<void> {
     }
 
     return {
-      roomActivity: activity,
+      workspaceActivity: activity,
       taskHistories: histories,
       agentTimeline: timeline,
       agentRelations: relations,
@@ -341,7 +341,7 @@ export function AgentProfile({ name }: { name: string }) {
   const profileLoading = ps.status === 'loading'
 
   const owned = assignedTasks(name)
-  const lines = profileData?.roomActivity ?? []
+  const lines = profileData?.workspaceActivity ?? []
   const timeline = profileData?.agentTimeline ?? null
   const keeper = findKeeper(name)
   const keeperChatName = keeperChatTargetName(name, keeper)
@@ -445,7 +445,7 @@ export function AgentProfile({ name }: { name: string }) {
           ${lines.length === 0
             ? html`<${EmptyState} message="관련 활동 없음" compact />`
             : (() => {
-                const visible = filterRoomActivity(lines, activityQuery.value)
+                const visible = filterWorkspaceActivity(lines, activityQuery.value)
                 const isFiltering = activityQuery.value.trim() !== ''
                 return html`
                   <div class="flex flex-col gap-1.5">

@@ -72,7 +72,7 @@ let create_raw_trace ~base_path ~worker_name =
       (Printf.sprintf "failed to create worker raw trace for %s: %s"
          worker_name msg)
 
-let run_worker_oas ~sw ?net ~coord_config
+let run_worker_oas ~sw ?net ~workspace_config
     (spec : Worker_execution_spec.t) : unit -> (run_result, string) result =
   fun () ->
     let* net = resolve_net ?net () in
@@ -107,7 +107,7 @@ let run_worker_oas ~sw ?net ~coord_config
         ~worker_name
     in
     let* shell_tools =
-      build_local_shell_tools ~coord_config ~worker_name ~workdir:workspace_path
+      build_local_shell_tools ~workspace_config ~worker_name ~workdir:workspace_path
     in
     let tools = dedupe_tools_by_name (masc_tools @ shell_tools) in
     let* raw_trace = create_raw_trace ~base_path ~worker_name in

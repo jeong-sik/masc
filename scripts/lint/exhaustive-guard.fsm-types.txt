@@ -19,7 +19,7 @@
 # decision has historically caused a runtime Assert_failure or silently
 # absorbed a new state. Examples reserved for Phase 5:
 #   - Keeper_state_machine.phase
-#   - Coord_task_lifecycle.drift
+#   - Workspace_task_lifecycle.drift
 #   - Runtime_decl_validator.outcome   (TBD — type may move)
 #   - Masc_domain.task_action
 #   - Masc_domain.task_status

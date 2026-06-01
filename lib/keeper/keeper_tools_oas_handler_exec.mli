@@ -9,7 +9,7 @@
     [make_keeper_tool_handler] closure are passed explicitly. *)
 val execute_with_observers
   :  name:string
-  -> config:Coord.config
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_snapshot:Keeper_types.working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t

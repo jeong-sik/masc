@@ -269,7 +269,7 @@ let persist ~config verdict =
 (** lib/keeper/goal_phase_bridge.mli *)
 
 val maybe_react :
-  config:Coord.config ->
+  config:Workspace.config ->
   Cdal_types.contract_verdict ->
   unit
 (** [maybe_react] inspects the verdict and, when its [contract_id] is
@@ -334,7 +334,7 @@ called** against the keeper's most recent turn for that goal's
 ### 6.2 Wiring
 
 ```ocaml
-(* lib/coord_goals.ml — handle_goal_transition *)
+(* lib/workspace_goals.ml — handle_goal_transition *)
 let handle_goal_transition ~action goal =
   let next_phase = Goal_phase.decide_transition goal.phase action in
   match next_phase with
@@ -350,9 +350,9 @@ let handle_goal_transition ~action goal =
 | File | Change |
 |---|---|
 | `lib/cdal_runtime/triggers.{ml,mli}` | New module — `evaluate_for_goal` |
-| `lib/coord_goals.ml` | Call trigger on transition into Awaiting_verification |
+| `lib/workspace_goals.ml` | Call trigger on transition into Awaiting_verification |
 | `lib/goal/goal_verification.ml` | CDAL verdict counted as vote (new vote kind `Cdal_verdict`) |
-| `test/test_coord_goals.ml` | Update transition tests |
+| `test/test_workspace_goals.ml` | Update transition tests |
 | `test/test_goal_verification.ml` | New — CDAL vote case |
 
 Estimated change: ~250 LoC.
@@ -525,7 +525,7 @@ block" pain that triggered this amendment.
 | Unit (Phase A) | Catalog spec → `Contract_catalog_invariants` typed projection (see `test/test_masc_contract_catalog.ml`) |
 | Unit (Phase B) | `Goal_phase_bridge.maybe_react` decision matrix |
 | Integration (Phase B) | Temp Goal Store + Cdal_eval_v1 + bridge; verify phase advances |
-| Integration (Phase C) | `Coord_goals.handle_goal_transition` calls `Cdal_runtime.Triggers.evaluate_for_goal` once |
+| Integration (Phase C) | `Workspace_goals.handle_goal_transition` calls `Cdal_runtime.Triggers.evaluate_for_goal` once |
 | Unit (Phase D) | 5-case decision matrix from §6.5.2: Satisfied → pass; Violated → reject with findings; Inconclusive → required_evidence check; None + contract=None → bypass; None + contract=Some → missing-verdict rejection |
 | Integration (Phase D) | End-to-end keeper_task_done with a bound Cdal verdict; assert workflow_rejection payload carries typed `findings[]` not just hint string |
 | Property | Bridge idempotence — re-applying same verdict yields no second transition |

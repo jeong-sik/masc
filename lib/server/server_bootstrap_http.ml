@@ -61,7 +61,7 @@ let print_startup_banner
   if Masc_grpc_server.is_enabled ()
   then
     Printf.printf
-      "   gRPC :%d → Coordination + grpc.health.v1.Health + reflection\n%!"
+      "   gRPC :%d → Workspace + grpc.health.v1.Health + reflection\n%!"
       (Masc_grpc_server.configured_port ());
   if Server_ws_standalone.is_enabled ()
   then

@@ -39,7 +39,7 @@ type rollover_gate_decision =
 (** Append lineage telemetry artifacts; logs and swallows non-cancel
     exceptions (rollover succeeds even if lineage append fails). *)
 val append_lineage_artifacts_best_effort :
-  config:Coord.config ->
+  config:Workspace.config ->
   parent:Keeper_meta_contract.keeper_meta ->
   child:Keeper_meta_contract.keeper_meta ->
   parent_trace_id:string ->

@@ -4,7 +4,7 @@ use bevy::prelude::Res;
 
 use crate::game::events::NarrativePayload;
 use crate::game::lifecycle::TrpgLifecycleState;
-use crate::game::state::{RoomState, TurnProgressState};
+use crate::game::state::{WorkspaceState, TurnProgressState};
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,21 +162,21 @@ fn is_dm_speaker(speaker: Option<&str>) -> bool {
     matches!(normalized.as_str(), "dm" | "game_master" | "gm")
 }
 
-fn is_room_running(room_state: &RoomState, progress: &TurnProgressState) -> bool {
-    TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status)
+fn is_workspace_running(workspace_state: &WorkspaceState, progress: &TurnProgressState) -> bool {
+    TrpgLifecycleState::from_workspace_progress(&workspace_state.status, &progress.workspace_status)
         .accepts_player_input()
 }
 
 fn should_play_dm_voice(
     payload: &NarrativePayload,
     clean_text: &str,
-    room_state: &RoomState,
+    workspace_state: &WorkspaceState,
     progress: &TurnProgressState,
 ) -> bool {
     if clean_text.trim().is_empty() {
         return false;
     }
-    if !is_room_running(room_state, progress) {
+    if !is_workspace_running(workspace_state, progress) {
         return false;
     }
     is_dm_phase(&payload.phase) || is_dm_speaker(payload.speaker.as_deref())
@@ -185,13 +185,13 @@ fn should_play_dm_voice(
 pub fn maybe_play_dm_voice(
     payload: &NarrativePayload,
     clean_text: &str,
-    room_state: &RoomState,
+    workspace_state: &WorkspaceState,
     progress: &TurnProgressState,
 ) {
-    if should_play_dm_voice(payload, clean_text, room_state, progress) {
+    if should_play_dm_voice(payload, clean_text, workspace_state, progress) {
         #[cfg(target_arch = "wasm32")]
         {
-            dispatch_voice(payload, clean_text, room_state);
+            dispatch_voice(payload, clean_text, workspace_state);
         }
     }
 }
@@ -217,13 +217,13 @@ pub fn unbind_dm_voice_controls() {
     }
 }
 
-pub fn sync_dm_voice_controls(room_state: Res<RoomState>, progress: Res<TurnProgressState>) {
+pub fn sync_dm_voice_controls(workspace_state: Res<WorkspaceState>, progress: Res<TurnProgressState>) {
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = (&room_state, &progress);
+    let _ = (&workspace_state, &progress);
 
     #[cfg(target_arch = "wasm32")]
     {
-        if !room_state.is_changed() && !progress.is_changed() {
+        if !workspace_state.is_changed() && !progress.is_changed() {
             return;
         }
 
@@ -236,7 +236,7 @@ pub fn sync_dm_voice_controls(room_state: Res<RoomState>, progress: Res<TurnProg
 
         let mode = resolve_dm_voice_mode();
         let tone = resolve_dm_voice_tone();
-        let running = is_room_running(&room_state, &progress);
+        let running = is_workspace_running(&workspace_state, &progress);
         match (running, mode) {
             (false, _) => {
                 set_dm_voice_status(
@@ -281,15 +281,15 @@ pub fn sync_dm_voice_controls(room_state: Res<RoomState>, progress: Res<TurnProg
 }
 
 #[cfg(target_arch = "wasm32")]
-fn dispatch_voice(payload: &NarrativePayload, clean_text: &str, room_state: &RoomState) {
+fn dispatch_voice(payload: &NarrativePayload, clean_text: &str, workspace_state: &WorkspaceState) {
     let text = clean_text.trim().to_string();
     if text.is_empty() {
         return;
     }
-    let room_id = if room_state.id.trim().is_empty() {
-        crate::config::current_room_id()
+    let workspace_id = if workspace_state.id.trim().is_empty() {
+        crate::config::current_workspace_id()
     } else {
-        room_state.id.trim().to_string()
+        workspace_state.id.trim().to_string()
     };
     let phase = payload.phase.trim().to_string();
     let turn = payload.turn;
@@ -308,7 +308,7 @@ fn dispatch_voice(payload: &NarrativePayload, clean_text: &str, room_state: &Roo
                 speak_with_proxy(
                     proxy_url,
                     text,
-                    room_id,
+                    workspace_id,
                     phase,
                     turn,
                     speaker,
@@ -1207,7 +1207,7 @@ fn bind_dm_voice_preview_button(doc: &web_sys::Document) {
                 speak_with_proxy_preview(
                     proxy_url,
                     DM_VOICE_PREVIEW_TEXT.to_string(),
-                    crate::config::current_room_id(),
+                    crate::config::current_workspace_id(),
                     "dm_narration".to_string(),
                     0,
                     Some("dm".to_string()),
@@ -1339,7 +1339,7 @@ fn speak_with_browser(text: &str, phase: &str, speaker: Option<&str>, tone: DmVo
 fn speak_with_proxy(
     proxy_url: String,
     text: String,
-    room_id: String,
+    workspace_id: String,
     phase: String,
     turn: u32,
     speaker: Option<String>,
@@ -1351,7 +1351,7 @@ fn speak_with_proxy(
         if let Err(err) = speak_with_proxy_inner(
             proxy_url,
             text.clone(),
-            room_id,
+            workspace_id,
             phase.clone(),
             turn,
             speaker.clone(),
@@ -1371,7 +1371,7 @@ fn speak_with_proxy(
 fn speak_with_proxy_preview(
     proxy_url: String,
     text: String,
-    room_id: String,
+    workspace_id: String,
     phase: String,
     turn: u32,
     speaker: Option<String>,
@@ -1383,7 +1383,7 @@ fn speak_with_proxy_preview(
         let result = speak_with_proxy_inner(
             proxy_url,
             text,
-            room_id,
+            workspace_id,
             phase,
             turn,
             speaker,
@@ -1410,7 +1410,7 @@ fn speak_with_proxy_preview(
 async fn speak_with_proxy_inner(
     proxy_url: String,
     text: String,
-    room_id: String,
+    workspace_id: String,
     phase: String,
     turn: u32,
     speaker: Option<String>,
@@ -1462,7 +1462,7 @@ async fn speak_with_proxy_inner(
             "text": text,
             "speaker": speaker_label,
             "phase": phase,
-            "room_id": room_id,
+            "workspace_id": workspace_id,
             "turn": turn,
             "tone": profile.tone_tag,
         })
@@ -1710,21 +1710,21 @@ fn play_audio_source(source: &str, cleanup_object_url: Option<String>) -> Result
 mod tests {
     use super::should_play_dm_voice;
     use crate::game::events::NarrativePayload;
-    use crate::game::state::{RoomState, TurnPhase, TurnProgressState};
+    use crate::game::state::{WorkspaceState, TurnPhase, TurnProgressState};
 
     fn payload(phase: &str, speaker: Option<&str>, text: &str) -> NarrativePayload {
         NarrativePayload {
             text: text.to_string(),
             phase: phase.to_string(),
             turn: 3,
-            room_id: "adventure-room".to_string(),
+            workspace_id: "adventure-workspace".to_string(),
             speaker: speaker.map(|s| s.to_string()),
         }
     }
 
-    fn running_state() -> (RoomState, TurnProgressState) {
-        let room = RoomState {
-            id: "adventure-room".to_string(),
+    fn running_state() -> (WorkspaceState, TurnProgressState) {
+        let workspace = WorkspaceState {
+            id: "adventure-workspace".to_string(),
             status: "active".to_string(),
             turn: 3,
             phase: TurnPhase::DmNarration,
@@ -1732,39 +1732,39 @@ mod tests {
             current_node: "".to_string(),
         };
         let progress = TurnProgressState::default();
-        (room, progress)
+        (workspace, progress)
     }
 
     #[test]
     fn dm_voice_requires_running_lifecycle() {
-        let (mut room, progress) = running_state();
-        room.status = "ended".to_string();
+        let (mut workspace, progress) = running_state();
+        workspace.status = "ended".to_string();
         assert!(!should_play_dm_voice(
             &payload("dm_narration", Some("dm"), "테스트"),
             "테스트",
-            &room,
+            &workspace,
             &progress
         ));
     }
 
     #[test]
     fn dm_voice_accepts_dm_phase_during_running() {
-        let (room, progress) = running_state();
+        let (workspace, progress) = running_state();
         assert!(should_play_dm_voice(
             &payload("dm_narration", None, "짙은 안개가 깔린다."),
             "짙은 안개가 깔린다.",
-            &room,
+            &workspace,
             &progress
         ));
     }
 
     #[test]
     fn dm_voice_skips_non_dm_events() {
-        let (room, progress) = running_state();
+        let (workspace, progress) = running_state();
         assert!(!should_play_dm_voice(
             &payload("action_declaration", Some("luna"), "플레이어 행동"),
             "플레이어 행동",
-            &room,
+            &workspace,
             &progress
         ));
     }

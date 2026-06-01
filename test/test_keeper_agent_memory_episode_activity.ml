@@ -4,7 +4,7 @@ open Alcotest
 open Masc_mcp
 
 module Episode = Keeper_agent_memory_episode
-module Hooks = Coord_hooks
+module Hooks = Workspace_hooks
 module P = Prometheus
 module TCG = Telemetry_coverage_gap
 
@@ -26,7 +26,7 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let make_config ~base_path : Coord_utils.config =
+let make_config ~base_path : Workspace_utils.config =
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
     base_path;
@@ -36,11 +36,11 @@ let make_config ~base_path : Coord_utils.config =
   } in
   let memory_backend = Backend.Memory.create () in
   {
-    Coord_utils.base_path;
+    Workspace_utils.base_path;
     workspace_path = base_path;
     lock_expiry_minutes = 30;
     backend_config;
-    backend = Coord_utils.Memory memory_backend;
+    backend = Workspace_utils.Memory memory_backend;
   }
 
 let with_config f =
@@ -96,7 +96,7 @@ let test_activity_emit_failure_records_coverage_gap () =
       Episode.emit_flush_activity ~config ~keeper_name:keeper ~turn:11
         ~episodes:1 ~procedures:0 ~tags:["memory"; "episode"; "flush"]
         ();
-      match TCG.read_recent ~masc_root:(Coord_utils.masc_dir config) ~n:1 with
+      match TCG.read_recent ~masc_root:(Workspace_utils.masc_dir config) ~n:1 with
       | [ row ] ->
         let open Yojson.Safe.Util in
         check string "gap source" "keeper_memory_activity"

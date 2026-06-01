@@ -37,7 +37,7 @@ The IDE mockup right rail carries five kinds of conversation cards anchored to s
 
 Each card carries: (a) a **kind** (FLAG / QUESTION / APPROVE / NOTE / SUGGEST), (b) an **anchor** (file path + line range or symbol), (c) **author** (keeper id), (d) **timestamp**, (e) **body**, (f) optional **reply count and resolution state**.
 
-RFC 0010 defines the keeper-presence anchor primitive but does not cover thread aggregation, kind taxonomy, or the editor↔rail click-to-scroll coordination. This RFC fills that gap so all three consumers (CONVERSATION rail in the IDE, audit ledger, cross-file review feed) share one model.
+RFC 0010 defines the keeper-presence anchor primitive but does not cover thread aggregation, kind taxonomy, or the editor↔rail click-to-scroll workspace collaboration. This RFC fills that gap so all three consumers (CONVERSATION rail in the IDE, audit ledger, cross-file review feed) share one model.
 
 ## 2. Non-Goals
 
@@ -88,7 +88,7 @@ export function createAnchoredThreadRail(opts: {
 
 Adapters: `headless-preact/use-anchored-thread-rail.ts`, `headless-solid/use-anchored-thread-rail.ts`.
 
-## 4. Editor ↔ rail coordination
+## 4. Editor ↔ rail workspace collaboration
 
 Two flows must work without coupling consumers:
 

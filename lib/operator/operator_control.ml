@@ -72,43 +72,49 @@ let keeper_recovery_outcome after_diagnostic =
              state) )
   | None -> (false, Some "keeper recovery did not return a health_state")
 
+(* resolve_team_turn_actor and execute_team_turn removed — team session cleanup *)
+
 (** {1 Domain-specific action handlers} *)
 
-let operator_action_result request result =
+let workspace_action_result request result =
   Ok (`Assoc [
     ("tool_name", `String (delegated_tool_for request.action_type));
     ("result", result);
   ])
 
-let execute_operator_action (ctx : 'a context) (request : action_request) =
+let execute_workspace_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "broadcast" ->
-      let* () = validate_target_type "" request in
+      let* () = validate_target_type "workspace" request in
       let* message =
         match get_string_opt request.payload "message" with
         | Some value -> Ok value
         | None -> Error "payload.message is required"
       in
-      let result = Coord.broadcast ctx.config ~from_agent:request.actor ~content:message in
-      operator_action_result request (`String result)
+      let result = Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message in
+      workspace_action_result request (`String result)
   | "namespace_pause" ->
-      let* () = validate_target_type "" request in
+      let* () = validate_target_type "workspace" request in
       let reason =
         get_string request.payload "reason" "Paused by operator control plane"
       in
-      Coord.pause ctx.config ~by:request.actor ~reason;
-      operator_action_result request
+      Workspace.pause ctx.config ~by:request.actor ~reason;
+      workspace_action_result request
         (`Assoc [ ("paused", `Bool true); ("reason", `String reason) ])
   | "namespace_resume" ->
-      let* () = validate_target_type "" request in
+      let* () = validate_target_type "workspace" request in
       let status =
-        match Coord.resume ctx.config ~by:request.actor with
+        match Workspace.resume ctx.config ~by:request.actor with
         | `Resumed -> "resumed"
         | `Already_running -> "already_running"
       in
-      operator_action_result request (`Assoc [ ("status", `String status) ])
+      workspace_action_result request (`Assoc [ ("status", `String status) ])
+  | "social_sweep" ->
+      workspace_action_result request
+        (`Assoc [("status", `String "removed");
+                 ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")])
   | "task_inject" ->
-      let* () = validate_target_type "" request in
+      let* () = validate_target_type "workspace" request in
       let* title =
         match get_string_opt request.payload "title" with
         | Some value -> Ok value
@@ -122,12 +128,18 @@ let execute_operator_action (ctx : 'a context) (request : action_request) =
          has no [goal_id] today; guard is a no-op for orphan tasks but
          wired so a future goal-aware payload inherits the cap. *)
       let result =
-        Coord.add_task
-          ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+        Workspace.add_task
+          ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id:None)
           ctx.config ~title ~priority ~description
       in
-      operator_action_result request (`String result)
+      workspace_action_result request (`String result)
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
+
+(* Issue #8394: removed [execute_team_action] — team session execution
+   surface was retired but the dispatch arm + this stub remained,
+   silently turning any team_* operator action into a misleading
+   "team session actions removed: ..." error instead of the cleaner
+   "unsupported action_type" path. *)
 
 let execute_keeper_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
@@ -225,7 +237,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | None -> Ok ()
         | Some _ ->
             Error
-              "keeper model args are unsupported for masc_keeper_msg: models. Use runtime_id; concrete provider/model identity is resolved from the default runtime."
+              "legacy keeper model args removed for masc_keeper_msg: models. Use runtime_id; concrete provider/model identity is resolved from the default runtime."
       in
       let direct_reply =
         Json_util.get_bool request.payload "direct_reply" |> Option.value ~default:false
@@ -274,11 +286,16 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
 let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t, string) result =
   match request.action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" ->
-      execute_operator_action ctx request
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
+  | "task_inject" ->
+      execute_workspace_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
   | "" -> Error "action_type is required"
+  (* Issue #8394: team_* actions retired — fall through to the standard
+     "unsupported action_type" path. Previously routed to a stub that
+     returned "team session actions removed: ..." which masked the
+     legitimate validation failure as a runtime stub error. *)
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
 (** All known action_types: available_actions plus hidden canonical actions. *)
@@ -288,7 +305,9 @@ let known_action_types =
       (fun (a : Operator_pending_confirm.available_action) -> a.action_type)
       Operator_pending_confirm.available_actions
   in
-  from_registry
+  (* Issue #8394: removed [team_turn] — team session execution surface is
+     retired. *)
+  from_registry @ [ "social_sweep" ]
 
 let validate_request request =
   if request.action_type = "" then Error "action_type is required"

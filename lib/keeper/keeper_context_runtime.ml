@@ -157,7 +157,7 @@ let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
 let dispatch_keeper_phase_event
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ?(origin = Keeper_registry.Generic_dispatch)
     ~keeper_name
     event =
@@ -207,7 +207,7 @@ let () =
 (* Observability-only: bump the outcome counter and log the warn
    when saved_tokens <= 0.  Split from [dispatch_compaction_completed]
    so unit tests can verify classification without needing a full
-   [Coord.config] / [Keeper_registry] setup. *)
+   [Workspace.config] / [Keeper_registry] setup. *)
 let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
   let saved_tokens = before_tokens - after_tokens in
   let outcome = if saved_tokens > 0 then "ok" else "noop" in
@@ -222,7 +222,7 @@ let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
       saved_tokens before_tokens after_tokens keeper_name
 
 let dispatch_compaction_completed
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~origin
     ~keeper_name
     ~before_tokens
@@ -235,7 +235,7 @@ let dispatch_compaction_completed
        { before_tokens; after_tokens })
 
 let dispatch_post_turn_lifecycle_events
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~keeper_name
     (lifecycle : post_turn_lifecycle) =
   if lifecycle.compaction.attempted then
@@ -324,7 +324,7 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
         List.mem model configured
         || List.exists
              (fun label ->
-               Runtime_candidate.label_matches_runtime_id
+               Runtime_provider_binding.label_matches_runtime_id
                  ~label
                  ~runtime_id:model)
              configured

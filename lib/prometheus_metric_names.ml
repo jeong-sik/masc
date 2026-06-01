@@ -160,6 +160,9 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
 let metric_tool_metrics_persist_dropped =
   "masc_tool_metrics_persist_dropped_total"
 
+let metric_tool_bind_required_guard =
+  "masc_tool_bind_required_guard_total"
+
 (* keeper_tool_call_log async append queue overflow.
    Counts full-I/O tool-call records dropped because the bounded
    best-effort queue is full. No labels (single source). *)
@@ -178,13 +181,13 @@ let metric_tool_keeper_cache_cas_conflicts =
 
 (* File_lock_eio lock-table CAS retries (single shared atomic).
    Bumped from [atomic_update] / [atomic_update_with_result] retry
-   branches via [on_cas_retry_fn] callback wired in coord.ml — the
+   branches via [on_cas_retry_fn] callback wired in workspace.ml — the
    masc_process sub-library cannot depend on Prometheus directly. *)
 let metric_file_lock_table_cas_retries =
   "masc_file_lock_table_cas_retries_total"
 
 (* Memory_jsonl.parse_line silent drop counter (V15 / RFC-0109 §5.1
-   Option A).  Bumped from a callback wired in coord.ml — the
+   Option A).  Bumped from a callback wired in workspace.ml — the
    masc_mcp_memory_jsonl leaf sub-library cannot depend on Prometheus
    directly (cycle).  Closed-vocabulary [reason] in
    {no_key | not_assoc | json_parse_error}.  Empty lines benign,
@@ -308,7 +311,7 @@ let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
 (* PR-B: keeper turn skipped due to ollama saturation pre-check.
    Labelled by [keeper] and [runtime]. *)
 (* Tool-setup and task-load failures during keeper tool surface assembly.
-   task_load: Coord.get_tasks_raw exception while loading current task contract.
+   task_load: Workspace.get_tasks_raw exception while loading current task contract.
    tool_selection: TopK_llm or tool discovery exception during per-turn tool set assembly. *)
 let metric_tool_policy_unloaded_query = "masc_tool_policy_unloaded_query_total"
 let metric_tool_policy_init_failed = "masc_tool_policy_init_failed_total"

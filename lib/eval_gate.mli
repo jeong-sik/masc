@@ -51,7 +51,7 @@ type evasion_kind =
 
 val evasion_kind_to_string : evasion_kind -> string
 (** Snake_case rendering for log / metric emission.  Pinned wording —
-    do not change without coordinating with any future telemetry. *)
+    do not change without synchronizing with future telemetry. *)
 
 type evasion_indicator = {
   kind : evasion_kind;

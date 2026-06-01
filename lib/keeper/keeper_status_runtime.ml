@@ -69,14 +69,14 @@ let keeper_continuity_to_string = function
   | Continuity_recovering -> "recovering"
   | Continuity_not_running -> "not_running"
 
-let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.Safe.t =
+let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojson.Safe.t =
   let agent_file =
-    Filename.concat (Coord.agents_dir config) (Coord.safe_filename agent_name ^ ".json")
+    Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent_name ^ ".json")
   in
-  if not (Coord.path_exists config agent_file) then
+  if not (Workspace.path_exists config agent_file) then
     `Assoc [ ("exists", `Bool false) ]
   else (
-    match Coord.read_json_opt config agent_file with
+    match Workspace.read_json_opt config agent_file with
     | None ->
         `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_read") ]
     | Some json -> (
@@ -86,11 +86,11 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
         | Ok (agent : Masc_domain.agent) ->
             let now_ts = Time_compat.now () in
             let session_bound_ts =
-              Coord_resilience.Time.parse_iso8601_opt agent.session_bound_at
+              Workspace_resilience.Time.parse_iso8601_opt agent.session_bound_at
               |> Option.value ~default:0.0
             in
             let last_seen_ts =
-              Coord_resilience.Time.parse_iso8601_opt agent.last_seen
+              Workspace_resilience.Time.parse_iso8601_opt agent.last_seen
               |> Option.value ~default:0.0
             in
             let age_s = if session_bound_ts <= 0.0 then 0.0 else now_ts -. session_bound_ts in
@@ -112,7 +112,7 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
                 ("last_seen_ago_s", `Float last_seen_ago_s);
                 ("is_zombie",
                  `Bool
-                   (Coord.is_zombie_agent
+                   (Workspace.is_zombie_agent
                       ~agent_type:agent.agent_type
                       ~agent_name:agent.name
                       agent.last_seen));
@@ -133,7 +133,7 @@ let agent_status_text agent_status =
 
 let agent_last_seen_ts_opt agent_status =
   match json_string_opt "last_seen" agent_status with
-  | Some value -> Coord_resilience.Time.parse_iso8601_opt value
+  | Some value -> Workspace_resilience.Time.parse_iso8601_opt value
   | None -> None
 
 let agent_last_seen_ago_s agent_status =
@@ -270,7 +270,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
   then Some "agent_missing"
   else if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then
     let keeper_age_s =
-      match Coord_resilience.Time.parse_iso8601_opt meta.created_at with
+      match Workspace_resilience.Time.parse_iso8601_opt meta.created_at with
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
       | _ -> 0.0
     in

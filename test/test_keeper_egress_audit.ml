@@ -4,7 +4,7 @@
     state and asserts the audit reproduces the same status the boot
     hook would emit in production. *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_egress_audit = Masc_mcp.Keeper_egress_audit
@@ -36,7 +36,7 @@ let make_meta ?(paused = false) ?(autoboot_enabled = true) ~name ~sandbox () =
 let make_config () =
   let base = temp_dir () in
   Unix.mkdir (Filename.concat base ".masc") 0o755;
-  Coord.default_config base
+  Workspace.default_config base
 
 let mkdir_p path =
   let rec aux p =

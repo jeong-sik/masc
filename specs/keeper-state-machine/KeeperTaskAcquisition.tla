@@ -23,7 +23,7 @@
 \*
 \* The OCaml runtime composes task acquisition out of three pieces:
 \*   1. Producers append tasks to the backlog observable from
-\*      [Keeper_world_observation] ([Coord.read_backlog] ->
+\*      [Keeper_world_observation] ([Workspace.read_backlog] ->
 \*      [observation.pending_*]).
 \*   2. The keepalive fiber synthesises a [world_observation] for the
 \*      next cycle and hands it to [run_keeper_cycle].
@@ -34,7 +34,7 @@
 \* Producer paths.  There are two ways a task enters the system, and
 \* this spec's SubmitTask abstracts the common effect of both:
 \*   (a) backlog producer (supervisor / board posts) —
-\*       a task lands in [Coord.read_backlog] and shows up as a
+\*       a task lands in [Workspace.read_backlog] and shows up as a
 \*       [pending_*] item on the next [world_observation]; the keeper
 \*       claims it via the "turn" channel (= spec's AssignTask).
 \*   (b) operator "claim:<task_id>" directive — bypasses the backlog,
@@ -92,7 +92,7 @@ Init ==
 
 \* A task enters the system. Covers both producer paths (see "Producer
 \* paths" in the header): the backlog-producer append
-\* ([Coord.read_backlog] -> next [world_observation.pending_*]) and the
+\* ([Workspace.read_backlog] -> next [world_observation.pending_*]) and the
 \* operator "claim:<task_id>" directive ([assign_keeper_task_from_directive],
 \* whose [post_submit_task] [@@fsm_guard] pins the [current_task_id]
 \* write). The spec tracks only the queue-depth effect, which is common

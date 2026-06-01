@@ -55,7 +55,7 @@ val per_provider_timeout_for_turn
 
 (** Run a single keeper turn.
 
-    @param config Coord configuration
+    @param config Workspace configuration
     @param meta Keeper metadata
     @param base_dir Session base directory for checkpoints
     @param max_context Maximum context window tokens
@@ -84,7 +84,7 @@ val per_provider_timeout_for_turn
     @param shared_context Optional shared OAS context for cross-turn state
     @param event_bus Optional MASC event bus *)
 val run_turn
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> base_dir:string
   -> max_context:int

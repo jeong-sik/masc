@@ -135,7 +135,7 @@ in the per-site closeout commit.
 | 4 | `sidecar schema_field_types` | #15866 | Returns `[]`; `to_option` shim acceptable transitionally. |
 | 5 | `mcp-ws` SSE parse | #15820 | Hot path; benchmark before/after. |
 | 6 | `runtime-http-probe` | #15840 | Mirror of #5. |
-| 7 | `memory_jsonl parse_line` | #15980 | RFC-0109 V15 — coordinate with that RFC's closeout. |
+| 7 | `memory_jsonl parse_line` | #15980 | RFC-0109 V15 — orchestrate with that RFC's closeout. |
 
 ## 6. Sunset criteria
 
@@ -183,7 +183,7 @@ result type rather than the unified `Parse_outcome.t`.
 |----|---------|-------|------------------|
 | #17780 | `keeper_approval_queue` | 1 | `Yojson.Safe.Util.Type_error` |
 | #17783 | `host_fd_pressure_poller` | 3 | `Scanf.Scan_failure \| End_of_file \| Unix.Unix_error`, `Yojson.Safe.Util.Type_error`, `Yojson.Json_error` |
-| #17789 | `coord_worktree_repo_discovery` | 4 | `Otoml.Type_error`, `Otoml.Parse_error \| Sys_error` |
+| #17789 | `workspace_worktree_repo_discovery` | 4 | `Otoml.Type_error`, `Otoml.Parse_error \| Sys_error` |
 | #17793 | `ide_region_tracker` | 2 | `Failure _` |
 | #17795 | `runtime_declarative_parser` | 2 | `Otoml.Type_error` |
 | #17796 | `runtime_declarative_parser` (parse_headers) | 2 | `Otoml.Type_error` |

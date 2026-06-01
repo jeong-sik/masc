@@ -114,7 +114,7 @@ let build_turn_context
         -> messages:Agent_sdk.Types.message list
         -> Keeper_agent_prompt_metrics.turn_prompt)
       ~(user_message : string)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(history_user_source : string)
       ~(is_retry : bool)

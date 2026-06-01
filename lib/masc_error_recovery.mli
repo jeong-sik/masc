@@ -31,7 +31,7 @@ val recovery_hint : string -> string option
     - "already claimed" → [masc_status] / [masc_claim_next]
     - "no unclaimed tasks" → [masc_add_task]
     - "rate limit" / "too many" → wait + retry (transient)
-    - "coord" ∧ "set" → [masc_start(path=…)]
+    - "workspace" ∧ "set" → [masc_start(path=…)]
     - "current_task" / "no current task" →
       [masc_plan_set_task(task_id=…)]
     - "path is required" → [masc_start(path="~/my-project")]

@@ -23,7 +23,7 @@ module Float = Stdlib.Float
 open Tool_args
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
 }
 
@@ -44,13 +44,13 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
 
 let handle_pause ~tool_name ~start_time ctx args : Tool_result.result =
   let reason = get_string args "reason" "Manual pause" in
-  Coord.pause ctx.config ~by:ctx.agent_name ~reason;
+  Workspace.pause ctx.config ~by:ctx.agent_name ~reason;
   text_ok ~tool_name ~start_time
     (Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
 ;;
 
 let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
-  match Coord.resume ctx.config ~by:ctx.agent_name with
+  match Workspace.resume ctx.config ~by:ctx.agent_name with
   | `Resumed ->
     text_ok ~tool_name ~start_time
       (Printf.sprintf "Resumed by %s" ctx.agent_name)
@@ -60,7 +60,7 @@ let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
 
 let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
   let keeper_pause =
-    if not (Coord.is_initialized ctx.config)
+    if not (Workspace.is_initialized ctx.config)
     then
       `Assoc
         [
@@ -82,9 +82,9 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
     | _ -> false
   in
   let pause_state =
-    if not (Coord.is_initialized ctx.config) then `Initializing
+    if not (Workspace.is_initialized ctx.config) then `Initializing
     else
-      let state = Coord.read_state ctx.config in
+      let state = Workspace.read_state ctx.config in
       if state.paused then
         `Paused (state.paused_by, state.pause_reason, state.paused_at)
       else
@@ -102,7 +102,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_by", Json_util.string_opt_to_json by);
             ("pause_reason", Json_util.string_opt_to_json reason);
             ("paused_at", Json_util.string_opt_to_json at);
-            ("pause_scope", `String "coord");
+            ("pause_scope", `String "workspace");
             ("any_pause_active", `Bool true);
             ("keeper_pause", keeper_pause);
             ("message", `String "Server is paused");
@@ -117,7 +117,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("pause_scope", `String "coord");
+            ("pause_scope", `String "workspace");
             ("any_pause_active", `Bool keeper_paused);
             ("keeper_pause", keeper_pause);
             ( "message",
@@ -136,7 +136,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("pause_scope", `String "coord");
+            ("pause_scope", `String "workspace");
             ("any_pause_active", `Null);
             ("keeper_pause", keeper_pause);
             ( "message",

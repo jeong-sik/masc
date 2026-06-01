@@ -65,7 +65,7 @@ code_refs:
 | `docs/RESEARCH-BASED-IMPROVEMENTS.md` | Removed | proposal-only research notes; no implementation/verification record |
 | `docs/SEARCH-FABRIC-V1.md` | Removed | CP search benchmark target removed with command-plane purge |
 | `docs/PROVIDER-ADAPTER-RUNBOOK.md` | Removed | compiled provider adapter deleted; use `docs/PROVIDER-ADAPTER-REMOVAL-PLAN.md` |
-| `docs/MULTI-ROOM-DESIGN.md` | Removed | deleted 2026-04-17 (historical, no code refs) |
+| `docs/MULTI-WORKSPACE-DESIGN.md` | Removed | deleted 2026-04-17 (historical, no code refs) |
 | `docs/COMMAND-PLANE-RUNBOOK.md` | Historical | retired command-plane contract and migration context |
 
 ## Archive and Experiment Stores

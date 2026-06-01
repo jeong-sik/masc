@@ -21,13 +21,13 @@ let rm_rf dir =
   in
   try rm dir with _ -> ()
 
-let with_room f =
+let with_workspace f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
-      let config = Coord.default_config dir in
-      ignore (Coord.init config ~agent_name:(Some "test"));
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:(Some "test"));
       f config)
 
 let operator ?display_name id : Goal_verification.goal_principal =
@@ -47,7 +47,7 @@ let request_snapshot ~requested_by =
   }
 
 let test_cancel_missing_request_does_not_bump () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let before = Goal_verification.read_state config in
   (match Goal_verification.cancel_request config ~request_id:"ghost" with
    | Error _ -> ()
@@ -57,7 +57,7 @@ let test_cancel_missing_request_does_not_bump () =
   check string "updated_at unchanged" before.updated_at after.updated_at
 
 let test_invalid_vote_does_not_bump () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let requested_by = operator "planner" in
   let request =
     match

@@ -15,7 +15,7 @@ let test_side_effect_issue_increments_failure_metric () =
       ()
   in
   let config =
-    Masc_mcp.Coord.default_config
+    Masc_mcp.Workspace.default_config
       (Filename.concat (Filename.get_temp_dir_name ())
          "masc-side-effect-metric-0507")
   in

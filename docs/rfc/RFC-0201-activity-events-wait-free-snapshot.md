@@ -295,7 +295,7 @@ The RFC is *complete* when:
   sidecar files (seq → byte offset) to allow byte-seek by sequence
   number. Useful only if cursor-bearing requests become hot; out of
   scope here.
-- **Multi-process activity coordination.** Single-process is enough at
+- **Multi-process activity workspace collaboration.** Single-process is enough at
   current scale.
 - **Schema migration of JSONL rows.** This RFC preserves the existing
   row schema.

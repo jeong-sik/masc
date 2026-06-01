@@ -5,7 +5,7 @@
 (* TEL-OK: dependency-inversion ref module — telemetry lives in the
    registered backing dispatch (Tool_keeper / Tool_keeper_ops handlers). *)
 let dispatch
-  : (config:Coord.config
+  : (config:Workspace.config
      -> agent_name:string
      -> ?sw:Eio.Switch.t
      -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

@@ -123,11 +123,11 @@ Assertions:
 
 Purpose:
 
-- prove turn success does not mask room heartbeat failure
+- prove turn success does not mask workspace heartbeat failure
 
 Injection:
 
-- simulate or force `turn succeeds but Room.heartbeat_in_room fails`
+- simulate or force `turn succeeds but Workspace.heartbeat_in_workspace fails`
 
 Assertions:
 
@@ -196,7 +196,7 @@ Purpose:
 Assertions:
 
 - `grpc_connected` and `last_grpc_ack_age_sec` visible
-- disconnected gRPC stream does not refresh room freshness lease
+- disconnected gRPC stream does not refresh workspace freshness lease
 
 ### 6.2 `phi_shadow`
 

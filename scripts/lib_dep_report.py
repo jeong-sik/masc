@@ -17,14 +17,14 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_GRAPH = ROOT / "reports" / "lib-dependency-graph.json"
 DEFAULT_OUTPUT = ROOT / "reports" / "lib-dependency-summary.md"
-ROOM_COORDINATION_MODULES = (
-    "Room",
-    "Room_state",
-    "Room_task",
-    "Room_utils",
-    "Coord",
-    "Coord_task",
-    "Coord_task_schedule",
+WORKSPACE_STATE_MODULES = (
+    "Workspace",
+    "Workspace_state",
+    "Workspace_task",
+    "Workspace_utils",
+    "Workspace",
+    "Workspace_task",
+    "Workspace_task_schedule",
 )
 
 
@@ -146,14 +146,14 @@ def scc_delta(current: Json, baseline: Json, *, limit: int) -> list[Json]:
     return changes[:limit]
 
 
-def room_dependents(raw: Json) -> list[Pair]:
+def workspace_dependents(raw: Json) -> list[Pair]:
     reverse: dict[str, set[str]] = {}
     for node, deps in graph(raw).items():
         for dep in deps:
             reverse.setdefault(dep, set()).add(node)
     rows = [
         {"module": module, "count": len(reverse.get(module, set()))}
-        for module in ROOM_COORDINATION_MODULES
+        for module in WORKSPACE_STATE_MODULES
         if module in reverse or module in graph(raw)
     ]
     return sorted(rows, key=lambda item: (-int(item["count"]), str(item["module"])))
@@ -244,7 +244,7 @@ def build_report(
     baseline_path: Path | None,
     limit: int,
 ) -> Json:
-    current_room = room_dependents(current)
+    current_workspace = workspace_dependents(current)
     current_candidates = clusters(current)[:limit]
     return {
         "source": str(source),
@@ -264,9 +264,9 @@ def build_report(
         "scc_delta": scc_delta(current, baseline, limit=limit)
         if baseline is not None
         else None,
-        "room_coordination_dependents": current_room,
-        "room_coordination_dependents_delta": pair_delta(
-            current_room, room_dependents(baseline)
+        "workspace_state_dependents": current_workspace,
+        "workspace_state_dependents_delta": pair_delta(
+            current_workspace, workspace_dependents(baseline)
         )
         if baseline is not None
         else None,
@@ -324,19 +324,19 @@ def render_markdown(report: Json) -> str:
             ],
         ],
     )
-    room_delta = {
+    workspace_delta = {
         str(item["module"]): item["count"]
-        for item in report["room_coordination_dependents_delta"] or []
+        for item in report["workspace_state_dependents_delta"] or []
     }
-    room = table(
+    workspace = table(
         ["Module", "Dependents", "Delta"],
         [
             [
                 str(item["module"]),
                 str(item["count"]),
-                fmt_delta(room_delta.get(str(item["module"]))),
+                fmt_delta(workspace_delta.get(str(item["module"]))),
             ]
-            for item in report["room_coordination_dependents"]
+            for item in report["workspace_state_dependents"]
         ],
     )
     hubs = table(
@@ -378,11 +378,11 @@ def render_markdown(report: Json) -> str:
         "",
         summary,
         "",
-        "## Room/Coordination Dependents",
+        "## Workspace/Workspace Dependents",
         "",
-        room
-        if report["room_coordination_dependents"]
-        else "No room/coordination modules found in graph.",
+        workspace
+        if report["workspace_state_dependents"]
+        else "No workspace/workspace collaboration modules found in graph.",
         "",
         "## Top Hub Modules",
         "",
@@ -459,7 +459,7 @@ def render_markdown(report: Json) -> str:
 def self_test() -> None:
     current = {
         "stats": {"total_modules": 4, "total_edges": 5, "avg_out_degree": 1.25},
-        "top_imported": [["Coord", 3]],
+        "top_imported": [["Workspace", 3]],
         "top_importers": [["Main", 2]],
         "cycles": [["A", "B", "C"]],
         "clusters": [
@@ -471,7 +471,7 @@ def self_test() -> None:
                 "internal_edges": 6,
             }
         ],
-        "graph": {"Main": ["Coord"], "Worker": ["Coord"], "Other": ["Coord"]},
+        "graph": {"Main": ["Workspace"], "Worker": ["Workspace"], "Other": ["Workspace"]},
     }
     baseline = {
         **current,
@@ -486,7 +486,7 @@ def self_test() -> None:
                 "internal_edges": 7,
             }
         ],
-        "graph": {**current["graph"], "Legacy": ["Coord"]},
+        "graph": {**current["graph"], "Legacy": ["Workspace"]},
     }
     with tempfile.TemporaryDirectory() as tmp:
         source = Path(tmp) / "current.json"
@@ -511,8 +511,8 @@ def self_test() -> None:
         {"status": "added", "size": 3, "members": ["A", "B", "C"]},
         {"status": "removed", "size": 4, "members": ["A", "B", "C", "D"]},
     ]
-    assert report["room_coordination_dependents_delta"] == [
-        {"module": "Coord", "count": -1}
+    assert report["workspace_state_dependents_delta"] == [
+        {"module": "Workspace", "count": -1}
     ]
     assert report["batch2_candidate_delta"][0]["module_count_delta"] == -1
     print("self-test ok")

@@ -115,7 +115,7 @@ function normalizeOperatorDigestTargetType(raw: unknown): OperatorDigest['target
   switch (targetType) {
     case 'root':
     case 'namespace':
-    case 'room':
+    case 'workspace':
     case 'keeper':
       return targetType
     default:

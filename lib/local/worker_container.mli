@@ -155,14 +155,14 @@ val build_oas_mcp_tools :
     errors into [Agent_sdk.Types.tool_result]. *)
 
 val build_local_shell_tools :
-  coord_config:Coord.config option ->
+  workspace_config:Workspace.config option ->
   worker_name:string ->
   workdir:string ->
   (Agent_sdk.Tool.t list, string) result
 (** Builds the local-shell tool subset (process exec /
     file IO).  Errors when {!Process_eio.get_proc_mgr} or
     {!Process_eio.get_clock} are unavailable.  Hooks
-    telemetry through [coord_config] when an Eio fs is
+    telemetry through [workspace_config] when an Eio fs is
     present; missing either drops telemetry silently. *)
 
 (** {1 Provider resolution} *)

@@ -234,7 +234,7 @@ Each phase ≤ 600 LOC, independently revertable, build-green-at-every-PR.
 | **2** *(deferred)* | Supervisor diagnostic probe | ~350 LOC | medium (new scheduler edge) | env flag + canary |
 | **3** *(deferred)* | Admin endpoint + dashboard wiring | ~250 LOC | low | revert PR |
 | **4** *(deferred)* | `last_proactive_preview` unconditional update | ~150 LOC | low | env flag |
-| **5** *(deferred)* | RFC-0042 `runtime_exhausted` typed closure | ~200 LOC | medium (wire format coordination) | revert PR |
+| **5** *(deferred)* | RFC-0042 `runtime_exhausted` typed closure | ~200 LOC | medium (wire format workspace collaboration) | revert PR |
 
 Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measurement (§12) showed *most* keepers already self-clear within minutes — Phase 1 would have added a seventh clear site without diagnosing *why* the six existing sites miss the 5 stuck keepers. Phase 0.6 (stale-exit trace) is now the prerequisite: its output decides whether Phase 1 introduces a new clear site or wires one of the six existing sites into the stale-recovery path.
 

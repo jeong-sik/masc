@@ -49,15 +49,15 @@ let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent
 let make_ctx_work () =
   Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 
-let with_room ?(agent_name = "keeper-sangsu-agent") f =
+let with_workspace ?(agent_name = "keeper-sangsu-agent") f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Coord.default_config dir in
-      ignore (Coord.init config ~agent_name:(Some agent_name));
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:(Some agent_name));
       f config)
 
 let append_jsonl path json =
@@ -129,7 +129,7 @@ let append_decision_log_event config keeper_name json =
   append_jsonl path json
 
 let test_same_turn_evidence_marks_claim_supported () =
-  with_room (fun config ->
+  with_workspace (fun config ->
       Keeper_accountability.record_completion_claim config
         ~keeper_name:"keeper-sangsu"
         ~agent_name:"keeper-sangsu-agent"
@@ -165,7 +165,7 @@ let test_same_turn_evidence_marks_claim_supported () =
         (List.mem "turn:trace-1:7" supporting_refs))
 
 let test_stale_completion_claim_sets_high_risk () =
-  with_room (fun config ->
+  with_workspace (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
       in
@@ -202,15 +202,15 @@ let test_stale_completion_claim_sets_high_risk () =
       check string "history status" "unsupported" (string_member "status" first))
 
 let test_agent_reputation_penalizes_unsupported_claims () =
-  with_room ~agent_name:"keeper-rep-agent" (fun config ->
+  with_workspace ~agent_name:"keeper-rep-agent" (fun config ->
       ignore
-        (Coord.add_task config ~title:"Reputation task" ~priority:1
+        (Workspace.add_task config ~title:"Reputation task" ~priority:1
            ~description:"desc");
       ignore
-        (Coord.claim_task config ~agent_name:"keeper-rep-agent"
+        (Workspace.claim_task config ~agent_name:"keeper-rep-agent"
            ~task_id:"task-001");
       (match
-         Coord.transition_task_r config ~agent_name:"keeper-rep-agent"
+         Workspace.transition_task_r config ~agent_name:"keeper-rep-agent"
            ~task_id:"task-001" ~action:Masc_domain.Done_action ()
        with
       | Ok _ -> ()
@@ -255,7 +255,7 @@ let test_agent_reputation_penalizes_unsupported_claims () =
         (rep.overall_score < unpenalized))
 
 let test_generated_alias_inherits_accountability_penalty () =
-  with_room ~agent_name:"adversary-eager-viper" (fun config ->
+  with_workspace ~agent_name:"adversary-eager-viper" (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
       in
@@ -305,7 +305,7 @@ let test_generated_alias_inherits_accountability_penalty () =
         rep.accountability_source_label)
 
 let test_generated_alias_inherits_legacy_keeper_history () =
-  with_room ~agent_name:"adversary-eager-viper" (fun config ->
+  with_workspace ~agent_name:"adversary-eager-viper" (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
       in
@@ -336,7 +336,7 @@ let test_generated_alias_inherits_legacy_keeper_history () =
         (float_member "unsupported_completion_rate" summary))
 
 let test_direct_agent_history_exposes_direct_source () =
-  with_room ~agent_name:"keeper-direct-agent" (fun config ->
+  with_workspace ~agent_name:"keeper-direct-agent" (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
       in
@@ -376,7 +376,7 @@ let test_direct_agent_history_exposes_direct_source () =
         rep.accountability_source_label)
 
 let test_task_transition_normalizes_keeper_name_in_history () =
-  with_room ~agent_name:"keeper-sangsu-agent" (fun config ->
+  with_workspace ~agent_name:"keeper-sangsu-agent" (fun config ->
       Keeper_accountability.record_task_transition config
         ~agent_name:"keeper-sangsu-agent" ~task_id:"task-legacy"
         ~transition:Masc_domain.Claim ~details:(`Assoc []);
@@ -391,7 +391,7 @@ let test_task_transition_normalizes_keeper_name_in_history () =
         (string_member "keeper_name" first))
 
 let test_task_transition_resolution_rows_include_identity () =
-  with_room ~agent_name:"keeper-sangsu-agent" (fun config ->
+  with_workspace ~agent_name:"keeper-sangsu-agent" (fun config ->
       Keeper_accountability.record_task_transition config
         ~agent_name:"keeper-sangsu-agent" ~task_id:"task-resolution"
         ~transition:Masc_domain.Claim ~details:(`Assoc []);
@@ -418,7 +418,7 @@ let test_task_transition_resolution_rows_include_identity () =
             (string_member "subject" row))
 
 let test_recent_decision_without_claim_exposes_coverage_gap () =
-  with_room ~agent_name:"keeper-sangsu-agent" (fun config ->
+  with_workspace ~agent_name:"keeper-sangsu-agent" (fun config ->
       let now = Unix.gettimeofday () in
       append_decision_log_event config "sangsu"
         (`Assoc
@@ -454,7 +454,7 @@ let test_recent_decision_without_claim_exposes_coverage_gap () =
         (int_member "accountability_claim_count" summary))
 
 let test_unmapped_alias_exposes_no_history_source () =
-  with_room ~agent_name:"orphan-eager-viper" (fun config ->
+  with_workspace ~agent_name:"orphan-eager-viper" (fun config ->
       let summary =
         Keeper_accountability.accountability_summary_json config
           ~keeper_name:"orphan" ~agent_name:"orphan-eager-viper"
@@ -483,7 +483,7 @@ let test_unmapped_alias_exposes_no_history_source () =
         rep.accountability_source_label)
 
 let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
-  with_room (fun config ->
+  with_workspace (fun config ->
       let meta = make_test_meta () in
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
@@ -502,7 +502,7 @@ let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
              ("evidence_refs", `List []);
              ("synthetic", `Bool false);
            ]);
-      ignore (Coord.add_task config ~title:"Task to claim" ~priority:1 ~description:"desc");
+      ignore (Workspace.add_task config ~title:"Task to claim" ~priority:1 ~description:"desc");
       let result =
         Agent_tool_dispatch_runtime.execute_keeper_tool_call
           ~config ~meta ~ctx_work:(make_ctx_work ()) ~exec_cache:None
@@ -517,7 +517,7 @@ let test_synthetic_claims_do_not_dilute_unsupported_rate () =
   (* Regression: synthetic completion claims (created by task_transition "done")
      must NOT be counted in total_completion_claims, otherwise they dilute the
      unsupported_completion_rate and mask genuine risk. *)
-  with_room (fun config ->
+  with_workspace (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
       in
@@ -578,7 +578,7 @@ let test_synthetic_claims_do_not_dilute_unsupported_rate () =
         (string_member "risk_band" summary))
 
 let test_summary_lookup_reads_window_once_for_multiple_agents () =
-  with_room (fun config ->
+  with_workspace (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
       in
@@ -630,7 +630,7 @@ let test_summary_lookup_reads_window_once_for_multiple_agents () =
    back-to-back calls for different agents read the window once, not once per
    agent. This pins the fix (previously this asserted 2). *)
 let test_summary_json_memoizes_window_across_agents () =
-  with_room (fun config ->
+  with_workspace (fun config ->
       let created_at =
         iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
       in

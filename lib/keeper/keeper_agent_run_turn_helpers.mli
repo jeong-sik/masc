@@ -46,7 +46,7 @@ val runtime_manifest_context :
   Keeper_runtime_manifest.turn_context
 
 val append_runtime_manifest :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   agent_name:string ->
   trace_id:string ->
@@ -71,7 +71,7 @@ val cleanup_agent_setup :
 val run_with_setup_cleanup : cleanup:(unit -> unit) -> (unit -> 'a) -> 'a
 
 val make_append_manifest :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   agent_name:string ->
   trace_id:string ->
@@ -82,7 +82,7 @@ val make_append_manifest :
   Keeper_agent_run_sidecar.append_manifest_fn
 
 val turn_progress_callbacks :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   downstream:(Agent_sdk.Types.sse_event -> unit) option ->
   turn_id:int ->

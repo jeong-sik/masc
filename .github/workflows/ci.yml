@@ -742,16 +742,16 @@ jobs:
         run: |
           echo "::notice::dune build is hard-required (blocks merge via CI Gate); test execution failures are advisory and summarized below"
 
-      - name: Config doctor drift report
+      - name: Config diagnostic drift report
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         continue-on-error: true
         run: |
           if [ -f _build/default/bin/main_eio.exe ]; then
-            echo "::group::Config doctor report"
-            _build/default/bin/main_eio.exe doctor config --json || true
+            echo "::group::Config diagnostic report"
+            _build/default/bin/main_eio.exe diagnostic config --json || true
             echo "::endgroup::"
           else
-            echo "::notice::main_eio.exe not found, skipping config-doctor"
+            echo "::notice::main_eio.exe not found, skipping config-diagnostic"
           fi
       - name: Summarize advisory build status
         if: ${{ always() }}

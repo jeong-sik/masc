@@ -50,9 +50,9 @@ let with_test_env f =
     (fun () -> f ~clock ~sw)
 
 let write_pending_confirm config _session_id =
-  let operator_dir = Filename.concat (Coord_utils.masc_dir config) "operator" in
-  Coord_utils.mkdir_p operator_dir;
-  Coord_utils.write_json config (Filename.concat operator_dir "pending_confirms.json")
+  let operator_dir = Filename.concat (Workspace_utils.masc_dir config) "operator" in
+  Workspace_utils.mkdir_p operator_dir;
+  Workspace_utils.write_json config (Filename.concat operator_dir "pending_confirms.json")
     (`List
       [
         `Assoc
@@ -71,31 +71,26 @@ let write_pending_confirm config _session_id =
           ];
       ])
 
-let seed_coord config session_id =
-  ignore (Lib.Coord.init config ~agent_name:(Some "fixture-root"));
-  (* See: fixture session setup; returned agent record is not used. *)
-  ignore (Lib.Coord.bind_session config ~agent_name:"mission-local64-smoke"
+let seed_workspace config session_id =
+  ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
+  ignore (Lib.Workspace.bind_session config ~agent_name:"mission-local64-smoke"
             ~capabilities:[ "operator"; "fixture"; "local64" ] ());
-  (* See: fixture session setup; returned agent record is not used. *)
-  ignore (Lib.Coord.bind_session config ~agent_name:"llama-local-alpha"
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-alpha"
             ~capabilities:[ "worker"; "local64"; "manager" ] ());
-  (* See: fixture session setup; returned agent record is not used. *)
-  ignore (Lib.Coord.bind_session config ~agent_name:"llama-local-beta"
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-beta"
             ~capabilities:[ "worker"; "local64"; "metacog" ] ());
-  (* See: fixture session setup; returned agent record is not used. *)
-  ignore (Lib.Coord.bind_session config ~agent_name:"llama-local-gamma"
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-gamma"
             ~capabilities:[ "worker"; "local64"; "executor" ] ());
-  (* See: fixture session setup; returned agent record is not used. *)
-  ignore (Lib.Coord.bind_session config ~agent_name:"llama-local-delta"
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-delta"
             ~capabilities:[ "worker"; "local64"; "observer" ] ());
   ignore
-    (Lib.Coord.broadcast config ~from_agent:"mission-local64-smoke"
+    (Lib.Workspace.broadcast config ~from_agent:"mission-local64-smoke"
        ~content:"@llama-local-alpha recover failed worker coverage");
   ignore
-    (Lib.Coord.broadcast config ~from_agent:"llama-local-alpha"
+    (Lib.Workspace.broadcast config ~from_agent:"llama-local-alpha"
        ~content:"Spawned worker recovered partial role coverage and runtime visibility.");
 
-  (* Team sessions are retired; mission fixtures now exercise coord-level
+  (* Team sessions are retired; mission fixtures now exercise workspace-level
      attention and worker/keeper signals without persisting session records. *)
   ignore session_id;
   write_pending_confirm config session_id
@@ -107,12 +102,12 @@ let test_dashboard_briefing_projection () =
     (fun () ->
       let session_id = "ts-mission-fixture-001" in
       with_test_env @@ fun ~clock ~sw ->
-      let config = Coord_utils.default_config dir in
-      seed_coord config session_id;
+      let config = Workspace_utils.default_config dir in
+      seed_workspace config session_id;
       (* Simulate delta departing: remove agent file so Dashboard_briefing
          sees delta as departed. *)
       let delta_path =
-        Filename.concat (Coord_utils.agents_dir config) "llama-local-delta.json"
+        Filename.concat (Workspace_utils.agents_dir config) "llama-local-delta.json"
       in
       if Sys.file_exists delta_path then Sys.remove delta_path;
       let json =
@@ -168,15 +163,15 @@ let test_dashboard_briefing_projection () =
         (internal_signals
          |> List.exists (fun row ->
               contains (row |> member "summary" |> to_string) "pending confirmation"));
-      (* Broadcast actions require microarch signal tones "warn"/"bad",
+      (* workspace broadcast actions require microarch signal tones "warn"/"bad",
          which need non-empty command-plane operations. In a clean test
-         fixture all 9 signals default to "ok", so recommendations are
-         empty. Verify internal_signals carries the pending-confirm incident
-         without emitting a pseudo target. *)
-      check bool "internal signals omit pseudo target" true
+         fixture all 9 signals default to "ok", so workspace_recommendations
+         returns []. Verify internal_signals carries the pending-confirm
+         incident instead — that is the reachable workspace-level signal. *)
+      check bool "internal signals are workspace-scoped" true
         (internal_signals
          |> List.for_all (fun row ->
-              row |> member "target_type" = `Null)))
+              row |> member "target_type" |> to_string = "workspace")))
 
 let test_dashboard_briefing_http_full_contract () =
   let dir = test_dir () in
@@ -185,8 +180,8 @@ let test_dashboard_briefing_http_full_contract () =
     (fun () ->
       let session_id = "ts-mission-http-fixture-001" in
       with_test_env @@ fun ~clock ~sw ->
-      let config = Coord_utils.default_config dir in
-      seed_coord config session_id;
+      let config = Workspace_utils.default_config dir in
+      seed_workspace config session_id;
       (* Clear stale cache entries from prior tests to avoid cross-test pollution.
          Both dashboard-level and operator snapshot caches must be invalidated. *)
       Lib.Dashboard_cache.invalidate_all ();
@@ -213,9 +208,9 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_test_env @@ fun ~clock ~sw ->
-      let config = Coord_utils.default_config dir in
+      let config = Workspace_utils.default_config dir in
       let session_id = "ts-mission-http-default-001" in
-      seed_coord config session_id;
+      seed_workspace config session_id;
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let json =
         Lib.Server_dashboard_http.dashboard_briefing_http_json
@@ -232,7 +227,7 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
         (json |> member "projection_diagnostics" |> member "last_success_at"
          <> `Null);
       check bool "default mission leaves initializing placeholder" true
-        (json |> member "summary" |> member "coord_health" |> to_string
+        (json |> member "summary" |> member "workspace_health" |> to_string
          <> "initializing");
       check bool "mission summary namespace_id removed" true
         (json |> member "summary" |> member "namespace_id" = `Null);
@@ -246,8 +241,8 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
     (fun () ->
       let session_id = "ts-mission-http-default-001" in
       with_test_env @@ fun ~clock ~sw ->
-      let config = Coord_utils.default_config dir in
-      seed_coord config session_id;
+      let config = Workspace_utils.default_config dir in
+      seed_workspace config session_id;
       Lib.Dashboard_cache.invalidate_all ();
       Lib.Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
@@ -266,7 +261,7 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
         (json |> member "projection_diagnostics" |> member "last_success_at"
          <> `Null);
       check bool "default mission leaves initializing placeholder" true
-        (json |> member "summary" |> member "coord_health" |> to_string
+        (json |> member "summary" |> member "workspace_health" |> to_string
          <> "initializing");
       check bool "mission summary namespace_id removed" true
         (json |> member "summary" |> member "namespace_id" = `Null);
@@ -285,10 +280,10 @@ let test_dashboard_briefing_http_cache_isolation () =
       let session_a = "ts-mission-cache-fixture-a" in
       let session_b = "ts-mission-cache-fixture-b" in
       with_test_env @@ fun ~clock ~sw ->
-      let config_a = Coord_utils.default_config dir_a in
-      let config_b = Coord_utils.default_config dir_b in
-      seed_coord config_a session_a;
-      seed_coord config_b session_b;
+      let config_a = Workspace_utils.default_config dir_a in
+      let config_b = Workspace_utils.default_config dir_b in
+      seed_workspace config_a session_a;
+      seed_workspace config_b session_b;
       let state_a =
         Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir_a ()
       in
@@ -313,9 +308,9 @@ let test_dashboard_briefing_http_cache_isolation () =
           request
       in
       let open Yojson.Safe.Util in
-      check bool "first coord namespace_id removed" true
+      check bool "first workspace namespace_id removed" true
         (json_a |> member "summary" |> member "namespace_id" = `Null);
-      check bool "second coord namespace_id removed" true
+      check bool "second workspace namespace_id removed" true
         (json_b |> member "summary" |> member "namespace_id" = `Null))
 
 let test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task () =
@@ -325,7 +320,7 @@ let test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_test_env @@ fun ~clock:_ ~sw:_ ->
-      let config = Coord_utils.default_config dir in
+      let config = Workspace_utils.default_config dir in
       let briefs =
         Lib.Dashboard_briefing_assembly.build_keeper_briefs config
           [
@@ -364,8 +359,8 @@ let test_dashboard_briefing_keeper_tool_audit_uses_decision_log () =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       with_test_env @@ fun ~clock:_ ~sw:_ ->
-      let config = Coord_utils.default_config dir in
-      Coord_utils.mkdir_p
+      let config = Workspace_utils.default_config dir in
+      Workspace_utils.mkdir_p
         (Filename.dirname (Lib.Keeper_types_support.keeper_decision_log_path config keeper_name));
       Fs_compat.append_jsonl
         (Lib.Keeper_types_support.keeper_decision_log_path config keeper_name)
@@ -440,8 +435,8 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
       Masc_test_deps.init_keeper_tool_registry ();
       let policy_base_path = Masc_test_deps.find_project_root () in
       ignore (Result.get_ok (Lib.Agent_tool_dispatch_runtime.init_policy_config ~base_path:policy_base_path));
-      let config_a = Coord_utils.default_config dir_a in
-      let config_z = Coord_utils.default_config dir_z in
+      let config_a = Workspace_utils.default_config dir_a in
+      let config_z = Workspace_utils.default_config dir_z in
       ignore
         (Lib.Keeper_registry.register ~base_path:config_a.base_path keeper_name
            (make_meta ~also_allow:[ "keeper_board_vote" ] keeper_name));
@@ -490,7 +485,7 @@ let () =
             `Quick test_dashboard_briefing_http_default_bootstraps_first_success;
           Alcotest.test_case "keeper tool audit fallback" `Quick
             test_dashboard_briefing_keeper_tool_audit_fallback;
-          Alcotest.test_case "http mission cache stays coord-scoped" `Quick
+          Alcotest.test_case "http mission cache stays workspace-scoped" `Quick
             test_dashboard_briefing_http_cache_isolation;
           Alcotest.test_case "keeper brief prefers heartbeat task" `Quick
             test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task;

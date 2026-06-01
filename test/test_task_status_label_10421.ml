@@ -7,7 +7,7 @@
     column dashboards already index by. *)
 
 open Alcotest
-module C = Masc_mcp.Coord
+module C = Masc_mcp.Workspace
 module T = Masc_domain
 
 let check_label expected status =

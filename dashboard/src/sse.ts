@@ -317,13 +317,13 @@ function handleEvent(event: SSEEvent): void {
   }
 
   switch (type) {
-    case 'agent_joined':
-      addTypedJournalEntry(agent, 'Joined', 'system', 'agent_joined', {
+    case 'agent_bound':
+      addTypedJournalEntry(agent, 'Joined', 'system', 'agent_bound', {
         narrativeText: `${actorLabel(agent)}가 프로젝트에 참여했습니다.`,
       })
       break
-    case 'agent_left':
-      addTypedJournalEntry(agent, 'Left', 'system', 'agent_left', {
+    case 'agent_unbound':
+      addTypedJournalEntry(agent, 'Left', 'system', 'agent_unbound', {
         narrativeText: `${actorLabel(agent)}가 프로젝트에서 나갔습니다.`,
       })
       break

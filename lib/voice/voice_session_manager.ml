@@ -244,7 +244,7 @@ let increment_turn t ~agent_id =
 
 (** {1 Zombie Cleanup} *)
 
-let cleanup_zombies t ?(timeout = Coord_resilience.default_zombie_threshold) () =
+let cleanup_zombies t ?(timeout = Workspace_resilience.default_zombie_threshold) () =
   with_lock t (fun () ->
     let now = Time_compat.now () in
     let to_remove = Hashtbl.fold (fun agent_id session acc ->

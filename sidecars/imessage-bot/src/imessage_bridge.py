@@ -99,8 +99,8 @@ class InboundMessage:
     display_name: str
 
     @property
-    def room_id(self) -> str:
-        """Use chat_identifier as room ID for gate routing."""
+    def workspace_id(self) -> str:
+        """Use chat_identifier as workspace ID for gate routing."""
         return self.chat_identifier or self.sender
 
 

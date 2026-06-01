@@ -195,11 +195,11 @@ let sync_keeper_presence
     | exn ->
       incr consecutive_failures;
       Prometheus.inc_counter
-        Keeper_metrics.(to_string CoordHeartbeatFailures)
+        Keeper_metrics.(to_string WorkspaceHeartbeatFailures)
         ~labels:[ "keeper", meta_current.name ]
         ();
       Log.Keeper.error
-        "coord heartbeat failed (%d/%d): %s"
+        "workspace heartbeat failed (%d/%d): %s"
         !consecutive_failures
         (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ())
         (Printexc.to_string exn);

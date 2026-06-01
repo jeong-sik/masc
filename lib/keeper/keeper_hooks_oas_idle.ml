@@ -22,7 +22,7 @@ let suggest_alternatives ~(allowed_tools : string list)
      if len <= max_suggestions then candidates
      else List.filteri (fun i _ -> i < max_suggestions) candidates
 
-(** Pure decision logic for the on_idle hook.  Testable without Coord.config.
+(** Pure decision logic for the on_idle hook.  Testable without Workspace.config.
 
     Graduated response to repeated tool calls uses the configured
     [Env_config_keeper.KeeperKeepalive.idle_skip_threshold]:

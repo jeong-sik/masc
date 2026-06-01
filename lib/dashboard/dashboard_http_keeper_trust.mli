@@ -2,6 +2,6 @@
 
 val keeper_trust_json :
   ?include_receipt:bool ->
-  Coord.config ->
+  Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t

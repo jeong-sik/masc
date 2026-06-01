@@ -233,7 +233,7 @@ let notification_to_json (n : notification) : Yojson.Safe.t =
     ("timestamp", `Float n.timestamp);
   ]
 
-(** Hook function to notify task changes - call from Coord module *)
+(** Hook function to notify task changes - call from Workspace module *)
 let notify_task_change ~(change : change_type) ~(task_id : string) ~(data : Yojson.Safe.t) : unit =
   let _ = notify_change ~resource:Tasks ~change ~resource_id:task_id ~data in
   ()

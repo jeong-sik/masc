@@ -11,7 +11,7 @@
 (** Create OAS hooks for hook-first memory injection.
 
     @param agent_name Keeper agent name (for procedure lookup and flush)
-    @param config Coord configuration (for institution loading)
+    @param config Workspace configuration (for institution loading)
     @param memory OAS Memory.t instance (for AfterTurn flush)
     @param episode_limit Max episodes to inject (default 30)
     @param procedure_limit Max procedures to inject (default 10)
@@ -25,7 +25,7 @@ val render_memory_context :
   ?memory:Agent_sdk.Memory.t ->
   ?world_backend:Agent_sdk.Memory.long_term_backend ->
   agent_name:string ->
-  config:Coord_utils.config ->
+  config:Workspace_utils.config ->
   episode_limit:int ->
   procedure_limit:int ->
   ?world_limit:int ->
@@ -34,7 +34,7 @@ val render_memory_context :
 
 val make :
   agent_name:string ->
-  config:Coord_utils.config ->
+  config:Workspace_utils.config ->
   memory:Agent_sdk.Memory.t ->
   ?world_backend:Agent_sdk.Memory.long_term_backend ->
   ?episode_limit:int ->

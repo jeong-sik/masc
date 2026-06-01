@@ -167,7 +167,7 @@ module Make (_ : sig val name : string end) : LOGGER
 
 (** {1 Pre-defined module loggers} *)
 
-module Coord : LOGGER
+module Workspace : LOGGER
 module Mcp : LOGGER
 module Auth : LOGGER
 module Retry : LOGGER
@@ -217,7 +217,7 @@ module MemoryJsonl : LOGGER
 module AutoResponder : LOGGER
 module Env : LOGGER
 module Level2 : LOGGER
-module RoomTask : LOGGER
+module TaskState : LOGGER
 module Inline : LOGGER
 module Protocol : LOGGER
 module AlwaysOn : LOGGER

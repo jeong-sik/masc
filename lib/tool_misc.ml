@@ -30,7 +30,7 @@ open Tool_args
 type tool_result = Tool_result.result
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
 }
 
@@ -51,7 +51,7 @@ type context = {
    - [Workflow_rejection] : invalid dashboard scope; missing
                             tool_name; unknown tool.
    - No [Runtime_failure] / [Transient_error] sites here — the
-     [Coord.gc] / [Coord.cleanup_zombies] / [Dashboard.generate]
+     [Workspace.gc] / [Workspace.cleanup_zombies] / [Dashboard.generate]
      backends assume-success or raise. When a backend later returns
      a typed Error variant, the construction site here gets the
      appropriate class at that time. *)
@@ -92,7 +92,7 @@ let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
   let days = max 1 days_raw in
   if days_raw < 1 then
     Log.Misc.warn "masc_gc days=%d clamped to 1 (minimum guardrail)" days_raw;
-  let gc_result = Coord.gc ctx.config ~days () in
+  let gc_result = Workspace.gc ctx.config ~days () in
   let expired = 0 in
   let decision_note =
     if expired > 0 then Printf.sprintf "\nExpired %d pending decision(s) past TTL" expired
@@ -101,12 +101,12 @@ let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
   text_ok ~tool_name ~start_time (gc_result ^ decision_note)
 
 let handle_cleanup_zombies ~tool_name ~start_time ctx _args : Tool_result.result =
-  let result = Coord.cleanup_zombies ctx.config in
+  let result = Workspace.cleanup_zombies ctx.config in
   let msg =
     match result with
-    | Coord.No_agents_dir -> "No agents directory"
-    | Coord.No_zombies -> "No zombie agents found"
-    | Coord.Cleaned { count; names; released_tasks; skipped } ->
+    | Workspace.No_agents_dir -> "No agents directory"
+    | Workspace.No_zombies -> "No zombie agents found"
+    | Workspace.Cleaned { count; names; released_tasks; skipped } ->
         let task_note =
           if released_tasks = 0 then ""
           else Printf.sprintf ", released %d orphan task(s)" released_tasks

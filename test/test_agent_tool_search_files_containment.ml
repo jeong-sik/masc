@@ -6,7 +6,7 @@
     always contained to their playground via the same containment
     module. *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Agent_tool_command_runtime = Masc_mcp.Agent_tool_command_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
@@ -65,7 +65,7 @@ let rec ensure_dir path =
 let make_config () =
   let tmp = temp_dir () in
   ensure_dir (Filename.concat tmp Common.masc_dirname);
-  (tmp, Coord.default_config tmp)
+  (tmp, Workspace.default_config tmp)
 
 let make_meta ~name ~sandbox =
   (* allowed_paths=["*"] mirrors the production minjae config that lets

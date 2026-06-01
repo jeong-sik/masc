@@ -102,7 +102,7 @@ No automatic retry within the same LLM turn — the error message is actionable 
 
 - `Goal_store.read_state` already used in keeper modules (`keeper_runtime_contract.ml`, `keeper_turn_up_create.ml`, etc.)
 - No new external dependencies
-- Version check is O(1) — `read_state` is already cached behind Coord config
+- Version check is O(1) — `read_state` is already cached behind Workspace config
 
 ### Backward Compatibility
 

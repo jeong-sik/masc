@@ -22,7 +22,7 @@
 
     @since 0.6.0 — MASC Social v4 Tier 1 *)
 
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** {1 Event types} *)
 
@@ -63,7 +63,7 @@ type audit_entry = {
   timestamp : float;
   agent_id : string;
   action : action;
-  coord_id : string option;
+  workspace_id : string option;
   details : Yojson.Safe.t;
   outcome : outcome;
   cost_estimate : float option;
@@ -129,7 +129,7 @@ val log_action :
   config ->
   agent_id:string ->
   action:action ->
-  ?coord_id:string ->
+  ?workspace_id:string ->
   ?details:Yojson.Safe.t ->
   ?cost_estimate:float ->
   ?token_count:int ->
@@ -182,7 +182,7 @@ val log_suspend :
   agent_id:string ->
   target_agent:string ->
   reason:string ->
-  coords_affected:int ->
+  workspaces_affected:int ->
   ?cost_estimate:float ->
   ?token_count:int ->
   unit -> unit

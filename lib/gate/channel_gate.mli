@@ -21,7 +21,7 @@ type inbound_message = Gate_protocol.inbound_message = {
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
   keeper_name : string;
   content : string;
   idempotency_key : string;
@@ -93,7 +93,7 @@ type dispatch_fn =
   channel:string ->
   channel_user_id:string ->
   channel_user_name:string ->
-  channel_room_id:string ->
+  channel_workspace_id:string ->
   keeper_name:string ->
   content:string ->
   Gate_protocol.dispatch_result

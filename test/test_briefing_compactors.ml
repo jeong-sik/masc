@@ -8,8 +8,8 @@
     Properties pinned:
 
     1. {b relevant_sessions_for_briefing filtering}
-       - Empty namespace → match all rooms.
-       - Project / coord_id matching with live-status allow-list
+       - Empty namespace → match all workspaces.
+       - Project / workspace_id matching with live-status allow-list
          {running, active, paused, starting, stopping, waiting},
          case-insensitive + whitespace-trimmed.
        - Recent-event window: keep if any recent_events ts_iso is
@@ -48,8 +48,8 @@ let assoc_keys_sorted j =
 
 (* Session JSON helper — minimal shape that the compactor
    navigates through. *)
-let session_fixture ?(session_id = "s-1") ?(project = "room-A")
-    ?(coord_id = "room-A") ?(goal = "ship feature") ?(status = "active")
+let session_fixture ?(session_id = "s-1") ?(project = "workspace-A")
+    ?(workspace_id = "workspace-A") ?(goal = "ship feature") ?(status = "active")
     ?(summary_status = "active") ?(comm_mode = "async")
     ?(broadcast = 3) ?(portal = 5) ?(recent = []) () =
   `Assoc
@@ -62,7 +62,7 @@ let session_fixture ?(session_id = "s-1") ?(project = "room-A")
               `Assoc
                 [
                   ("project", json_string project);
-                  ("coord_id", json_string coord_id);
+                  ("workspace_id", json_string workspace_id);
                   ("goal", json_string goal);
                   ("status", json_string status);
                   ("agent_names", `List [ json_string "a1" ]);
@@ -162,8 +162,8 @@ let int_of j = match j with `Int n -> n | _ -> -1
 
 let test_relevant_empty_namespace_matches_all () =
   (* When current_namespace is "" (or whitespace), trim_to_option
-     returns None, and coord_matches always returns true. *)
-  let s = session_fixture ~project:"any-coord" () in
+     returns None, and workspace_matches always returns true. *)
+  let s = session_fixture ~project:"any-workspace" () in
   let result =
     C.relevant_sessions_for_briefing ~current_namespace:""
       ~now_ts:0.0 [ s ]
@@ -171,52 +171,52 @@ let test_relevant_empty_namespace_matches_all () =
   assert (List.length result = 1)
 
 let test_relevant_namespace_matching_keeps () =
-  let s = session_fixture ~project:"coord-X" ~status:"active"
+  let s = session_fixture ~project:"workspace-X" ~status:"active"
               ~summary_status:"active" () in
   let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"coord-X"
+    C.relevant_sessions_for_briefing ~current_namespace:"workspace-X"
       ~now_ts:0.0 [ s ]
   in
   assert (List.length result = 1)
 
 let test_relevant_namespace_mismatch_drops () =
-  let s = session_fixture ~project:"coord-X" ~status:"active" () in
+  let s = session_fixture ~project:"workspace-X" ~status:"active" () in
   let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"coord-Y"
+    C.relevant_sessions_for_briefing ~current_namespace:"workspace-Y"
       ~now_ts:0.0 [ s ]
   in
   assert (result = [])
 
-let test_relevant_coord_id_fallback_when_project_blank () =
-  (* If project is blank, fall back to coord_id for matching. *)
+let test_relevant_workspace_id_fallback_when_project_blank () =
+  (* If project is blank, fall back to workspace_id for matching. *)
   let s =
-    session_fixture ~project:"" ~coord_id:"room-Z"
+    session_fixture ~project:"" ~workspace_id:"workspace-Z"
       ~status:"active" ~summary_status:"active" ()
   in
   let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"room-Z"
+    C.relevant_sessions_for_briefing ~current_namespace:"workspace-Z"
       ~now_ts:0.0 [ s ]
   in
   assert (List.length result = 1)
 
 let test_relevant_dead_status_drops () =
   let s =
-    session_fixture ~project:"room-A" ~status:"failed"
+    session_fixture ~project:"workspace-A" ~status:"failed"
       ~summary_status:"failed" ~recent:[] ()
   in
   let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"room-A"
+    C.relevant_sessions_for_briefing ~current_namespace:"workspace-A"
       ~now_ts:0.0 [ s ]
   in
   assert (result = [])
 
 let test_relevant_live_status_case_insensitive_trim () =
   let s =
-    session_fixture ~project:"room-A"
+    session_fixture ~project:"workspace-A"
       ~summary_status:"  RUNNING  " ~status:"  RUNNING  " ()
   in
   let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"room-A"
+    C.relevant_sessions_for_briefing ~current_namespace:"workspace-A"
       ~now_ts:0.0 [ s ]
   in
   assert (List.length result = 1)
@@ -232,12 +232,12 @@ let test_relevant_recent_event_within_hour_keeps_dead_session () =
       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
   in
   let s =
-    session_fixture ~project:"room-A" ~status:"failed"
+    session_fixture ~project:"workspace-A" ~status:"failed"
       ~summary_status:"failed"
       ~recent:[ recent_event ~ts_iso:recent_ts_iso () ] ()
   in
   let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"room-A"
+    C.relevant_sessions_for_briefing ~current_namespace:"workspace-A"
       ~now_ts [ s ]
   in
   assert (List.length result = 1)
@@ -251,12 +251,12 @@ let test_relevant_recent_event_outside_hour_drops_dead_session () =
       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
   in
   let s =
-    session_fixture ~project:"room-A" ~status:"failed"
+    session_fixture ~project:"workspace-A" ~status:"failed"
       ~summary_status:"failed"
       ~recent:[ recent_event ~ts_iso:stale_ts_iso () ] ()
   in
   let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"room-A"
+    C.relevant_sessions_for_briefing ~current_namespace:"workspace-A"
       ~now_ts [ s ]
   in
   assert (result = [])
@@ -383,7 +383,7 @@ let test_compact_session_goal_default_when_blank () =
               ( "session",
                 `Assoc
                   [
-                    ("project", `String "room-A");
+                    ("project", `String "workspace-A");
                     ("status", `String "active");
                     ("goal", `String "");
                     ("agent_names", `List []);
@@ -564,7 +564,7 @@ let () =
   test_relevant_empty_namespace_matches_all ();
   test_relevant_namespace_matching_keeps ();
   test_relevant_namespace_mismatch_drops ();
-  test_relevant_coord_id_fallback_when_project_blank ();
+  test_relevant_workspace_id_fallback_when_project_blank ();
   test_relevant_dead_status_drops ();
   test_relevant_live_status_case_insensitive_trim ();
   test_relevant_recent_event_within_hour_keeps_dead_session ();

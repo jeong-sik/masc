@@ -1,4 +1,4 @@
-(** In-process runtime handlers for descriptor-backed coordination tools.
+(** In-process runtime handlers for descriptor-backed workspace tools.
 
     Each handler reproduces the exact JSON the legacy
     [Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] match arm used
@@ -141,41 +141,41 @@ let dispatch_option_to_string ~name = function
          ])
 ;;
 
-let handle_masc_task ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_task ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_task.context =
     { config; agent_name = meta.name; sw = None }
   in
   Tool_task.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-let handle_masc_plan ~(config : Coord.config) ~name ~args =
+let handle_masc_plan ~(config : Workspace.config) ~name ~args =
   let ctx : Tool_plan.context = { config } in
   Tool_plan.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-let handle_masc_run ~(config : Coord.config) ~name ~args =
+let handle_masc_run ~(config : Workspace.config) ~name ~args =
   let ctx : Tool_run.context = { config } in
   Tool_run.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-let handle_masc_agent ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_agent ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent.context = { config; agent_name = meta.name } in
   Tool_agent.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-(* RFC-0182 §3.1 — masc_coord_ cluster. Tool_coord lies LATE in module
+(* RFC-0182 §3.1 — masc_workspace_ cluster. Tool_workspace lies LATE in module
    order (depends on Keeper_runtime which depends on much of the keeper
    layer). Agent_tool_in_process_runtime is EARLY (transitively imported
    by Agent_tool_dispatch_runtime). A direct static import here closes a cycle.
 
-   Resolution: dispatch through [Coord_dispatch_ref.dispatch]. A late
+   Resolution: dispatch through [Workspace_dispatch_ref.dispatch]. A late
    bootstrap module ([Mcp_server_eio_execute]) registers
-   [Tool_coord.dispatch] into the ref. Until registered the ref returns
+   [Tool_workspace.dispatch] into the ref. Until registered the ref returns
    [None], surfacing a clear projection error rather than silently
    succeeding with stale state. *)
-let handle_masc_coord ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_workspace ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let dispatched =
-    !Coord_dispatch_ref.dispatch ~config ~agent_name:meta.name ~name ~args
+    !Workspace_dispatch_ref.dispatch ~config ~agent_name:meta.name ~name ~args
   in
   dispatch_option_to_string ~name dispatched
 ;;
@@ -184,17 +184,17 @@ let handle_masc_coord ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args
    extraction (2026-05-27) broke the Tool_agent_timeline → Keeper_*
    back edge that previously cycled Config → ... →
    Agent_tool_in_process_runtime. *)
-let handle_masc_misc ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_misc ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_misc.context = { config; agent_name = meta.name } in
   Tool_misc.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-let handle_masc_control ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_control ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_control.context = { config; agent_name = meta.name } in
   Tool_control.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-let handle_masc_agent_timeline ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent_timeline.context = { config; agent_name = meta.name } in
   Tool_agent_timeline.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
@@ -202,7 +202,7 @@ let handle_masc_agent_timeline ~(config : Coord.config) ~(meta : keeper_meta) ~n
 (* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]
    returns the older [(bool * Yojson.Safe.t)] tuple (predates RFC-0189
    typed-result migration), same shape as Tool_local_runtime.  Tool_shard
-   has no Keeper/Coord deps so no cycle concern.
+   has no Keeper/Workspace deps so no cycle concern.
 
    TEL-OK: descriptor projection — telemetry lives in [Tool_shard.execute]
    and the upstream [Agent_tool_dispatch_runtime] dispatch wrapper. *)
@@ -225,7 +225,7 @@ let handle_masc_surface_audit ~args =
 ;;
 
 (* RFC-0182 §3.1 — masc_keeper cluster.  [Tool_keeper] lives in lib/
-   (late) but exposes keeper coordination tools.  A direct import here
+   (late) but exposes keeper workspace tools.  A direct import here
    closes a cycle, so we dispatch through [Keeper_dispatch_ref].  Today
    only [masc_keeper_list] is registered; remaining keeper tools depend
    on the Eio context and await Phase 5 Eio plumbing.
@@ -239,7 +239,7 @@ let handle_masc_keeper
       ?proc_mgr
       ?net
       ?mcp_session_id
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~name
       ~args

@@ -100,7 +100,7 @@ type rollover_gate_decision =
   | Go of string
 
 let append_lineage_artifacts_best_effort
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(parent : keeper_meta)
     ~(child : keeper_meta)
     ~(parent_trace_id : string)
@@ -340,7 +340,7 @@ let maybe_rollover_oas_handoff
                     MASC lineage telemetry is append-only best-effort data and
                     must never roll back a successful rollover. *)
                  let lineage_config =
-                   Coord.default_config (Filename.dirname (Filename.dirname base_dir))
+                   Workspace.default_config (Filename.dirname (Filename.dirname base_dir))
                  in
                  append_lineage_artifacts_best_effort
                    ~config:lineage_config

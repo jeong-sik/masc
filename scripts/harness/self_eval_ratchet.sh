@@ -38,7 +38,7 @@ echo ""
 
 # ── Core tool pass rate ──
 TOOLS=(
-  "masc_join"
+  "masc_bind"
   "masc_add_task"
   "masc_status"
   "masc_heartbeat"
@@ -54,7 +54,7 @@ MCP_SESSION_ID="eval-${ITERATION}-$(date +%s)"
 export MCP_SESSION_ID
 
 # Join first
-call_tool 9000 "masc_join" "{\"agent_name\":\"${AGENT_NAME}\"}" >/dev/null 2>&1 || true
+call_tool 9000 "masc_bind" "{\"agent_name\":\"${AGENT_NAME}\"}" >/dev/null 2>&1 || true
 
 PASS=0
 FAIL=0
@@ -64,7 +64,7 @@ SIZES=()
 for tool in "${TOOLS[@]}"; do
   args="{}"
   case "$tool" in
-    masc_join) args="{\"agent_name\":\"${AGENT_NAME}\"}" ;;
+    masc_bind) args="{\"agent_name\":\"${AGENT_NAME}\"}" ;;
     masc_add_task) args="{\"title\":\"eval task ${ITERATION}\",\"priority\":3}" ;;
     masc_heartbeat) args="{\"agent_name\":\"${AGENT_NAME}\",\"status\":\"evaluating\"}" ;;
     masc_broadcast) args="{\"message\":\"eval iteration ${ITERATION}\"}" ;;
@@ -78,9 +78,9 @@ for tool in "${TOOLS[@]}"; do
     PASS=$((PASS + 1))
   else
     FAIL=$((FAIL + 1))
-    # P0: core coordination tools failing is critical
+    # P0: core workspace collaboration tools failing is critical
     case "$tool" in
-      masc_join|masc_add_task|masc_status|masc_heartbeat)
+      masc_bind|masc_add_task|masc_status|masc_heartbeat)
         P0=$((P0 + 1))
         echo "  P0: ${tool} FAILED"
         ;;

@@ -2,7 +2,7 @@
 (** Tool_agent - Agent management, metrics, and capability discovery handlers *)
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
 }
 

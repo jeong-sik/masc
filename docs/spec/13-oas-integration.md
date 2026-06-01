@@ -101,12 +101,12 @@ graph TB
 | 관심사 | OAS 담당 | MASC 담당 |
 |--------|---------|----------|
 | 단일 에이전트 실행 | `Agent.run`, `Builder`, `Hooks`, `Guardrails`, `Memory`, `Checkpoint` | 언제/왜/어떤 agent를 돌릴지 결정 |
-| 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | room, board, workflow, policies |
+| 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | workspace, board, workflow, policies |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, dispatch, auth |
 | 컨텍스트 축약 | `Context_reducer` | 어떤 전략을 언제 적용할지 결정 |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 publish할지, SSE/dashboard 연결 |
 | 장기 메모리 | `Memory.t` tiers | institutional memory, pg/jsonl backends |
-| 조율 상태 | 없음 | room, tasks, team sessions, governance |
+| 조율 상태 | 없음 | workspace, tasks, team sessions, governance |
 
 ---
 
@@ -362,7 +362,7 @@ MASC 조율 이벤트를 OAS `Event_bus`에 `Custom("masc:<type>", json)` 형식
 2. 배경 fiber가 `drain_interval_s` (기본 0.25초) 간격으로 poll
 3. native/custom event를 `oas:*` envelope JSON으로 직렬화하고 `correlation_id`, `run_id`, `ts_unix`를 포함
 4. `.masc/oas-events/`에 durable append
-5. `Sse.broadcast_to Coordinators`로 dashboard 클라이언트에 전달
+5. `Sse.broadcast_to Agent streams`로 dashboard 클라이언트에 전달
 
 환경변수: `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` (범위: 0.05-5.0초)
 
@@ -509,7 +509,7 @@ Detailed implementation checklist lives in
 
 | Surface | Classification | Notes |
 |---------|----------------|-------|
-| `oas_worker` / `worker_oas` / `verifier_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about room/task semantics |
+| `oas_worker` / `worker_oas` / `verifier_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about workspace/task semantics |
 | `context_compact_oas` | Acceptable but lossy | OAS reducer is authoritative, but MASC marker heuristics still influence scoring |
 | `memory_oas_bridge` | Acceptable | consumer adapter is correct; lifecycle is hook-first read injection plus post-turn flush |
 | keeper context/checkpoint continuity path | Boundary violation | duplicate runtime ownership + raw text continuity markers remain |

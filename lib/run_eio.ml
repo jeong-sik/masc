@@ -8,7 +8,7 @@
     - log.jsonl (append-only)
 *)
 
-open Coord_utils
+open Workspace_utils
 
 (** Run metadata *)
 type run_record = {

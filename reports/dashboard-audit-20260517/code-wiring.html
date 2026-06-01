@@ -75,7 +75,7 @@
           <tr>
             <td>Code IDE</td>
             <td class="ok">Implemented locally</td>
-            <td>`ide-shell.ts:413-735`, `ide-data-coordinator.ts:144-221`</td>
+            <td>`ide-shell.ts:413-735`, `ide-data-workspace-store.ts:144-221`</td>
             <td>Repo-scoped `.masc-ide` annotation/region APIs and decision trace context are wired locally; live runtime probe remains pending.</td>
           </tr>
         </tbody>
@@ -146,7 +146,7 @@
   -> editor/diff/ownership render
 
 Repaired metadata path:
-  activeRepositoryId exists in coordinator opts
+  activeRepositoryId exists in agent stream opts
   -> api/ide.ts IdeApiOptions carries keeper + repoId
   -> fetchIdeAnnotations / fetchIdeRegions / create / delete append repo_id
   -> server resolves selected repository base

@@ -835,7 +835,7 @@ module Make (M : sig val name : string end) = struct
 end
 
 (** Pre-defined module loggers *)
-module Coord = Make(struct let name = "Coord" end)
+module Workspace = Make(struct let name = "Workspace" end)
 module Mcp = Make(struct let name = "MCP" end)
 module Auth = Make(struct let name = "Auth" end)
 module Retry = Make(struct let name = "Retry" end)
@@ -885,7 +885,7 @@ module MemoryJsonl = Make(struct let name = "MemoryJsonl" end)
 module AutoResponder = Make(struct let name = "AutoResponder" end)
 module Env = Make(struct let name = "Env" end)
 module Level2 = Make(struct let name = "Level2" end)
-module RoomTask = Make(struct let name = "RoomTask" end)
+module TaskState = Make(struct let name = "TaskState" end)
 module Inline = Make(struct let name = "Inline" end)
 module Protocol = Make(struct let name = "Protocol" end)
 module AlwaysOn = Make(struct let name = "AlwaysOn" end)

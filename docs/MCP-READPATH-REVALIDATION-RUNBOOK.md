@@ -30,7 +30,7 @@
 - `/health.startup.pending_lazy_tasks`가 빈 배열이다.
 - keeper가 하나 이상 있을 때, 정렬된 keeper list 앞쪽 `KEEPER_STATUS_SAMPLE_LIMIT`개 이름만 결정론적으로 status probe 후보로 본다.
 - 위 후보 중 첫 `masc_keeper_status` 성공 payload에 다음 필드가 존재한다.
-  - `coordination.joined_room_ids`
+  - `workspace collaboration.bound_workspace_ids`
   - `runtime.proactive_enabled`
 - `/api/v1/dashboard/execution`의 keeper row는 `diagnostic` object를 포함한다.
 - `/api/v1/dashboard/execution`에서 `keepalive_running=false` 이고 `proactive_enabled=true` 인 keeper는 `diagnostic.quiet_reason="disabled"`로 분류되지 않는다.

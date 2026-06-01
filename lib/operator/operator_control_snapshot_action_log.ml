@@ -82,7 +82,7 @@ let action_log_entry_to_yojson (entry : action_log_entry) =
 ;;
 
 let append_action_log config (entry : action_log_entry) =
-  Coord_utils.mkdir_p (Operator_pending_confirm.operator_dir config);
+  Workspace_utils.mkdir_p (Operator_pending_confirm.operator_dir config);
   Fs_compat.append_jsonl (action_log_path config) (action_log_entry_to_yojson entry)
 ;;
 

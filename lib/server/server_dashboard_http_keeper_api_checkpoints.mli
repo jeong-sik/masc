@@ -11,6 +11,6 @@ val oas_checkpoint_summary_json :
   Agent_sdk.Checkpoint.t ->
   Yojson.Safe.t
 
-val inventory_json : Coord.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
+val inventory_json : Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
 
 val linked_artifact_json : kind:string -> string -> Yojson.Safe.t

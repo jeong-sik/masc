@@ -231,7 +231,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   `
 }
 
-function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
+function ControlWorkspacePanel({ state }: { state: FleetTelemetryState }) {
   const truth = state.namespace_truth
   const readiness = truth?.readiness ?? null
   const attentionEvents = truth?.attention_events ?? []
@@ -242,7 +242,7 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
   if (!truth || !readiness) {
     return html`
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
-        Control room readiness is unavailable for this refresh.
+        Control workspace readiness is unavailable for this refresh.
       </div>
     `
   }
@@ -708,7 +708,7 @@ export function FleetTelemetryPanel() {
           ? normalizeNamespaceTruth(namespaceTruthResult.value)
           : null
       if (namespaceTruthResult.status === 'rejected' && !isAbortError(namespaceTruthResult.reason)) {
-        warnings.push(`Control room 사용 불가: ${errorMessageOrUnknown(namespaceTruthResult.reason)}`)
+        warnings.push(`Control workspace 사용 불가: ${errorMessageOrUnknown(namespaceTruthResult.reason)}`)
       }
 
       const rows = buildFleetRows(keepers, toolQuality)
@@ -871,7 +871,7 @@ export function FleetTelemetryPanel() {
 
       <div>
         <${Eyebrow} tone="disabled" class="mb-1">함대 통제실</${Eyebrow}>
-        <${ControlRoomPanel} state=${value} />
+        <${ControlWorkspacePanel} state=${value} />
       </div>
 
       <div>

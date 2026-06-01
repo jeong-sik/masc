@@ -48,7 +48,7 @@ export function targetTypeLabel(value?: string | null): string {
       return 'Task'
     case 'namespace':
       return 'Namespace'
-    case 'room':
+    case 'workspace':
       return 'Namespace'
     case 'keeper':
       return 'Keeper'
@@ -58,7 +58,7 @@ export function targetTypeLabel(value?: string | null): string {
 }
 
 export function isRootTarget(value?: string | null): boolean {
-  return value === 'root' || value === 'namespace' || value === 'room'
+  return value === 'root' || value === 'namespace' || value === 'workspace'
 }
 const isNamespaceTarget = isRootTarget
 
@@ -98,7 +98,7 @@ function hydrateActionForm(input: {
       taskPriority.value = workflowPayloadString(payload, 'priority') ?? taskPriority.value
       return
     }
-    if (actionType === 'namespace_pause' || actionType === 'room_pause') {
+    if (actionType === 'namespace_pause' || actionType === 'workspace_pause') {
       pauseReason.value = workflowPayloadString(payload, 'reason') ?? input.summary
     }
     return
@@ -134,7 +134,7 @@ export function workflowTargetReady(
 
 export async function executeAction(input: {
   action_type: string
-  target_type: 'root' | 'namespace' | 'room' | 'keeper' | string
+  target_type: 'root' | 'namespace' | 'workspace' | 'keeper' | string
   target_id?: string
   payload: Record<string, unknown>
   successMessage: string

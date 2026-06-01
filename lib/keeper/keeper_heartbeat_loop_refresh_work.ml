@@ -4,17 +4,17 @@
     [refresh_work_as_heartbeat] is the keepalive cycle's
     "implicit heartbeat" path: when the keeper just finished a
     productive turn (`work_as_hb () = true`) and the proactive warmup
-    has elapsed, we count any successful Coord.heartbeat against any
-    session-bound coord as evidence that the keeper is alive — and reset the
+    has elapsed, we count any successful Workspace.heartbeat against any
+    session-bound workspace as evidence that the keeper is alive — and reset the
     consecutive-failure counter accordingly.
 
-    Per-coord failure logging is at DEBUG (not WARN) because the
-    *any-success* aggregation policy means a single live coord is
-    sufficient; transient per-coord misses are expected during coord
+    Per-workspace failure logging is at DEBUG (not WARN) because the
+    *any-success* aggregation policy means a single live workspace is
+    sufficient; transient per-workspace misses are expected during workspace
     rebalance and shouldn't pollute the WARN stream.
 
     Cancellation re-raises (preserves Eio cancellation semantics).
-    All other exceptions degrade to a per-coord `false` result.
+    All other exceptions degrade to a per-workspace `false` result.
 
     Pure helper move — no callback injection, no parent-local
     dependencies. *)
@@ -36,7 +36,8 @@ let refresh_work_as_heartbeat
   then (
     let hb_ok =
       try
-        ignore (Coord.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name);
+        (* fire-and-forget: heartbeat persistence is enough; loop records only success/failure. *)
+        ignore (Workspace.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name);
         true
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

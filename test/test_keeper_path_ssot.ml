@@ -24,7 +24,7 @@
     surfaces the wrong root after PR-F lands, this test suite
     should still pass and the diagnosis must look elsewhere. *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
@@ -55,7 +55,7 @@ let make_meta ~name ~sandbox =
 let make_config () =
   let base = temp_dir () in
   Unix.mkdir (Filename.concat base ".masc") 0o755;
-  Coord.default_config base
+  Workspace.default_config base
 
 let rec mkdir_p path =
   if Sys.file_exists path then ()
@@ -74,7 +74,7 @@ let write_keeper_toml ~config ~name ~sandbox_profile =
   let dir =
     Filename.concat
       (Filename.concat
-         (Filename.concat config.Coord.base_path ".masc")
+         (Filename.concat config.Workspace.base_path ".masc")
          "config")
       "keepers"
   in
@@ -172,7 +172,7 @@ let test_config_agent_projection_docker () =
   in
   let expected =
     Filename.concat
-      config.Coord.base_path
+      config.Workspace.base_path
       ".masc/playground/docker/sangsu/repos/masc-mcp/lib/foo.ml"
   in
   Alcotest.(check string)
@@ -202,13 +202,13 @@ let test_config_agent_projection_rejects_legacy_alias () =
        (Printf.sprintf
           "%s: invalid sandbox_profile %S (allowed: local, docker)"
           (Keeper_sandbox_config.keeper_toml_path
-             ~base_path:config.Coord.base_path
+             ~base_path:config.Workspace.base_path
              ~agent_name:"keeper-sangsu-agent")
           "docker_hardened"))
     (fun () ->
        ignore
          (Keeper_sandbox_config.sandbox_profile_of_agent
-            ~base_path:config.Coord.base_path
+            ~base_path:config.Workspace.base_path
             ~agent_name:"keeper-sangsu-agent"))
 
 (* ── Egress policy file path SSOT ─────────────────────────────────────────

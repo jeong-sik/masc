@@ -30,7 +30,7 @@ type action_log_entry =
   ; created_at : string
   }
 
-val action_log_path : Coord.config -> string
+val action_log_path : Workspace.config -> string
 val action_log_entry_to_yojson : action_log_entry -> Yojson.Safe.t
-val append_action_log : Coord.config -> action_log_entry -> unit
-val recent_actions_json : Coord.config -> Yojson.Safe.t
+val append_action_log : Workspace.config -> action_log_entry -> unit
+val recent_actions_json : Workspace.config -> Yojson.Safe.t

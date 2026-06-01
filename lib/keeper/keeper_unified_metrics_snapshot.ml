@@ -10,7 +10,7 @@ module Social = Keeper_social_model
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
 
-let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
+let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(turn_cost : float)

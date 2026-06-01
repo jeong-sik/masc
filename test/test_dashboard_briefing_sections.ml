@@ -4,7 +4,7 @@ open Alcotest
 
 module Dashboard_briefing_sections = Masc_mcp.Dashboard_briefing_sections
 module Briefing = Masc_mcp.Dashboard_briefing_sections.For_test
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 
 let temp_dir () =
   let dir = Filename.temp_file "test_dashboard_briefing_sections_" "" in
@@ -89,8 +89,8 @@ let test_briefing_cold_call_returns_pending () =
        | None -> Unix.putenv "MASC_STORAGE_TYPE" ""))
     (fun () ->
       Briefing.reset_cache ();
-      let config = Coord.default_config base_path in
-      ignore (Coord.init config ~agent_name:None);
+      let config = Workspace.default_config base_path in
+      ignore (Workspace.init config ~agent_name:None);
       let json =
         Dashboard_briefing_sections.json
           ~config ~sw ~clock ~proc_mgr:None ()
@@ -114,8 +114,8 @@ let test_force_refresh_without_cache_returns_pending () =
       cleanup_dir base_path)
     (fun () ->
       Briefing.reset_cache ();
-      let config = Coord.default_config base_path in
-      ignore (Coord.init config ~agent_name:None);
+      let config = Workspace.default_config base_path in
+      ignore (Workspace.init config ~agent_name:None);
       let json =
         Dashboard_briefing_sections.json
           ~force:true ~config ~sw ~clock ~proc_mgr:None ()
@@ -138,8 +138,8 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
       cleanup_dir base_path)
     (fun () ->
       Briefing.reset_cache ();
-      let config = Coord.default_config base_path in
-      ignore (Coord.init config ~agent_name:None);
+      let config = Workspace.default_config base_path in
+      ignore (Workspace.init config ~agent_name:None);
       Briefing.seed_cache
         ~cached_at:(Unix.gettimeofday ())
         (`Assoc
@@ -367,7 +367,7 @@ let test_build_briefing_sections_demotes_metadata_only_communication () =
   let briefing_summary_json =
     `Assoc
       [
-        ("coord_health", `String "ok");
+        ("workspace_health", `String "ok");
         ("incident_count", `Int 0);
         ("recommended_action_count", `Int 0);
         ("top_attention_summary", `String "");
@@ -401,7 +401,7 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
   let briefing_summary_json =
     `Assoc
       [
-        ("coord_health", `String "ok");
+        ("workspace_health", `String "ok");
         ("incident_count", `Int 0);
         ("recommended_action_count", `Int 0);
         ("top_attention_summary", `String "");
@@ -462,7 +462,7 @@ let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
   let briefing_summary_json =
     `Assoc
       [
-        ("coord_health", `String "bad");
+        ("workspace_health", `String "bad");
         ("incident_count", `Int 0);
         ("recommended_action_count", `Int 0);
         ("top_attention_summary", `String "");

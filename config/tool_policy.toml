@@ -22,8 +22,8 @@ tools = ["keeper_board_get", "keeper_board_post", "keeper_board_comment", "keepe
 [groups.board_extended]
 tools = ["keeper_board_stats", "keeper_board_search"]
 
-# Coordination split: core (task lifecycle) vs extended (audit, force ops).
-[groups.coordination_core]
+# Workspace split: core (task lifecycle) vs extended (audit, force ops).
+[groups.workspace_core]
 tools = [
   "keeper_tasks_list",
   "keeper_task_claim",
@@ -33,7 +33,7 @@ tools = [
   "keeper_broadcast",
 ]
 
-[groups.coordination]
+[groups.workspace]
 tools = [
   "keeper_tasks_list",
   "keeper_tasks_audit",
@@ -105,9 +105,9 @@ tools = [
 [masc.essential]
 tools = ["masc_status", "masc_web_search", "masc_web_fetch", "masc_approval_pending"]
 
-# Coordination: external agent coordination tools.
+# Workspace: external agent workspace tools.
 # Only needed by keepers that manage tasks across agents.
-[masc.coordination]
+[masc.workspace]
 tools = [
   "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task",
   "masc_batch_add_tasks", "masc_agents", "masc_dashboard",

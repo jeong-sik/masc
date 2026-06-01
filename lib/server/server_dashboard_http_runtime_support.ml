@@ -10,7 +10,7 @@ type runtime = {
 let set_executor_pool pool = Executor_pool_ref.set pool
 
 let run_dashboard_compute ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
-    ~(config : Coord.config) compute =
+    ~(config : Workspace.config) compute =
   let _ = runtime, clock in
   let fallback () = compute ~config ~sw in
   let run_in_pool pool_sw =

@@ -20,7 +20,7 @@ import { votePost } from '../../api/board'
 import { deleteBoardPost } from '../../api/actions'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
-import { MessageRoomTimeline } from './message-room-timeline'
+import { MessageWorkspaceTimeline } from './message-workspace-timeline'
 import { BoardCurationPanel } from './board-curation-panel'
 import { BoardKarmaPanel } from './board-karma-panel'
 import { MentionInbox } from './mention-inbox'
@@ -892,11 +892,11 @@ export function BoardSurface() {
     `
   }
 
-  if (focus === 'messages-room') {
+  if (focus === 'messages-workspace') {
     return html`
       <div>
         <${BoardSummary} />
-        <${MessageRoomTimeline} />
+        <${MessageWorkspaceTimeline} />
       </div>
     `
   }

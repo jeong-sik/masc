@@ -30,7 +30,7 @@ module Random = Stdlib.Random
     - **Local-worker**: tools available to in-process worker
       flows (a larger set including SDK contract schemas).
     - **Role-catalogue**: dynamic role-based filtering for the
-      autonomous agent (worker / coordinator / fleet_leader). *)
+      autonomous agent (worker / workspace_lead / fleet_leader). *)
 
 (** {1 Helpers} *)
 
@@ -85,7 +85,7 @@ val local_worker_contract_schemas : Masc_domain.tool_schema list
 
 val local_worker_internal_schemas : Masc_domain.tool_schema list
 (** Internal-only schemas (currently just [masc_heartbeat]).
-    Filtered from {!Tool_schemas_coord_core.schemas}. *)
+    Filtered from {!Tool_schemas_workspace_core.schemas}. *)
 
 val local_worker_run_schemas : Masc_domain.tool_schema list
 (** Domain-grouped schema bundle (run)
@@ -95,7 +95,7 @@ val local_worker_run_schemas : Masc_domain.tool_schema list
 val select_public_local_worker_schemas :
   unit -> Masc_domain.tool_schema list
 (** [select_public_local_worker_schemas ()] returns the union of
-    board / coord-core / coord-extra / agent / run / spawn schemas,
+    board / workspace-core / workspace-extra / agent / run / spawn schemas,
     deduped, intersected with
     {!local_worker_public_tool_names}.  This is the public local-
     worker surface as the dashboard sees it. *)
@@ -131,9 +131,9 @@ val admin_tool_names : string list
 
 (** {1 Role-catalogue} *)
 
-val coordination_tool_names : string list
-(** SSOT: {!Tool_catalog_surfaces.coordination_role_tools}.
-    Candidates for coordinators and fleet leaders. *)
+val workspace_tool_names : string list
+(** SSOT: {!Tool_catalog_surfaces.workspace_role_tools}.
+    Candidates for workspace leads and fleet leaders. *)
 
 val execution_tool_names : string list
 (** SSOT: {!Tool_catalog_surfaces.execution_role_tools}.
@@ -153,7 +153,7 @@ val build_tool_catalog : role:string -> unit -> string list
     | [role] | Result |
     |---|---|
     | [["worker"]] | {!execution_tool_names} ∩ available |
-    | [["coordinator"]] / [["fleet_leader"]] | {!coordination_tool_names} ∩ available |
+    | [["workspace_lead"]] / [["fleet_leader"]] | {!workspace_tool_names} ∩ available |
     | other | all available tools minus {!admin_tool_names} |
 
     Available = {!spawned_agent_public_tool_names} ∪

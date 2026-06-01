@@ -9,18 +9,18 @@ val normalize_actor_name : string option -> string
 (** Trim and default a missing/empty actor to ["dashboard"]. *)
 
 val get_or_compute_snapshot_json :
-  config:Coord_utils.config ->
+  config:Workspace_utils.config ->
   actor:string option ->
   (string -> Yojson.Safe.t) ->
   Yojson.Safe.t
 (** Cached read with TTL [3.0 s]. The compute callback receives the
     normalized actor name produced by {!normalize_actor_name}. *)
 
-val invalidate_snapshot_json : config:Coord_utils.config -> unit
+val invalidate_snapshot_json : config:Workspace_utils.config -> unit
 (** Drop every snapshot cache entry for the given config (all actors). *)
 
 val get_or_compute_digest_json :
-  config:Coord_utils.config ->
+  config:Workspace_utils.config ->
   actor:string option ->
   (string -> Yojson.Safe.t) ->
   Yojson.Safe.t

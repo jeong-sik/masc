@@ -51,7 +51,7 @@ type runtime_handler =
   | Tool_masc_plan_dispatch
   | Tool_masc_run_dispatch
   | Tool_masc_agent_dispatch
-  | Tool_masc_coord_dispatch
+  | Tool_masc_workspace_dispatch
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
@@ -141,7 +141,7 @@ let runtime_handler_to_string = function
   | Tool_masc_plan_dispatch -> "tool_masc_plan_dispatch"
   | Tool_masc_run_dispatch -> "tool_masc_run_dispatch"
   | Tool_masc_agent_dispatch -> "tool_masc_agent_dispatch"
-  | Tool_masc_coord_dispatch -> "tool_masc_coord_dispatch"
+  | Tool_masc_workspace_dispatch -> "tool_masc_workspace_dispatch"
   | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
@@ -521,7 +521,7 @@ let public_descriptors =
 ;;
 
 (* RFC-0179 list bifurcation. [internal_descriptors] hosts descriptor-backed
-   coordination tools (keeper_* / masc_* clusters). Each cluster migration PR
+   workspace tools (keeper_* / masc_* clusters). Each cluster migration PR
    adds entries here. The LLM-native [public_descriptors] contract (RFC-0064
    hard-cut, 7 entries) is preserved unchanged.
 
@@ -538,7 +538,7 @@ let empty_object_schema =
     ]
 ;;
 
-(* Coordination tools historically dispatched by name in [Agent_tool_dispatch_runtime]
+(* Workspace tools historically dispatched by name in [Agent_tool_dispatch_runtime]
    without input-schema validation — the underlying handlers (Tool_board,
    Tool_library, Agent_tool_task_runtime, Agent_tool_voice_runtime, etc.) parse
    their own input. The descriptor input_schema is informational only
@@ -678,10 +678,10 @@ let task_descriptor id name description ~readonly =
 ;;
 
 (* RFC-0182 §3.1 — additional masc_* cluster descriptor helpers (task /
-   plan / run / agent / coord). The masc_board_descriptor lives above
+   plan / run / agent / workspace). The masc_board_descriptor lives above
    (registry-driven); these helpers follow the same projection pattern
    but use hardcoded id+description because their dispatchers
-   (Tool_task / Tool_plan / Tool_run / Tool_agent / Tool_coord) are not
+   (Tool_task / Tool_plan / Tool_run / Tool_agent / Tool_workspace) are not
    schema-registry-backed. The handler routes by descriptor.internal_name
    through the existing typed dispatcher. *)
 let masc_task_descriptor id name description ~readonly =
@@ -721,12 +721,12 @@ let masc_agent_descriptor id name description ~readonly =
     ~readonly
 ;;
 
-let masc_coord_descriptor id name description ~readonly =
+let masc_workspace_descriptor id name description ~readonly =
   cluster_descriptor
-    ~id:("masc.coord." ^ id)
+    ~id:("masc.workspace." ^ id)
     ~name
     ~description
-    ~handler:Tool_masc_coord_dispatch
+    ~handler:Tool_masc_workspace_dispatch
     ~readonly
 ;;
 
@@ -938,7 +938,7 @@ let internal_descriptors : t list =
   ; task_descriptor
       "broadcast"
       "keeper_broadcast"
-      "Broadcast a coordination message to the MASC coord."
+      "Broadcast a workspace message to the MASC workspace."
       ~readonly:false
   ; task_descriptor
       "claim"
@@ -1023,7 +1023,7 @@ let internal_descriptors : t list =
       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
   ; masc_task_descriptor "add" "masc_add_task"
-      "Add a task to the coordination plan." ~readonly:false
+      "Add a task to the workspace plan." ~readonly:false
   ; masc_task_descriptor "batch_add" "masc_batch_add_tasks"
       "Add multiple tasks in a single call." ~readonly:false
   ; masc_task_descriptor "claim_next" "masc_claim_next"
@@ -1038,9 +1038,9 @@ let internal_descriptors : t list =
       "Update the priority of a task." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_plan_* + note + deliver (8 entries) ── *)
   ; masc_plan_descriptor "init" "masc_plan_init"
-      "Initialise a coordination plan." ~readonly:false
+      "Initialise a workspace plan." ~readonly:false
   ; masc_plan_descriptor "update" "masc_plan_update"
-      "Update a coordination plan." ~readonly:false
+      "Update a workspace plan." ~readonly:false
   ; masc_plan_descriptor "get" "masc_plan_get"
       "Read the current plan." ~readonly:true
   ; masc_plan_descriptor "set_task" "masc_plan_set_task"
@@ -1050,12 +1050,12 @@ let internal_descriptors : t list =
   ; masc_plan_descriptor "clear_task" "masc_plan_clear_task"
       "Unbind a task from a plan slot." ~readonly:false
   ; masc_plan_descriptor "note_add" "masc_note_add"
-      "Append a coordination note." ~readonly:false
+      "Append a workspace note." ~readonly:false
   ; masc_plan_descriptor "deliver" "masc_deliver"
       "Record a deliverable against the plan." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_run_* cluster (6 entries) ──────────── *)
   ; masc_run_descriptor "masc_run_init"
-      "Initialise a coordination run." ~readonly:false
+      "Initialise a workspace run." ~readonly:false
   ; masc_run_descriptor "masc_run_list"
       "List recent runs." ~readonly:true
   ; masc_run_descriptor "masc_run_get"
@@ -1077,30 +1077,30 @@ let internal_descriptors : t list =
       "Update agent registration metadata." ~readonly:false
   ; masc_agent_descriptor "get_metrics" "masc_get_metrics"
       "Read aggregated agent metrics." ~readonly:true
-  (* ── RFC-0182 §3.1 — masc_coord_* cluster (8 entries) ────────── *)
-  ; masc_coord_descriptor "status" "masc_status"
-      "Read overall coordination status." ~readonly:true
-  ; masc_coord_descriptor "heartbeat" "masc_heartbeat"
+  (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)
+  ; masc_workspace_descriptor "status" "masc_status"
+      "Read overall workspace status." ~readonly:true
+  ; masc_workspace_descriptor "heartbeat" "masc_heartbeat"
       "Emit an agent heartbeat." ~readonly:false
-  ; masc_coord_descriptor "check" "masc_check"
-      "Read a coordination assertion check." ~readonly:true
-  ; masc_coord_descriptor "reset" "masc_reset"
-      "Reset coordination state." ~readonly:false
-  ; masc_coord_descriptor "goal_list" "masc_goal_list"
-      "List coordination goals." ~readonly:true
-  ; masc_coord_descriptor "goal_upsert" "masc_goal_upsert"
-      "Create or update a coordination goal." ~readonly:false
-  ; masc_coord_descriptor "goal_transition" "masc_goal_transition"
+  ; masc_workspace_descriptor "check" "masc_check"
+      "Read a workspace assertion check." ~readonly:true
+  ; masc_workspace_descriptor "reset" "masc_reset"
+      "Reset workspace state." ~readonly:false
+  ; masc_workspace_descriptor "goal_list" "masc_goal_list"
+      "List workspace goals." ~readonly:true
+  ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
+      "Create or update a workspace goal." ~readonly:false
+  ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
       "Transition a goal status." ~readonly:false
-  ; masc_coord_descriptor "goal_verify" "masc_goal_verify"
+  ; masc_workspace_descriptor "goal_verify" "masc_goal_verify"
       "Verify goal completion criteria." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
   ; masc_misc_descriptor "config" "masc_config"
-      "Read coordination configuration." ~readonly:true
+      "Read workspace configuration." ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
-      "Read coordination dashboard summary." ~readonly:true
+      "Read workspace dashboard summary." ~readonly:true
   ; masc_misc_descriptor "cleanup_zombies" "masc_cleanup_zombies"
-      "Reap orphan / zombie coordination state." ~readonly:false
+      "Reap orphan / zombie workspace state." ~readonly:false
   ; masc_misc_descriptor "tool_stats" "masc_tool_stats"
       "Read tool-usage statistics." ~readonly:true
   ; masc_misc_descriptor "tool_help" "masc_tool_help"
@@ -1210,7 +1210,7 @@ let public_descriptors_for_internal internal_name =
 ;;
 
 (* Walks [all_descriptors ()]. Used by the runtime dispatcher to resolve any
-   descriptor-backed tool by its internal name, including coordination tools
+   descriptor-backed tool by its internal name, including workspace tools
    that live in [internal_descriptors]. While [internal_descriptors = []], this
    returns the same result as [public_descriptors_for_internal]. *)
 let descriptors_for_internal internal_name =

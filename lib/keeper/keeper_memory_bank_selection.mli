@@ -118,9 +118,9 @@ val prompt_memory_sections_of_snapshot :
   current_generation:int ->
   ?source_generation:int -> keeper_state_snapshot -> string list
 val read_progress_snapshot :
-  config:Coord.config -> name:string -> keeper_state_snapshot option
+  config:Workspace.config -> name:string -> keeper_state_snapshot option
 val read_progress_snapshot_cache :
-  config:Coord.config ->
+  config:Workspace.config ->
   name:string -> progress_snapshot_cache option
 val write_progress_snapshot_path :
   path:string ->

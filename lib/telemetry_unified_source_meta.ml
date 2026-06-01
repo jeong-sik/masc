@@ -103,7 +103,7 @@ let replay_retention_json ~base_path ~masc_root ~sources : Yojson.Safe.t =
   `Assoc
     [
       ("scope", `String "dashboard_telemetry_replay");
-      ("coordination_root", `String masc_root);
+      ("workspace_root", `String masc_root);
       ("base_path", `String base_path);
       ( "selected_sources",
         `List

@@ -91,8 +91,8 @@ let dashboard_scope_enum_strings = [ "all"; "current" ]
 let masc_dashboard_spec : tool_spec =
   { name = "masc_dashboard"
   ; description =
-      "Render the MASC dashboard summarizing coordinators, agents, and tasks. Set \
-       scope='current' for this coord only."
+      "Render the MASC dashboard summarizing agent streams, agents, and tasks. Set \
+       scope='current' for this workspace only."
   ; parameters =
       [ { p_name = "compact"
         ; p_type = T_bool { default = None }
@@ -487,7 +487,7 @@ let masc_approval_get_spec : tool_spec =
   }
 ;;
 
-(* === PR-2d: inline_coord group (6 tools) === *)
+(* === PR-2d: inline_workspace group (6 tools) === *)
 
 let masc_start_spec : tool_spec =
   { name = "masc_start"
@@ -591,7 +591,7 @@ let phase6_specs : tool_spec list =
     (* PR-2c: inline_infra (masc_mcp_session manual; masc_spawn removed by RFC-0182) *)
   ; masc_approval_pending_spec
   ; masc_approval_get_spec
-    (* PR-2d: inline_coord group *)
+    (* PR-2d: inline_workspace group *)
   ; masc_start_spec
   ; masc_broadcast_spec
   ; masc_messages_spec

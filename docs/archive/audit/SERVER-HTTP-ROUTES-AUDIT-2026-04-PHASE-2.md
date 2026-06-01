@@ -46,7 +46,7 @@ Per-domain-module Prometheus search:
 | `multimodal` | 0 | C2 silent |
 | `provider_runs` | 0 | C2 silent |
 | `resilience` | 0 | C2 silent |
-| `room` | 0 | C2 silent |
+| `workspace` | 0 | C2 silent |
 | `sidecar` | 0 | C2 silent |
 | `verification` | 0 | C2 silent |
 
@@ -56,11 +56,11 @@ Total silent: **14**. Phase 1 estimated 14–16 — confirmed at the lower bound
 
 ### 2.3 C3 — Error envelope shapes (3 distinct)
 
-Sampled error returns across activity, artifacts, runtime, dashboard, room:
+Sampled error returns across activity, artifacts, runtime, dashboard, workspace:
 
 | Shape | Example | Modules |
 |---|---|---|
-| A | `{"error": "<string>"}` | activity, dashboard, room |
+| A | `{"error": "<string>"}` | activity, dashboard, workspace |
 | B | `{"error": "<string>", "<field>": ...}` extended | artifacts |
 | C | `{"ok": false, "error": "<string>"}` wrapper | runtime |
 

@@ -80,7 +80,7 @@ type institution =
   ; alumni : string list
   }
 
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** {1 Default Values} *)
 
@@ -371,7 +371,7 @@ and institution_of_json json =
 (** {1 Persistence (Eio Native)} *)
 
 let institution_file (config : config) =
-  Filename.concat (Coord_utils.masc_dir config) "institution.json"
+  Filename.concat (Workspace_utils.masc_dir config) "institution.json"
 ;;
 
 let load_institution ~fs (config : config) : institution option =
@@ -798,7 +798,7 @@ let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings 
 ;;
 
 (** Load recent episodes from JSONL (last N entries) via a bounded
-    [Queue] ring — O(limit) resident memory regardless of file size,
+    [Queue] ring — O(limit) memory regardless of file size,
     one pass over the JSONL via [Fs_compat.fold_jsonl_lines]. *)
 let load_recent_episodes_jsonl ~limit : episode list =
   let path = episodes_jsonl_path () in

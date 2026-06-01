@@ -226,7 +226,7 @@ val context_overflow_event_of_error :
   Keeper_state_machine.event
 
 val pause_keeper_for_overflow :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   reason:string ->
   keeper_meta
@@ -235,7 +235,7 @@ val pause_keeper_for_overflow :
     paused meta. *)
 
 val sync_keeper_paused_state :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   paused:bool ->
   (keeper_meta, string) result
@@ -244,7 +244,7 @@ val sync_keeper_paused_state :
     instead of silently diverging runtime vs persisted state. *)
 
 val sync_keeper_paused_state_with_resume_policy :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   paused:bool ->
   resume_policy:Keeper_supervisor_pause_policy.crash_pause_resume_policy ->
@@ -254,7 +254,7 @@ val sync_keeper_paused_state_with_resume_policy :
     sweep instead of becoming an indefinite manual pause. *)
 
 val current_keeper_meta :
-  config:Coord.config ->
+  config:Workspace.config ->
   fallback_meta:keeper_meta ->
   keeper_meta
 (** Read the latest meta from the registry, falling back to the given
@@ -276,13 +276,13 @@ type post_turn_resilience_handles = {
     meta write does not accidentally unpause it. *)
 
 val resilience_audit_dir :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   string
 (** Per-keeper audit root for resilience recovery envelopes. *)
 
 val post_turn_resilience_handles :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   post_turn_resilience_handles
 (** Create per-turn resilience audit/executor handles. The audit store is
@@ -290,7 +290,7 @@ val post_turn_resilience_handles :
     contract. *)
 
 val enqueue_partial_commit_continue_gate :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   failure_reason:Keeper_registry.failure_reason ->
   committed_tools:string list ->

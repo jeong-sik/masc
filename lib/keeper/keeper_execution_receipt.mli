@@ -321,9 +321,9 @@ val stale_broadcast_payload
   -> last_turn_ts:float
   -> Yojson.Safe.t
 
-val append : Coord.config -> t -> unit
-val latest_json : Coord.config -> string -> Yojson.Safe.t option
-val latest_json_by_keeper : Coord.config -> string list -> (string * Yojson.Safe.t) list
+val append : Workspace.config -> t -> unit
+val latest_json : Workspace.config -> string -> Yojson.Safe.t option
+val latest_json_by_keeper : Workspace.config -> string list -> (string * Yojson.Safe.t) list
 
 (** Emit a watchdog-sourced operator_broadcast_required event for a keeper
     that has been Running but not produced a turn within the stale
@@ -331,7 +331,7 @@ val latest_json_by_keeper : Coord.config -> string list -> (string * Yojson.Safe
     keeper-pause-broadcast-watchdog change) to convert silent stalls into
     addressable events. *)
 val emit_stale_keeper_broadcast
-  :  Coord.config
+  :  Workspace.config
   -> keeper_name:string
   -> agent_name:string
   -> runtime_id:string

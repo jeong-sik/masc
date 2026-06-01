@@ -588,7 +588,7 @@ let test_resolved_turn_timeout_clamps_above_900s () =
     900.0 runtime.turn_timeout_sec.value
 
 (* #10388 budget invariant guard: with the lifted 900s ceiling, even
-   the maximum permitted turn timeout must still leave room for an
+   the maximum permitted turn timeout must still leave workspace for an
    admission wait (default 180s) plus a minimum useful run (30s). The
    plan-level invariant is
      [turn_timeout - oas_guard >= admission_wait + min_useful_run]

@@ -110,7 +110,7 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'operations' },
-    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest'])
+    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest'])
 
     expect(refreshPlanForRoute({
       tab: 'command',

@@ -102,10 +102,10 @@ type archived_agent_meta = {
 }
 
 let build_task_lookup config =
-  if not (Coord.is_initialized config) then
+  if not (Workspace.is_initialized config) then
     []
   else
-    Coord.get_tasks_raw config
+    Workspace.get_tasks_raw config
     |> List.filter_map (fun (task : Masc_domain.task) ->
            if String.trim task.id = "" then None
            else Some (task.id, Printf.sprintf "%s · %s" task.id (compact_text task.title)))
@@ -143,8 +143,8 @@ let latest_message_to agent_name messages =
             if message.seq >= current.seq then Some message else best)
     None messages
 
-let read_recent_coord_event_lines config ~limit =
-  let events_dir = Filename.concat (Coord.masc_dir config) "events" in
+let read_recent_workspace_event_lines config ~limit =
+  let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
     let month_dirs =
@@ -225,7 +225,7 @@ let archived_agent_meta_map config agent_names =
         Hashtbl.add table agent_name row;
         row
   in
-  read_recent_coord_event_lines config ~limit:2000
+  read_recent_workspace_event_lines config ~limit:2000
   |> List.rev
   |> List.iter (fun line ->
          try
@@ -260,12 +260,12 @@ let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
     keepers;
   table
 
-let build_agent_briefs config sessions attention_queue _snapshot_json (keepers : Yojson.Safe.t list) =
+let build_agent_briefs config sessions attention_queue _workspace_json (keepers : Yojson.Safe.t list) =
   let now_ts = Time_compat.now () in
   let task_lookup = build_task_lookup config in
   let messages =
-    if Coord.is_initialized config then
-      Coord.get_messages_raw config ~since_seq:0 ~limit:200
+    if Workspace.is_initialized config then
+      Workspace.get_messages_raw config ~since_seq:0 ~limit:200
     else
       []
   in
@@ -277,23 +277,23 @@ let build_agent_briefs config sessions attention_queue _snapshot_json (keepers :
         | Some label -> Some label
         | None -> Some id)
   in
-  let coord_agents =
-    if Coord.is_initialized config then Coord.get_agents_raw config else []
+  let workspace_agents =
+    if Workspace.is_initialized config then Workspace.get_agents_raw config else []
   in
-  let coord_agent_by_name =
-    coord_agents
+  let workspace_agent_by_name =
+    workspace_agents
     |> List.map (fun (agent : Masc_domain.agent) -> (agent.name, agent))
   in
   let agent_names =
     dedup_strings
-      (List.map (fun (agent : Masc_domain.agent) -> agent.name) coord_agents
+      (List.map (fun (agent : Masc_domain.agent) -> agent.name) workspace_agents
       @ List.concat_map (fun (session : session_context) -> session.member_names) sessions)
   in
   let archived_meta_by_name = archived_agent_meta_map config agent_names in
   let keeper_aliases = keeper_alias_by_agent_name keepers in
   agent_names
   |> List.map (fun agent_name ->
-         let agent = List.assoc_opt agent_name coord_agent_by_name in
+         let agent = List.assoc_opt agent_name workspace_agent_by_name in
          let related_session =
            List.find_opt
              (fun (session : session_context) -> List.mem agent_name session.member_names)

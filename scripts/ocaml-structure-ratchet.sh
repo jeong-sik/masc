@@ -6,7 +6,7 @@
 #
 #   - keeper_mli_missing: count of lib/keeper/keeper_*.ml files without a
 #     matching .mli (interface-first design gap)
-#   - coord_mli_missing : same metric for lib/coord/
+#   - workspace_mli_missing : same metric for lib/workspace/
 #   - godsplit_count    : occurrences of `;; godsplit` markers in lib/dune
 #     (god-file decomposition stubs left as comments — should converge to 0
 #     by sub-library extraction)
@@ -18,7 +18,7 @@
 #     content is verbatim inferred-type output that should be normalized
 #     to a real one-line docstring.
 #   - lib_other_mli_missing: long-tail .mli coverage — every lib/*/*.ml
-#     file outside lib/keeper/ and lib/coord/ that lacks a sibling .mli.
+#     file outside lib/keeper/ and lib/workspace/ that lacks a sibling .mli.
 #     Captures lib/server/, lib/dashboard/, lib/config/, lib/local/,
 #     lib/types/, lib/voice/, etc.
 #
@@ -82,7 +82,7 @@ count_inferred_dump_headers() {
 
 count_lib_other_mli_missing() {
   # All lib/*/*.ml files without a sibling .mli, EXCLUDING lib/keeper/
-  # and lib/coord/ which have dedicated metrics. Captures the long
+  # and lib/workspace/ which have dedicated metrics. Captures the long
   # tail (lib/server/, lib/dashboard/, lib/config/, lib/local/, etc.).
   python3 - <<'EOF' "${REPO_ROOT}"
 import os, sys, glob
@@ -90,7 +90,7 @@ repo_root = sys.argv[1]
 total = 0
 for d in glob.glob(os.path.join(repo_root, 'lib', '*') + '/'):
     name = d.rstrip('/').rsplit('/', 1)[-1]
-    if name in ('keeper', 'coord'):
+    if name in ('keeper', 'workspace'):
         continue
     for ml in glob.glob(d + '*.ml'):
         if not os.path.exists(ml + 'i'):
@@ -102,17 +102,17 @@ EOF
 # Metric definitions: name|hint
 METRICS=(
   "keeper_mli_missing|Add .mli for the new lib/keeper/keeper_*.ml file. See planning/claude-plans/moonlit-finding-russell.md PR#2-4."
-  "coord_mli_missing|Add .mli for the new lib/coord/*.ml file."
+  "workspace_mli_missing|Add .mli for the new lib/workspace/*.ml file."
   "godsplit_count|Do not add new ';; godsplit' markers in lib/dune — extract a real sub-library instead. See PR#7-10."
   "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/oas/dune, lib/dashboard/dune)."
   "inferred_dump_headers|Replace the '(** X inferred mli **)' header with a real one-line docstring. See PR#11286/11290/11296/11303/11309/11321/11401 for the closure series."
-  "lib_other_mli_missing|Add .mli for the new lib/*/*.ml file (covers every dir except keeper/coord which have their own metrics)."
+  "lib_other_mli_missing|Add .mli for the new lib/*/*.ml file (covers every dir except keeper/workspace which have their own metrics)."
 )
 
 current_value() {
   case "$1" in
     keeper_mli_missing)     count_mli_missing "lib/keeper" "keeper_*" ;;
-    coord_mli_missing)      count_mli_missing "lib/coord"  "*" ;;
+    workspace_mli_missing)      count_mli_missing "lib/workspace"  "*" ;;
     godsplit_count)         count_godsplit ;;
     lib_dune_lines)         count_lib_dune_lines ;;
     inferred_dump_headers)  count_inferred_dump_headers ;;

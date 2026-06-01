@@ -25,7 +25,7 @@
 (** {1 Submit phase} *)
 
 val create_submit_request :
-  config:Coord.config ->
+  config:Workspace.config ->
   task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
@@ -40,7 +40,7 @@ val create_submit_request :
     contract gap pre-check. *)
 
 val notify_submit_for_verification :
-  config:Coord.config ->
+  config:Workspace.config ->
   task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
@@ -54,7 +54,7 @@ val notify_submit_for_verification :
     from the persisted request output. *)
 
 val on_submit_for_verification :
-  config:Coord.config ->
+  config:Workspace.config ->
   task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
@@ -68,7 +68,7 @@ val on_submit_for_verification :
 (** {1 Approve verdict} *)
 
 val record_approve_verification :
-  config:Coord.config ->
+  config:Workspace.config ->
   task_id:string ->
   verifier:string ->
   verification_id:string ->
@@ -92,7 +92,7 @@ val notify_approve_verification :
 (** {1 Reject verdict} *)
 
 val record_reject_verification :
-  config:Coord.config ->
+  config:Workspace.config ->
   task_id:string ->
   verifier:string ->
   verification_id:string ->
@@ -114,7 +114,7 @@ val notify_reject_verification :
 
 (** {1 Timeout sweep} *)
 
-val check_timeouts : config:Coord.config -> unit
+val check_timeouts : config:Workspace.config -> unit
 (** [check_timeouts ~config] scans pending verifications and
     emits operator-visible timeout events for any past their TTL. No-op when
     [Env_config_runtime.Verification.fsm_enabled ()] is [false]

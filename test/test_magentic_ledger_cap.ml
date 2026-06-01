@@ -62,7 +62,7 @@ let test_speech_and_surface_preserved () =
 let test_short_magentic_state_unchanged () =
   let s =
     { base with
-      belief_summary = "quiet_room";
+      belief_summary = "quiet_workspace";
       active_desire = Some "wait_for_delta";
       current_intention = Some "record_progress_evidence";
       blocker = None;
@@ -71,7 +71,7 @@ let test_short_magentic_state_unchanged () =
   in
   let capped = T.cap_social_state s in
   Alcotest.(check string) "short belief unchanged"
-    "quiet_room" capped.belief_summary;
+    "quiet_workspace" capped.belief_summary;
   Alcotest.(check (option string)) "blocker None stays None" None capped.blocker
 
 let () =

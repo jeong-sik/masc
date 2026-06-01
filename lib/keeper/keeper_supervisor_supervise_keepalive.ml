@@ -11,8 +11,8 @@
     2. On [Ok ()]:
        - logs persona drift if missing
        - registers offline in [Keeper_registry]
-       - lazily initializes the coordination root (Coord.init)
-       - syncs keeper coord presence + writes meta (failures degrade
+       - lazily initializes the workspace root (Workspace.init)
+       - syncs keeper workspace presence + writes meta (failures degrade
          to original meta but tick failure counters)
        - calls the injected [~launch_supervised_fiber] to actually
          spawn the supervised fiber
@@ -68,20 +68,20 @@ let supervise_keepalive
     let reg =
       Keeper_registry.register_offline ~base_path:ctx.config.base_path meta.name meta
     in
-    (* Coord initialization *)
+    (* Workspace initialization *)
     (try
-       if not (Coord_utils.is_initialized ctx.config)
+       if not (Workspace_utils.is_initialized ctx.config)
        then (
-         let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
+         let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
          ())
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Prometheus.inc_counter
-         Keeper_metrics.(to_string CoordInitFailures)
+         Keeper_metrics.(to_string WorkspaceInitFailures)
          ~labels:[ "keeper", meta.name ]
          ();
-       Log.Keeper.error "supervisor coord init failed: %s" (Printexc.to_string exn));
+       Log.Keeper.error "supervisor workspace init failed: %s" (Printexc.to_string exn));
     let live_meta =
       try
         let synced = meta in

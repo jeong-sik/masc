@@ -13,8 +13,8 @@ let dead_in_channel_gate_metrics =
   [ "_binding_snapshot"; "_effective_attempt_count" ]
 ;;
 
-let renamed_in_coord =
-  ( "lib/coord/coord_utils_paths_backend.ml"
+let renamed_in_workspace =
+  ( "lib/workspace/workspace_utils_paths_backend.ml"
   , "_shared_pubsub"
   , "shared_pubsub" )
 ;;
@@ -51,7 +51,7 @@ let test_renamed_old_names_gone () =
       let n = Ast_grep.count_value_bindings ~module_path:path ~name:old_name in
       let msg = Printf.sprintf "old %s should be gone in %s" old_name path in
       check int msg 0 n)
-    [ renamed_in_coord; renamed_in_diagnostics ]
+    [ renamed_in_workspace; renamed_in_diagnostics ]
 ;;
 
 let test_renamed_new_names_present () =
@@ -60,7 +60,7 @@ let test_renamed_new_names_present () =
       let n = Ast_grep.count_value_bindings ~module_path:path ~name:new_name in
       let msg = Printf.sprintf "new %s must exist in %s" new_name path in
       if n < 1 then failf "%s — count=%d" msg n)
-    [ renamed_in_coord; renamed_in_diagnostics ]
+    [ renamed_in_workspace; renamed_in_diagnostics ]
 ;;
 
 let () =

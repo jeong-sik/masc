@@ -37,13 +37,13 @@ let execution_receipt_store_pattern = Dashboard_http_keeper_execution_receipt.ex
 let count_execution_receipt_entries = Dashboard_http_keeper_execution_receipt.count_execution_receipt_entries
 let execution_receipt_coverage_gaps = Dashboard_http_keeper_execution_receipt.execution_receipt_coverage_gaps
 
-let keeper_names (config : Coord.config) =
+let keeper_names (config : Workspace.config) =
   Keeper_meta_store.keeper_names config
 
-let keeper_count (config : Coord.config) : int =
+let keeper_count (config : Workspace.config) : int =
   List.length (keeper_names config)
 
-let running_keeper_count (config : Coord.config) : int =
+let running_keeper_count (config : Workspace.config) : int =
   keeper_names config
   |> List.fold_left
        (fun count name ->
@@ -52,7 +52,7 @@ let running_keeper_count (config : Coord.config) : int =
          | _ -> count)
        0
 
-let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.Safe.t =
+let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojson.Safe.t =
   let include_goals = true in
   let history_fragment_filter_enabled =
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
@@ -68,7 +68,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
     Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
   in
   let keepers_dir =
-    Filename.concat (Coord.masc_root_dir config) "keepers"
+    Filename.concat (Workspace.masc_root_dir config) "keepers"
   in
   let shared_sp_events =
     try
@@ -102,7 +102,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let agent = Keeper_status_runtime.parse_agent_status config ~agent_name:m.agent_name in
 
           let created_ts =
-            Coord_resilience.Time.parse_iso8601_opt m.created_at
+            Workspace_resilience.Time.parse_iso8601_opt m.created_at
             |> Option.value ~default:0.0
           in
           let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
@@ -607,7 +607,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   let all_goals = Goal_store.list_goals config () in
                   let linked = List.filter (fun (g : Goal_store.goal) ->
                     List.mem g.id m.active_goal_ids) all_goals in
-                  let tasks = Coord.get_tasks_safe config in
+                  let tasks = Workspace.get_tasks_safe config in
                   let forest =
                     Dashboard_goals.build_forest ~config ~goals:linked ~tasks
                   in
@@ -807,7 +807,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
     ("alert_count", `Int (List.length recent_alerts));
   ]
 
-let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
+let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
   let keepers =
     match keepers_dashboard_json ~compact:true config with
     | `Assoc fields -> (
@@ -835,7 +835,7 @@ let execution_trust_dashboard_json (config : Coord.config) : Yojson.Safe.t =
   in
   let now = Unix.gettimeofday () in
   let keeper_names = keeper_names config in
-  let keepers_root = Filename.concat (Coord.masc_root_dir config) "keepers" in
+  let keepers_root = Filename.concat (Workspace.masc_root_dir config) "keepers" in
   let exists = Sys.file_exists keepers_root in
   let entry_count = count_execution_receipt_entries config keeper_names in
   let latest_ts = latest_receipt_ts_of_keeper_rows keepers in

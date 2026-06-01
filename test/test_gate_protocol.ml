@@ -6,7 +6,7 @@ let make_msg ?(channel = "discord") ?(content = "hello") ?(keeper_name = "luna")
     channel;
     channel_user_id;
     channel_user_name = "user";
-    channel_room_id = "room-1";
+    channel_workspace_id = "workspace-1";
     keeper_name;
     content;
     idempotency_key;
@@ -68,7 +68,7 @@ let test_inbound_of_json_basic () =
       ("channel", `String "telegram");
       ("channel_user_id", `String "u1");
       ("channel_user_name", `String "alice");
-      ("channel_room_id", `String "r1");
+      ("channel_workspace_id", `String "r1");
       ("destination_id", `String "luna");
       ("content", `String "hi");
       ("idempotency_key", `String "k1");
@@ -86,7 +86,7 @@ let test_inbound_of_json_normalizes_case () =
       ("channel", `String "  DisCord  ");
       ("channel_user_id", `String "u1");
       ("channel_user_name", `String "bob");
-      ("channel_room_id", `String "r1");
+      ("channel_workspace_id", `String "r1");
       ("destination_id", `String "luna");
       ("content", `String "hello");
       ("idempotency_key", `String "k2");
@@ -102,7 +102,7 @@ let test_inbound_of_json_with_metadata () =
       ("channel", `String "slack");
       ("channel_user_id", `String "u1");
       ("channel_user_name", `String "carol");
-      ("channel_room_id", `String "r1");
+      ("channel_workspace_id", `String "r1");
       ("destination_id", `String "luna");
       ("content", `String "hey");
       ("idempotency_key", `String "k3");
@@ -126,7 +126,7 @@ let test_inbound_of_json_accepts_destination_id () =
       ("channel", `String "discord");
       ("channel_user_id", `String "u1");
       ("channel_user_name", `String "alice");
-      ("channel_room_id", `String "r1");
+      ("channel_workspace_id", `String "r1");
       ("destination_id", `String "luna");
       ("content", `String "hi");
       ("idempotency_key", `String "k-dest");
@@ -142,7 +142,7 @@ let test_inbound_of_json_ignores_noncanonical_keeper_name_when_destination_id_pr
       ("channel", `String "discord");
       ("channel_user_id", `String "u1");
       ("channel_user_name", `String "alice");
-      ("channel_room_id", `String "r1");
+      ("channel_workspace_id", `String "r1");
       ("destination_id", `String "new-name");
       ("keeper_name", `String "old-name");
       ("content", `String "hi");
@@ -160,7 +160,7 @@ let test_inbound_of_json_rejects_keeper_name_only () =
       ("channel", `String "discord");
       ("channel_user_id", `String "u1");
       ("channel_user_name", `String "alice");
-      ("channel_room_id", `String "r1");
+      ("channel_workspace_id", `String "r1");
       ("keeper_name", `String "old-only");
       ("content", `String "hi");
       ("idempotency_key", `String "k-old");

@@ -34,14 +34,14 @@ val valid_fs_write_mode_strings : string list
 
 val handle_read_file :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   args:Yojson.Safe.t ->
   string
 
 val handle_file_write :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   args:Yojson.Safe.t ->
   string

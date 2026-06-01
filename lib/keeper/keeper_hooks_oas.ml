@@ -205,7 +205,7 @@ include Keeper_hooks_oas_cost_events
 include Keeper_hooks_oas_idle
 
 let make_hooks
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(generation : int)
     ?(max_cost_usd : float option)

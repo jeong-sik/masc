@@ -85,7 +85,7 @@ ensure_server() {
 
   local server_exe
   server_exe="$(harness_find_server_exe "$ROOT_DIR" "${SERVER_EXE:-}")"
-  TRANSPORT_SERVER_BASE_PATH="$(harness_mktemp_dir "masc-transport-room")"
+  TRANSPORT_SERVER_BASE_PATH="$(harness_mktemp_dir "masc-transport-workspace")"
   TRANSPORT_SERVER_LOG_FILE="$(harness_mktemp_file "masc-transport-server" ".log")"
 
   # shellcheck disable=SC2031
@@ -174,7 +174,7 @@ mcp_join_agent() {
   local agent_name="$2"
   mcp_call_tool \
     "$session_id" \
-    "masc_join" \
+    "masc_bind" \
     "$(printf '{"agent_name":"%s","capabilities":[]}' "$agent_name")" \
     2
 }

@@ -513,16 +513,16 @@
 .bd-thread .reply .body { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--color-fg-secondary); line-height: 1.4; white-space: pre-wrap; }
 
 /* ═════ C2 · MESSAGES ═════ */
-.ms-room { display: grid; grid-template-columns: 180px 1fr; height: 100%; }
-.ms-room .roomlist { border-right: 1px solid var(--color-border-strong); background: var(--color-bg-surface); display:flex; flex-direction:column; }
-.ms-room .roomlist .room { padding: 6px 10px; border-bottom: 1px solid var(--color-border-default); cursor: pointer; display:flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-secondary); }
-.ms-room .roomlist .room.on { background: rgb(var(--color-accent-glow)/.08); color: var(--color-accent-fg); border-left: 2px solid var(--color-accent-fg); padding-left: 8px; }
-.ms-room .roomlist .room .nm { flex: 1; }
-.ms-room .roomlist .room .nm::before { content: "#"; color: var(--color-fg-disabled); margin-right: 3px; }
-.ms-room .roomlist .room .un { font-size: var(--fs-9); color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.15); padding: 1px 5px; border-radius: 0; min-width: 18px; text-align: center; }
-.ms-room .roomlist .room .un.zero { display: none; }
-.ms-room .feed { display:flex; flex-direction:column; }
-.ms-room .feed .timeline { flex:1; overflow:auto; padding: var(--sp-2) 10px; display:flex; flex-direction: column; gap: 6px; }
+.ms-workspace { display: grid; grid-template-columns: 180px 1fr; height: 100%; }
+.ms-workspace .workspacelist { border-right: 1px solid var(--color-border-strong); background: var(--color-bg-surface); display:flex; flex-direction:column; }
+.ms-workspace .workspacelist .workspace { padding: 6px 10px; border-bottom: 1px solid var(--color-border-default); cursor: pointer; display:flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-secondary); }
+.ms-workspace .workspacelist .workspace.on { background: rgb(var(--color-accent-glow)/.08); color: var(--color-accent-fg); border-left: 2px solid var(--color-accent-fg); padding-left: 8px; }
+.ms-workspace .workspacelist .workspace .nm { flex: 1; }
+.ms-workspace .workspacelist .workspace .nm::before { content: "#"; color: var(--color-fg-disabled); margin-right: 3px; }
+.ms-workspace .workspacelist .workspace .un { font-size: var(--fs-9); color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.15); padding: 1px 5px; border-radius: 0; min-width: 18px; text-align: center; }
+.ms-workspace .workspacelist .workspace .un.zero { display: none; }
+.ms-workspace .feed { display:flex; flex-direction:column; }
+.ms-workspace .feed .timeline { flex:1; overflow:auto; padding: var(--sp-2) 10px; display:flex; flex-direction: column; gap: 6px; }
 
 .ms-msg { display: grid; grid-template-columns: 50px 1fr; gap: var(--sp-2); font-family: var(--font-mono); font-size: var(--fs-11); }
 .ms-msg .seq { color: var(--color-fg-disabled); font-size: var(--fs-9); text-align: right; padding-top: 2px; letter-spacing: .04em; }
@@ -554,8 +554,8 @@
 .cm2 .toolbar .seg button { background: transparent; border: none; color: var(--color-fg-muted); padding: 3px 8px; font-family: inherit; font-size: inherit; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; border-right: 1px solid var(--color-border-strong); font-weight: var(--fw-semi); }
 .cm2 .toolbar .seg button:last-child { border-right: none; }
 .cm2 .toolbar .seg button.on { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow)/.1); }
-.cm2 .toolbar .room-sel { padding: 2px 6px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); color: var(--color-accent-fg); font-family: inherit; font-size: inherit; }
-.cm2 .toolbar .room-sel::before { content: "→ #"; color: var(--color-fg-disabled); }
+.cm2 .toolbar .workspace-sel { padding: 2px 6px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); color: var(--color-accent-fg); font-family: inherit; font-size: inherit; }
+.cm2 .toolbar .workspace-sel::before { content: "→ #"; color: var(--color-fg-disabled); }
 .cm2 .toolbar .grow { flex: 1; }
 .cm2 .toolbar .send { padding: 3px 10px; background: var(--brass-2); color: var(--color-bg-page); border: none; font-family: inherit; font-size: inherit; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; font-weight: var(--fw-semi); }
 .cm2 .ed { background: var(--color-bg-page); border: 1px solid var(--color-border-default); padding: 6px var(--sp-2); font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-primary); min-height: 60px; line-height: 1.5; cursor: text; white-space: pre-wrap; }

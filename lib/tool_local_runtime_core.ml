@@ -18,7 +18,7 @@ module Float = Stdlib.Float
 (** Tool_local_runtime core — types, helpers, process discovery, model fetching. *)
 
 type context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
 }
 

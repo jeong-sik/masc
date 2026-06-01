@@ -45,7 +45,7 @@ let test_normal_tool_input_returns_some () =
 
 let test_normal_tool_output_returns_some () =
   let result = Observability_redact.redact_tool_output
-    ~tool_name:"masc_status" "room is active" in
+    ~tool_name:"masc_status" "workspace is active" in
   Alcotest.(check bool) "normal tool returns Some" true
     (Option.is_some result)
 

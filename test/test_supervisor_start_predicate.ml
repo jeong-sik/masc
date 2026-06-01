@@ -12,7 +12,7 @@
    Note on test isolation: [Keeper_runtime.has_boot_entries] reads
    keeper TOML profiles via [Config_dir_resolver.keepers_dir ()],
    which is the active resolved config root independent of the
-   [Coord.config.base_path].  So in every test environment with an
+   [Workspace.config.base_path].  So in every test environment with an
    active operator profile present,
    [bootable_keeper_names] returns non-empty.  The tests below
    exploit that — they verify the post-fix path
@@ -21,7 +21,7 @@
 
 open Alcotest
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc_mcp.Workspace
 module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
 module Keeper_meta_store = Masc_mcp.Keeper_meta_store
 module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
@@ -110,17 +110,17 @@ let with_temp_masc_dir ?(keeper_names = [ "operator" ]) f =
          (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
   in
   Unix.mkdir base 0o755;
-  let config = Coord.default_config base in
-  let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+  let config = Workspace.default_config base in
+  let config_root = Filename.concat (Workspace.masc_root_dir config) "config" in
   let original_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   mkdir_p config_root;
   List.iter (fun name -> write_keeper_toml config_root ~name) keeper_names;
   Unix.putenv "MASC_CONFIG_DIR" config_root;
   Config_dir_resolver.reset ();
-  ignore (Coord.init config ~agent_name:None);
+  ignore (Workspace.init config ~agent_name:None);
   Fun.protect
     ~finally:(fun () ->
-      ignore (Coord.reset config);
+      ignore (Workspace.reset config);
       Reg.clear ();
       KR.reset_test_state base;
       restore_env "MASC_CONFIG_DIR" original_config_dir;

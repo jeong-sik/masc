@@ -586,7 +586,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     []
     |> (fun items ->
          if effective_model_loaded_before then
-           "Effective model was already resident before the probe according to /api/ps."
+           "Effective model was already loaded before the probe according to /api/ps."
            :: items
          else items)
     |> (fun items ->
@@ -596,7 +596,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
          else items)
     |> (fun items ->
          if generate_skipped_unloaded_model then
-           "Skipped /api/generate because the effective model was not resident; dashboard probes avoid cold-loading Ollama models."
+           "Skipped /api/generate because the effective model was not loaded; dashboard probes avoid cold-loading Ollama models."
            :: items
          else items)
     |> (fun items ->

@@ -16,7 +16,7 @@
       {!Server_mcp_transport_http_respond}.
 
     This .mli mirrors with type-identity-preserving runtime
-    (see cycle 187 [coord_utils.mli] for the [module type of
+    (see cycle 187 [workspace_utils.mli] for the [module type of
     struct include M end] pattern rationale). *)
 
 type deps = Server_mcp_transport_http_types.deps

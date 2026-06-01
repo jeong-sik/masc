@@ -87,6 +87,98 @@ let default_local_openai_runtime_provider_id () =
   |> Option.map (fun binding -> binding.Runtime_binding.id)
 ;;
 
+let local_runtime_label runtime_id =
+  match default_local_openai_runtime_provider_id () with
+  | Some provider_id -> provider_id ^ ":" ^ runtime_id
+  | None -> runtime_id
+;;
+
+let default_local_runtime_label () =
+  match default_local_openai_runtime_provider_id () with
+  | Some provider_id -> provider_id ^ ":auto"
+  | None -> "auto"
+;;
+
+let registry_default_base_url provider_name =
+  let registry = Llm_provider.Provider_registry.default () in
+  match Llm_provider.Provider_registry.find registry provider_name with
+  | Some entry -> entry.defaults.base_url
+  | None -> ""
+;;
+
+let provider_config_of_runtime_label label =
+  let cfg_of_kind ~kind ~model_id ~base_url =
+    Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
+  in
+  match Provider_kind_resolver.resolve label with
+  | Provider_kind_resolver.Registered { provider_name; model_id; kind } ->
+    let base_url = registry_default_base_url provider_name in
+    Some (cfg_of_kind ~kind ~model_id ~base_url)
+  | Provider_kind_resolver.Custom_url { model_id; base_url } ->
+    Some
+      (cfg_of_kind
+         ~kind:Llm_provider.Provider_config.OpenAI_compat
+         ~model_id
+         ~base_url)
+  | Provider_kind_resolver.Unknown _ -> None
+;;
+
+let runtime_health_key_of_label label =
+  provider_config_of_runtime_label label
+  |> Option.map provider_health_key_of_config
+;;
+
+let runtime_health_keys_of_labels labels =
+  labels
+  |> List.filter_map runtime_health_key_of_label
+  |> List.sort_uniq String.compare
+;;
+
+let runtime_id_of_label label =
+  match Provider_kind_resolver.resolve label with
+  | Provider_kind_resolver.Registered { model_id; _ }
+  | Provider_kind_resolver.Custom_url { model_id; _ } ->
+    let runtime_id = String.trim model_id in
+    if String.equal runtime_id "" then None else Some runtime_id
+  | Provider_kind_resolver.Unknown _ -> None
+;;
+
+let runtime_id_of_label_or_raw label =
+  match runtime_id_of_label label with
+  | Some runtime_id -> runtime_id
+  | None -> String.trim label
+;;
+
+let strip_latest_suffix runtime_id =
+  let suffix = ":latest" in
+  let suffix_len = String.length suffix in
+  let len = String.length runtime_id in
+  if len > suffix_len
+     && String.equal (String.sub runtime_id (len - suffix_len) suffix_len) suffix
+  then String.sub runtime_id 0 (len - suffix_len)
+  else runtime_id
+;;
+
+let normalize_runtime_name_for_bucket label =
+  runtime_id_of_label_or_raw label |> strip_latest_suffix
+;;
+
+let label_matches_runtime_id ~label ~runtime_id =
+  let label_id = normalize_runtime_name_for_bucket label in
+  let runtime_id = String.trim runtime_id |> strip_latest_suffix in
+  (not (String.equal runtime_id "")) && String.equal label_id runtime_id
+;;
+
+type context_window_hint =
+  { context_window : int
+  ; is_local_model : bool
+  }
+
+let context_window_hint_of_labels labels =
+  let _ = labels in
+  { context_window = 0; is_local_model = false }
+;;
+
 let provider_name_matches_default_local_openai_runtime provider_name =
   match default_local_openai_runtime_provider_id () with
   | Some id -> String.equal (normalize_provider_id provider_name) (normalize_provider_id id)

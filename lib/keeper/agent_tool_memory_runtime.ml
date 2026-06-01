@@ -68,7 +68,7 @@ let report_memory_bank_read_drop ~path ~reason ~detail =
 ;;
 
 let search_memory_bank
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(query : string)
       ~(kind_filter : string)
@@ -244,7 +244,7 @@ let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
 (* --- History search (checkpoint + trace history) --- *)
 
 let search_history
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ~(query : string)
@@ -317,7 +317,7 @@ let search_history
 (* --- Unified keeper_memory_search dispatch --- *)
 
 let keeper_memory_search_json
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
       ~(args : Yojson.Safe.t)
@@ -454,7 +454,7 @@ let keeper_memory_search_json
 ;;
 
 let keeper_context_status_json
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(ctx_work : working_context)
   =
@@ -589,7 +589,7 @@ let keeper_memory_write_max_title_chars = 120
 
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
-    taxonomy without constructing a [Coord.config]. *)
+    taxonomy without constructing a [Workspace.config]. *)
 type memory_write_error_kind =
   | Invalid_memory_kind
   | Title_too_long
@@ -662,7 +662,7 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
 ;;
 
 let keeper_memory_write_json
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   : string

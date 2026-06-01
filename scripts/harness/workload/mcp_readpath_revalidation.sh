@@ -423,7 +423,7 @@ run_mode() {
       "false"
     else
       (
-        ((.coordination.joined_room_ids // null) | type == "array")
+        ((.workspace collaboration.bound_workspace_ids // null) | type == "array")
         and ((.runtime.proactive_enabled // null) | type == "boolean")
       ) | tostring
     end

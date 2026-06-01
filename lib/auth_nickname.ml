@@ -105,7 +105,7 @@ let extract_generated_nickname_prefix name =
 ;;
 
 (* Inline copy of Nickname.is_generated_nickname / extract_agent_type.
-   Auth lives below masc_coord in the module graph and cannot depend on
+   Auth lives below masc_workspace in the module graph and cannot depend on
    it. The nickname pattern — stable-prefix + adjective + animal
    [+ hex4] — is duplicated here so auth can canonicalize generated
    aliases without depending on Nickname. Keeper aliases use a

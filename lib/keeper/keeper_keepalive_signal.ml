@@ -260,7 +260,7 @@ let board_signal_entry_is_wakeup_candidate (entry : Keeper_registry.registry_ent
 ;;
 
 let board_signal_wake_paused_keeper
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(stimulus : Keeper_event_queue.stimulus)
       (meta : keeper_meta)
   =
@@ -292,7 +292,7 @@ let board_signal_wake_paused_keeper
 ;;
 
 let board_signal_wake_keeper
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(reason : string)
       ~(signal : Board_dispatch.keeper_board_signal)
       (meta : keeper_meta)
@@ -306,7 +306,7 @@ let board_signal_wake_keeper
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       (signal : Board_dispatch.keeper_board_signal)
   =
   let registry_entries =

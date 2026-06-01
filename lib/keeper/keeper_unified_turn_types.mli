@@ -76,7 +76,7 @@ val record_turn_tool_events :
     transitions, and writes a terminal observation via
     [Keeper_turn_helpers.record_pre_dispatch_terminal_observation]. *)
 val record_streaming_cancelled_observation :
-  config:Coord.config ->
+  config:Workspace.config ->
   run_meta:Keeper_meta_contract.keeper_meta ->
   run_generation:int ->
   runtime_id:string ->

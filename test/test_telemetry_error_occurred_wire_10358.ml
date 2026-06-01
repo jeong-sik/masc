@@ -42,8 +42,8 @@ let make_config () =
   let dir = Filename.temp_file "telem_10358_" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  let config = Masc_mcp.Coord.default_config dir in
-  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-10358"));
+  let config = Masc_mcp.Workspace.default_config dir in
+  ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "test-10358"));
   (config, dir)
 
 let rec rm_rf path =
@@ -71,7 +71,7 @@ let with_temp_config f =
 let event_kind_tag (e : T.event) =
   match e with
   | T.Agent_session_bound _ -> "Agent_session_bound"
-  | T.Agent_left _ -> "Agent_left"
+  | T.Agent_unbound _ -> "Agent_unbound"
   | T.Task_started _ -> "Task_started"
   | T.Task_completed _ -> "Task_completed"
   | T.Handoff_triggered _ -> "Handoff_triggered"
@@ -79,7 +79,7 @@ let event_kind_tag (e : T.event) =
   | T.Tool_called _ -> "Tool_called"
   | T.Tool_assigned _ -> "Tool_assigned"
 
-(* [Coord.init] emits an [Agent_session_bound] event during setup; filter
+(* [Workspace.init] emits an [Agent_session_bound] event during setup; filter
    it out so test assertions only see the events explicitly emitted
    by [track_tool_called]. *)
 let recent_events_kinds config _n =

@@ -38,7 +38,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Tool_metrics.record r;
       Tool_metrics_persist.enqueue r
     | _ -> ());
-  Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:state.coord_config.base_path;
+  Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:state.workspace_config.base_path;
   (* Bare-alias audit fiber (PR #15112 surface refresh): re-run the
      classifier every minute so the [masc_auth_bare_alias] gauges
      reflect mid-run regressions, not only the boot snapshot. The
@@ -47,9 +47,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Auth.start_bare_alias_audit_fiber
     ~sw
     ~clock
-    ~base_path:state.coord_config.base_path
+    ~base_path:state.workspace_config.base_path
     ~canonical_names_fn:(fun () ->
-      Keeper_runtime.bootable_keeper_names state.coord_config
+      Keeper_runtime.bootable_keeper_names state.workspace_config
       |> List.map Keeper_identity.keeper_agent_name);
   (* #9876: Hebbian consolidation fiber. Prior to this, the graph was
      write-only — strengthen/weaken populated synapses but decay +
@@ -58,8 +58,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      production. *)
   (* System_internal tool usage log: durable JSONL for pruning evidence (#5120) *)
   Tool_usage_log.init
-    ~base_path:state.coord_config.base_path
-    ~cluster_name:state.coord_config.backend_config.Backend_types.cluster_name
+    ~base_path:state.workspace_config.base_path
+    ~cluster_name:state.workspace_config.backend_config.Backend_types.cluster_name
     ();
   (* Inject keeper FD/disk pressure handling at the boundary so the generic
      Tool_usage_log surface does not reference the keeper subsystem directly
@@ -70,8 +70,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     Keeper_disk_pressure.note_exception ~site exn);
   (* Keeper tool call I/O log: full input/output for dashboard inspector *)
   Keeper_tool_call_log.init
-    ~base_path:state.coord_config.base_path
-    ~cluster_name:state.coord_config.backend_config.Backend_types.cluster_name
+    ~base_path:state.workspace_config.base_path
+    ~cluster_name:state.workspace_config.backend_config.Backend_types.cluster_name
     ();
   Keeper_tool_call_log.start_flush_fiber ~sw ~clock;
   Otel_dispatch_hook.install ();
@@ -102,7 +102,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            (* SSE replay-buffer eviction is periodic housekeeping; failed
                sends and stale connection reaping remain visible elsewhere. *)
            Log.Server.routine "Evicted %d expired SSE buffer events" evicted_events;
-         let evicted = Cache_eio.evict_expired state.coord_config in
+         let evicted = Cache_eio.evict_expired state.workspace_config in
          if evicted > 0 then Log.Server.info "Cache: evicted %d expired entries" evicted;
          let sse_guards_reaped = Server_mcp_transport_http_sse.reap_stale_guards () in
          let http_guards_reaped = Server_mcp_transport_http.reap_stale_guards () in
@@ -157,7 +157,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              ticks faster but the helper short-circuits when called too soon. *)
          (match
             Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-              ~base_path:state.coord_config.base_path
+              ~base_path:state.workspace_config.base_path
               ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Startup ())
               ()
           with
@@ -182,7 +182,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              let days =
                Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
              in
-             let masc = Coord.masc_dir state.coord_config in
+             let masc = Workspace.masc_dir state.workspace_config in
              let prune_dir dir =
                if Sys.file_exists dir
                then Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
@@ -227,7 +227,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     let sync_once () =
       try
         let now = Int64.of_float (Eio.Time.now clock) in
-        match Repo_sync.sync_all ~base_path:state.coord_config.base_path ~now with
+        match Repo_sync.sync_all ~base_path:state.workspace_config.base_path ~now with
         | Ok repos ->
           if repos <> []
           then Log.Server.info "repo_sync: synced %d repositories" (List.length repos)
@@ -263,9 +263,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          of the request fiber for the canonical project-snapshot
          response (Step 4 retires the env knobs themselves). *)
       Dashboard_snapshot.refresh_loop
-        ~sw ~clock ~config:state.coord_config ~state
+        ~sw ~clock ~config:state.workspace_config ~state
         ~interval_sec:2.0 ());
-  let resolved_base = state.coord_config.base_path in
-  let masc_dir = Coord.masc_root_dir state.coord_config in
+  let resolved_base = state.workspace_config.base_path in
+  let masc_dir = Workspace.masc_root_dir state.workspace_config in
   resolved_base, masc_dir
 ;;

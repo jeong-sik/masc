@@ -23,7 +23,7 @@ module Float = Stdlib.Float
 
 (** Tool handler context *)
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
 }
 
 open Tool_args
@@ -171,7 +171,7 @@ After init, use masc_run_plan to set approach, masc_run_log for notes, masc_run_
   (* masc_run_plan *)
   {
     name = "masc_run_plan";
-    description = "Set or update the execution plan (markdown) for a task run; each update creates a new revision. \\nCall after masc_run_init to document your approach before starting implementation. \\nOther agents can view plans via masc_run_get for coordination and handoff context.";
+    description = "Set or update the execution plan (markdown) for a task run; each update creates a new revision. \\nCall after masc_run_init to document your approach before starting implementation. \\nOther agents can view plans via masc_run_get for workspace and handoff context.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

@@ -81,7 +81,7 @@ describe('normalizeOperatorDigest', () => {
   it('extracts active_recommended_actions', () => {
     const result = normalizeOperatorDigest({
       active_recommended_actions: [
-        { action_type: 'broadcast', target_type: 'room', reason: 'Alert' },
+        { action_type: 'broadcast', target_type: 'workspace', reason: 'Alert' },
       ],
     })
     expect(result.active_recommended_actions).toHaveLength(1)

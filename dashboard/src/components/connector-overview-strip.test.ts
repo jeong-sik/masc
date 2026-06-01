@@ -59,7 +59,7 @@ describe('ConnectorOverviewStrip', () => {
   it('shows visible summary copy for healthy and offline tiles', () => {
     render(
       html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'discord', available: true, configured_bindings: ['room-1'] as any })]}
+        connectors=${[mkConnector({ connector_id: 'discord', available: true, configured_bindings: ['workspace-1'] as any })]}
         keeperCount=${0}
       />`,
       container,

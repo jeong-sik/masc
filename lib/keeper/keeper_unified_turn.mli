@@ -151,7 +151,7 @@ val resolved_max_context_for_turn : meta:Keeper_meta_contract.keeper_meta -> str
     Returns [Error] when disk sync fails so callers can surface the failure
     instead of silently diverging runtime vs persisted state. *)
 val sync_keeper_paused_state
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> paused:bool
   -> (Keeper_meta_contract.keeper_meta, string) result
@@ -221,7 +221,7 @@ val next_fail_open_runtime_for_turn
     Exposed so tests can pin the supervisor [fiber_stop] branch without forcing
     a live provider cancellation. *)
 val record_streaming_cancelled_observation
-  :  config:Coord.config
+  :  config:Workspace.config
   -> run_meta:Keeper_meta_contract.keeper_meta
   -> run_generation:int
   -> runtime_id:string
@@ -230,7 +230,7 @@ val record_streaming_cancelled_observation
   -> unit
 
 val run_keeper_cycle
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> observation:Keeper_world_observation.world_observation
   -> generation:int
@@ -248,7 +248,7 @@ val run_keeper_cycle
     3. Observes tool history from result to update metrics
     4. Returns updated keeper_meta
 
-    @param config Coord configuration
+    @param config Workspace configuration
     @param meta Current keeper metadata
     @param observation World state snapshot
     @param generation Current generation counter *)

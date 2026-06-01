@@ -74,7 +74,7 @@ val rule_label :
     This is intentionally separate from the generic rule table because it is
     path- and keeper-state-aware. *)
 val sandboxed_code_write_rule_label :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   tool_name:string ->
   input:Yojson.Safe.t ->

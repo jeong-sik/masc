@@ -38,7 +38,7 @@ let side_effect_metric_label side_effect =
 ;;
 
 let report_keeper_cycle_side_effect_issue
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(side_effect : string)
       ?(severity = `Warn)
@@ -57,7 +57,7 @@ let report_keeper_cycle_side_effect_issue
 ;;
 
 let dispatch_keeper_phase_event_checked
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(side_effect : string)
       (event : Keeper_state_machine.event)
@@ -77,7 +77,7 @@ let dispatch_keeper_phase_event_checked
 ;;
 
 let finalize_trajectory_acc
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       (trajectory_acc : Trajectory.accumulator)
       (outcome : Trajectory.trajectory_outcome)
@@ -102,7 +102,7 @@ let finalize_trajectory_acc
 ;;
 
 let record_execution_receipt_gap
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(stale_reason : string)
       ~(error : string)
@@ -110,7 +110,7 @@ let record_execution_receipt_gap
   : unit
   =
   try
-    let masc_root = Coord.masc_root_dir config in
+    let masc_root = Workspace.masc_root_dir config in
     Telemetry_coverage_gap.record
       ~masc_root
       ~source:"execution_receipt"
@@ -198,7 +198,7 @@ let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
 ;;
 
 let record_pre_dispatch_terminal_observation
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(generation : int)
       ~(runtime_id : string)
@@ -217,7 +217,7 @@ let record_pre_dispatch_terminal_observation
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in
-  let masc_root = Coord.masc_root_dir config in
+  let masc_root = Workspace.masc_root_dir config in
   let trajectory_acc =
     Trajectory.create_accumulator ~masc_root ~keeper_name:meta.name ~trace_id ~generation ()
   in

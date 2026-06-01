@@ -12,4 +12,4 @@ val handle_keeper_down :
 
 (** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
 val handle_keeper_down_config :
-  config:Coord.config -> Yojson.Safe.t -> tool_result
+  config:Workspace.config -> Yojson.Safe.t -> tool_result

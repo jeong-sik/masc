@@ -24,7 +24,7 @@ let with_config f =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Lib.Coord.default_config dir in
+      let config = Lib.Workspace.default_config dir in
       f config)
 
 let test_emit_and_list_events () =
@@ -247,7 +247,7 @@ let test_events_json_exposes_provenance_and_non_stale_latest_seq () =
       in
       let seq_counter =
         Filename.concat
-          (Filename.concat (Coord_utils.masc_dir config) "activity-events")
+          (Filename.concat (Workspace_utils.masc_dir config) "activity-events")
           "_seq"
       in
       Fs_compat.save_file seq_counter (string_of_int first.seq);
@@ -310,14 +310,14 @@ let test_emit_sanitizes_invalid_utf8_before_persisting () =
 let test_read_self_heals_historic_invalid_utf8_event_file () =
   with_config (fun config ->
       Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
-      let root = Filename.concat (Coord_utils.masc_dir config) "activity-events" in
+      let root = Filename.concat (Workspace_utils.masc_dir config) "activity-events" in
       let month_dir = Filename.concat root "2000-01" in
       Unix.mkdir root 0o755;
       Unix.mkdir month_dir 0o755;
       let event_path = Filename.concat month_dir "01.jsonl" in
       let raw_line =
         "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
-         \"coord_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
          \"payload\":{\"content\":\"bad\xffpayload\"},\"tags\":[]}\n"
       in
       Fs_compat.save_file event_path raw_line;

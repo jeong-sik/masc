@@ -10,7 +10,7 @@
 
 ## 1. Purpose
 
-Map the *current* coupling between MASC (Multi-Agent Streaming Coordination, this repo) and OAS (Open Agent SDK, external `Oas.*` package). Verify that the intended **3-layer boundary discipline** (§3) is upheld, and enumerate the modules that violate, blur, or test it.
+Map the *current* coupling between MASC (Multi-Agent Shared Context, this repo) and OAS (Open Agent SDK, external `Oas.*` package). Verify that the intended **3-layer boundary discipline** (§3) is upheld, and enumerate the modules that violate, blur, or test it.
 
 This document is a *survey*, not a design proposal. Design changes that follow from the survey are out of scope (each one needs its own RFC).
 
@@ -52,7 +52,7 @@ Source coverage:
 |---|---|---|---|
 | **A. Upstream OAS SDK** | `Oas.Agent`, `Oas.Hooks`, `Oas.Tool`, `Oas.Error`, `Oas.Types.inference_telemetry` | OAS → nothing MASC-specific | **No `masc_` / `Masc.` references**. Memory: `feedback_oas-must-not-know-masc`. |
 | **B. MASC-side OAS adapter** | `lib/masc_oas_bridge`, `lib/oas_event_bridge`, `lib/oas_log_bridge`, `lib/oas_worker*.ml`, `lib/keeper/keeper_hooks_oas`, `lib/keeper/keeper_tools_oas` | both directions | Bidirectional translation; converts `Oas.Types.*` ↔ MASC types. |
-| **C. MASC core** | `lib/keeper/keeper_run_tools`, `lib/coord/*`, `lib/server/*`, `lib/dashboard/*` | MASC → A only via B | Direct `Oas.*` import permitted only inside Layer B. Layer C should call helpers in Layer B (e.g. `Masc_oas_bridge.run_with_caller`). |
+| **C. MASC core** | `lib/keeper/keeper_run_tools`, `lib/workspace/*`, `lib/server/*`, `lib/dashboard/*` | MASC → A only via B | Direct `Oas.*` import permitted only inside Layer B. Layer C should call helpers in Layer B (e.g. `Masc_oas_bridge.run_with_caller`). |
 
 The audit checks (a) Layer A purity, (b) Layer B's coverage, (c) Layer C's usage discipline.
 

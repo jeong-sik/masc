@@ -10,7 +10,7 @@ type keeper_chat_stream_request = {
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
 }
 
 let keeper_chat_stream_error_json message =
@@ -31,7 +31,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     try
       let keeper_ctx : _ Tool_keeper.context =
         {
-          config = state.Mcp_server.coord_config;
+          config = state.Mcp_server.workspace_config;
           agent_name;
           sw;
           clock;
@@ -44,7 +44,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
       | None -> (false, "masc_keeper_msg dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Coord.Not_initialized ->
+    | Workspace.Not_initialized ->
         (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
     | exn ->
         let err = Printexc.to_string exn in
@@ -57,7 +57,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.coord_config
+  Audit_log.log_tool_call state.Mcp_server.workspace_config
     ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
     Log.emit Log.Error ~module_name:"Keeper"
@@ -80,7 +80,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.coord_config
+           Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
              ~source:(Tool_registry.string_of_source Keeper_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
@@ -119,14 +119,14 @@ let parse_keeper_chat_stream_request body_str =
         |> Option.value ~default:""
         |> String.trim
       in
-      let channel_room_id =
-        Json_util.get_string json "channel_room_id"
+      let channel_workspace_id =
+        Json_util.get_string json "channel_workspace_id"
         |> Option.value ~default:""
         |> String.trim
       in
       let has_connector_context =
         channel <> "" || channel_user_id <> ""
-        || channel_user_name <> "" || channel_room_id <> ""
+        || channel_user_name <> "" || channel_workspace_id <> ""
       in
       let timeout_sec =
         match Json_util.assoc_member_opt "timeout_sec" json with
@@ -142,10 +142,10 @@ let parse_keeper_chat_stream_request body_str =
       else if message = "" then
         Error "message is required"
       else if has_connector_context
-              && (channel = "" || channel_user_id = "" || channel_room_id = "")
+              && (channel = "" || channel_user_id = "" || channel_workspace_id = "")
       then
         Error
-          "channel, channel_user_id, and channel_room_id are required when connector context is supplied"
+          "channel, channel_user_id, and channel_workspace_id are required when connector context is supplied"
       else
         match
           Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" json
@@ -162,7 +162,7 @@ let parse_keeper_chat_stream_request body_str =
                   channel;
                   channel_user_id;
                   channel_user_name;
-                  channel_room_id;
+                  channel_workspace_id;
                 }
           | Error err -> Error err )
   with Yojson.Json_error e ->
@@ -253,7 +253,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
     try
       let keeper_ctx : _ Tool_keeper.context =
         {
-          config = state.Mcp_server.coord_config;
+          config = state.Mcp_server.workspace_config;
           agent_name;
           sw;
           clock;
@@ -269,7 +269,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
       | None -> (false, "masc_keeper_msg stream dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Coord.Not_initialized ->
+    | Workspace.Not_initialized ->
         (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
     | exn ->
         let err = Printexc.to_string exn in
@@ -282,7 +282,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.coord_config ~agent_id:agent_name
+  Audit_log.log_tool_call state.Mcp_server.workspace_config ~agent_id:agent_name
     ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
     Log.emit Log.Error ~module_name:"Keeper"
@@ -305,7 +305,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.coord_config
+           Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
              ~duration_ms ~source:(Tool_registry.string_of_source Keeper_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
@@ -425,7 +425,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                 ~channel:payload.channel
                 ~channel_user_id:payload.channel_user_id
                 ~channel_user_name:payload.channel_user_name
-                ~channel_room_id:payload.channel_room_id
+                ~channel_workspace_id:payload.channel_workspace_id
                 ~content:payload.message
             else
               payload.message
@@ -440,7 +440,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             if has_connector_context then
               Gate_keeper_backend.agent_name_for_channel_actor
                 ~channel:payload.channel
-                ~channel_room_id:payload.channel_room_id
+                ~channel_workspace_id:payload.channel_workspace_id
                 ~channel_user_id:payload.channel_user_id
             else
               match agent_from_request request with
@@ -525,7 +525,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                  | None -> ());
                 (* Persist user + assistant messages in a single write *)
                 Keeper_chat_store.append_pair
-                  ~base_dir:state.Mcp_server.coord_config.base_path
+                  ~base_dir:state.Mcp_server.workspace_config.base_path
                   ~keeper_name:payload.name
                   ~user_content:payload.message
                   ~assistant_content:visible_reply;

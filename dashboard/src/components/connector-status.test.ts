@@ -33,7 +33,7 @@ function sampleGateResponse(overrides?: Partial<Record<string, unknown>>) {
         last_success: '2026-04-03T00:00:00Z',
         last_error_at: '2026-04-03T00:00:00Z',
         last_keeper: 'luna',
-        last_room_id: '123456',
+        last_workspace_id: '123456',
         last_error: 'upstream timeout',
         last_error_kind: 'keeper',
         last_outcome: 'keeper_error',
@@ -42,14 +42,14 @@ function sampleGateResponse(overrides?: Partial<Record<string, unknown>>) {
         slow_count: 3,
         slow_rate_pct: 25,
         success_rate_pct: 91,
-        room_count: 2,
+        workspace_count: 2,
         health: 'degraded',
       },
     ],
     bindings: [
       {
         channel: 'discord',
-        room_id: '123456',
+        workspace_id: '123456',
         keeper: 'luna',
         message_count: 8,
         success_count: 7,
@@ -72,7 +72,7 @@ function sampleGateResponse(overrides?: Partial<Record<string, unknown>>) {
         seq: 12,
         timestamp: '2026-04-03T00:00:00Z',
         channel: 'discord',
-        room_id: '123456',
+        workspace_id: '123456',
         keeper: 'luna',
         outcome: 'keeper_error',
         error_kind: 'keeper',
@@ -277,7 +277,7 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('luna')
     expect(text).toContain('nova')
     expect(text).toContain('keeper-luna-agent')
-    expect(text).toContain('Observed room bindings')
+    expect(text).toContain('Observed workspace bindings')
     expect(text).toContain('Recent gate events')
     expect(text).toContain('keeper_error')
     expect(text).toContain('/tmp/discord_status.json')
@@ -322,7 +322,7 @@ describe('ConnectorStatusPanel', () => {
           bot_user_name: 'Messages Bot',
           reply_mode: 'self-chat',
           self_chat_guid: 'self-chat-guid',
-          configured_bindings: [{ channel_id: 'imsg-room', keeper_name: 'nova' }],
+          configured_bindings: [{ channel_id: 'imsg-workspace', keeper_name: 'nova' }],
           recent_audit: [],
         },
       ],
@@ -370,7 +370,7 @@ describe('ConnectorStatusPanel', () => {
           binding_store_path: '/tmp/imessage_bindings.json',
           audit_path: '/tmp/imessage_binding_audit.jsonl',
           names_path: '/tmp/imessage_names.json',
-          configured_bindings: [{ channel_id: 'imsg-room', keeper_name: 'nova' }],
+          configured_bindings: [{ channel_id: 'imsg-workspace', keeper_name: 'nova' }],
           recent_audit: [],
         },
       ],

@@ -9,7 +9,7 @@ open Keeper_types_profile
 open Keeper_meta_contract
 open Keeper_meta_json
 
-let runtime_meta_write_sync_hook : (Coord.config -> Keeper_meta_contract.keeper_meta -> unit) ref =
+let runtime_meta_write_sync_hook : (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) ref =
   ref (fun _ _ -> ())
 ;;
 

@@ -52,20 +52,20 @@ val create_context : task_id:string -> planning_context
 (** {1 Lifecycle (return updated context on success)} *)
 
 val init :
-  Coord.config -> task_id:string -> (planning_context, string) result
+  Workspace.config -> task_id:string -> (planning_context, string) result
 (** [init config ~task_id] creates the planning directory and an
     empty Markdown skeleton.  Returns [Error _] when the directory
     already has content. *)
 
 val load :
-  Coord.config -> task_id:string -> (planning_context, string) result
+  Workspace.config -> task_id:string -> (planning_context, string) result
 (** [load config ~task_id] reads the persisted planning markdown
     and parses sections via the internal markdown parser.  Returns
     [Error _] when the directory does not exist or the markdown
     is malformed. *)
 
 val update_plan :
-  Coord.config ->
+  Workspace.config ->
   task_id:string ->
   content:string ->
   (planning_context, string) result
@@ -73,7 +73,7 @@ val update_plan :
     field and refreshes [updated_at]. *)
 
 val add_note :
-  Coord.config ->
+  Workspace.config ->
   task_id:string ->
   note:string ->
   (planning_context, string) result
@@ -81,7 +81,7 @@ val add_note :
     [notes] list and refreshes [updated_at]. *)
 
 val add_error :
-  Coord.config ->
+  Workspace.config ->
   task_id:string ->
   error_type:string ->
   message:string ->
@@ -92,7 +92,7 @@ val add_error :
     appends a new {!error_entry} with [resolved = false]. *)
 
 val resolve_error :
-  Coord.config ->
+  Workspace.config ->
   task_id:string ->
   index:int ->
   (planning_context, string) result
@@ -101,7 +101,7 @@ val resolve_error :
     when the index is out of range. *)
 
 val set_deliverable :
-  Coord.config ->
+  Workspace.config ->
   task_id:string ->
   content:string ->
   (planning_context, string) result
@@ -114,21 +114,21 @@ val set_deliverable :
     [current_task_file config].  Used by the dashboard / CLI to
     show which task the operator is focused on. *)
 
-val get_current_task : Coord.config -> string option
+val get_current_task : Workspace.config -> string option
 (** [get_current_task config] returns the persisted current task
     id, or [None] when no current task is set. *)
 
-val set_current_task : Coord.config -> task_id:string -> (unit, string) result
+val set_current_task : Workspace.config -> task_id:string -> (unit, string) result
 (** [set_current_task config ~task_id] persists the current task
     id, returning [Error _] when an existing directory cannot be
     quarantined before the file write. *)
 
-val clear_current_task : Coord.config -> unit
+val clear_current_task : Workspace.config -> unit
 (** [clear_current_task config] removes the persisted current task
     file. *)
 
 val resolve_task_id :
-  Coord.config -> task_id:string -> (string, string) result
+  Workspace.config -> task_id:string -> (string, string) result
 (** [resolve_task_id config ~task_id] returns the canonical task
     id.  Empty input falls back to {!get_current_task}; returns
     [Error _] when neither yields a task id. *)

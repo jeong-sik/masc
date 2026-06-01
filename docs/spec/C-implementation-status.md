@@ -28,7 +28,7 @@ code_refs:
 
 | 서브시스템 | 스펙 | IMPL | CODE | STUB | MISS | 비율 | 핵심 판정 |
 |-----------|------|------|------|------|------|------|---------|
-| Room Coordination | 03 | 24 | 0 | 0 | 0 | 100% | 전 기능 운용 |
+| Workspace State | 03 | 24 | 0 | 0 | 0 | 100% | 전 기능 운용 |
 | Chain Engine | 04 | - | - | - | - | **REMOVED** | 소스 삭제됨, OAS superseded |
 | Keeper Agent | 05 | 25 | 0 | 0 | 0 | 100% | Memory.t Long_term JSONL-only 완료 (v2.140.0) |
 | Command Plane | 06 | 40 | 0 | 0 | 0 | 100% | Intent 도구 4종 MCP 등록 완료 |
@@ -69,21 +69,21 @@ code_refs:
 
 ## 3. Per-Subsystem Detail
 
-### 03-Room Coordination (100% IMPL)
+### 03-Workspace State (100% IMPL)
 
 | Section | Feature | Status | Evidence |
 |---------|---------|--------|----------|
-| State Machines | Task FSM (Pending→Claimed→InProgress→Done) | IMPL | room_task.ml + telemetry |
+| State Machines | Task FSM (Pending→Claimed→InProgress→Done) | IMPL | workspace_task.ml + telemetry |
 | Heartbeat | Smart heartbeat (Emit/Skip_busy/Skip_idle) | IMPL | heartbeat_smart.ml + telemetry 1K+ |
 | Zombie Detection | 300s general, 3600s keeper threshold | IMPL | resilience.ml + GC 증거 |
-| GC Pipeline | 5-phase (detect→transition→release→delete→update) | IMPL | room_gc.ml 491 LOC |
+| GC Pipeline | 5-phase (detect→transition→release→delete→update) | IMPL | workspace_gc.ml 491 LOC |
 | WALPH | Retired — loop, state, tools all removed | REMOVED | — |
 | Mention Routing | @mention parsing, stateless/stateful/broadcast | IMPL | mention.ml |
-| Worktree | Git worktree create/remove per agent | IMPL | room_worktree.ml |
-| Multi-Room | Room registry, slugification | IMPL | room_multi.ml + room_rooms.ml |
-| Portal | A2A bidirectional task exchange | IMPL | room_portal.ml |
-| Checkpoint | Snapshot capture/restore | IMPL | room_checkpoint.ml |
-| Tempo | Pacing control (Normal/Slow/Fast/Paused) | IMPL | room_tempo.ml |
+| Worktree | Git worktree create/remove per agent | IMPL | workspace_worktree.ml |
+| Multi-Workspace | Workspace registry, slugification | IMPL | workspace_multi.ml + workspace_states.ml |
+| Portal | A2A bidirectional task exchange | IMPL | workspace_portal.ml |
+| Checkpoint | Snapshot capture/restore | IMPL | workspace_checkpoint.ml |
+| Tempo | Pacing control (Normal/Slow/Fast/Paused) | IMPL | workspace_tempo.ml |
 | MCP Tools | 8 tool suites, ~45 tools | IMPL | telemetry 145+ calls |
 
 ### 05-Keeper Agent (96% IMPL)
@@ -104,7 +104,7 @@ code_refs:
 
 ### 06-Command Plane (RETIRED)
 
-전체 Command Plane 서브시스템(`lib/command_plane/`, `cp_lifecycle.ml`, `cp_search_fabric.ml`, `cp_snapshot_core.ml`, `cp_cleanup.ml`, `command_plane_orchestra.ml`, `cp_lifecycle_policy.ml`, `cp_types.ml`, `command_plane_v2.ml`)와 HTTP paths는 retired surface다. 역사적 맥락은 `docs/spec/06-command-plane.md`의 "Retired Historical Reference" status와 `docs/spec/00-glossary.md`의 Command Plane 항목을 참고한다. 현재 coordination truth는 `board_posts` + keeper FSM으로 대체됐다.
+전체 Command Plane 서브시스템(`lib/command_plane/`, `cp_lifecycle.ml`, `cp_search_fabric.ml`, `cp_snapshot_core.ml`, `cp_cleanup.ml`, `command_plane_orchestra.ml`, `cp_lifecycle_policy.ml`, `cp_types.ml`, `command_plane_v2.ml`)와 HTTP paths는 retired surface다. 역사적 맥락은 `docs/spec/06-command-plane.md`의 "Retired Historical Reference" status와 `docs/spec/00-glossary.md`의 Command Plane 항목을 참고한다. 현재 workspace collaboration truth는 `board_posts` + keeper FSM으로 대체됐다.
 
 ### 07-Team Session (RETIRED)
 
@@ -170,7 +170,7 @@ env-gated 6종은 CI에서 MASC_E2E_TESTS=true로 실행 확인.
 ## 4. Key Findings
 
 ### 건강한 서브시스템 (100% IMPL)
-- Room, Memory, OAS, Config, Governance — 코드+테스트+실사용 모두 확인
+- Workspace, Memory, OAS, Config, Governance — 코드+테스트+실사용 모두 확인
 
 ### CODE 잔여 (1개, 740 LOC)
 1. **HTTP/2 h2c** (740 LOC) → opt-in 경로, HTTP/1.1이 canonical. 벤치마크 후 전환 판단 필요

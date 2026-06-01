@@ -45,7 +45,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 - 두 스크립트 모두 session-less `tools/call`을 재지 않는다.
 - 항상 `initialize -> notifications/initialized -> Mcp-Session-Id 재사용` 순서를 포함한다.
 - `mcp_session_init`은 세션 생성 비용이다.
-- `mcp_read_*`, `mcp_coord_*`, `mcp_lock`, `mcp_a2a_*`는 established session 위의 MCP path다.
+- `mcp_read_*`, `mcp_workspace_*`, `mcp_lock`, `mcp_a2a_*`는 established session 위의 MCP path다.
 - `oas_runtime_status`, `oas_runtime_single`은 raw local runtime lane이다.
 - `local64`는 target runtime profile 이름이다. 실제 병렬 용량은 `masc_runtime_verify`의 `configured_capacity`, `healthy_runtime_count`를 기준으로 읽는다.
 
@@ -142,7 +142,7 @@ scripts/harness/workload/agent_swarm_live.sh
 
 ## session runtime local64 compat lane
 
-Removed. Team-session compat harnesses and the command-plane HTTP lane are both retired; use board_posts + keeper FSM read models for coordination truth and the canonical dashboard projections (`/api/v1/dashboard/mission`, `/api/v1/dashboard/execution`, `/api/v1/dashboard/board`) for live proof.
+Removed. Team-session compat harnesses and the command-plane HTTP lane are both retired; use board_posts + keeper FSM read models for workspace collaboration truth and the canonical dashboard projections (`/api/v1/dashboard/mission`, `/api/v1/dashboard/execution`, `/api/v1/dashboard/board`) for live proof.
 
 Operation/unit/detachment tool variants were removed (no implementation existed).
 

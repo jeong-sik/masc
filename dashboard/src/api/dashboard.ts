@@ -1137,7 +1137,7 @@ export interface StressKind {
 
 export interface StressEvent {
   agent_name: string
-  room_id: string
+  workspace_id: string
   kind: StressKind
   timestamp: number
 }
@@ -1180,7 +1180,7 @@ function decodeStressEvent(raw: unknown): StressEvent | null {
   if (!kind) return null
   return {
     agent_name: asString(raw.agent_name) ?? '',
-    room_id: asString(raw.room_id) ?? '',
+    workspace_id: asString(raw.workspace_id) ?? '',
     kind,
     timestamp: asNumber(raw.timestamp) ?? 0,
   }
@@ -2113,7 +2113,7 @@ function normalizeKeeperHookSlots(raw: unknown): Record<string, KeeperHookSlot> 
   return slots
 }
 
-function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['coordination']['active_goals'] {
+function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['workspace collaboration']['active_goals'] {
   return asRecordArray(raw)
     .map((item) => {
       const id = asNullableString(item.id)
@@ -2122,7 +2122,7 @@ function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['coordinat
       if (!id || !title || !horizon) return null
       return { id, title, horizon }
     })
-    .filter((item): item is KeeperConfig['coordination']['active_goals'][number] => item !== null)
+    .filter((item): item is KeeperConfig['workspace collaboration']['active_goals'][number] => item !== null)
 }
 
 function normalizePromptBlock(raw: unknown, fallbackKey: string): { key: string; source: string; text: string } {
@@ -2193,7 +2193,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
   const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
-  const coordination = isRecord(data.coordination) ? data.coordination : {}
+  const workspace collaboration = isRecord(data.workspace collaboration) ? data.workspace collaboration : {}
   const tools = isRecord(data.tools) ? data.tools : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
@@ -2296,13 +2296,13 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       runtime_blocker_continue_gate: asLooseNullableBoolean(runtime.runtime_blocker_continue_gate),
     },
     runtime_trust: runtimeTrust,
-    coordination: {
-      mention_targets: normalizeStringList(coordination.mention_targets),
-      joined_room_ids: normalizeStringList(coordination.joined_room_ids),
-      active_goal_ids: normalizeStringList(coordination.active_goal_ids),
-      active_goals: normalizeKeeperConfigActiveGoals(coordination.active_goals),
-      active_goal_count: asInt(coordination.active_goal_count) ?? 0,
-      missing_active_goal_ids: normalizeStringList(coordination.missing_active_goal_ids),
+    workspace collaboration: {
+      mention_targets: normalizeStringList(workspace collaboration.mention_targets),
+      bound_workspace_ids: normalizeStringList(workspace collaboration.bound_workspace_ids),
+      active_goal_ids: normalizeStringList(workspace collaboration.active_goal_ids),
+      active_goals: normalizeKeeperConfigActiveGoals(workspace collaboration.active_goals),
+      active_goal_count: asInt(workspace collaboration.active_goal_count) ?? 0,
+      missing_active_goal_ids: normalizeStringList(workspace collaboration.missing_active_goal_ids),
     },
     tools: {
       tool_access: tools.tool_access ?? {},
@@ -2348,7 +2348,7 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
 
 export type SandboxProfile = 'local' | 'docker'
 export type SandboxNetworkMode = 'none' | 'inherit'
-export type SharedMemoryScope = 'disabled' | 'room'
+export type SharedMemoryScope = 'disabled' | 'workspace'
 
 export type KeeperConfigUpdatePayload = {
   active_goal_ids?: string[]

@@ -10,7 +10,7 @@ open Dashboard_http_helpers
     and counts [ToolCall _] actions, partitioned by outcome.
 
     [~now_ts] is injectable for testing; defaults to wall-clock time. *)
-let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Coord.config)
+let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Workspace.config)
     : Yojson.Safe.t =
   let window_hours = 1.0 in
   let since = now_ts -. (window_hours *. Masc_time_constants.hour) in
@@ -262,7 +262,7 @@ let slot_monitoring_json () : Yojson.Safe.t =
       ("endpoints", `List []);
     ]
 
-let executor_outcomes_json (config : Coord.config) : Yojson.Safe.t =
+let executor_outcomes_json (config : Workspace.config) : Yojson.Safe.t =
   try
     let since = Time_compat.now () -. Masc_time_constants.day in
     let events = Telemetry_eio.read_events_since config ~since in
@@ -276,7 +276,7 @@ let executor_outcomes_json (config : Coord.config) : Yojson.Safe.t =
         incr total;
         if success then incr successes
       | Telemetry_eio.Tool_called _ -> ()
-      | Agent_session_bound _ | Agent_left _ | Task_started _ | Task_completed _
+      | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
       | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
     ) events;
     `Assoc [

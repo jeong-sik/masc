@@ -42,7 +42,7 @@ val file_not_found_prefix : string
     #10349: directory entries are intentionally excluded to prevent
     sandbox oracle leaks when keeper identity drifts. *)
 val missing_file_error_json
-  :  config:Coord.config
+  :  config:Workspace.config
   -> target:string
   -> fallback_dir:string
   -> error:string
@@ -61,21 +61,21 @@ val keeper_effective_write_allowed_paths : meta:Keeper_meta_contract.keeper_meta
 (** Sandbox playground root for [meta]; ensures the bundle dirs
     exist as a side effect. *)
 val keeper_playground_root
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> string
 
 val keeper_default_write_root
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> string
 
 val keeper_default_read_root
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> string
 
-val project_relative_host_path : config:Coord.config -> string -> string option
+val project_relative_host_path : config:Workspace.config -> string -> string option
 
 val safe_file_exists : string -> bool
 val safe_is_dir : string -> bool
@@ -83,7 +83,7 @@ val safe_is_dir : string -> bool
 (** Names of git-clone subdirectories under the keeper sandbox
     [repos/] lane. *)
 val keeper_sandbox_repo_names
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> string list
 
@@ -103,7 +103,7 @@ val repo_relative_path_candidate : meta:Keeper_meta_contract.keeper_meta -> stri
     form. Returns [Ok None] when no rewrite applies, [Ok (Some _)]
     on a successful rewrite, [Error _] on ambiguity. *)
 val rewrite_single_repo_relative_path
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> string
   -> (string option, string) result
@@ -112,7 +112,7 @@ val rewrite_single_repo_relative_path
     unless it already targets an explicit allowed_paths root.
     Applies single-repo rewrite, then resolves. *)
 val playground_relative_unless_allowed_root
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> string
   -> (string, string) result
@@ -120,7 +120,7 @@ val playground_relative_unless_allowed_root
 (** Resolve a write target path: playground default + sandbox
     boundary check via [Keeper_alerting_path.resolve_keeper_target_path]. *)
 val resolve_keeper_path
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
   -> (string, string) result
@@ -129,7 +129,7 @@ val resolve_keeper_path
     boundary check via [Keeper_alerting_path.resolve_keeper_read_path]
     (with missing-leaf fallback search). *)
 val resolve_keeper_read_path
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> raw_path:string
   -> (string, string) result
@@ -156,7 +156,7 @@ val keeper_text_fallback_json : agent_id:string -> message:string -> Yojson.Safe
 (** Hook used by the tool dispatcher to dispatch into module-tagged
     sub-handlers. Default is a no-op fallback. *)
 val tag_dispatch_fn
-  : (config:Coord.config
+  : (config:Workspace.config
      -> agent_name:string
      -> tag:Tool_dispatch.module_tag
      -> name:string
@@ -184,6 +184,6 @@ val with_registry_meta
   -> string
 
 (** Render the keeper-tools-list JSON envelope: tool names grouped
-    by category (board / voice / coordination / shell / fs / memory
+    by category (board / voice / workspace / shell / fs / memory
     / core). *)
 val keeper_tools_list_json : meta:Keeper_meta_contract.keeper_meta -> string

@@ -35,8 +35,8 @@ let persisted_completion_contract ~(task_opt : Masc_domain.task option) =
    what changed, which files, what verification ran. See #8688. *)
 let completion_notes_example =
   "Example of accepted notes: 'Added Event_kind.Board variant to \
-   lib/coord/event_kind.{ml,mli}, migrated 8 call-sites in \
-   coord_task.ml and activity_graph.ml, test_event_kind round-trip \
+   lib/workspace/event_kind.{ml,mli}, migrated 8 call-sites in \
+   task_state.ml and activity_graph.ml, test_event_kind round-trip \
    green, CI green on PR #NNNN.'"
 
 let completion_rejection_message ?(allow_force = false) reason =

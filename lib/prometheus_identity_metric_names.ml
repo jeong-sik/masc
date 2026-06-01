@@ -55,7 +55,7 @@ let metric_silent_dashboard_actor_fallback =
 
 let metric_auth_strict_would_reject = "masc_auth_strict_would_reject_total"
 let metric_empty_tool_universe_observed = "masc_empty_tool_universe_observed_total"
-let metric_coord_join_normalize_outcome = "masc_coord_join_normalize_outcome_total"
+let metric_workspace_bind_normalize_outcome = "masc_workspace_bind_normalize_outcome_total"
 let metric_config_unknown_keys_ignored = "masc_config_unknown_keys_ignored_total"
 let metric_governance_judge_unparseable = "masc_governance_judge_unparseable_total"
 

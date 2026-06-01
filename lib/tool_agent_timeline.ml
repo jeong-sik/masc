@@ -21,9 +21,9 @@ module Float = Stdlib.Float
     a single chronological timeline for a given agent.
 
     Data sources:
-    - Agent session status (Coord.get_agents_raw)
-    - Task state transitions (Coord.get_tasks_raw)
-    - Broadcast messages (Coord.get_messages_raw)
+    - Agent session status (Workspace.get_agents_raw)
+    - Task state transitions (Workspace.get_tasks_raw)
+    - Broadcast messages (Workspace.get_messages_raw)
 *)
 
 open Tool_args
@@ -31,7 +31,7 @@ open Tool_args
 type tool_result = Tool_result.result
 
 type context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
 }
 
@@ -107,9 +107,9 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
     ]
 
 (* Collect agent session/status events *)
-let agent_events (config : Coord.config) ~agent_name :
+let agent_events (config : Workspace.config) ~agent_name :
     timeline_event list =
-  let agents = Coord.get_active_agents config in
+  let agents = Workspace.get_active_agents config in
   agents
   |> List.filter (fun (a : Masc_domain.agent) -> String.equal a.name agent_name)
   |> List.filter_map (fun (a : Masc_domain.agent) ->
@@ -123,7 +123,7 @@ let agent_events (config : Coord.config) ~agent_name :
                  detail =
                    `Assoc
                      [
-                       ("coord", `String "default");
+                       ("workspace", `String "default");
                        ( "status",
                          `String (Masc_domain.agent_status_to_string a.status) );
                        ( "current_task", Json_util.string_opt_to_json a.current_task );
@@ -132,9 +132,9 @@ let agent_events (config : Coord.config) ~agent_name :
          | None -> None)
 
 (* Collect task-related events for an agent *)
-let task_events (config : Coord.config) ~agent_name :
+let task_events (config : Workspace.config) ~agent_name :
     timeline_event list =
-  let tasks = Coord.get_tasks_safe config in
+  let tasks = Workspace.get_tasks_safe config in
   tasks
   |> List.filter_map (fun (task : Masc_domain.task) ->
          match task.task_status with
@@ -214,10 +214,10 @@ let task_events (config : Coord.config) ~agent_name :
          | _ -> None)
 
 (* Collect broadcast messages from agent *)
-let message_events (config : Coord.config) ~agent_name ~limit :
+let message_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   let messages =
-    Coord.get_messages_raw config ~since_seq:0 ~limit
+    Workspace.get_messages_raw config ~since_seq:0 ~limit
   in
   messages
   |> List.filter (fun (m : Masc_domain.message) ->
@@ -241,7 +241,7 @@ let message_events (config : Coord.config) ~agent_name ~limit :
          | None -> None)
 
 (* Collect tool call events from Activity Graph *)
-let tool_call_events (config : Coord.config) ~agent_name ~limit :
+let tool_call_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   let rec take n xs =
     match (n, xs) with
@@ -250,7 +250,7 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
     | n, x :: rest -> x :: take (n - 1) rest
   in
   (* `list_events` limits globally before we filter by actor, so fetch a
-     wider bounded window to reduce the chance that busy-coord activity from
+     wider bounded window to reduce the chance that busy-workspace activity from
      other agents crowds out this agent's tool events. *)
   let scan_limit =
     let expanded = if limit <= 0 then 0 else limit * 10 in
@@ -293,7 +293,7 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
          })
   |> take limit
 
-let keeper_cdal_events (config : Coord.config) ~agent_name ~limit :
+let keeper_cdal_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   let rec take n xs =
     match (n, xs) with
@@ -325,7 +325,7 @@ let keeper_cdal_events (config : Coord.config) ~agent_name ~limit :
   |> take limit
 
 (* Collect turn-completed events from Activity Graph *)
-let turn_completed_events (config : Coord.config) ~agent_name ~limit :
+let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   let rec take n xs =
     match (n, xs) with
@@ -419,7 +419,7 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
   |> take limit
 
 (* Build the full timeline *)
-let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
+let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ ~include_tool_calls =
   let now = Time_compat.now () in
   let cutoff = now -. (since_hours *. Masc_time_constants.hour) in
@@ -562,7 +562,7 @@ let schemas : Masc_domain.tool_schema list =
     {
       name = "masc_agent_timeline";
       description =
-        "Unified timeline of an agent's activity in the currently selected coord \
+        "Unified timeline of an agent's activity in the currently selected workspace \
          across tasks, messages, and joins.";
       input_schema =
         `Assoc

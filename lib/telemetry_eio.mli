@@ -22,7 +22,7 @@
     non-positive values disable the matching bound. The byte cap prunes oldest
     completed day-files while preserving the current day-file. *)
 
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** {1 Events} *)
 
@@ -35,7 +35,7 @@ val error_kind_to_string : error_kind -> string
 
 type event =
   | Agent_session_bound of { agent_id : string; capabilities : string list }
-  | Agent_left of { agent_id : string; reason : string }
+  | Agent_unbound of { agent_id : string; reason : string }
   | Task_started of { task_id : string; agent_id : string }
   | Task_completed of {
       task_id : string;
@@ -161,7 +161,7 @@ val track_agent_session_bound :
   unit ->
   unit
 
-val track_agent_left :
+val track_agent_unbound :
   ?fs:'a -> config -> agent_id:string -> reason:string -> unit
 
 val track_task_started :

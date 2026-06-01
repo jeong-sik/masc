@@ -308,7 +308,7 @@ let build_handoff_prompt ~payload ~generation =
     2. Continue working on the current task\n\
     3. Maintain the same tone and approach\n\
     4. If context is unclear, ask the user for clarification\n\
-    5. Use MASC tools to coordinate if needed\n"
+    5. Use MASC tools to align if needed\n"
   in
 
   header ^ context ^ footer

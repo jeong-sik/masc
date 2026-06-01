@@ -71,7 +71,7 @@ describe('parseTransportHealthData', () => {
           { session_id: 's1', kind: 'observer' },
           { session_id: 's2' },
           'invalid',
-          { session_id: 's3', kind: 'coordinator', queue_depth: 5 },
+          { session_id: 's3', kind: 'agent_stream', queue_depth: 5 },
         ],
       },
     })
@@ -92,7 +92,7 @@ describe('parseTransportHealthData', () => {
     })
     expect(result.sse.hot_sessions[2]).toEqual({
       session_id: 's3',
-      kind: 'coordinator',
+      kind: 'agent_stream',
       queue_depth: 5,
       last_event_id: 0,
       idle_seconds: 0,
@@ -139,7 +139,7 @@ describe('parseTransportHealthData', () => {
       },
       sse: {
         sessions_observer: 1,
-        sessions_coordinator: 2,
+        sessions_agent_stream: 2,
         sessions_presence: 3,
         sessions_total: 6,
         external_subscribers: 10,
@@ -216,7 +216,7 @@ describe('parseTransportHealthData', () => {
       },
       cluster: {
         cluster: 'alpha',
-        room_id: 'room-1',
+        workspace_id: 'workspace-1',
         topology_available: true,
         topology_source: 'consul',
         total_units: 10,

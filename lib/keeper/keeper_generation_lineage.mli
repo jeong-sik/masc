@@ -74,7 +74,7 @@ val index_entry_json :
     (JSONL append) for the given handoff. Logs and swallows
     non-cancel exceptions — best-effort lineage telemetry. *)
 val record_handoff_artifacts :
-  config:Coord.config ->
+  config:Workspace.config ->
   parent:Keeper_meta_contract.keeper_meta ->
   child:Keeper_meta_contract.keeper_meta ->
   parent_trace_id:string ->
@@ -98,7 +98,7 @@ val take : int -> 'a list -> 'a list
     generation/trace, manifest path, recent index entries (capped
     to [recent_limit]). *)
 val surface_json :
-  Coord.config ->
+  Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   recent_limit:int ->
   Yojson.Safe.t

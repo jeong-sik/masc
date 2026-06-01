@@ -121,10 +121,10 @@ let identity_digest prefix identity =
   Printf.sprintf "%s:%s" prefix (Digest.to_hex (Digest.string identity))
 
 let is_internal_attention incident =
-  Operator_digest_types.is_omitted_target_type (string_field "target_type" incident)
+  Operator_digest_types.is_root_target_type (string_field "target_type" incident)
 
 let is_internal_action action =
-  Operator_digest_types.is_omitted_target_type (string_field "target_type" action)
+  Operator_digest_types.is_root_target_type (string_field "target_type" action)
 
 let incident_action_types kind =
   match kind with
@@ -174,7 +174,7 @@ let action_matches_incident incident action =
       let action_type = string_field "action_type" action in
       List.mem action_type (incident_action_types (string_field "kind" incident))
 
-let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
+let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t list) =
   let all_entries = Keeper_registry.all ~base_path:config.base_path () in
   let registry_lookup name =
     List.find_opt (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name) all_entries

@@ -29,11 +29,11 @@ let test_all_selector_matches_everything () =
     (Tool_access_policy.selector_matches_name All "nonexistent_tool_xyz")
 
 let test_names_selector_exact_match () =
-  let sel = Tool_access_policy.Names [ "masc_status"; "masc_join" ] in
+  let sel = Tool_access_policy.Names [ "masc_status"; "masc_bind" ] in
   check bool "matches listed name" true
     (Tool_access_policy.selector_matches_name sel "masc_status");
   check bool "rejects unlisted name" false
-    (Tool_access_policy.selector_matches_name sel "masc_leave")
+    (Tool_access_policy.selector_matches_name sel "masc_unbind")
 
 let test_names_selector_trims_and_dedupes () =
   let sel = Tool_access_policy.Names [ " masc_status "; "masc_status"; ""; "  " ] in
@@ -58,7 +58,7 @@ let test_union_single_element_unwraps () =
   check bool "matches through single union" true
     (Tool_access_policy.selector_matches_name sel "masc_status");
   check bool "rejects non-member" false
-    (Tool_access_policy.selector_matches_name sel "masc_leave")
+    (Tool_access_policy.selector_matches_name sel "masc_unbind")
 
 let test_union_matches_any_member () =
   let selector =
@@ -612,9 +612,9 @@ let test_dispatch_preset_routes_pm_tools () =
   check bool "dispatch excludes code git" false
     (List.mem "tool_execute" allowed)
 
-let test_delivery_preset_routes_coordination_read_models () =
+let test_delivery_preset_routes_workspace_read_models () =
   init_keeper_tool_registry ();
-  let base = make_gate_test_meta ~name:"test-delivery-coordination-read" () in
+  let base = make_gate_test_meta ~name:"test-delivery-workspace-read" () in
   let meta = { base with
     tool_access = [];
     tool_denylist = [];
@@ -629,11 +629,11 @@ let test_delivery_preset_routes_coordination_read_models () =
   check bool "delivery includes goal verify" true
     (List.mem "masc_goal_verify" allowed)
 
-let test_coordination_presets_route_plan_history_reads () =
+let test_workspace_presets_route_plan_history_reads () =
   init_keeper_tool_registry ();
   List.iter
     (fun (label, _) ->
-      let base = make_gate_test_meta ~name:("test-" ^ label ^ "-coordination") () in
+      let base = make_gate_test_meta ~name:("test-" ^ label ^ "-workspace") () in
       let meta =
         {
           base with
@@ -671,7 +671,7 @@ let test_registered_inline_board_tool_survives_filter () =
   Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let base = make_gate_test_meta ~name:"test-board-inline" () in
   let meta = { base with
-    tool_access = [ "keeper_board_post"; "masc_who" ];
+    tool_access = [ "keeper_board_post"; "masc_agents" ];
     tool_denylist = [];
   } in
   let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -680,7 +680,7 @@ let test_registered_inline_board_tool_survives_filter () =
   check bool "raw masc_board_post filtered out" false
     (List.mem "masc_board_post" allowed);
   check bool "unsupported inline tool removed" false
-    (List.mem "masc_who" allowed)
+    (List.mem "masc_agents" allowed)
 
 (* ================================================================ *)
 (* Runner                                                            *)
@@ -799,10 +799,10 @@ let () =
         [
           test_case "dispatch routes PM tools" `Quick
             test_dispatch_preset_routes_pm_tools;
-          test_case "delivery routes coordination read models" `Quick
-            test_delivery_preset_routes_coordination_read_models;
-          test_case "coordination presets route plan/history reads" `Quick
-            test_coordination_presets_route_plan_history_reads;
+          test_case "delivery routes workspace read models" `Quick
+            test_delivery_preset_routes_workspace_read_models;
+          test_case "workspace presets route plan/history reads" `Quick
+            test_workspace_presets_route_plan_history_reads;
         ] );
       ( "inter_diff_composition",
         [

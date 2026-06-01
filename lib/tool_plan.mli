@@ -8,7 +8,7 @@
 
 (** Tool handler context *)
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
 }
 
 (** {1 Individual Handlers} *)

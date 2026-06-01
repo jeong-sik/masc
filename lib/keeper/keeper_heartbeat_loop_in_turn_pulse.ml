@@ -1,7 +1,7 @@
 (** In-turn liveness pulse helpers for the keeper heartbeat loop,
     extracted from keeper_heartbeat_loop.ml.
 
-    Drives a side-fiber that emits Coord.heartbeat + SSE broadcasts at
+    Drives a side-fiber that emits Workspace.heartbeat + SSE broadcasts at
     a bounded interval while a keeper turn is executing, so operators
     see continued presence and the registry can detect stuck turns. *)
 
@@ -68,7 +68,7 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
   match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
   | Some entry when Option.is_some entry.current_turn_observation ->
     (try
-       let _heartbeat = Coord.heartbeat ctx.config ~agent_name:meta.agent_name in
+       let _heartbeat = Workspace.heartbeat ctx.config ~agent_name:meta.agent_name in
        ()
      with
      | Eio.Cancel.Cancelled _ as e -> raise e

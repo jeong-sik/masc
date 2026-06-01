@@ -14,7 +14,7 @@ include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
 
 let append_decision_record
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)

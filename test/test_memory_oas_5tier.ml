@@ -430,7 +430,7 @@ let test_jsonl_backend_query_failure_counter () =
 
 let test_jsonl_backend_uses_explicit_base_dir () =
   let dir = setup_tmp_dir () in
-  let base_dir = Filename.concat dir ".masc-room-a" in
+  let base_dir = Filename.concat dir ".masc-workspace-a" in
   let sid = Printf.sprintf "test-scope-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
   let backend =
     Memory_oas_bridge.make_backend
@@ -451,7 +451,7 @@ let test_jsonl_backend_uses_explicit_base_dir () =
 
 let test_create_memory_with_backend_uses_same_backend () =
   let dir = setup_tmp_dir () in
-  let base_dir = Filename.concat dir ".masc-room-b" in
+  let base_dir = Filename.concat dir ".masc-workspace-b" in
   let sid = Printf.sprintf "test-bundle-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) in
   let bundle =
     Memory_oas_bridge.create_memory_with_backend

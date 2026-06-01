@@ -164,7 +164,7 @@ This is *behavior change at migration boundaries only*. PR-1 alone is byte-compa
 
 - **Q1**: Should `Read_drop_reason.t` (RFC-0044) and `Write_failure_reason.t` (this RFC) unify into `Persistence_failure_reason.t` with read/write phantom-type discriminator? **Decision**: defer. Unification is mechanical once both RFCs reach `Active`. Premature unification couples migration cadence.
 - **Q2**: `Meta_cas_conflict` retry policy — caller-level retry vs cycle-level retry? RFC-0026 (Work-Conserving Admission) suggests cycle-level. **Decision**: per-migration in PR-2 sub-steps.
-- **Q3**: How to handle the cross-module case `keeper_agent_memory_episode.ml` calling into `Coord` / OAS? Result must propagate through the boundary or be absorbed at the boundary with explicit `Episode_create_error` annotation. **Decision**: PR-3 surfaces this question in the sub-PR.
+- **Q3**: How to handle the cross-module case `keeper_agent_memory_episode.ml` calling into `Workspace` / OAS? Result must propagate through the boundary or be absorbed at the boundary with explicit `Episode_create_error` annotation. **Decision**: PR-3 surfaces this question in the sub-PR.
 
 ## 8. Acceptance
 

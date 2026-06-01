@@ -49,7 +49,7 @@ import {
 } from './namespace-truth-store'
 import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
-import { operatorSnapshot, operatorRoomDigest } from './operator-signals'
+import { operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
 import { compositeTick, hydrateFleetCompositeSnapshot } from './composite-signals'
 import { isRecord } from './lib/type-guards'
 import { hydrateGoalTreeSnapshot } from './goal-tree-state'
@@ -132,9 +132,9 @@ interface SimpleRoute {
 // corresponding server emitter exists in lib/ are kept; dead keys were
 // removed after cross-referencing the OCaml sources under lib/.
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
-  // Agent lifecycle — emitted by lib/tool_inline_dispatch_room.ml
-  'masc/agent_joined':  { target: 'execution' },
-  'masc/agent_left':    { target: 'execution' },
+  // Agent lifecycle — emitted by lib/tool_inline_dispatch_workspace.ml
+  'masc/agent_bound':  { target: 'execution' },
+  'masc/agent_unbound':    { target: 'execution' },
   // Broadcasts — emitted by lib/tool_inline_dispatch_comm.ml
   'masc/broadcast':     { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
@@ -241,7 +241,7 @@ function handleOperatorSnapshot(payload: unknown): void {
 
 function handleOperatorDigest(payload: unknown): void {
   try {
-    operatorRoomDigest.value = normalizeOperatorDigest(payload)
+    operatorWorkspaceDigest.value = normalizeOperatorDigest(payload)
   } catch (err) {
     console.warn('[SSE] operator digest hydration failed', err instanceof Error ? err.message : '')
   }

@@ -16,7 +16,7 @@
     - Observability (C2): every override / approval decision emits a
       [masc:keeper_gate] Event_bus Custom event in addition to the
       existing [broadcast_tool_skipped] SSE call. The dual emit lets
-      downstream consumers migrate without coordinating with this
+      downstream consumers migrate without synchronizing with this
       change. Payload carries stage/reason/latency so dashboards can
       chart per-stage firing rates and drift.
 

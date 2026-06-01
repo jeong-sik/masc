@@ -557,7 +557,7 @@ let prompt_memory_sections_of_snapshot
   ]
   |> List.filter (fun text -> String.trim text <> "")
 
-let read_progress_snapshot ~(config : Coord.config) ~(name : string)
+let read_progress_snapshot ~(config : Workspace.config) ~(name : string)
     : keeper_state_snapshot option =
   match
     let path = Keeper_types_support.keeper_progress_path config name in
@@ -572,7 +572,7 @@ let read_progress_snapshot ~(config : Coord.config) ~(name : string)
   | None -> None
   | Some cache -> Some cache.snapshot
 
-let read_progress_snapshot_cache ~(config : Coord.config) ~(name : string)
+let read_progress_snapshot_cache ~(config : Workspace.config) ~(name : string)
     : progress_snapshot_cache option =
   let path = Keeper_types_support.keeper_progress_path config name in
   if not (Fs_compat.file_exists path) then

@@ -50,7 +50,7 @@ val oas_runtime : t
 val masc_domain : t
 (** Bus for MASC-domain events (broadcast, heartbeat, keeper, autonomy,
     harness, trust).  Same configuration as [oas_runtime] — these are
-    semantic events whose loss would silently break the coordination
+    semantic events whose loss would silently break the workspace
     invariants. *)
 
 val create_bus : t -> Agent_sdk.Event_bus.t

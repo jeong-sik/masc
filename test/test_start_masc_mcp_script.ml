@@ -344,7 +344,7 @@ let test_explicit_env_overrides_repo_env_files () =
       check bool "Docker hotspot blocking default is exported as disabled" true
         (contains_substring captured "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=0"))
 
-let test_fd_hotspot_headroom_override_is_preserved () =
+let test_fd_hotspot_headworkspace_override_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let script = Filename.concat dir "start-masc-mcp.sh" in
       copy_script (script_path ()) script;
@@ -1140,7 +1140,7 @@ let () =
           test_case "explicit env overrides repo env files" `Quick
             test_explicit_env_overrides_repo_env_files;
           test_case "FD hotspot headroom override is preserved" `Quick
-            test_fd_hotspot_headroom_override_is_preserved;
+            test_fd_hotspot_headworkspace_override_is_preserved;
           test_case
             "realtime transports default to base path config and preserve override"
             `Quick

@@ -175,7 +175,7 @@ let test_seed_stale_if_missing_refreshes_in_background ~clock () =
 
 let test_projection_snapshot_cache_reuses_actor_key () =
   Dashboard_cache.invalidate_all ();
-  let config = Coord.default_config "/tmp/projection-cache-room" in
+  let config = Workspace.default_config "/tmp/projection-cache-workspace" in
   let counter = ref 0 in
   let compute actor_name =
     incr counter;
@@ -194,7 +194,7 @@ let test_projection_snapshot_cache_reuses_actor_key () =
 
 let test_projection_digest_cache_separates_actors () =
   Dashboard_cache.invalidate_all ();
-  let config = Coord.default_config "/tmp/projection-cache-room-actors" in
+  let config = Workspace.default_config "/tmp/projection-cache-workspace-actors" in
   let counter = ref 0 in
   let compute actor_name =
     incr counter;
@@ -225,33 +225,33 @@ let test_invalidate_prefix () =
   let proof_counter = ref 0 in
   let mission_counter = ref 0 in
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "proof:workspace-a:default:one" ~ttl:5.0
        (fun () ->
          incr proof_counter;
          `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "proof:workspace-a:default:two" ~ttl:5.0
        (fun () ->
          incr proof_counter;
          `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "mission:workspace-a:default:one" ~ttl:5.0
        (fun () ->
          incr mission_counter;
          `Int !mission_counter));
-  Dashboard_cache.invalidate_prefix "proof:room-a:default:";
+  Dashboard_cache.invalidate_prefix "proof:workspace-a:default:";
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "proof:workspace-a:default:one" ~ttl:5.0
        (fun () ->
          incr proof_counter;
          `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "proof:workspace-a:default:two" ~ttl:5.0
        (fun () ->
          incr proof_counter;
          `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "mission:workspace-a:default:one" ~ttl:5.0
        (fun () ->
          incr mission_counter;
          `Int !mission_counter));

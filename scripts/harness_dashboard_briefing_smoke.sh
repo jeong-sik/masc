@@ -217,7 +217,7 @@ async function mcpCall(name, args) {
     pass: body.includes('session has 2 failed spawn event(s)') && body.includes('Recover failed worker coverage'),
   });
   checks.push({
-    name: 'internal room signal is present',
+    name: 'internal workspace signal is present',
     pass:
       body.includes('pending confirmation(s) are waiting for operator input')
       || body.includes('command-plane artifact scope drift is elevated')

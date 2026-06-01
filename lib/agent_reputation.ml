@@ -122,16 +122,16 @@ let load_jsonl_safe (path : string) : Yojson.Safe.t list =
           try Some (Yojson.Safe.from_string line)
           with Yojson.Json_error _ -> None)
 
-(** {1 Task Counting from Coord State} *)
+(** {1 Task Counting from Workspace State} *)
 
-(** Count tasks claimed and completed by an agent from the room's task list.
-    Reads the canonical Coord backlog so reputation follows the same storage
+(** Count tasks claimed and completed by an agent from the task backlog.
+    Reads the canonical Workspace backlog so reputation follows the same storage
     path as task transitions. *)
-let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
+let count_tasks_from_backlog (config : Workspace.config) ~(agent_name : string)
     : int * int =
   let claimed = ref 0 in
   let completed = ref 0 in
-  Coord.get_tasks_safe config
+  Workspace.get_tasks_safe config
   |> List.iter (fun (task : Masc_domain.task) ->
          match task.task_status with
          | Masc_domain.Claimed { assignee; _ }
@@ -202,20 +202,20 @@ let board_activity_table board_dir : (string, int * int) Hashtbl.t =
     board_comments.jsonl (see {!board_activity_table}). The result is identical
     to filtering each file by [author = agent_name] but amortizes the parse
     across every author queried while the files are unchanged. Exposed without
-    the [Coord.config] indirection so the projection can be tested directly. *)
+    the [Workspace.config] indirection so the projection can be tested directly. *)
 let count_board_activity_in_dir ~(board_dir : string) ~(agent_name : string) :
     int * int =
   Hashtbl.find_opt (board_activity_table board_dir) agent_name
   |> Option.value ~default:(0, 0)
 
 (** Count board posts and comments authored by an agent. *)
-let count_board_activity (config : Coord.config) ~(agent_name : string)
+let count_board_activity (config : Workspace.config) ~(agent_name : string)
     : int * int =
-  count_board_activity_in_dir ~board_dir:(Coord.masc_dir config) ~agent_name
+  count_board_activity_in_dir ~board_dir:(Workspace.masc_dir config) ~agent_name
 
 (** {1 Mention Counting} *)
 
-let count_mention_activity (config : Coord.config) ~(agent_name : string)
+let count_mention_activity (config : Workspace.config) ~(agent_name : string)
     : int * int =
   let all = Mention_inbox.read_mentions config ~target_agent:agent_name ~limit:10000 in
   let received = List.length all in
@@ -269,7 +269,7 @@ let keeper_name_of_agent agent_name =
   | Some keeper_name -> keeper_name
   | None -> String.trim agent_name
 
-let accountability_metrics (config : Coord.config) ~(agent_name : string) =
+let accountability_metrics (config : Workspace.config) ~(agent_name : string) =
   let keeper_name = keeper_name_of_agent agent_name in
   let summary =
     Keeper_accountability.accountability_summary_json config
@@ -318,10 +318,10 @@ let thompson_confidence_for_agent (agent_name : string) : float =
   if sum > 0.0 then stats.Thompson_sampling.alpha /. sum
   else 0.5
 
-let compute_reputation (config : Coord.config) ~(agent_name : string)
+let compute_reputation (config : Workspace.config) ~(agent_name : string)
     : agent_reputation =
   let (tasks_claimed, tasks_completed) =
-    count_tasks_from_room config ~agent_name
+    count_tasks_from_backlog config ~agent_name
   in
   let completion_rate =
     if tasks_claimed > 0 then

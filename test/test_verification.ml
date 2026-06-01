@@ -5,8 +5,8 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 module V = Masc_mcp.Verification
 module P = Masc_mcp.Prometheus
-module VS = Coord_verification_store
-module CU = Coord_utils
+module VS = Workspace_verification_store
+module CU = Workspace_utils
 
 let persistence_surface = "verification"
 

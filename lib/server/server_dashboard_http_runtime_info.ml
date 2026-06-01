@@ -739,7 +739,7 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
     ]
 ;;
 
-let runtime_resolution_json (config : Coord.config) =
+let runtime_resolution_json (config : Workspace.config) =
   let build = Build_identity.current () in
   let runtime_commit = build.binary_commit in
   let runtime_commit_known = Option.is_some runtime_commit in
@@ -935,7 +935,7 @@ let runtime_resolution_json (config : Coord.config) =
   in
   let add_repair_warning acc =
     if repair_count > 0
-    then Printf.sprintf "Recent coord-state repair events detected (%d)." repair_count :: acc
+    then Printf.sprintf "Recent workspace-state repair events detected (%d)." repair_count :: acc
     else acc
   in
   let add_agent_issue_warning acc =
@@ -966,7 +966,7 @@ let runtime_resolution_json (config : Coord.config) =
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
-      ; "data_root", path_item_json ~source:"runtime_data" (Coord.masc_root_dir config)
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
       ; ( "server_repo_path"
         , match server_repo_path with
@@ -996,7 +996,7 @@ let runtime_resolution_json (config : Coord.config) =
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;
 
-let light_runtime_resolution_json (config : Coord.config) =
+let light_runtime_resolution_json (config : Workspace.config) =
   let build = Build_identity.current () in
   let base_path_input =
     Env_config_core.base_path_source_opt ()
@@ -1061,7 +1061,7 @@ let light_runtime_resolution_json (config : Coord.config) =
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
-      ; "data_root", path_item_json ~source:"runtime_data" (Coord.masc_root_dir config)
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
       ; ( "server_repo_path"
         , match server_repo_path with
@@ -1088,7 +1088,7 @@ let dashboard_tools_cache_ttl_sec = 30.0
 let dashboard_tools_cache_key ~base_path ~actor =
   Printf.sprintf "tools:%s:%s" base_path actor
 
-let dashboard_tools_http_json ?actor ?timing (config : Coord.config) : Yojson.Safe.t =
+let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
   let ctx : Tool_misc.context =
     { config; agent_name = Option.value ~default:"dashboard" actor }
   in
@@ -1119,7 +1119,7 @@ let dashboard_tools_http_json ?actor ?timing (config : Coord.config) : Yojson.Sa
           ~runtime_metrics:Keeper_observation.runtime_metrics_json
           ()
         |> Tool_usage_log.attach_source_metadata
-             ~masc_root:(Coord.masc_root_dir config))
+             ~masc_root:(Workspace.masc_root_dir config))
     in
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())

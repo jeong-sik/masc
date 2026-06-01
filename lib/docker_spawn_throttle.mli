@@ -20,7 +20,7 @@
     {- Layer B — FD-aware serialization. When [Keeper_fd_pressure.active ()]
        indicates the breaker is tripped, an additional global mutex
        funnels all in-flight spawns through a single thread, giving
-       the cooldown room to drain. Engaged automatically.}}
+       the cooldown workspace to drain. Engaged automatically.}}
 
     Callers wrap their spawn invocation with [with_slot]; the helper
     blocks until a slot is available. *)

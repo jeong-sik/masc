@@ -22,7 +22,7 @@ type phase_gate_outcome =
         returns [Error err]. *)
 
 val decide_and_record
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> generation:int
   -> keeper_turn_id:int
@@ -43,7 +43,7 @@ val decide_and_record
     transition, and the keeper turn is complete from the gate's
     perspective.
 
-    @param config Coord configuration passed through to observability.
+    @param config Workspace configuration passed through to observability.
     @param meta Current keeper metadata. Returned unchanged on
       [Phase_gate_terminal_ok] outcomes.
     @param generation Current generation counter.

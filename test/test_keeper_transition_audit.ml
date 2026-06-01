@@ -209,7 +209,7 @@ let test_runtime_trust_timeline_carries_transition_operator_signal () =
       let sink = Filename.concat base_dir "transition-audit.jsonl" in
       with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
           let keeper_name = "runtime-trust-transition-signal" in
-          let config = Masc_mcp.Coord.default_config base_dir in
+          let config = Masc_mcp.Workspace.default_config base_dir in
           let meta = keeper_meta keeper_name in
           Audit.record_transition ~keeper_name (transition ());
           let snapshot =

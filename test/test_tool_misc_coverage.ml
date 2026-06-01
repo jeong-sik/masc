@@ -62,8 +62,8 @@ let make_test_ctx () =
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-misc-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
-  let config = Coord.default_config tmp in
-  let _ = Coord.init config ~agent_name:(Some "test-agent") in
+  let config = Workspace.default_config tmp in
+  let _ = Workspace.init config ~agent_name:(Some "test-agent") in
   { Tool_misc.config; agent_name = "test-agent" }
 
 (* Test dispatch returns None for unknown tool *)
@@ -76,17 +76,17 @@ let () = test "dispatch_unknown_tool" (fun () ->
 (* Test dispatch dashboard — may require Eio runtime; skip gracefully if unavailable *)
 let () = test "dispatch_dashboard" (fun () ->
   let ctx = make_test_ctx () in
-  ignore (Coord.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
-  Coord.ensure_coord_bootstrap ctx.config;
-  let second_room = ctx.config in
-  ignore (Coord.add_task second_room ~title:"second task" ~priority:1 ~description:"");
+  ignore (Workspace.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
+  Workspace.ensure_workspace_bootstrap ctx.config;
+  let second_workspace = ctx.config in
+  ignore (Workspace.add_task second_workspace ~title:"second task" ~priority:1 ~description:"");
   let args = `Assoc [] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert (Tool_result.is_success result);
       assert (str_contains (Tool_result.message result) "MASC Dashboard");
       assert (str_contains (Tool_result.message result) "Namespace: default (flattened)");
-      assert (not (str_contains (Tool_result.message result) "second-room"));
+      assert (not (str_contains (Tool_result.message result) "second-workspace"));
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -108,16 +108,16 @@ let () = test "dispatch_dashboard_compact" (fun () ->
 
 let () = test "dispatch_dashboard_current_scope" (fun () ->
   let ctx = make_test_ctx () in
-  Coord.ensure_coord_bootstrap ctx.config;
+  Workspace.ensure_workspace_bootstrap ctx.config;
   let focused = ctx.config in
-  ignore (Coord.add_task focused ~title:"focus task" ~priority:2 ~description:"");
+  ignore (Workspace.add_task focused ~title:"focus task" ~priority:2 ~description:"");
   let args = `Assoc [("scope", `String "current")] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert (Tool_result.is_success result);
       assert (str_contains (Tool_result.message result) "MASC Dashboard");
       assert (str_contains (Tool_result.message result) "Namespace: default (flattened)");
-      assert (not (str_contains (Tool_result.message result) "focus-room"))
+      assert (not (str_contains (Tool_result.message result) "focus-workspace"))
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"

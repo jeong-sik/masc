@@ -21,7 +21,7 @@ val string_contains_substring_ci : needle:string -> string -> bool
 (** Delegates to [String_util.string_contains_substring_ci]. *)
 
 val report_keeper_cycle_side_effect_issue :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   side_effect:string ->
   ?severity:[< `Warn | `Error > `Warn ] ->
@@ -29,14 +29,14 @@ val report_keeper_cycle_side_effect_issue :
 (** Log and record a side-effect failure for a keeper cycle. *)
 
 val dispatch_keeper_phase_event_checked :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   side_effect:string ->
   Keeper_state_machine.event -> unit
 (** Dispatch a phase event and log on error instead of raising. *)
 
 val finalize_trajectory_acc :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   Trajectory.accumulator ->
   Trajectory.trajectory_outcome -> unit
@@ -44,7 +44,7 @@ val finalize_trajectory_acc :
     rather than raising (except cancellation). *)
 
 val record_execution_receipt_gap :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   stale_reason:string ->
   error:string ->
@@ -64,7 +64,7 @@ val pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface
 (** Default tool surface for pre-dispatch receipts (no tools dispatched). *)
 
 val record_pre_dispatch_terminal_observation :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   generation:int ->
   runtime_id:string ->

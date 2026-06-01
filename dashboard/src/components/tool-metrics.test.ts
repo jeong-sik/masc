@@ -23,7 +23,7 @@ interface TestTool {
 //   - board_post     -> 'board'
 //   - search_symbols -> 'search'
 //   - web_fetch      -> 'web'
-//   - masc_task_...  -> 'coord'
+//   - masc_task_...  -> 'workspace'
 //   - memory_recall  -> 'memory'
 const sample: TestTool[] = [
   { name: 'bash_exec', call_count: 120 },

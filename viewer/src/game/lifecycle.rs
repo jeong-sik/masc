@@ -49,21 +49,25 @@ impl TrpgLifecycleState {
         }
     }
 
-    pub fn from_room_progress(room_status: &str, progress_status: &str) -> Self {
+    pub fn from_workspace_progress(workspace_status: &str, progress_status: &str) -> Self {
         let progress_raw = progress_status.trim();
-        let room = Self::from_status(room_status);
+        let workspace = Self::from_status(workspace_status);
         if progress_raw.is_empty() {
-            return room;
+            return workspace;
         }
 
         let progress = Self::from_status(progress_raw);
 
         // Progress status is more granular when valid, but stale "loading/unknown/idle"
-        // should not mask a stronger room lifecycle from runtime state.
+        // should not mask a stronger workspace lifecycle from runtime state.
         match progress {
-            Self::Loading if !matches!(room, Self::Unknown | Self::Idle | Self::Loading) => room,
-            Self::Unknown if !matches!(room, Self::Unknown) => room,
-            Self::Idle if !matches!(room, Self::Unknown | Self::Idle | Self::Loading) => room,
+            Self::Loading if !matches!(workspace, Self::Unknown | Self::Idle | Self::Loading) => {
+                workspace
+            }
+            Self::Unknown if !matches!(workspace, Self::Unknown) => workspace,
+            Self::Idle if !matches!(workspace, Self::Unknown | Self::Idle | Self::Loading) => {
+                workspace
+            }
             _ => progress,
         }
     }
@@ -249,17 +253,17 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_prefers_stronger_room_state_over_stale_progress_loading() {
+    fn lifecycle_prefers_stronger_workspace_state_over_stale_progress_loading() {
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("running", "loading"),
+            TrpgLifecycleState::from_workspace_progress("running", "loading"),
             TrpgLifecycleState::Running
         );
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("stopped", "unknown"),
+            TrpgLifecycleState::from_workspace_progress("stopped", "unknown"),
             TrpgLifecycleState::Stopped
         );
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("ended", "idle"),
+            TrpgLifecycleState::from_workspace_progress("ended", "idle"),
             TrpgLifecycleState::Ended
         );
     }
@@ -267,11 +271,11 @@ mod tests {
     #[test]
     fn lifecycle_keeps_progress_when_it_is_specific() {
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("running", "dm_narration"),
+            TrpgLifecycleState::from_workspace_progress("running", "dm_narration"),
             TrpgLifecycleState::Running
         );
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("running", "stopped"),
+            TrpgLifecycleState::from_workspace_progress("running", "stopped"),
             TrpgLifecycleState::Stopped
         );
     }

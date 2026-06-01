@@ -15,7 +15,7 @@ import {
   goalTreeLoading as treeLoading,
   hydrateGoalTreeSnapshot,
 } from '../../goal-tree-state'
-import { coordinationFsmSnapshot } from '../../store'
+import { workspace collaborationFsmSnapshot } from '../../store'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
@@ -29,7 +29,7 @@ import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 import type {
   DashboardGoalDetailResponse,
-  DashboardCoordinationFsmViolation,
+  DashboardWorkspaceFsmViolation,
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
   GoalFsmProjection,
@@ -692,8 +692,8 @@ function GoalBadges({ badges }: { badges: string[] }) {
   `
 }
 
-function coordinationViolationsForGoal(goalId: string): DashboardCoordinationFsmViolation[] {
-  const violations = coordinationFsmSnapshot.value?.violations ?? []
+function workspace collaborationViolationsForGoal(goalId: string): DashboardWorkspaceFsmViolation[] {
+  const violations = workspace collaborationFsmSnapshot.value?.violations ?? []
   return violations.filter(violation => violation.refs?.goal_id === goalId)
 }
 
@@ -950,8 +950,8 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const hasContent = node.children.length > 0 || node.tasks.length > 0
   const isSelected = selectedGoalId.value === node.id
   const verificationSummary = node.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
-  const coordinationViolations = coordinationViolationsForGoal(node.id)
-  const coordinationHasError = coordinationViolations.some(v => v.severity === 'error')
+  const workspace collaborationViolations = workspace collaborationViolationsForGoal(node.id)
+  const workspace collaborationHasError = workspace collaborationViolations.some(v => v.severity === 'error')
   const indent = depth * 20
   const headerBase = isSelected
     ? TREE_NODE_CARD_ACTIVE
@@ -1030,12 +1030,12 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
                 approval ${node.pending_approval_count}
               </span>
             ` : null}
-            ${coordinationViolations.length > 0 ? html`
+            ${workspace collaborationViolations.length > 0 ? html`
               <span
-                class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-medium ${coordinationHasError ? 'border-bad/30 bg-bad/10 text-bad' : 'border-warn/30 bg-warn/10 text-warn'}"
+                class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-medium ${workspace collaborationHasError ? 'border-bad/30 bg-bad/10 text-bad' : 'border-warn/30 bg-warn/10 text-warn'}"
                 title="Goal x Task x Board x Reward"
               >
-                FSM ${coordinationViolations.length}
+                FSM ${workspace collaborationViolations.length}
               </span>
             ` : null}
             ${node.blocking_source !== 'none' ? html`

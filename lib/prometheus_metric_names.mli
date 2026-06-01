@@ -127,6 +127,10 @@ val metric_backend_mutex_held_sec : string
 (** Counter for [tool_metrics_persist] write-queue overflow drops. No labels. *)
 val metric_tool_metrics_persist_dropped : string
 
+(** Counter for bind-required guard rejects. Labels: [tool],
+    [agent_name], and [reason]. *)
+val metric_tool_bind_required_guard : string
+
 (** Counter for [Keeper_tool_call_log] async write-queue overflow drops.
     No labels. *)
 val metric_keeper_tool_call_log_queue_dropped : string
@@ -146,7 +150,7 @@ val metric_file_lock_table_cas_retries : string
 (** Counter for [Memory_jsonl.parse_line] silent drop events.
     Closed-vocabulary labels: [reason] in
     [no_key | not_assoc | json_parse_error].  Empty lines are
-    intentionally not counted.  Wired from [lib/coord.ml] via
+    intentionally not counted.  Wired from [lib/workspace.ml] via
     [Memory_jsonl.on_parse_drop_fn].  RFC-0109 §5.1 Option A canary
     for V15. *)
 val metric_memory_jsonl_parse_drops : string

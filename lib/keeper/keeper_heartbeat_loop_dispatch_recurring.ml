@@ -9,7 +9,7 @@
        falls silent for the lifetime of the process and triggers
        stale-kill runtimes).
     2. Dispatch all due tasks via [Keeper_recurring.dispatch_due],
-       broadcasting each via [Coord.broadcast] tagged
+       broadcasting each via [Workspace.broadcast] tagged
        [\[loop:<label>\] <msg>]. Per-task broadcast failures tick
        [metric_keeper_recurring_failures] with [phase="task_execution"]
        and surface as [Error] in the inner result. The outer try/with
@@ -46,7 +46,7 @@ let dispatch_recurring_keepalive
         | Keeper_recurring.Broadcast msg ->
           (try
              let _ =
-               Coord.broadcast
+               Workspace.broadcast
                  ctx.config
                  ~from_agent:meta_after_proactive.agent_name
                  ~content:(Printf.sprintf "[loop:%s] %s" task.label msg)

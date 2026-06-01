@@ -61,7 +61,7 @@ flowchart TD
     D --> E[repair identity drift and sync registry meta]
     E --> F{smart heartbeat gate}
     F -- Skip_idle and no wake/signal --> B
-    F -- Emit/Skip_busy/woken --> G[sync room presence / heartbeat_ok or heartbeat_failed]
+    F -- Emit/Skip_busy/woken --> G[sync workspace presence / heartbeat_ok or heartbeat_failed]
     G --> H{consecutive heartbeat failures over threshold?}
     H -- yes --> X[set failure reason; raise Keeper_fiber_crash]
     H -- no --> I[expire approval queue; maybe write heartbeat snapshot]

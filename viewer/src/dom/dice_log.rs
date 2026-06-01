@@ -33,10 +33,10 @@ fn tier_label(result: &str) -> &'static str {
     }
 }
 
-fn current_room_id(document: &web_sys::Document) -> String {
+fn current_workspace_id(document: &web_sys::Document) -> String {
     document
         .get_element_by_id("dashboard")
-        .and_then(|el| el.get_attribute("data-room-id"))
+        .and_then(|el| el.get_attribute("data-workspace-id"))
         .map(|raw| sanitize_text(raw.trim()))
         .filter(|value| !value.is_empty())
         .unwrap_or_default()
@@ -70,7 +70,7 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
     let Some(log_el) = document.get_element_by_id("dice-log") else {
         return;
     };
-    let fallback_room_id = current_room_id(&document);
+    let fallback_workspace_id = current_workspace_id(&document);
 
     for DiceRolled(payload) in events.read() {
         // Phase 3-2: Dice roll arithmetic validation
@@ -99,10 +99,10 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
         let tier = tier_class(effective_tier);
         entry.set_class_name(&format!("dice-entry {}", tier));
 
-        let room_id = if payload.room_id.trim().is_empty() {
-            fallback_room_id.clone()
+        let workspace_id = if payload.workspace_id.trim().is_empty() {
+            fallback_workspace_id.clone()
         } else {
-            sanitize_text(payload.room_id.trim())
+            sanitize_text(payload.workspace_id.trim())
         };
 
         let character = html_escape(&sanitize_text(&payload.character));
@@ -123,7 +123,7 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
 
         let dedup_key = format!(
             "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-            room_id.to_ascii_lowercase(),
+            workspace_id.to_ascii_lowercase(),
             payload.turn,
             payload.character.trim().to_ascii_lowercase(),
             payload.action.trim().to_ascii_lowercase(),
@@ -140,8 +140,8 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
         }
 
         let _ = entry.set_attribute("data-dedup-key", &dedup_key);
-        if !room_id.is_empty() {
-            let _ = entry.set_attribute("data-room-id", &room_id);
+        if !workspace_id.is_empty() {
+            let _ = entry.set_attribute("data-workspace-id", &workspace_id);
         }
         if payload.turn > 0 {
             let _ = entry.set_attribute("data-turn", &payload.turn.to_string());
@@ -177,9 +177,9 @@ pub fn update_dice_log_dom(mut events: MessageReader<DiceRolled>) {
             let Some(dashboard) = document.get_element_by_id("dashboard") else {
                 return;
             };
-            if let Some(room_id) = clickable_entry.get_attribute("data-room-id") {
-                if !room_id.trim().is_empty() {
-                    let _ = dashboard.set_attribute("data-focus-room", room_id.trim());
+            if let Some(workspace_id) = clickable_entry.get_attribute("data-workspace-id") {
+                if !workspace_id.trim().is_empty() {
+                    let _ = dashboard.set_attribute("data-focus-workspace", workspace_id.trim());
                 }
             }
             if let Some(turn) = clickable_entry.get_attribute("data-turn") {

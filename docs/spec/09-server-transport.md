@@ -119,7 +119,7 @@ type t = Http | Grpc | Ws | Webrtc | Local
 선택 순서:
 1. API 호출 시 명시된 `~transport` 파라미터
 2. `MASC_AGENT_TRANSPORT` 환경변수 (`"grpc"`, `"http"`, `"ws"`, `"webrtc"`, `"local"`)
-3. 기본값: `Local` (파일시스템 기반 Room 직접 호출)
+3. 기본값: `Local` (파일시스템 기반 Workspace 직접 호출)
 
 ---
 
@@ -251,12 +251,12 @@ SSE 세션은 두 종류로 분류된다:
 | Kind | 대상 | 수신 이벤트 |
 |------|------|-----------|
 | `Observer` | Dashboard, 읽기 전용 뷰어 | dashboard snapshot |
-| `Coordinator` | MCP 에이전트 연결 | heartbeat, task event |
+| `Agent stream` | MCP 에이전트 연결 | heartbeat, task event |
 
 `broadcast_to` 함수로 대상을 지정할 수 있다:
 
 ```ocaml
-type broadcast_target = All | Observers | Coordinators
+type broadcast_target = All | Observers | Agent streams
 ```
 
 `broadcast json`은 `broadcast_to All json`과 동일하다 (하위 호환).
@@ -329,7 +329,7 @@ Sse.subscribe_external ~id:"ws-123"
 | Method | Path | Handler | 설명 |
 |--------|------|---------|------|
 | POST | `/mcp` | `handle_post_mcp ~profile:Full` | MCP JSON-RPC (전체 도구) |
-| GET | `/mcp` | `handle_get_mcp` | SSE 스트림 (Coordinator) |
+| GET | `/mcp` | `handle_get_mcp` | SSE 스트림 (Agent stream) |
 | DELETE | `/mcp` | `handle_delete_mcp` | MCP 세션 종료 |
 | POST | `/mcp/managed` | `handle_post_mcp ~profile:Managed_agent` | 관리 에이전트 MCP |
 | GET | `/mcp/managed` | `handle_get_mcp` | 관리 에이전트 SSE |
@@ -351,7 +351,7 @@ Sse.subscribe_external ~id:"ws-123"
 let make_routes ~port ~host ~sw ~clock =
   Http.Router.empty
   |> Server_routes_http_routes_frontend.add_routes ~port ~host
-  |> Server_routes_http_routes_room.add_routes
+  |> Server_routes_http_routes_workspace.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_provider_runs.add_routes ~sw
   |> Server_routes_http_routes_runtime.add_routes
@@ -365,7 +365,7 @@ let make_routes ~port ~host ~sw ~clock =
 |------|--------|------|----------|
 | Frontend | `/`, `/health`, `/metrics` | `_frontend` | `GET /health`, `GET /.well-known/agent.json` |
 | Dashboard | `/api/v1/dashboard/*` | `_dashboard` | `GET /api/v1/dashboard/shell` |
-| Room | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_room` | `GET /api/v1/status` |
+| Workspace | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_workspace` | `GET /api/v1/status` |
 | Provider Runs | `/api/v1/chains/*` | `_provider_runs` | `GET /api/v1/chains/summary` |
 | Runtime | `/api/v1/runtime/*` | `_runtime` | `GET /api/v1/runtime/health` |
 | Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/events` |
@@ -395,7 +395,7 @@ let make_routes ~port ~host ~sw ~clock =
 ```
 .masc/auth/
   config.json          -- auth_config (enabled, require_token, token_expiry_hours)
-  room_secret.hash     -- room-level secret (SHA256 해시)
+  workspace_secret.hash     -- workspace-level secret (SHA256 해시)
   initial_admin        -- 최초 admin agent 이름
   agents/
     agent-llm-a.json        -- credential JSON (agent_name, token_hash, admin, expires_at)
@@ -512,7 +512,7 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 ### 10.2 Service 정의
 
 ```
-Service: masc.coordination.v1.MascCoordination
+Service: masc.workspace collaboration.v1.MascWorkspace
 
 RPCs:
   Join(JoinRequest) -> JoinResponse            // Unary
@@ -709,8 +709,8 @@ sequenceDiagram
 부트스트랩 순서 (`run_server` -> `Server_runtime_bootstrap.run`):
 
 1. `init_runtime_context`: Eio 환경(clock, net, proc_mgr, fs) 추출
-2. `create_server_state`: 서버 상태 생성 (Room config, Eio context 설정)
-3. `bootstrap_server_state`: Room 초기화, Chain bootstrap, Tool registry warm-up, JSONL pruning
+2. `create_server_state`: 서버 상태 생성 (Workspace config, Eio context 설정)
+3. `bootstrap_server_state`: Workspace 초기화, Chain bootstrap, Tool registry warm-up, JSONL pruning
 4. `bootstrap_keepers`: Keeper 에이전트 부트스트랩
 5. `init_task_backend`: 태스크 백엔드 초기화
 6. `start_background_maintenance`: 주기적 cleanup fiber 시작
@@ -833,7 +833,7 @@ sequenceDiagram
 | `mcp_server_eio_resource.ml` | 335 | MCP Resource/Prompt 핸들러 |
 | `mcp_server_eio_governance.ml` | 110 | Governance 설정 |
 | `sse.ml` | 474 | SSE event registry + broadcast |
-| `sse_room_filter.ml` | 63 | Room별 SSE 필터링 |
+| `sse_workspace_filter.ml` | 63 | Workspace별 SSE 필터링 |
 | `oas_event_bridge.ml` | 56 | OAS -> SSE 이벤트 브릿지 |
 | `transport.ml` | 674 | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
 | `http_server_eio.ml` | 675 | httpun-eio 래퍼 (Router, Compression) |

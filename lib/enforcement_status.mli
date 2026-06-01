@@ -6,7 +6,7 @@
     policy surface and the dispatcher that consumes it:
 
     {ul
-    {- [Conditional]: enforced only under a runtime gate (e.g. room
+    {- [Conditional]: enforced only under a runtime gate (e.g. workspace
        auth enabled).}
     {- [Enforced]: unconditionally applied at the relevant dispatch
        site.}

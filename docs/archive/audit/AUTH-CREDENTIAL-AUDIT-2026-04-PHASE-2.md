@@ -28,7 +28,7 @@ Searched for `Prometheus.|metric_*|register_counter|inc_counter`:
 | `lib/agent_identity.ml` | NO | 338 lines, zero counters; false positives only (`@since`, `register`, `registered_at`) |
 | `lib/build_identity.ml` | NO | Pure data structures |
 | `lib/keeper/keeper_identity.ml` | NO | Has comment at L201 referencing "Prometheus metric" but no instrumentation |
-| `lib/coord/coord_identity.ml` | NO | Zero matches |
+| `lib/workspace/workspace_identity.ml` | NO | Zero matches |
 
 Phase 1 estimate: 4 modules without telemetry. Confirmed: **all 4** silent.
 
@@ -43,10 +43,10 @@ Both files exist; coverage is comprehensive (claim/start/done/heartbeat actions 
 
 ### 2.3 C4 — Credential redaction (gap collapsed)
 
-`lib/keeper/credential_provider.ml` and `lib/auth_doctor.ml` examined for `Log.error|Log.info|Log.warn|sprintf.*path|to_string.*ro_mount`:
+`lib/keeper/credential_provider.ml` and `lib/auth_diagnostic.ml` examined for `Log.error|Log.info|Log.warn|sprintf.*path|to_string.*ro_mount`:
 
 - `credential_provider.ml`: sprintf at L24, L26, L28, L30 — error display only, **not logged**
-- `auth_doctor.ml`: sprintf at L710-731 — diagnostic report builder, **not logged**
+- `auth_diagnostic.ml`: sprintf at L710-731 — diagnostic report builder, **not logged**
 
 Neither file has a `Log.*` call. Path strings flow into return values, not into log frameworks. The Phase 1-flagged "host path leak risk" is not currently a leak vector because there is no logging instrumentation that could carry the paths off-process.
 

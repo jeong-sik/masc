@@ -28,7 +28,7 @@ let keeper_sandbox_container_name (meta : Keeper_meta_contract.keeper_meta) =
   let seq = Atomic.fetch_and_add oneshot_container_counter 1 in
   Printf.sprintf
     "masc-keeper-%s-%d-%d-%d"
-    (Coord_utils.safe_filename meta.name)
+    (Workspace_utils.safe_filename meta.name)
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
     seq
@@ -39,7 +39,7 @@ let keeper_private_container_root (meta : Keeper_meta_contract.keeper_meta) =
 ;;
 
 let docker_private_workspace_cwd
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       host_cwd
   =

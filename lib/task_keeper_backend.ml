@@ -1,7 +1,7 @@
 (** Keeper-aware task helpers behind the task-tool boundary. *)
 
 let resolve_agent_name config agent_name ~log_context =
-  try Coord.resolve_agent_name config agent_name with
+  try Workspace.resolve_agent_name config agent_name with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Task.warn
@@ -41,7 +41,7 @@ let is_registered_agent_alias config agent_name =
   let registered_keeper_name keeper_name =
     keeper_name_variants keeper_name
     |> List.exists (fun name ->
-      Option.is_some (Keeper_registry.get ~base_path:config.Coord.base_path name))
+      Option.is_some (Keeper_registry.get ~base_path:config.Workspace.base_path name))
   in
   match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
   | Some keeper_name ->

@@ -217,8 +217,8 @@ describe('workflowTargetLabel', () => {
     expect(workflowTargetLabel(makeContext({ target_type: 'namespace' }))).toBe('Namespace')
   })
 
-  it('returns Namespace for room target', () => {
-    expect(workflowTargetLabel(makeContext({ target_type: 'room' }))).toBe('Namespace')
+  it('returns Namespace for workspace target', () => {
+    expect(workflowTargetLabel(makeContext({ target_type: 'workspace' }))).toBe('Namespace')
   })
 
   it('returns type · id for non-root with id', () => {
@@ -243,16 +243,16 @@ describe('workflowActionLabel', () => {
     expect(workflowActionLabel('namespace_pause')).toBe('Pause Namespace')
   })
 
-  it('returns "Pause Namespace" for room_pause', () => {
-    expect(workflowActionLabel('room_pause')).toBe('Pause Namespace')
+  it('returns "Pause Namespace" for workspace_pause', () => {
+    expect(workflowActionLabel('workspace_pause')).toBe('Pause Namespace')
   })
 
   it('returns "Resume Namespace" for namespace_resume', () => {
     expect(workflowActionLabel('namespace_resume')).toBe('Resume Namespace')
   })
 
-  it('returns "Resume Namespace" for room_resume', () => {
-    expect(workflowActionLabel('room_resume')).toBe('Resume Namespace')
+  it('returns "Resume Namespace" for workspace_resume', () => {
+    expect(workflowActionLabel('workspace_resume')).toBe('Resume Namespace')
   })
 
   it('returns "Inject Task" for task_inject', () => {

@@ -2,23 +2,23 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
-let coord_status_json (config : Coord.config) : Yojson.Safe.t =
-  let coord_state_opt =
-    if Coord.is_initialized config then Some (Coord.read_state config) else None
+let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
+  let workspace_state_opt =
+    if Workspace.is_initialized config then Some (Workspace.read_state config) else None
   in
   let project =
-    match coord_state_opt with
-    | Some coord_state -> coord_state.project
+    match workspace_state_opt with
+    | Some workspace_state -> workspace_state.project
     | None -> "default"
   in
   let paused =
-    match coord_state_opt with
-    | Some coord_state -> coord_state.paused
+    match workspace_state_opt with
+    | Some workspace_state -> workspace_state.paused
     | None -> false
   in
   let tempo = Tempo.get_tempo config in
   `Assoc
-    [ "coordination_root", `String config.base_path
+    [ "workspace_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
     ; "cluster", `String (Env_config_core.cluster_name ())
@@ -30,22 +30,22 @@ let coord_status_json (config : Coord.config) : Yojson.Safe.t =
 ;;
 
 let tasks_safe config =
-  if Coord.is_initialized config then Coord.get_tasks_safe config else []
+  if Workspace.is_initialized config then Workspace.get_tasks_safe config else []
 ;;
 
 let agents_safe config =
-  if Coord.is_initialized config then Coord.get_active_agents config else []
+  if Workspace.is_initialized config then Workspace.get_active_agents config else []
 ;;
 
 let messages_safe config =
-  if Coord.is_initialized config
-  then Coord.get_messages_raw config ~since_seq:0 ~limit:50
+  if Workspace.is_initialized config
+  then Workspace.get_messages_raw config ~since_seq:0 ~limit:50
   else []
 ;;
 
 let assoc_upsert fields key value = (key, value) :: List.remove_assoc key fields
 
-let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_meta_contract.keeper_meta) =
+let compact_keeper_trust_json ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) =
   let runtime_trust =
     if Keeper_fd_pressure.active ()
     then Keeper_fd_pressure.degraded_trust_json ()
@@ -221,7 +221,7 @@ let upsert_keeper_trust_fields fields trust =
   reconcile_keeper_attention_fields_with_trust fields trust
 ;;
 
-let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson.Safe.t) =
+let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yojson.Safe.t) =
   match keeper_json with
   | `Assoc fields ->
     (* The upstream operator snapshot already carries these for most keeper rows.
@@ -733,11 +733,11 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     let base_fields =
       let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
       [ "generated_at", `String (Masc_domain.now_iso ())
-      ; "status", coord_status_json config
+      ; "status", workspace_status_json config
       ; ( "projection_diagnostics"
         , `Assoc
             [ "surface", `String "execution"
-            ; "coordination_root", `String config.base_path
+            ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
             ; "persistence_sanitized_count", `Int utf8_repair.repaired_reads
             ; "persistence_sanitized_bytes", `Int utf8_repair.repaired_bytes
@@ -842,6 +842,6 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
          [ "generated_at", `String (Masc_domain.now_iso ())
          ; ( "error"
            , `String (Printf.sprintf "render timed out after %.0fs" render_timeout_s) )
-         ; "status", coord_status_json config
+         ; "status", workspace_status_json config
          ])
 ;;

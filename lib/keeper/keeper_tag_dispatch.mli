@@ -27,7 +27,7 @@
     typed error result with the exception type stripped of internal paths.
     [Eio.Cancel.Cancelled] is re-raised. *)
 val dispatch :
-  config:Coord.config ->
+  config:Workspace.config ->
   agent_name:string ->
   tag:Tool_dispatch.module_tag ->
   name:string ->

@@ -7,7 +7,7 @@ val set_executor_pool : Eio.Executor_pool.t -> unit
 val dashboard_runtime :
   ?net:Eio_context.eio_net ->
   ?mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
-  Coord.config ->
+  Workspace.config ->
   Server_dashboard_http_runtime_support.runtime option
 (** Build optional dashboard runtime capabilities from server resources. *)
 
@@ -17,8 +17,8 @@ val run_dashboard_compute :
   ?mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
-  config:Coord.config ->
-  (config:Coord.config -> sw:Eio.Switch.t -> 'a) ->
+  config:Workspace.config ->
+  (config:Workspace.config -> sw:Eio.Switch.t -> 'a) ->
   'a
 (** Dispatch dashboard compute through the configured runtime support. *)
 

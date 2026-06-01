@@ -16,7 +16,7 @@ code_refs:
 | Modules | 67 (.ml) + 5 (.mli-only) |
 | LOC | ~17.8K |
 | MCP Tools | `tool_keeper` |
-| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Coord`, `Runtime_inference`, `Verifier_oas` |
+| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Workspace`, `Runtime_inference`, `Verifier_oas` |
 
 ---
 
@@ -95,7 +95,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Goal (3-horizon)**: `goal`, `short_goal`, `mid_goal`, `long_goal`
 - **Model**: `runtime_id`, `last_model_used`, derived `active_model`
 - **Capability**: `policy_voice_enabled`, `allowed_paths`
-- **Scope**: `mention_targets`, `joined_room_ids`
+- **Scope**: `mention_targets`, `bound_workspace_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
 - **Compaction**: `compaction_profile`, `compaction_ratio_gate`, `compaction_message_gate`
 - **Handoff**: `auto_handoff`, `handoff_threshold`, `handoff_cooldown_sec`
@@ -146,10 +146,10 @@ type session_context = {
 
 세션당 최대 3개 체크포인트가 유지된다(`max_checkpoints_retained = 3`). 세션 메시지는 `history.jsonl`에 영속화.
 
-### 3.4 Coordination Boundary
+### 3.4 Workspace Boundary
 
-Legacy room-targeting typed aliases were removed during single-room flattening.
-JSON/MCP 경계에는 `mention_targets`, `joined_room_ids` 같은 coordination 값만 남고, 별도 scope enum은 더 이상 유지하지 않는다.
+Legacy workspace-targeting typed aliases were removed during single-workspace flattening.
+JSON/MCP 경계에는 `mention_targets`, `bound_workspace_ids` 같은 workspace collaboration 값만 남고, 별도 scope enum은 더 이상 유지하지 않는다.
 `policy_mode`, `policy_shell_mode`, `trigger_mode`, `initiative_*`는 제거되었다.
 
 ### 3.5 fiber_health
@@ -188,7 +188,7 @@ stateDiagram-v2
 
 단계 설명:
 
-1. **Observe**: `keeper_world_observation.observe`로 room 상태, 멘션, board 이벤트, idle 시간, 경제 압력 등을 수집
+1. **Observe**: `keeper_world_observation.observe`로 workspace 상태, 멘션, board 이벤트, idle 시간, 경제 압력 등을 수집
 2. **BuildPrompt**: `keeper_unified_prompt.build_prompt`로 keeper identity + observation을 단일 (system_prompt, user_message) 쌍으로 조립
 3. **AgentRun**: `keeper_agent_run.run_turn`이 OAS `Agent.run`에 위임. tools + hooks + context_reducer + memory 전달
 4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_oas`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
@@ -206,7 +206,7 @@ stateDiagram-v2
 | continuity summary | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
 | memory bank | `keeper_agent_run.ml` | `.masc/keepers/<name>.memory.jsonl` | memory policy / bank compaction |
 | episode flush | `keeper_agent_run.ml` | `.masc/institution_episodes.jsonl` | episode schema / JSONL cap |
-| collaboration activity signal | `coord_task.ml` + `coord.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
+| collaboration activity signal | `workspace_task.ml` + `workspace.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 
 ### 4.2 Keeper Supervisor Lifecycle
 

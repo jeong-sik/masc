@@ -438,4 +438,8 @@ let register
     metric_tool_input_validation
     "Total tool input validation outcomes labeled by tool, result, and reason"
     `Counter;
+  add
+    metric_tool_bind_required_guard
+    "Total bind-required guard rejects labeled by tool, agent_name, and reason"
+    `Counter;
 ;;

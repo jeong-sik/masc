@@ -34,7 +34,7 @@ let arg_get_string ctx key default =
 let arg_get_int ctx key default =
   Safe_ops.json_int ~default key ctx.arguments
 
-(** masc_broadcast — broadcast a message to the coord *)
+(** masc_broadcast — broadcast a message to the workspace *)
 let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
@@ -67,7 +67,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
             (Printf.sprintf "Rate limited. %d sec remaining." wait_secs))
   else begin
     let message =
-      Coord_task_cache_invariant.rewrite_broadcast_content
+      Workspace_task_cache_invariant.rewrite_broadcast_content
         ~config
         ~from_agent:agent_name
         ~module_name:"tool_inline_dispatch_comm"
@@ -75,7 +75,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
     in
     let trace_context = Otel_trace_context.from_ambient () in
     let broadcast_result =
-      Coord.broadcast ?trace_context ~task_cache_invariant_checked:true config
+      Workspace.broadcast ?trace_context ~task_cache_invariant_checked:true config
         ~from_agent:agent_name ~content:message
     in
         let mention = Mention.extract message in
@@ -110,4 +110,4 @@ let handle_messages ~tool_name ~start_time (ctx : context) : tool_result option 
   let config = ctx.config in
   let since_seq = arg_get_int ctx "since_seq" 0 in
   let limit = arg_get_int ctx "limit" 10 in
-  Some (Tool_result.ok ~tool_name ~start_time (Coord.get_messages config ~since_seq ~limit))
+  Some (Tool_result.ok ~tool_name ~start_time (Workspace.get_messages config ~since_seq ~limit))

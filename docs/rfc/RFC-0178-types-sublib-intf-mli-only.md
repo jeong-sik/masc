@@ -76,9 +76,9 @@ Empirical inventory from `lib/types/types_core.ml` (1,086 LoC at HEAD `4759453d3
 |--:|---|---|---:|---|---|
 | 0 | Utility (timestamp) | 1-40 | ~40 | `now_iso`, `parse_iso8601_opt` (values, not types) | `types_time` (or absorb into shared util) |
 | 1 | **Agent** | 42-220 | ~180 | `agent_status`, `agent_meta`, `agent` | `types_agent_intf` |
-| 2 | **Room** | 232-249 | ~17 | `room_info`, `room_registry` | `types_room_intf` |
+| 2 | **Workspace** | 232-249 | ~17 | `workspace_info`, `workspace_registry` | `types_workspace_intf` |
 | 3 | **Task** (largest) | 250-650 | ~400 | 13 types: `task_action`, `task_status`, `worktree_info`, `task_execution_links`, `task_contract`, `task_reclaim_policy`, `task_handoff_context`, `task`, `task_reclaim_gate`, `task_claim_readiness`, `task_claim_block`, `task_claim_decision`, `task_claim_next_action` | `types_task_intf` |
-| 4 | **Message** | 756-788 | ~32 | `message`, `room_state` | `types_message_intf` |
+| 4 | **Message** | 756-788 | ~32 | `message`, `workspace_state` | `types_message_intf` |
 | 5 | **Tempo** | 789-860 | ~71 | `tempo_mode`, `tempo_config` | `types_tempo_intf` |
 | 6 | **Backlog** | 861-901 | ~40 | `backlog` | `types_backlog_intf` |
 | 7 | **A2A / Portal** | 902-1031 | ~130 | `a2a_task_status`, `portal_state`, `a2a_task`, `portal` | `types_a2a_intf` |
@@ -88,7 +88,7 @@ Empirical inventory from `lib/types/types_core.ml` (1,086 LoC at HEAD `4759453d3
 ### 3.2 Observations from inventory
 
 - **Task domain dominates** (~400 LoC, 42% of typed surface). It is the obvious last candidate for Phase 0 PoC due to internal coupling among 13 types.
-- **3 small leaves are immediate Phase 0 candidates** (Room 17 LoC, Backlog 40 LoC, Tempo 71 LoC). Tempo is most attractive because it has the cleanest internal structure (`tempo_mode` + `tempo_config`) and no obvious cross-domain reference (verify in §3.3).
+- **3 small leaves are immediate Phase 0 candidates** (Workspace 17 LoC, Backlog 40 LoC, Tempo 71 LoC). Tempo is most attractive because it has the cleanest internal structure (`tempo_mode` + `tempo_config`) and no obvious cross-domain reference (verify in §3.3).
 - **Utility (timestamp) is values, not types**. Distinct treatment — likely lives in a shared `lib/util_time/` not a typed-SSOT sub-library.
 - **MCP surface** (sse_session, tool_result) belongs to the protocol boundary — may overlap with `lib/mcp_protocol/` (external pinned dep, see dune-project). Phase 0 should *avoid* this domain until cross-package contract is clarified.
 
@@ -99,7 +99,7 @@ Tentative ranking by *expected risk × signal*:
 | Candidate | Risk | Signal | Notes |
 |---|---|---|---|
 | Tempo (~71 LoC, 2 types) | Low | Medium | Self-contained 2-type cluster; good "shape proof" for the pattern. |
-| Room (~17 LoC, 2 types) | Very low | Low | Too small; outcome trivially positive, low generalization. |
+| Workspace (~17 LoC, 2 types) | Very low | Low | Too small; outcome trivially positive, low generalization. |
 | Backlog (~40 LoC, 1 type) | Low | Low | Single type; doesn't exercise multi-type `_intf.ml` benefit. |
 | Agent (~180 LoC, 3 types) | Medium | High | Mid-size cluster; exercises pattern at meaningful scale. |
 

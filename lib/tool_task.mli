@@ -2,7 +2,7 @@
 (** Tool_task - Core task CRUD operations *)
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
   sw: Eio.Switch.t option;
 }
@@ -19,7 +19,7 @@ val handle_update_priority : tool_name:string -> start_time:float -> context -> 
 val handle_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_task_history : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val task_history_events_json :
-  Coord.config -> task_id:string -> limit:int -> Yojson.Safe.t
+  Workspace.config -> task_id:string -> limit:int -> Yojson.Safe.t
 
 val dispatch :
   ?agent_tool_names:string list ->
@@ -43,7 +43,7 @@ val completion_rejection_message : ?allow_force:bool -> string -> string
 
 (** [build_claim_observation_payload ~now ~agent_name ~task_id] builds the
     downstream collaboration-observation fragment for a successful
-    [masc_claim_next] write/readback result. MASC uses a central coordination
+    [masc_claim_next] write/readback result. MASC uses a central workspace
     store here, so CRDT-specific [logical_clock] and [convergence_delay_ms]
     are left null. *)
 val build_claim_observation_payload :

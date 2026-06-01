@@ -92,7 +92,7 @@ let build_claim_observation_payload ~(now : float) ~(agent_name : string)
         `Assoc
           [
             ("kind", `String "todo_claim");
-            ("provider", `String "masc.coord");
+            ("provider", `String "masc.workspace");
             ("workspace_id", `Null);
           ] );
       ( "actor",

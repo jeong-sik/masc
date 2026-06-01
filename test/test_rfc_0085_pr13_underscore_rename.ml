@@ -10,7 +10,7 @@ open Alcotest
        - tool_keeper._keeper_list_cache
        - tool_board._board_list_cache
        - governance_pipeline_risk._destructive_pattern_strings
-       - tool_coord._status_cache
+       - tool_workspace._status_cache
     All renamed (drop _ prefix), callers in same file updated.
 
     Original test scanned [count_string_literals], which examines only
@@ -30,7 +30,7 @@ let renamed_identifiers =
   ; ( "lib/governance_pipeline_risk.ml"
     , "_destructive_pattern_strings"
     , "destructive_pattern_strings" )
-  ; "lib/tool_coord.ml", "_status_cache", "status_cache"
+  ; "lib/tool_workspace.ml", "_status_cache", "status_cache"
   ]
 ;;
 

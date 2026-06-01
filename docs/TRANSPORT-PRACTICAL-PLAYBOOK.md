@@ -20,11 +20,11 @@
 
 이 surface는 다음을 한 번에 보여준다.
 
-- live SSE observer/coordinator 수
+- live SSE observer/agent stream 수
 - gRPC subscriber/heartbeat 상태
 - WebSocket/WebRTC 활성도
 - queue/backpressure hot session
-- 현재 cluster / room / managed unit / active operation
+- 현재 cluster / workspace / managed unit / active operation
 - transport별 practical path 추천
 
 ## Truth Harness
@@ -104,7 +104,7 @@ grpcurl -plaintext 127.0.0.1:8936 list
 grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
 ```
 
-`Subscribe` / `Heartbeat`는 `proto/masc_coordination.proto` 기준으로 client를 붙인다. dashboard `transport-health`에서 `subscribers`, `active_streams`가 즉시 증가해야 한다.
+`Subscribe` / `Heartbeat`는 `proto/masc_workspace collaboration.proto` 기준으로 client를 붙인다. dashboard `transport-health`에서 `subscribers`, `active_streams`가 즉시 증가해야 한다.
 
 ### 5. WebSocket discovery
 

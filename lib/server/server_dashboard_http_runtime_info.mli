@@ -44,7 +44,7 @@
 
 (** {1 Runtime resolution} *)
 
-val runtime_resolution_json : Coord.config -> Yojson.Safe.t
+val runtime_resolution_json : Workspace.config -> Yojson.Safe.t
 (** Renders the runtime resolution envelope: build
     identity + workspace / base-path commit shas (via
     {!git_rev_parse_short}) + server/workspace path
@@ -52,7 +52,7 @@ val runtime_resolution_json : Coord.config -> Yojson.Safe.t
     Reached unqualified through the
     [Server_dashboard_http_core] runtime consumer. *)
 
-val light_runtime_resolution_json : Coord.config -> Yojson.Safe.t
+val light_runtime_resolution_json : Workspace.config -> Yojson.Safe.t
 (** Renders the cheap runtime/fleet subset used by
     [/api/v1/dashboard/shell?light=true].  This keeps the shell health strip
     aligned with [/health] fleet safety without running git probes or other
@@ -70,7 +70,7 @@ val dashboard_runtime_probe_http_json :
     includes a [cache_hit] flag so dashboards can show
     the freshness state. *)
 
-val dashboard_perf_http_json : Coord.config -> Yojson.Safe.t
+val dashboard_perf_http_json : Workspace.config -> Yojson.Safe.t
 (** Renders the dashboard performance envelope (build
     identity, runtime / workspace commits, system clock
     skew, etc). *)
@@ -78,7 +78,7 @@ val dashboard_perf_http_json : Coord.config -> Yojson.Safe.t
 val dashboard_tools_http_json :
   ?actor:string ->
   ?timing:Server_timing.t ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 (** Renders the dashboard tools projection.  [?actor]
     selects the per-agent tool catalogue when present;

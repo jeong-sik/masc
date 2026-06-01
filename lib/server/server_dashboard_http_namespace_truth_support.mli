@@ -47,7 +47,7 @@ val dashboard_namespace_truth_focus_json :
     snapshot. *)
 
 val compose_namespace_truth_snapshot :
-  config:Coord.config ->
+  config:Workspace.config ->
   initialized:bool ->
   shell_json:Yojson.Safe.t ->
   execution_json:Yojson.Safe.t ->
@@ -62,7 +62,7 @@ val compose_namespace_truth_snapshot :
     SSOT producer for the [namespace_truth] HTTP route. *)
 
 val compose_namespace_truth_initializing :
-  config:Coord.config -> message:string -> Yojson.Safe.t
+  config:Workspace.config -> message:string -> Yojson.Safe.t
 (** Composes the namespace-truth cold-start response with the same
     top-level [dashboard_surface], [dashboard_aliases], [source],
     [retention], and [generated_at_iso] metadata used by the warm

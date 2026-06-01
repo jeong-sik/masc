@@ -1,6 +1,6 @@
 (** Task_dispatch - Runtime backend selection for MASC Tasks
 
-    Uses JSONL (Coord.* functions) only.
+    Uses JSONL (Workspace.* functions) only.
 
     @since 0.7.0
 *)
@@ -31,7 +31,7 @@ let init_jsonl () =
   if (match Atomic.get backend_state with Active _ -> true | Uninitialized -> false) then
     Log.Task.warn "WARNING: already initialized, ignoring init_jsonl"
   else if Atomic.compare_and_set backend_state Uninitialized (Active Jsonl) then
-    Log.Task.info "JSONL backend initialized (using Coord.* functions)."
+    Log.Task.info "JSONL backend initialized (using Workspace.* functions)."
   else
     Log.Task.warn "WARNING: backend was concurrently initialized; ignoring init_jsonl"
 
@@ -45,13 +45,13 @@ let backend () =
   | Active backend -> backend
   | Uninitialized ->
       let _ = Atomic.compare_and_set backend_state Uninitialized (Active Jsonl) in
-      Log.Task.info "JSONL backend initialized (using Coord.* functions).";
+      Log.Task.info "JSONL backend initialized (using Workspace.* functions).";
       Jsonl
 
 (** {1 Dispatch Functions} *)
 
 (** Add a new task.
-    Delegates to Coord.add_task. *)
+    Delegates to Workspace.add_task. *)
 let add_task config ~title ~priority ~description =
   match backend () with
   | Jsonl ->
@@ -60,22 +60,22 @@ let add_task config ~title ~priority ~description =
          bypass the cap). Wired now so future [goal_id]-aware callers
          (or a backend rewrite) inherit the same invariant for free. *)
       Ok
-        (Coord.add_task
-           ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+        (Workspace.add_task
+           ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id:None)
            config ~title ~priority ~description)
 
 (** Get a task by ID *)
 let get_task config ~task_id =
   match backend () with
   | Jsonl ->
-      let backlog = Coord.read_backlog config in
+      let backlog = Workspace.read_backlog config in
       Ok (List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks)
 
 (** List tasks *)
 let list_tasks config ?(include_done=false) ?(include_cancelled=false) () =
   match backend () with
   | Jsonl ->
-      let backlog = Coord.read_backlog config in
+      let backlog = Workspace.read_backlog config in
       let tasks = List.filter (fun (t : task) ->
         let dominated = match t.task_status with
           | Done _ -> not include_done
@@ -100,14 +100,14 @@ let validate_transition ~(current : task_status) ~(next : task_status) ~task_id 
   | _ -> Ok ()
 
 let backlog_lock_path config =
-  Filename.concat (Coord.tasks_dir config) ".backlog"
+  Filename.concat (Workspace.tasks_dir config) ".backlog"
 
 let with_locked_backlog
     config
     (f : backlog -> ('a, Masc_error.t) result)
     : ('a, Masc_error.t) result =
-  Coord.with_file_lock config (backlog_lock_path config) (fun () ->
-    match Coord.read_backlog_r config with
+  Workspace.with_file_lock config (backlog_lock_path config) (fun () ->
+    match Workspace.read_backlog_r config with
     | Error msg -> Error (System (System_error.IoError msg))
     | Ok backlog -> f backlog)
 
@@ -138,7 +138,7 @@ let update_status config ~task_id ~status =
                     version = backlog.version + 1;
                   }
                 in
-                Coord.write_backlog config new_backlog;
+                Workspace.write_backlog config new_backlog;
                 Ok ()))
 
 (** Delete a task *)
@@ -156,5 +156,5 @@ let delete_task config ~task_id =
             version = backlog.version + 1;
           }
         in
-        Coord.write_backlog config new_backlog;
+        Workspace.write_backlog config new_backlog;
         Ok ())

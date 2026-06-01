@@ -203,7 +203,7 @@ let timeout_json ~key ~timeout_sec ~timeout_kind =
     invariant "watchdog >= largest caller budget" holds by construction.
     Previously hardcoded to 130.0, which silently drifted from caller
     config when env overrides were introduced.  Multiplier N = 8 gives
-    headcoord so the watchdog is a *floor* protection — under normal
+    headroom so the watchdog is a *floor* protection — under normal
     operation the structural cleanup ([release_on_cancel]) keeps slots
     from ever reaching this ceiling.  An SLO alert on
     [masc_cache_stuck_evictions_total] pages operators if it does fire,

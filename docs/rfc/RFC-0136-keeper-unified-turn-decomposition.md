@@ -151,7 +151,7 @@ type phase_gate_outcome =
     (** registry phase missing — `Error err` 반환. *)
 
 val decide_and_record
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_types.keeper_meta
   -> generation:int
   -> keeper_turn_id:int

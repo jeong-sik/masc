@@ -10,7 +10,7 @@ import {
   tasks,
 } from '../store'
 import { findKeeper } from '../lib/keeper-utils'
-import { currentDashboardActor, fetchRoomMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
+import { currentDashboardActor, fetchWorkspaceMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
 import { callMcpTool } from '../api/mcp'
 import { journal } from '../sse'
 import { route, navigate } from '../router'
@@ -156,7 +156,7 @@ export async function refreshAgentDetail(): Promise<void> {
   agentFitness.value = null
 
   try {
-    // Fetch namespace (room) messages, task histories, timeline, and fitness in parallel.
+    // Fetch namespace (workspace) messages, task histories, timeline, and fitness in parallel.
     //
     // P2 silent-failure fix: previously both .catch(() => null) calls
     // silently coerced fetch failures into null, indistinguishable from
@@ -165,7 +165,7 @@ export async function refreshAgentDetail(): Promise<void> {
     // each catch logs the error so DevTools surfaces the failure even
     // though the UI still degrades gracefully (other data still shows).
     const [lines, timelineResult, fitnessResult] = await Promise.all([
-      fetchRoomMessages(80),
+      fetchWorkspaceMessages(80),
       fetchAgentTimeline(agentName, 24, 50).catch((err: unknown) => {
         console.warn('[agent-detail-state] fetchAgentTimeline failed', { agentName, err })
         return null

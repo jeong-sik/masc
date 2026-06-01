@@ -37,7 +37,7 @@ LOC moves since plan (size monolith-reduction proxy):
 | `lib/server/server_mcp_transport_http.ml` | (H1/H2 split) | 870 | — |
 | `lib/server/server_h2_gateway.ml` | (H1/H2 split) | 1,006 | — |
 | `lib/auth.ml` | 1,651 | 1,651 | 0 |
-| `lib/coord_goals.ml` | 1,095 | 1,001 | −94 |
+| `lib/workspace_goals.ml` | 1,095 | 1,001 | −94 |
 
 ---
 

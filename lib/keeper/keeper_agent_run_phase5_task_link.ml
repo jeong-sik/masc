@@ -24,7 +24,7 @@ let run ~config ~(meta : Keeper_meta_contract.keeper_meta)
       let operation_id = Some trace_id_str in
       let result =
         try
-          Coord.link_task_execution_artifacts_r
+          Workspace.link_task_execution_artifacts_r
             config
             ~task_id:task_id_str
             ?session_id

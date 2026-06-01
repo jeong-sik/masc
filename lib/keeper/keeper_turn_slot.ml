@@ -562,7 +562,7 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
         maybe_yield_for_fairness ~keeper_name;
         let ticket = enqueue_autonomous_waiter ~keeper_name in
         slot_state.autonomous_ticket := Some ticket;
-        (* Reset the queue-head timeout clock to the moment we joined the
+        (* Reset the queue-head timeout clock to the moment we bound the
              queue, NOT [t0] (slot-entry). Otherwise [maybe_yield_for_fairness]
              above silently consumes the [semaphore_wait_timeout_sec] budget
              before we even appear in the FIFO, producing the symptom

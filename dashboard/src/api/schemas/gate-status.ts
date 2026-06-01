@@ -37,7 +37,7 @@ const ChannelInfoRawSchema = object({
   last_success: fallback(string(), ''),
   last_error_at: fallback(string(), ''),
   last_keeper: fallback(string(), ''),
-  last_room_id: fallback(string(), ''),
+  last_workspace_id: fallback(string(), ''),
   last_error: fallback(string(), ''),
   last_error_kind: fallback(string(), ''),
   last_outcome: fallback(string(), ''),
@@ -46,7 +46,7 @@ const ChannelInfoRawSchema = object({
   slow_count: fallback(number(), 0),
   slow_rate_pct: fallback(number(), 0),
   success_rate_pct: fallback(number(), 0),
-  room_count: fallback(number(), 0),
+  workspace_count: fallback(number(), 0),
   health: fallback(string(), 'idle'),
 })
 
@@ -54,7 +54,7 @@ export type ChannelInfo = InferOutput<typeof ChannelInfoRawSchema>
 
 const BindingInfoRawSchema = object({
   channel: string(),
-  room_id: string(),
+  workspace_id: string(),
   keeper: string(),
   message_count: fallback(number(), 0),
   success_count: fallback(number(), 0),
@@ -78,7 +78,7 @@ const GateEventInfoRawSchema = object({
   seq: fallback(number(), 0),
   timestamp: string(),
   channel: string(),
-  room_id: string(),
+  workspace_id: string(),
   keeper: string(),
   outcome: fallback(string(), ''),
   error_kind: fallback(string(), ''),

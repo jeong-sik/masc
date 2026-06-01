@@ -8,7 +8,7 @@ import { shellAuthSummary } from '../../store'
 import { operatorSnapshot } from '../../operator-store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import {
-  flowState, flowLoading, fetchPauseStatus, pauseRoom, resumeRoom,
+  flowState, flowLoading, fetchPauseStatus, pauseWorkspace, resumeWorkspace,
   maintenanceResult, maintenanceLoading, runGarbageCollection, cleanupZombies,
 } from './flow-control-state'
 
@@ -58,9 +58,9 @@ export function FlowControlPanel() {
         </p>
       `}
       <div class="flex flex-wrap gap-2">
-        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing || !mutationAccess.allowed} onClick=${() => void pauseRoom()}>
+        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing || !mutationAccess.allowed} onClick=${() => void pauseWorkspace()}>
           ${loading && !isPaused ? '...' : 'Pause'}<//>
-        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing || !mutationAccess.allowed} onClick=${() => void resumeRoom()}>
+        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing || !mutationAccess.allowed} onClick=${() => void resumeWorkspace()}>
           ${loading && isPaused ? '...' : 'Resume'}<//>
       </div>
     <//>

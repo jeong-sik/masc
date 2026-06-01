@@ -39,7 +39,7 @@ let chat_path ~base_dir ~keeper_name =
     (Filename.concat
        (Common.masc_dir_from_base_path ~base_path:base_dir)
        "keeper_chat")
-    (Coord_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
+    (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
 
 let test_load_records_malformed_row_drops () =
   let base_dir = temp_base_path "keeper-chat-store-drops" in

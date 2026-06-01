@@ -3,11 +3,11 @@
 val lightweight_tool_audit_fallback_json :
   Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 
-val recent_tool_names_from_files : Coord.config -> string -> string list
+val recent_tool_names_from_files : Workspace.config -> string -> string list
 
 val keeper_tool_audit_fields :
   ?include_allowed_tools:bool ->
-  Coord.config ->
+  Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   string list
   * string list
@@ -18,4 +18,4 @@ val keeper_tool_audit_fields :
   * string option
 
 val cached_tool_audit_json :
-  lightweight:bool -> Coord.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+  lightweight:bool -> Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t

@@ -111,8 +111,8 @@ module Operator : sig
   (** [MASC_OPERATOR_JUDGE_INTERVAL_SEC] (default [60]).
       Floor [15s]. *)
 
-  val judgment_ttl_sec : int
-  (** [MASC_OPERATOR_JUDGE_TTL_SEC] (default [60]).
+  val workspace_ttl_sec : int
+  (** [MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC] (default [60]).
       Floor [15s]. *)
 
   val session_ttl_sec : int

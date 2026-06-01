@@ -96,7 +96,7 @@ let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_li
     message_count = 0;
   }
 
-let test_dispatch_keeper_phase_event_uses_room_base_path () =
+let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
   let base_dir = temp_dir "keeper_lifecycle_registry_phase" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -104,7 +104,7 @@ let test_dispatch_keeper_phase_event_uses_room_base_path () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Coord.default_config base_dir in
+      let config = Masc_mcp.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-phase-regression" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
@@ -118,7 +118,7 @@ let test_dispatch_keeper_phase_event_uses_room_base_path () =
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after compaction dispatch")
 
-let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
+let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
   let base_dir = temp_dir "keeper_lifecycle_registry_outcome" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -126,7 +126,7 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Coord.default_config base_dir in
+      let config = Masc_mcp.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-outcome-regression" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
@@ -170,7 +170,7 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Coord.default_config base_dir in
+      let config = Masc_mcp.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-origin-guard" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       let labels =
@@ -206,7 +206,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Masc_mcp.Coord.default_config base_dir in
+      let config = Masc_mcp.Workspace.default_config base_dir in
       let labels =
         [ ("keeper", "missing-keeper"); ("event", "compaction_started") ]
       in
@@ -239,7 +239,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       Eio.Switch.run @@ fun sw ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Coord.default_config base_dir in
+      let config = Masc_mcp.Workspace.default_config base_dir in
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -283,8 +283,8 @@ let test_heartbeat_history_fallback_counts_malformed_rows () =
       Eio.Switch.run @@ fun sw ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:None);
+      let config = Masc_mcp.Workspace.default_config base_dir in
+      ignore (Masc_mcp.Workspace.init config ~agent_name:None);
       let meta =
         make_keeper_meta
           ~name:"keeper-heartbeat-history-drop"
@@ -338,10 +338,10 @@ let () =
     [
       ( "registry_dispatch",
         [
-          test_case "phase event uses room base_path" `Quick
-            test_dispatch_keeper_phase_event_uses_room_base_path;
-          test_case "post-turn lifecycle events use room base_path" `Quick
-            test_dispatch_post_turn_lifecycle_events_uses_room_base_path;
+          test_case "phase event uses workspace base_path" `Quick
+            test_dispatch_keeper_phase_event_uses_workspace_base_path;
+          test_case "post-turn lifecycle events use workspace base_path" `Quick
+            test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path;
           test_case "unscoped lifecycle event is rejected" `Quick
             test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event;
           test_case "phase event rejection increments metric" `Quick

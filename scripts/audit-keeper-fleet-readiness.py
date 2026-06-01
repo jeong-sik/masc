@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Audit live keeper fleet readiness from on-disk MASC runtime state.
 
-This is intentionally read-only. It separates configuration readiness
-(Docker, repo CLI identity, repo-mutation-capable tool access) from durable
-evidence (recent turns, board actions, persisted PR references) so operators do
-not mistake a configured capability for proof that every keeper already used it.
+This is intentionally read-only. It separates static sandbox/runtime
+configuration from durable evidence (recent turns, board actions, persisted PR
+references) so operators do not mistake a configured capability for proof that
+every keeper already used it.
 """
 
 from __future__ import annotations

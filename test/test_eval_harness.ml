@@ -272,6 +272,9 @@ let test_report_to_string () =
     mean_score = 0.75;
     consistency = 0.9;
     total_cost_usd = 0.05;
+    ci95_low = 0.75;
+    ci95_high = 0.75;
+    min_runs_met = false;
     runs = [];
   } in
   let suite : Eval_harness.eval_suite_result = {

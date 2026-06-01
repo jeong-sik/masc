@@ -179,6 +179,34 @@ let test_read_descriptor_spells_out_path_basis () =
     (string_contains ~sub:"does not inherit Execute cwd" file_path_description)
 ;;
 
+let test_execute_descriptor_spells_out_argv_basis () =
+  let descriptor = required_public_descriptor "Execute" in
+  let argv_description =
+    schema_property_description descriptor.input_schema "argv"
+    |> Option.value ~default:""
+  in
+  Alcotest.(check bool)
+    "Execute description says argv follows executable"
+    true
+    (string_contains ~sub:"argv arguments after the executable" descriptor.description);
+  Alcotest.(check bool)
+    "Execute description forbids duplicate argv0"
+    true
+    (string_contains ~sub:"Do not repeat executable as argv[0]" descriptor.description);
+  Alcotest.(check bool)
+    "Execute description includes git example"
+    true
+    (string_contains ~sub:"executable='git' argv=['status', '--short']" descriptor.description);
+  Alcotest.(check bool)
+    "Execute argv schema repeats argv0 warning"
+    true
+    (string_contains ~sub:"Do not repeat executable as argv[0]" argv_description);
+  Alcotest.(check bool)
+    "Execute argv schema includes grep example"
+    true
+    (string_contains ~sub:"executable='grep', argv=['-rn', 'pattern', 'lib']" argv_description)
+;;
+
 let test_masc_board_registry_has_descriptor_projection () =
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
@@ -481,6 +509,10 @@ let () =
             "Read path basis is explicit"
             `Quick
             test_read_descriptor_spells_out_path_basis
+        ; test_case
+            "Execute argv basis is explicit"
+            `Quick
+            test_execute_descriptor_spells_out_argv_basis
         ] )
     ; ( "masc-board"
       , [ test_case

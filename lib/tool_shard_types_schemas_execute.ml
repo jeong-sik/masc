@@ -24,8 +24,11 @@ let tool_execute_exec_stage_schema =
                 ; "items", `Assoc [ "type", `String "string" ]
                 ; ( "description"
                   , `String
-                      "Arguments passed verbatim to executable. Shell metacharacters \
-                       are data; use pipeline for multi-stage execution." )
+                      "Arguments after executable, passed verbatim. Do not repeat \
+                       executable as argv[0]. Example: executable='grep', argv=['-rn', \
+                       'pattern', 'lib']; not argv=['grep', ...]. Shell \
+                       metacharacters are data; use pipeline for multi-stage \
+                       execution." )
                 ] )
           ] )
     ; "required", `List [ `String "executable" ]
@@ -53,8 +56,10 @@ let tool_execute_argv_field =
       ; "items", `Assoc [ "type", `String "string" ]
       ; ( "description"
         , `String
-            "Typed argv form: arguments passed verbatim to executable. A literal '|' \
-             token is data, not a pipe." )
+            "Typed argv form: arguments after executable, passed verbatim. Do not \
+             repeat executable as argv[0]. Example: executable='git', argv=['status', \
+             '--short']; example: executable='grep', argv=['-rn', 'pattern', 'lib']. \
+             A literal '|' token is data, not a pipe." )
       ] )
 ;;
 

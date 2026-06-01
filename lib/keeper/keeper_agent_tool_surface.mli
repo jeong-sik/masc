@@ -182,6 +182,7 @@ val turn_affordances_require_tool_gate_with_allowed :
     ["masc_web_search"]] are a direct evidence contract, not a generic
     actionable-world-signal gate. *)
 val tool_names_for_required_gate_surface :
+  ?has_current_task:bool ->
   tool_gate_requested:bool ->
   required_tool_names:string list ->
   string list ->
@@ -230,6 +231,16 @@ val generic_required_tool_candidate_names :
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string list
+
+(** Whether an owned active task plus an actionable world signal should promote
+    the turn to the same generic required-tool gate that post-run validation
+    already enforces. *)
+val actionable_signal_requires_active_task_tool_gate :
+  actionable_signal:bool ->
+  has_current_task:bool ->
+  turn_affordances:string list ->
+  allowed_tool_names:string list ->
+  bool
 
 (** Per-call [masc_keeper_msg.required_tools] is an explicit operator/harness
     contract for this turn. When present, it takes precedence over the keeper's

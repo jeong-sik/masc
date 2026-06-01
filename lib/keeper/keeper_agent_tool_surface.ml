@@ -301,6 +301,7 @@ let turn_affordances_require_tool_gate_with_allowed
   gate_requested
 
 let tool_names_for_required_gate_surface
+    ?(has_current_task : bool = false)
     ~(tool_gate_requested : bool)
     ~(required_tool_names : string list)
     (tool_names : string list) : string list =
@@ -326,7 +327,9 @@ let tool_names_for_required_gate_surface
       |> List.filter (fun name ->
         is_explicit_required_tool_name name
         || (Keeper_tool_progress.tool_name_can_satisfy_required_contract name
-            && not (is_stay_silent name)))
+            && not (is_stay_silent name)
+            && ((not has_current_task)
+                || not (Keeper_tool_progress.is_claim_context_tool_name name))))
       |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     match actionable with
@@ -482,6 +485,18 @@ let generic_required_tool_candidate_names ~(has_current_task : bool)
       ~allowed_tool_names
   in
   actionable_tools
+;;
+
+let actionable_signal_requires_active_task_tool_gate ~(actionable_signal : bool)
+    ~(has_current_task : bool) ~(turn_affordances : string list)
+    ~(allowed_tool_names : string list) =
+  actionable_signal
+  && has_current_task
+  && generic_required_actionable_tool_names
+       ~has_current_task
+       ~turn_affordances
+       ~allowed_tool_names
+     <> []
 ;;
 
 let generic_required_tool_gate_guidance ~(has_current_task : bool)

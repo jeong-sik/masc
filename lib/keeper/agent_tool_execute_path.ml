@@ -61,14 +61,14 @@ let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
         Some (repo_name, repo_root, repo_root, [ repo_root ])
       | _ -> None
 
-let repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel =
+let repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel =
   Printf.sprintf
     "sandbox_repo_not_ready: sandbox path is under repos/%s, but %s is not an \
      independent git checkout (git_toplevel=%s). Repair or reclone the sandbox \
      repo under repos/%s, then retry with cwd=\"repos/%s\" or \
      cwd=\"repos/%s/.worktrees/<task>\"."
     repo_name
-    repo_root
+    path_root
     (Option.value ~default:"<none>" git_toplevel)
     repo_name
     repo_name
@@ -82,11 +82,11 @@ let validate_repo_path_ready
   =
   match repo_path_context ~config ~meta cwd with
   | None -> Ok ()
-  | Some (repo_name, repo_root, _path_root, accepted_toplevels) ->
+  | Some (repo_name, _repo_root, path_root, accepted_toplevels) ->
     let check_probe () =
       if not (safe_is_dir probe_path) then
         Error
-          (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:None)
+          (repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel:None)
       else
         let top =
           Keeper_repo_readiness.run_git
@@ -107,7 +107,7 @@ let validate_repo_path_ready
         if top_matches then Ok ()
         else
           Error
-            (repo_cwd_not_ready_error ~repo_name ~repo_root ~git_toplevel:top_opt)
+            (repo_cwd_not_ready_error ~repo_name ~path_root ~git_toplevel:top_opt)
     in
     match check_probe () with
     | Ok () -> Ok ()
@@ -134,24 +134,44 @@ let validate_repo_path_args_ready
     then String.sub command_name 0 (String.length command_name - String.length ".exe")
     else command_name
   in
+  let command_has_repo_path_args command_name =
+    command_name = "git"
+    || command_name = "gh"
+    || Exec_policy_path_arg_descriptor.command_materializes_path_arg command_name
+  in
   let path_args_of_simple simple =
     let command_name =
       Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
       |> Filename.basename
       |> normalize_repo_command_name
     in
-    if not (command_name = "git" || command_name = "gh")
+    if not (command_has_repo_path_args command_name)
     then []
-    else
+    else (
       match Exec_policy.simple_literal_args simple with
       | None -> []
-      | Some args -> Exec_policy.path_argument_values command_name args
+      | Some args -> Exec_policy.path_argument_values command_name args)
+  in
+  let path_args_of_effective_stage
+      (stage : Agent_tool_execute_command_semantics.parsed_stage)
+    =
+    let command_name =
+      stage.bin |> Filename.basename |> normalize_repo_command_name
+    in
+    if command_has_repo_path_args command_name
+    then Exec_policy.path_argument_values command_name stage.args
+    else []
   in
   let rec path_args = function
     | Masc_exec.Shell_ir.Simple simple ->
       path_args_of_simple simple
     | Masc_exec.Shell_ir.Pipeline stages ->
       List.concat_map path_args stages
+  in
+  let all_path_args =
+    path_args ir
+    @ (Agent_tool_execute_command_semantics.effective_stages_of_ir ir
+       |> List.concat_map path_args_of_effective_stage)
   in
   let validate_target seen raw =
     let trimmed = String.trim raw in
@@ -162,7 +182,7 @@ let validate_repo_path_args_ready
       in
       match repo_path_context ~config ~meta target with
       | None -> Ok seen
-      | Some (_repo_name, repo_root, path_root, _accepted_toplevels) ->
+      | Some (_repo_name, _repo_root, path_root, _accepted_toplevels) ->
         let key = normalize_repo_cwd_path path_root in
         if List.mem key seen then Ok seen
         else (
@@ -187,7 +207,7 @@ let validate_repo_path_args_ready
         Ok (true, seen)
       | None -> Result.map (fun seen -> false, seen) (validate_target seen trimmed))
   in
-  path_args ir
+  all_path_args
   |> List.fold_left
        (fun acc raw ->
           match acc with

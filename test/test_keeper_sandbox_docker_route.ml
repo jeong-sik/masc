@@ -166,10 +166,6 @@ let make_meta ?tool_access ~name ~sandbox () =
       ("name", `String name);
       ("agent_name", `String ("agent-" ^ name));
       ("trace_id", `String ("trace-" ^ name));
-      ("goal", `String "shell docker route test");
-      ("allowed_paths", `List [ `String "*" ]);
-      ( "sandbox_profile",
-        `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
     ]
   in
   let fields =
@@ -184,7 +180,12 @@ let make_meta ?tool_access ~name ~sandbox () =
     `Assoc fields
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta ->
+    { meta with
+      goal = "shell docker route test"
+    ; allowed_paths = ["*"]
+    ; sandbox_profile = sandbox
+    }
   | Error e -> Alcotest.fail e
 
 let test_make_meta_tool_access_matches_production_default () =
@@ -1656,6 +1657,50 @@ let test_sandbox_root_git_c_repeated_missing_final_target () =
       true
       (contains_substring msg "repos/masc-mcp/.worktrees/missing")
 
+let test_sandbox_root_git_c_pipeline_missing_later_target () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  let cwd, error =
+    resolve_sandbox_root_git_cwd_string
+      ~config
+      ~meta
+      ~cwd:playground
+      ~cmd:"git -C repos/masc-mcp status | git -C repos/missing status"
+  in
+  Alcotest.(check string) "execution cwd remains sandbox root" playground cwd;
+  match error with
+  | None -> Alcotest.fail "expected later git stage -C target error"
+  | Some msg ->
+    Alcotest.(check bool)
+      "error identifies later git stage missing target"
+      true
+      (contains_substring msg "repos/missing")
+
+let test_sandbox_root_git_c_bare_worktree_missing_target () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  git_ok ~cwd:repo [ "init"; "-q" ];
+  let cwd, error =
+    resolve_sandbox_root_git_cwd_string
+      ~config
+      ~meta
+      ~cwd:playground
+      ~cmd:"git -C .worktrees/missing status"
+  in
+  Alcotest.(check string) "execution cwd remains sandbox root" playground cwd;
+  match error with
+  | None -> Alcotest.fail "expected bare worktree git -C target error"
+  | Some msg ->
+    Alcotest.(check bool)
+      "error identifies bare worktree under sole repo"
+      true
+      (contains_substring msg "repos/masc-mcp/.worktrees/missing")
+
 let test_sandbox_root_git_subcommand_c_is_not_cwd () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -2403,6 +2448,14 @@ let () =
             "sandbox-root repeated git -C validates final target"
             `Quick
             test_sandbox_root_git_c_repeated_missing_final_target;
+          Alcotest.test_case
+            "sandbox-root git pipeline validates every -C target"
+            `Quick
+            test_sandbox_root_git_c_pipeline_missing_later_target;
+          Alcotest.test_case
+            "sandbox-root bare worktree git -C validates target"
+            `Quick
+            test_sandbox_root_git_c_bare_worktree_missing_target;
           Alcotest.test_case
             "sandbox-root git subcommand -C is not cwd"
             `Quick

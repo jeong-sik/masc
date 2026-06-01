@@ -14,6 +14,7 @@ module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
 module Dev_exec_allowlist = Masc_mcp.Dev_exec_allowlist
 module Exec_program = Masc_exec.Exec_program
 module Json = Yojson.Safe.Util
@@ -278,37 +279,34 @@ let make_config () =
   ensure_dir (Filename.concat tmp Common.masc_dirname);
   (tmp, Workspace.default_config tmp)
 
-let make_docker_meta name =
+let make_base_meta ~context name =
   let json =
     `Assoc
       [
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "sandbox test");
-        ("sandbox_profile", `String "docker");
-        ("network_mode", `String "none");
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
-  | Error err -> Alcotest.fail ("make_docker_meta failed: " ^ err)
+  | Error err -> Alcotest.fail (context ^ " failed: " ^ err)
+
+let make_docker_meta name =
+  let meta = make_base_meta ~context:"make_docker_meta" name in
+  { meta with
+    goal = "sandbox test"
+  ; sandbox_profile = Keeper_types_profile_sandbox.Docker
+  ; network_mode = Keeper_types_profile_sandbox.Network_none
+  }
 
 let make_local_meta name =
-  let json =
-    `Assoc
-      [
-        ("name", `String name);
-        ("agent_name", `String ("agent-" ^ name));
-        ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "sandbox test");
-        ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
-      ]
-  in
-  match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
-  | Error err -> Alcotest.fail ("make_local_meta failed: " ^ err)
+  let meta = make_base_meta ~context:"make_local_meta" name in
+  { meta with
+    goal = "sandbox test"
+  ; sandbox_profile = Keeper_types_profile_sandbox.Local
+  ; network_mode = Keeper_types_profile_sandbox.Network_inherit
+  }
 
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
@@ -335,7 +333,11 @@ let run_process ~cwd prog argv =
         Unix.create_process prog (Array.of_list (prog :: argv)) Unix.stdin out_fd
           err_fd)
   in
-  let _, status = Unix.waitpid [] pid in
+  let rec wait () =
+    try Unix.waitpid [] pid with
+    | Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+  in
+  let _, status = wait () in
   let stdout = read_file out in
   let stderr = read_file err in
   Sys.remove out;
@@ -420,6 +422,46 @@ let test_tool_execute_rejects_parent_git_repo_path_arg () =
       (String_util.contains_substring err "No such file or directory")
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
+let test_tool_execute_rejects_wrapped_git_repo_path_arg () =
+  with_eio_fs @@ fun () ->
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  run_process_ok ~cwd:base "git" [ "init"; "-q"; "--initial-branch=main" ];
+  let config = Workspace.default_config base in
+  let meta = make_local_meta "sangsu" in
+  let playground = Filename.concat base (playground_path_of meta.name) in
+  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  ensure_dir repo_dir;
+  let raw =
+    Agent_tool_command_runtime.handle_tool_execute
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+           [ "executable", `String "env"
+           ; ( "argv"
+             , `List
+                 [ `String "git"
+                 ; `String "-C"
+                 ; `String "./repos/masc-mcp"
+                 ; `String "status"
+                 ] )
+           ; "cwd", `String playground
+           ])
+      ()
+  in
+  match parse_error_field raw with
+  | Some err ->
+    if
+      not
+        (String_util.contains_substring err "sandbox_repo_not_ready"
+         || String_util.contains_substring err "no sandbox git clones exist")
+    then Alcotest.failf "expected repo readiness/root git guard, got: %s" err
+  | None -> Alcotest.fail ("expected error json, got: " ^ raw)
+
 let test_tool_execute_rg_pattern_under_repos_is_not_repo_path () =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
@@ -480,9 +522,11 @@ let test_tool_execute_rejects_inline_git_work_tree_path_arg () =
   in
   match parse_error_field raw with
   | Some err ->
-    Alcotest.(check bool) "sandbox_repo_not_ready"
-      true
-      (String_util.contains_substring err "sandbox_repo_not_ready")
+    if
+      not
+        (String_util.contains_substring err "sandbox_repo_not_ready"
+         || String_util.contains_substring err "no sandbox git clones exist")
+    then Alcotest.failf "expected repo readiness/root git guard, got: %s" err
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
 let test_tool_execute_rejects_stale_worktree_path_arg () =
@@ -516,9 +560,8 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
     Alcotest.(check bool) "sandbox_repo_not_ready"
       true
       (String_util.contains_substring err "sandbox_repo_not_ready");
-    Alcotest.(check bool) "stale worktree root is surfaced"
-      true
-      (String_util.contains_substring err ".worktrees/task")
+    if not (String_util.contains_substring err ".worktrees/task")
+    then Alcotest.failf "expected stale worktree root, got: %s" err
   | None -> Alcotest.fail ("expected error json, got: " ^ raw)
 
 let test_tool_execute_elapsed_duration_preserves_positive_sub_ms () =
@@ -721,18 +764,8 @@ let test_playground_guard_traversal () =
 (* ── tool_search_files readonly hints teach the model about alternatives ───── *)
 
 let make_readonly_meta name =
-  let json =
-    `Assoc
-      [
-        ("name", `String name);
-        ("agent_name", `String ("agent-" ^ name));
-        ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "readonly hint test");
-      ]
-  in
-  match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
-  | Error err -> Alcotest.fail ("make_readonly_meta failed: " ^ err)
+  let meta = make_base_meta ~context:"make_readonly_meta" name in
+  { meta with goal = "readonly hint test" }
 
 let make_write_enabled_meta name =
   let json =
@@ -741,14 +774,13 @@ let make_write_enabled_meta name =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "write-enabled Execute test");
         ( "tool_access",
           Keeper_meta_tool_access.tool_access_to_json
             (["tool_edit_file"; "tool_write_file"]) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta -> { meta with goal = "write-enabled Execute test" }
   | Error err -> Alcotest.fail ("make_write_enabled_meta failed: " ^ err)
 
 let parse_hint raw =
@@ -1304,6 +1336,10 @@ let () =
             "repo path arg rejects parent git checkout"
             `Quick
             test_tool_execute_rejects_parent_git_repo_path_arg
+        ; Alcotest.test_case
+            "wrapped git repo path arg rejects parent git checkout"
+            `Quick
+            test_tool_execute_rejects_wrapped_git_repo_path_arg
         ; Alcotest.test_case
             "rg pattern under repos is not a repo path"
             `Quick

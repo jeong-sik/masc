@@ -810,7 +810,7 @@ let prepare_agent_setup
       if tool_gate_requested && required_tool_names = []
       then
         generic_required_tool_candidate_names
-          ~has_current_task:(keeper_has_owned_active_task ())
+          ~has_current_task
           ~turn_affordances
           ~allowed_tool_names:turn_visible_tool_names
       else []

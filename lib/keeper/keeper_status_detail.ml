@@ -292,10 +292,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
       let include_compaction_history =
         get_bool args "include_compaction_history" (not fast)
       in
-      let models = Keeper_model_labels.configured_model_labels_of_meta m in
       let max_context_resolution =
-        Keeper_context_runtime.resolve_max_context_resolution
-          ~requested_override:m.max_context_override models
+        Keeper_context_runtime.resolve_max_context_resolution_of_meta m
       in
       let primary_max_context = max_context_resolution.effective_budget in
       let base_dir = session_base_dir config in

@@ -804,10 +804,9 @@ let runtime_budget_logged : (string * int * int, unit) Hashtbl.t =
 
 let resolved_max_context_for_turn
     ~(meta : keeper_meta)
-    (model_labels : string list) : int =
+    (_model_labels : string list) : int =
   let resolution =
-    Keeper_context_runtime.resolve_max_context_resolution
-      ~requested_override:meta.max_context_override model_labels
+    Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
   in
   if resolution.primary_budget < resolution.runtime_budget then begin
     let key = (meta.name, resolution.primary_budget, resolution.runtime_budget) in

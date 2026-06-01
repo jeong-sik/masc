@@ -301,6 +301,6 @@ val resolved_max_context_for_turn :
   meta:keeper_meta ->
   string list ->
   int
-(** Resolve the initial keeper turn context budget. Uses the first available
-    model in the runtime rather than the largest fallback model, so lifecycle
-    context math matches the provider that will receive the first request. *)
+(** Resolve the initial keeper turn context budget from the keeper's routed
+    runtime, so lifecycle context math matches the provider that will receive
+    the first request. *)

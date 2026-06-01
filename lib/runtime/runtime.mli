@@ -39,6 +39,13 @@ val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list
 val get_required_tool_runtime_ids : unit -> string list
 
+val get_runtime_by_id : string -> t option
+(** [get_runtime_by_id id] is the materialized runtime whose binding-key id
+    ["provider.model"] equals [id], or [None] if no such runtime is configured.
+    Used by the keeper turn driver to dispatch to the requested runtime (a
+    keeper's persona [model] selection or the default); [None] makes the driver
+    fail fast rather than silently substituting the default (RFC-0207). *)
+
 val get_default_runtime_id : unit -> string
 (** @raise Failure if {!init_default} has not run. No silent fallback
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a

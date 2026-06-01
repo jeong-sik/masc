@@ -112,11 +112,18 @@ let run_named
   ignore base_path;
   ignore wait_timeout_sec;
   ignore (accept : Agent_sdk_response.api_response -> bool);
-  match Runtime.get_default_runtime () with
+  (* RFC-0207: dispatch to the *requested* runtime (a keeper's persona [model]
+     selection or the global default, both produced by [runtime_id_of_meta])
+     instead of unconditionally the default.  A requested id that does not
+     resolve is a config/validation bug — fail-fast rather than silently
+     substituting the default (RFC-0206 §2.1: no Unknown→Permissive fallback). *)
+  match Runtime.get_runtime_by_id runtime_id with
   | None ->
     Error
       (Agent_sdk.Error.Internal
-         (Printf.sprintf "no default runtime configured (requested: %s)"
+         (Printf.sprintf
+            "requested runtime %S not found among configured runtimes \
+             (no silent fallback to default — RFC-0207/RFC-0206 §2.1)"
             runtime_id))
   | Some runtime ->
   let candidate =

@@ -1,0 +1,201 @@
+(* RFC-0208 P2 — differential-safety harness.
+
+   Purpose: gate the eventual retirement of the word-list floor (P6) on
+   *evidence*, not assertion. For a corpus of commands the harness:
+
+   1. asserts the monotone-safety invariant — the full composed verdict is
+      never below the legacy word-list floor (so the typed path can only
+      escalate, never silently downgrade); and
+   2. reports the floor-redundancy rate — the fraction of the corpus where
+      the typed model *alone* already dominates the floor. A command-class
+      may leave the floor only when that fraction reaches 100% for it; the
+      load-bearing remainder is the work-list for the typed model (P3+).
+
+   The harness is deterministic (curated corpus, no RNG) for
+   reproducibility. It runs on constructed IRs via the exported
+   classifiers, so it needs only masc_exec — independent of the keeper
+   build. *)
+
+module IR = Masc_exec.Shell_ir
+module Risk = Masc_exec.Shell_ir_risk
+module Typed = Masc_exec.Shell_ir_typed
+
+let bin s = Result.get_ok (Masc_exec.Exec_program.of_string s)
+
+let simple_ir bin_str args =
+  IR.Simple
+    { IR.bin = bin bin_str
+    ; args = List.map (fun a -> IR.Lit (a, IR.default_meta)) args
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+;;
+
+let pipeline_ir stages = IR.Pipeline (List.map (fun (b, a) -> simple_ir b a) stages)
+
+let rank = function
+  | Risk.R0_Read -> 0
+  | Risk.R1_Reversible_mutation -> 1
+  | Risk.R2_Irreversible -> 2
+  | Risk.Destructive_protected -> 3
+;;
+
+let max_rc a b = if rank a >= rank b then a else b
+let ge a b = rank a >= rank b
+
+(* A corpus entry is a single command or a pipeline of stages. *)
+type entry =
+  | S of string * string list
+  | P of (string * string list) list
+
+let ir_of = function
+  | S (b, a) -> simple_ir b a
+  | P stages -> pipeline_ir stages
+;;
+
+let words_of = function
+  | S (b, a) -> b :: a
+  | P stages -> List.concat_map (fun (b, a) -> b :: a) stages
+;;
+
+let label = function
+  | S (b, a) -> String.concat " " (b :: a)
+  | P stages ->
+    String.concat " | " (List.map (fun (b, a) -> String.concat " " (b :: a)) stages)
+;;
+
+(* Typed-only verdict: the per-stage [risk_of_typed] fold WITHOUT the
+   word-list floor. This is what [classify] would return if the floor were
+   removed — the quantity floor-retirement readiness is measured against. *)
+let rec typed_only (ir : IR.t) : Risk.risk_class =
+  match ir with
+  | IR.Simple s -> Risk.risk_of_typed (Typed.of_simple s)
+  | IR.Pipeline stages ->
+    List.fold_left (fun acc st -> max_rc acc (typed_only st)) Risk.R0_Read stages
+;;
+
+(* Representative keeper traffic + adversarial edge cases across the risk
+   spectrum. Grows as new command-classes are typed. *)
+let corpus =
+  [ (* reads *)
+    S ("ls", [ "-la" ])
+  ; S ("cat", [ "file.txt" ])
+  ; S ("rg", [ "pattern"; "lib/" ])
+  ; S ("git", [ "status" ])
+  ; S ("git", [ "log"; "--oneline" ])
+  ; S ("pwd", [])
+  ; S ("echo", [ "hello" ])
+  ; S ("wc", [ "-l"; "file" ])
+  ; S ("gh", [ "pr"; "view"; "123" ])
+  ; P [ ("ls", []); ("grep", [ "x" ]) ]
+  ; P [ ("cat", [ "f" ]); ("wc", [ "-l" ]) ]
+    (* reversible writes *)
+  ; S ("git", [ "commit"; "-m"; "msg" ])
+  ; S ("git", [ "push" ])
+  ; S ("git", [ "checkout"; "-b"; "feature" ])
+  ; S ("npm", [ "install" ])
+  ; S ("mkdir", [ "-p"; "dir" ])
+  ; S ("touch", [ "file" ])
+  ; S ("gh", [ "pr"; "create"; "--title"; "t" ])
+    (* irreversible *)
+  ; S ("git", [ "reset"; "--hard"; "HEAD~1" ])
+  ; S ("rm", [ "file" ])
+  ; S ("gh", [ "pr"; "merge"; "123" ])
+    (* destructive / privileged *)
+  ; S ("git", [ "push"; "--force"; "origin"; "main" ])
+  ; S ("rm", [ "-rf"; "dir" ])
+  ; S ("sudo", [ "rm"; "-rf"; "/" ])
+  ; P [ ("echo", [ "x" ]); ("sudo", [ "tee"; "/etc/passwd" ]) ]
+  ; P [ ("cat", [ "f" ]); ("git", [ "push"; "--force"; "origin"; "main" ]) ]
+    (* floor-load-bearing candidates: method/body buried in rest *)
+  ; S ("gh", [ "api"; "-X"; "DELETE"; "/repos/o/r" ])
+  ; S ("gh", [ "api"; "-X"; "POST"; "/repos/o/r/issues" ])
+  ; S ("gh", [ "api"; "graphql"; "-f"; "query=mutation{deleteRef}" ])
+    (* unknown binary -> Generic escape hatch *)
+  ; S ("my-custom-tool", [ "--help" ])
+  ; P [ ("ls", []); ("my-custom-tool", []) ]
+  ]
+;;
+
+(* Invariant: full verdict never drops below the floor or the typed-only
+   verdict. If this ever fails, the composed classifier silently weakened a
+   command — a safety regression. *)
+let test_monotone_safety () =
+  List.iter
+    (fun e ->
+       let ir = ir_of e in
+       let full = (Risk.classify (Risk.undecided ir)).Risk.risk in
+       let floor = Risk.classify_words (words_of e) in
+       let typed = typed_only ir in
+       Alcotest.(check bool)
+         (Printf.sprintf
+            "%s: full=%s >= floor=%s"
+            (label e)
+            (Risk.string_of_risk_class full)
+            (Risk.string_of_risk_class floor))
+         true
+         (ge full floor);
+       Alcotest.(check bool)
+         (Printf.sprintf
+            "%s: full=%s >= typed_only=%s"
+            (label e)
+            (Risk.string_of_risk_class full)
+            (Risk.string_of_risk_class typed))
+         true
+         (ge full typed))
+    corpus
+;;
+
+(* Report: typed coverage and floor-retirement readiness. The load-bearing
+   list is the set of commands the floor still classifies stricter than the
+   typed model — i.e. the floor cannot be dropped for these yet. *)
+let test_report_floor_readiness () =
+  let n = List.length corpus in
+  let typed_hits = List.filter (fun e -> Risk.typed_hit_of_ir (ir_of e)) corpus in
+  let load_bearing =
+    List.filter
+      (fun e -> not (ge (typed_only (ir_of e)) (Risk.classify_words (words_of e))))
+      corpus
+  in
+  let redundant = n - List.length load_bearing in
+  let pct x = 100.0 *. float_of_int x /. float_of_int n in
+  Printf.printf "\n=== RFC-0208 P2 differential-safety harness ===\n";
+  Printf.printf "corpus: %d commands\n" n;
+  Printf.printf
+    "typed_hit (non-Generic): %d/%d (%.0f%%)\n"
+    (List.length typed_hits)
+    n
+    (pct (List.length typed_hits));
+  Printf.printf
+    "floor-redundant (typed_only >= floor): %d/%d (%.0f%%)\n"
+    redundant
+    n
+    (pct redundant);
+  Printf.printf "floor still load-bearing: %d\n" (List.length load_bearing);
+  List.iter
+    (fun e ->
+       Printf.printf
+         "  - %s  (typed_only=%s, floor=%s)\n"
+         (label e)
+         (Risk.string_of_risk_class (typed_only (ir_of e)))
+         (Risk.string_of_risk_class (Risk.classify_words (words_of e))))
+    load_bearing;
+  Printf.printf
+    "floor retirement readiness: %s\n"
+    (if load_bearing = []
+     then "READY — typed model dominates the whole corpus"
+     else
+       Printf.sprintf
+         "NOT READY — %d command-class(es) still need the floor"
+         (List.length load_bearing));
+  (* The harness reports; it never auto-retires the floor. *)
+  Alcotest.(check bool) "harness ran over a non-empty corpus" true (n > 0)
+;;
+
+let () =
+  test_monotone_safety ();
+  test_report_floor_readiness ();
+  print_endline "test_shell_ir_differential: harness passed"
+;;

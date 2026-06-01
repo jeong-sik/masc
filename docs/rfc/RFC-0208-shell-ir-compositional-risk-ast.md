@@ -201,6 +201,28 @@ let rec typed_risk_of_ir (ir : Shell_ir.t) : risk_class =
   dominates the floor on the corpus.
 - Extends `audit-shell-ir-consumption.sh` with a runtime-coverage KPI.
 
+**Status: implemented** (`lib/exec/test/test_shell_ir_differential.ml`).
+The harness asserts the monotone-safety invariant over a curated corpus
+and reports floor-retirement readiness. Initial run (2026-06-01, 31-command
+corpus): typed_hit 90%, floor-redundant 77%, **NOT READY** — 7 command
+classes still need the floor because `risk_of_typed` does not yet read
+their typed fields:
+
+| command | typed_only | floor |
+|---------|-----------|-------|
+| `git checkout -b` | R0 | R1 |
+| `git reset --hard` | R0 | R2 |
+| `gh pr create` | R0 | R1 |
+| `gh pr merge` | R0 | R2 |
+| `gh api -X DELETE` | R0 | R2 |
+| `gh api -X POST` | R0 | R1 |
+| `gh api graphql` mutation | R0 | R2 |
+
+This is the evidence-driven work-list for P3: teach `risk_of_typed` to
+read `Git_checkout.new_branch`, `Git_reset.mode`, and the `Gh`
+method/graphql-body fields. A command class leaves the floor (P6) only
+when the harness shows it floor-redundant.
+
 ### P3 · morbig spike + CST→AST lowering · P4 · AST node extension ·
 ### P5 · spellbook spec registry · P6 · floor retirement (per-class, gated) ·
 ### P7 · risk-taxonomy unification (retire phantom 3-level) ·

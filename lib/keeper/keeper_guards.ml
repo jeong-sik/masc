@@ -277,17 +277,24 @@ type gate_decision_event = {
 let ignore_gate_decision (_ : gate_decision_event) = ()
 
 let notify_gate_decision on_gate_decision (event : gate_decision_event) =
-  try on_gate_decision event
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+  (* RFC-0106 P0 canary: use Cancel_safe.observe so Cancelled
+     propagates without per-site discipline drift. *)
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      (* Keep existing GuardsFailures metric for backward compatibility
+         (test_keeper_guards.ml asserts this counter). *)
       Prometheus.inc_counter
         Keeper_metrics.(to_string GuardsFailures)
         ~labels:[("keeper", event.keeper_name); ("site", "gate_observer")]
         ();
+      Prometheus.inc_counter
+        Keeper_metrics.(to_string LifecycleCallbackFailures)
+        ~labels:[("keeper", event.keeper_name); ("callback", "on_gate_decision")]
+        ();
       Log.Keeper.warn
         "keeper_guards: gate observer failed keeper=%s stage=%s tool=%s err=%s"
-        event.keeper_name event.stage event.tool_name (Printexc.to_string exn)
+        event.keeper_name event.stage event.tool_name (Printexc.to_string exn))
+    (fun () -> on_gate_decision event)
 
 (** Emit a [masc:keeper_gate] Event_bus Custom event.
 

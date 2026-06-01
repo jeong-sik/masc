@@ -505,17 +505,20 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
    | None -> ());
   (match entry.on_resolution with
    | Some f ->
-     (try f decision with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string ApprovalQueueFailures)
-          ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Resolution_callback) ]
-          ();
-        Log.Keeper.warn
-          "approval_queue: resolution callback failed id=%s err=%s"
-          entry.id
-          (Printexc.to_string exn))
+     Cancel_safe.observe
+       ~on_exn:(fun exn ->
+         Prometheus.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+           ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_resolution") ]
+           ();
+         Prometheus.inc_counter
+           Keeper_metrics.(to_string ApprovalQueueFailures)
+           ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Resolution_callback) ]
+           ();
+         Log.Keeper.warn
+           "approval_queue: resolution callback failed id=%s err=%s"
+           entry.id
+           (Printexc.to_string exn))
+       (fun () -> f decision)
    | None -> ());
   try
     Sse.broadcast
@@ -1053,17 +1056,20 @@ let expire_stale ~max_wait_s =
         | None -> ());
        match entry.on_resolution with
        | Some f ->
-         (try f (Agent_sdk.Hooks.Reject reason) with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Prometheus.inc_counter
-              Keeper_metrics.(to_string ApprovalQueueFailures)
-              ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Expire_callback) ]
-              ();
-            Log.Keeper.warn
-              "approval_queue: expire callback failed id=%s err=%s"
-              id
-              (Printexc.to_string exn))
+         Cancel_safe.observe
+           ~on_exn:(fun exn ->
+             Prometheus.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+               ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_approval_expire") ]
+               ();
+             Prometheus.inc_counter
+               Keeper_metrics.(to_string ApprovalQueueFailures)
+               ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Expire_callback) ]
+               ();
+             Log.Keeper.warn
+               "approval_queue: expire callback failed id=%s err=%s"
+               id
+               (Printexc.to_string exn))
+           (fun () -> f (Agent_sdk.Hooks.Reject reason))
        | None -> ())
     stale
 ;;

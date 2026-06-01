@@ -108,7 +108,7 @@ jobs:
             done
             opam install -y "${fmt_pkgs[@]}"
           }
-          install_from_opam_archives || install_from_git_tags
+          if ! install_from_opam_archives; then install_from_git_tags; fi
 
       - name: Check formatting (changed files only)
         if: steps.changed.outputs.no_files != 'true'

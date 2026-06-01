@@ -134,8 +134,8 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       override_fields: ['goal', 'instructions'],
     },
     tools: {
-      tool_access: ['keeper_fs_read'],
-      resolved_allowlist: ['keeper_fs_read'],
+      tool_access: ['tool_read_file'],
+      resolved_allowlist: ['tool_read_file'],
       tool_denylist: ['Execute'],
       active_masc_tool_count: 1,
       active_keeper_tool_count: 2,

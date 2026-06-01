@@ -57,41 +57,6 @@ let ensure_test_runtime =
            if not (Atomic.get initialized) then initialize_once ()))
 ;;
 
-let write_text_file path content =
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content)
-
-let runtime_toml =
-  {|
-[runtime]
-default = "test_provider.test_model"
-
-[providers.test_provider]
-display-name = "Test Provider"
-protocol = "provider_d-http"
-endpoint = "http://127.0.0.1:1"
-
-[models.test_model]
-api-name = "test-model"
-max-context = 8192
-tools-support = true
-streaming = true
-
-[test_provider.test_model]
-is-default = true
-max-concurrent = 1
-|}
-;;
-
-let init_runtime_default_for_tests () =
-  let path = Filename.temp_file "tool_task_runtime_" ".toml" in
-  write_text_file path runtime_toml;
-  match Runtime.init_default ~config_path:path with
-  | Ok () -> ()
-  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
-
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -2468,7 +2433,7 @@ let () = test "rfc_0034_v2_capacity_check_returns_some_at_limit" (fun () ->
        failwith "expected capacity_error at the per-goal limit"))
 
 let () =
-  init_runtime_default_for_tests ();
+  ensure_test_runtime ();
   Alcotest.run "Tool_task"
     [
       ( "coverage",

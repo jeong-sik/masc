@@ -225,8 +225,8 @@ include module type of Prometheus_transport_metric_names
 
 (** #13xxx: counter incremented every time the keeper dispatch layer
     denies a tool call because the tool is not in the keeper's allowlist.
-    Surfaces tool_access drift (e.g. [board_core] group omitted from the
-    keeper's [tool_groups]) and deny-list collisions as a Prometheus
+    Surfaces tool_access drift (e.g. a required board tool omitted from the
+    keeper's [tool_access] list) and deny-list collisions as a Prometheus
     alert rather than requiring operators to grep
     [keepers/*.decisions.jsonl] after the fact.
     Labels:

@@ -52,7 +52,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       goal: 'Ship stable keeper ops',
       short_goal: 'Diagnose agent liveness',
       mid_goal: 'Reduce restart confusion',
-      long_goal: 'Keep workspace collaboration stable',
+      long_goal: 'Keep workspace stable',
       will: 'Stay on call',
       needs: 'Accurate runtime state',
       desires: 'Clear operator feedback',
@@ -115,7 +115,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       presence_keepalive: true,
       presence_keepalive_sec: 30,
     },
-    workspace collaboration: {
+    workspace: {
       mention_targets: ['sangsu'],
       bound_workspace_ids: ['default'],
       active_goal_ids: ['goal-runtime'],
@@ -277,7 +277,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       cooldown_sec: 0,
     } as KeeperConfig['handoff'],
     runtime: {} as KeeperConfig['runtime'],
-    workspace collaboration: {
+    workspace: {
       mention_targets: [],
       bound_workspace_ids: [],
       active_goal_ids: [],
@@ -375,7 +375,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
   it('emits active_goal_ids when goal bindings change', () => {
     const c = makeKeeperConfigForSandbox({
       active_goal_ids: ['goal-a'],
-      workspace collaboration: {
+      workspace: {
         mention_targets: [],
         bound_workspace_ids: [],
         active_goal_ids: ['goal-a'],
@@ -513,12 +513,11 @@ describe('KeeperConfigPanel', () => {
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
     expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
-    expect(mocks.fetchRuntimeProfiles).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchRuntimeProfiles).not.toHaveBeenCalled()
     expect(container.textContent).toContain('편집 가능 범위')
-    expect(container.textContent).toContain('keeper TOML의 runtime_id')
+    expect(container.textContent).toContain('keeper_runtime.toml')
     expect(container.textContent).toContain('Runtime 선택')
     expect(container.textContent).toContain('tier-group.keeper_unified')
-    expect(container.textContent).toContain('broken_profile')
     expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
     expect(container.textContent).toContain('런타임 설정')
     expect(container.textContent).toContain('active_goal_ids')
@@ -541,41 +540,20 @@ describe('KeeperConfigPanel', () => {
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
   })
 
-  it('exposes runtime selection controls directly in the config panel', async () => {
+  it('renders runtime selection as read-only resolved config state', async () => {
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
 
     const runtimeSelect = Array.from(container.querySelectorAll('select')).find(
       (select) => !select.getAttribute('aria-label'),
-    ) as HTMLSelectElement | undefined
-    expect(runtimeSelect).toBeDefined()
-    expect(runtimeSelect?.value).toBe('tier-group.keeper_unified')
-
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(
-      makeKeeperConfig({
-        execution: {
-          models: ['llama:test-balanced'],
-          active_model: 'llama:test-balanced',
-          per_provider_timeout_sec: null,
-          per_provider_timeout_mode: 'turn_budget_heuristic',
-          verify: true,
-          selected_runtime_id: 'tier.resilient_breaker',
-          selected_runtime_canonical: 'tier.resilient_breaker',
-        },
-      }),
     )
-
-    runtimeSelect!.value = 'tier.resilient_breaker'
-    runtimeSelect!.dispatchEvent(new Event('change', { bubbles: true }))
-    await flush()
-    await flush()
-
-    expect(mocks.updateKeeperRuntime).toHaveBeenCalledWith(
-      'keeper-sangsu',
-      'tier.resilient_breaker',
-    )
-    expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
+    expect(runtimeSelect).toBeUndefined()
+    expect(container.textContent).toContain('선택 runtime')
+    expect(container.textContent).toContain('tier-group.keeper_unified')
+    expect(container.textContent).toContain('선택은 /tmp/config/keepers/default.toml 에서 관리됩니다.')
+    expect(mocks.updateKeeperRuntime).not.toHaveBeenCalled()
+    expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
   })
 
   it('patches sandbox runtime controls from the dashboard panel', async () => {

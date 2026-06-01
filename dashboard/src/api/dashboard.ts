@@ -2113,7 +2113,7 @@ function normalizeKeeperHookSlots(raw: unknown): Record<string, KeeperHookSlot> 
   return slots
 }
 
-function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['workspace collaboration']['active_goals'] {
+function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['workspace']['active_goals'] {
   return asRecordArray(raw)
     .map((item) => {
       const id = asNullableString(item.id)
@@ -2122,7 +2122,7 @@ function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['workspace
       if (!id || !title || !horizon) return null
       return { id, title, horizon }
     })
-    .filter((item): item is KeeperConfig['workspace collaboration']['active_goals'][number] => item !== null)
+    .filter((item): item is KeeperConfig['workspace']['active_goals'][number] => item !== null)
 }
 
 function normalizePromptBlock(raw: unknown, fallbackKey: string): { key: string; source: string; text: string } {
@@ -2193,7 +2193,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
   const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
-  const workspace collaboration = isRecord(data.workspace collaboration) ? data.workspace collaboration : {}
+  const workspace = isRecord(data.workspace) ? data.workspace : {}
   const tools = isRecord(data.tools) ? data.tools : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
@@ -2296,13 +2296,13 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       runtime_blocker_continue_gate: asLooseNullableBoolean(runtime.runtime_blocker_continue_gate),
     },
     runtime_trust: runtimeTrust,
-    workspace collaboration: {
-      mention_targets: normalizeStringList(workspace collaboration.mention_targets),
-      bound_workspace_ids: normalizeStringList(workspace collaboration.bound_workspace_ids),
-      active_goal_ids: normalizeStringList(workspace collaboration.active_goal_ids),
-      active_goals: normalizeKeeperConfigActiveGoals(workspace collaboration.active_goals),
-      active_goal_count: asInt(workspace collaboration.active_goal_count) ?? 0,
-      missing_active_goal_ids: normalizeStringList(workspace collaboration.missing_active_goal_ids),
+    workspace: {
+      mention_targets: normalizeStringList(workspace.mention_targets),
+      bound_workspace_ids: normalizeStringList(workspace.bound_workspace_ids),
+      active_goal_ids: normalizeStringList(workspace.active_goal_ids),
+      active_goals: normalizeKeeperConfigActiveGoals(workspace.active_goals),
+      active_goal_count: asInt(workspace.active_goal_count) ?? 0,
+      missing_active_goal_ids: normalizeStringList(workspace.missing_active_goal_ids),
     },
     tools: {
       tool_access: tools.tool_access ?? {},

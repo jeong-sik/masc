@@ -7,7 +7,7 @@ import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { replaceRoute, route } from '../router'
-import { workspace collaborationFsmSnapshot, goals, tasks } from '../store'
+import { workspaceFsmSnapshot, goals, tasks } from '../store'
 import { FilterChips } from './common/filter-chips'
 import { Planning } from './goals/planning'
 import { GoalTree } from './goals/goal-tree'
@@ -50,7 +50,7 @@ function updateViewParam(view: PlanningView): void {
   replaceRoute('workspace', params)
 }
 
-function workspace collaborationCount(
+function workspaceCount(
   snapshot: DashboardWorkspaceFsmSnapshot | null,
   key: 'products' | 'violations' | 'evidence' | 'warn' | 'error',
 ): number {
@@ -188,7 +188,7 @@ function WorkspaceViolationRow({ violation }: { violation: DashboardWorkspaceFsm
         <span class="font-mono text-2xs text-text-strong">${violation.code ?? violation.axis ?? '(unknown violation)'}</span>
         ${violation.axis ? html`<span class="text-3xs text-text-dim">${violation.axis}</span>` : null}
       </div>
-      <div class="mt-1 text-xs leading-relaxed text-text-body">${violation.message ?? 'workspace collaboration invariant 검토 필요.'}</div>
+      <div class="mt-1 text-xs leading-relaxed text-text-body">${violation.message ?? 'workspace invariant 검토 필요.'}</div>
       <div class="mt-1 truncate text-3xs text-text-dim" title=${refsLabel(violation.refs)}>${refsLabel(violation.refs)}</div>
       ${evidence.length > 0 ? html`
         <ul class="mt-2 grid gap-1">
@@ -202,14 +202,14 @@ function WorkspaceViolationRow({ violation }: { violation: DashboardWorkspaceFsm
 }
 
 function WorkspaceHealthPanel() {
-  const snapshot = workspace collaborationFsmSnapshot.value
+  const snapshot = workspaceFsmSnapshot.value
   if (!snapshot) return null
   const violations = snapshot.violations ?? []
   const topViolations = violations.slice(0, 5)
   const topEvidence = (snapshot.evidence ?? []).slice(0, 5)
-  const errorCount = workspace collaborationCount(snapshot, 'error')
-  const warnCount = workspace collaborationCount(snapshot, 'warn')
-  const evidenceCount = workspace collaborationCount(snapshot, 'evidence')
+  const errorCount = workspaceCount(snapshot, 'error')
+  const warnCount = workspaceCount(snapshot, 'warn')
+  const evidenceCount = workspaceCount(snapshot, 'evidence')
   return html`
     <section class="rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-3" aria-label="협력 상태">
       <div class="flex flex-wrap items-center justify-between gap-3">
@@ -218,10 +218,10 @@ function WorkspaceHealthPanel() {
         </div>
         <div class="flex flex-wrap items-center gap-2 text-3xs font-medium">
           <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
-            products ${workspace collaborationCount(snapshot, 'products')}
+            products ${workspaceCount(snapshot, 'products')}
           </span>
           <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
-            violations ${workspace collaborationCount(snapshot, 'violations')}
+            violations ${workspaceCount(snapshot, 'violations')}
           </span>
           <span class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--color-bg-elevated)] px-2 py-1 text-text-body">
             evidence ${evidenceCount}
@@ -244,7 +244,7 @@ function WorkspaceHealthPanel() {
       ` : html`
         <ul class="mt-2 grid gap-2">
           ${topViolations.map((violation, index) => html`
-            <${WorkspaceViolationRow} key=${`${violation.code ?? violation.axis ?? 'workspace collaboration'}-${index}`} violation=${violation} />
+            <${WorkspaceViolationRow} key=${`${violation.code ?? violation.axis ?? 'workspace'}-${index}`} violation=${violation} />
           `)}
         </ul>
       `}

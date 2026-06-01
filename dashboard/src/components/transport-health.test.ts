@@ -431,7 +431,7 @@ describe('filterHotSessions', () => {
   })
 
   it('matches substring of kind', () => {
-    const result = filterHotSessions(sessions, 'workspace')
+    const result = filterHotSessions(sessions, 'agent')
     expect(result).toHaveLength(1)
     expect(result[0]!.kind).toBe('agent_stream')
   })

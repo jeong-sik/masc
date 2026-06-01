@@ -60,7 +60,7 @@ describe('toolCategory', () => {
     expect(result.label).toBe('voice')
   })
 
-  it('matches workspace collaboration category', () => {
+  it('matches workspace category', () => {
     const result = toolCategory('task_claim')
     expect(result.label).toBe('workspace')
   })

@@ -1379,7 +1379,7 @@ export interface KeeperConfig {
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime
   runtime_trust?: KeeperConfigRuntimeTrust | null
-  workspace collaboration: KeeperConfigWorkspace
+  workspace: KeeperConfigWorkspace
   tools: KeeperConfigTools
   sources: KeeperConfigSources
   metrics: KeeperConfigMetrics

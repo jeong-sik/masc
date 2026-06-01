@@ -127,6 +127,12 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   },
   {
     mode: 'observe',
+    aliases: ['runtime'],
+    target: { tab: 'monitoring', params: { section: 'runtime' } },
+    coverage: 'covered',
+  },
+  {
+    mode: 'observe',
     aliases: ['audit'],
     target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit' } },
     coverage: 'covered',

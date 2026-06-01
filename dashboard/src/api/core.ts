@@ -438,7 +438,7 @@ function bootstrapInitializingPayload(path: string): unknown | null {
           done: 0,
           cancelled: 0,
         },
-        workspace collaboration_fsm: {
+        workspace_fsm: {
           schema_version: 1,
           mode: 'advisory',
           summary: {

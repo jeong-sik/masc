@@ -214,7 +214,7 @@ export function removeBoardPost(postId: string | undefined): void {
 
 export const goals = signal<Goal[]>([])
 export const goalsLoading = signal(false)
-export const workspace collaborationFsmSnapshot = signal<DashboardWorkspaceFsmSnapshot | null>(null)
+export const workspaceFsmSnapshot = signal<DashboardWorkspaceFsmSnapshot | null>(null)
 
 // --- OAS monitoring state ---
 
@@ -765,7 +765,7 @@ function normalizeWorkspaceFsmSnapshot(raw: unknown): DashboardWorkspaceFsmSnaps
 }
 
 function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
-  workspace collaborationFsmSnapshot.value = normalizeWorkspaceFsmSnapshot(data.workspace collaboration_fsm)
+  workspaceFsmSnapshot.value = normalizeWorkspaceFsmSnapshot(data.workspace_fsm)
   goals.value = (Array.isArray(data.goals) ? data.goals : [])
     .map((row): Goal | null => {
       if (!isRecord(row)) return null

@@ -17,6 +17,7 @@ import {
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { EmptyState } from './common/feedback-state'
+import { ringFocusClasses } from './common/ring'
 import { RouteLink } from './common/route-link'
 import { TimeAgo } from './common/time-ago'
 import {
@@ -1010,7 +1011,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   aria-pressed=${selected}
                   onClick=${() => setSelectedKey(row.key)}
                   onKeyDown=${handleRowKey}
-                  class="grid w-full cursor-pointer grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] lg:grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] lg:items-center lg:gap-3 ${selected ? 'bg-[var(--color-bg-surface)]' : 'bg-transparent'}"
+                  class="grid w-full cursor-pointer grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-fg', width: 2 })} lg:grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] lg:items-center lg:gap-3 ${selected ? 'bg-[var(--color-bg-surface)]' : 'bg-transparent'}"
                 >
                   <span class="flex min-w-0 items-center gap-3">
                     <span class="shrink-0">

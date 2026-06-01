@@ -395,7 +395,7 @@ export interface DashboardAttentionEvent {
 
 export interface DashboardNamespaceTruthRetention {
   scope?: string
-  workspace collaboration_root?: string
+  workspace_root?: string
   workspace_path?: string
   shell_input?: string
   execution_input?: string
@@ -673,7 +673,7 @@ export interface DashboardPlanningResponse {
     done?: number
     cancelled?: number
   }
-  workspace collaboration_fsm?: DashboardWorkspaceFsmSnapshot | null
+  workspace_fsm?: DashboardWorkspaceFsmSnapshot | null
 }
 
 export interface DashboardWorkspaceFsmRefs {
@@ -1028,7 +1028,7 @@ export interface DashboardGoalDetailResponse {
 
 
 export interface ServerStatus {
-  workspace collaboration_root?: string
+  workspace_root?: string
   workspace_path?: string
   workspace_differs?: boolean
   cluster?: string

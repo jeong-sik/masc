@@ -1,4 +1,4 @@
-/** Hand-written TypeScript types derived from proto/masc_workspace collaboration.proto.
+/** Hand-written TypeScript types derived from proto/masc_workspace.proto.
  *
  * These are used by the grpc-web transport until protoc codegen is wired.
  */

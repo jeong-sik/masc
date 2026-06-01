@@ -9,13 +9,12 @@
     the extraction in the first place. *)
 
 val read_file_default_max_bytes : int
-(** Default byte budget for [ReadFile] when the caller
-    omits [max_bytes]. Currently 20_000.
+(** Default byte budget for [Read] when the caller omits [max_bytes]. Currently
+    20_000.
 
     Pinned at the contract seam because the value appears in
-    two unrelated places: the JSON schema for [ReadFile]'s
-    [max_bytes] parameter (where it is rendered into the
-    [description] string for the LLM) and the runtime guard in
+    two unrelated places: the JSON schema for [Read]'s [max_bytes] parameter
+    (where it is rendered into the [description] string for the LLM) and the runtime guard in
     [Agent_tool_filesystem_runtime]. Surfacing it here keeps both consumers
     locked to the same number. *)
 

@@ -81,7 +81,8 @@ let sdk_termination_semantics = function
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
     Provider_wall_clock_timeout
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
     Oas_agent_execution_timeout
   | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
     Oas_turn_budget_exhausted
@@ -226,6 +227,14 @@ let agent_error_terminal_reason_code = function
       "agent_error_execution_timeout:elapsed_sec=%.1f,timeout_sec=%.1f,turn_count=%d,max_turns=%d"
       elapsed_sec
       timeout_sec
+      turn_count
+      max_turns
+  | Agent_sdk.Error.AgentExecutionIdleTimeout
+      { idle_sec; idle_timeout_sec; turn_count; max_turns } ->
+    Printf.sprintf
+      "agent_error_idle_timeout:idle_sec=%.1f,idle_timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      idle_sec
+      idle_timeout_sec
       turn_count
       max_turns
   | Agent_sdk.Error.ExitConditionMet { turn } ->

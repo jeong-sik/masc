@@ -165,9 +165,20 @@ let wrap_runtime_mcp_external_tool_hooks
     Some { hooks with before_turn_params }
 
 let max_execution_time_for_attempt ?per_provider_timeout_s () =
-  match per_provider_timeout_s with
-  | Some timeout_s -> Some timeout_s
-  | None -> Some (Keeper_runtime_resolved.oas_call_timeout_sec ())
+  (* OAS total-run ceiling for a provider attempt. The default cap is
+     removed (None): a blunt total wall-clock cancels a healthy streaming
+     turn mid-stream once the deadline passes, even while tokens are still
+     arriving — the AgentExecutionTimeout that killed long qwen reasoning
+     turns. Liveness instead comes from [stream_idle_timeout_s] (per-line
+     stall -> attempt fall-forward; always set, 120s default) and the
+     keeper stale watchdog (Mid_turn_no_progress / In_turn_hung; RFC-0022
+     attempt liveness). An explicit per-keeper [per_provider_timeout]
+     (profile config) is still honoured as the cap, so a ceiling is
+     re-addable per keeper via config rather than a hardcoded global
+     default. This value also feeds [body_timeout_s] (which falls back to
+     it below), so both OAS total caps drop together when no per-keeper
+     timeout is configured. *)
+  per_provider_timeout_s
 
 (** Run a single provider attempt within the runtime.
 
@@ -298,12 +309,16 @@ let run_try_provider
               max_execution_time_for_attempt ?per_provider_timeout_s ()
           ; body_timeout_s =
               (* SSOT: Keeper_runtime_resolved.body_timeout_override_sec
-                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). When unset
-                 (default), fall back to the per-attempt
-                 max_execution_time so this wire matches the PR #16071
-                 baseline. When set, the body-callback wall-clock fires
-                 before the turn cap, surfacing Retry.Timeout so runtime
-                 falls forward at the attempt boundary. *)
+                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). When set, the
+                 body-callback wall-clock fires before any turn cap,
+                 surfacing Retry.Timeout so runtime falls forward at the
+                 attempt boundary. When unset (default), it inherits the
+                 per-attempt cap — now [None] unless a per-keeper
+                 [per_provider_timeout] is configured (see
+                 [max_execution_time_for_attempt]). A blunt per-stream
+                 total body deadline is itself a mid-stream killer of a
+                 healthy reasoning burst, so it stays opt-in; stall
+                 detection is handled by [stream_idle_timeout_s]. *)
               (match Keeper_runtime_resolved.body_timeout_override_sec () with
                | Some _ as s -> s
                | None -> max_execution_time_for_attempt ?per_provider_timeout_s ())

@@ -246,6 +246,13 @@ let of_agent_error (e : Agent_sdk.Error.agent_error) : t =
     ; openai_kind = kind_server
     ; openai_code = Some "agent_execution_timeout"
     ; message }
+  | AgentExecutionIdleTimeout _ ->
+    (* No-progress idle timeout (agent_sdk 0.201.0); also a deadline, so
+       surface as 504 with a distinct code. *)
+    { http_status = `Gateway_timeout
+    ; openai_kind = kind_server
+    ; openai_code = Some "agent_idle_timeout"
+    ; message }
 
 let of_mcp_error (e : Agent_sdk.Error.mcp_error) : t =
   let message = Agent_sdk.Error.to_string (Agent_sdk.Error.Mcp e) in

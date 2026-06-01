@@ -79,6 +79,23 @@ let keeper_tool_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t opti
           @ typed_outcome_fields))
 ;;
 
+(* Caller-input validation errors carry [Tool_result.Policy_rejection]. Per
+   RFC-0062 §3.2 that variant is "permission, guardrail, validation reject", so
+   validation belongs there by original design — and the schema-layer producer
+   [Tool_input_validation] already emits Policy_rejection for invalid args.
+   Tagging makes the keeper *health* circuit breaker (Gate #1,
+   [Agent_tool_dispatch_runtime.should_apply_circuit_breaker_to_failure_payload])
+   exempt these: an LLM that sends malformed/missing args is making an input
+   mistake, not exhibiting a keeper-health fault. The per-(tool,args) breaker
+   (Gate #2) still counts them, so retrying the SAME bad args stays blocked. *)
+let validation_error_json message =
+  keeper_tool_result_json
+    ~failure_class:(Some Tool_result.Policy_rejection)
+    ~ok:false
+    ~message
+    ()
+;;
+
 let validate_goal_id config goal_id =
   match Goal_store.get_goal config ~goal_id with
   | Some _ -> Ok goal_id
@@ -460,12 +477,14 @@ let handle_keeper_task_tool
     let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in
     let priority = Safe_ops.json_int ~default:3 "priority" args |> max 1 |> min 5 in
     if title = ""
-    then error_json "title is required. Provide a clear, actionable task title."
+    then validation_error_json "title is required. Provide a clear, actionable task title."
     else if description = ""
-    then error_json "description is required. Explain what needs to be done and why."
+    then
+      validation_error_json
+        "description is required. Explain what needs to be done and why."
     else (
       match resolve_task_create_goal_id ~config ~meta args with
-      | Error message -> error_json message
+      | Error message -> validation_error_json message
       | Ok goal_id ->
           (* De-duplicated: this keeper-internal path now shares the canonical
              [Tool_task_args.parse_task_contract] used by the public
@@ -476,7 +495,7 @@ let handle_keeper_task_tool
              and tripped the keeper failure circuit breaker. Same lib, no
              dependency wall; the canonical parser handles [None | Some `Null]. *)
           (match Tool_task_args.parse_task_contract args with
-           | Error message -> error_json message
+           | Error message -> validation_error_json message
            | Ok contract ->
               let capacity_error =
                 let backlog = Workspace.read_backlog config in

@@ -912,7 +912,7 @@ masc_keeper_up(name: "sangsu")
 
 ### 8.3 base-path 주의사항
 
-`--base-path` CLI 인자는 workspace/base 경로다. runtime root는 항상 `<base-path>/.masc/`로 계산한다. `scripts/run-local.sh`는 `<target>/.masc/`를 기본값으로 쓰고, `start-masc-mcp.sh`는 shared/full-runtime 경로로 유지된다.
+`--base-path` CLI 인자는 workspace/base 경로다. runtime root는 항상 `<base-path>/.masc/`로 계산한다. `scripts/run-local.sh`는 `MASC_BASE_PATH=<target>` 및 `--base-path <target>`을 넘기며, 그 결과 data root가 `<target>/.masc/`가 된다. `start-masc-mcp.sh`는 shared/full-runtime 경로로 유지된다.
 
 dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이다. 공유 keeper 상태가 필요하면 shared/full-runtime 경로를 사용해야 한다.
 

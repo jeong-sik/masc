@@ -64,7 +64,7 @@ let render_memory_context
         Memory_oas_bridge.load_world_text ~backend:world_backend
           ~memory ~limit:world_limit)
     ; Memory_oas_bridge.load_episodes_text ~limit:episode_limit
-    ; Memory_oas_bridge.load_procedures_text ~agent_name ~limit:procedure_limit
+    ; Some (Procedural_memory.format_for_dna ~agent_name ~limit:procedure_limit)
     ]
     |> List.filter_map Fun.id
   in

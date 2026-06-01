@@ -171,21 +171,59 @@ let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : str
 let resolve_status_target (ctx : _ context) args =
   resolve_status_target_config ~config:ctx.config ~agent_name:ctx.agent_name args
 
-(** Hash the status-affecting args and the effective meta snapshot so different
+(** Hash the status-affecting args and the profile-overlay fields so different
     parameter combos (e.g. fast=true vs fast=false) and TOML/persona overlays
     get separate cache entries. Persisted JSON writes update [updated_at], but
     external [keepers/<name>.toml] edits do not. *)
-let hash_status_args _config resolved_name (meta : keeper_meta) args =
-  let effective_meta_hash =
-    meta
-    |> Keeper_meta_json.meta_to_json
-    |> Yojson.Safe.to_string
-    |> Digest.string
-    |> Digest.to_hex
+let profile_overlay_pair_json pairs =
+  `List (List.map (fun (key, value) -> `List [ `String key; `String value ]) pairs)
+
+let effective_meta_overlay_hash (meta : keeper_meta) =
+  let overlay_json =
+    `Assoc
+      [
+        ("goal", `String meta.goal);
+        ("short_goal", `String meta.short_goal);
+        ("mid_goal", `String meta.mid_goal);
+        ("long_goal", `String meta.long_goal);
+        ("will", `String meta.will);
+        ("needs", `String meta.needs);
+        ("desires", `String meta.desires);
+        ("instructions", `String meta.instructions);
+        ("social_model", `String meta.social_model);
+        ( "sandbox_profile",
+          `String (sandbox_profile_to_string meta.sandbox_profile) );
+        ("sandbox_image", Json_util.string_opt_to_json meta.sandbox_image);
+        ("network_mode", `String (network_mode_to_string meta.network_mode));
+        ("allowed_paths", Json_util.json_string_list meta.allowed_paths);
+        ("tool_access", Json_util.json_string_list meta.tool_access);
+        ("tool_denylist", Json_util.json_string_list meta.tool_denylist);
+        ("mention_targets", Json_util.json_string_list meta.mention_targets);
+        ("active_goal_ids", Json_util.json_string_list meta.active_goal_ids);
+        ( "proactive",
+          `Assoc
+            [
+              ("enabled", `Bool meta.proactive.enabled);
+              ("idle_sec", `Int meta.proactive.idle_sec);
+              ("cooldown_sec", `Int meta.proactive.cooldown_sec);
+            ] );
+        ("autoboot_enabled", `Bool meta.autoboot_enabled);
+        ( "telemetry_feedback_enabled",
+          Json_util.bool_opt_to_json meta.telemetry_feedback_enabled );
+        ( "telemetry_feedback_window_hours",
+          Json_util.int_opt_to_json meta.telemetry_feedback_window_hours );
+        ( "per_provider_timeout_s",
+          Json_util.float_opt_to_json meta.per_provider_timeout_s );
+        ("always_approve", Json_util.bool_opt_to_json meta.always_approve);
+        ("oas_env", profile_overlay_pair_json meta.oas_env);
+      ]
   in
+  Digest.string (Yojson.Safe.to_string overlay_json) |> Digest.to_hex
+
+let hash_status_args _config resolved_name (meta : keeper_meta) args =
   let parts = [
     resolved_name;
-    effective_meta_hash;
+    effective_meta_overlay_hash meta;
     (* Keeper_manual_reconcile.cache_key removed with reconcile system. *)
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);

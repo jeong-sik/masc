@@ -532,35 +532,9 @@ let read_recent_metrics_lines config keeper_name =
           ~site:"keeper_status_metrics" metrics_path exn_class;
         []
 
-let latest_snapshot_of_lines lines ~parse_snapshot ~has_legacy_shape =
+let latest_snapshot_of_lines lines ~parse_snapshot =
   let ordered = List.rev lines in
-  match List.find_map parse_snapshot ordered with
-  | Some _ as snapshot -> snapshot
-  | None ->
-      List.find_map
-        (fun line ->
-          try
-            let json = Yojson.Safe.from_string line in
-            let snapshot =
-              match json with
-              | `Assoc _ -> parse_snapshot line
-              | _ -> None
-            in
-            match snapshot with
-            | Some _ as snapshot -> snapshot
-            | None ->
-                if has_legacy_shape json then
-                  Some
-                    {
-                      latest_tool_names = [];
-                      latest_tool_call_count = Some 0;
-                      latest_action_source = None;
-                      tool_audit_source = None;
-                      tool_audit_at = json_iso_opt json;
-                    }
-                else None
-          with Yojson.Json_error _ -> None)
-        ordered
+  List.find_map parse_snapshot ordered
 
 let latest_tool_audit_snapshot_from_decisions config keeper_name =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
@@ -622,13 +596,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
             ~detail;
           None
     in
-    latest_snapshot_of_lines lines
-      ~parse_snapshot
-      ~has_legacy_shape:(fun json ->
-        Option.is_some (json_iso_opt json)
-        || Option.is_some (Safe_ops.json_string_opt "turn_mode" json)
-        || Option.is_some (Safe_ops.json_string_opt "selected_mode" json)
-        || Option.is_some (Safe_ops.json_string_opt "outcome" json))
+    latest_snapshot_of_lines lines ~parse_snapshot
     |> Option.map (fun snapshot ->
            {
              snapshot with
@@ -689,13 +657,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
           ~detail;
         None
   in
-  latest_snapshot_of_lines lines
-    ~parse_snapshot
-    ~has_legacy_shape:(fun json ->
-      Option.is_some (json_iso_opt json)
-      || Option.is_some (Safe_ops.json_string_opt "channel" json)
-      || Option.is_some (Safe_ops.json_string_opt "turn_mode" json)
-      || Option.is_some (Safe_ops.json_string_opt "work_kind" json))
+  latest_snapshot_of_lines lines ~parse_snapshot
   |> Option.map (fun snapshot ->
          {
            snapshot with

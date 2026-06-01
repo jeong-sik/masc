@@ -49,9 +49,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
   in
   let selected_runtime_id =
-    (* RFC-0206: [runtime_id] is the canonical selector.  The profile
-       [model] field is legacy bootstrap input kept only until profile TOML
-       is renamed. *)
+    (* RFC-0206: [runtime_id] is the canonical selector.  The profile record
+       still stores that parsed value in [model] until the internal field is
+       renamed. *)
     match p.runtime_id_opt, p.profile_defaults.model with
     | Some name, _ -> name
     | None, Some name -> name

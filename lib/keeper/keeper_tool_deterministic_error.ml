@@ -121,8 +121,6 @@ let reason_of_wire = function
   | "write_operation_gated" -> Some Write_operation_gated
   | "completion_contract_violation" -> Some Completion_contract_violation
   | "structured_tool_required" -> Some Structured_tool_required
-  | legacy when String.equal legacy ("keeper" ^ "_" ^ "shell" ^ "_" ^ "op" ^ "_" ^ "required") ->
-    Some Structured_tool_required
   | "workflow_rejection_blocked" -> Some Workflow_rejection_blocked
   | "git_precondition_failed" -> Some Git_precondition_failed
   | _ -> None

@@ -46,6 +46,11 @@ val get_runtime_by_id : string -> t option
     keeper's persona [model] selection or the default); [None] makes the driver
     fail fast rather than silently substituting the default (RFC-0207). *)
 
+val max_context_of_runtime_id : string -> int option
+(** Context window for the materialized runtime [id], or [None] when the id is
+    not configured.  Budgeting callers use this to size a per-keeper routed turn
+    against the same runtime that dispatch will use. *)
+
 val get_default_runtime_id : unit -> string
 (** @raise Failure if {!init_default} has not run. No silent fallback
     (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a

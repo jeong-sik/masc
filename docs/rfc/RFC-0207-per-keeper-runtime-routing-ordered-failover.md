@@ -1,3 +1,16 @@
+---
+rfc: "0207"
+title: "Per-keeper LLM runtime routing"
+status: Draft
+created: 2026-06-01
+updated: 2026-06-01
+author: jeong-sik
+supersedes: []
+superseded_by: null
+related: ["0001", "0206"]
+implementation_prs: []
+---
+
 # RFC-0207 — Per-keeper LLM runtime routing
 
 - Status: Part A implemented (per-keeper primary selection). Part B (ordered failover) deferred.

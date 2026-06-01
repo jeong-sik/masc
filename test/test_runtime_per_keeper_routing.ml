@@ -99,13 +99,13 @@ endpoint = "https://api.openai.example/v1"
 
 [models.qwen]
 api-name = "qwen"
-max-context = 65536
+max-context = 128000
 tools-support = true
 streaming = true
 
 [models.gpt]
 api-name = "gpt"
-max-context = 128000
+max-context = 64000
 tools-support = true
 streaming = true
 
@@ -171,6 +171,28 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
          (Runtime.get_runtime_by_id "bogus.binding")))
 ;;
 
+let test_context_budget_uses_selected_runtime () =
+  with_runtime_initialized (fun () ->
+    let default_budget =
+      Keeper_context_runtime.resolve_max_context_resolution
+        ~requested_override:None
+        [ "runpod_mtp.qwen" ]
+    in
+    let selected_budget =
+      Keeper_context_runtime.resolve_max_context_resolution
+        ~requested_override:None
+        [ "openai.gpt" ]
+    in
+    Alcotest.(check int)
+      "default runtime budget"
+      128000
+      default_budget.Keeper_context_runtime.effective_budget;
+    Alcotest.(check int)
+      "selected runtime budget"
+      64000
+      selected_budget.Keeper_context_runtime.effective_budget)
+;;
+
 let () =
   Alcotest.run
     "runtime_per_keeper_routing"
@@ -189,6 +211,10 @@ let () =
             "get_runtime_by_id resolves known / fails fast on unknown"
             `Quick
             test_get_runtime_by_id_resolves_and_fails_fast
+        ; Alcotest.test_case
+            "context budget uses selected runtime max-context"
+            `Quick
+            test_context_budget_uses_selected_runtime
         ] )
     ]
 ;;

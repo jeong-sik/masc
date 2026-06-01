@@ -122,6 +122,12 @@ let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) !runtimes_ref
 ;;
 
+let max_context_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | Some rt -> Some rt.model.max_context
+  | None -> None
+;;
+
 (* fail-fast: uninitialized = startup-ordering bug, NOT a recoverable
    condition. 이전 [| None -> "tool_strict"] 하드코딩 fallback 은 90 사이트에
    조작된 id 를 흘리는 Unknown→Permissive 안티패턴이라 제거했다 (RFC-0206 §2.1).

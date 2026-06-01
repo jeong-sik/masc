@@ -333,18 +333,26 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
       then dedupe_keep_order (model :: configured)
       else configured
 
-let resolve_max_context_resolution ~requested_override (_labels : string list)
+let resolve_max_context_resolution ~requested_override (labels : string list)
     : max_context_resolution =
   let min_keeper_context = Keeper_config.min_keeper_context_tokens in
   let clamp resolved =
     let local_clamped = resolved in
     max min_keeper_context local_clamped
   in
-  (* RFC-0206 single-binding: runtime label scans removed. Primary and runtime
-     budgets both resolve to the default runtime's model context window. *)
   let default_budget = Runtime.default_max_context () |> clamp in
-  let primary_budget = default_budget in
-  let runtime_budget = default_budget in
+  let runtime_budget =
+    labels
+    |> List.find_map (fun label ->
+           String.trim label
+           |> Runtime.max_context_of_runtime_id
+           |> Option.map clamp)
+    |> Option.value ~default:default_budget
+  in
+  (* RFC-0207: budget against the same per-keeper runtime id that dispatch uses.
+     If no label resolves yet (for config-less tests), retain the default
+     runtime/fallback budget. *)
+  let primary_budget = runtime_budget in
   let turn_budget =
     match requested_override with
     | Some requested when requested > 0 ->

@@ -44,7 +44,7 @@ docker run --rm -i \
       exit 1
     fi
     printf "OK: sandbox dune %s >= required %s\n" "$actual_dune" "$MASC_REQ_DUNE_VER"
-    test "$(cat demo.txt)" = $'"'"'alpha\nbeta\ngamma'"'"'
+    test "$(cat demo.txt)" = $'alpha\nbeta\ngamma'
     rg beta demo.txt >/dev/null
     printf "delta\n" >> append.txt
     test "$(cat append.txt)" = "delta"

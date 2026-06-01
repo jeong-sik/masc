@@ -50,6 +50,7 @@ let make_tool_bundle
     Some
       (Keeper_sandbox_factory.create
          ~default_network_override:Network_inherit
+         ~credential_mounts_enabled:true
          ~config
          ~meta
          ())

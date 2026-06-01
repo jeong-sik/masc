@@ -3,18 +3,20 @@ type t = {
   meta : Keeper_meta_contract.keeper_meta;
   turn_id : int;
   default_network_override : Keeper_types_profile_sandbox.network_mode option;
+  credential_mounts_enabled : bool;
   cache :
     ((bool * string), Keeper_turn_sandbox_runtime.t) Hashtbl.t;
   mutex : Eio.Mutex.t;
 }
 
-let create ?default_network_override
+let create ?default_network_override ?(credential_mounts_enabled = false)
     ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ?(turn_id = 0) () =
   {
     config;
     meta;
     turn_id;
     default_network_override;
+    credential_mounts_enabled;
     cache = Hashtbl.create 4;
     mutex = Eio.Mutex.create ();
   }
@@ -60,6 +62,7 @@ let resolve (t : t) ~cwd =
             ~config:t.config
             ~meta:t.meta
             ~network_mode:actual_network
+            ~credential_mounts_enabled:t.credential_mounts_enabled
             ~turn_id:t.turn_id
             ()
         in

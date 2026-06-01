@@ -133,9 +133,12 @@ let validate_repo_path_args_ready
       Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
       |> Filename.basename
     in
-    match Exec_policy.simple_literal_args simple with
-    | None -> []
-    | Some args -> Exec_policy.path_argument_values command_name args
+    if not (command_name = "git" || command_name = "gh")
+    then []
+    else
+      match Exec_policy.simple_literal_args simple with
+      | None -> []
+      | Some args -> Exec_policy.path_argument_values command_name args
   in
   let rec path_args = function
     | Masc_exec.Shell_ir.Simple simple ->

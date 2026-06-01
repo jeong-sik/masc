@@ -161,6 +161,16 @@ let git_c_path_of_stages stages =
   List.find_map (fun stage ->
     if stage.bin = "git" then scan_git_args stage.args else None) stages
 
+let normalize_cwd_relative_path ~cwd path =
+  let path = strip_simple_shell_quotes path |> String.trim in
+  let path = if Filename.is_relative path then Filename.concat cwd path else path in
+  Keeper_alerting_path.normalize_path_for_check path
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+let path_is_existing_dir path =
+  try Sys.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
+
 let normalize_repos_path_token token =
   let token = strip_simple_shell_quotes token |> String.trim in
   let token =
@@ -219,7 +229,16 @@ let resolve_sandbox_root_git_cwd_of_stages
   then (
     let explicit_git_c_path = git_c_path_of_stages stages in
     match explicit_git_c_path with
-    | Some path when not (bare_worktrees_path path) -> cwd, None
+    | Some path when not (bare_worktrees_path path) ->
+      let target = normalize_cwd_relative_path ~cwd:cwd_normalized path in
+      if path_is_existing_dir target
+      then cwd, None
+      else
+        target,
+        Some
+          (Printf.sprintf
+             "cwd_not_directory: %s (git -C target must be an existing directory)"
+             target)
     | _ -> (
       match repos_in_playground () with
       | [ single_repo ] ->

@@ -160,17 +160,7 @@ let docker_image_available image =
   in
   Sys.command cmd = 0
 
-let make_meta ?preset ~name ~sandbox () =
-  let tool_access_fields =
-    match preset with
-    | None -> []
-    | Some preset ->
-        [
-          ( "tool_access",
-            Keeper_meta_tool_access.tool_access_to_json
-              ([]) );
-        ]
-  in
+let make_meta ?(tool_access = []) ~name ~sandbox () =
   let json =
     `Assoc
       ([
@@ -181,8 +171,10 @@ let make_meta ?preset ~name ~sandbox () =
          ("allowed_paths", `List [ `String "*" ]);
          ( "sandbox_profile",
            `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
+         ( "tool_access",
+           Keeper_meta_tool_access.tool_access_to_json tool_access );
        ]
-      @ tool_access_fields)
+      )
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
@@ -220,7 +212,13 @@ let setup_with_preset ~sandbox f =
   let config = Workspace.default_config base in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_meta ~name:"minjae" ~sandbox () in
+  let meta =
+    make_meta
+      ~name:"minjae"
+      ~sandbox
+      ~tool_access:[ "tool_edit_file"; "tool_write_file" ]
+      ()
+  in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   f ~config ~meta ~playground
@@ -1128,6 +1126,7 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   let worktree = Filename.concat repo ".worktrees/task-229" in
   ensure_dir worktree;
   git_ok ~cwd:repo [ "init"; "-q" ];
+  git_ok ~cwd:worktree [ "init"; "-q" ];
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
@@ -1177,7 +1176,7 @@ let test_execute_git_push_requires_write_preset_before_docker () =
   Alcotest.(check (option string)) "readonly allowlist before docker"
     (Some
        "executable \"git\" not in readonly allowlist. This preset is read-only. \
-        Use Read/Grep when visible; otherwise ask for a \
+        Use ReadFile/SearchFiles when visible; otherwise ask for a \
         write/execute-capable schema before using git/gh.")
     (parse_string_field raw "error");
   let log = if Sys.file_exists log_path then read_file log_path else "" in

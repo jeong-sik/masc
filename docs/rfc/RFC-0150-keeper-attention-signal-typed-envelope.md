@@ -53,7 +53,7 @@ type attention_signal =
   | Paused_blocked of { since: float }
   | Provider_timeout of { elapsed_sec: float; budget_sec: float }
   | Social_model_fallback of { fallback_provider: string }
-  | Fd_pressure of { headroom_pct: float }
+  | Fd_pressure of { capacity_margin_pct: float }
   | Runtime_trust_snapshot_unavailable
   | Approval_pending of { id: string; tool_name: string; task_id: string option }
   | Continue_gate_required

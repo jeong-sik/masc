@@ -365,7 +365,11 @@ let render entries =
         module_entries;
       Buffer.add_char buf '\n')
     modules;
-  Buffer.contents buf
+  let rendered = Buffer.contents buf in
+  let len = String.length rendered in
+  if len >= 2 && String.sub rendered (len - 2) 2 = "\n\n" then
+    String.sub rendered 0 (len - 1)
+  else rendered
 
 let usage () =
   prerr_endline "usage: env_knob_catalog.exe <output-md-path> [--lib-dir DIR]";

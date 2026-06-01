@@ -58,24 +58,33 @@ let current_task_owner_hooks () = Atomic.get task_owner_hooks
 
 let blocked_task_ttl_seconds = 1800.
 
-let blocked_task_ids_table : (string, float) Hashtbl.t = Hashtbl.create 16
+let blocked_task_ids_table : (string * string, float) Hashtbl.t = Hashtbl.create 16
 let blocked_task_ids_mutex = Mutex.create ()
 
-let register_scope_blocked_task_id task_id =
-  Mutex.protect blocked_task_ids_mutex (fun () ->
-    Hashtbl.replace blocked_task_ids_table task_id (Time_compat.now ()))
+let blocked_task_key (config : Workspace.config) task_id = config.base_path, task_id
 
-let scope_blocked_task_ids () =
+let register_scope_blocked_task_id ?now config task_id =
+  let now = Option.value now ~default:(Time_compat.now ()) in
+  let key = blocked_task_key config task_id in
+  Mutex.protect blocked_task_ids_mutex (fun () ->
+    Hashtbl.replace blocked_task_ids_table key now)
+
+let scope_blocked_task_ids config =
+  let base_path = config.Workspace.base_path in
   Mutex.protect blocked_task_ids_mutex (fun () ->
     let now = Time_compat.now () in
     let expired = ref [] in
     Hashtbl.iter
-      (fun task_id blocked_at ->
+      (fun key blocked_at ->
         if now -. blocked_at > blocked_task_ttl_seconds then
-          expired := task_id :: !expired)
+          expired := key :: !expired)
       blocked_task_ids_table;
     List.iter (fun k -> Hashtbl.remove blocked_task_ids_table k) !expired;
-    Hashtbl.fold (fun task_id _ acc -> task_id :: acc) blocked_task_ids_table [])
+    Hashtbl.fold
+      (fun (entry_base_path, task_id) _ acc ->
+        if String.equal entry_base_path base_path then task_id :: acc else acc)
+      blocked_task_ids_table
+      [])
 
 open Tool_args
 
@@ -484,7 +493,7 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
   (* F4: exclude tasks that are scope-blocked by prior workflow rejections.
      The blocked-ID set is populated by [register_scope_blocked_task_id]
      when a [Block_scope] workflow rejection is recorded. *)
-  let exclude_task_ids = scope_blocked_task_ids () in
+  let exclude_task_ids = scope_blocked_task_ids ctx.config in
   let result =
     Workspace.claim_next_r
       ctx.config

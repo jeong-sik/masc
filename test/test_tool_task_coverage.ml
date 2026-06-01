@@ -1351,6 +1351,58 @@ let () = test "handle_claim_next_returns_claim_observation" (fun () ->
           = ctx.agent_name)
 )
 
+let () = test "handle_claim_next_excludes_scope_blocked_task" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Scope blocked") ])
+  in
+  let _ =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [ ("title", `String "Next eligible") ])
+  in
+  Tool_task.register_scope_blocked_task_id ctx.config "task-001";
+  let result =
+    Tool_task.handle_claim_next ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [])
+  in
+  let message = Tool_result.message result in
+  assert (Tool_result.is_success result);
+  if not (str_contains message "task-002")
+  then failwith ("expected scope-blocked task-001 to be skipped, got: " ^ message)
+)
+
+let () = test "scope_blocked_task_ids_expire" (fun () ->
+  let ctx = make_test_ctx () in
+  Tool_task.register_scope_blocked_task_id
+    ~now:(Time_compat.now () -. 3600.)
+    ctx.config
+    "task-001";
+  let ids = Tool_task.scope_blocked_task_ids ctx.config in
+  if List.mem "task-001" ids
+  then failwith "expected expired scope-blocked task id to be pruned"
+)
+
+let () = test "scope_blocked_task_ids_are_workspace_scoped" (fun () ->
+  let blocked_ctx = make_test_ctx_with_agent "blocked-agent" in
+  Tool_task.register_scope_blocked_task_id blocked_ctx.config "task-001";
+  let claim_ctx = make_test_ctx_with_agent "claim-agent" in
+  let _ =
+    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 claim_ctx
+      (`Assoc [ ("title", `String "Same raw id, different workspace") ])
+  in
+  let result =
+    Tool_task.handle_claim_next
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      claim_ctx
+      (`Assoc [])
+  in
+  let message = Tool_result.message result in
+  assert (Tool_result.is_success result);
+  if not (str_contains message "task-001")
+  then failwith ("expected workspace-local task-001 to remain claimable, got: " ^ message)
+)
+
 let () =
   test "handle_claim_next_ignores_required_tools_without_server_surface" (fun () ->
     let ctx = make_test_ctx () in

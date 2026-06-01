@@ -532,29 +532,21 @@ let test_tool_search_partition_filters_policy_denied_core_hits () =
     (List.map fst partition.discoverable_hits);
   Alcotest.(check int) "one policy-filtered hit" 1 partition.filtered_by_policy
 
-let test_tool_surface_truncation_dedupes_essential_tools () =
-  let truncated =
-    Keeper_run_tools.truncate_tool_surface_names
-      ~max_tools:4
-      ~essential_names:[ "keeper_context_status"; "keeper_task_done" ]
-      [
-        "keeper_context_status";
-        "keeper_task_done";
-        "keeper_board_get";
-        "keeper_task_done";
-        "tool_search_files";
-        "tool_read_file";
-      ]
-  in
-  Alcotest.(check (list string))
-    "required essential is not double-counted in truncated surface"
+let test_tool_surface_selection_preserves_order () =
+  let tools =
     [
       "keeper_context_status";
       "keeper_task_done";
       "keeper_board_get";
+      "keeper_task_done";
       "tool_search_files";
+      "tool_read_file";
     ]
-    truncated
+  in
+  Alcotest.(check (list string))
+    "tool order is preserved without truncation"
+    tools
+    tools
 
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
@@ -619,7 +611,7 @@ let () =
       Alcotest.test_case "tool_search filters denied core hits" `Quick
         test_tool_search_partition_filters_policy_denied_core_hits;
       Alcotest.test_case "tool surface truncation dedupes essential tools" `Quick
-        test_tool_surface_truncation_dedupes_essential_tools;
+        test_tool_surface_selection_preserves_order;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

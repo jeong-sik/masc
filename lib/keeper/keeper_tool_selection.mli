@@ -6,7 +6,7 @@
 val allow_deterministic_tool : query_text:string -> string -> bool
 
 (** Deterministic BM25 prefilter: pull tools from [search_index] that are NOT
-    in [core], pass [allow_deterministic_tool], and cap at [selection_limit]. *)
+    in [core], pass [allow_deterministic_tool], and limit to [selection_limit]. *)
 val deterministic_prefilter_names
   :  search_index:Agent_sdk.Tool_index.t
   -> query_text:string
@@ -16,8 +16,7 @@ val deterministic_prefilter_names
 
 (** Merge the four tool selection layers (core / deterministic_prefilter /
     discovered / llm_selected) into a single ordered, deduped list.
-    BM25-relevant tools are placed ahead of generic core to survive downstream
-    max_tools truncation. *)
+    BM25-relevant tools are placed ahead of generic core. *)
 val merge_tool_selection_boundary
   :  core:string list
   -> deterministic_prefilter:string list

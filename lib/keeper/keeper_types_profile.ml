@@ -467,9 +467,13 @@ let profile_cache_scope () =
       [ resolution.config_root.path; resolution.personas.path ]
   with
   | exn ->
+    (* resolver failure fallback uses env only as a cache-key salt;
+       profile parsing remains explicit and the cache miss path revalidates
+       file fingerprints before returning a cached result. NDT-OK *)
     String.concat "|"
       [
         Option.value ~default:"" (Sys.getenv_opt "MASC_CONFIG_DIR");
+        (* NDT-OK: same cache-key salt fallback as MASC_CONFIG_DIR above. *)
         Option.value ~default:"" (Sys.getenv_opt "MASC_PERSONAS_DIR");
         Printexc.to_string exn;
       ]
@@ -510,7 +514,8 @@ let persona_profile_candidate_paths name =
   |> List.map (fun root ->
        Filename.concat (Filename.concat root name) "profile.json")
 
-let profile_dependency_paths ~name ~primary_toml_path result =
+let profile_dependency_paths ~name ~primary_toml_path
+    (result : (keeper_profile_defaults, string) result) =
   let paths =
     match primary_toml_path, result with
     | Some toml_path, Ok defaults ->

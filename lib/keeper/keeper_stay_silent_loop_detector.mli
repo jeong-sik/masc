@@ -3,10 +3,10 @@
     masc-improver evidence from 2026-04-24: a single keeper spent
     13.3 hours of LLM time and burned 4.19M tokens across 40+
     consecutive [stay_silent] turns, because the scheduler kept
-    firing ticks on a keeper whose preset could not satisfy any
+    firing ticks on a keeper whose tool_access could not satisfy any
     backlog task.
 
-    The scheduler-side fix (O(1) preset gate, quarantine, backlog
+    The scheduler-side fix (O(1) tool_access gate, quarantine, backlog
     routing) is large and belongs in a follow-up. This module
     closes the **observability** half so runtime can detect the
     loop instead of letting it burn silently in the background.

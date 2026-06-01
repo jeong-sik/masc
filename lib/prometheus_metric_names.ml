@@ -299,7 +299,7 @@ let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
    [claim_only_after_owned_task], [tool_surface_mismatch],
    [missing_required_tool_use]).  The fleet histogram of
    (keeper, contract_status) pairs tells the operator which
-   keeper tool_presets need reshaping for the current task mix
+   keeper tool surfaces need reshaping for the current task mix
    without masking the strict gate. *)
 (* #10474: no_tool_capable_provider and proactive cycle outcome counters.
    [Keeper_metrics.(to_string NoToolProvider)] fires every time a keeper's

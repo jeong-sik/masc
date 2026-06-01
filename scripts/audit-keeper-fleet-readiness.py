@@ -2,9 +2,9 @@
 """Audit live keeper fleet readiness from on-disk MASC runtime state.
 
 This is intentionally read-only. It separates configuration readiness
-(Docker, repo CLI identity, repo-mutation-capable preset) from durable evidence
-(recent turns, board actions, persisted PR references) so operators do not
-mistake a configured capability for proof that every keeper already used it.
+(Docker, repo CLI identity, repo-mutation-capable tool access) from durable
+evidence (recent turns, board actions, persisted PR references) so operators do
+not mistake a configured capability for proof that every keeper already used it.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from typing import Any
 import tomllib
 
 
-PR_CAPABLE_PRESETS = {"research", "delivery", "full"}
+REPO_MUTATION_TOOLS = {"tool_execute", "tool_edit_file", "tool_write_file"}
 BOARD_TOOLS = {
     "keeper_board_post",
     "keeper_board_comment",
@@ -79,7 +79,8 @@ class KeeperAudit:
     runtime_path: str | None
     sandbox_profile: str | None
     network_mode: str | None
-    tool_preset: str | None
+    tool_access: list[str] | None
+    repo_mutation_tools: list[str]
     repo_cli_identity: str | None
     github_account_login: str | None
     git_identity_mode: str | None
@@ -289,23 +290,47 @@ def jsonl_has_object(path: Path) -> bool:
     return False
 
 
-def tool_preset_from_config(config: dict[str, Any]) -> str | None:
-    tool_access = config.get("tool_access")
-    if isinstance(tool_access, dict):
-        preset = tool_access.get("preset")
-        if isinstance(preset, str) and preset:
-            return preset
-    preset = config.get("tool_preset")
-    return preset if isinstance(preset, str) and preset else None
+def string_list_value(value: Any) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    tools: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            return None
+        item = item.strip()
+        if item:
+            tools.append(item)
+    return tools
 
 
-def tool_preset_from_runtime(runtime: dict[str, Any]) -> str | None:
-    tool_access = runtime.get("tool_access")
-    if isinstance(tool_access, dict):
-        preset = tool_access.get("preset")
-        if isinstance(preset, str) and preset:
-            return preset
-    return string_field(runtime, "tool_preset")
+def tool_access_from_config(
+    config: dict[str, Any],
+) -> tuple[list[str] | None, list[str]]:
+    raw = config.get("tool_access")
+    if raw is None:
+        return None, []
+    tools = string_list_value(raw)
+    if tools is None:
+        return None, ["tool_access_config_invalid"]
+    return tools, []
+
+
+def tool_access_from_runtime(
+    runtime: dict[str, Any],
+) -> tuple[list[str] | None, list[str]]:
+    raw = runtime.get("tool_access")
+    if raw is None:
+        return None, []
+    tools = string_list_value(raw)
+    if tools is None:
+        return None, ["tool_access_runtime_invalid"]
+    return tools, []
+
+
+def repo_mutation_tools(tool_access: list[str] | None) -> list[str]:
+    if tool_access is None:
+        return []
+    return sorted(REPO_MUTATION_TOOLS.intersection(tool_access))
 
 
 def tools_from_decision(row: dict[str, Any]) -> list[str]:
@@ -1079,7 +1104,14 @@ def audit_keeper(
     network_mode = string_field(runtime, "network_mode") or string_field(
         config, "network_mode"
     )
-    tool_preset = tool_preset_from_runtime(runtime) or tool_preset_from_config(config)
+    config_tool_access, config_tool_access_failures = tool_access_from_config(config)
+    runtime_tool_access, runtime_tool_access_failures = tool_access_from_runtime(
+        runtime
+    )
+    tool_access = (
+        runtime_tool_access if runtime_tool_access is not None else config_tool_access
+    )
+    mutation_tools = repo_mutation_tools(tool_access)
     repo_cli_identity = string_field(runtime, "repo_cli_identity") or string_field(
         config, "repo_cli_identity"
     )
@@ -1091,11 +1123,16 @@ def audit_keeper(
         failures.append("sandbox_not_docker")
     if network_mode != "inherit":
         failures.append("network_not_inherit")
-    if tool_preset not in PR_CAPABLE_PRESETS:
-        failures.append("preset_not_pr_capable")
+    failures.extend(config_tool_access_failures)
+    failures.extend(runtime_tool_access_failures)
+    if not mutation_tools:
+        failures.append("repo_mutation_tools_missing")
     if not repo_cli_identity:
         failures.append("repo_cli_identity_missing")
-    elif forbidden_repo_cli_identities and repo_cli_identity in forbidden_repo_cli_identities:
+    elif (
+        forbidden_repo_cli_identities
+        and repo_cli_identity in forbidden_repo_cli_identities
+    ):
         failures.append(f"repo_cli_identity_forbidden_{repo_cli_identity}")
     if git_identity_mode != "repo_cli_identity":
         failures.append("git_identity_mode_not_repo_cli_identity")
@@ -1209,7 +1246,8 @@ def audit_keeper(
         runtime_path=str(runtime_path) if runtime_path.exists() else None,
         sandbox_profile=sandbox_profile,
         network_mode=network_mode,
-        tool_preset=tool_preset,
+        tool_access=tool_access,
+        repo_mutation_tools=mutation_tools,
         repo_cli_identity=repo_cli_identity,
         github_account_login=github_account_login,
         git_identity_mode=git_identity_mode,
@@ -1350,8 +1388,15 @@ def print_text(report: dict[str, Any]) -> None:
         marker = "OK" if not failures else "FAIL"
         age = keeper["last_turn_age_hours"]
         age_label = "unknown" if age is None else f"{age:.2f}h"
+        tool_access_label = (
+            "default"
+            if keeper["tool_access"] is None
+            else str(len(keeper["tool_access"]))
+        )
+        repo_tools_label = ",".join(keeper["repo_mutation_tools"]) or "none"
         print(
-            "- {name}: {marker} preset={preset} sandbox={sandbox}/{network} "
+            "- {name}: {marker} tool_access={tool_access} repo_tools={repo_tools} "
+            "sandbox={sandbox}/{network} "
             "gh={github} recent={recent} age={age} board={board} "
             "web_search={web_search} "
             "gh_account={github_account} "
@@ -1361,7 +1406,8 @@ def print_text(report: dict[str, Any]) -> None:
             "history={history} tool_call_log={tool_call_log}".format(
                 name=keeper["name"],
                 marker=marker,
-                preset=keeper["tool_preset"],
+                tool_access=tool_access_label,
+                repo_tools=repo_tools_label,
                 sandbox=keeper["sandbox_profile"],
                 network=keeper["network_mode"],
                 github=keeper["repo_cli_identity"],
@@ -1413,7 +1459,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--max-silence-hours", type=float, default=2400.0)
     parser.add_argument(
+        "--forbid-repo-cli-identity",
         "--forbid-github-identity",
+        dest="forbid_repo_cli_identity",
         action="append",
         default=[],
         metavar="IDENTITY",

@@ -76,7 +76,7 @@ let test_union_of_empties_matches_nothing () =
     (Tool_access_policy.selector_matches_name sel "anything")
 
 (* ================================================================ *)
-(* Policy presets                                                     *)
+(* Policy helpers                                                     *)
 (* ================================================================ *)
 
 let test_empty_policy_denies_everything () =
@@ -479,6 +479,28 @@ let make_gate_test_meta ?(name = "test-gate") () : Keeper_meta_contract.keeper_m
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_gate_test_meta failed: %s" e)
 
+let dispatch_tool_access =
+  [ "masc_goal_list"
+  ; "masc_task_history"
+  ; "masc_plan_get"
+  ; "masc_plan_get_task"
+  ; "masc_goal_upsert"
+  ; "masc_goal_transition"
+  ; "masc_goal_verify"
+  ; "masc_keeper_list"
+  ; "masc_keeper_status"
+  ; "masc_keeper_msg"
+  ; "masc_keeper_msg_result"
+  ; "tool_read_file"
+  ; "tool_search_files"
+  ]
+
+let workspace_read_tool_access =
+  [ "masc_task_history"; "masc_plan_get"; "masc_plan_get_task" ]
+
+let delivery_tool_access =
+  [ "masc_goal_list"; "masc_goal_upsert"; "masc_goal_transition"; "masc_goal_verify" ]
+
 let test_core_tools_are_core () =
   init_keeper_tool_registry ();
   let core = Agent_tool_dispatch_runtime.core_always_tools in
@@ -513,7 +535,7 @@ let test_universe_superset_of_policy () =
   check bool "universe >= policy" true
     (List.length universe >= List.length policy)
 
-let test_minimal_preset_includes_core_masc () =
+let test_minimal_tool_access_universe_includes_core_masc () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-minimal" () in
   let meta = { base with
@@ -531,10 +553,10 @@ let test_minimal_preset_includes_core_masc () =
     (List.mem "masc_broadcast" universe)
 
 (* ================================================================ *)
-(* Preset-scoped universe (#4637)                                    *)
+(* Tool-access scoped universe (#4637)                               *)
 (* ================================================================ *)
 
-let test_preset_universe_subset_of_global () =
+let test_tool_access_universe_subset_of_global () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
@@ -547,10 +569,10 @@ let test_preset_universe_subset_of_global () =
     List.filter (fun name -> not (List.mem name global)) scoped
   in
   check (list string) "scoped is subset of global" [] outside;
-  check bool "scoped < global for non-Full preset" true
+  check bool "scoped < global for narrow tool_access" true
     (List.length scoped < List.length global)
 
-let test_preset_universe_includes_core () =
+let test_empty_tool_access_scope_keeps_core_only () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-scoped" () in
   let meta = { base with
@@ -558,22 +580,24 @@ let test_preset_universe_includes_core () =
     tool_denylist = [];
   } in
   let scoped = Agent_tool_dispatch_runtime.keeper_tool_search_scope meta in
-  check bool "masc_status in scoped" true
+  check bool "masc_status requires explicit access" false
     (List.mem "masc_status" scoped);
   check bool "masc_heartbeat removed from scoped" false
     (List.mem "masc_heartbeat" scoped);
-  check bool "masc_tool_help in scoped" true
+  check bool "masc_tool_help requires explicit access" false
     (List.mem "masc_tool_help" scoped);
+  check bool "extend_turns remains core scoped" true
+    (List.mem "extend_turns" scoped);
   check bool "masc_broadcast excluded from scoped" false
     (List.mem "masc_broadcast" scoped)
 
-let test_preset_universe_sizes () = ()
+let test_tool_access_universe_sizes () = ()
 
-let test_dispatch_preset_routes_pm_tools () =
+let test_dispatch_tool_access_routes_pm_tools () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-dispatch" () in
   let meta = { base with
-    tool_access = [];
+    tool_access = dispatch_tool_access;
     tool_denylist = [];
   } in
   let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -612,11 +636,11 @@ let test_dispatch_preset_routes_pm_tools () =
   check bool "dispatch excludes code git" false
     (List.mem "tool_execute" allowed)
 
-let test_delivery_preset_routes_workspace_read_models () =
+let test_delivery_tool_access_routes_workspace_read_models () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta ~name:"test-delivery-workspace-read" () in
   let meta = { base with
-    tool_access = [];
+    tool_access = delivery_tool_access;
     tool_denylist = [];
   } in
   let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -629,7 +653,7 @@ let test_delivery_preset_routes_workspace_read_models () =
   check bool "delivery includes goal verify" true
     (List.mem "masc_goal_verify" allowed)
 
-let test_workspace_presets_route_plan_history_reads () =
+let test_workspace_tool_access_routes_plan_history_reads () =
   init_keeper_tool_registry ();
   List.iter
     (fun (label, _) ->
@@ -637,7 +661,7 @@ let test_workspace_presets_route_plan_history_reads () =
       let meta =
         {
           base with
-          tool_access = [];
+          tool_access = workspace_read_tool_access;
           tool_denylist = [];
         }
       in
@@ -650,9 +674,9 @@ let test_workspace_presets_route_plan_history_reads () =
         (List.mem "masc_plan_get_task" allowed);
       check bool (label ^ " does not include goal upsert") false
         (List.mem "masc_goal_upsert" allowed))
-    [ ("social", ()); ("messaging", ()) ]
+    [ ("board", ()); ("workspace", ()) ]
 
-let test_preset_universe_superset_of_policy () =
+let test_tool_access_universe_superset_of_policy () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
@@ -664,14 +688,15 @@ let test_preset_universe_superset_of_policy () =
   let missing =
     List.filter (fun name -> not (List.mem name scoped)) policy
   in
-  check (list string) "all policy tools in preset universe" [] missing
+  check (list string) "all policy tools in scoped universe" [] missing
 
 let test_registered_inline_board_tool_survives_filter () =
   init_keeper_tool_registry ();
   Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let base = make_gate_test_meta ~name:"test-board-inline" () in
   let meta = { base with
-    tool_access = [ "keeper_board_post"; "masc_agents" ];
+    tool_access =
+      [ "keeper_board_post"; "masc_agents"; "masc_not_registered_inline" ];
     tool_denylist = [];
   } in
   let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -679,8 +704,10 @@ let test_registered_inline_board_tool_survives_filter () =
     (List.mem "keeper_board_post" allowed);
   check bool "raw masc_board_post filtered out" false
     (List.mem "masc_board_post" allowed);
+  check bool "explicit registered MASC tool survives" true
+    (List.mem "masc_agents" allowed);
   check bool "unsupported inline tool removed" false
-    (List.mem "masc_agents" allowed)
+    (List.mem "masc_not_registered_inline" allowed)
 
 (* ================================================================ *)
 (* Runner                                                            *)
@@ -713,7 +740,7 @@ let () =
           test_case "union of empties" `Quick
             test_union_of_empties_matches_nothing;
         ] );
-      ( "policy_presets",
+      ( "policy_helpers",
         [
           test_case "empty denies everything" `Quick
             test_empty_policy_denies_everything;
@@ -795,14 +822,14 @@ let () =
           test_case "resolve disjoint is base" `Quick
             test_resolve_diff_disjoint_is_base;
         ] );
-      ( "preset_scope",
+      ( "tool_access_scope",
         [
           test_case "dispatch routes PM tools" `Quick
-            test_dispatch_preset_routes_pm_tools;
+            test_dispatch_tool_access_routes_pm_tools;
           test_case "delivery routes workspace read models" `Quick
-            test_delivery_preset_routes_workspace_read_models;
-          test_case "workspace presets route plan/history reads" `Quick
-            test_workspace_presets_route_plan_history_reads;
+            test_delivery_tool_access_routes_workspace_read_models;
+          test_case "workspace tool_access routes plan/history reads" `Quick
+            test_workspace_tool_access_routes_plan_history_reads;
         ] );
       ( "inter_diff_composition",
         [
@@ -830,23 +857,23 @@ let () =
             test_core_tools_are_core;
           test_case "universe superset of policy" `Quick
             test_universe_superset_of_policy;
-          test_case "minimal preset includes core masc" `Quick
-            test_minimal_preset_includes_core_masc;
+          test_case "minimal tool_access universe includes core masc" `Quick
+            test_minimal_tool_access_universe_includes_core_masc;
           test_case "registered inline board tool survives filter" `Quick
             test_registered_inline_board_tool_survives_filter;
         ] );
       (* ======================================================== *)
-      (* Preset-scoped universe (#4637)                            *)
+      (* Tool-access scoped universe (#4637)                       *)
       (* ======================================================== *)
-      ( "preset_scoped_universe",
+      ( "tool_access_scoped_universe",
         [
           test_case "scoped subset of global" `Quick
-            test_preset_universe_subset_of_global;
-          test_case "scoped includes core" `Quick
-            test_preset_universe_includes_core;
-          test_case "preset size ordering" `Quick
-            test_preset_universe_sizes;
+            test_tool_access_universe_subset_of_global;
+          test_case "empty scope keeps core only" `Quick
+            test_empty_tool_access_scope_keeps_core_only;
+          test_case "tool_access size ordering" `Quick
+            test_tool_access_universe_sizes;
           test_case "scoped superset of policy" `Quick
-            test_preset_universe_superset_of_policy;
+            test_tool_access_universe_superset_of_policy;
         ] );
     ]

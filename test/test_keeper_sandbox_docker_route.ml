@@ -188,24 +188,6 @@ let make_meta ?tool_access ~name ~sandbox () =
     }
   | Error e -> Alcotest.fail e
 
-let test_make_meta_tool_access_matches_production_default () =
-  let meta =
-    make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker ()
-  in
-  Alcotest.(check (list string))
-    "missing tool_access uses production default"
-    (Keeper_meta_tool_access.default_tool_access_of_meta_json ())
-    meta.tool_access;
-  let explicit_empty =
-    make_meta ~name:"no-tools" ~sandbox:Keeper_types_profile_sandbox.Docker
-      ~tool_access:[]
-      ()
-  in
-  Alcotest.(check (list string))
-    "explicit empty tool_access remains empty"
-    []
-    explicit_empty.tool_access
-
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -227,7 +209,7 @@ let setup ?tool_access ~sandbox f =
   ensure_dir playground;
   f ~config ~meta ~playground
 
-let setup_with_preset ~sandbox f =
+let setup_with_tool_access ~sandbox f =
   with_eio_fs @@ fun () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
@@ -242,7 +224,8 @@ let setup_with_preset ~sandbox f =
     make_meta
       ~name:"minjae"
       ~sandbox
-      ~tool_access:[ "tool_edit_file"; "tool_write_file" ]
+      ~tool_access:
+        [ "tool_execute"; "tool_read_file"; "tool_search_files"; "tool_edit_file"; "tool_write_file" ]
       ()
   in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
@@ -517,7 +500,7 @@ let assert_docker_route_fires ~config ~meta ~playground =
 
 let test_readonly_ops_route_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   assert_docker_route_fires ~config ~meta ~playground
 
@@ -1005,7 +988,7 @@ exit 2\n"
 
 let test_execute_git_creds_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1026,7 +1009,7 @@ let test_execute_git_creds_routes_through_docker () =
 let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -1068,7 +1051,7 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
 let test_execute_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1100,7 +1083,7 @@ let test_execute_git_creds_missing_bundle_is_structured_blocker () =
 let test_execute_git_c_option_missing_dir_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
@@ -1161,7 +1144,7 @@ let test_execute_missing_playground_blocks_before_docker () =
 let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   let worktree = Filename.concat repo ".worktrees/task-229" in
@@ -1191,7 +1174,7 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   Alcotest.(check bool) "docker cwd uses the sole repo" true
     (contains_substring log "repos/masc-mcp")
 
-let test_execute_git_push_requires_write_preset_before_docker () =
+let test_execute_git_push_requires_write_tool_access_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -1216,7 +1199,7 @@ let test_execute_git_push_requires_write_preset_before_docker () =
    | Some false | None -> ());
   Alcotest.(check (option string)) "readonly allowlist before docker"
     (Some
-       "executable \"git\" not in readonly allowlist. This preset is read-only. \
+       "executable \"git\" not in readonly allowlist. This tool_access list is read-only. \
         Use ReadFile/SearchFiles when visible; otherwise ask for a \
         write/execute-capable schema before using git/gh.")
     (parse_string_field raw "error");
@@ -1227,7 +1210,7 @@ let test_execute_git_push_requires_write_preset_before_docker () =
 let test_execute_git_push_routes_through_git_creds_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -1261,7 +1244,7 @@ let test_execute_git_push_routes_through_git_creds_docker () =
 let test_execute_env_wrapped_git_uses_git_creds_factory () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -1293,7 +1276,7 @@ let test_execute_env_wrapped_git_uses_git_creds_factory () =
 let test_execute_pipeline_gh_uses_git_creds_factory () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -2022,7 +2005,7 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
@@ -2048,7 +2031,7 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
 let test_execute_rg_no_match_remains_successful_in_docker_route () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_bash_rg_no_match_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let lib =
     Filename.concat
       (Filename.concat (Filename.concat playground "repos") "masc-mcp")
@@ -2081,7 +2064,7 @@ let test_execute_rg_no_match_remains_successful_in_docker_route () =
 let test_execute_blocks_file_redirect_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let raw =
@@ -2108,7 +2091,7 @@ let test_execute_blocks_file_redirect_before_docker () =
 let test_execute_repo_checks_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
@@ -2137,7 +2120,7 @@ let test_execute_repo_checks_routes_through_docker () =
 let test_execute_search_pipeline_exposes_structured_recovery_plan () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
+  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
@@ -2292,9 +2275,6 @@ let () =
       ( "docker_route_fires",
         [
           Alcotest.test_case
-            "fixture meta defaults to production tool access"
-            `Quick test_make_meta_tool_access_matches_production_default;
-          Alcotest.test_case
             "docker tool execute ops route through docker"
             `Quick test_readonly_ops_route_through_docker;
           Alcotest.test_case
@@ -2316,8 +2296,8 @@ let () =
             "docker keeper git -C bare worktree uses sole repo"
             `Quick test_execute_git_c_bare_worktrees_from_root_uses_single_repo;
           Alcotest.test_case
-            "docker keeper git push requires write preset"
-            `Quick test_execute_git_push_requires_write_preset_before_docker;
+            "docker keeper git push requires write tool_access"
+            `Quick test_execute_git_push_requires_write_tool_access_before_docker;
           Alcotest.test_case
             "docker keeper git push routes through git-creds docker"
             `Quick test_execute_git_push_routes_through_git_creds_docker;

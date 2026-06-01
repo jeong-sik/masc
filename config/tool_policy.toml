@@ -1,14 +1,14 @@
 # Tool Policy Configuration
 #
-# Defines tool groups and presets declaratively.
-# Presets are composed from groups. Each group is a named list of tool names.
+# Defines named tool groups for keeper tool_access lists.
+# Each group is a named list of tool names.
 #
 # Groups with `shard = "..."` resolve tool names from Tool_shard at runtime.
-# MASC groups are filtered via masc_filter in preset_allowlist: only tools
+# MASC groups are filtered at runtime: only tools
 # that were injected by inject_masc_schemas at startup are included.
 #
-# To add a tool to a preset: add it to a group, then reference that group
-# in the preset's `groups` list.
+# To add a reusable tool bundle, add it to a group and reference the tool names
+# from keeper tool_access lists.
 
 # ── Tool Groups ─────────────────────────────────────────────────────
 
@@ -86,8 +86,8 @@ tools = [
   "masc_web_fetch",
 ]
 
-# Optional tools that require explicit opt-in via also_allow.
-# Excluded from all presets by default; a keeper must list them in also_allow.
+# Optional tools that require explicit opt-in through a keeper tool_access list.
+# Excluded from all built-in groups by default.
 [groups.voice]
 # Voice session management + TTS/mic via ElevenLabs or local backend.
 tools = [

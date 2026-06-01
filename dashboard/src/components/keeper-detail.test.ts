@@ -296,7 +296,7 @@ describe('KeeperDetailPage', () => {
         name: 'keeper-analyst-agent',
         agent_type: 'agent',
         status: 'active',
-        capabilities: ['keeper', 'preset:research'],
+        capabilities: ['keeper', 'research'],
         current_task: null,
         joined_at: '2026-05-01T00:46:51Z',
         last_seen: '2026-05-01T00:48:26Z',

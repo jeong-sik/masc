@@ -92,7 +92,7 @@ These are the identity fields that should live in persona by default.
 | `desires` | Optional | Keeper self-model: desires | Identity field. |
 | `instructions` | Optional | Persona-specific instructions | Identity field. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
-| `tool_access` | Optional | Default tool allowlist | String array of callable tool names. |
+| `tool_access` | Optional | Default tool allowlist | String array of callable tool names; omitted means `[]`. |
 | `tool_denylist` | Optional | Tools to remove from the allowlist | Optional policy refinement. |
 | `policy_voice_enabled` | Optional | Whether voice tools should be surfaced | Policy default, not runtime state. |
 | `shards` | Optional | Default tool shards | Optional specialization hook. |
@@ -202,7 +202,7 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 
 | Field | Replacement / rationale |
 | --- | --- |
-| `also_allow`, `tool_also_allow`, `tool_preset`, `tool_custom_allowlist` | Tool policy is the canonical `tool_access` string-array allowlist. |
+| Retired tool-policy aliases | Tool policy is the canonical `tool_access` string-array allowlist. |
 | `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `runtime_id` → `keeper_runtime.toml`. Do not pin per-keeper. |
 | `allowed_providers` | Provider/model ownership lives in `keeper_runtime.toml` and OAS runtime receipts. Do not pin providers per keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |

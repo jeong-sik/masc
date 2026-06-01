@@ -59,7 +59,7 @@ let to_string = function
     "destructive operation blocked (force push / rm -rf / push to main)"
   | Path_outside_sandbox -> "path argument outside keeper-allowed sandbox roots"
   | Cwd_not_directory -> "cwd argument is not a directory"
-  | Policy_blocked -> "governance / preset policy rejected the call"
+  | Policy_blocked -> "governance / tool_access policy rejected the call"
   | Write_operation_gated ->
     "write-capable Execute is required; retrying the same arguments cannot succeed"
   | Completion_contract_violation ->

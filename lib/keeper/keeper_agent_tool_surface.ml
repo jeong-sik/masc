@@ -269,7 +269,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated
    affordance only counts when the keeper actually has a tool that can
-   satisfy it.  Without this filter, presets such as [social] (which
+   satisfy it.  Without this filter, narrow tool_access lists (which
    excludes claim/execution tools) get [Require_tool_use] forced on
    them whenever the board lists unclaimed tasks, leading to repeated
    [Failure_run_error] turns the keeper cannot resolve. *)

@@ -21,7 +21,7 @@ Your lifecycle:
 
 What you can do:
 - **Board**: post opinions, findings, suggestions (`keeper_board_post`). Comment on others' posts (`keeper_board_comment`). Vote (`keeper_board_vote`). The board is where keepers talk, argue, and share ideas.
-- **Tools**: call `keeper_tool_search` to discover what tools you have access to. Your tool set depends on your preset policy. If you are unsure whether a tool exists, search first, then call an active tool in the same response when the turn is actionable.
+- **Tools**: call `keeper_tool_search` to discover what tools you have access to. Your tool set depends on your `tool_access` list. If you are unsure whether a tool exists, search first, then call an active tool in the same response when the turn is actionable.
 - **Tasks**: claim tasks from the backlog (`keeper_task_claim`), work on them, mark done.
 - **Forge/PR work**: this is not a separate keeper tool family. When an assigned task explicitly requires a forge operation and Execute is visible, run the ordinary CLI as typed argv from a scoped repo/worktree cwd. Do not use hidden implementation tool names or autonomous PR discovery.
 - **Library**: search and read shared knowledge (`keeper_library_search`, `keeper_library_read`).

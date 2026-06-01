@@ -313,7 +313,7 @@ let test_dashboard_briefing_http_cache_isolation () =
       check bool "second workspace namespace_id removed" true
         (json_b |> member "summary" |> member "namespace_id" = `Null))
 
-let test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task () =
+let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence () =
   let keeper_name = "audit-keeper-assembly-fixture" in
   let dir = test_dir () in
   Fun.protect
@@ -345,9 +345,9 @@ let test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task () =
       in
       check bool "heartbeat task allowed tools present" true
         ((brief |> member "allowed_tool_names" |> to_list) <> []);
-      check string "heartbeat task source wins in keeper brief" "heartbeat_task"
-        (brief |> member "tool_audit_source" |> to_string);
-      check string "heartbeat task preserves fallback action source" "structured_model"
+      check bool "no synthetic audit source without evidence" true
+        (brief |> member "tool_audit_source" = `Null);
+      check string "in-band action source is preserved" "structured_model"
         (brief |> member "latest_action_source" |> to_string);
       check bool "no observed tools without evidence" true
         ((brief |> member "latest_tool_names" |> to_list) = []))
@@ -408,7 +408,7 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
   let dir_a = Filename.concat root_dir "a-scope" in
   let dir_z = Filename.concat root_dir "z-scope" in
   let keeper_name = "shared-dashboard-keeper" in
-  let make_meta ~also_allow name =
+  let make_meta ~tool_access name =
     match
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
@@ -418,7 +418,7 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
             ("trace_id", `String ("trace-" ^ name));
             ( "tool_access",
               Lib.Keeper_meta_tool_access.tool_access_to_json
-                ([]) );
+                tool_access );
           ])
     with
     | Ok meta -> meta
@@ -439,10 +439,10 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
       let config_z = Workspace_utils.default_config dir_z in
       ignore
         (Lib.Keeper_registry.register ~base_path:config_a.base_path keeper_name
-           (make_meta ~also_allow:[ "keeper_board_vote" ] keeper_name));
+           (make_meta ~tool_access:[ "keeper_board_vote" ] keeper_name));
       ignore
         (Lib.Keeper_registry.register ~base_path:config_z.base_path keeper_name
-           (make_meta ~also_allow:[ "keeper_board_post" ] keeper_name));
+           (make_meta ~tool_access:[ "keeper_board_post" ] keeper_name));
       let briefs =
         Lib.Dashboard_briefing_assembly.build_keeper_briefs config_a
           [
@@ -487,8 +487,8 @@ let () =
             test_dashboard_briefing_keeper_tool_audit_fallback;
           Alcotest.test_case "http mission cache stays workspace-scoped" `Quick
             test_dashboard_briefing_http_cache_isolation;
-          Alcotest.test_case "keeper brief prefers heartbeat task" `Quick
-            test_dashboard_briefing_keeper_tool_audit_prefers_heartbeat_task;
+          Alcotest.test_case "keeper brief keeps in-band tools without evidence" `Quick
+            test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidence;
           Alcotest.test_case "keeper brief uses decision log fallback" `Quick
             test_dashboard_briefing_keeper_tool_audit_uses_decision_log;
           Alcotest.test_case "keeper brief registry lookup scoped to base path"

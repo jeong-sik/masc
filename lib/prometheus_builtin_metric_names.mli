@@ -225,7 +225,7 @@ include module type of Prometheus_transport_metric_names
 
 (** #13xxx: counter incremented every time the keeper dispatch layer
     denies a tool call because the tool is not in the keeper's allowlist.
-    Surfaces preset drift (e.g. [board_core] group omitted from the
+    Surfaces tool_access drift (e.g. [board_core] group omitted from the
     keeper's [tool_groups]) and deny-list collisions as a Prometheus
     alert rather than requiring operators to grep
     [keepers/*.decisions.jsonl] after the fact.
@@ -236,7 +236,7 @@ include module type of Prometheus_transport_metric_names
                   not_in_allow_set]
     Operator alert: [rate(masc_keeper_tool_not_allowed_total[5m]) > 0]
     on any [(keeper, tool)] pair means that keeper is looping without
-    making progress — its BDI is requesting a tool that its preset
+    making progress — its BDI is requesting a tool that its tool_access
     does not permit. *)
 val metric_after_turn_response_model_empty : string
 

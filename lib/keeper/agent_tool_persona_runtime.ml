@@ -184,11 +184,7 @@ let tool_access_toml_section json =
   | Some (`List _ as tool_access) -> (
       match tool_access_of_meta_json (`Assoc [ ("tool_access", tool_access) ]) with
       | Ok tools ->
-          Ok
-            [
-              "[keeper.tool_access]";
-              Printf.sprintf "tools = %s" (toml_string_array tools);
-            ]
+          Ok [ Printf.sprintf "tool_access = %s" (toml_string_array tools) ]
       | Error msg -> Error msg)
   | Some _ -> Error "tool_access must be an array of strings for durable TOML"
   | None -> Ok []
@@ -409,7 +405,8 @@ let resolved_keeper_args_from_persona args :
             in
             let autoboot_enabled = get_bool_opt args "autoboot_enabled" in
             (match
-               Keeper_turn_up_args.parse_tool_access_input args,
+               Keeper_turn_up_args.parse_tool_access_input
+                 ~tool_name:"masc_keeper_create_from_persona" args,
                Keeper_turn_up_args.parse_present_string_list_opt args "allowed_paths"
              with
             | Error err, _ | _, Error err -> Error err

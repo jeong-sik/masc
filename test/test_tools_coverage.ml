@@ -481,8 +481,6 @@ let test_masc_persona_authoring_schemas () =
       | Some props ->
           Alcotest.(check bool) "generate has concept" true
             (List.mem_assoc "concept" props);
-          Alcotest.(check bool) "generate omits tool_preset" false
-            (List.mem_assoc "tool_preset" props);
           Alcotest.(check bool) "generate has alignment axis" true
             (List.mem_assoc "alignment" props);
           Alcotest.(check bool) "generate omits operating_style axis" false
@@ -548,12 +546,6 @@ let test_masc_keeper_create_from_persona_schema () =
             (List.mem_assoc "persona_name" props);
           Alcotest.(check bool) "has canonical tool_access" true
             (List.mem_assoc "tool_access" props);
-          Alcotest.(check bool) "omits tool_preset" false
-            (List.mem_assoc "tool_preset" props);
-          Alcotest.(check bool) "omits tool_also_allow" false
-            (List.mem_assoc "tool_also_allow" props);
-          Alcotest.(check bool) "omits tool_custom_allowlist" false
-            (List.mem_assoc "tool_custom_allowlist" props);
           Alcotest.(check bool) "omits social_model" false
             (List.mem_assoc "social_model" props)
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
@@ -580,12 +572,6 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "autoboot_enabled" props);
           Alcotest.(check bool) "has canonical tool_access" true
             (List.mem_assoc "tool_access" props);
-          Alcotest.(check bool) "omits tool_preset" false
-            (List.mem_assoc "tool_preset" props);
-          Alcotest.(check bool) "omits tool_also_allow" false
-            (List.mem_assoc "tool_also_allow" props);
-          Alcotest.(check bool) "omits tool_custom_allowlist" false
-            (List.mem_assoc "tool_custom_allowlist" props);
           Alcotest.(check bool) "omits models" false
             (List.mem_assoc "models" props);
           Alcotest.(check bool) "omits allowed_models" false

@@ -562,7 +562,7 @@ let executable_not_allowlisted_hint ~name ~mode =
     match mode, name with
     | Readonly, "gh" | Readonly, "git" ->
       Some
-        "This preset is read-only. Use ReadFile/SearchFiles when visible; \
+        "This tool_access list is read-only. Use ReadFile/SearchFiles when visible; \
          otherwise ask for a write/execute-capable schema before using git/gh."
     | _, "bash" | _, "sh" | _, "zsh" ->
       Some

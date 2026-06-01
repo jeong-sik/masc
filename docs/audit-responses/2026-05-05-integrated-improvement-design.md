@@ -214,7 +214,7 @@ candidate (RFC-0029)**.
 | `keeper.base` | 죽음 (unknown key 경고) | sangsu.toml line 2가 실제 사용 — base.toml inheritance 선언 | **D — false** |
 | `work_discovery_sources` | 죽음, `work.source`로 대체 | sangsu.toml line 4가 실제 사용. 코드 caller 확인 필요 | TBD |
 | `git_identity_mode` | 죽음, 항상 `"repo_cli_identity"` | active cleanup 후보 | **C** |
-| `tool_access.preset` | 중복 with `tools.preset` | sangsu.toml line 8 실제 사용. `tools.preset`은 audit의 가정 키 | **D — false** |
+| retired nested tool-access preset field | 중복 with `tools.preset` | sangsu.toml line 8 실제 사용. `tools.preset`은 audit의 가정 키 | **D — false** |
 | `sandbox_profile` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
 | `network_mode` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
 | `repo_cli_identity` | persona에서 파생 | 검증 필요 | TBD |

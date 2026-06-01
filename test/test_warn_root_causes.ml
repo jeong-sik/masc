@@ -1,6 +1,6 @@
 (** Harness tests for WARN root cause fixes.
 
-    1. AllowList pruning: core_discovery_tools filtered by preset
+    1. AllowList pruning: core_discovery_tools filtered by tool_access
     2. Atomic agent JSON writes: no empty-file race condition *)
 
 open Alcotest
@@ -49,7 +49,7 @@ let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
-(** Build the policy_allowed_tool_set: preset-allowed internal names resolved to
+(** Build the policy_allowed_tool_set: tool_access-allowed internal names resolved to
     public names (via descriptor registry) + core_always_tools.
     RFC-0179 moved core_discovery_tools to public names while
     keeper_allowed_tool_names still returns internal names. *)
@@ -70,31 +70,28 @@ let build_policy_allowed_tool_set (meta : Keeper_meta_contract.keeper_meta) =
     (Keeper_tool_policy.StringSet.union internal_set public_set)
     (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
 
-(** Filter core_discovery_tools by preset (the fix). *)
-let filter_core_by_preset (meta : Keeper_meta_contract.keeper_meta) =
+(** Filter core_discovery_tools by tool_access (the fix). *)
+let filter_core_by_tool_access (meta : Keeper_meta_contract.keeper_meta) =
   let policy_allowed_tool_set = build_policy_allowed_tool_set meta in
   List.filter
     (fun name -> Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set)
     Keeper_tool_registry.core_discovery_tools
 
-(* Direct write tools require delivery/full presets. *)
+(* Direct write tools require explicit write-enabled tool_access. *)
 let write_only_tools = [ "Edit" ]
 
-(* tool_execute stays visible across presets for read-only shell usage.
-   Mutating shell commands are gated separately by privileged presets. *)
+(* tool_execute stays visible across tool_access lists for read-only shell usage.
+   Mutating shell commands are gated separately by write-enabled tool_access. *)
 let shell_bridge_tools = [ "Execute" ]
 
-let privileged_presets =
-  [ []; []; [] ]
+let write_enabled_tool_access =
+  [ "tool_edit_file"; "tool_execute" ]
 
-let unprivileged_presets = [ [] ]
-
-let test_privileged_preset_write_gates () = ()
-
-let test_core_tools_filtered_by_research_preset () =
+let test_core_tools_filtered_by_empty_tool_access () =
   ignore (init_registry ());
   let meta =
-    { (make_meta ~name:"test-research" ()) with
+    { (make_meta ~name:"test-empty-access" ()) with
+      tool_access = [];
       tool_denylist = [] }
   in
   (* Precondition: direct write tools ARE in unfiltered core *)
@@ -102,40 +99,39 @@ let test_core_tools_filtered_by_research_preset () =
     if not (List.mem t Keeper_tool_registry.core_discovery_tools) then
       fail (Printf.sprintf "precondition: %s missing from core_discovery_tools" t)
   ) write_only_tools;
-  let filtered = filter_core_by_preset meta in
-  (* Research preset now includes filesystem_write + execute groups,
-     so write tools and shell bridge tools survive the filter. *)
+  let filtered = filter_core_by_tool_access meta in
   List.iter (fun t ->
-    if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s must survive research preset filter" t)
-  ) (write_only_tools @ shell_bridge_tools);
+    if List.mem t filtered then
+      fail (Printf.sprintf "%s must be excluded without explicit tool_access" t)
+  ) write_only_tools;
   (* Core always-tools must survive *)
   List.iter (fun t ->
     if not (List.mem t filtered) then
-      fail (Printf.sprintf "core_always %s must survive preset filter" t)
+      fail (Printf.sprintf "core_always %s must survive tool_access filter" t)
   ) Keeper_tool_registry.core_always_tools
 
-let test_core_tools_filtered_by_social_preset () =
+let test_core_tools_filtered_by_read_only_tool_access () =
   ignore (init_registry ());
   let meta =
-    { (make_meta ~name:"test-social" ()) with
-      tool_access = [];
+    { (make_meta ~name:"test-read-only-access" ()) with
+      tool_access = [ "tool_read_file"; "tool_search_files" ];
       tool_denylist = [] }
   in
-  let filtered = filter_core_by_preset meta in
+  let filtered = filter_core_by_tool_access meta in
   if List.mem "Edit" filtered then
-    fail "Edit should be excluded for social preset"
+    fail "Edit should be excluded for read-only tool_access"
 
-let test_core_tools_include_write_for_delivery_preset () =
+let test_core_tools_include_write_for_write_enabled_tool_access () =
   ignore (init_registry ());
   let meta =
-    { (make_meta ~name:"test-delivery" ()) with
+    { (make_meta ~name:"test-write-access" ()) with
+      tool_access = write_enabled_tool_access;
       tool_denylist = [] }
   in
-  let filtered = filter_core_by_preset meta in
+  let filtered = filter_core_by_tool_access meta in
   List.iter (fun t ->
     if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s should be included for delivery preset" t)
+      fail (Printf.sprintf "%s should be included for write-enabled tool_access" t)
   ) (write_only_tools @ shell_bridge_tools)
 
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
@@ -281,16 +277,14 @@ let test_tool_policy_init_failure_emits_metric () =
 let () =
   run "Warn_root_causes"
     [
-      ( "allowlist_preset_filter",
+      ( "allowlist_tool_access_filter",
         [
-          test_case "research preset excludes direct write tools" `Quick
-            test_core_tools_filtered_by_research_preset;
-          test_case "social preset excludes direct write tools" `Quick
-            test_core_tools_filtered_by_social_preset;
-          test_case "delivery preset includes shell + write tools" `Quick
-            test_core_tools_include_write_for_delivery_preset;
-          test_case "privileged presets gate shell write and workflow" `Quick
-            test_privileged_preset_write_gates;
+          test_case "empty tool_access excludes direct write tools" `Quick
+            test_core_tools_filtered_by_empty_tool_access;
+          test_case "read-only tool_access excludes direct write tools" `Quick
+            test_core_tools_filtered_by_read_only_tool_access;
+          test_case "write-enabled tool_access includes shell + write tools" `Quick
+            test_core_tools_include_write_for_write_enabled_tool_access;
         ] );
       ( "atomic_agent_json",
         [

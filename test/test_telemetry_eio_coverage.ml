@@ -269,7 +269,7 @@ let check_one_tool_assigned_record label json =
         (Printf.sprintf "%s: expected one parsed record, got %d" label
            (List.length records))
 
-let test_parse_event_records_tool_assigned_null_preset () =
+let test_parse_event_records_tool_assigned_minimal_payload () =
   let json =
     `Assoc
       [
@@ -288,7 +288,9 @@ let test_parse_event_records_tool_assigned_null_preset () =
             ] );
       ]
   in
-  check_one_tool_assigned_record "null preset" json let test_parse_event_records_tool_assigned_missing_preset () =
+  check_one_tool_assigned_record "minimal payload" json
+
+let test_parse_event_records_tool_assigned_missing_optional_fields () =
   let json =
     `Assoc
       [
@@ -307,7 +309,9 @@ let test_parse_event_records_tool_assigned_null_preset () =
             ] );
       ]
   in
-  check_one_tool_assigned_record "missing preset" json (* ============================================================
+  check_one_tool_assigned_record "missing optional fields" json
+
+(* ============================================================
    metrics Type Tests
    ============================================================ *)
 
@@ -682,10 +686,10 @@ let () =
         test_parse_event_records_tool_called_null_options;
       test_case "tool_called missing option fields" `Quick
         test_parse_event_records_tool_called_missing_options;
-      test_case "tool_assigned null preset field (legacy)" `Quick
-        test_parse_event_records_tool_assigned_null_preset;
-      test_case "tool_assigned missing preset field" `Quick
-        test_parse_event_records_tool_assigned_missing_preset;
+      test_case "tool_assigned minimal payload" `Quick
+        test_parse_event_records_tool_assigned_minimal_payload;
+      test_case "tool_assigned missing optional fields" `Quick
+        test_parse_event_records_tool_assigned_missing_optional_fields;
     ];
     "metrics", [
       test_case "type" `Quick test_metrics_type;

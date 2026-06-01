@@ -835,7 +835,7 @@ let internal_descriptors : t list =
       ~id:"keeper.tools_list"
       ~name:"keeper_tools_list"
       ~description:
-        "List the keeper-allowed tools for the current preset. No arguments."
+        "List the keeper-allowed tools for the current tool_access list. No arguments."
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_tools_list

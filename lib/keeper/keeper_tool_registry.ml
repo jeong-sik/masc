@@ -5,7 +5,8 @@
     Tool_shard, injected MASC tools), core always-visible tools, and
     dynamic schema injection.
 
-    See Keeper_tool_policy_config for the declarative tool groups and presets. *)
+    See Keeper_tool_policy_config for the declarative tool groups used by
+    keeper tool_access lists. *)
 
 open Keeper_types
 open Keeper_meta_contract

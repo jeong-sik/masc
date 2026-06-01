@@ -57,7 +57,7 @@ let make_tool_bundle
   in
   let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
   (* Build Tool.t for the full universe so BM25 and Tool_op can
-     discover tools beyond the active preset.  Progressive disclosure
+     discover tools beyond the active tool_access list.  Progressive disclosure
      (AllowList filter in before_turn_hook) controls LLM visibility;
      execute_keeper_tool_call uses can_execute for the execution gate. *)
   let universe_names = Agent_tool_dispatch_runtime.keeper_universe_tool_names meta in

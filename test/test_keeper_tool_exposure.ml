@@ -2,8 +2,8 @@ module Types = Masc_domain
 
 (** Keeper Tool Exposure Tests
 
-    Verifies that keeper_allowed_tool_names returns the full tool set
-    per preset/custom policy and write_done producing empty list. *)
+    Verifies that keeper_allowed_tool_names follows explicit [tool_access]
+    entries and write_done produces an empty list. *)
 
 open Alcotest
 open Masc_mcp
@@ -38,6 +38,27 @@ let make_meta
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 ;;
+
+let full_tool_access () =
+  Keeper_meta_tool_access.normalize_tool_access
+    (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+     @ Tool_catalog.tools_for_surface Tool_catalog.Public_mcp)
+;;
+
+let minimal_tool_access =
+  [ "keeper_time_now"
+  ; "keeper_tools_list"
+  ; "keeper_context_status"
+  ; "masc_web_search"
+  ; "masc_approval_pending"
+  ]
+;;
+
+let make_full_meta ?name ?(policy_voice_enabled = false) () =
+  make_meta ?name ~policy_voice_enabled ~tool_access:(full_tool_access ()) ()
+;;
+
+let make_minimal_meta () = make_meta ~tool_access:minimal_tool_access ()
 
 let has_tool name tools = List.mem name tools
 
@@ -96,17 +117,17 @@ let test_write_done_blocks_all_tools () =
 ;;
 
 let test_write_done_false_has_tools () =
-  let meta = make_meta () in
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names ~write_done:false meta in
   check bool "write_done=false returns nonempty" true (List.length tools > 0)
 ;;
 
 (* ============================================================
-   2. Default profile — all keepers get all tools (mode removed)
+   2. Explicit access controls exposed tools
    ============================================================ *)
 
-let test_default_has_base_tools () =
-  let meta = make_meta () in
+let test_explicit_access_has_base_tools () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tools" true (List.length tools > 0);
   check bool "has keeper_time_now" true (has_tool "keeper_time_now" tools);
@@ -116,7 +137,7 @@ let test_default_has_base_tools () =
 
 (* Governance tool schemas are no longer registered. *)
 let test_default_has_no_legacy_governance_tools () =
-  let meta = make_meta () in
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "governance status removed" false (has_tool "masc_governance_status" tools);
   check bool "case brief submit removed" false (has_tool "masc_case_brief_submit" tools)
@@ -132,19 +153,20 @@ let voice_tools =
   ]
 ;;
 
-let test_voice_policy_enabled_exposes_voice_tools () =
-  let meta =
-    make_meta ~policy_voice_enabled:true ()
-  in
+let test_explicit_access_exposes_voice_tools () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   List.iter
     (fun name -> check bool (name ^ " exposed") true (has_tool name tools))
     voice_tools
 ;;
 
-let test_voice_policy_disabled_hides_voice_tools () =
+let test_missing_voice_access_hides_voice_tools () =
+  let tool_access =
+    full_tool_access () |> List.filter (fun name -> not (List.mem name voice_tools))
+  in
   let meta =
-    make_meta ~policy_voice_enabled:false ()
+    make_meta ~tool_access ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   List.iter
@@ -173,47 +195,47 @@ let test_custom_unknown_tool_names_are_dropped () =
 ;;
 
 (* ============================================================
-   4. Delivery keepers get SearchFiles access
+   4. Explicit tool_access surfaces
    ============================================================ *)
 
-let test_delivery_preset_has_search_files_access () =
-  let meta = make_meta () in
+let test_explicit_access_has_search_files_access () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_search_files" true (has_tool "tool_search_files" tools)
 ;;
 
-let test_full_preset_includes_tool_edit_file () =
-  let meta = make_meta () in
+let test_full_access_includes_tool_edit_file () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
-let test_delivery_preset_includes_tool_edit_file () =
-  let meta = make_meta () in
+let test_explicit_write_access_includes_tool_edit_file () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
-let test_research_preset_includes_tool_edit_file () =
-  let meta = make_meta () in
+let test_explicit_read_access_can_include_tool_edit_file () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
-let test_minimal_preset_excludes_tool_edit_file () =
-  let meta = make_meta () in
+let test_minimal_access_excludes_tool_edit_file () =
+  let meta = make_minimal_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "no tool_edit_file" false (has_tool "tool_edit_file" tools)
 ;;
 
-let test_minimal_preset_has_web_search () =
-  let meta = make_meta () in
+let test_minimal_access_has_web_search () =
+  let meta = make_minimal_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has masc_web_search" true (has_tool "masc_web_search" tools)
 ;;
 
-let test_minimal_preset_has_approval_pending () =
-  let meta = make_meta () in
+let test_minimal_access_has_approval_pending () =
+  let meta = make_minimal_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let schema_names =
     Agent_tool_dispatch_runtime.keeper_allowed_model_tools meta
@@ -231,43 +253,43 @@ let test_minimal_preset_has_approval_pending () =
     (Keeper_tool_policy.is_keeper_mcp_context_required "masc_approval_get");
   check
     bool
-    "minimal has approval pending tool"
+    "minimal access has approval pending tool"
     true
     (has_tool "masc_approval_pending" tools);
   check
     bool
-    "minimal has approval pending schema"
+    "minimal access has approval pending schema"
     true
     (has_tool "masc_approval_pending" schema_names);
   check
     bool
-    "minimal excludes admin approval detail"
+    "minimal access excludes admin approval detail"
     false
     (has_tool "masc_approval_get" tools)
 ;;
 
-let test_all_presets_have_approval_pending () =
-  let label = "custom" in
-  let meta = make_meta () in
-    let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-    let schema_names =
-      Agent_tool_dispatch_runtime.keeper_allowed_model_tools meta
-      |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-    in
-    check
-      bool
-      (label ^ " has approval pending tool")
-      true
-      (has_tool "masc_approval_pending" tools);
-    check
-      bool
-      (label ^ " has approval pending schema")
-      true
-      (has_tool "masc_approval_pending" schema_names)
+let test_explicit_access_has_approval_pending () =
+  let label = "explicit access" in
+  let meta = make_full_meta () in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let schema_names =
+    Agent_tool_dispatch_runtime.keeper_allowed_model_tools meta
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  in
+  check
+    bool
+    (label ^ " has approval pending tool")
+    true
+    (has_tool "masc_approval_pending" tools);
+  check
+    bool
+    (label ^ " has approval pending schema")
+    true
+    (has_tool "masc_approval_pending" schema_names)
 ;;
 
 let test_feature_catalog_required_tools_reachable_by_full_keeper () =
-  let meta = make_meta () in
+  let meta = make_full_meta () in
   let schema_names =
     Agent_tool_dispatch_runtime.keeper_allowed_model_tools meta
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
@@ -282,8 +304,8 @@ let test_feature_catalog_required_tools_reachable_by_full_keeper () =
   check (list string) "feature proof tools reachable by full keeper" [] missing
 ;;
 
-let test_delivery_preset_has_tool_execute () =
-  let meta = make_meta () in
+let test_explicit_access_has_tool_execute () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_execute" true (has_tool "tool_execute" tools);
   check bool "has tool_search_files" true (has_tool "tool_search_files" tools)
@@ -304,30 +326,30 @@ let test_legacy_pr_schemas_removed () =
 ;;
 
 (* ============================================================
-   7. All modes produce same tool set (mode removed)
+   7. Access-list behavior
    ============================================================ *)
 
-let test_presets_have_different_tool_count () =
-  let minimal = make_meta () in
-  let full = make_meta () in
+let test_explicit_access_lists_have_different_tool_count () =
+  let minimal = make_minimal_meta () in
+  let full = make_full_meta () in
   let minimal_tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names minimal in
   let full_tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names full in
   check
     bool
-    "full has more than minimal"
+    "full explicit access has more than minimal"
     true
     (List.length full_tools > List.length minimal_tools)
 ;;
 
-let test_messaging_preset_has_board_tools () =
-  let meta = make_meta () in
+let test_explicit_access_has_board_tools () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_board_get" true (has_tool "keeper_board_get" tools);
   check bool "has keeper_board_post" true (has_tool "keeper_board_post" tools)
 ;;
 
-let test_research_preset_has_read_tools () =
-  let meta = make_meta () in
+let test_explicit_access_has_read_tools () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   (* keeper_read removed: dead alias with no schema, tool_read_file is the actual tool *)
   check bool "has tool_read_file" true (has_tool "tool_read_file" tools);
@@ -395,10 +417,10 @@ let test_fallback_floor_has_no_implicit_repo_tools () =
   check bool "fallback floor omits Read" false (List.mem "tool_read_file" floor)
 ;;
 
-let test_core_workspace_presets_have_task_lifecycle_tools () =
-  [ "social", (); "messaging", () ]
+let test_explicit_workspace_access_has_task_lifecycle_tools () =
+  [ "board", (); "workspace", () ]
   |> List.iter (fun (label, _) ->
-    let meta = make_meta () in
+    let meta = make_full_meta () in
     let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
     check
       bool
@@ -412,8 +434,8 @@ let test_core_workspace_presets_have_task_lifecycle_tools () =
       (has_tool "keeper_task_submit_for_verification" tools))
 ;;
 
-let test_delivery_preset_has_workspace_tools () =
-  let meta = make_meta () in
+let test_explicit_access_has_workspace_tools () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_tasks_list" true (has_tool "keeper_tasks_list" tools);
   check bool "has keeper_task_claim" true (has_tool "keeper_task_claim" tools);
@@ -443,7 +465,12 @@ let test_delivery_preset_has_workspace_tools () =
 
 let test_verifier_identity_uses_verdict_only_task_surface () =
   let assert_verifier_surface name =
-    let meta = make_meta ~name () in
+    let meta =
+      make_meta
+        ~name
+        ~tool_access:[ "keeper_tasks_list"; "masc_transition" ]
+        ()
+    in
     let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
     check bool (name ^ " can list tasks") true (has_tool "keeper_tasks_list" tools);
     check bool (name ^ " can transition verdicts") true (has_tool "masc_transition" tools);
@@ -460,15 +487,15 @@ let test_verifier_identity_uses_verdict_only_task_surface () =
 ;;
 
 (* Governance tool schemas are no longer registered. *)
-let test_messaging_preset_has_no_legacy_governance_tools () =
-  let meta = make_meta () in
+let test_explicit_access_has_no_legacy_governance_tools () =
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "governance status removed" false (has_tool "masc_governance_status" tools);
   check bool "petition submit removed" false (has_tool "masc_petition_submit" tools)
 ;;
 
 let test_sufficient_tool_count () =
-  let meta = make_meta () in
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "tool count from shards" true (List.length tools >= 20)
 ;;
@@ -477,17 +504,17 @@ let test_sufficient_tool_count () =
    8. Combined profiles
    ============================================================ *)
 
-let test_research_plus_also_allow_combined () =
+let test_explicit_tool_access_combined () =
   let meta =
     make_meta
       ~tool_access:
-        ([])
+        ([ "keeper_board_get"; "keeper_board_post"; "tool_search_files"; "tool_read_file" ])
       ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  check bool "has board_get via also_allow" true (has_tool "keeper_board_get" tools);
+  check bool "has board_get" true (has_tool "keeper_board_get" tools);
   check bool "has search files access" true (has_tool "tool_search_files" tools);
-  check bool "has board_post via also_allow" true (has_tool "keeper_board_post" tools);
+  check bool "has board_post" true (has_tool "keeper_board_post" tools);
   check bool "has read" true (has_tool "tool_read_file" tools)
 ;;
 
@@ -496,7 +523,7 @@ let test_research_plus_also_allow_combined () =
    ============================================================ *)
 
 let test_no_duplicate_tools () =
-  let meta = make_meta ~policy_voice_enabled:true () in
+  let meta = make_full_meta () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let unique = List.sort_uniq String.compare tools in
   check int "no duplicates" (List.length unique) (List.length tools)
@@ -1224,20 +1251,20 @@ let () =
       , [ test_case "blocks all tools" `Quick test_write_done_blocks_all_tools
         ; test_case "false has tools" `Quick test_write_done_false_has_tools
         ] )
-    ; ( "default_profile"
-      , [ test_case "has base tools" `Quick test_default_has_base_tools
+    ; ( "explicit_access"
+      , [ test_case "has base tools" `Quick test_explicit_access_has_base_tools
         ; test_case
             "legacy governance tools removed"
             `Quick
             test_default_has_no_legacy_governance_tools
         ; test_case
-            "voice policy enabled exposes voice tools"
+            "explicit access exposes voice tools"
             `Quick
-            test_voice_policy_enabled_exposes_voice_tools
+            test_explicit_access_exposes_voice_tools
         ; test_case
-            "voice policy disabled hides voice tools"
+            "missing voice access hides voice tools"
             `Quick
-            test_voice_policy_disabled_hides_voice_tools
+            test_missing_voice_access_hides_voice_tools
         ; test_case
             "custom empty blocks all tools"
             `Quick
@@ -1249,58 +1276,61 @@ let () =
         ] )
     ; ( "search_files_tools"
       , [ test_case
-            "delivery preset has SearchFiles access"
+            "explicit access has SearchFiles access"
             `Quick
-            test_delivery_preset_has_search_files_access
+            test_explicit_access_has_search_files_access
         ] )
     ; ( "write_and_execute_tools"
       , [ test_case
-            "full preset includes tool_edit_file"
+            "full explicit access includes tool_edit_file"
             `Quick
-            test_full_preset_includes_tool_edit_file
+            test_full_access_includes_tool_edit_file
         ; test_case
-            "delivery preset includes tool_edit_file"
+            "explicit write access includes tool_edit_file"
             `Quick
-            test_delivery_preset_includes_tool_edit_file
+            test_explicit_write_access_includes_tool_edit_file
         ; test_case
-            "research preset includes tool_edit_file"
+            "explicit read access can include tool_edit_file"
             `Quick
-            test_research_preset_includes_tool_edit_file
+            test_explicit_read_access_can_include_tool_edit_file
         ; test_case
-            "minimal preset excludes tool_edit_file"
+            "minimal access excludes tool_edit_file"
             `Quick
-            test_minimal_preset_excludes_tool_edit_file
+            test_minimal_access_excludes_tool_edit_file
         ; test_case
-            "minimal preset has web search"
+            "minimal access has web search"
             `Quick
-            test_minimal_preset_has_web_search
+            test_minimal_access_has_web_search
         ; test_case
-            "minimal preset has keeper-safe approval pending"
+            "minimal access has keeper-safe approval pending"
             `Quick
-            test_minimal_preset_has_approval_pending
+            test_minimal_access_has_approval_pending
         ; test_case
-            "all presets have keeper-safe approval pending"
+            "explicit access has keeper-safe approval pending"
             `Quick
-            test_all_presets_have_approval_pending
+            test_explicit_access_has_approval_pending
         ; test_case
             "feature proof required tools are reachable"
             `Quick
             test_feature_catalog_required_tools_reachable_by_full_keeper
         ; test_case
-            "delivery preset has tool_execute and tool_search_files"
+            "explicit access has tool_execute and tool_search_files"
             `Quick
-            test_delivery_preset_has_tool_execute
+            test_explicit_access_has_tool_execute
         ] )
     ; ( "mode_free_access"
       , [ test_case
-            "presets have different tool count"
+            "explicit access lists have different tool count"
             `Quick
-            test_presets_have_different_tool_count
+            test_explicit_access_lists_have_different_tool_count
         ; test_case
-            "messaging has board tools"
+            "explicit access has board tools"
             `Quick
-            test_messaging_preset_has_board_tools
-        ; test_case "research has read tools" `Quick test_research_preset_has_read_tools
+            test_explicit_access_has_board_tools
+        ; test_case
+            "explicit access has read tools"
+            `Quick
+            test_explicit_access_has_read_tools
         ; test_case
             "last turn keeps discovery and web search"
             `Quick
@@ -1310,28 +1340,28 @@ let () =
             `Quick
             test_fallback_floor_has_no_implicit_repo_tools
         ; test_case
-            "core workspace presets have task lifecycle tools"
+            "explicit workspace access has task lifecycle tools"
             `Quick
-            test_core_workspace_presets_have_task_lifecycle_tools
+            test_explicit_workspace_access_has_task_lifecycle_tools
         ; test_case
-            "delivery has workspace tools"
+            "explicit access has workspace tools"
             `Quick
-            test_delivery_preset_has_workspace_tools
+            test_explicit_access_has_workspace_tools
         ; test_case
             "verifier identity uses verdict-only task surface"
             `Quick
             test_verifier_identity_uses_verdict_only_task_surface
         ; test_case
-            "messaging legacy governance tools removed"
+            "explicit access legacy governance tools removed"
             `Quick
-            test_messaging_preset_has_no_legacy_governance_tools
+            test_explicit_access_has_no_legacy_governance_tools
         ; test_case "sufficient tool count" `Quick test_sufficient_tool_count
         ] )
     ; ( "combined_profiles"
       , [ test_case
-            "research plus also_allow override"
+            "explicit tool_access combines tools"
             `Quick
-            test_research_plus_also_allow_combined
+            test_explicit_tool_access_combined
         ] )
     ; "deduplication", [ test_case "no duplicate tools" `Quick test_no_duplicate_tools ]
     ; ( "path_resolution"
@@ -1455,7 +1485,7 @@ let () =
             | Some hint -> check bool "hint non-empty" true (String.length hint > 0)
             | None -> fail "masc_web_search should have a hint")
         ; test_case "all allowed tools have hints" `Quick (fun () ->
-            let meta = make_meta () in
+            let meta = make_full_meta () in
             let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
             let missing =
               List.filter (fun name -> Keeper_tool_policy.tool_hint_of name = None) tools

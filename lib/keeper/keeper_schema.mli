@@ -2,7 +2,7 @@
 
     Builds tool-input JSON schemas exposed by [tool_keeper_*] handlers and
     the dashboard authoring surface.  Centralises the enum strings (tool
-    preset, sandbox profile, network mode, etc.) so a new value lands in
+    compaction profile, sandbox profile, network mode, etc.) so a new value lands in
     one place and propagates to every tool that takes the keeper meta as
     input. *)
 

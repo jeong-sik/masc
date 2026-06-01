@@ -280,7 +280,7 @@ let test_tool_search_self_en () =
     "discover tools by describing what I need" "keeper_tool_search")
 
 (** Full-universe search should find the Execute-backed worktree workflow even
-    for a minimal-preset keeper. *)
+    for a narrowly scoped keeper. *)
 let test_full_universe_worktree_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"full_worktree" idx

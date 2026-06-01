@@ -63,7 +63,7 @@ actionable signal 처리:
 - 순수 idle/no-work 턴에서만 keeper_stay_silent를 사용한다.
 """
 
-also_allow = [
+tool_access = [
   "masc_tasks",
   "masc_transition",
   "masc_task_history",

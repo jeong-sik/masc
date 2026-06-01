@@ -4,8 +4,8 @@ open Masc_domain
 module Persona_contract = Keeper_persona_authoring_contract
 
 (** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
-    [network_mode], . Same cycle constraint as
-    [tool_preset_enum_strings] above — Keeper_schema cannot depend on
+    [network_mode]. Same cycle constraint as other schema mirrors —
+    Keeper_schema cannot depend on
     Keeper_types_profile directly because the latter [include]s
     Keeper_config and is otherwise downstream. The test
     [test_types.ml :: keeper_profile_enum_ssot] asserts these mirrors
@@ -329,19 +329,19 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("compaction_profile", `Assoc [
           ("type", `String "string");
-          ("description", `String "Compaction preset. One of: aggressive, balanced, conservative, custom.");
+          ("description", `String "Compaction profile. One of: aggressive, balanced, conservative, custom.");
         ]);
         ("compaction_ratio_gate", `Assoc [
           ("type", `String "number");
-          ("description", `String "Context ratio gate for compaction (0.1-0.98). Overrides preset when set.");
+          ("description", `String "Context ratio gate for compaction (0.1-0.98). Overrides compaction profile when set.");
         ]);
         ("compaction_message_gate", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Message count gate for compaction (0 disables this gate). Overrides preset when set.");
+          ("description", `String "Message count gate for compaction (0 disables this gate). Overrides compaction profile when set.");
         ]);
         ("compaction_token_gate", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Token count gate for compaction (0 disables this gate). Overrides preset when set.");
+          ("description", `String "Token count gate for compaction (0 disables this gate). Overrides compaction profile when set.");
         ]);
         ("continuity_compaction_cooldown_sec", `Assoc [
           ("type", `String "integer");
@@ -380,7 +380,7 @@ let keeper_schemas : tool_schema list = [
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Tool names to remove after preset resolution.");
+          ("description", `String "Tool names to remove after tool_access resolution.");
         ]);
       ]);
       ("required", `List [`String "name"]);

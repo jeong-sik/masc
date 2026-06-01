@@ -83,7 +83,7 @@ The checked-in versioned seed config tree currently contains:
 | Path | Purpose |
 | --- | --- |
 | `config/keeper_runtime.toml` | Provider/model runtime and routing defaults. |
-| `config/tool_policy.toml` | Tool preset policy and allow/deny rules. |
+| `config/tool_policy.toml` | Tool group policy and allow/deny rules. |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
 | `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |

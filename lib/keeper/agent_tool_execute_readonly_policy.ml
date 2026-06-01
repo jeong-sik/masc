@@ -224,7 +224,7 @@ let diagnosis_of_block_reason reason =
     Some
       { Exec_core.rule_id = "command_not_allowed"
       ; explanation =
-          Printf.sprintf "'%s' is not on the allowed command list for this preset." name
+          Printf.sprintf "'%s' is not on the allowed command list for this tool_access list." name
       ; rewrite = None
       ; tool_suggestion = None
       }

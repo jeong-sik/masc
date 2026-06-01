@@ -184,7 +184,7 @@ include Prometheus_identity_metric_names
    keeper_heartbeat_snapshot.ml, keeper_stay_silent_loop_detector.ml,
    keeper_unified_metrics.ml. *)
 (* #13xxx: keeper dispatch layer denied a tool call because the
-   tool is not in the keeper's allowlist (preset drift, deny-list,
+   tool is not in the keeper's allowlist (tool_access drift, deny-list,
    or unknown tool name).  Distinct from [Keeper_metrics.(to_string ToolUseFailure)]
    (post-execution hook failure) and
    [Keeper_metrics.(to_string TurnGateRejectedTerminal)] (pre_tool_use guard
@@ -192,9 +192,9 @@ include Prometheus_identity_metric_names
    - [keeper] — keeper name (fleet-bounded)
    - [tool]   — tool name attempted (registry-bounded, ~100 tools)
    - [reason] — vocabulary:
-       "not_in_candidate_set" (unknown / not available to this preset)
+       "not_in_candidate_set" (unknown / not available to this tool_access list)
        "denied_by_policy"     (explicit deny-list entry)
-       "not_in_allow_set"     (tool exists but preset omits it)
+       "not_in_allow_set"     (tool exists but tool_access omits it)
    Cardinality: ~16 keepers × ~100 tools × 3 reasons = ~4800 series. *)
 let metric_after_turn_response_model_empty = "masc_after_turn_response_model_empty_total"
 let metric_after_turn_response_model_alias = "masc_after_turn_response_model_alias_total"

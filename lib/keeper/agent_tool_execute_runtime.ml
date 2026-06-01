@@ -215,7 +215,7 @@ let handle_tool_execute_typed
             ~deterministic_reason:
               Keeper_tool_deterministic_error.Destructive_operation_blocked
             ~error:"destructive_operation_blocked"
-            ~reason:"This typed command is destructive and is blocked for all presets."
+            ~reason:"This typed command is destructive and is blocked for all tool_access lists."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
             ()
         else if (not write_enabled)
@@ -225,10 +225,10 @@ let handle_tool_execute_typed
           blocked_result
             ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated
             ~error:"write_operation_gated"
-            ~reason:"This typed command modifies state. A write-enabled preset is required."
+            ~reason:"This typed command modifies state. Write-enabled tool_access is required."
             ~alternatives:
               [ "Use read-only commands such as rg, cat, ls, git status, or git log."
-              ; "Ask the operator for a write-enabled preset."
+              ; "Ask the operator for write-enabled tool_access."
               ]
             ()
         else

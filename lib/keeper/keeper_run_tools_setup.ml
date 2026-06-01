@@ -159,13 +159,13 @@ let prepare_agent_setup
   in
   let tool_entries = List.map tool_index_entry_of_tool keeper_tools in
   let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
-  let load_preset_selection_context () =
-    let preset_names = Keeper_tool_policy.keeper_tool_search_scope meta in
-    let preset_set = Hashtbl.create (List.length preset_names) in
-    List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
-    let preset_tools =
+  let load_scoped_selection_context () =
+    let scoped_names = Keeper_tool_policy.keeper_tool_search_scope meta in
+    let scoped_set = Hashtbl.create (List.length scoped_names) in
+    List.iter (fun n -> Hashtbl.replace scoped_set n true) scoped_names;
+    let scoped_tools =
       List.filter
-        (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
+        (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem scoped_set t.schema.name)
         keeper_tools
     in
     let progressive_tool_index_config =
@@ -173,9 +173,9 @@ let prepare_agent_setup
         top_k = keeper_selection_bm25_prefilter_n
       }
     in
-    let preset_tool_entries = List.map tool_index_entry_of_tool preset_tools in
-    ( preset_tools
-    , Agent_sdk.Tool_index.build ~config:progressive_tool_index_config preset_tool_entries
+    let scoped_tool_entries = List.map tool_index_entry_of_tool scoped_tools in
+    ( scoped_tools
+    , Agent_sdk.Tool_index.build ~config:progressive_tool_index_config scoped_tool_entries
     )
   in
   let oas_description_map =
@@ -354,7 +354,7 @@ let prepare_agent_setup
      counterparts are implementation details.
 
      Order matters: compute [descriptor_public_names] against the UNFILTERED
-     internal allowlist, because tool_policy.toml / presets still express
+     internal allowlist, because tool_policy.toml / tool_access still expresses
      allowlists in descriptor/internal names (tool_execute, tool_read_file, ...).
      Stripping internals before the descriptor expansion check would leave
      [descriptor_public_names] empty and drop "Execute"/"Read"/... from the
@@ -367,7 +367,7 @@ let prepare_agent_setup
   (* Only include a public name when its descriptor internal target is
      itself in [policy_allowed_tool_names]. Otherwise the public name (e.g. "Execute")
      could let the LLM invoke a tool whose internal handler the current
-     keeper/preset has explicitly excluded — the descriptor would dispatch to
+     keeper tool_access has explicitly excluded — the descriptor would dispatch to
      a registered-but-disallowed tool. See PR #14574 review. *)
   let descriptor_public_names =
     Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names
@@ -581,10 +581,10 @@ let prepare_agent_setup
       if decay_discovered then ignore (Keeper_discovered_tools.decay acc.discovered ~turn)
     in
     let selection_limit = keeper_selection_top_k in
-    let preset_tools, preset_search_index = load_preset_selection_context () in
+    let scoped_tools, scoped_search_index = load_scoped_selection_context () in
     let deterministic_prefilter =
       Keeper_tool_selection.deterministic_prefilter_names
-        ~search_index:preset_search_index
+        ~search_index:scoped_search_index
         ~query_text
         ~selection_limit
         ~core
@@ -640,7 +640,7 @@ let prepare_agent_setup
                   Agent_sdk.Tool_selector.TopK_llm
                     { k = selection_limit
                     ; bm25_prefilter_n =
-                        min keeper_selection_bm25_prefilter_n (List.length preset_tools)
+                        min keeper_selection_bm25_prefilter_n (List.length scoped_tools)
                     ; always_include = core
                     ; confidence_threshold = 0.3
                     ; rerank_fn
@@ -651,7 +651,7 @@ let prepare_agent_setup
                      Agent_sdk.Tool_selector.select_names
                        ~strategy
                        ~context:query_text
-                       ~tools:preset_tools
+                       ~tools:scoped_tools
                    in
                    if Keeper_types_profile.keeper_debug
                    then
@@ -661,7 +661,7 @@ let prepare_agent_setup
                        meta.name
                        (List.length selected)
                        (String.length query_text)
-                       (List.length preset_tools);
+                       (List.length scoped_tools);
                    filter_visible_policy_surface selected
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e

@@ -57,6 +57,41 @@ let ensure_test_runtime =
            if not (Atomic.get initialized) then initialize_once ()))
 ;;
 
+let write_text_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "tool_task_runtime_" ".toml" in
+  write_text_file path runtime_toml;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -75,7 +110,9 @@ let with_env name value_opt f =
 let with_isolated_runtime_env f =
   with_env "MASC_BASE_PATH" None (fun () ->
     with_env "MASC_BASE_PATH_INPUT" None (fun () ->
-      with_env "MASC_STORAGE_TYPE" None f))
+      with_env "MASC_STORAGE_TYPE" None (fun () ->
+        with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "false") (fun () ->
+          with_env "MASC_CDAL_GATE_ENABLED" (Some "false") f))))
 
 (* Test registry — collect via [test] then dispatch with Alcotest.run.
    Eio scope set up per-test inside the registered thunk. *)
@@ -1297,38 +1334,6 @@ let () = test "handle_claim_allows_required_tools_with_server_surface" (fun () -
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
-let () = test "handle_add_task_rejects_removed_required_preset_argument" (fun () ->
-  let agent_name = "test-agent" in
-  let ctx = make_test_ctx_with_agent agent_name in
-  let result =
-    Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [
-          ("title", `String "Needs social");
-          ("required_preset", `String "social");
-        ])
-  in
-  assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "required_preset");
-  assert (str_contains (Tool_result.message result) "Unknown argument")
-)
-
-let () = test "add_task_schema_omits_removed_required_preset_argument" (fun () ->
-  let schema =
-    match
-      List.find_opt
-        (fun (schema : Masc_domain.tool_schema) ->
-           String.equal schema.name "masc_add_task")
-        Tool_task_schemas.schemas
-    with
-    | Some schema -> schema
-    | None -> failwith "masc_add_task schema not found"
-  in
-  let properties =
-    Yojson.Safe.Util.(schema.input_schema |> member "properties")
-  in
-  assert (Yojson.Safe.Util.member "required_preset" properties = `Null))
-
 let () = test "handle_claim_rejects_removed_agent_role_argument" (fun () ->
   let ctx = make_test_ctx () in
   let _ =
@@ -1471,7 +1476,7 @@ let () = test "handle_claim_next_ignores_keeper_tool_access_for_open_claims" (fu
   | Error e -> failwith ("write_meta failed: " ^ e));
   (match
      Workspace.update_agent_r ctx.config ~agent_name
-       ~capabilities:[ "keeper"; "preset:minimal" ] ()
+       ~capabilities:[ "keeper" ] ()
    with
   | Ok _ -> ()
   | Error e -> failwith (Masc_domain.masc_error_to_string e));
@@ -2049,6 +2054,29 @@ let () = test "handle_batch_add_tasks_rejects_removed_role_fields" (fun () ->
   assert (str_contains (Tool_result.message result) "required_role is no longer supported")
 )
 
+let () = test "handle_batch_add_tasks_rejects_unknown_item_fields" (fun () ->
+  let ctx = make_test_ctx () in
+  let args =
+    `Assoc
+      [
+        ( "tasks",
+          `List
+            [
+              `Assoc
+                [
+                  ("title", `String "Task 1");
+                  ("retired_tool_policy_field", `String "writer");
+                ];
+            ] );
+      ]
+  in
+  let result = Tool_task.handle_batch_add_tasks ~tool_name:"test_tool" ~start_time:0.0 ctx args in
+  assert (not (Tool_result.is_success result));
+  assert
+    (str_contains (Tool_result.message result)
+       "Unknown argument(s): retired_tool_policy_field")
+)
+
 (* Test helper functions *)
 let () = test "get_string_present" (fun () ->
   let args = `Assoc [("key", `String "value")] in
@@ -2440,6 +2468,7 @@ let () = test "rfc_0034_v2_capacity_check_returns_some_at_limit" (fun () ->
        failwith "expected capacity_error at the per-goal limit"))
 
 let () =
+  init_runtime_default_for_tests ();
   Alcotest.run "Tool_task"
     [
       ( "coverage",

@@ -802,7 +802,7 @@ let () =
       Alcotest.test_case "allows quoted regex alternation under typed gate" `Quick (fun () ->
         match
           validate_command_tool_execute_text
-            "rg \"tool_policy\\|tool_preset\\|preset_policy\\|toolset\" --type=ml -l"
+            "rg \"tool_access\\|tool_policy\\|access_policy\\|toolset\" --type=ml -l"
         with
         | Ok () -> ()
         | Error e ->

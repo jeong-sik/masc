@@ -13,15 +13,15 @@
     See: docs/rfc/RFC-0091-execute-typed-argv.md *)
 
 val dev_programs : Masc_exec.Exec_program.known list
-(** Typed executable vocabulary for full dev presets. *)
+(** Typed executable vocabulary for write-enabled dev tool_access lists. *)
 
 val dev : string list
 (** [List.map Masc_exec.Exec_program.name_of_known dev_programs]. Executables permitted for
-    write/execute-capable presets. Used by [Worker_dev_tools] when dispatching
+    write/execute-capable tool_access lists. Used by [Worker_dev_tools] when dispatching
     Execute for keepers with elevated dev capability. *)
 
 val readonly_programs : Masc_exec.Exec_program.known list
-(** Typed executable vocabulary for read-only presets. *)
+(** Typed executable vocabulary for read-only tool_access lists. *)
 
 val readonly : string list
 (** [List.map Masc_exec.Exec_program.name_of_known readonly_programs]. Read-only executable

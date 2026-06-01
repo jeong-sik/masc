@@ -1217,7 +1217,7 @@ let oneof_const_schema =
                 ( "properties"
                 , `Assoc
                     [
-                      ("kind", `Assoc [("const", `String "preset")])
+                      ("kind", `Assoc [("const", `String "alpha")])
                     ; ("value", `Assoc [("type", `String "string")])
                     ] )
               ; ("required", `List [`String "kind"; `String "value"])
@@ -1236,8 +1236,8 @@ let oneof_const_schema =
     ]
 ;;
 
-let test_oneof_const_discriminator_preset_branch () =
-  let args = `Assoc [("kind", `String "preset"); ("value", `String "minimal")] in
+let test_oneof_const_discriminator_alpha_branch () =
+  let args = `Assoc [("kind", `String "alpha"); ("value", `String "minimal")] in
   match
     Tool_input_validation.validate_args
       ~schema:oneof_const_schema
@@ -1249,7 +1249,7 @@ let test_oneof_const_discriminator_preset_branch () =
     Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
   | Error result ->
     Alcotest.failf
-      "expected preset branch to match, got %s"
+      "expected alpha branch to match, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
@@ -1283,8 +1283,8 @@ let test_oneof_const_discriminator_rejects_unknown_kind () =
     let msg = (Tool_result.message result) in
     Alcotest.(check bool) "error mentions exact-one-of" true
       (string_contains msg "exactly one of");
-    Alcotest.(check bool) "error mentions preset branch label" true
-      (string_contains msg "kind=\"preset\"");
+    Alcotest.(check bool) "error mentions alpha branch label" true
+      (string_contains msg "kind=\"alpha\"");
     Alcotest.(check bool) "error mentions custom branch label" true
       (string_contains msg "kind=\"custom\"")
   | Ok _ -> Alcotest.fail "expected rejection for unknown kind value"
@@ -1581,8 +1581,8 @@ let () =
         test_registered_hook_required_enum_blank_is_not_stripped;
     ]);
     ("oneof_const_discriminator", [
-      Alcotest.test_case "preset branch matches via const" `Quick
-        test_oneof_const_discriminator_preset_branch;
+      Alcotest.test_case "alpha branch matches via const" `Quick
+        test_oneof_const_discriminator_alpha_branch;
       Alcotest.test_case "custom branch matches via const" `Quick
         test_oneof_const_discriminator_custom_branch;
       Alcotest.test_case "unknown kind is rejected" `Quick

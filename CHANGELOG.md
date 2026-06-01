@@ -1446,9 +1446,9 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   `evidence/effects.json` rows are treated as advisory effect-decision evidence
   instead of mode violations.
 - **Keeper TOML key drift assertion restored.** The TOML unknown-key allowlist no
-  longer whitelists `tool_access.kind` / `tool_access.preset` unless the TOML
-  profile parser actually consumes those nested keys, unblocking keeper test
-  executable startup after the canonical/parsed key lists diverged.
+  longer whitelists retired nested tool-access fields unless the TOML profile
+  parser actually consumes them, unblocking keeper test executable startup after
+  the canonical/parsed key lists diverged.
 - **OAS pin bump → `main@8b5bf30a` (`v0.170.4`).**
   `scripts/oas-agent-sdk-pin.sh` now tracks the merged OAS Kimi CLI session
   reuse fix on upstream `main`, and the dependency floor in `dune-project` /

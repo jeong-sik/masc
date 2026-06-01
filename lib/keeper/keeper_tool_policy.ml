@@ -414,10 +414,10 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
   in
   dedupe_tool_names (from_candidates @ from_core)
 
-(** Scoped tool universe: custom allowlist + core_always - denied.
+(** Scoped tool universe: explicit [tool_access] + core_always - denied.
     Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
-    to improve signal-to-noise ratio: a Minimal keeper indexes ~30 tools
-    instead of 244+.  Execution gate still uses the full universe so
+    to improve signal-to-noise ratio: a narrowly scoped keeper indexes fewer
+    tools instead of the full universe.  Execution gate still uses the full universe so
     externally-granted tools (tool_overlay) remain callable.
     See #4637 (Samchon harness: absence > prohibition). *)
 let keeper_tool_search_scope (meta : keeper_meta) : string list =
@@ -452,7 +452,7 @@ let filter_schemas_by_names (names : string list)
   |> dedupe_tool_schemas
 
 (** Scoped model tool schemas for BM25 indexing.
-    Returns schemas only for the preset-scoped universe. *)
+    Returns schemas only for the tool_access-scoped universe. *)
 let keeper_model_tool_schemas (meta : keeper_meta) : Masc_domain.tool_schema list =
   let scoped = keeper_tool_search_scope meta in
   all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
@@ -473,7 +473,7 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
       Log.Keeper.warn
         "tool policy allows %d schemas (~%dKB). Progressive disclosure \
          limits actual LLM context to ~20-40, but universe build cost scales \
-         with policy size. Consider a narrower preset or custom allowlist."
+         with policy size. Consider a narrower tool_access list."
         count (count * 470 / 1024);
     result
 

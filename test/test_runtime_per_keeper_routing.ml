@@ -227,7 +227,7 @@ runtime_id = "openai.gpt"
           ~meta:(make_meta "budgettest")
       in
       Alcotest.(check int)
-        "turn budget uses routed runtime even when projected labels are empty"
+        "turn budget uses routed runtime, not runtime-id-agnostic labels"
         64000
         budget))
 ;;

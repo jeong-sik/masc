@@ -14,19 +14,8 @@ let api_key_from_env name =
      | None -> "")
 ;;
 
-let auth_headers_for_provider_cfg
-      ~(api_key : string)
-      (provider_cfg : Llm_provider.Provider_config.t)
-  =
-  let headers = provider_cfg.headers in
-  if String.trim api_key = ""
-  then headers
-  else (
-    match provider_cfg.kind with
-    | Anthropic -> ("x-api-key", api_key) :: headers
-    | Gemini -> headers
-    | OpenAI_compat | Ollama | Glm | Kimi | DashScope ->
-      ("Authorization", "Bearer " ^ api_key) :: headers)
+let headers_for_provider_cfg (provider_cfg : Llm_provider.Provider_config.t) =
+  provider_cfg.headers
 ;;
 
 let request_kind_of_provider_cfg (provider_cfg : Llm_provider.Provider_config.t) =
@@ -111,7 +100,7 @@ let register_capability_overlay_provider
            Ok
              ( provider_cfg.base_url
              , api_key
-             , auth_headers_for_provider_cfg ~api_key provider_cfg ))
+             , headers_for_provider_cfg provider_cfg ))
     }
 ;;
 

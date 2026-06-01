@@ -47,6 +47,9 @@ val provider_name_matches_kind_default :
 
 val display_provider_name : string -> string
 
+val default_headers_for_kind :
+  Llm_provider.Provider_config.provider_kind -> (string * string) list
+
 val headers_with_auth :
   kind:Llm_provider.Provider_config.provider_kind ->
   api_key:string ->

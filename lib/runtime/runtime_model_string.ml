@@ -105,7 +105,7 @@ let make_registry_config
     then ""
     else Sys.getenv_opt effective_api_key_env |> Option.value ~default:""
   in
-  let headers = Binding.headers_with_auth ~kind:defaults.kind ~api_key in
+  let headers = Binding.default_headers_for_kind defaults.kind in
   let discover =
     if Binding.provider_name_matches_kind_default provider_name Ollama
     then

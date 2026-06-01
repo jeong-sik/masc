@@ -110,6 +110,41 @@ let test_runtime_adapter_filters_toml_auth_headers () =
       (Some "trace-1")
       (normalized_header_value "X-Trace-Id" provider_cfg.headers)
 
+let provider_cfg () =
+  let cfg =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  | Ok provider_cfg -> provider_cfg
+  | Error msg -> failf "unexpected adapter error: %s" msg
+
+let test_runtime_agent_terminal_observation_uses_runtime_identity () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config =
+    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+  in
+  let observation =
+    Runtime_agent.For_testing.runtime_observation_for_completed_config
+      ~total_duration_ms:42.9
+      config
+  in
+  check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
+  check (option string) "selected model" (Some "qwen")
+    observation.selected_model;
+  check int "attempt count" 1 (List.length observation.attempts);
+  check string "attempt detail source" "runtime_agent_terminal"
+    observation.attempt_details_source
+
 let () =
   run "runtime_provider_auth_headers"
     [ ( "provider_config"
@@ -121,5 +156,9 @@ let () =
             "runtime adapter filters TOML auth headers"
             `Quick
             test_runtime_adapter_filters_toml_auth_headers
+        ; test_case
+            "runtime agent terminal observation carries model identity"
+            `Quick
+            test_runtime_agent_terminal_observation_uses_runtime_identity
         ] )
     ]

@@ -404,6 +404,7 @@ let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
 let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     ~(candidate_count : int)
     ~(selected_model_raw : string option) ~(capture : runtime_metrics_capture)
+    ?(attempt_details_source = "oas_metrics_callbacks")
     ?(oas_internal_runtime_allowed = false)
     () =
   runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
@@ -411,7 +412,7 @@ let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
     ~attempts:(List.rev capture.attempts_rev)
     ~fallback_events:(List.rev capture.fallback_events_rev)
     ~attempt_details_available:true
-    ~attempt_details_source:"oas_metrics_callbacks"
+    ~attempt_details_source
     ~oas_internal_runtime_allowed
     ()
 

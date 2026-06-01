@@ -176,6 +176,14 @@ let sdk_agent_error_fields = function
     ; "turn_count", `Int turn_count
     ; "max_turns", `Int max_turns
     ]
+  | Agent_sdk.Error.AgentExecutionIdleTimeout
+      { idle_sec; idle_timeout_sec; turn_count; max_turns } ->
+    [ "variant", `String "agent_idle_timeout"
+    ; "idle_sec", `Float idle_sec
+    ; "idle_timeout_sec", `Float idle_timeout_sec
+    ; "turn_count", `Int turn_count
+    ; "max_turns", `Int max_turns
+    ]
 ;;
 
 let sdk_mcp_error_fields = function

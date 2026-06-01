@@ -7,6 +7,8 @@ let provider_attempt_status_of_result = function
     "timeout"
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
     "timeout"
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
+    "timeout"
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) -> "timeout"
   | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) -> "timeout"
   | Error _ -> "error"
@@ -17,6 +19,8 @@ let provider_attempt_exception_kind_of_result = function
     Some "oas_agent_execution_timeout"
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
     Some "oas_agent_execution_timeout"
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
+    Some "oas_agent_idle_timeout"
   | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) ->
     Some "outer_oas_timeout"
   | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) ->

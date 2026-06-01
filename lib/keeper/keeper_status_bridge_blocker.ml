@@ -49,7 +49,8 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
        Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
        Some Completion_contract_violation
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
+     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
+     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
        Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> Some Sdk_max_turns_exceeded
      | Agent_sdk.Error.Agent (TokenBudgetExceeded _) -> Some Sdk_token_budget_exceeded

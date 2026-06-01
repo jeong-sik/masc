@@ -113,7 +113,8 @@ val install_bg_sandbox_exec_guard : unit -> unit
 
 type snapshot = {
   per_kind : (kind * int) list ;
-      (** in-flight count per class (cap − available semaphore slots). *)
+      (** in-flight count per class. Maintained separately from Eio semaphore
+          credits so snapshots remain safe from dashboard worker domains. *)
   fd_open : int ;
       (** Best-effort observation of process-wide open FDs.
           On macOS / Linux uses [/dev/fd] / [/proc/self/fd] counting;

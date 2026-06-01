@@ -890,7 +890,7 @@ runtime_id = "oas-coding_first"
          (Some "oas-coding_first")
          defaults.model)
 
-let test_persona_resolver_defaults_to_empty_tool_access () =
+let test_persona_resolver_omits_unspecified_tool_access () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -912,10 +912,8 @@ let test_persona_resolver_defaults_to_empty_tool_access () =
   | Ok (_, resolved) ->
       let tool_access = Yojson.Safe.Util.member "tool_access" resolved in
       (match tool_access with
-       | `List items ->
-           check int "persona default tool_access is empty" 0
-             (List.length items)
-       | _ -> fail "persona default tool_access should be a list")
+       | `Null -> ()
+       | _ -> fail "unspecified tool_access should be omitted")
 
 let test_persona_resolver_rejects_operator_todo_profile () =
   with_personas_dir @@ fun personas_dir ->
@@ -1925,8 +1923,8 @@ let () =
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
-          test_case "persona resolver defaults to empty tool_access" `Quick
-            test_persona_resolver_defaults_to_empty_tool_access;
+          test_case "persona resolver omits unspecified tool_access" `Quick
+            test_persona_resolver_omits_unspecified_tool_access;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver reports placeholder defaults source" `Quick

@@ -297,10 +297,7 @@ val enqueue_partial_commit_continue_gate :
   error_detail:string ->
   string
 
-val resolved_max_context_for_turn :
-  meta:keeper_meta ->
-  string list ->
-  int
+val resolved_max_context_for_turn : meta:keeper_meta -> int
 (** Resolve the initial keeper turn context budget from the keeper's routed
     runtime, so lifecycle context math matches the provider that will receive
     the first request. *)

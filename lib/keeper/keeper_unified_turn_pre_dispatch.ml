@@ -47,7 +47,6 @@ let build_runtime_execution
        let max_context =
          Keeper_turn_runtime_budget.resolved_max_context_for_turn
            ~meta
-           model_labels
        in
        let temperature =
          Runtime_inference.resolve_temperature

@@ -802,9 +802,7 @@ let enqueue_partial_commit_continue_gate
 let runtime_budget_logged : (string * int * int, unit) Hashtbl.t =
   Hashtbl.create 16
 
-let resolved_max_context_for_turn
-    ~(meta : keeper_meta)
-    (_model_labels : string list) : int =
+let resolved_max_context_for_turn ~(meta : keeper_meta) : int =
   let resolution =
     Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
   in

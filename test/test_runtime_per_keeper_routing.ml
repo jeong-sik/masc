@@ -225,7 +225,6 @@ runtime_id = "openai.gpt"
       let budget =
         Keeper_turn_runtime_budget.resolved_max_context_for_turn
           ~meta:(make_meta "budgettest")
-          []
       in
       Alcotest.(check int)
         "turn budget uses routed runtime even when projected labels are empty"

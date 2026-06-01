@@ -92,7 +92,7 @@ These are the identity fields that should live in persona by default.
 | `desires` | Optional | Keeper self-model: desires | Identity field. |
 | `instructions` | Optional | Persona-specific instructions | Identity field. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
-| `tool_access` | Optional | Default tool allowlist | String array of callable tool names. |
+| `tool_access` | Optional | Default tool allowlist | String array of callable tool names; omitted means `[]`. |
 | `tool_denylist` | Optional | Tools to remove from the allowlist | Optional policy refinement. |
 | `policy_voice_enabled` | Optional | Whether voice tools should be surfaced | Policy default, not runtime state. |
 | `shards` | Optional | Default tool shards | Optional specialization hook. |

@@ -181,20 +181,19 @@ let test_inject_stores_filtered_masc () =
   Alcotest.(check bool) "no keeper_time_now" false
     (List.mem "keeper_time_now" names)
 
-let test_default_tool_access_exposes_masc () =
+let test_missing_tool_access_exposes_no_masc_tools () =
   prime_keeper_bridge ();
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
-  Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
-  (* Governance tools are no longer in raw_all_tool_schemas *)
-  Alcotest.(check bool) "no masc_governance_status" false
-    (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "filters unsupported inline tool" false
-    (List.mem "masc_agents" names)
+  Alcotest.(check (list string)) "missing allowlist is empty" [] names
 
-let test_messaging_preset_exposes_board () =
+let test_explicit_tool_access_exposes_board () =
   prime_keeper_bridge ();
-  let meta = make_meta () in
+  let meta =
+    make_meta
+      ~tool_access:([ "keeper_board_post"; "tool_search_files"; "tool_read_file" ])
+      ()
+  in
   let names = KET.keeper_allowed_tool_names meta in
   Alcotest.(check bool) "has keeper_board_post" true
     (List.mem "keeper_board_post" names);
@@ -273,7 +272,7 @@ let test_custom_keeps_registered_inline_board_tool () =
     make_meta
       ~tool_access:
         (
-           [ "keeper_board_post"; "masc_agents" ])
+           [ "keeper_board_post"; "masc_broadcast" ])
       ()
   in
   let names = KET.keeper_masc_tool_names meta in
@@ -282,7 +281,7 @@ let test_custom_keeps_registered_inline_board_tool () =
   Alcotest.(check bool) "raw masc_board_post filtered out" false
     (List.mem "masc_board_post" names);
   Alcotest.(check bool) "drops unsupported inline tool" false
-    (List.mem "masc_agents" names)
+    (List.mem "masc_broadcast" names)
 
 let with_masc_schema_ref schemas f =
   KET.with_masc_schemas_for_test schemas f
@@ -310,7 +309,7 @@ let test_dashboard_tool_count_uses_schema_ssot () =
       in
       Alcotest.(check int) "dashboard counts schema-derived masc tools" 1 count)
 
-let test_tool_access_missing_defaults_standard_policy () =
+let test_tool_access_missing_defaults_empty_allowlist () =
   let names =
     allowed_names_of_json
       (`Assoc
@@ -320,30 +319,28 @@ let test_tool_access_missing_defaults_standard_policy () =
           ("trace_id", `String "legacy-standard-trace");
         ])
   in
-  let legacy_masc_names =
-    names
-    |> List.filter (fun name -> String.starts_with ~prefix:"masc_" name)
-    |> List.sort_uniq String.compare
+  Alcotest.(check (list string)) "missing allowlist is empty" [] names
+
+let test_typed_and_string_tool_access_defaults_match () =
+  let module Access = Masc_mcp.Keeper_meta_contract in
+  let check_default label json =
+    let string_default =
+      match Access.tool_access_of_meta_json json with
+      | Ok tools -> tools
+      | Error e -> Alcotest.failf "string parser failed for %s: %s" label e
+    in
+    let typed_default =
+      match Access.tool_access_of_meta_json_typed json with
+      | Ok tools -> Access.tool_access_to_string_list tools
+      | Error e -> Alcotest.failf "typed parser failed for %s: %s" label e
+    in
+    Alcotest.(check (list string))
+      (label ^ " typed/string defaults")
+      string_default
+      typed_default
   in
-  let expected_legacy_masc_names =
-    [
-      "masc_status";
-      "masc_tasks";
-      "masc_claim_next";
-      "masc_plan_set_task";
-      "masc_transition";
-      "masc_add_task";
-    ]
-    |> List.sort_uniq String.compare
-  in
-  Alcotest.(check bool) "keeps keeper internal tool" true
-    (List.mem "keeper_time_now" names);
-  Alcotest.(check bool) "keeps legacy standard masc tool" true
-    (List.mem "masc_status" names);
-  Alcotest.(check (list string)) "default keeps expected masc set"
-    expected_legacy_masc_names legacy_masc_names;
-  Alcotest.(check bool) "default exposes full read surface" true
-    (List.mem "tool_read_file" names)
+  check_default "missing" (`Assoc []);
+  check_default "null" (`Assoc [ "tool_access", `Null ])
 
 let test_read_meta_file_rejects_legacy_tool_keys () =
   let dir = temp_dir () in
@@ -373,29 +370,6 @@ let test_read_meta_file_rejects_legacy_tool_keys () =
             (Yojson.Safe.Util.member "tool_preset" persisted
              |> Yojson.Safe.Util.to_string))
 
-let test_read_meta_file_defaults_legacy_tool_access_object_without_tools () =
-  let dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      let path = Filename.concat dir "legacy-object.json" in
-      write_json_file path
-        (`Assoc
-          [
-            ("name", `String "legacy-object");
-            ("agent_name", `String "legacy-object");
-            ("trace_id", `String "legacy-object-trace");
-            ("runtime_id", `String "test.runtime");
-            ("tool_access", `Assoc [ ("preset", `String "full") ]);
-          ]);
-      match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
-      | Error e -> Alcotest.fail e
-      | Ok None -> Alcotest.fail "expected keeper meta"
-      | Ok (Some meta) ->
-          let names = KET.keeper_allowed_tool_names meta in
-          Alcotest.(check bool) "default keeps keeper internal tool" true
-            (List.mem "keeper_time_now" names))
-
 let test_read_meta_file_defaults_missing_tool_access_without_rewrite () =
   let dir = temp_dir () in
   Fun.protect
@@ -417,8 +391,7 @@ let test_read_meta_file_defaults_missing_tool_access_without_rewrite () =
       | Ok None -> Alcotest.fail "expected keeper meta"
       | Ok (Some meta) ->
           let names = KET.keeper_allowed_tool_names meta in
-          Alcotest.(check bool) "default keeps keeper internal tool" true
-            (List.mem "keeper_time_now" names);
+          Alcotest.(check (list string)) "missing allowlist is empty" [] names;
           let persisted = read_json_file path in
           Alcotest.(check bool) "missing tool_access not rewritten" true
             (Yojson.Safe.Util.member "tool_access" persisted = `Null))
@@ -440,27 +413,6 @@ let test_meta_of_json_rejects_legacy_tool_policy_keys () =
         "removed keeper meta fields: tool_preset"
         e
 
-let test_tool_access_legacy_object_empty_tools_preserved () =
-  let meta =
-    match Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-        [
-          ("name", `String "preset-json");
-          ("agent_name", `String "preset-json");
-          ("trace_id", `String "preset-json-trace");
-          ( "tool_access",
-            `Assoc
-              [
-                ("tools", `List []);
-              ] );
-        ])
-    with
-    | Ok meta -> meta
-    | Error e -> failwith e
-  in
-  let names = meta.Masc_mcp.Keeper_meta_contract.tool_access in
-  Alcotest.(check int) "legacy object empty tools preserved" 0 (List.length names)
-
 let test_tool_access_array_empty_json_preserved () =
   let meta =
     match Masc_test_deps.meta_of_json_fixture
@@ -478,7 +430,7 @@ let test_tool_access_array_empty_json_preserved () =
   let names = meta.Masc_mcp.Keeper_meta_contract.tool_access in
   Alcotest.(check int) "custom empty preserved" 0 (List.length names)
 
-let test_tool_access_legacy_object_with_tools_preserved () =
+let test_tool_access_object_with_tools_rejected () =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
@@ -488,27 +440,29 @@ let test_tool_access_legacy_object_with_tools_preserved () =
         ("tool_access", `Assoc [ ("tools", `List [ `String "masc_status" ]) ]);
       ])
   with
-  | Error e -> Alcotest.fail e
-  | Ok meta ->
-      let names = meta.Masc_mcp.Keeper_meta_contract.tool_access in
-      Alcotest.(check (list string)) "legacy tools preserved" [ "masc_status" ] names
+  | Ok _ -> Alcotest.fail "expected legacy tool_access object rejection"
+  | Error e ->
+      Alcotest.(check string)
+        "legacy object with tools rejected"
+        "meta parse error: keeper tool_access must be an array of strings (received object)"
+        e
 
-let test_tool_access_legacy_object_without_tools_defaults () =
+let test_tool_access_object_without_tools_rejected () =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
         ("name", `String "legacy-no-tools");
         ("agent_name", `String "legacy-no-tools");
         ("trace_id", `String "legacy-no-tools-trace");
-        ("tool_access", `Assoc [ ("preset", `String "full") ]);
+        ("tool_access", `Assoc [ ("unexpected", `String "object") ]);
       ])
   with
+  | Ok _ -> Alcotest.fail "expected legacy tool_access object rejection"
   | Error e ->
-      Alcotest.fail e
-  | Ok meta ->
-      let names = meta.Masc_mcp.Keeper_meta_contract.tool_access in
-      Alcotest.(check bool) "legacy object defaults" true
-        (List.mem "keeper_time_now" names)
+      Alcotest.(check string)
+        "legacy object without tools rejected"
+        "meta parse error: keeper tool_access must be an array of strings (received object)"
+        e
 
 let test_tool_access_invalid_tool_member_rejected () =
   match Masc_test_deps.meta_of_json_fixture
@@ -517,18 +471,14 @@ let test_tool_access_invalid_tool_member_rejected () =
         ("name", `String "invalid-tool-member");
         ("agent_name", `String "invalid-tool-member");
         ("trace_id", `String "invalid-tool-member-trace");
-        ( "tool_access",
-          `Assoc
-            [
-              ("tools", `List [ `String "masc_status"; `Int 1 ]);
-            ] );
+        ("tool_access", `List [ `String "masc_status"; `Int 1 ]);
       ])
   with
   | Ok _ -> Alcotest.fail "expected invalid tool member to fail"
   | Error e ->
       Alcotest.(check string)
         "invalid tool member error"
-        "meta parse error: keeper tool_access.tools[1] must be a string (received int)"
+        "meta parse error: keeper tool_access[1] must be a string (received int)"
         e
 
 let test_allowlist_gates_shard_tools () =
@@ -829,10 +779,10 @@ let () =
         ] );
       ( "preset_policy",
         [
-          Alcotest.test_case "default tool_access exposes masc tools" `Quick
-            test_default_tool_access_exposes_masc;
-          Alcotest.test_case "default tool_access exposes board" `Quick
-            test_messaging_preset_exposes_board;
+          Alcotest.test_case "missing tool_access exposes no masc tools" `Quick
+            test_missing_tool_access_exposes_no_masc_tools;
+          Alcotest.test_case "explicit tool_access exposes board" `Quick
+            test_explicit_tool_access_exposes_board;
           Alcotest.test_case "explicit allowlist opens extra tool" `Quick
             test_explicit_allowlist_opens_extra_tool;
           Alcotest.test_case "custom filters board tools with keeper wrappers" `Quick
@@ -853,24 +803,22 @@ let () =
         ] );
       ( "meta_json",
         [
-          Alcotest.test_case "missing tool_access defaults standard policy" `Quick
-            test_tool_access_missing_defaults_standard_policy;
+          Alcotest.test_case "missing tool_access defaults empty allowlist" `Quick
+            test_tool_access_missing_defaults_empty_allowlist;
+          Alcotest.test_case "typed/string defaults match" `Quick
+            test_typed_and_string_tool_access_defaults_match;
           Alcotest.test_case "read_meta rejects legacy tool keys" `Quick
             test_read_meta_file_rejects_legacy_tool_keys;
-          Alcotest.test_case "read_meta drains legacy tool_access object" `Quick
-            test_read_meta_file_defaults_legacy_tool_access_object_without_tools;
           Alcotest.test_case "read_meta defaults missing tool_access without rewrite" `Quick
             test_read_meta_file_defaults_missing_tool_access_without_rewrite;
           Alcotest.test_case "direct meta_of_json rejects legacy tool keys" `Quick
             test_meta_of_json_rejects_legacy_tool_policy_keys;
-          Alcotest.test_case "legacy object empty tools preserved" `Quick
-            test_tool_access_legacy_object_empty_tools_preserved;
           Alcotest.test_case "array empty json preserved" `Quick
             test_tool_access_array_empty_json_preserved;
-          Alcotest.test_case "legacy object tools preserved" `Quick
-            test_tool_access_legacy_object_with_tools_preserved;
-          Alcotest.test_case "legacy object without tools defaults" `Quick
-            test_tool_access_legacy_object_without_tools_defaults;
+          Alcotest.test_case "legacy object with tools rejected" `Quick
+            test_tool_access_object_with_tools_rejected;
+          Alcotest.test_case "legacy object without tools rejected" `Quick
+            test_tool_access_object_without_tools_rejected;
           Alcotest.test_case "invalid tool member rejected" `Quick
             test_tool_access_invalid_tool_member_rejected;
         ] );

@@ -23,40 +23,6 @@ let normalize_tool_names names =
   |> dedupe_keep_order
 ;;
 
-let write_tools_typed =
-  [ Tool_name.Keeper.Fs_edit; Tool_name.Keeper.Fs_write; Tool_name.Keeper.Execute ]
-;;
-
-let write_tools = List.map Tool_name.Keeper.to_string write_tools_typed
-;;
-
-let legacy_keeper_internal_tool_names =
-  (* Keep legacy masc workspace defaults explicit in
-     [legacy_session_min_tool_names]; new [masc_*] internal tools should not
-     silently expand missing [tool_access] migrations.
-     Write tools are excluded so that keepers without explicit [tool_access]
-     cannot claim write-intent tasks.  Keepers that need write access must
-     list explicit write tool names. *)
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
-  |> List.filter (fun name ->
-         not (String.starts_with ~prefix:"masc_" name)
-         && not (List.exists (String.equal name) write_tools))
-;;
-
-let legacy_session_min_tool_names =
-  (* Legacy keepers historically received canonical masc_* workspace tools,
-     not the SDK alias-heavy Session_min surface. Keep this compatibility list
-     explicit so missing tool_access migration remains stable after tier removal. *)
-  List.map
-    Tool_name.Masc.to_string
-    Tool_name.Masc.
-      [ Status; Tasks; Claim_next; Plan_set_task; Transition; Add_task; Broadcast ]
-;;
-
-let migrate_legacy_restricted_tools names =
-  normalize_tool_names (legacy_keeper_internal_tool_names @ names)
-;;
-
 let normalize_tool_access names = normalize_tool_names names
 
 (** Encode a tool allowlist as a JSON array of tool names. *)
@@ -94,21 +60,10 @@ let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
   | _ -> string_list_field_result ?label ~field_name json
 ;;
 
-let default_tool_access_of_meta_json () =
-  (* Full Keeper_internal surface: keepers without explicit tool_access get the
-     complete tool set so runtime filtering can find providers with required tools
-     like masc_transition. Write-intent restrictions are handled by task contract
-     gating, not by default tool access exclusion.
-     See fleet deadlock Layer 2 analysis (2026-05-30) + runtime provider
-     gap analysis (2026-05-30). *)
-  normalize_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal)
-;;
+let default_tool_access_of_meta_json () = []
 
 (** Parse [tool_access] from persisted meta JSON.
-    Canonical form is a JSON array of tool names.
-    Legacy object forms are accepted only as a migration drain:
-    - [{ "tools": [...] }] -> the [tools] array
-    - objects without [tools] -> default surface *)
+    Canonical form is a JSON array of tool names. *)
 let tool_access_of_meta_json (json : Yojson.Safe.t) =
   match Json_util.assoc_member_opt "tool_access" json with
   | Some `Null | None -> Ok (default_tool_access_of_meta_json ())
@@ -119,18 +74,6 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
      with
      | Ok tools -> Ok (normalize_tool_access tools)
      | Error msg -> Error msg)
-  | Some (`Assoc _ as access_json) ->
-    (match Json_util.assoc_member_opt "tools" access_json with
-     | Some _ ->
-       (match
-          string_list_field_result
-            ~field_name:"tools"
-            ~label:"tool_access.tools"
-            access_json
-        with
-        | Ok tools -> Ok (normalize_tool_access tools)
-        | Error msg -> Error msg)
-     | None -> Ok (default_tool_access_of_meta_json ()))
   | Some other ->
     Error
       (Printf.sprintf "keeper tool_access must be an array of strings (received %s)"
@@ -165,17 +108,10 @@ let tool_access_to_json_typed tools =
   `List (List.map (fun t -> `String (Tool_name.Keeper.to_string t)) tools)
 ;;
 
-(** Default typed tool allowlist: [Keeper_internal] surface with write tools
-    excluded, parsed through the typed boundary. *)
-let default_tool_access_of_meta_json_typed () =
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
-  |> tool_access_of_string_list
-  |> List.filter (fun tool -> not (List.mem tool write_tools_typed))
-;;
+let default_tool_access_of_meta_json_typed () = []
 
 (** Parse [tool_access] from persisted meta JSON into typed tools.
-    Same migration-drain behavior as [tool_access_of_meta_json] but returns
-    typed variants.  Unknown names are silently dropped at the boundary. *)
+    Unknown names are silently dropped at the boundary. *)
 let tool_access_of_meta_json_typed (json : Yojson.Safe.t) =
   match Json_util.assoc_member_opt "tool_access" json with
   | Some `Null | None -> Ok (default_tool_access_of_meta_json_typed ())
@@ -186,18 +122,6 @@ let tool_access_of_meta_json_typed (json : Yojson.Safe.t) =
      with
      | Ok tools -> Ok (tool_access_of_string_list tools)
      | Error msg -> Error msg)
-  | Some (`Assoc _ as access_json) ->
-    (match Json_util.assoc_member_opt "tools" access_json with
-     | Some _ ->
-       (match
-          string_list_field_result
-            ~field_name:"tools"
-            ~label:"tool_access.tools"
-            access_json
-        with
-        | Ok tools -> Ok (tool_access_of_string_list tools)
-        | Error msg -> Error msg)
-     | None -> Ok (default_tool_access_of_meta_json_typed ()))
   | Some other ->
     Error
       (Printf.sprintf "keeper tool_access must be an array of strings (received %s)"

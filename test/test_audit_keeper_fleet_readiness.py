@@ -99,9 +99,14 @@ def write_ready_keeper(
                 "[keeper]",
                 'sandbox_profile = "docker"',
                 'network_mode = "inherit"',
-                'tool_preset = "delivery"',
                 f'repo_cli_identity = "{repo_cli_identity}"',
                 'git_identity_mode = "repo_cli_identity"',
+                "tool_access = ["
+                '"tool_execute", '
+                '"tool_edit_file", '
+                '"tool_write_file", '
+                '"keeper_board_post"'
+                "]",
                 "",
             ]
         ),
@@ -112,7 +117,12 @@ def write_ready_keeper(
             {
                 "sandbox_profile": "docker",
                 "network_mode": "inherit",
-                "tool_preset": "delivery",
+                "tool_access": [
+                    "tool_execute",
+                    "tool_edit_file",
+                    "tool_write_file",
+                    "keeper_board_post",
+                ],
                 "repo_cli_identity": repo_cli_identity,
                 "git_identity_mode": "repo_cli_identity",
                 "last_turn_ts": time.time(),
@@ -268,6 +278,11 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         args = audit.parse_args([])
 
         self.assertEqual(args.expected_keepers, 18)
+
+    def test_parse_args_accepts_forbid_github_identity_alias(self):
+        args = audit.parse_args(["--forbid-github-identity", "operator"])
+
+        self.assertEqual(args.forbid_repo_cli_identity, ["operator"])
 
     def test_iter_jsonl_streams_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -531,6 +546,70 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             report["fleet_failures"], ["minimum_2_configured_keepers_got_1"]
         )
+
+    def test_explicit_tool_access_must_include_repo_mutation_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            runtime_path = root / ".masc" / "keepers" / "alpha.json"
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+            runtime["tool_access"] = ["keeper_board_post"]
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+
+            report = audit.build_report(audit_args(root, expected_keepers=1))
+
+        self.assertFalse(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertEqual(keeper["repo_mutation_tools"], [])
+        self.assertIn("repo_mutation_tools_missing", keeper["failures"])
+
+    def test_removed_tool_policy_keys_fail_readiness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            runtime_path = root / ".masc" / "keepers" / "alpha.json"
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+            runtime["tool_preset"] = "delivery"
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+
+            report = audit.build_report(audit_args(root, expected_keepers=1))
+
+        self.assertFalse(report["ok"])
+        self.assertIn(
+            "runtime_removed_tool_policy_keys_tool_preset",
+            report["keepers"][0]["failures"],
+        )
+
+    def test_missing_tool_access_has_no_repo_mutation_surface(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            runtime_path = root / ".masc" / "keepers" / "alpha.json"
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+            runtime.pop("tool_access")
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+            config_path = root / ".masc" / "config" / "keepers" / "alpha.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[keeper]",
+                        'sandbox_profile = "docker"',
+                        'network_mode = "inherit"',
+                        'repo_cli_identity = "anyang-keepers"',
+                        'git_identity_mode = "repo_cli_identity"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            report = audit.build_report(audit_args(root, expected_keepers=1))
+
+        self.assertFalse(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertIsNone(keeper["tool_access"])
+        self.assertEqual(keeper["repo_mutation_tools"], [])
+        self.assertIn("repo_mutation_tools_missing", keeper["failures"])
 
     def test_require_persistent_work_evidence_fails_without_runtime_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:

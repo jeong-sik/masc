@@ -37,13 +37,11 @@ val string_list_field_opt_result :
   Yojson.Safe.t ->
   (string list, string) result
 
-(** Default tool allowlist for missing/null fields:
-    [Keeper_internal] surface with write tools excluded. *)
+(** Default tool allowlist for missing/null fields. *)
 val default_tool_access_of_meta_json : unit -> string list
 
 (** Parse [tool_access] from persisted meta JSON.  Canonical form is a JSON
-    array of tool names; legacy objects with [tools] are accepted as a
-    migration drain. *)
+    array of tool names. *)
 val tool_access_of_meta_json :
   Yojson.Safe.t -> (string list, string) result
 
@@ -70,7 +68,7 @@ val tool_access_to_json_typed : Tool_name.Keeper.t list -> Yojson.Safe.t
 (** Encode a typed tool allowlist as JSON. *)
 
 val default_tool_access_of_meta_json_typed : unit -> Tool_name.Keeper.t list
-(** Default typed tool allowlist from [Keeper_internal] surface. *)
+(** Default typed tool allowlist. *)
 
 val tool_access_of_meta_json_typed :
   Yojson.Safe.t -> (Tool_name.Keeper.t list, string) result

@@ -200,16 +200,15 @@ let test_classify_pipeline_nonhead_escalation () =
   Alcotest.(check bool) "sudo cat /etc/shadow | grep x is destructive"
     true
     (is_destructive [ ("sudo", [ "cat"; "/etc/shadow" ]); ("grep", [ "x" ]) ]);
-  (* git push --force to a protected branch in a non-head stage escalates
-     above R0 (the flat floor saw only the head "cat"). *)
+  (* git push --force to a protected branch in a non-head stage must be
+     Destructive_protected (not merely above R0). *)
   let push_risk =
     risk_of [ ("cat", [ "f" ]); ("git", [ "push"; "--force"; "origin"; "main" ]) ]
   in
-  Alcotest.(check bool)
-    (Printf.sprintf "cat f | git push --force escalates above R0 (got %s)"
-       (Risk.string_of_risk_class push_risk))
-    true
-    (push_risk <> Masc_exec.Shell_ir_risk.R0_Read);
+  Alcotest.(check string)
+    "cat f | git push --force origin main is Destructive_protected"
+    "Destructive_protected"
+    (Risk.string_of_risk_class push_risk);
   (* benign read pipelines stay R0 — no over-escalation. *)
   Alcotest.(check bool) "ls | grep x stays R0"
     true

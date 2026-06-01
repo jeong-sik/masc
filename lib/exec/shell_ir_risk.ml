@@ -580,7 +580,10 @@ let max_risk a b = if risk_rank a >= risk_rank b then a else b
 (* Per-[Simple] decision: the stricter of the typed-shape opinion and
    the word-list floor for that single command. Both opinions are scoped
    to one command's own words, so a pipeline can compose them stage by
-   stage instead of flattening every stage into one head-anchored list. *)
+   stage instead of flattening every stage into one head-anchored list.
+   When [literal_words_of_simple] returns [None] (env/redirect/$VAR present)
+   the word-list floor cannot be computed and falls back to [R0_Read];
+   the typed opinion still supplies escalation for those cases. *)
 let decision_of_simple (s : Shell_ir.simple) : risk_class =
   let typed = risk_of_typed (Shell_ir_typed.of_simple s) in
   let floor =

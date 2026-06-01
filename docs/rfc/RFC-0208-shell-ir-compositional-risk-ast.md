@@ -19,28 +19,32 @@ a single-source decision substrate and closed its 7 KPIs (G1–G8). Since then
 adoption is high: `scripts/audit-shell-ir-consumption.sh` shows all gates at
 target, and the phantom-envelope invariant (`undecided → classify → decided`)
 is sound — every dispatch flows through one `classify` site
-(`lib/exec/shell_ir_risk.ml:594`) before `Exec_dispatch.dispatch_decided`.
+(`lib/exec/shell_ir_risk.ml`, the sole `classify` function) before
+`Exec_dispatch.dispatch_decided`.
 
 Three findings from a 2026-06-01 audit (fleet logs + source) show the
 *runtime reality* diverges from the static picture:
 
-1. **Confirmed safety hole — pipelines bypass typed risk.**
-   `lib/exec/shell_ir_risk.ml:592` hardcodes `Pipeline _ -> R0_Read`. The
-   word-list floor flattens all stages (`flat_stage_words`) into one list,
-   and `is_destructive_bash_operation` matches only on the *head* token plus a
-   narrow set (`git push --force`, `rm -rf`). Result: a privilege-escalation
-   or destructive command in any non-head pipeline stage classifies as
-   `R0_Read` (safe). Examples that currently classify R0:
+1. **Confirmed safety hole — pipelines bypassed typed risk (closed by P0).**
+   Before this RFC's P0 implementation, `shell_ir_risk.ml` hardcoded
+   `Pipeline _ -> R0_Read`. The word-list floor flattened all stages
+   (`flat_stage_words`) into one list, and `is_destructive_bash_operation`
+   matched only on the *head* token plus a narrow set (`git push --force`,
+   `rm -rf`). Result: a privilege-escalation or destructive command in any
+   non-head pipeline stage classified as `R0_Read` (safe). Examples that
+   were silently under-classified:
    - `echo x | sudo tee /etc/passwd`
    - `cat f | git push --force origin main`
    - `sudo cat f | grep y` (sudo anywhere in a pipeline; the typed `W (Sudo)`
-     arm at `shell_ir_risk.ml:549` only fires for a `Simple`, never inside a
-     `Pipeline`).
-   `test/.../test_shell_ir_risk.ml` has no non-head-stage pipeline case.
+     arm only fired for a `Simple`, never inside a `Pipeline`).
+   P0 replaces the blanket `Pipeline _ -> R0_Read` with a per-stage
+   compositional `max_risk` fold (see §4), so every stage now contributes
+   its typed risk. Regression tests for non-head-stage escalation ship with
+   the P0 PR.
 
 2. **No runtime observability of typed coverage.** The dispatch log
-   (`lib/keeper/agent_tool_execute_runtime.ml:274-280`) records
-   `keeper / sandbox / status / elapsed_ms` only. The `decided_ir` (with
+   (`lib/keeper/agent_tool_execute_runtime.ml`, the dispatch telemetry site)
+   records `keeper / sandbox / status / elapsed_ms` only. The `decided_ir` (with
    `risk_class`) is in scope at the log site but unused; `classify` discards
    which path won (typed vs word-floor). The 110 constructors are invisible in
    production — nobody can measure what fraction of the ~800 dispatches/day
@@ -61,9 +65,9 @@ Three findings from a 2026-06-01 audit (fleet logs + source) show the
 | 2 | **Two risk classifiers** | typed `risk_of_typed` (4-level) ‖ word-list `classify_words` (the string classifier RFC-0160 set out to remove, kept as floor) | one compositional risk algebra over the AST |
 | 3 | **Two risk taxonomies** | phantom `[`Safe | `Audited | `Privileged]` (GADT 3rd type param + `gen_risk` walker + `exec_program.risk`) ‖ operational `risk_class` (R0/R1/R2/Destructive_protected, used by the gate) | one `risk_class` |
 
-The `shell_ir_risk.ml:580-586` comment admits the floor stays "until the
-typed model becomes complete enough to subsume it (RFC-0160 follow-up)". This
-RFC is that follow-up.
+The `decision_of_simple` comment in `shell_ir_risk.ml` admits the floor
+stays "until the typed model becomes complete enough to subsume it
+(RFC-0160 follow-up)". This RFC is that follow-up.
 
 ## §1 · Goals (verifiable end-state)
 

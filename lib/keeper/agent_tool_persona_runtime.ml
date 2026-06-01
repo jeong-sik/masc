@@ -84,7 +84,7 @@ let resolved_keeper_args_to_json
     let tool_access =
       match tool_access_opt with
       | Some tool_access -> tool_access
-      | None -> default_tool_access_of_meta_json ()
+      | None -> []
     in
     [("tool_access", tool_access_to_json tool_access)]
   in
@@ -405,8 +405,7 @@ let resolved_keeper_args_from_persona args :
             in
             let autoboot_enabled = get_bool_opt args "autoboot_enabled" in
             (match
-               Keeper_turn_up_args.parse_tool_access_input
-                 ~tool_name:"masc_keeper_create_from_persona" args,
+               Keeper_turn_up_args.parse_tool_access_input args,
                Keeper_turn_up_args.parse_present_string_list_opt args "allowed_paths"
              with
             | Error err, _ | _, Error err -> Error err

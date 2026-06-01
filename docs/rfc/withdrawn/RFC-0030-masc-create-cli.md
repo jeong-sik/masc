@@ -183,7 +183,7 @@ runs:
 
 - TOML parse (delegate to existing `keeper_meta_json_parse` /
   `runtime_toml_materializer`).
-- Cross-reference checks (persona's tool preset exists; runtime's
+- Cross-reference checks (persona's tool access exists; runtime's
   fallback profile exists; keeper's persona exists).
 - Capability checks (persona's `git_identity_mode` is one of the two
   enum variants; tier exists in runtime).

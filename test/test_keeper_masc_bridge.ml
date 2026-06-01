@@ -72,6 +72,8 @@ let read_text_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> Stdlib.really_input_string ic (in_channel_length ic))
 
+let contains_substring = String_util.contains_substring
+
 let process_exit_code = function
   | Unix.WEXITED code -> code
   | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
@@ -383,7 +385,7 @@ let test_dashboard_tool_count_uses_schema_ssot () =
       in
       Alcotest.(check int) "dashboard counts schema-derived masc tools" 1 count)
 
-let test_tool_access_missing_defaults_empty_allowlist () =
+let test_tool_access_missing_defaults_standard_policy () =
   let names =
     allowed_names_of_json
       (`Assoc
@@ -393,30 +395,29 @@ let test_tool_access_missing_defaults_empty_allowlist () =
           ("trace_id", `String "legacy-standard-trace");
         ])
   in
-  Alcotest.(check (list string)) "missing allowlist is empty" [] names
+  Alcotest.(check bool) "missing allowlist uses default keeper surface" true
+    (List.mem "keeper_time_now" names)
 
-let test_typed_and_string_tool_access_defaults_match () =
+let test_typed_and_string_tool_access_rejections_match () =
   let module Access = Masc_mcp.Keeper_meta_contract in
-  let check_default label json =
-    let string_default =
+  let check_rejection label json =
+    let string_error =
       match Access.tool_access_of_meta_json json with
-      | Ok tools -> tools
-      | Error e -> Alcotest.failf "string parser failed for %s: %s" label e
+      | Ok _ -> Alcotest.failf "string parser accepted %s" label
+      | Error e -> e
     in
-    let typed_default =
+    let typed_error =
       match Access.tool_access_of_meta_json_typed json with
-      | Ok tools -> Access.tool_access_to_string_list tools
-      | Error e -> Alcotest.failf "typed parser failed for %s: %s" label e
+      | Ok _ -> Alcotest.failf "typed parser accepted %s" label
+      | Error e -> e
     in
-    Alcotest.(check (list string))
-      (label ^ " typed/string defaults")
-      string_default
-      typed_default
+    Alcotest.(check string) (label ^ " typed/string rejection") string_error
+      typed_error
   in
-  check_default "missing" (`Assoc []);
-  check_default "null" (`Assoc [ "tool_access", `Null ])
+  check_rejection "missing" (`Assoc []);
+  check_rejection "null" (`Assoc [ "tool_access", `Null ])
 
-let test_read_meta_file_defaults_missing_tool_access_without_rewrite () =
+let test_read_meta_file_rejects_missing_tool_access () =
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -433,14 +434,46 @@ let test_read_meta_file_defaults_missing_tool_access_without_rewrite () =
             ("network_mode", `String "inherit");
           ]);
       match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
-      | Error e -> Alcotest.fail e
-      | Ok None -> Alcotest.fail "expected keeper meta"
-      | Ok (Some meta) ->
-          let names = KET.keeper_allowed_tool_names meta in
-          Alcotest.(check (list string)) "missing allowlist is empty" [] names;
-          let persisted = read_json_file path in
-          Alcotest.(check bool) "missing tool_access not rewritten" true
-            (Yojson.Safe.Util.member "tool_access" persisted = `Null))
+      | Ok _ -> Alcotest.fail "expected missing tool_access rejection"
+      | Error e ->
+          Alcotest.(check bool) "mentions tool_access" true
+            (contains_substring e "tool_access must be an array"))
+
+let test_read_meta_file_rejects_tool_access_object () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      let path = Filename.concat dir "object-tool-access.json" in
+      write_json_file path
+        (`Assoc
+          [
+            ("name", `String "object-tool-access");
+            ("agent_name", `String "object-tool-access");
+            ("trace_id", `String "object-tool-access-trace");
+            ("tool_access", `Assoc [ ("value", `String "full") ]);
+          ]);
+      match Masc_mcp.Keeper_meta_store.read_meta_file_path path with
+      | Ok _ -> Alcotest.fail "expected tool_access object rejection"
+      | Error e ->
+          Alcotest.(check bool) "mentions array" true
+            (contains_substring e "tool_access must be an array"))
+
+let test_tool_access_object_empty_value_rejected () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [
+           ("name", `String "object-json");
+           ("agent_name", `String "object-json");
+           ("trace_id", `String "object-json-trace");
+           ("tool_access", `Assoc [ ("value", `List []) ]);
+         ])
+  with
+  | Ok _ -> Alcotest.fail "expected object tool_access rejection"
+  | Error e ->
+      Alcotest.(check bool) "mentions array" true
+        (contains_substring e "tool_access must be an array")
 
 let test_tool_access_array_empty_json_preserved () =
   let meta =
@@ -475,6 +508,36 @@ let test_tool_access_non_array_rejected () =
         "non-array tool_access rejected"
         "meta parse error: keeper tool_access must be an array of strings (received string)"
         e
+
+let test_tool_access_object_array_value_rejected () =
+  match Masc_test_deps.meta_of_json_fixture
+    (`Assoc
+      [
+        ("name", `String "object-tools");
+        ("agent_name", `String "object-tools");
+        ("trace_id", `String "object-tools-trace");
+        ("tool_access", `Assoc [ ("value", `List [ `String "masc_status" ]) ]);
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected object tool_access rejection"
+  | Error e ->
+      Alcotest.(check bool) "mentions array" true
+        (contains_substring e "tool_access must be an array")
+
+let test_tool_access_object_scalar_value_rejected () =
+  match Masc_test_deps.meta_of_json_fixture
+    (`Assoc
+      [
+        ("name", `String "object-no-array");
+        ("agent_name", `String "object-no-array");
+        ("trace_id", `String "object-no-array-trace");
+        ("tool_access", `Assoc [ ("value", `String "full") ]);
+      ])
+  with
+  | Ok _ -> Alcotest.fail "expected object tool_access rejection"
+  | Error e ->
+      Alcotest.(check bool) "mentions array" true
+        (contains_substring e "tool_access must be an array")
 
 let test_tool_access_invalid_tool_member_rejected () =
   match Masc_test_deps.meta_of_json_fixture
@@ -834,16 +897,24 @@ let () =
         ] );
       ( "meta_json",
         [
-          Alcotest.test_case "missing tool_access defaults empty allowlist" `Quick
-            test_tool_access_missing_defaults_empty_allowlist;
-          Alcotest.test_case "typed/string defaults match" `Quick
-            test_typed_and_string_tool_access_defaults_match;
-          Alcotest.test_case "read_meta defaults missing tool_access without rewrite" `Quick
-            test_read_meta_file_defaults_missing_tool_access_without_rewrite;
+          Alcotest.test_case "missing tool_access uses standard policy" `Quick
+            test_tool_access_missing_defaults_standard_policy;
+          Alcotest.test_case "typed/string rejections match" `Quick
+            test_typed_and_string_tool_access_rejections_match;
+          Alcotest.test_case "read_meta rejects missing tool_access" `Quick
+            test_read_meta_file_rejects_missing_tool_access;
+          Alcotest.test_case "read_meta rejects tool_access object" `Quick
+            test_read_meta_file_rejects_tool_access_object;
+          Alcotest.test_case "tool_access object empty value rejected" `Quick
+            test_tool_access_object_empty_value_rejected;
           Alcotest.test_case "array empty json preserved" `Quick
             test_tool_access_array_empty_json_preserved;
           Alcotest.test_case "non-array tool_access rejected" `Quick
             test_tool_access_non_array_rejected;
+          Alcotest.test_case "tool_access object array value rejected" `Quick
+            test_tool_access_object_array_value_rejected;
+          Alcotest.test_case "tool_access object scalar value rejected" `Quick
+            test_tool_access_object_scalar_value_rejected;
           Alcotest.test_case "invalid tool member rejected" `Quick
             test_tool_access_invalid_tool_member_rejected;
         ] );

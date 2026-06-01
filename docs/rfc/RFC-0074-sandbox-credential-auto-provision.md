@@ -21,10 +21,10 @@ RFC-0073 이 *gap 을 진단*한다면 이 RFC 는 *gap 을 닫는다*.
 
 ## 2. Problem
 
-- preset (coding/research/social/...) 은 *어떤 자원이 필요한지* 를 implicit 하게만 안다 (`preset_allowlist` 의 tool 목록).
+- keeper `tool_access` 는 *어떤 자원이 필요한지* 를 명시하지만 sandbox/credential 부착까지 직접 표현하지 않는다.
 - sandbox/credential 부착은 caller 측 책임 — `register_keeper` 호출자가 각자 ad-hoc 으로 결정.
-- 결과: dashboard 상 "허용 54" 와 실제 호출 가능한 도구 사이 항구적 gap.
-- credential 부착은 *security surface* — 모든 keeper 에 자동 주입은 부적절. preset-aware 가 필요.
+- 결과: dashboard 상 허용 도구와 실제 호출 가능한 도구 사이 항구적 gap.
+- credential 부착은 *security surface* — 모든 keeper 에 자동 주입은 부적절하다.
 
 AGENT-LLM-A.md §워크어라운드 거부 기준 시그니처 #3 (N-of-M abstraction admission) 의 회피 대상.
 

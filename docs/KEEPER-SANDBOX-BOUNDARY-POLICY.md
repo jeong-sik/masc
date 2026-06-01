@@ -37,6 +37,11 @@ failure just because a keeper uses the Docker backend.
 - Canonical sandbox profiles are only `local` and `docker`.
 - Legacy aliases are rejected, not warned and reinterpreted.
 - Keeper TOML is parsed with `Otoml`, not ad hoc string parsing.
+- `repo_cli_identity` and `git_identity_mode` are canonical keeper TOML
+  config keys. The loader must parse and validate them so live config drift is
+  surfaced accurately, but credential resolution remains owned by repo mapping
+  and the credential store. TOML parsing must not add ambient operator
+  credential fallback.
 - Docker container roots are path projections from the config contract,
   not literals in tool code.
 - Per-command `git`/`gh` behavior is command semantics, not a sandbox
@@ -90,6 +95,7 @@ Focused behavioral tests verify path and command behavior:
 - `test_keeper_effective_meta_overlay`
 - `test_keeper_runtime_trust_snapshot`
 - `test_runtime_provider_auth_headers`
+- `test_keeper_toml` repo CLI identity parser tests
 - `test_telemetry_unified` recovered coverage-gap summary test
 - `test_keeper_tool_call_log` recovered tool-call coverage-gap aggregate test
 - `test_keeper_sandbox_docker_route`

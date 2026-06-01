@@ -216,6 +216,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 tool_denylist =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_denylist" keeper_json);
+                repo_cli_identity = None;
+                git_identity_mode = None;
                 active_goal_ids = None;
                 telemetry_feedback_enabled =
                   Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;

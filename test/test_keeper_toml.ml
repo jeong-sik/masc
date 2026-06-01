@@ -874,6 +874,46 @@ runtime_id = "oas-coding_first"
          (Some "oas-coding_first")
          defaults.model)
 
+let test_profile_accepts_repo_cli_identity_fields () =
+  let input = {|
+[keeper]
+goal = "test"
+repo_cli_identity = "repo_cli_identity"
+git_identity_mode = "repo_cli_identity"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok defaults ->
+       check (option string)
+         "repo_cli_identity"
+         (Some "repo_cli_identity")
+         defaults.repo_cli_identity;
+       check
+         (option string)
+         "git_identity_mode"
+         (Some "repo_cli_identity")
+         (Option.map KTP.git_identity_mode_to_string defaults.git_identity_mode))
+
+let test_profile_rejects_invalid_git_identity_mode () =
+  let input = {|
+[keeper]
+goal = "test"
+git_identity_mode = "ambient"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected invalid git_identity_mode error"
+     | Error msg ->
+       check bool "mentions invalid git_identity_mode" true
+         (contains_substring msg "invalid git_identity_mode 'ambient'");
+       check bool "mentions allowed values" true
+         (contains_substring msg "keeper_alias, repo_cli_identity"))
+
 let test_persona_resolver_omits_unspecified_tool_access () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -1366,6 +1406,8 @@ goal = "canonical"
 mention_targets = ["a", "b"]
 autoboot_enabled = false
 runtime_id = "primary"
+repo_cli_identity = "repo_cli_identity"
+git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]
 |} in
   match TL.parse_toml input with
@@ -1838,6 +1880,10 @@ let () =
             test_profile_rejects_removed_initiative_keys;
           test_case "runtime_id parsed" `Quick
             test_profile_accepts_runtime_id;
+          test_case "repo CLI identity fields parsed" `Quick
+            test_profile_accepts_repo_cli_identity_fields;
+          test_case "invalid git_identity_mode rejected" `Quick
+            test_profile_rejects_invalid_git_identity_mode;
           test_case "max_turns overrides parsed and applied" `Quick
             test_profile_max_turns_overrides;
           test_case "max_turns defaults when absent" `Quick

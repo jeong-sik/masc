@@ -139,6 +139,13 @@ type per_provider_timeout_state =
     Per_provider_timeout_unset
   | Per_provider_timeout_invalid
   | Per_provider_timeout_set
+type git_identity_mode =
+  Keeper_types_profile_defaults.git_identity_mode =
+    Keeper_alias
+  | Repo_cli_identity
+val git_identity_mode_to_string : git_identity_mode -> string
+val git_identity_mode_of_string : string -> git_identity_mode option
+val valid_git_identity_mode_strings : string list
 type keeper_profile_defaults =
   Keeper_types_profile_defaults.keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
@@ -165,6 +172,8 @@ type keeper_profile_defaults =
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   tool_access : string list option;
   tool_denylist : string list option;
+  repo_cli_identity : string option;
+  git_identity_mode : git_identity_mode option;
   active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;

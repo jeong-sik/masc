@@ -159,21 +159,21 @@
         <div class="card">
           <h3>Sandbox</h3>
           <p><span class="badge bad">NOT GREEN</span></p>
-          <p>코드는 TOML 기반 sandbox overlay를 갖고 있고 docker route 테스트도 있다. 그러나 live surface는 아직 서로 다르다. `analyst.toml`은 docker인데 `masc_keeper_sandbox_status`는 local로 보이고, 직전 execution receipt는 docker로 기록됐다.</p>
+          <p>코드는 TOML 기반 sandbox overlay와 docker route 테스트를 갖고 있고, status surface overlay 패치도 main에 들어갔다. 현재 live runtime과 root/main은 `7156fa2eef`로 맞춰졌지만, config schema는 `keeper.git_identity_mode` unknown-key 16건으로 blocked다.</p>
         </div>
         <div class="card">
           <h3>Tool Surface</h3>
           <p><span class="badge warn">PARTIAL</span></p>
-          <p>Keeper는 도구를 실제로 보고 실행한다. Echo/Analyst 모두 allowed tools 39개, 최근 receipt는 `satisfied_execution`이다. Historical coverage gap이 현재 health를 계속 붙잡는 판정 버그는 active-gap 기준으로 패치됐다. live runtime 반영 후 `tool_call_io`, `trajectory_tool_call`, `execution_receipt`는 최신 성공 row가 과거 gap보다 새로우면 `ok`로 회복되어야 한다.</p>
+          <p>Keeper는 도구를 실제로 보고 실행한다. Dashboard telemetry는 historical gap을 보존하되 `active_coverage_gap_count=0`이면 health를 회복한다. 현재 `tool_call_io`, `trajectory_tool_call`, `execution_receipt`는 `ok`; `tool_usage`는 active gap은 0이지만 freshness SLO 초과로 `stale`이다.</p>
         </div>
         <div class="card">
           <h3>Model Runtime</h3>
           <p><span class="badge bad">NOT VERIFIED</span></p>
-          <p>Keeper status는 `runtime_id=ollama_cloud.deepseek-v4-pro`를 들고 있지만 `selected_model=null`, `attempt_count=0`, `runtime_outcome=not_observed`다. MASC가 실제 provider/model 실행을 검증했다고 말할 수 없다.</p>
+          <p>Model metrics are volatile and currently expose no verified provider/model rows (`total_entries=0`, `models=[]`). MASC가 실제 provider/model 실행을 keeper boundary에서 검증했다고 말할 수 없다.</p>
         </div>
       </div>
-      <p><strong>최종 판정:</strong> 운영은 재기동과 일부 self-repair가 계속 일어나는 중이지만, 현재 상태는 “잘 되고 있음”이 아니라 “불안정하게 살아 있고 증거 surface가 갈라져 있음”이다.</p>
-      <p class="small">Generated: 2026-06-01 16:56 KST. Source worktree: `6c0950fd09`. Live runtime/root: `24cde720f7` and still behind `origin/main` by 1 at last root checkout probe.</p>
+      <p><strong>최종 판정:</strong> 운영은 살아 있고 commit truth는 회복됐지만, live config schema가 `keeper.git_identity_mode` unknown-key로 blocked라 아직 green이 아니다. 이 문서의 현재 PR slice는 그 schema blocker를 canonical TOML field로 수용하는 것이다.</p>
+      <p class="small">Generated: 2026-06-01 21:46 KST. Source branch head: `1a12abafae`; live root/main/runtime: `7156fa2eef`. The PR branch is not live until merge/rebuild/restart.</p>
     </div>
 
     <div class="section">
@@ -189,13 +189,13 @@
         <tbody>
           <tr>
             <td>`/health?full=1`</td>
-            <td>`keeper_fibers=0`, fleet `blocked`, blocker `no_executable_keeper_fibers`, config schema `ok`, parse errors `0`.</td>
-            <td>Config parse 자체는 복구됐지만, 마지막 probe 시점에는 keepalive fleet가 다시 뜨지 못했다.</td>
+            <td>`keeper_fibers=7`, fleet `degraded`, blocker `reaction_capacity_below_target`, `no_executable_keeper_fibers=false`, config schema `blocked`, parse errors `0`, unknown keys `16` all `keeper.git_identity_mode`.</td>
+            <td>Fleet boot는 살아 있지만 paused autoboot keepers 5개 때문에 reaction capacity가 target보다 5 부족하다. Schema gate는 별도로 live config를 막고 있다. Operator next action은 `remove_unknown_keeper_toml_keys`로 나오지만, docs already declare the key canonical, so parser/schema support is the right fix.</td>
           </tr>
           <tr>
             <td>Runtime/source commits</td>
-            <td>Report source worktree `6c0950fd09`; live root checkout `24cde720f7`; runtime build reports commit from repo head, binary commit is not proven.</td>
-            <td>현재성 검증이 실패하는 핵심 원인. 같은 코드 기준에서 판단하고 있지 않다.</td>
+            <td>Root checkout, `origin/main`, and live runtime all report `7156fa2eef` from `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/_build/default/bin/main_eio.exe`.</td>
+            <td>Commit truth is stable for current main. This PR branch is not live yet; acceptance still requires merge/rebuild/restart.</td>
           </tr>
           <tr>
             <td>`masc_keeper_sandbox_status(include_preflight=true)`</td>
@@ -214,8 +214,13 @@
           </tr>
           <tr>
             <td>`/api/v1/dashboard/telemetry/summary`</td>
-            <td>Before this slice, `tool_call_io`, `trajectory_tool_call`, `tool_usage`, `execution_receipt` showed coverage gaps even when newer successful rows existed; `oas_event` was ok.</td>
-            <td>Dashboard summary now separates historical `coverage_gap_count` from `active_coverage_gap_count`; only active gaps can force source health to `coverage_gap`.</td>
+            <td>`tool_call_io` gaps 3 / active 0 / `ok`; `trajectory_tool_call` gaps 2 / active 0 / `ok`; `execution_receipt` gaps 1 / active 0 / `ok`; `tool_usage` gaps 9 / active 0 / `stale` due freshness.</td>
+            <td>Active-gap patch is live. Remaining tool_usage red is freshness, not unrecovered append gap.</td>
+          </tr>
+          <tr>
+            <td>`/api/v1/models/metrics`</td>
+            <td>`total_entries=0`, `total_error_entries=0`, `models=[]`.</td>
+            <td>No current metrics row proves provider/model identity at keeper boundary.</td>
           </tr>
           <tr>
             <td>`masc_keeper_persona_audit(include_ok=false)`</td>
@@ -226,10 +231,12 @@
       </table>
       <h3>[근거]</h3>
       <ul>
-        <li>Command: `curl -fsS 'http://127.0.0.1:8935/health?full=1' | jq ...`; checked 2026-06-01 16:56 KST; confidence High for live health, Medium for binary identity because health itself says binary commit is unproven.</li>
+        <li>Command: `curl -fsS 'http://127.0.0.1:8935/health?full=1'`; checked 2026-06-01 21:46 KST; confidence High for live health, Medium for final acceptance because this PR branch is not live until merge/rebuild/restart.</li>
         <li>Command: `masc_keeper_sandbox_status(include_preflight=true)`; checked 2026-06-01 16:54 KST; confidence High for that surface, Medium overall because other surfaces disagree.</li>
         <li>Command: `masc_keeper_status echo/analyst`; checked 2026-06-01 16:54 KST; confidence High for receipt/status payload, Medium overall because runtime restarted during audit.</li>
-        <li>Command: `git fetch origin main`, `git merge --ff-only origin/main`, `git rev-parse --short=10 HEAD`; checked 2026-06-01 16:50 KST; confidence High for report worktree source.</li>
+        <li>Command: `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/telemetry/summary'`; checked 2026-06-01 21:46 KST; confidence High for telemetry source health.</li>
+        <li>Command: `curl -fsS 'http://127.0.0.1:8935/api/v1/models/metrics'`; checked 2026-06-01 21:46 KST; confidence High for metrics payload, Medium for provider identity because no current rows exist.</li>
+        <li>Command: `git fetch origin main`, `git rev-parse --short=10 HEAD`, `git rev-parse --short=10 origin/main`; checked 2026-06-01 21:46 KST; confidence High for root/source commit.</li>
       </ul>
     </div>
 
@@ -253,6 +260,11 @@
             <td>`lib/keeper/keeper_types_profile_toml_parser.ml:123-133`</td>
             <td>Rejects removed `keeper.model`; requires `keeper.runtime_id`.</td>
             <td>Config migration is sharp. During audit this blocker appeared, then config was repaired to `runtime_id`.</td>
+          </tr>
+          <tr>
+            <td>`lib/keeper/keeper_types_profile_toml_parser.ml` and `lib/keeper/keeper_types_profile_defaults.ml`</td>
+            <td>Parses `repo_cli_identity` and validates `git_identity_mode ∈ {keeper_alias, repo_cli_identity}` as canonical keeper TOML fields.</td>
+            <td>This fixes the current live schema blocker without changing credential ownership; repo mapping and credential store remain the runtime credential SSOT.</td>
           </tr>
           <tr>
             <td>`lib/keeper/keeper_meta_tool_access.ml:80-96` and `lib/keeper/keeper_meta_json_parse.ml:164-172`</td>
@@ -372,15 +384,15 @@
         <tbody>
           <tr>
             <td>F0</td>
-            <td><span class="badge bad">P0</span></td>
-            <td>Runtime/source drift and restarts: report worktree, root checkout, and running process are not on a single stable commit.</td>
-            <td>`git -C root status`, `/health?full=1`, restart only after root matches `origin/main`.</td>
+            <td><span class="badge warn">P1</span></td>
+            <td>Runtime/source drift is cleared for current main (`7156fa2eef`), but this PR branch is not deployed yet.</td>
+            <td>After this PR merges, rebuild/restart once and require `/health?full=1.build.commit` to include the merge commit.</td>
           </tr>
           <tr>
             <td>F1</td>
             <td><span class="badge bad">P0</span></td>
-            <td>Fleet currently blocked or flapping. Last health: no executable keeper fibers.</td>
-            <td>Wait for startup once; if still 0 fibers, inspect keeper supervisor/fiber startup logs.</td>
+            <td>Config schema blocked by 16 live `keeper.git_identity_mode` unknown keys even though docs declare the field canonical.</td>
+            <td>Merge this parser/defaults PR, rebuild/restart, and require unknown key count 0.</td>
           </tr>
           <tr>
             <td>F2</td>
@@ -390,9 +402,9 @@
           </tr>
           <tr>
             <td>F3</td>
-            <td><span class="badge warn">P1</span></td>
-            <td>Tool execution works but durable telemetry appenders are unhealthy.</td>
-            <td>Tail `Telemetry_coverage_gap` by source and repair the first live append exception.</td>
+            <td><span class="badge warn">P2</span></td>
+            <td>Historical telemetry append gaps are recovered for current health, but `tool_usage` remains stale by freshness SLO.</td>
+            <td>Investigate tool_usage freshness separately; do not classify it as an active coverage gap.</td>
           </tr>
           <tr>
             <td>F4</td>
@@ -419,8 +431,9 @@
 	    <div class="section">
 	      <h2>Execution Plan</h2>
 	      <ol>
+        <li><strong>Unblock keeper TOML schema.</strong> Accept `repo_cli_identity` and validated `git_identity_mode` as canonical loader fields because live config and docs already use them. Acceptance: `/health?full=1` reports `keeper_config_schema_status=ok` and unknown key count 0 after rebuild.</li>
         <li><strong>Stabilize commit truth.</strong> Bring root checkout to current `origin/main`, rebuild/restart once, and require `/health?full=1` to report the same commit as `git rev-parse origin/main`. Do not evaluate Keeper behavior while runtime is warming or flapping.</li>
-        <li><strong>Repair fleet boot first.</strong> After restart, wait one startup window. If `keeper_fibers=0`, inspect supervisor startup logs and meta decode errors. Acceptance: `keeper_fleet_safety.status` is `ok` or a bounded degraded state with named keepers, not `no_executable_keeper_fibers`.</li>
+        <li><strong>Recover fleet capacity.</strong> After restart, wait one startup window. If executable keeper capacity stays below target, inspect paused autoboot keepers and recent turn timeout blockers before changing supervisor code. Acceptance: `keeper_fleet_safety.status` is `ok`, `reaction_capacity_below_target=false`, and `no_executable_keeper_fibers=false`.</li>
         <li><strong>Converge sandbox truth.</strong> Make `masc_keeper_sandbox_status`, `masc_keeper_status.policy`, `runtime_trust.runtime_contract`, and receipt sandbox summary read the same overlay source. Acceptance: Analyst TOML docker yields status docker and receipt docker, or an explicit local override is shown with source.</li>
         <li><strong>Lock tool surface evidence.</strong> Treat descriptor route evidence as canonical and make coverage gap health active-only. Acceptance: `tool_usage`, `tool_call_io`, `trajectory_tool_call`, and `execution_receipt` are `ok` or carry `active_coverage_gap_count &gt; 0` with a fresh, actionable error for the failing source.</li>
         <li><strong>Make runtime identity observable.</strong> Add internal-safe provider/model attribution to runtime observation and receipt. Public dashboards may keep redacted runtime lanes, but Keeper status must say either `verified=true` with source or a concrete provider blocker. Acceptance: one controlled turn produces non-null runtime observation or a named failure class.</li>
@@ -471,6 +484,12 @@
 	            <td><span class="badge good">patched</span></td>
 	            <td>`Telemetry_unified.summary_json`, `Dashboard_tool_source_freshness`, and `Tool_usage_log.source_metadata_json` now keep historical `coverage_gaps` visible while filtering health through active gaps only. A source row whose timestamp is equal to or newer than the gap timestamp proves recovery; source summaries expose `coverage_gap_count` and `active_coverage_gap_count`. Regression tests cover recovered `tool_call_io` summary and tool-quality aggregate behavior.</td>
 	            <td>After rebuild/restart, `/api/v1/dashboard/telemetry/summary` should report `active_coverage_gap_count=0` for recovered lanes. If a lane still reports `coverage_gap`, the gap must be newer than the latest durable source row and include the single actionable append error.</td>
+	          </tr>
+	          <tr>
+	            <td>Keeper TOML identity schema</td>
+	            <td><span class="badge warn">PR slice</span></td>
+	            <td>`keeper_profile_defaults` now carries `repo_cli_identity` and typed `git_identity_mode`; `profile_defaults_of_toml` validates the enum and the canonical key lists accept both fields. Boundary policy documents that parsing these fields does not move credential resolution out of repo mapping / credential store.</td>
+	            <td>After merge/rebuild/restart, `/health?full=1` must drop the 16 `keeper.git_identity_mode` unknown-key blockers and report config schema `ok`.</td>
 	          </tr>
 	        </tbody>
 	      </table>

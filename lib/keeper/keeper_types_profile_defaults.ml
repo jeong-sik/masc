@@ -3,6 +3,26 @@ type per_provider_timeout_state =
   | Per_provider_timeout_invalid
   | Per_provider_timeout_set
 
+type git_identity_mode =
+  | Keeper_alias
+  | Repo_cli_identity
+
+let git_identity_mode_to_string = function
+  | Keeper_alias -> "keeper_alias"
+  | Repo_cli_identity -> "repo_cli_identity"
+;;
+
+let git_identity_mode_of_string raw =
+  match String.trim raw with
+  | "keeper_alias" -> Some Keeper_alias
+  | "repo_cli_identity" -> Some Repo_cli_identity
+  | _ -> None
+;;
+
+let valid_git_identity_mode_strings =
+  List.map git_identity_mode_to_string [ Keeper_alias; Repo_cli_identity ]
+;;
+
 type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
@@ -27,6 +47,8 @@ type keeper_profile_defaults = {
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   tool_access : string list option;
   tool_denylist : string list option;
+  repo_cli_identity : string option;
+  git_identity_mode : git_identity_mode option;
   active_goal_ids : string list option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
@@ -83,6 +105,8 @@ let empty_keeper_profile_defaults =
     network_mode = None;
     tool_access = None;
     tool_denylist = None;
+    repo_cli_identity = None;
+    git_identity_mode = None;
     active_goal_ids = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;

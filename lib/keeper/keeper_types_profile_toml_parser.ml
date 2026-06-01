@@ -88,6 +88,28 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
+  let repo_cli_identity_result =
+    match str "repo_cli_identity" with
+    | Some raw when not (validate_name raw) ->
+        Error
+          (Printf.sprintf
+             "invalid repo_cli_identity '%s' (expected [A-Za-z0-9._-]+)"
+             raw)
+    | value -> Ok value
+  in
+  let git_identity_mode_result =
+    match str "git_identity_mode" with
+    | Some raw -> (
+        match git_identity_mode_of_string raw with
+        | Some mode -> Ok (Some mode)
+        | None ->
+            Error
+              (Printf.sprintf
+                 "invalid git_identity_mode '%s' (allowed: %s)"
+                 raw
+                 (String.concat ", " valid_git_identity_mode_strings)))
+    | None -> Ok None
+  in
   let runtime_id_result =
     let trimmed key =
       match str key with
@@ -114,14 +136,29 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         | _ -> Ok ())
   in
   let result =
-    Result.bind result (fun () -> tool_access_defaults_result)
+    Result.bind result (fun () -> repo_cli_identity_result)
   in
   let result =
-    Result.bind result (fun tool_access ->
-      Result.map (fun runtime_id_opt -> tool_access, runtime_id_opt) runtime_id_result)
+    Result.bind result (fun repo_cli_identity ->
+      Result.map
+        (fun git_identity_mode -> repo_cli_identity, git_identity_mode)
+        git_identity_mode_result)
+  in
+  let result =
+    Result.bind result (fun (repo_cli_identity, git_identity_mode) ->
+      Result.map
+        (fun tool_access -> repo_cli_identity, git_identity_mode, tool_access)
+        tool_access_defaults_result)
+  in
+  let result =
+    Result.bind result (fun (repo_cli_identity, git_identity_mode, tool_access) ->
+      Result.map
+        (fun runtime_id_opt ->
+          repo_cli_identity, git_identity_mode, tool_access, runtime_id_opt)
+        runtime_id_result)
   in
   Result.map
-    (fun (tool_access, runtime_id_opt) ->
+    (fun (repo_cli_identity, git_identity_mode, tool_access, runtime_id_opt) ->
       {
         id = None;
         manifest_path = None;
@@ -159,6 +196,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           Option.bind (str "network_mode") network_mode_of_string;
         tool_access;
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
+        repo_cli_identity;
+        git_identity_mode;
         active_goal_ids =
           if has "active_goal_ids" then
             Some (normalize_name_list (strs "active_goal_ids"))
@@ -205,6 +244,8 @@ let parsed_field_key_names =
   ; "network_mode"
   ; "tool_access"
   ; "tool_denylist"
+  ; "repo_cli_identity"
+  ; "git_identity_mode"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
@@ -248,6 +289,8 @@ let canonical_keeper_toml_key_names =
   ; "network_mode"
   ; "tool_access"
   ; "tool_denylist"
+  ; "repo_cli_identity"
+  ; "git_identity_mode"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
@@ -385,6 +428,8 @@ let merge_keeper_profile_defaults
     network_mode = prefer overlay.network_mode base.network_mode;
     tool_access = prefer overlay.tool_access base.tool_access;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
+    repo_cli_identity = prefer overlay.repo_cli_identity base.repo_cli_identity;
+    git_identity_mode = prefer overlay.git_identity_mode base.git_identity_mode;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     telemetry_feedback_enabled =
       prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;

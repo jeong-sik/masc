@@ -47,6 +47,7 @@ type ctx =
   ; keeper_tool_bundle : Keeper_tools_oas.tool_bundle
   ; keeper_has_owned_active_task : unit -> bool
   ; manifest_keeper_turn_id : int option
+  ; max_tools_per_turn : int
   ; meta : Keeper_meta_contract.keeper_meta
   ; reported_tool_names_ref : string list ref
   ; observed_tool_names_ref : string list ref
@@ -97,6 +98,7 @@ let assemble_hooks
   let keeper_tool_bundle = ctx.keeper_tool_bundle in
   let keeper_has_owned_active_task = ctx.keeper_has_owned_active_task in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
+  let max_tools_per_turn = ctx.max_tools_per_turn in
   let meta = ctx.meta in
   let reported_tool_names_ref = ctx.reported_tool_names_ref in
   let observed_tool_names_ref = ctx.observed_tool_names_ref in
@@ -471,7 +473,8 @@ let assemble_hooks
                          "[RETRY] The previous attempt overflowed the model context. \
                           Stay concise, prefer already-loaded context, and only use the \
                           smallest essential tool set if a tool call is strictly \
-                          necessary.")
+                          necessary. Current tool budget: %d."
+                         max_tools_per_turn)
                   else if computed_surface.is_warning_zone
                   then
                     append_ctx

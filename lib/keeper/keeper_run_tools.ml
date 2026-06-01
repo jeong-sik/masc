@@ -67,6 +67,7 @@ type tool_search_hit_partition = Tool_search.tool_search_hit_partition =
   }
 
 let partition_tool_search_hits = Tool_search.partition_tool_search_hits
+let truncate_tool_surface_names = Tool_search.truncate_tool_surface_names
 
 (** Agent setup produced by Step 7.
 

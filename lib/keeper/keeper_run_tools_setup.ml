@@ -343,6 +343,7 @@ let prepare_agent_setup
       meta.name
       (List.length keeper_tools)
       (List.length tool_entries);
+  let always_include_tools = Agent_tool_dispatch_runtime.core_always_tools in
   let all_tool_names =
     "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
@@ -395,6 +396,12 @@ let prepare_agent_setup
       Keeper_tool_policy.StringSet.mem public_name universe_set
       && Keeper_tool_policy.StringSet.mem public_name allowed_exec_set)
   in
+  let max_tools_per_turn =
+    if is_retry
+    then Keeper_config.keeper_retry_max_tools_per_turn ()
+    else Keeper_config.keeper_max_tools_per_turn ()
+  in
+  let visible_always_include_tools = always_include_tools in
   (* Receipt refs: written sequentially after OAS execution, kept as refs
      because the facade (keeper_agent_run.ml) writes them post-run. *)
   let reported_tool_names_ref : string list ref = ref [] in
@@ -565,6 +572,7 @@ let prepare_agent_setup
       (if String.trim last_user_text <> "" then last_user_text else user_message)
       |> Keeper_tool_query.tool_query_text_of_user_message
     in
+    let max_tools = max_tools_per_turn in
     let core =
       Agent_tool_dispatch_runtime.effective_core_tools ()
       |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
@@ -576,7 +584,7 @@ let prepare_agent_setup
     let () =
       if decay_discovered then ignore (Keeper_discovered_tools.decay acc.discovered ~turn)
     in
-    let selection_limit = keeper_selection_top_k in
+    let selection_limit = min max_tools keeper_selection_top_k in
     let preset_tools, preset_search_index = load_preset_selection_context () in
     let deterministic_prefilter =
       Keeper_tool_selection.deterministic_prefilter_names
@@ -808,6 +816,33 @@ let prepare_agent_setup
         ~required_tool_names
         all_allowed
     in
+    let all_allowed =
+      if List.length all_allowed > max_tools
+      then (
+        Log.Keeper.info
+          "context overflow guard: %d tools > max %d, truncating"
+          (List.length all_allowed)
+          max_tools;
+        let required_turn_essential_tool_names =
+          if required_tool_names <> []
+          then visible_required_tool_names
+          else if tool_gate_requested
+          then (
+            let claim_tools =
+              if has_task_claim_affordance turn_affordances
+              then [ "keeper_task_claim" ]
+              else []
+            in
+            Keeper_types_profile_toml_normalizers.dedupe_keep_order (visible_affordance_tool_names @ claim_tools))
+          else []
+        in
+        let essential_names =
+          Keeper_types_profile_toml_normalizers.dedupe_keep_order
+            (visible_always_include_tools @ required_turn_essential_tool_names)
+        in
+        Keeper_run_tools_search.truncate_tool_surface_names ~max_tools ~essential_names all_allowed)
+      else all_allowed
+    in
     let allowed_canonical_tool_names =
       all_allowed
       |> List.map Keeper_tool_resolution.canonical_tool_name
@@ -890,6 +925,7 @@ let prepare_agent_setup
     ; keeper_tool_bundle
     ; keeper_has_owned_active_task
     ; manifest_keeper_turn_id
+    ; max_tools_per_turn
     ; meta
     ; reported_tool_names_ref
     ; observed_tool_names_ref

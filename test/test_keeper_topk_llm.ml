@@ -40,6 +40,41 @@ let mock_rerank_keyword keyword ~context:_ ~candidates =
 let mock_rerank_failing ~context:_ ~candidates:_ =
   failwith "LLM unavailable"
 
+let write_file path content =
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc
+
+let runtime_toml =
+  {|[runtime]
+default = "test.local"
+
+[providers.test]
+display-name = "Test"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.local]
+api-name = "local"
+max-context = 4096
+tools-support = true
+streaming = true
+
+[test.local]
+is-default = true
+max-concurrent = 1
+|}
+
+let with_runtime_default f =
+  let path = Filename.temp_file "keeper-topk-runtime" ".toml" in
+  write_file path runtime_toml;
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      match Runtime.init_default ~config_path:path with
+      | Ok () -> f ()
+      | Error e -> Alcotest.fail ("Runtime.init_default failed: " ^ e))
+
 (* ── Test tools ──────────────────────────────────────────── *)
 
 let test_tools = [
@@ -532,30 +567,40 @@ let test_tool_search_partition_filters_policy_denied_core_hits () =
     (List.map fst partition.discoverable_hits);
   Alcotest.(check int) "one policy-filtered hit" 1 partition.filtered_by_policy
 
-let test_tool_surface_selection_preserves_order () =
-  let tools =
+let test_tool_surface_truncation_dedupes_essential_tools () =
+  let truncated =
+    Keeper_run_tools.truncate_tool_surface_names
+      ~max_tools:4
+      ~essential_names:[ "keeper_context_status"; "keeper_task_done" ]
+      [
+        "keeper_context_status";
+        "keeper_task_done";
+        "keeper_board_get";
+        "keeper_task_done";
+        "tool_search_files";
+        "tool_read_file";
+      ]
+  in
+  Alcotest.(check (list string))
+    "required essential is not double-counted in truncated surface"
     [
       "keeper_context_status";
       "keeper_task_done";
       "keeper_board_get";
-      "keeper_task_done";
       "tool_search_files";
-      "tool_read_file";
     ]
-  in
-  Alcotest.(check (list string))
-    "tool order is preserved without truncation"
-    tools
-    tools
+    truncated
 
 let test_keeper_config_defaults () =
+  with_runtime_default @@ fun () ->
   (* Default: LLM rerank disabled *)
-  Alcotest.(check bool) "llm_rerank disabled by default"
-    false (Keeper_config.keeper_llm_rerank_enabled ());
+  Alcotest.(check bool)
+    "llm_rerank disabled by default"
+    false
+    (Keeper_config.keeper_llm_rerank_enabled ());
   (* Default runtime name *)
   let runtime = Keeper_config.keeper_llm_rerank_runtime () in
-  Alcotest.(check string) "default runtime name"
-    "route.llm_rerank" runtime
+  Alcotest.(check string) "default runtime name" "test.local" runtime
 
 (* ── Suite ───────────────────────────────────────────────── *)
 
@@ -611,7 +656,7 @@ let () =
       Alcotest.test_case "tool_search filters denied core hits" `Quick
         test_tool_search_partition_filters_policy_denied_core_hits;
       Alcotest.test_case "tool surface truncation dedupes essential tools" `Quick
-        test_tool_surface_selection_preserves_order;
+        test_tool_surface_truncation_dedupes_essential_tools;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

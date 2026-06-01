@@ -176,40 +176,10 @@ let report_telemetry_drop ~reason ~path ~detail =
     ~on_drop:(fun () -> observe_telemetry_drop ~reason)
     ~surface:telemetry_eio_surface ~reason ~path ~detail
 
-(** Schema migration: map legacy variant names to current ones.
-
-    The [event] type underwent renames ([Agent_joined] → [Agent_session_bound],
-    [Agent_left] → [Agent_unbound]) but stored JSONL records retain the old
-    names in the wire format.  This normalizes the raw JSON so the
-    auto-generated yojson codec can deserialize it.
-
-    Payload fields are identical — this is a pure rename, no field migration. *)
-let legacy_variant_aliases : (string * string) list = [
-  ("Agent_joined", "Agent_session_bound");
-  ("Agent_left", "Agent_unbound");
-]
-
-let migrate_legacy_event_variant (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields ->
-    let migrate_field (key, value) =
-      if key <> "event" then (key, value)
-      else
-        match value with
-        | `List [`String variant; payload] ->
-          (match List.assoc_opt variant legacy_variant_aliases with
-           | Some new_name -> (key, `List [`String new_name; payload])
-           | None -> (key, value))
-        | _ -> (key, value)
-    in
-    `Assoc (List.map migrate_field fields)
-  | _ -> json
-
 let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
   List.filter_map
     (fun json ->
-      let migrated = migrate_legacy_event_variant json in
-      match event_record_of_yojson migrated with
+      match event_record_of_yojson json with
       | Ok record -> Some record
       | Error msg ->
           report_telemetry_drop
@@ -226,8 +196,7 @@ let read_all_events_from_path (file : string) : event_record list =
     |> List.filter (fun line -> String.trim line <> "")
     |> List.filter_map (fun line ->
            try
-             let json = migrate_legacy_event_variant (Yojson.Safe.from_string line) in
-             match event_record_of_yojson json with
+             match event_record_of_yojson (Yojson.Safe.from_string line) with
              | Ok record -> Some record
              | Error msg ->
                  report_telemetry_drop

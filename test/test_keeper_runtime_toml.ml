@@ -175,6 +175,7 @@ let test_applies_turn_execution_overrides () =
   let doc = parse_or_fail
     "[turn]\n\
      tool_cost_max_usd = 1.25\n\
+     max_tools_per_turn = 64\n\
      llm_rerank = true\n\
      llm_rerank_runtime = \"tool_rerank_fast\"\n\
      temperature = 0.65\n\

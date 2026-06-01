@@ -430,6 +430,18 @@ let keeper_tool_cost_max_usd () : float option =
   | v when Float.compare v 0.0 <= 0 -> None
   | v -> Some v
 
+let keeper_max_tools_per_turn_rp =
+  _rp_int ~key:"keeper.turn.max_tools_per_turn"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_MAX_TOOLS_PER_TURN"
+                          ~default:40 ~min_v:5 ~max_v:200)
+    ~min_v:5 ~max_v:200
+    ~description:"Max tools visible per turn (progressive disclosure cap)" ()
+let keeper_max_tools_per_turn () : int =
+  Runtime_params.get keeper_max_tools_per_turn_rp
+
+let keeper_retry_max_tools_per_turn () : int =
+  min 15 (keeper_max_tools_per_turn ())
+
 let keeper_board_event_limit_rp =
   _rp_int ~key:"keeper.turn.board_event_limit"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_EVENT_LIMIT"

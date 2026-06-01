@@ -168,6 +168,7 @@ type t =
   | TurnPhaseDuration
   | LifecycleTransitions
   | LifecycleCallbackFailures
+  | CompactionCallbackRecoveries
   | BriefingSessionLastEventSource
   | EventBusDrain
   | SupervisorCleanupFailures

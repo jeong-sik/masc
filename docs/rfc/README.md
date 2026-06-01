@@ -88,7 +88,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0062 | Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initi... | Draft | a7296801a7 2026-06-01 | - |
 | 0063 | Telemetry Feedback Loop & Cooperative Scheduling Safety | Draft | a7b9f1f8d0 2026-05-31 | - |
 | 0064 | Descriptor-Owned Tool Surface | Superseded | 6ce9619607 2026-05-27 | - |
-| 0065 | Keeper Tool Selection Lifecycle - TLA+ Coverage Extension | Active | a7b9f1f8d0 2026-05-31 | - |
+| 0065 | Keeper Tool Selection Lifecycle - TLA+ Coverage Extension | Active | 24cde720f7 2026-06-01 | - |
 | 0067 | Goal-Scope Observation→Claim Atomicity | Draft | a7296801a7 2026-06-01 | - |
 | 0068 | Typed `Keeper_turn_disposition` (operator-facing closed sum) | Draft | 17345c0c29 2026-05-26 | - |
 | 0069 | Awareness Channel Split | Active | a7296801a7 2026-06-01 | - |
@@ -213,6 +213,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0205 | Keeper Module Consolidation — Eliminate Facade Anti-Pattern | Draft | a7296801a7 2026-06-01 | - |
 | 0206 | Runtime 개념 — runtime→Runtime 재탄생 | Draft | a7296801a7 2026-06-01 | - |
 | 0207 | Per-keeper LLM runtime routing | Draft | 86aee8bb04 2026-06-01 | - |
+| 0208 | Shell IR Phase 2 — compositional risk algebra over a real AST (morbig front-e... | Draft | e3042e8ad9 2026-06-01 | - |
+
+
 
 
 

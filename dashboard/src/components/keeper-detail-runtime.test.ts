@@ -539,9 +539,6 @@ describe('RuntimeLensSection', () => {
             tools: ['Execute', 'SearchFiles'],
             successful_tools: ['Execute', 'SearchFiles'],
             failed_tools: [],
-            sandbox_profiles: ['docker'],
-            network_modes: ['inherit'],
-            docker_visible: true,
             latest_at: '2026-05-13T00:00:01Z',
           },
           context: {
@@ -774,13 +771,8 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('0/1')).toBeInTheDocument()
     expect(screen.getByText('runtime proof')).toBeInTheDocument()
     expect(screen.getByText('pass / 2 calls')).toBeInTheDocument()
-    expect(screen.getByText('sandbox proof')).toBeInTheDocument()
-    expect(screen.getByText('docker')).toBeInTheDocument()
-    expect(screen.getByText('git creds / identity materialized')).toBeInTheDocument()
     expect(screen.getByText('proof tools')).toBeInTheDocument()
     expect(screen.getByText('Execute, SearchFiles')).toBeInTheDocument()
-    expect(screen.getByText('network proof')).toBeInTheDocument()
-    expect(screen.getByText('inherit')).toBeInTheDocument()
     expect(screen.getByText('working loops')).toBeInTheDocument()
     expect(screen.getAllByText('2').length).toBeGreaterThan(0)
     expect(screen.getByText('provider attempts')).toBeInTheDocument()

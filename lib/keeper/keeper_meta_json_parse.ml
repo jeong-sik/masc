@@ -524,16 +524,10 @@ let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   try
-    match reject_removed_keeper_meta_fields json with
+    match reject_removed_keeper_meta_shapes json with
     | Error e -> Error e
     | Ok () ->
-      (match reject_strict_keeper_meta_fields json with
-       | Error e -> Error e
-       | Ok () ->
-         (match reject_removed_keeper_meta_shapes json with
-          | Error e -> Error e
-          | Ok () ->
-         (match parse_keeper_identity json with
+      (match parse_keeper_identity json with
           | Error _ as e -> e
           | Ok identity ->
             (match parse_keeper_policy json ~keeper_name:identity.pk_name with
@@ -622,7 +616,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (match Safe_ops.json_int_opt "meta_version" json with
                         | Some v -> v
                         | None -> 0)
-                   }))))
+                   }))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

@@ -675,9 +675,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         runtime_canonical: asString(row.runtime_canonical) ?? asString(row.selected_runtime_canonical) ?? null,
         selected_runtime_canonical: asString(row.selected_runtime_canonical) ?? null,
         status: normalizeKeeperAgentStatus(statusRaw),
-        presence_keepalive:
-          typeof row.presence_keepalive === 'boolean' ? row.presence_keepalive : undefined,
-        presence_keepalive_sec: asNumber(row.presence_keepalive_sec),
         keepalive_running:
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
         proactive_enabled:
@@ -713,7 +710,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         sandbox_profile: normalizeKeeperSandboxProfile(row.sandbox_profile),
         sandbox_target: asString(row.sandbox_target) ?? null,
         sandbox_last_error: asString(row.sandbox_last_error) ?? null,
-        effective_sandbox_image: asString(row.effective_sandbox_image) ?? null,
         blocked_task_count: asNumber(row.blocked_task_count) ?? null,
         goal_progress: isRecord(row.goal_progress)
           ? {

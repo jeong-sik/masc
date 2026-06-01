@@ -57,10 +57,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
   let history_fragment_filter_enabled =
     bool_default_true_of_env "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
-  let sandbox_preflight_json =
-    Keeper_sandbox_runtime.docker_preflight ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ()) ()
-    |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
-  in
   let series_points = 120 in
   let names = keeper_names config in
   let now_ts = Time_compat.now () in
@@ -316,21 +312,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             match registry_entry with
             | Some entry -> entry.last_error
             | None -> None
-          in
-          let effective_sandbox_image =
-            if m.sandbox_profile = Keeper_types_profile_sandbox.Docker
-            then
-              Some (
-                match m.sandbox_image with
-                | Some img when String.trim img <> "" -> img
-                | _ -> Env_config_sandbox.Runtime.docker_image ()
-              )
-            else None
-          in
-          let sandbox_preflight =
-            match effective_sandbox_image, sandbox_preflight_json with
-            | Some _, Some preflight -> Some preflight
-            | _ -> None
           in
           (* reconcile_status removed with manual_reconcile blocker system. *)
           let runtime_blocker_fields =
@@ -634,10 +615,6 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("sandbox_target", `String sandbox_target);
               ("sandbox_last_error",
                 Json_util.string_opt_to_json sandbox_last_error);
-              ("sandbox_preflight",
-                Json_util.option_to_yojson Fun.id sandbox_preflight);
-              ("effective_sandbox_image",
-                Json_util.string_opt_to_json effective_sandbox_image);
               ("runtime_contract", runtime_contract);
               ("goal_progress", goal_progress);
               ("blocked_task_count", `Int blocked_task_count);

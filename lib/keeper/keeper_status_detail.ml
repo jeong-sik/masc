@@ -716,23 +716,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            | Some entry -> entry.last_error
            | None -> None
          in
-         let effective_sandbox_image =
-           if m.sandbox_profile = Docker
-           then
-             Some (
-               match m.sandbox_image with
-               | Some img when String.trim img <> "" -> img
-               | _ -> Env_config_sandbox.Runtime.docker_image ()
-             )
-           else None
-         in
-         let sandbox_preflight =
-           match effective_sandbox_image with
-           | Some _ ->
-               cached_docker_preflight_status_json
-                 ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ())
-           | None -> None
-         in
          let sandbox_live =
            Keeper_sandbox_control.live_status_json
              ~include_preflight:false
@@ -823,11 +806,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              `String (network_mode_to_string m.network_mode));
            ("sandbox_last_error",
              Json_util.string_opt_to_json sandbox_last_error);
-           ("sandbox_preflight",
-             Json_util.option_to_yojson Fun.id sandbox_preflight);
            ("sandbox_live", sandbox_live);
-           ("effective_sandbox_image",
-             Json_util.string_opt_to_json effective_sandbox_image);
            ("tool_denylist", Json_util.json_string_list m.tool_denylist);
            ("allowed_tool_names", Json_util.json_string_list allowed_tools);
            ("allowed_tool_preview", Json_util.json_string_list allowed_tool_preview);
@@ -881,8 +860,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode",
                `String (network_mode_to_string m.network_mode));
-             ("effective_sandbox_image",
-               Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", Json_util.json_string_list m.allowed_paths);
            ("allowed_tools", Json_util.json_string_list allowed_tools);
             ("available_internal_tools", Json_util.json_string_list all_internal_tools);
@@ -1015,7 +992,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
               not surface host paths.  For Docker keepers the host abs path
               does not exist inside the container, so the LLM previously
               echoed [cd <host_abs>] producing ~890/day [No such file or
-              directory] errors.  default_cwd / private_workspace_root use
+              directory] errors.  default_cwd uses
               [keeper_visible_root_abs] (container path for Docker, host
               path for Local).  Host-only fields (sandbox_host_root,
               playground_path) are intentionally omitted — server-side
@@ -1030,16 +1007,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("sandbox_mind", `String sandbox.mind_arg);
              ("sandbox_container_root", Json_util.string_opt_to_json sandbox.container_root);
              ("default_cwd", `String keeper_visible_abs);
-             ("private_workspace_root", `String keeper_visible_abs);
              ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode", `String (network_mode_to_string m.network_mode));
              ("sandbox_last_error",
                Json_util.string_opt_to_json sandbox_last_error);
-             ("sandbox_preflight",
-               Json_util.option_to_yojson Fun.id sandbox_preflight);
              ("sandbox_live", sandbox_live);
-             ("effective_sandbox_image",
-               Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", Json_util.json_string_list m.allowed_paths);
              ("playground_repos",
                Keeper_sandbox_control.playground_repos_json

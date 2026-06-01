@@ -30,22 +30,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     sandbox_profile: 'local',
     network_mode: 'inherit',
     sandbox_last_error: null,
-    effective_sandbox_image: 'ubuntu:24.04@sha256:test',
-    private_workspace_root: '/tmp/project-root/.masc/playground/keeper-sangsu',
-    sandbox_environment: {
-      base_path: '/tmp/project-root/.masc',
-      project_root: '/tmp/project-root',
-      docker_playground_enabled: true,
-      docker_container_name: 'keeper-playground',
-      container_playground_root: '/home/keeper/playground',
-      docker_image: 'ubuntu:24.04@sha256:test',
-      pids_limit: 128,
-      memory: '2g',
-      tmpfs_size: '256m',
-      seccomp_profile: null,
-      require_rootless: false,
-      require_userns: false,
-    },
     allowed_paths: ['/tmp/workspace'],
     effective_allowed_paths: ['/tmp/workspace'],
     prompt: {
@@ -112,8 +96,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       keepalive_running: true,
       registry_state: 'running',
       fiber_health: 'healthy',
-      presence_keepalive: true,
-      presence_keepalive_sec: 30,
     },
     workspace: {
       mention_targets: ['sangsu'],
@@ -527,7 +509,6 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
     expect(container.textContent).toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
-    expect(container.textContent).toContain('/tmp/project-root')
 
     const editButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('편집'),

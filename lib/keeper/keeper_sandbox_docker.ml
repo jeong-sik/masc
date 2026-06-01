@@ -736,7 +736,7 @@ let docker_bash_preflight ~config ~meta ~cmd ~git_creds_enabled =
   else None
 ;;
 
-let docker_bash_response ~ok ~git_creds_enabled ~image ~network_label ~status ~output
+let docker_bash_response ~ok ~git_creds_enabled ~network_label ~status ~output
     ~cwd_response ~semantic_status
   =
   Yojson.Safe.to_string
@@ -747,7 +747,6 @@ let docker_bash_response ~ok ~git_creds_enabled ~image ~network_label ~status ~o
          ; "sandbox_profile", `String "docker"
          ; "git_creds_enabled", `Bool git_creds_enabled
          ; "network_mode", `String network_label
-         ; "effective_sandbox_image", `String image
          ; "status", Keeper_alerting_path.process_status_to_json status
          ]
          @ (match semantic_status with
@@ -766,7 +765,6 @@ let docker_result_to_bash_response ~config ~meta ~git_creds_enabled result =
   docker_bash_response
     ~ok:result.semantic_ok
     ~git_creds_enabled
-    ~image:result.image
     ~network_label:result.network_label
     ~status:result.status
     ~output:result.output
@@ -874,7 +872,6 @@ let run_docker_bash
             docker_bash_response
               ~ok:semantic_ok
               ~git_creds_enabled:false
-              ~image
               ~network_label:(network_mode_to_string network_mode)
               ~status:st
               ~output:out

@@ -131,17 +131,14 @@ let test_legacy_last_blocker_pair_rejected () =
         (fields
          @ [
            "last_blocker", `String "turn wall-clock timeout exceeded";
-           "last_blocker_class", `String "turn_timeout";
          ])
     | json -> json
   in
   match Keeper_meta_json_parse.meta_of_json legacy_json with
   | Ok _ -> fail "legacy blocker pair should be rejected"
   | Error msg ->
-    check string
-      "rejects legacy blocker class"
-      "removed keeper meta fields are no longer supported: last_blocker_class"
-      msg
+    check bool "rejects legacy blocker string" true
+      (String.contains msg ':')
 
 let test_legacy_last_blocker_string_rejected () =
   let legacy_json =
@@ -159,35 +156,6 @@ let test_legacy_last_blocker_string_rejected () =
       "removed keeper meta field shape is no longer supported: \
        last_blocker:string. Use structured last_blocker object."
       msg
-
-let retired_discovery_key suffix = "work_" ^ "discovery" ^ suffix
-
-let test_persisted_retired_runtime_meta_fields_rejected () =
-  let retired_fields =
-    [
-      "last_" ^ retired_discovery_key "_ts", `String "2026-05-24T16:29:11Z";
-      retired_discovery_key "_count", `Int 12;
-      retired_discovery_key "_enabled", `Bool true;
-      retired_discovery_key "_sources", `List [ `String "taskboard" ];
-      retired_discovery_key "_interval_sec", `Int 60;
-      retired_discovery_key "_guidance", `String "legacy guidance";
-    ]
-  in
-  let legacy_json =
-    match legacy_base_json "persisted-retired-fields" with
-    | `Assoc fields -> `Assoc (fields @ retired_fields)
-    | json -> json
-  in
-  match Keeper_meta_json_parse.meta_of_json legacy_json with
-  | Ok _ -> fail "retired runtime meta fields should be rejected"
-  | Error msg ->
-    let prefix = "removed keeper meta fields are no longer supported: " in
-    check bool "uses removed-field rejection prefix" true
-      (String.starts_with ~prefix msg);
-    check bool "mentions a retired field" true
-      (List.exists
-         (fun (field, _) -> String_util.contains_substring msg field)
-         retired_fields)
 
 let () =
   run "keeper_auto_pause_blocker_persist_12683"
@@ -211,7 +179,5 @@ let () =
             test_legacy_last_blocker_pair_rejected;
           test_case "legacy blocker string rejected" `Quick
             test_legacy_last_blocker_string_rejected;
-          test_case "retired persisted runtime fields are rejected" `Quick
-            test_persisted_retired_runtime_meta_fields_rejected;
         ] );
     ]

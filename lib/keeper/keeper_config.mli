@@ -45,7 +45,6 @@ val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
-val legacy_provider_filter_name : string
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.
     Drives [normalize_self_model_text] when called from prompt rendering.
@@ -92,9 +91,6 @@ val removed_keeper_input_key_names : string list
 
 (** Field names that are no longer accepted in keeper message input. *)
 val removed_keeper_msg_input_key_names : string list
-
-(** Field names that are no longer accepted in keeper metadata. *)
-val removed_keeper_meta_key_names : string list
 
 (** Return which [keys] are present as top-level keys in the JSON object. *)
 val present_json_keys : string list -> Yojson.Safe.t -> string list

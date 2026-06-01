@@ -1,12 +1,11 @@
-(** Keeper meta JSON removed-field scrub helpers.
+(** Keeper meta JSON scrub helpers.
 
     Kept below the codec/parser facade so persisted runtime JSON can be
-    normalized before strict [keeper_meta] decoding. *)
+    normalized before [keeper_meta] decoding. *)
 
 
 (* Config fields owned by TOML only.  Never written to JSON; scrubbed
-   from existing JSON on first write.  The parser still accepts them
-   for backward compatibility and seed round-trip.
+   from existing JSON on first write.
 
    Defined here (not in keeper_meta_json.ml) to avoid a cycle:
    keeper_meta_json.ml includes this module, so referencing a value
@@ -37,87 +36,25 @@ let drop_assoc_keys (keys : string list) (json : Yojson.Safe.t) : Yojson.Safe.t 
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ as j -> j
 ;;
 
-let reject_removed_keeper_meta_fields (json : Yojson.Safe.t) =
-  let present = Keeper_config_text.present_json_keys Keeper_config_text.removed_keeper_meta_key_names json in
-  match present with
-  | [] -> Ok ()
-  | fields ->
-    Error (Printf.sprintf "removed keeper meta fields: %s" (String.concat ", " fields))
-;;
-
-let strict_rejected_keeper_meta_key_names =
-  [ "allowed_providers"; "last_blocker_class" ]
-;;
-
-let persisted_retired_keeper_meta_key_names =
-  let retired_discovery_key suffix = "work_" ^ "discovery" ^ suffix in
-  [
-    "last_" ^ retired_discovery_key "_ts";
-    retired_discovery_key "_count";
-    retired_discovery_key "_enabled";
-    retired_discovery_key "_sources";
-    retired_discovery_key "_interval_sec";
-    retired_discovery_key "_guidance";
-  ]
-;;
-
-let reject_strict_keeper_meta_fields (json : Yojson.Safe.t) =
-  let present = Keeper_config_text.present_json_keys strict_rejected_keeper_meta_key_names json in
-  match present with
-  | [] -> Ok ()
-  | fields ->
-    Error
-      (Printf.sprintf
-         "removed keeper meta fields are no longer supported: %s"
-         (String.concat ", " fields))
-;;
-
 let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.t * bool =
   match json with
   | `Assoc fields ->
-    let scrub_candidate_key_names =
-      Keeper_config_text.removed_keeper_meta_key_names
-      @ persisted_retired_keeper_meta_key_names
-      @ config_field_names
-    in
     let removed_present =
       fields
       |> List.filter_map (fun (key, _) ->
-        if List.mem key scrub_candidate_key_names then Some key else None)
+        if List.mem key config_field_names then Some key else None)
     in
-    let removed_to_scrub =
-      removed_present
-      |> List.filter (fun key ->
-        (not (List.mem key strict_rejected_keeper_meta_key_names))
-        || List.mem key persisted_retired_keeper_meta_key_names)
-    in
-    if removed_to_scrub = []
+    if removed_present = []
     then json, false
     else (
-      let migrate_legacy_disabled_keepalive =
-        (match List.assoc_opt "presence_keepalive" fields with
-         | Some (`Bool false) -> true
-         | Some _ | None -> false)
-        && not (List.mem_assoc "paused" fields)
-      in
-      let scrubbed =
-        let base = drop_assoc_keys removed_to_scrub json in
-        match base with
-        | `Assoc base_fields when migrate_legacy_disabled_keepalive ->
-          `Assoc (("paused", `Bool true) :: List.remove_assoc "paused" base_fields)
-        | `Assoc _ -> base
-        | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> base
-      in
+      let scrubbed = drop_assoc_keys removed_present json in
       let content = Yojson.Safe.pretty_to_string scrubbed in
       (try
          Fs_compat.save_file path content;
          Log.Keeper.info
-           "scrubbed removed keeper meta fields for %s: %s%s"
+           "scrubbed TOML-owned keeper meta fields for %s: %s"
            path
-           (String.concat ", " removed_to_scrub)
-           (if migrate_legacy_disabled_keepalive
-            then " (migrated presence_keepalive=false to paused=true)"
-            else "")
+           (String.concat ", " removed_present)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

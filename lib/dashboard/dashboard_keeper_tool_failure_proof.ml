@@ -21,8 +21,6 @@ type tool_keeper_stat = {
   keepers : string list;
   successful_keepers : string list;
   failed_keepers : string list;
-  sandbox_profiles : string list;
-  network_modes : string list;
   task_ids : string list;
   goal_ids : string list;
   latest_ts : float option;
@@ -36,8 +34,6 @@ type mutable_tool_keeper_stat = {
   keepers : (string, unit) Hashtbl.t;
   successful_keepers : (string, unit) Hashtbl.t;
   failed_keepers : (string, unit) Hashtbl.t;
-  sandbox_profiles : (string, unit) Hashtbl.t;
-  network_modes : (string, unit) Hashtbl.t;
   task_ids : (string, unit) Hashtbl.t;
   goal_ids : (string, unit) Hashtbl.t;
   latest_ts : float option ref;
@@ -124,8 +120,6 @@ let empty_mutable_stat () =
     keepers = Hashtbl.create 8;
     successful_keepers = Hashtbl.create 8;
     failed_keepers = Hashtbl.create 8;
-    sandbox_profiles = Hashtbl.create 4;
-    network_modes = Hashtbl.create 4;
     task_ids = Hashtbl.create 8;
     goal_ids = Hashtbl.create 8;
     latest_ts = ref None;
@@ -158,10 +152,6 @@ let add_tool_stat table record =
     add_set stat.keepers keeper;
     if ok then add_set stat.successful_keepers keeper
     else add_set stat.failed_keepers keeper;
-    Option.iter (add_set stat.sandbox_profiles)
-      (Safe_ops.json_string_opt "sandbox_profile" record);
-    Option.iter (add_set stat.network_modes)
-      (Safe_ops.json_string_opt "network_mode" record);
     Option.iter (add_set stat.task_ids)
       (Safe_ops.json_string_opt "task_id" record);
     List.iter (add_set stat.goal_ids) (string_list_field record "goal_ids");
@@ -186,8 +176,6 @@ let materialize_tool_stat name stat =
     keepers = sorted_set stat.keepers;
     successful_keepers = sorted_set stat.successful_keepers;
     failed_keepers = sorted_set stat.failed_keepers;
-    sandbox_profiles = sorted_set stat.sandbox_profiles;
-    network_modes = sorted_set stat.network_modes;
     task_ids = sorted_set stat.task_ids;
     goal_ids = sorted_set stat.goal_ids;
     latest_ts = !(stat.latest_ts);
@@ -325,8 +313,6 @@ let stat_json (stat : tool_keeper_stat) =
        ("keepers", Json_util.json_string_list stat.keepers);
        ("successful_keepers", Json_util.json_string_list stat.successful_keepers);
        ("failed_keepers", Json_util.json_string_list stat.failed_keepers);
-       ("sandbox_profiles", Json_util.json_string_list stat.sandbox_profiles);
-       ("network_modes", Json_util.json_string_list stat.network_modes);
        ("task_ids", Json_util.json_string_list stat.task_ids);
        ("goal_ids", Json_util.json_string_list stat.goal_ids);
      ]
@@ -343,8 +329,6 @@ let empty_stat_json tool =
     ("keepers", `List []);
     ("successful_keepers", `List []);
     ("failed_keepers", `List []);
-    ("sandbox_profiles", `List []);
-    ("network_modes", `List []);
     ("task_ids", `List []);
     ("goal_ids", `List []);
     ("latest_ts", `Null);

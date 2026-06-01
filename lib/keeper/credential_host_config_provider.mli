@@ -4,7 +4,7 @@
     store.  Missing or unreadable mappings fail closed; keeper TOML no longer
     participates in repo credential selection.  It mounts only files from the selected
     credential bundle read-only into the dispatch container and composes
-    container-local forge/Git environment variables.  Operator ambient credentials
+    container-local GH/Git config paths.  Operator ambient credentials
     ([GH_TOKEN], [GITHUB_TOKEN], [~/.config/gh], [~/.ssh], keychain probes) are
     outside this contract.
 
@@ -25,8 +25,7 @@ val cred_root : string
     API; do not call from production code. *)
 module For_testing : sig
   val compose_env :
-    ?ssh_key_container:string ->
-    unit -> (string * string) list
+    ?ssh_key_container:string -> unit -> (string * string) list
 
   val mount_if_present :
     host:string -> container:string -> Credential_provider.ro_mount list

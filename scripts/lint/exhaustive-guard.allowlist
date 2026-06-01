@@ -440,7 +440,6 @@ lib/keeper/keeper_hooks_oas.ml:1649
 lib/keeper/keeper_hooks_oas.ml:1786
 lib/keeper/keeper_hooks_oas.ml:1859
 lib/keeper/keeper_id.ml:12
-lib/keeper/keeper_identity.ml:116
 lib/keeper/keeper_keepalive_signal.ml:307
 lib/keeper/keeper_keepalive.ml:453
 lib/keeper/keeper_lifecycle_hooks.ml:56

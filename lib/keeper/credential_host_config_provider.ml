@@ -178,9 +178,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
   let ssh_key_container =
     Option.map (fun _ -> explicit_ssh_key_container_path) ssh_key_path
   in
-  let env =
-    compose_env ?ssh_key_container ()
-  in
+  let env = compose_env ?ssh_key_container () in
   match compose_ro_mounts_result ~keeper_name kb with
   | Error reason ->
       Error
@@ -382,8 +380,7 @@ let tear_down (_b : Credential_provider.binding) ~container_id:_ =
   ()
 
 module For_testing = struct
-  let compose_env ?ssh_key_container () =
-    compose_env ?ssh_key_container ()
+  let compose_env ?ssh_key_container () = compose_env ?ssh_key_container ()
 
   let mount_if_present = mount_if_present
   let compose_ro_mounts_result = compose_ro_mounts_result

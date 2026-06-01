@@ -262,15 +262,15 @@ let expected_env_keys =
     "HOME";
     "GH_CONFIG_DIR";
     "GIT_CONFIG_GLOBAL";
-	    "GIT_CONFIG_COUNT";
-	    "GIT_CONFIG_KEY_0";
-	    "GIT_CONFIG_VALUE_0";
-	    "GIT_CONFIG_KEY_1";
-	    "GIT_CONFIG_VALUE_1";
-	    "GIT_CONFIG_KEY_2";
-	    "GIT_CONFIG_VALUE_2";
-	    "GIT_CONFIG_KEY_3";
-	    "GIT_CONFIG_VALUE_3";
+    "GIT_CONFIG_COUNT";
+    "GIT_CONFIG_KEY_0";
+    "GIT_CONFIG_VALUE_0";
+    "GIT_CONFIG_KEY_1";
+    "GIT_CONFIG_VALUE_1";
+    "GIT_CONFIG_KEY_2";
+    "GIT_CONFIG_VALUE_2";
+    "GIT_CONFIG_KEY_3";
+    "GIT_CONFIG_VALUE_3";
     (* Env_git_noninteractive *)
     "GIT_TERMINAL_PROMPT";
     "GIT_ASKPASS";
@@ -293,20 +293,17 @@ let test_compose_env_path_values_anchored_to_cred_root () =
   check string "GH_CONFIG_DIR"
     (Filename.concat HCP.cred_root ".config/gh")
     (lookup "GH_CONFIG_DIR");
-	  check string "GIT_CONFIG_GLOBAL"
-	    (Filename.concat HCP.cred_root ".gitconfig")
-	    (lookup "GIT_CONFIG_GLOBAL");
-	  check string "GIT_CONFIG_COUNT" "4" (lookup "GIT_CONFIG_COUNT");
-	  check string "credential helper reset" "credential.helper"
-	    (lookup "GIT_CONFIG_KEY_1");
-	  check string "credential helper reset value" ""
-	    (lookup "GIT_CONFIG_VALUE_1");
-	  check string "GitHub credential helper"
-	    "credential.https://github.com.helper"
-	    (lookup "GIT_CONFIG_KEY_2");
-	  check string "GitHub credential helper command"
-	    "!gh auth git-credential"
-	    (lookup "GIT_CONFIG_VALUE_2")
+  check string "GIT_CONFIG_GLOBAL"
+    (Filename.concat HCP.cred_root ".gitconfig")
+    (lookup "GIT_CONFIG_GLOBAL");
+  check string "GIT_CONFIG_COUNT" "4" (lookup "GIT_CONFIG_COUNT");
+  check string "credential helper reset" "credential.helper"
+    (lookup "GIT_CONFIG_KEY_1");
+  check string "credential helper reset value" "" (lookup "GIT_CONFIG_VALUE_1");
+  check string "GitHub credential helper" "credential.https://github.com.helper"
+    (lookup "GIT_CONFIG_KEY_2");
+  check string "GitHub credential helper command" "!gh auth git-credential"
+    (lookup "GIT_CONFIG_VALUE_2")
 
 let test_compose_env_explicit_ssh_key () =
   let env =

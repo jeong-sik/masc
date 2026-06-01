@@ -1846,7 +1846,7 @@ let test_git_creds_mounts_numeric_user_identity () =
     (contains_substring (read_file group_path)
        (Printf.sprintf "keeper:x:%d:" (Unix.getgid ())))
 
-let test_git_creds_uses_mapped_credential_identity () =
+let test_git_creds_does_not_synthesize_git_author_identity () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1856,11 +1856,14 @@ let test_git_creds_uses_mapped_credential_identity () =
   let line =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
   in
-  Alcotest.(check bool) "mapped credential uses forge author" true
-    (contains_substring line "GIT_AUTHOR_NAME=anyang-keepers");
-  Alcotest.(check bool) "mapped credential uses noreply email" true
-    (contains_substring line
-       "GIT_AUTHOR_EMAIL=anyang-keepers@users.noreply.github.com")
+  Alcotest.(check bool) "does not synthesize git author name" false
+    (contains_substring line "GIT_AUTHOR_NAME=");
+  Alcotest.(check bool) "does not synthesize git author email" false
+    (contains_substring line "GIT_AUTHOR_EMAIL=");
+  Alcotest.(check bool) "does not synthesize git committer name" false
+    (contains_substring line "GIT_COMMITTER_NAME=");
+  Alcotest.(check bool) "does not synthesize git committer email" false
+    (contains_substring line "GIT_COMMITTER_EMAIL=")
 
 let test_git_creds_mounts_only_selected_keeper_identity () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -2357,8 +2360,8 @@ let () =
             "git-creds mounts passwd entry for numeric uid"
             `Quick test_git_creds_mounts_numeric_user_identity;
           Alcotest.test_case
-            "git-creds uses mapped credential identity"
-            `Quick test_git_creds_uses_mapped_credential_identity;
+            "git-creds does not synthesize git author identity"
+            `Quick test_git_creds_does_not_synthesize_git_author_identity;
           Alcotest.test_case
             "git-creds mounts only the selected keeper identity"
             `Quick test_git_creds_mounts_only_selected_keeper_identity;

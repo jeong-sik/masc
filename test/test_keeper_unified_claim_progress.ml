@@ -6,13 +6,11 @@ module KTP = Masc_mcp.Keeper_tool_progress
 
 let unclaimed_task_context =
   KCC.make_actionable_signal_context
-    ~tool_gate_required:false
     ~actionable_signal:KCC.Has_unclaimed_tasks
 ;;
 
 let no_actionable_context =
   KCC.make_actionable_signal_context
-    ~tool_gate_required:false
     ~actionable_signal:KCC.No_actionable_signal
 ;;
 

@@ -9,7 +9,6 @@ type actionable_signal =
 
 type actionable_signal_context = private
   | No_actionable_signal_context
-  | Turn_affordance_requires_tool
   | Keeper_world_signal of actionable_signal
 
 type contract_status =
@@ -80,8 +79,7 @@ val requires_tool_support_for_allowed_tools :
   allowed_tool_names:string list -> world_observation -> bool
 
 val make_actionable_signal_context
-  :  tool_gate_required:bool
-  -> actionable_signal:actionable_signal
+  :  actionable_signal:actionable_signal
   -> actionable_signal_context
 
 (** [is_actionable s] is [false] iff [s = No_actionable_signal].

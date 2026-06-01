@@ -13,11 +13,6 @@ include module type of Keeper_agent_checkpoint_hygiene
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
-val should_require_provider_tool_choice_support
-  :  initial_tool_requirement:tool_requirement
-  -> actionable_observation_requires_tool_support:bool
-  -> bool
-
 val tool_contract_result_for_observed_tools
   :  required_tool_names:string list
   -> missing_visible_required:string list

@@ -189,8 +189,10 @@ val tool_names_for_required_gate_surface :
   string list ->
   string list
 
-(** Whether the very first turn of a multi-turn slot should require
-    a tool call. *)
+(** Whether the very first turn of a multi-turn slot should require a tool
+    call. Generic affordances no longer create a required-tool contract; only
+    explicit required tools or caller [tool_choice] do that later in turn
+    setup. *)
 val should_require_tools_for_initial_turn :
   max_turns:int -> turn_affordances:string list -> bool
 

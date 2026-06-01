@@ -7,20 +7,16 @@ module KTP = Masc_mcp.Keeper_tool_progress
 
 let unclaimed_task_context =
   KCC.make_actionable_signal_context
-    ~tool_gate_required:false
     ~actionable_signal:KCC.Has_unclaimed_tasks
 ;;
 
 let board_activity_context =
   KCC.make_actionable_signal_context
-    ~tool_gate_required:false
     ~actionable_signal:KCC.Has_board_activity
 ;;
 
-let tool_gate_context =
-  KCC.make_actionable_signal_context
-    ~tool_gate_required:true
-    ~actionable_signal:KCC.No_actionable_signal
+let no_actionable_context =
+  KCC.make_actionable_signal_context ~actionable_signal:KCC.No_actionable_signal
 ;;
 
 let contains_substring haystack needle =
@@ -173,14 +169,14 @@ let test_actionable_tool_contract_flags_no_tools () =
        ~tool_names:[])
 ;;
 
-let test_actionable_tool_contract_preserves_turn_gate_context () =
+let test_actionable_tool_contract_allows_no_actionable_context () =
   check
     (option string)
-    "turn affordance gate no longer emits violation"
+    "no-actionable context no longer emits violation"
     None
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:tool_gate_context
+       ~actionable_signal_context:no_actionable_context
        ~tool_names:[])
 ;;
 
@@ -285,9 +281,9 @@ let () =
             `Quick
             test_actionable_tool_contract_flags_no_tools
         ; test_case
-            "actionable signal preserves turn-gate context"
+            "actionable signal allows no-actionable context"
             `Quick
-            test_actionable_tool_contract_preserves_turn_gate_context
+            test_actionable_tool_contract_allows_no_actionable_context
         ; test_case
             "actionable signal allows passive-only tools"
             `Quick

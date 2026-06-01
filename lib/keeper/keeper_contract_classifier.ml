@@ -5,7 +5,6 @@ type actionable_signal =
 
 type actionable_signal_context =
   | No_actionable_signal_context
-  | Turn_affordance_requires_tool
   | Keeper_world_signal of actionable_signal
 
 type contract_status =
@@ -24,7 +23,6 @@ let actionable_signal_label = function
 
 let actionable_signal_context_label = function
   | No_actionable_signal_context -> "no_actionable_signal_context"
-  | Turn_affordance_requires_tool -> "turn_affordance_requires_tool"
   | Keeper_world_signal signal -> actionable_signal_label signal
 
 let contract_status_label = function
@@ -75,13 +73,10 @@ let classify_actionable_signal_for_tools ~(allowed_tool_names : string list) o =
   then Has_board_activity
   else No_actionable_signal
 
-let make_actionable_signal_context ~tool_gate_required ~actionable_signal =
-  if tool_gate_required
-  then Turn_affordance_requires_tool
-  else
-    match actionable_signal with
-    | No_actionable_signal -> No_actionable_signal_context
-    | signal -> Keeper_world_signal signal
+let make_actionable_signal_context ~actionable_signal =
+  match actionable_signal with
+  | No_actionable_signal -> No_actionable_signal_context
+  | signal -> Keeper_world_signal signal
 
 let is_actionable = function
   | No_actionable_signal -> false
@@ -89,7 +84,7 @@ let is_actionable = function
 
 let is_actionable_signal_context = function
   | No_actionable_signal_context -> false
-  | Turn_affordance_requires_tool | Keeper_world_signal _ -> true
+  | Keeper_world_signal _ -> true
 
 let requires_tool_support_for_allowed_tools ~(allowed_tool_names : string list) o =
   o

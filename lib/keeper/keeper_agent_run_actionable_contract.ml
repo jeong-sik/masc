@@ -21,14 +21,9 @@ let analyze
       |> Keeper_contract_classifier.classify_actionable_signal_for_tools
            ~allowed_tool_names
   in
-  let tool_gate_required =
-    Keeper_agent_tool_surface.turn_affordances_require_tool_gate_with_allowed
-      ~allowed_tool_names
-      turn_affordances
-  in
+  ignore turn_affordances;
   let actionable_signal_context =
     Keeper_contract_classifier.make_actionable_signal_context
-      ~tool_gate_required
       ~actionable_signal:actionable_signal_kind
   in
   let violation_reason =

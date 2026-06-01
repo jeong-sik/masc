@@ -21,9 +21,6 @@ let no_progress_success_tool_names_for_contract =
   Contract_helpers.no_progress_success_tool_names_for_contract
 ;;
 
-let should_require_provider_tool_choice_support =
-  Turn_helpers.should_require_provider_tool_choice_support
-
 let tool_contract_result_for_observed_tools =
   Turn_helpers.tool_contract_result_for_observed_tools
 
@@ -458,24 +455,12 @@ let run_turn
      with
      | Error e -> Error (Agent_sdk.Error.Internal e)
      | Ok oas_allowed_paths ->
-       let actionable_observation_requires_tool_support =
-         match world_observation with
-         | None -> false
-         | Some observation ->
-           observation
-           |> Keeper_contract_classifier.of_keeper_world_observation
-           |> Keeper_contract_classifier.requires_tool_support_for_allowed_tools
-                ~allowed_tool_names:all_tool_names
-       in
+       ignore world_observation;
        let require_tool_support =
-         tools <> []
-         && (initial_tool_surface.tool_requirement = Required
-             || actionable_observation_requires_tool_support)
+         tools <> [] && initial_tool_surface.tool_requirement = Required
        in
        let require_tool_choice_support =
-         should_require_provider_tool_choice_support
-           ~initial_tool_requirement:initial_tool_surface.tool_requirement
-           ~actionable_observation_requires_tool_support
+         initial_tool_surface.tool_requirement = Required
        in
        let timeout_s =
          match oas_timeout_s with

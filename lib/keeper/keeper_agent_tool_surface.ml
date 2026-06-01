@@ -334,11 +334,9 @@ let tool_names_for_required_gate_surface
 
 let should_require_tools_for_initial_turn ~(max_turns : int)
     ~(turn_affordances : string list) =
-  let initial_per_call_turn = 1 in
-  let initial_turn_is_last = initial_per_call_turn >= max_turns in
-  max_turns > 1
-  && not initial_turn_is_last
-  && turn_affordances_require_tool_gate turn_affordances
+  ignore max_turns;
+  ignore turn_affordances;
+  false
 
 let has_turn_affordance expected turn_affordances =
   List.exists

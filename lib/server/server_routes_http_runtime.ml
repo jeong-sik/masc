@@ -144,10 +144,56 @@ let health_uptime_secs = Server_routes_http_runtime_health_helpers.health_uptime
 let health_uptime_string = Server_routes_http_runtime_health_helpers.health_uptime_string
 let protocol_json = Server_routes_http_runtime_health_helpers.protocol_json
 let quick_gc_json = Server_routes_http_runtime_health_helpers.quick_gc_json
+
+let internal_mcp_auth_json ~base_path =
+  let env_key = Auth.internal_keeper_token_env_key in
+  let env_token =
+    match Sys.getenv_opt env_key with
+    | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+    | None -> None
+  in
+  let env_token_present = Option.is_some env_token in
+  let token_hash_file_present =
+    Sys.file_exists (Auth.internal_keeper_token_hash_file base_path)
+  in
+  let env_token_verifies =
+    match env_token with
+    | Some token -> Auth.verify_internal_keeper_token base_path ~token
+    | None -> false
+  in
+  let ready = env_token_present && token_hash_file_present && env_token_verifies in
+  let missing =
+    [ (not env_token_present, "env_token")
+    ; (not token_hash_file_present, "token_hash_file")
+    ; (env_token_present && token_hash_file_present && not env_token_verifies, "token_hash_match")
+    ]
+    |> List.filter_map (fun (missing, name) -> if missing then Some name else None)
+  in
+  let status = if ready then "ok" else "degraded" in
+  let next_action =
+    if ready then "none" else "sync_internal_keeper_token_and_restart_runtime"
+  in
+  `Assoc
+    [ "schema", `String "masc.internal_mcp_auth.v1"
+    ; "status", `String status
+    ; "source", `String "running_process_env_and_auth_hash"
+    ; "env_key", `String env_key
+    ; "env_token_present", `Bool env_token_present
+    ; "token_hash_file_present", `Bool token_hash_file_present
+    ; "env_token_verifies", `Bool env_token_verifies
+    ; "keeper_internal_runtime_mcp_ready", `Bool ready
+    ; "missing", `List (List.map (fun name -> `String name) missing)
+    ; "operator_action_required", `Bool (not ready)
+    ; "next_action", `String next_action
+    ]
+
 let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
     ?(health_detail = "probe") request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
+  let path_diagnostics = health_path_diagnostics () in
   let full_health_url_fields =
     match full_health_url with
     | Some url -> [ ("full_health_url", `String url) ]
@@ -165,7 +211,9 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("protocol", protocol_json ~listener);
       ("transport", transport_json request);
       ("http_listener", Transport_metrics.http_listener_json ());
-      ("paths", Server_base_path_diagnostics.to_yojson (health_path_diagnostics ()));
+      ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
+      ( "internal_mcp_auth"
+      , internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path );
       ("uptime", `String (health_uptime_string uptime_secs));
       ("sse_clients", `Int (Sse.client_count ()));
       ("startup", Server_startup_state.to_yojson ());
@@ -323,6 +371,8 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     ("transport", transport_json request);
     ("http_listener", Transport_metrics.http_listener_json ());
     ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
+    ( "internal_mcp_auth"
+    , internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path );
     ( "runtime_truth"
     , runtime_truth_json ~build ~path_diagnostics ~keeper_fibers
         ~fd_accountant:fd_accountant_json );

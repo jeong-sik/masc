@@ -879,7 +879,7 @@ let test_profile_accepts_repo_cli_identity_fields () =
 [keeper]
 goal = "test"
 repo_cli_identity = "repo_cli_identity"
-git_identity_mode = "repo_cli_identity"
+git_identity_mode = "Repo_CLI_Identity"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e

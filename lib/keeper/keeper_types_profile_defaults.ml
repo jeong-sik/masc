@@ -13,7 +13,7 @@ let git_identity_mode_to_string = function
 ;;
 
 let git_identity_mode_of_string raw =
-  match String.trim raw with
+  match String.trim raw |> String.lowercase_ascii with
   | "keeper_alias" -> Some Keeper_alias
   | "repo_cli_identity" -> Some Repo_cli_identity
   | _ -> None

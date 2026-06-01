@@ -10,7 +10,7 @@
 
 ## 1. Problem
 
-RFC-0168 (PR #18219) removed 14 closed-roster `--p-<vendor>` color tokens (`provider-a`, `provider-c`, `provider-d`, `provider-e`, `provider-f`, `provider-g`, `provider-h`, `provider-j`, `provider-l`, `ollama`, `llamacpp`, `provider-k`, `provider-f-cli`, `agent-code-cli`) from `dashboard/design-system/tokens/source.ts` and the live generated CSS surfaces.
+RFC-0168 (PR #18219) removed 14 closed-roster `--p-<vendor>` color tokens (`provider-a`, `provider-c`, `chat-completions-v1`, `provider-e`, `provider-f`, `provider-g`, `provider-h`, `provider-j`, `provider-l`, `ollama`, `llamacpp`, `provider-k`, `provider-f-cli`, `agent-code-cli`) from `dashboard/design-system/tokens/source.ts` and the live generated CSS surfaces.
 
 **RFC-0168 inventory was 14-of-15**: `--p-provider-b` / `--p-provider-b-soft` / `--p-provider-b-border` was carried in both `dashboard/design-system/tokens.generated.css` and `dashboard/design-system/ui_kits/cockpit/tokens.generated.css` but missed by the source.ts sweep. This is the workaround-rejection §3 (N-of-M patch) signature.
 
@@ -38,7 +38,7 @@ RFC-0168 (PR #18219) removed 14 closed-roster `--p-<vendor>` color tokens (`prov
 
 ## 4. Verification
 
-- `rg -i 'p-provider-b|p-provider-a|p-provider-c|p-provider-d|p-provider-e|p-provider-f|p-agent-code' dashboard/design-system/tokens*.css dashboard/design-system/ui_kits/cockpit/tokens.generated.css` returns 0 hits (token defs).
+- `rg -i 'p-provider-b|p-provider-a|p-provider-c|p-chat-completions-v1|p-provider-e|p-provider-f|p-agent-code' dashboard/design-system/tokens*.css dashboard/design-system/ui_kits/cockpit/tokens.generated.css` returns 0 hits (token defs).
 - `rg -l 'p-provider-b' dashboard/src/` returns 0 (no production consumer).
 - `pnpm run typecheck` unchanged (no TS touched).
 - `dune build lib/ bin/` unchanged (no OCaml touched).

@@ -57,7 +57,7 @@ Runtime scope has moved since the original draft.
 - benchmark가 raw selection, BM25 selection, oracle self-heal upper-bound로 흩어져 있다
 - `samchon`식 recovery가 OAS 안에 부분적으로 존재하지만 generic helper로 표면화돼 있지 않다
 - `masc-mcp` public MCP path에 retry를 넣어야 하는지에 대한 경계가 문서화돼 있지 않다
-- MLX 실험은 필요하지만 현재 harness가 `Provider-D-compatible endpoint` 전제라 바로 붙일 수 없다
+- MLX 실험은 필요하지만 현재 harness가 `Chat Completions v1-compatible endpoint` 전제라 바로 붙일 수 없다
 - 최신 모델 추가가 ad hoc하게 일어나고, artifact schema와 acceptance gate가 고정돼 있지 않다
 
 이 RFC의 목적은 더 많은 모델을 늘어놓는 것이 아니다. `tool call quality`를 하나의 typed program으로 만들고, 그 위에서 model/backend/repair policy를 비교할 수 있게 하는 것이다.
@@ -113,7 +113,7 @@ Runtime scope has moved since the original draft.
 
 ### 3.3 Backend truth
 
-현재 benchmark harness는 사실상 `llama.cpp server` 같은 Provider-D-compatible endpoint를 가정한다.
+현재 benchmark harness는 사실상 `llama.cpp server` 같은 Chat Completions v1-compatible endpoint를 가정한다.
 
 - current runners: endpoint POST `/v1/chat/completions`
 - current score artifacts: JSON output files under `data/tool-calling-benchmark/results-*`

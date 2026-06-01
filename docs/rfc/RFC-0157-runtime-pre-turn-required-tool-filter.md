@@ -94,7 +94,7 @@ dispatch candidate
 명시적 제외:
 
 1. **Post-dispatch recovery** — PR #17046 (사후 검출 후 turn 재시도) 의 scope. 본 RFC 는 *사전 회피* 이며 사후 recovery 와 직교한다. 둘 다 필요.
-2. **OAS provider-side filtering** — provider (Provider-D, Provider-A, Provider-K, ...) 가 내부적으로 `tool_required` 를 무시하는 케이스. MASC 통제 밖. 본 RFC 는 MASC 가 *알 수 있는 capability 정보* 로만 필터.
+2. **OAS provider-side filtering** — provider (Chat Completions v1, Provider-A, Provider-K, ...) 가 내부적으로 `tool_required` 를 무시하는 케이스. MASC 통제 밖. 본 RFC 는 MASC 가 *알 수 있는 capability 정보* 로만 필터.
 3. **Required-tool semantics 확장** — 현재 contract (단순 도구 이름 매칭) 를 유지. 정규식/패턴/wildcard 매칭은 별도 RFC.
 4. **Runtime-level concurrency** — RFC-0153 Phase B scope. 본 RFC 는 순차 runtime 안에서 candidate 단위 필터.
 5. **Provider downtime detection** — RFC-0127 scope. health/cooldown 체크는 본 RFC 게이트 *후* 그대로 유지.

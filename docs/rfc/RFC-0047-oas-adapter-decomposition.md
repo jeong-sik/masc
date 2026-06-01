@@ -439,7 +439,7 @@ follow-up RFC:
 - **Keeper sub-library extraction.** That work is tracked separately
   (memory `project_keeper_sublib_extraction_analysis.md`) and is
   serialized after this RFC completes.
-- **Provider behavior changes.** Provider-A/Provider-D/ZAI provider routing,
+- **Provider behavior changes.** Provider-A/Chat Completions v1/ZAI provider routing,
   retry, and tool execution semantics are byte-identical pre/post.
 - **Tool schema redesign.** `Masc_domain.tool_schema` remains the
   consumer-side type; OAS adapter converts to `Agent_sdk.Types.tool`

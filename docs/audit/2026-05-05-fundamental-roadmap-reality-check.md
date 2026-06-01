@@ -19,7 +19,7 @@ This document exists so the next agent (or human) does not re-execute a 26-week 
 | `lib/keeper/keeper_prompt.ml` | "수백 줄, 5+ templates" | 244 lines | ⚠️ smaller than implied; ROI of externalization is low |
 | `lib/runtime/runtime_catalog_runtime.ml` | 34KB, hardcoded tiers/models/providers | 972 lines (~38KB) | ✅ size-confirmed; content claim §3 needs separate check |
 | `lib/runtime/capabilities.ml` | "40+ model prefix-match cases hardcoded" | **File does not exist on `main`** | ❌ **STALE** — file is gone; **but its content migrated** (see §8 gap #6: `lib/provider_adapter.ml:365-405` holds 9 model literals — gpt-5.x/provider-f-2.5 list) |
-| `oas/lib/llm_provider/backend_openai.ml` | "48KB monolith, 10+ providers" | 1,550 lines, dispatches Provider-D/Provider-A/Provider-F/Ollama/Provider-K (5 providers, not 10+) | ⚠️ partially confirmed |
+| `oas/lib/llm_provider/backend_openai.ml` | "48KB monolith, 10+ providers" | 1,550 lines, dispatches Chat Completions v1/Provider-A/Provider-F/Ollama/Provider-K (5 providers, not 10+) | ⚠️ partially confirmed |
 | `oas/lib/llm_provider/backend_provider-a.ml` | "doesn't exist yet" implied | **210 lines, already separate file** | ❌ **STALE** — split already partially done |
 | `oas/lib/llm_provider/backend_provider-f.ml` | implied non-existent | **363 lines** | ❌ **STALE** |
 | `oas/lib/llm_provider/backend_ollama.ml` | implied non-existent | **641 lines** | ❌ **STALE** |

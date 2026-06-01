@@ -44,7 +44,7 @@ Yet when `voice_enabled = true`, the keeper's `required_tool_names` list emits t
 "required_tool_names":[..., "keeper_voice_speak", "keeper_voice_listen", ...]
 "rejection_reasons":[
   "required_tool_unsupported: provider=provider-k-coding missing_required_tools=[tool_execute]",
-  "required_tool_unsupported: provider=provider-d missing_required_tools=[tool_execute]"
+  "required_tool_unsupported: provider=chat-completions-v1 missing_required_tools=[tool_execute]"
 ]
 "rejected_candidate_count": 9
 ```

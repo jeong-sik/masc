@@ -110,7 +110,7 @@ let test_transition_actions_cover_tla_next () =
     F.ProviderError
     ~from_state:F.Runtime_routing
     ~to_state:
-      (F.Failed (F.Failure_provider_error { kind = "provider_d"; detail = "rate_limit" }));
+      (F.Failed (F.Failure_provider_error { kind = "chat_completions_v1"; detail = "rate_limit" }));
   check_action F.ProviderResponded ~from_state:F.Awaiting_provider ~to_state:F.Streaming;
   check_action
     F.ProviderTimeout
@@ -133,7 +133,7 @@ let test_transition_actions_cover_tla_next () =
     F.ProviderError
     ~from_state:F.Streaming
     ~to_state:
-      (F.Failed (F.Failure_provider_error { kind = "provider_d"; detail = "rate_limit" }));
+      (F.Failed (F.Failure_provider_error { kind = "chat_completions_v1"; detail = "rate_limit" }));
   check_action
     F.ProviderTimeout
     ~from_state:F.Streaming

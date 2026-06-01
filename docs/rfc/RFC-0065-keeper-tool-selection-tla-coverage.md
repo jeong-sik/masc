@@ -116,7 +116,7 @@ A new TLA+ spec is integrated into KeeperCompositeLifecycle observer if and only
 |---|---|---|
 | **G1: Clean PASS** | `tlc -config <Spec>.cfg <Spec>.tla` exits 0 with no invariant violation, no deadlock, bounded state space ≤ 1M states. | TLC stdout + `make -C specs check-clean`. |
 | **G2: Buggy VIOLATED** | `tlc -config <Spec>-buggy.cfg <Spec>.tla` reports invariant violation in ≤ MaxSteps. Buggy cfg must model the *class* of bug we want to prevent (AGENT-LLM-A.md §TLA+ Bug Model), not a single instance. | TLC reports `Invariant <Name> is violated`. |
-| **G3: Provider opacity** | The spec and both cfgs contain zero literal provider identifiers (`provider-a`, `provider-d`, `agent-llm-a`, `gpt`, `provider-f`, `sonnet`, `opus`, `haiku`). Provider symbols are abstract (`Provider_1`, `Tier_A`, etc.). | `rg -i '<provider-regex>' <Spec>.tla <Spec>*.cfg` → 0 hits. |
+| **G3: Provider opacity** | The spec and both cfgs contain zero literal provider identifiers (`provider-a`, `chat-completions-v1`, `agent-llm-a`, `gpt`, `provider-f`, `sonnet`, `opus`, `haiku`). Provider symbols are abstract (`Provider_1`, `Tier_A`, etc.). | `rg -i '<provider-regex>' <Spec>.tla <Spec>*.cfg` → 0 hits. |
 | **G4: Observer integration** | Adding the new sub-FSM to `KeeperCompositeLifecycle.tla` keeps all existing joint invariants passing. The new sub-FSM exports a small projection (≤ 8 ghost variables) consumed by Composite. | TLC on `KeeperCompositeLifecycle.cfg` + `-buggy-*.cfg` pairs. |
 | **G5: OCaml correspondence** | Every spec state has a documented OCaml seam (file:line range). `test_keeper_ocaml_tla_correspondence.ml` (§3.6) maps each spec transition to a matching OCaml transition; missing mapping fails the test. | Alcotest. |
 
@@ -293,7 +293,7 @@ Three phases, each in its own PR. Each PR self-contained (no cross-PR atomicity 
 
 - [ ] `tlc -config <Spec>.cfg <Spec>.tla` → no error (G1)
 - [ ] `tlc -config <Spec>-buggy.cfg <Spec>.tla` → invariant violated (G2)
-- [ ] `rg -i 'provider-a|provider-d|agent-llm-a|gpt|provider-f|sonnet|opus|haiku' <Spec>.tla <Spec>*.cfg` → 0 hits (G3)
+- [ ] `rg -i 'provider-a|chat-completions-v1|agent-llm-a|gpt|provider-f|sonnet|opus|haiku' <Spec>.tla <Spec>*.cfg` → 0 hits (G3)
 - [ ] `tlc -config KeeperCompositeLifecycle.cfg KeeperCompositeLifecycle.tla` after new sub-FSM added → no error (G4)
 - [ ] `dune runtest test/test_keeper_ocaml_tla_correspondence.ml` PASS (G5)
 - [ ] `bash scripts/gen-tla-index.sh > specs/INDEX.md` and commit the regenerated index (drift-check CI)

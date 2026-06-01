@@ -30,7 +30,7 @@ Mapping target set (perl word-boundary, case-sensitive, both lowercase and capit
 | `anthropic` / `Anthropic` / `ANTHROPIC` | `provider-a` / `Provider-A` / `PROVIDER-A` |
 | `moonshot` / `Moonshot` / `MOONSHOT` | `provider-b` / `Provider-B` / `PROVIDER-B` |
 | `kimi` / `Kimi` / `KIMI` (word) | `provider-c` / `Provider-C` / `PROVIDER-C` |
-| `openai` / `OpenAI` (word) | `provider-d` / `Provider-D` |
+| `openai` / `OpenAI` (word) | `chat-completions-v1` / `Chat Completions v1` |
 | `xai` / `xAI` (word) | `provider-e` / `Provider-E` |
 | `gemini` / `Gemini` / `GEMINI` | `provider-f` / `Provider-F` / `PROVIDER-F` |
 | `deepseek` / `DeepSeek` | `provider-g` / `Provider-G` |

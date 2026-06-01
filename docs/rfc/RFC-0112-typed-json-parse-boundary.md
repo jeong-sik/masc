@@ -131,7 +131,7 @@ P3 가 핵심 — grandfather list 없으면 P4/P5/P6 가 측정 불가능.
 - **Yojson 라이브러리 자체 변경** — upstream PR 가능성 있으나 본 RFC 는 internal API 만.
 - **다른 serialization format** (msgpack, cbor) — 별도 RFC 가능, 본 RFC 는 JSON 만.
 - **Schema 자체의 evolution** (예: backward-compat) — typed error 만, schema 변경 정책 별도.
-- **Provider boundary parse** (예: Provider-A / Provider-D response) — 본 RFC 는 *internal* JSON read. provider response 는 `Agent_sdk.Types.message` 변환 layer 가 별도 책임.
+- **Provider boundary parse** (예: Provider-A / Chat Completions v1 response) — 본 RFC 는 *internal* JSON read. provider response 는 `Agent_sdk.Types.message` 변환 layer 가 별도 책임.
 
 ## §6 Risk & rollback
 

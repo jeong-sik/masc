@@ -20,7 +20,7 @@ Apply hyphen-free underscore mapping (no `-` in any replacement, so OCaml identi
 | `anthropic` | `provider_a` |
 | `moonshot` | `provider_b` |
 | `kimi` (word) | `provider_c` |
-| `openai` (word) | `provider_d` |
+| `openai` (word) | `chat_completions_v1` |
 | `xai` (word) | `provider_e` |
 | `gemini` | `provider_f` |
 | `deepseek` | `provider_g` |

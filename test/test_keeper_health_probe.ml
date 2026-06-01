@@ -97,7 +97,7 @@ let test_runtime_pressure_classifier () =
        (R.Provider_runtime_error
           { code = "provider_capacity_backpressure"
           ; detail = "rate limit"
-          ; provider_id = Some "provider_d"
+          ; provider_id = Some "chat_completions_v1"
           ; http_status = Some 429
           ; runtime_id = None
           }));

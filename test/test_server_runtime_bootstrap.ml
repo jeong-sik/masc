@@ -472,7 +472,7 @@ let write_partially_invalid_runtime ~base_path ~valid_model =
     (Filename.concat config_root "keeper_runtime.toml")
     (Printf.sprintf
        {|[providers.custom]
-protocol = "provider_d-http"
+protocol = "chat_completions_v1_http"
 endpoint = %S
 
 [models.stable]
@@ -507,7 +507,7 @@ let write_partially_invalid_default_runtime ~base_path ~valid_model =
     (Filename.concat config_root "keeper_runtime.toml")
     (Printf.sprintf
        {|[providers.custom]
-protocol = "provider_d-http"
+protocol = "chat_completions_v1_http"
 endpoint = %S
 
 [models.stable]

@@ -532,11 +532,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
         status: 'active',
         runtime_id: 'oas-keeper_unified',
         selected_runtime_canonical: 'primary',
-        primary_model: 'provider-d:gpt-5.4',
+        primary_model: 'chat-completions-v1:gpt-5.4',
         active_model: 'gpt-5.4',
-        active_model_label: 'provider-d:gpt-5.4',
+        active_model_label: 'chat-completions-v1:gpt-5.4',
         last_model_used: 'gpt-5.4',
-        last_model_used_label: 'provider-d:gpt-5.4',
+        last_model_used_label: 'chat-completions-v1:gpt-5.4',
         metrics_series: [
           {
             ts_unix: 10,
@@ -557,7 +557,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
               fallback_hops: 1,
               fallback_events: [
                 {
-                  from_model_id: 'provider-d:gpt-5.4',
+                  from_model_id: 'chat-completions-v1:gpt-5.4',
                   to_model_id: 'provider-a:model-a-sonnet',
                   reason: 'turn_timeout',
                 },

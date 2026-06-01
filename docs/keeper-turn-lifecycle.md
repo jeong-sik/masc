@@ -310,7 +310,7 @@ MASC sits in a different product category from general-purpose agent SDKs. Keepi
 | Product family | Center of gravity | Turn model | Runtime ownership | Memory model | Operator surface |
 |---|---|---|---|---|---|
 | Agent-LLM-A Agent SDK | Runner / session | `Agent.run` loop with tool callbacks | OAS internal runtime | Session-scoped context + optional memory | Weak — run-level events only |
-| Provider-D Agents SDK | Runner / session | `Runner.run` pipeline with handoffs | OAS internal runtime | Thread + vector store | Weak — run-level traces |
+| OpenAI Agents SDK | Runner / session | `Runner.run` pipeline with handoffs | OAS internal runtime | Thread + vector store | Weak — run-level traces |
 | Google ADK | Runner / agent graph | Event-loop with stateful agents | Model routing per agent | Session memory + artifacts | Medium — deployment + evaluation |
 | OpenClaw | Workspace / orchestrator | Plan-execute with tool registry | Workspace-level fallback | Long-term memory bank + compression | Strong — workspace governance |
 | Hermes | Workspace / skills | Skill-based execution graph | Provider fallback per skill | Context files + skill memory | Medium — provider + skill management |

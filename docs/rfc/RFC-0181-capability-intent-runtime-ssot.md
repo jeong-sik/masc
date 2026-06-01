@@ -43,7 +43,7 @@ If we migrate the phonebook to be the SSOT *while RFC-0177 substitutes labels in
 - One declarative SSOT for runtime routing (not "legacy routes + phonebook + dangling references").
 - Caller speaks **intent** (`judge`, `code-generation`, `tool-execution`), not provider names.
 - Tier-groups describe **capability profiles** the routing matcher uses to pick concrete models.
-- No vendor brand names in any masc-mcp internal type. No `provider_d`-style substituted labels either; either capability classes or stable model IDs.
+- No vendor brand names in any masc-mcp internal type. No `chat_completions_v1`-style substituted labels either; either capability classes or stable model IDs.
 - Fall-back chain is part of the declarative spec, not an emergent property of `tiers = ["X", "Y"]` tuples.
 
 ## 3. Non-goals

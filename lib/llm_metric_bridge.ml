@@ -21,7 +21,7 @@
 
     Label cardinality (practical upper bound as of v0.4.x):
     - [provider]: fixed enum of 6 canonical values (ollama, provider_k,
-      provider_k-coding, provider_a, provider_d, provider_f, cli_tool_d)
+      provider_k-coding, provider_a, chat_completions_v1, provider_f, cli_tool_d)
     - [model]: bounded by entries in [config/keeper_runtime.toml], typically
       under 10 distinct values per deployment
     - [status]: small set of HTTP codes the provider actually emits

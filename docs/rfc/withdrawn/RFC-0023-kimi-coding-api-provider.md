@@ -31,7 +31,7 @@ The `provider-c-coding` endpoint is a coding-optimized API with different rate l
 | # | Principle | Rationale |
 |---|-----------|-----------|
 | P1 | Separate provider, not endpoint toggle. | Current architecture treats each variant as a separate provider. Third follows same pattern. |
-| P2 | Reuse Direct_api transport. | Same Provider-D-compatible HTTP transport as `provider-c-api`. Different endpoint and API key. |
+| P2 | Reuse Direct_api transport. | Same Chat Completions v1-compatible HTTP transport as `provider-c-api`. Different endpoint and API key. |
 | P3 | Runtime opt-in. | New provider starts outside runtime profiles. Operators add after validation. |
 
 ## 3. Implementation
@@ -57,7 +57,7 @@ In `lib/provider_adapter.ml`, add:
 
 ### 3.3 No New Transport Module
 
-Reuse existing Provider-D-compatible `Direct_api` transport. Only differences are base URL and API key env var.
+Reuse existing Chat Completions v1-compatible `Direct_api` transport. Only differences are base URL and API key env var.
 
 ## 4. Files to Modify
 

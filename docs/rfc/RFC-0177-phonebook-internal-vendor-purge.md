@@ -16,7 +16,7 @@ RFC-0176 migrated the OAS SDK boundary (Provider_config, Provider_kind, Transpor
 - `runtime_server_flavor` variants: `Zai_glm`, `Qwen`, `Openai`, `Deep_seek`, `Anthropic_http`
 - These are masc-mcp's own classification of wire-format flavors, separate from the SDK's Provider_kind.
 
-The outbound `flavor_to_string` was already updated to emit purged wire-strings (`"provider_d"`, `"provider_g"`, `"zai-provider_k"`, `"provider_h"`), but the OCaml constructor names retained the vendor brand.
+The outbound `flavor_to_string` was already updated to emit purged wire-strings (`"chat_completions_v1"`, `"provider_g"`, `"zai-provider_k"`, `"provider_h"`), but the OCaml constructor names retained the vendor brand.
 
 Per user direction "전부 폭파 — aggregator 포함", this RFC closes the internal-side enum names.
 
@@ -30,7 +30,7 @@ Per user direction "전부 폭파 — aggregator 포함", this RFC closes the in
 | `Anthropic_messages_compat` (if any) | `Provider_a_messages_compat` | same |
 | `Zai_glm` (13 sites) | `Provider_k_zai` | Z.AI/GLM = Provider_k |
 | `Deep_seek` (14 sites) | `Provider_g_wire` | DeepSeek = Provider_g |
-| `Openai` (17 sites) | `Provider_d_wire` | OpenAI canonical wire = Provider_d |
+| `Openai` (17 sites) | `Chat_completions_v1_wire` | OpenAI canonical wire = Chat_completions_v1 |
 | `Qwen` (27 sites) | `Provider_h_wire` | Qwen/DashScope = Provider_h |
 
 ### Preserved (technical / non-vendor)
@@ -43,7 +43,7 @@ These are *serving infrastructure*, not vendor brands. Same rationale as OAS RFC
 
 ### Wire-string mapping table
 
-`flavor_to_string` / `flavor_of_string` already emit/parse purged wire-strings (`"provider_d"`, `"provider_g"`, `"zai-provider_k"`, `"provider_h"`). This RFC does not touch the wire format — only the OCaml constructor names. Operators reading TOML configs see no change.
+`flavor_to_string` / `flavor_of_string` already emit/parse purged wire-strings (`"chat_completions_v1"`, `"provider_g"`, `"zai-provider_k"`, `"provider_h"`). This RFC does not touch the wire format — only the OCaml constructor names. Operators reading TOML configs see no change.
 
 ## 3. Out of scope
 

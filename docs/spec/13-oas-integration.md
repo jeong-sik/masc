@@ -271,7 +271,7 @@ runtime_id (e.g. "keeper", "verifier", "context_router")
 
 Provider/model-free here means MASC policy code does not branch on vendor or
 model literals. Provider/model ids remain operator-authored config data and may
-come from an OAS provider registry for cloud APIs, local Provider-D-compatible
+come from an OAS provider registry for cloud APIs, local Chat Completions v1-compatible
 servers, or non-interactive subscription CLI runtimes.
 
 ### 6.2 Runtime Inference Parameters

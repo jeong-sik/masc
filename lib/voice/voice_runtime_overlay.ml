@@ -42,11 +42,11 @@ let string_of_transport = function
 ;;
 
 let openai_compat_adapter =
-  { canonical_name = "voice-provider_d-compat"
+  { canonical_name = "voice-chat-completions-v1-compat"
   ; transport = Openai_compat
   ; auth_mode = No_auth
   ; aliases =
-      [ "voice-provider_d-compat"; "openai_compat"; "provider_d"; "railway-elevenlabs-proxy" ]
+      [ "voice-chat-completions-v1-compat"; "openai_compat"; "railway-elevenlabs-proxy" ]
   }
 ;;
 

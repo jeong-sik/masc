@@ -6,7 +6,7 @@
     {!Keeper_sandbox_docker} no longer reaches into multiple SSOTs
     inline.  Concrete implementations:
 
-    - {!Keeper_host_config_provider}: selected root/keeper host bundle
+    - {!Keeper_host_config_provider}: selected credential bundle
       mounted RO.
 
     Lifecycle (in caller order):
@@ -49,7 +49,7 @@ type binding = {
 }
 
 (** Provider error variants.  [Missing_bundle] covers a selected
-    root/keeper bundle that cannot be materialised. [Invalid_token] is
+    credential bundle that cannot be materialised. [Invalid_token] is
     reserved for provider gates. [Finalize_failed] / [Tear_down_failed] surface the
     underlying reason without coercing to [string] so the caller can
     log structured fields. *)

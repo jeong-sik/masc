@@ -477,11 +477,11 @@ let post_keeper_alert_github
     match status with
     | Unix.WEXITED 0 -> Alert_sent (Some (short_preview ~max_len:200 out))
     | Unix.WEXITED n ->
-        Alert_failed (Some (Printf.sprintf "repo_cli_exit_%d: %s" n (short_preview ~max_len:200 out)))
+        Alert_failed (Some (Printf.sprintf "credential_exit_%d: %s" n (short_preview ~max_len:200 out)))
     | Unix.WSIGNALED n ->
-        Alert_failed (Some (Printf.sprintf "repo_cli_signaled_%d" n))
+        Alert_failed (Some (Printf.sprintf "credential_signaled_%d" n))
     | Unix.WSTOPPED n ->
-        Alert_failed (Some (Printf.sprintf "repo_cli_stopped_%d" n))
+        Alert_failed (Some (Printf.sprintf "credential_stopped_%d" n))
 
 let maybe_emit_interesting_alert
     (ctx : _ context)

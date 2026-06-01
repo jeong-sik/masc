@@ -35,7 +35,7 @@ type parsed_identity = {
 
 val parse_json_identity : Yojson.Safe.t -> parsed_identity
 
-(** {1 SSOT identity bundle (RFC P1)} *)
+(** {1 SSOT keeper identity names (RFC P1)} *)
 
 type name_bundle = {
   persona_name : string;

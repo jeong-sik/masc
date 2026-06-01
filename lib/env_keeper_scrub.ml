@@ -45,9 +45,9 @@ let scrub : string list =
     "DEFAULT_WORKFLOW_TOKEN";
     "SSH_SIGNING_KEY";
 
-    (* Keeper GitHub work must use the MASC-owned identity bundle
-       selected by Repo_cli_credentials. Ambient host credentials would turn
-       keeper/root identity labels into a cosmetic boundary. *)
+    (* Keeper GitHub work must use the selected MASC credential bundle.
+       Ambient host credentials would turn credential labels into a cosmetic
+       boundary. *)
     "GH_TOKEN";
     "GITHUB_TOKEN";
     "GH_CONFIG_DIR";

@@ -3,7 +3,7 @@
 - **Status**: Implemented (PR-1 `Credential_provider trait + Host_config_provider` via #10660. PR-2 `binding.metadata` field + `Invalid_token`/`Finalize_failed`/`Tear_down_failed` error variants live in `lib/keeper/keeper_credential_provider.mli`. PR-3 Option B `lib/keeper/keeper_in_container_login_provider.{ml,mli}` — `include Keeper_credential_provider.S` + F-1 `provider_gate` — present and matches §3 spec 1:1. Module renamed under RFC-0085 Phase 2.A (#15472/#15474/#15478). Caller wire-up of `finalize` from `keeper_sandbox_docker` is RFC-0019 PR-C scope.)
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-24
-- **Revised**: 2026-04-30 — root credential fallback added and ambient operator credential fallback removed; §3 binding.env is composed **inside** `Host_config_provider.resolve` from the selected root/keeper bundle paths + `Env_git_noninteractive.env`.
+- **Revised**: 2026-04-30 — root credential fallback added and ambient operator credential fallback removed; §3 binding.env is composed **inside** `Host_config_provider.resolve` from the selected credential bundle path + `Env_git_noninteractive.env`.
 - **Related**: F-1 (#9843), F-2 (#9844), F-4 (#9847)
 - **Drives**: convert the "keeper-scoped identity" label into an actual capability boundary; make credential lifecycle explicit so Option B (in-container login) can ship later without rewiring the caller
 
@@ -11,7 +11,7 @@
 
 Three observations from `~/me/memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md`:
 
-- **F-1**: `<base_path>/.masc/repo-cli-identities/anyang-keepers/gh/hosts.yml` stores the same OAuth token as `gh auth token` on the operator host (SHA-256 prefix `406d098bd41b` matches both sides). Identity separation is cosmetic.
+- **F-1**: `<base_path>/.masc/credentials/anyang-keepers/gh/hosts.yml` stores the same OAuth token as `gh auth token` on the operator host (SHA-256 prefix `406d098bd41b` matches both sides). Identity separation is cosmetic.
 - **F-2**: `gh auth login --with-token` (Option B path) rewrites `hosts.yml:user` to the real token owner. Any downstream code that reads `user:` loses the identity label.
 - **F-4**: `scripts/rotate-keeper-gh-token.sh` used to default `GH_CONFIG_DIR` to a retired unscoped path. PAT rotation happened off-path, which is how F-1 drifted in.
 
@@ -60,7 +60,7 @@ val finalize : binding -> container_id:string -> (unit, error) result
 val tear_down : binding -> container_id:string option -> unit
 ```
 
-> **Evidence note (rev.2 cross-correction, 2026-04-30)**: The upstream `Repo_cli_credentials.keeper_binding` exposes `{configured_repo_cli_identity; effective_repo_cli_identity; credential_scope; git_identity_mode; bundle_root; gh_config_dir}`. If a keeper has no configured `repo_cli_identity`, it binds to `$base_path/.masc/repo-cli-identities/root/gh`; if that root bundle is missing, resolution fails closed. The `binding.env` list is therefore **composed inside `Host_config_provider.resolve`** from the selected bundle path — `HOME=<cred_root>`, `GH_CONFIG_DIR=<cred_root>/.config/gh`, `GIT_CONFIG_GLOBAL=<cred_root>/.gitconfig`, the `GIT_CONFIG_*` safe.directory block, `GIT_AUTHOR_*`/`GIT_COMMITTER_*` — plus `Env_git_noninteractive.env`. Ambient operator `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK`, `~/.config/gh`, and keychain probes are not part of the provider contract.
+> **Evidence note (rev.2 cross-correction, 2026-04-30)**: The upstream `Credential_bundle.keeper_binding` exposes `{configured_retired_credential_config; effective_retired_credential_config; credential_scope; retired_git_author_config; bundle_root; credential_bundle_dir}`. If a keeper has no configured `retired_credential_config`, it binds to `$base_path/.masc/credentials/root/gh`; if that root bundle is missing, resolution fails closed. The `binding.env` list is therefore **composed inside `Host_config_provider.resolve`** from the selected bundle path — `HOME=<cred_root>`, `GH_CONFIG_DIR=<cred_root>/.config/gh`, `GIT_CONFIG_GLOBAL=<cred_root>/.gitconfig`, the `GIT_CONFIG_*` safe.directory block, `GIT_AUTHOR_*`/`GIT_COMMITTER_*` — plus `Env_git_noninteractive.env`. Ambient operator `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK`, `~/.config/gh`, and keychain probes are not part of the provider contract.
 
 Two concrete modules:
 
@@ -84,7 +84,7 @@ end
 ### PR-1 — module + `Host_config_provider` only (≈150 lines + tests)
 
 - **New files**: `lib/keeper/credential_provider.ml(i)`, `lib/keeper/host_config_provider.ml(i)`, `test/test_credential_provider.ml`.
-- **Caller change**: the sandbox credentialed Execute caller swaps its inline `Repo_cli_credentials.keeper_binding` call for `Host_config_provider.resolve` and reads `binding.env @ Env_git_noninteractive.env` for docker env flags.
+- **Caller change**: the sandbox credentialed Execute caller swaps its inline `Credential_bundle.keeper_binding` call for `Host_config_provider.resolve` and reads `binding.env @ Env_git_noninteractive.env` for docker env flags.
 - **`finalize` in PR-1**: a noop (RO mount does not need user rewrite; the label in the host's `hosts.yml` is whatever the operator wrote). The method exists so PR-2 drops in without interface churn.
 - **Why safe**: fail-closed at resolution time; no operator credential fallback remains. All focused provider/docker/scrub tests must stay green.
 
@@ -92,7 +92,7 @@ end
 
 - **Files**: rewrite `scripts/rotate-keeper-gh-token.sh` (in the `me` repo, branch `feat/rotate-keeper-gh-token`) to:
   - require `IDENTITY=<name>` argument,
-  - target `$MASC_BASE_PATH/.masc/repo-cli-identities/$IDENTITY/gh` only,
+  - target `$MASC_BASE_PATH/.masc/credentials/$IDENTITY/gh` only,
   - verify the new token's SHA-256 **differs** from `gh auth token` (F-1 gate — `provider_gate` equivalent at rotation time).
 - **`Host_config_provider` update**: `resolve` adds a metadata line `sha256_prefix=<first 12>` and surfaces it in `binding.metadata` so `provider_gate` in PR-3 can consult it without re-reading the file.
 - **Why safe**: script is operator-facing; a mismatched identity × PAT never reaches the runtime.
@@ -106,8 +106,8 @@ end
 
 1. **Vault / 1Password / macOS Keychain integration.** The `binding.metadata.source` field is free-form today; integrations become separate RFCs that add new `source` values.
 2. **PAT TTL tracking dashboard.** `ttl_seconds` metadata is recorded for future use; a dashboard belongs in masc-mcp dashboards, not here.
-3. **Changing repo CLI identity materialization.** `Host_config_provider.resolve` calls `Repo_cli_credentials.keeper_binding` internally and maps fields. Replacing the on-disk bundle format is a separate cleanup.
-4. **Changing hard-mode execution mode.** `MASC_KEEPER_SANDBOX_HARD_MODE=true` still requires an effective selected identity bundle; keeper-specific `repo_cli_identity` wins, otherwise the root bundle is used, and missing bundles fail closed.
+3. **Changing credential bundle materialization.** `Host_config_provider.resolve` calls `Credential_bundle.keeper_binding` internally and maps fields. Replacing the on-disk bundle format is a separate cleanup.
+4. **Changing hard-mode execution mode.** `MASC_KEEPER_SANDBOX_HARD_MODE=true` still requires an effective selected credential bundle; keeper-specific `retired_credential_config` wins, otherwise the root bundle is used, and missing bundles fail closed.
 
 ## 6. Risks
 

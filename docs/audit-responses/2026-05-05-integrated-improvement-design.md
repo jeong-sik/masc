@@ -156,7 +156,7 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
 | `unknown keys: keeper.base` 경고 | **경고 없음으로 확인됨**: `lib/keeper/keeper_types_profile.ml:1237` 에서 `keeper.base` 를 base inheritance pointer 로 별도 처리하고, 1253 줄에서 `unknown_toml_keys` 리스트에서 명시적으로 filter out (`k <> "keeper.base"`). 즉 `keeper.base` 키는 valid key 로 인정되며 warning 발생 시점이 없음 | **D** |
-| 죽은 필드 (`work_discovery_sources`, `git_identity_mode`, etc.) | active cleanup 트랙: **#13091 (drop dead persona-schema computed signals -6 LOC)**, **#13076 (unexport internal-only helpers across 4 components)**, **#13070 (-655 LOC dead ide-editor-mock)**, **#13071 (-40 LOC orphans)** — 같은 axis 매주 진행 | **B** |
+| 죽은 필드 (`work_discovery_sources`, `retired_git_author_config`, etc.) | active cleanup 트랙: **#13091 (drop dead persona-schema computed signals -6 LOC)**, **#13076 (unexport internal-only helpers across 4 components)**, **#13070 (-655 LOC dead ide-editor-mock)**, **#13071 (-40 LOC orphans)** — 같은 axis 매주 진행 | **B** |
 | `masc persona create` CLI + validate | 미구현 | **C — design idea** |
 
 **§2-2 결과**: 죽은 필드 cleanup은 매우 active한 트랙. CLI 자체는 unimplemented.
@@ -213,11 +213,11 @@ candidate (RFC-0029)**.
 |------|-------------|------|------|
 | `keeper.base` | 죽음 (unknown key 경고) | sangsu.toml line 2가 실제 사용 — base.toml inheritance 선언 | **D — false** |
 | `work_discovery_sources` | 죽음, `work.source`로 대체 | sangsu.toml line 4가 실제 사용. 코드 caller 확인 필요 | TBD |
-| `git_identity_mode` | 죽음, 항상 `"repo_cli_identity"` | active cleanup 후보 | **C** |
+| `retired_git_author_config` | 죽음, 항상 `"retired_credential_config"` | active cleanup 후보 | **C** |
 | retired nested tool-access preset field | 중복 with `tools.preset` | sangsu.toml line 8 실제 사용. `tools.preset`은 audit의 가정 키 | **D — false** |
 | `sandbox_profile` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
 | `network_mode` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
-| `repo_cli_identity` | persona에서 파생 | 검증 필요 | TBD |
+| `retired_credential_config` | persona에서 파생 | 검증 필요 | TBD |
 | `max_context_tokens` | tier에서 파생 | tier 자체가 runtime routing이라 derive 가능 | **C** |
 | `fallback_runtime` | tier 순서에서 파생 | RFC-0027의 weighted_entry로 더 정밀 | **B** |
 | `keeper_assignable` | advanced로 | 5 TOML 미선언 | **D** |
@@ -325,7 +325,7 @@ cleanup 트랙에 추가 가능.
 
 - §1-2 코멘트 보강: Dashboard `dashboard_http_keeper_metrics.ml` 헤더에
   "no SQL layer; fiber-batched aggregation TBD" 한 줄 (false-positive 방지).
-- §4-1 cleanup: `git_identity_mode` 등 진짜 죽은 필드는 다음 cleanup PR
+- §4-1 cleanup: `retired_git_author_config` 등 진짜 죽은 필드는 다음 cleanup PR
   (#13091 axis)에 함께.
 
 위 두 항목은 본 audit-response 머지 후 follow-up commit으로 처리. 본 PR에는
@@ -350,15 +350,15 @@ cleanup 트랙에 추가 가능.
 
 **`work.source`는 audit이 추정한 키이며 코드에 존재하지 않음**. 분류 **D**.
 
-### §10.2 §4-1 `repo_cli_identity` ("persona에서 파생 가능")
+### §10.2 §4-1 `retired_credential_config` ("persona에서 파생 가능")
 
-`rg "repo_cli_identity\b" lib/keeper/` → 12 hit, 명시 필드:
+`rg "retired_credential_config\b" lib/keeper/` → 12 hit, 명시 필드:
 
 - `lib/keeper/keeper_turn_up_create.ml:116`:
-  `~repo_cli_identity:p.profile_defaults.repo_cli_identity` — 명시적 named arg.
+  `~retired_credential_config:p.profile_defaults.retired_credential_config` — 명시적 named arg.
 - `lib/keeper/keeper_types_profile.ml:290, 465, 714, 911`: type +
   default + parse + ser.
-- `lib/keeper/keeper_types_profile.ml:728`: 별도 필드 `git_identity_mode`
+- `lib/keeper/keeper_types_profile.ml:728`: 별도 필드 `retired_git_author_config`
   의 valid value 중 하나로 사용 — 즉 *파생 가능한 다른 모드와의 enumeration*
   으로 선택되는 명시 필드.
 

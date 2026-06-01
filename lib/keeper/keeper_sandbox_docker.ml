@@ -64,7 +64,7 @@ let credential_preflight_failure_json ~keeper_name ~message =
        ; "detail", `String message
        ; ( "recovery_hint"
          , `String
-             "The keeper repo CLI credential bundle is unavailable or stale. \
+             "The keeper GitHub credential bundle is unavailable or stale. \
               Re-materialize the selected bundle via dashboard or CLI auth \
               login into that bundle before retrying credentialed git/forge \
               commands through the visible Execute tool." )

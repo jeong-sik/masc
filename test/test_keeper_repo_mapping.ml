@@ -790,7 +790,7 @@ let sample_credential id cred_type =
     id;
     cred_type;
     username = "user-" ^ id;
-    gh_config_dir = None;
+    credential_bundle_dir = None;
     ssh_key_path = None;
     gpg_key_id = None;
     state = Unmaterialized;

@@ -38,7 +38,7 @@ let sample_credential id cred_type =
     id;
     cred_type;
     username = "user-" ^ id;
-    gh_config_dir = Some ("/home/user/.config/gh-" ^ id);
+    credential_bundle_dir = Some ("/home/user/.config/gh-" ^ id);
     ssh_key_path = Some ("/home/user/.ssh/id_" ^ id);
     gpg_key_id = None;
     state = Unmaterialized;
@@ -105,7 +105,7 @@ let test_optional_fields_roundtrip () =
           id = "minimal";
           cred_type = Local;
           username = "min-user";
-          gh_config_dir = None;
+          credential_bundle_dir = None;
           ssh_key_path = None;
           gpg_key_id = Some "ABC123";
           state = Unmaterialized;
@@ -120,7 +120,7 @@ let test_optional_fields_roundtrip () =
           | Ok loaded ->
               Alcotest.(check int) "count" 1 (List.length loaded);
               let found = List.hd loaded in
-              Alcotest.(check (option string)) "gh_config_dir None" None found.gh_config_dir;
+              Alcotest.(check (option string)) "credential_bundle_dir None" None found.credential_bundle_dir;
               Alcotest.(check (option string)) "ssh_key_path None" None found.ssh_key_path;
               Alcotest.(check (option string)) "gpg_key_id Some" (Some "ABC123") found.gpg_key_id))
 

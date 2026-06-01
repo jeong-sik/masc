@@ -94,8 +94,7 @@ module Runtime : sig
   val git_dispatch : unit -> bool
   (** When true, Execute commands beginning with ["git "] or
       ["gh "] run in a dedicated container with network egress and
-      read-only mounts from the selected root/keeper repo CLI identity
-      bundle.
+      read-only mounts from the selected credential bundle.
       Env: [MASC_KEEPER_SANDBOX_GIT_DISPATCH].  Default: [true]. *)
 
   val docker_playground_enabled : unit -> bool

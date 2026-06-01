@@ -12,7 +12,7 @@ export interface Credential {
   name: string
   type: CredentialType
   username: string
-  gh_config_dir?: string | null
+  credential_bundle_dir?: string | null
   ssh_key_path?: string | null
   gpg_key_id?: string | null
   state?: CredentialState | null
@@ -27,7 +27,7 @@ export interface CredentialCreatePayload {
   name: string
   type: CredentialType
   username: string
-  gh_config_dir?: string | null
+  credential_bundle_dir?: string | null
   ssh_key_path?: string | null
   gpg_key_id?: string | null
   oauth_method?: CredentialOauthMethod
@@ -83,14 +83,14 @@ function shellQuote(value: string): string {
   return `'${value.split("'").join("'\\''")}'`
 }
 
-export function githubLoginCommand(ghConfigDir: string | null | undefined): string | null {
-  const dir = sanitizeOptionalString(ghConfigDir)
+export function githubLoginCommand(credentialBundleDir: string | null | undefined): string | null {
+  const dir = sanitizeOptionalString(credentialBundleDir)
   if (!dir) return null
   return `GH_CONFIG_DIR=${shellQuote(dir)} gh auth login --hostname github.com --git-protocol https --web --clipboard`
 }
 
 export function buildCredentialCreateRequest(payload: CredentialCreatePayload): Record<string, unknown> {
-  const ghConfigDir = sanitizeOptionalString(payload.gh_config_dir)
+  const credentialBundleDir = sanitizeOptionalString(payload.credential_bundle_dir)
   const sshKeyPath = sanitizeOptionalString(payload.ssh_key_path)
   const gpgKeyId = sanitizeOptionalString(payload.gpg_key_id)
   const oauthMethod =
@@ -101,7 +101,7 @@ export function buildCredentialCreateRequest(payload: CredentialCreatePayload): 
     id: payload.id.trim(),
     cred_type: payload.type,
     username: (payload.username || payload.name).trim(),
-    gh_config_dir: ghConfigDir,
+    credential_bundle_dir: credentialBundleDir,
     ssh_key_path: sshKeyPath,
     gpg_key_id: gpgKeyId,
     oauth_method: oauthMethod,
@@ -124,7 +124,7 @@ export function normalizeCredentialsResponse(data: unknown): Credential[] {
         name: String(r.name ?? username ?? r.id ?? ''),
         type: coerceCredentialType(r.type ?? r.cred_type),
         username,
-        gh_config_dir: typeof r.gh_config_dir === 'string' ? r.gh_config_dir : null,
+        credential_bundle_dir: typeof r.credential_bundle_dir === 'string' ? r.credential_bundle_dir : null,
         ssh_key_path: typeof r.ssh_key_path === 'string' ? r.ssh_key_path : null,
         gpg_key_id: typeof r.gpg_key_id === 'string' ? r.gpg_key_id : null,
         state: parseCredentialState(r.state),

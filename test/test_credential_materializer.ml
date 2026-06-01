@@ -6,7 +6,7 @@
     end-to-end test added in PR-B Slice 3.  Here we pin the branches
     that do not depend on [gh] being installed:
 
-    1. [None] / empty / missing [gh_config_dir] -> [Unmaterialized].
+    1. [None] / empty / missing [credential_bundle_dir] -> [Unmaterialized].
     2. Path exists but is a file rather than a directory -> [Stale].
     3. Path exists but [hosts.yml] has no [oauth_token] -> [Stale].
     4. [ensure] mutates only the [state] field; every other field on the
@@ -35,12 +35,12 @@ let with_temp_base_path f =
       rm_rf dir)
     (fun () -> f dir)
 
-let make_credential ?gh_config_dir id =
+let make_credential ?credential_bundle_dir id =
   {
     id;
     cred_type = Github;
     username = "user-" ^ id;
-    gh_config_dir;
+    credential_bundle_dir;
     ssh_key_path = None;
     gpg_key_id = None;
     state = Materialized { last_verified_at = 999L };
@@ -50,7 +50,7 @@ let make_credential ?gh_config_dir id =
 (* --- 1. Unmaterialised branches --- *)
 
 let test_empty_string_is_unmaterialized () =
-  match Credential_materializer.verify_state ~gh_config_dir:"" with
+  match Credential_materializer.verify_state ~credential_bundle_dir:"" with
   | Unmaterialized -> ()
   | other ->
       Alcotest.failf "expected Unmaterialized for empty path, got %s"
@@ -59,7 +59,7 @@ let test_empty_string_is_unmaterialized () =
 let test_missing_path_is_unmaterialized () =
   match
     Credential_materializer.verify_state
-      ~gh_config_dir:"/nonexistent/rfc0019/path"
+      ~credential_bundle_dir:"/nonexistent/rfc0019/path"
   with
   | Unmaterialized -> ()
   | other ->
@@ -75,7 +75,7 @@ let test_path_is_file_is_stale () =
       output_string oc "regular file";
       close_out oc;
       match
-        Credential_materializer.verify_state ~gh_config_dir:file_path
+        Credential_materializer.verify_state ~credential_bundle_dir:file_path
       with
       | Stale { reason } ->
           Alcotest.(check bool) "reason mentions directory"
@@ -91,9 +91,9 @@ let test_path_is_file_is_stale () =
 
 let test_keyring_backed_bundle_without_oauth_token_is_stale () =
   with_temp_base_path (fun base ->
-      let gh_config_dir = Filename.concat base "keyring_only_gh" in
-      Unix.mkdir gh_config_dir 0o700;
-      let hosts_yml = Filename.concat gh_config_dir "hosts.yml" in
+      let credential_bundle_dir = Filename.concat base "keyring_only_gh" in
+      Unix.mkdir credential_bundle_dir 0o700;
+      let hosts_yml = Filename.concat credential_bundle_dir "hosts.yml" in
       let oc = open_out hosts_yml in
       output_string oc
         "github.com:\n\
@@ -103,7 +103,7 @@ let test_keyring_backed_bundle_without_oauth_token_is_stale () =
         \    user: yousleepwhen\n";
       close_out oc;
       match
-        Credential_materializer.verify_state ~gh_config_dir
+        Credential_materializer.verify_state ~credential_bundle_dir
       with
       | Stale { reason } ->
           Alcotest.(check bool)
@@ -131,17 +131,17 @@ let test_keyring_backed_bundle_without_oauth_token_is_stale () =
 let test_ensure_preserves_other_fields_and_resets_state_to_unmaterialized () =
   let cred = make_credential "preserved" in
   let updated = Credential_materializer.ensure cred in
-  (* gh_config_dir = None -> Unmaterialized *)
+  (* credential_bundle_dir = None -> Unmaterialized *)
   (match updated.state with
    | Unmaterialized -> ()
    | other ->
        Alcotest.failf
-         "expected Unmaterialized when gh_config_dir is None, got %s"
+         "expected Unmaterialized when credential_bundle_dir is None, got %s"
          (show_credential_state other));
   Alcotest.(check string) "id preserved" cred.id updated.id;
   Alcotest.(check string) "username preserved" cred.username updated.username;
   Alcotest.(check (option string))
-    "gh_config_dir preserved" cred.gh_config_dir updated.gh_config_dir;
+    "credential_bundle_dir preserved" cred.credential_bundle_dir updated.credential_bundle_dir;
   (* RFC-0019 PR-C: when state transitions away from Materialized,
      token_sha256_prefix is reset to None.  A stale prefix would mislead
      the F-1 gate (it would compare against a fingerprint that no
@@ -158,7 +158,7 @@ let test_ensure_preserves_other_fields_and_resets_state_to_unmaterialized () =
 
 let test_ensure_with_missing_path_yields_unmaterialized () =
   let cred =
-    make_credential ~gh_config_dir:"/nonexistent/rfc0019/path" "missing"
+    make_credential ~credential_bundle_dir:"/nonexistent/rfc0019/path" "missing"
   in
   let updated = Credential_materializer.ensure cred in
   match updated.state with
@@ -172,19 +172,19 @@ let test_ensure_with_missing_path_yields_unmaterialized () =
 let test_credential_store_add_invokes_ensure () =
   with_temp_base_path (fun base_path ->
       let cred =
-        make_credential ~gh_config_dir:"/nonexistent/rfc0019/store-add" "via-store"
+        make_credential ~credential_bundle_dir:"/nonexistent/rfc0019/store-add" "via-store"
       in
       match Credential_store.add ~base_path cred with
       | Error e -> Alcotest.failf "add failed: %s" e
       | Ok stored ->
           (* The materializer should have overwritten the input's stale
              [Materialized {...}] state with [Unmaterialized] because the
-             gh_config_dir does not exist. *)
+             credential_bundle_dir does not exist. *)
           (match stored.state with
            | Unmaterialized -> ()
            | other ->
                Alcotest.failf
-                 "expected Unmaterialized after add (gh_config_dir \
+                 "expected Unmaterialized after add (credential_bundle_dir \
                   missing), got %s"
                  (show_credential_state other));
           (* The stored record should also persist back through load_all. *)
@@ -214,7 +214,7 @@ let test_path_safe_accepts_ordinary_paths () =
    We only assert the *security invariants* that we can verify without
    gh being installed:
      - Empty token is rejected with a clear, token-free message.
-     - Path-traversal in gh_config_dir is rejected before any subprocess.
+     - Path-traversal in credential_bundle_dir is rejected before any subprocess.
      - The error message never contains the supplied token. *)
 
 let canary_token =
@@ -279,9 +279,9 @@ fi
 exit 2
 |};
       Unix.chmod gh_path 0o755;
-      let gh_config_dir = Filename.concat base "bundle-gh" in
-      Unix.mkdir gh_config_dir 0o700;
-      write_file (Filename.concat gh_config_dir "hosts.yml")
+      let credential_bundle_dir = Filename.concat base "bundle-gh" in
+      Unix.mkdir credential_bundle_dir 0o700;
+      write_file (Filename.concat credential_bundle_dir "hosts.yml")
         "github.com:\n\
         \    user: keeper-A\n\
         \    oauth_token: ghp_graphql_failure_canary\n\
@@ -292,7 +292,7 @@ exit 2
         | Some current -> bin_dir ^ ":" ^ current
       in
       with_env_vars [ ("PATH", path) ] (fun () ->
-          match Credential_materializer.verify_state ~gh_config_dir with
+          match Credential_materializer.verify_state ~credential_bundle_dir with
           | Stale { reason } ->
               Alcotest.(check bool)
                 "reason mentions graphql viewer"
@@ -305,7 +305,7 @@ exit 2
 let test_provision_rejects_empty_token () =
   match
     Credential_materializer.provision_via_with_token
-      ~gh_config_dir:"/tmp/keeper-creds-canary" ~token:"" ()
+      ~credential_bundle_dir:"/tmp/keeper-creds-canary" ~token:"" ()
   with
   | Error msg ->
       Alcotest.(check bool) "error mentions non-empty requirement"
@@ -319,7 +319,7 @@ let test_provision_rejects_empty_token () =
 let test_provision_rejects_path_traversal () =
   match
     Credential_materializer.provision_via_with_token
-      ~gh_config_dir:"/tmp/../etc/gh" ~token:canary_token ()
+      ~credential_bundle_dir:"/tmp/../etc/gh" ~token:canary_token ()
   with
   | Error msg ->
       Alcotest.(check bool) "error mentions forbidden segment" true
@@ -379,8 +379,8 @@ fi
 exit 2
 |};
       Unix.chmod gh_path 0o755;
-      let gh_config_dir = Filename.concat base "bundle-gh" in
-      let ambient_gh_config_dir = Filename.concat base "ambient-gh" in
+      let credential_bundle_dir = Filename.concat base "bundle-gh" in
+      let ambient_credential_bundle_dir = Filename.concat base "ambient-gh" in
       let path =
         match Sys.getenv_opt "PATH" with
         | None | Some "" -> bin_dir
@@ -389,7 +389,7 @@ exit 2
       with_env_vars
         [
           ("PATH", path);
-          ("GH_CONFIG_DIR", ambient_gh_config_dir);
+          ("GH_CONFIG_DIR", ambient_credential_bundle_dir);
           ("GH_TOKEN", "ambient-gh-token");
           ("GITHUB_TOKEN", "ambient-github-token");
           ("GH_ENTERPRISE_TOKEN", "ambient-enterprise-token");
@@ -401,7 +401,7 @@ exit 2
           match
             Credential_materializer.provision_via_with_token
               ~credential_id:"keeper-A" ~identity_label:"keeper-A"
-              ~gh_config_dir ~token:canary_token ()
+              ~credential_bundle_dir ~token:canary_token ()
           with
           | Error msg ->
               Alcotest.failf
@@ -411,7 +411,7 @@ exit 2
               Alcotest.failf "expected Materialized, got %s"
                 (show_credential_state other));
       let login_argv =
-        read_file (Filename.concat gh_config_dir "login.argv")
+        read_file (Filename.concat credential_bundle_dir "login.argv")
       in
       Alcotest.(check bool) "login uses --insecure-storage" true
         (contains_substring login_argv "--insecure-storage");
@@ -421,7 +421,7 @@ exit 2
         Alcotest.(check bool)
           (label ^ " uses target GH_CONFIG_DIR")
           true
-          (contains_substring content ("GH_CONFIG_DIR=" ^ gh_config_dir));
+          (contains_substring content ("GH_CONFIG_DIR=" ^ credential_bundle_dir));
         Alcotest.(check bool)
           (label ^ " disables gh prompts")
           true
@@ -437,7 +437,7 @@ exit 2
               false
               (contains_substring content poisoned))
           [
-            "GH_CONFIG_DIR=" ^ ambient_gh_config_dir;
+            "GH_CONFIG_DIR=" ^ ambient_credential_bundle_dir;
             "GH_TOKEN=ambient-gh-token";
             "GITHUB_TOKEN=ambient-github-token";
             "GH_ENTERPRISE_TOKEN=ambient-enterprise-token";
@@ -445,13 +445,13 @@ exit 2
           ]
       in
       assert_clean_env "login env"
-        (read_file (Filename.concat gh_config_dir "login.env"));
+        (read_file (Filename.concat credential_bundle_dir "login.env"));
       assert_clean_env "status env"
-        (read_file (Filename.concat gh_config_dir "status.env"));
+        (read_file (Filename.concat credential_bundle_dir "status.env"));
       assert_clean_env "api env"
-        (read_file (Filename.concat gh_config_dir "api.env"));
+        (read_file (Filename.concat credential_bundle_dir "api.env"));
       let hosts_yml =
-        read_file (Filename.concat gh_config_dir "hosts.yml")
+        read_file (Filename.concat credential_bundle_dir "hosts.yml")
       in
       Alcotest.(check bool) "hosts.yml user relabeled" true
         (contains_substring hosts_yml "user: keeper-A");
@@ -459,7 +459,7 @@ exit 2
         (contains_substring hosts_yml "user: real-login");
       match
         Credential_materializer.compute_token_sha256_prefix
-          ~gh_config_dir
+          ~credential_bundle_dir
       with
       | None -> Alcotest.fail "expected token fingerprint"
       | Some prefix ->
@@ -492,9 +492,9 @@ let test_sha256_prefix_distinguishes () =
   Alcotest.(check bool) "distinct inputs -> distinct prefixes" true
     (not (String.equal a b))
 
-let make_hosts_yml ~gh_config_dir ~user ~token =
-  Unix.mkdir gh_config_dir 0o700;
-  let path = Filename.concat gh_config_dir "hosts.yml" in
+let make_hosts_yml ~credential_bundle_dir ~user ~token =
+  Unix.mkdir credential_bundle_dir 0o700;
+  let path = Filename.concat credential_bundle_dir "hosts.yml" in
   let oc = open_out path in
   output_string oc "github.com:\n";
   Printf.fprintf oc "    user: %s\n" user;
@@ -508,7 +508,7 @@ let test_compute_prefix_no_hosts_yml () =
       Unix.mkdir dir 0o700;
       match
         Credential_materializer.compute_token_sha256_prefix
-          ~gh_config_dir:dir
+          ~credential_bundle_dir:dir
       with
       | None -> ()
       | Some _ ->
@@ -518,10 +518,10 @@ let test_compute_prefix_matches_token () =
   with_temp_base_path (fun base ->
       let dir = Filename.concat base "with_hosts" in
       let token = "ghp_test_token_RFC0019_PRC" in
-      make_hosts_yml ~gh_config_dir:dir ~user:"keeper-A" ~token;
+      make_hosts_yml ~credential_bundle_dir:dir ~user:"keeper-A" ~token;
       match
         Credential_materializer.compute_token_sha256_prefix
-          ~gh_config_dir:dir
+          ~credential_bundle_dir:dir
       with
       | None -> Alcotest.fail "expected Some prefix"
       | Some prefix ->
@@ -542,7 +542,7 @@ let test_f1_gate_skipped_no_token () =
       Unix.mkdir dir 0o700;
       match
         Credential_materializer.f1_gate_check
-          ~credential_id:"k" ~gh_config_dir:dir
+          ~credential_id:"k" ~credential_bundle_dir:dir
       with
       | F1_skipped reason ->
           (* Reason mentions the absence; never echoes any token. *)
@@ -561,9 +561,9 @@ let test_relabel_user_line () =
   with_temp_base_path (fun base ->
       let dir = Filename.concat base "relabel" in
       let token = "ghp_relabel_token" in
-      make_hosts_yml ~gh_config_dir:dir ~user:"vincent-real" ~token;
+      make_hosts_yml ~credential_bundle_dir:dir ~user:"vincent-real" ~token;
       Credential_materializer.relabel_hosts_yml
-        ~gh_config_dir:dir ~identity_label:"keeper-anyang";
+        ~credential_bundle_dir:dir ~identity_label:"keeper-anyang";
       let ic = open_in (Filename.concat dir "hosts.yml") in
       let buf = Buffer.create 256 in
       (try while true do
@@ -592,9 +592,9 @@ let test_relabel_preserves_other_lines () =
   with_temp_base_path (fun base ->
       let dir = Filename.concat base "preserve" in
       let token = "ghp_preserved_token_canary" in
-      make_hosts_yml ~gh_config_dir:dir ~user:"original" ~token;
+      make_hosts_yml ~credential_bundle_dir:dir ~user:"original" ~token;
       Credential_materializer.relabel_hosts_yml
-        ~gh_config_dir:dir ~identity_label:"new-id";
+        ~credential_bundle_dir:dir ~identity_label:"new-id";
       let ic = open_in (Filename.concat dir "hosts.yml") in
       let buf = Buffer.create 256 in
       (try while true do
@@ -627,7 +627,7 @@ let test_relabel_no_file () =
       Unix.mkdir dir 0o700;
       (* Must not raise even though hosts.yml is absent. *)
       Credential_materializer.relabel_hosts_yml
-        ~gh_config_dir:dir ~identity_label:"x")
+        ~credential_bundle_dir:dir ~identity_label:"x")
 
 let () =
   Alcotest.run "credential_materializer"
@@ -650,7 +650,7 @@ let () =
         [
           Alcotest.test_case "preserves other fields, resets state" `Quick
             test_ensure_preserves_other_fields_and_resets_state_to_unmaterialized;
-          Alcotest.test_case "missing gh_config_dir yields Unmaterialized"
+          Alcotest.test_case "missing credential_bundle_dir yields Unmaterialized"
             `Quick
             test_ensure_with_missing_path_yields_unmaterialized;
         ] );

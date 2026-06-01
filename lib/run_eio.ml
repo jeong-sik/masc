@@ -23,8 +23,6 @@ type run_record = {
 (** Log entry *)
 type log_entry = {
   timestamp: string;
-  kind: string;       (** event_type: "init", "update", "append", etc. *)
-  task_id: string;     (** task_id embedded in entry for queryability *)
   note: string;
 }
 
@@ -54,21 +52,21 @@ let run_record_of_json (json : Yojson.Safe.t) : run_record option =
     Log.Misc.error "run_of_json: missing required fields";
     None
 
-let log_entry_to_json (e : log_entry) : Yojson.Safe.t =
-  `Assoc [
-    ("timestamp", `String e.timestamp);
-    ("kind", `String e.kind);
-    ("task_id", `String e.task_id);
-    ("note", `String e.note);
-  ]
+let log_entry_to_json ?kind ?task_id (e : log_entry) : Yojson.Safe.t =
+  let string_field name = function
+    | None -> []
+    | Some value -> [ name, `String value ]
+  in
+  `Assoc
+    ([ "timestamp", `String e.timestamp ]
+     @ string_field "kind" kind
+     @ string_field "task_id" task_id
+     @ [ "note", `String e.note ])
 
 let log_entry_of_json (json : Yojson.Safe.t) : log_entry option =
   match Safe_ops.json_string_opt "timestamp" json,
-        Safe_ops.json_string_opt "kind" json,
-        Safe_ops.json_string_opt "task_id" json,
         Safe_ops.json_string_opt "note" json with
-  | Some timestamp, Some kind, Some task_id, Some note ->
-    Some { timestamp; kind; task_id; note }
+  | Some timestamp, Some note -> Some { timestamp; note }
   | _ ->
     Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
     Log.Misc.error "log_entry_of_json: missing required fields";
@@ -195,10 +193,10 @@ let append_log config ~task_id ~note : (log_entry, string) result =
   try
     ensure_initialized config;
     ensure_run_dir config task_id;
-    let entry = { timestamp = now_iso (); kind = "append"; task_id; note } in
+    let entry = { timestamp = now_iso (); note } in
     let file = log_path config task_id in
     with_file_lock config file (fun () ->
-      Fs_compat.append_jsonl file (log_entry_to_json entry)
+      Fs_compat.append_jsonl file (log_entry_to_json ~kind:"append" ~task_id entry)
     );
     Ok entry
   with

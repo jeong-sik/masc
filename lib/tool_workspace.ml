@@ -576,7 +576,7 @@ let status_summary_string (ctx : context) =
   in
   Workspace_status_rendering.status_summary_string
     ~ctx
-    ~joined:session_bound
+    ~bound:session_bound
     ~actual_name
     ~credential_state
     ~credential_blocked

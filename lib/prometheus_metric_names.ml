@@ -160,6 +160,9 @@ let metric_backend_mutex_held_sec = "masc_backend_mutex_held_sec"
 let metric_tool_metrics_persist_dropped =
   "masc_tool_metrics_persist_dropped_total"
 
+let metric_tool_bind_required_guard =
+  "masc_tool_bind_required_guard_total"
+
 (* keeper_tool_call_log async append queue overflow.
    Counts full-I/O tool-call records dropped because the bounded
    best-effort queue is full. No labels (single source). *)

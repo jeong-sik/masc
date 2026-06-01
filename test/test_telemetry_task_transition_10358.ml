@@ -29,7 +29,7 @@ let make_ctx base_path =
   { Tool_task.config; agent_name; sw = None }
 
 let make_peer_ctx config agent_name =
-  ignore (Workspace.join config ~agent_name ~capabilities:[] ());
+  ignore (Workspace.bind_session config ~agent_name ~capabilities:[] ());
   { Tool_task.config; agent_name; sw = None }
 
 let run_transition ctx ~task_id ~action ?(notes = "") () =

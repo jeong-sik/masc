@@ -174,7 +174,6 @@ let status_summary_string
     ~(attention_items : string list)
     ~(state : Masc_domain.workspace_state)
     ~(backlog : Masc_domain.backlog) =
-  
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
   let shown_agents = take_items max_agents_display agents_with_state in
@@ -199,8 +198,8 @@ let status_summary_string
        in_progress_count (max 0 state.message_seq));
   Buffer.add_string buf
     (Printf.sprintf
-       "🧭 You: agent=%s | joined=%s | owned=%s | current=%s\n"
-       actual_name (bool_flag joined) (option_or_dash binding.primary_owned)
+       "🧭 You: agent=%s | bound=%s | owned=%s | current=%s\n"
+       actual_name (bool_flag bound) (option_or_dash binding.primary_owned)
        (option_or_dash current_task));
   Buffer.add_string buf
     (Printf.sprintf

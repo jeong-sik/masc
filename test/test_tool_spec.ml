@@ -33,7 +33,8 @@ let () =
             check string "name" "__test_spec_required" spec.name;
             check string "description" "test required only" spec.description;
             check bool "is_read_only default" false spec.is_read_only;
-            check bool "requires_join default" false spec.requires_join;
+            check bool "requires_actor_binding default" true
+              (Option.is_none spec.requires_actor_binding);
             check bool "mcp_context_required default" false
               spec.mcp_context_required;
             check bool "is_destructive default" false spec.is_destructive;
@@ -136,24 +137,22 @@ let () =
             Tool_spec.register spec;
             check bool "not read_only" false
               (Tool_capability.has Tool_capability.Read_only "__test_spec_rw"));
-          test_case "register sets requires_join metadata" `Quick (fun () ->
+          test_case "register sets actor-binding metadata" `Quick (fun () ->
             let spec =
               Tool_spec.create
-                ~name:"__test_spec_join"
-                ~description:"join test"
+                ~name:"__test_spec_actor_binding"
+                ~description:"actor binding test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
-                ~requires_join:true
+                ~requires_actor_binding:true
                 ()
             in
             Tool_spec.register spec;
-            check bool "is_bind_required" true
-              (Tool_capability.has Tool_capability.Requires_join "__test_spec_join");
-            let meta = Tool_catalog.metadata "__test_spec_join" in
-            check bool "catalog requires_join" true
-              (meta.requires_join = Some true);
-            check bool "requires_join implies actor binding" true
+            check bool "catalog requires_actor_binding" true
+              (Tool_catalog.requires_actor_binding "__test_spec_actor_binding");
+            let meta = Tool_catalog.metadata "__test_spec_actor_binding" in
+            check bool "requires_actor_binding metadata" true
               (meta.requires_actor_binding = Some true));
           test_case "register sets mcp context required" `Quick (fun () ->
             let spec =

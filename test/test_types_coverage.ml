@@ -1057,8 +1057,11 @@ let test_category_for_tool_general () =
    more masc_error_to_string Tests (coverage for all variants)
    ============================================================ *)
 
-let test_masc_error_agent_already_bound () =
-  let s = Masc_domain.masc_error_to_string (Masc_domain.Agent (Masc_domain.Agent_error.AlreadyBound "agent1")) in
+let test_masc_error_agent_invalid_name () =
+  let s =
+    Masc_domain.masc_error_to_string
+      (Masc_domain.Agent (Masc_domain.Agent_error.InvalidName "agent1"))
+  in
   check bool "nonempty" true (String.length s > 0)
 
 let test_masc_error_task_not_claimed () =
@@ -1739,7 +1742,7 @@ let () =
       test_case "general" `Quick test_category_for_tool_general;
     ];
     "masc_error_extended", [
-      test_case "agent already joined" `Quick test_masc_error_agent_already_bound;
+      test_case "agent invalid name" `Quick test_masc_error_agent_invalid_name;
       test_case "task not claimed" `Quick test_masc_error_task_not_claimed;
       test_case "task invalid state" `Quick test_masc_error_task_invalid_state;
       test_case "portal not open" `Quick test_masc_error_portal_not_open;

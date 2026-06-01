@@ -358,22 +358,22 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let config = Masc_mcp.Workspace.default_config base_path in
   ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "supervisor-root"));
   let supervisor_nickname =
-    Masc_mcp.Workspace.join config ~agent_name:"supervisor-root"
+    Masc_mcp.Workspace.bind_session config ~agent_name:"supervisor-root"
       ~capabilities:[ "supervisor"; "operator" ] ()
     |> extract_nickname_from_join_result
   in
   let planner_nickname =
-    Masc_mcp.Workspace.join config ~agent_name:"planner"
+    Masc_mcp.Workspace.bind_session config ~agent_name:"planner"
       ~capabilities:[ "planner" ] ()
     |> extract_nickname_from_join_result
   in
   let implementer_a_nickname =
-    Masc_mcp.Workspace.join config ~agent_name:"implementer-a"
+    Masc_mcp.Workspace.bind_session config ~agent_name:"implementer-a"
       ~capabilities:[ "backend" ] ()
     |> extract_nickname_from_join_result
   in
   let implementer_b_nickname =
-    Masc_mcp.Workspace.join config ~agent_name:"implementer-b"
+    Masc_mcp.Workspace.bind_session config ~agent_name:"implementer-b"
       ~capabilities:[ "docs"; "tests" ] ()
     |> extract_nickname_from_join_result
   in

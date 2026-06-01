@@ -1004,7 +1004,7 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.join ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
        ~capabilities:[] ());
   register_test_keeper ctx ~keeper_name:"executor"
     ~agent_name:"keeper-executor-agent";
@@ -1041,7 +1041,7 @@ let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun (
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.join ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
        ~capabilities:[] ());
   register_test_keeper ctx ~keeper_name:"executor"
     ~agent_name:"keeper-executor-agent";
@@ -1078,10 +1078,10 @@ let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_ta
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.join ctx.config ~agent_name:"keeper-executor-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-agent"
        ~capabilities:[] ());
   ignore
-    (Workspace.join ctx.config ~agent_name:"keeper-executor-warm-raven-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-executor-warm-raven-agent"
        ~capabilities:[] ());
   register_test_keeper ctx ~keeper_name:"executor"
     ~agent_name:"keeper-executor-agent";
@@ -1118,10 +1118,10 @@ let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_ta
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.join ctx.config ~agent_name:"keeper-tech-glutton-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-tech-glutton-agent"
        ~capabilities:[] ());
   ignore
-    (Workspace.join ctx.config ~agent_name:"keeper-tech_glutton-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-tech_glutton-agent"
        ~capabilities:[] ());
   register_test_keeper ctx ~keeper_name:"tech-glutton"
     ~agent_name:"keeper-tech-glutton-agent";
@@ -1158,7 +1158,7 @@ let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fu
    | Ok () -> ()
    | Error msg -> failwith ("failed to seed current_task: " ^ msg));
   ignore
-    (Workspace.join ctx.config ~agent_name:"keeper-spoof-agent"
+    (Workspace.bind_session ctx.config ~agent_name:"keeper-spoof-agent"
        ~capabilities:[] ());
   let spoof_ctx =
     { ctx with Tool_task.agent_name = "keeper-spoof-agent" }

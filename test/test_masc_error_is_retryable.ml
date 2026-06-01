@@ -40,10 +40,6 @@ let test_agent_errors_non_retryable () =
   assert (
     not (E.is_retryable (E.Agent (E.Agent_error.NotFound "n"))));
   assert (
-    not (E.is_retryable (E.Agent (E.Agent_error.NotBound "n"))));
-  assert (
-    not (E.is_retryable (E.Agent (E.Agent_error.AlreadyBound "n"))));
-  assert (
     not (E.is_retryable (E.Agent (E.Agent_error.InvalidName "x"))))
 
 let test_portal_errors_non_retryable () =

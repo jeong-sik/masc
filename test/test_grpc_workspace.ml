@@ -35,62 +35,61 @@ let with_temp_dir prefix f =
 
 (* ====== Type serialization/deserialization round-trip tests ====== *)
 
-let test_join_request_roundtrip () =
+let test_subscribe_filter_request_roundtrip () =
   let req =
-    T.JoinRequest.
+    T.SubscribeRequest.
       { agent_name = "agent_llm_a-swift-fox"
-      ; capabilities = [ "code"; "review"; "test" ]
-      ; metadata = [ "model", "opus-4"; "version", "1.0" ]
+      ; session_id = "grpc-session-001"
+      ; event_types = [ "task"; "message"; "agent.session_bound" ]
+      ; since_seq = 42L
       }
   in
-  let bytes = T.JoinRequest.to_bytes req in
-  let decoded = T.JoinRequest.of_bytes bytes in
+  let bytes = T.SubscribeRequest_serde.to_bytes req in
+  let decoded = T.SubscribeRequest.of_bytes bytes in
   Alcotest.(check string) "agent_name" req.agent_name decoded.agent_name;
-  Alcotest.(check (list string)) "capabilities" req.capabilities decoded.capabilities;
-  Alcotest.(check int)
-    "metadata length"
-    (List.length req.metadata)
-    (List.length decoded.metadata);
-  Alcotest.(check string)
-    "metadata model"
-    (List.assoc "model" req.metadata)
-    (List.assoc "model" decoded.metadata)
+  Alcotest.(check string) "session_id" req.session_id decoded.session_id;
+  Alcotest.(check (list string)) "event_types" req.event_types decoded.event_types;
+  Alcotest.(check int64) "since_seq" req.since_seq decoded.since_seq
 ;;
 
-let test_leave_request_roundtrip () =
+let test_tool_call_dispatch_request_roundtrip () =
   let req =
-    T.LeaveRequest.{ agent_name = "provider_f-bright-owl"; session_id = "grpc-provider_f-12345" }
+    T.ToolCallRequest.
+      { agent_name = "provider_f-bright-owl"
+      ; session_id = "grpc-provider_f-12345"
+      ; tool_name = "masc_status"
+      ; arguments_json = {|{"_agent_name":"provider_f-bright-owl"}|}
+      }
   in
-  let bytes = T.LeaveRequest.to_bytes req in
-  let decoded = T.LeaveRequest.of_bytes bytes in
+  let bytes = T.ToolCallRequest.to_bytes req in
+  let decoded = T.ToolCallRequest.of_bytes bytes in
   Alcotest.(check string) "agent_name" req.agent_name decoded.agent_name;
-  Alcotest.(check string) "session_id" req.session_id decoded.session_id
+  Alcotest.(check string) "session_id" req.session_id decoded.session_id;
+  Alcotest.(check string) "tool_name" req.tool_name decoded.tool_name;
+  Alcotest.(check string) "arguments_json" req.arguments_json decoded.arguments_json
 ;;
 
-let test_join_response_roundtrip () =
+let test_status_agents_response_roundtrip () =
   let resp =
-    T.JoinResponse.
-      { success = true
-      ; message = "Joined workspace"
-      ; session_id = "grpc-test-001"
-      ; active_agents =
+    T.StatusResponse.
+      { agents =
           [ { T.name = "agent_llm_a-swift-fox"
             ; status = "active"
             ; capabilities = [ "code" ]
             ; last_heartbeat_ms = 1700000000000L
-            ; joined_at_ms = 1700000000000L
+            ; session_bound_at_ms = 1700000000000L
             ; current_task_id = "task-1"
             }
           ]
+      ; tasks = []
+      ; message_count = 0
+      ; workspace_path = "/tmp/grpc-test"
       }
   in
-  let bytes = T.JoinResponse.to_bytes resp in
-  let decoded = T.JoinResponse.of_bytes bytes in
-  Alcotest.(check bool) "success" true decoded.success;
-  Alcotest.(check string) "message" "Joined workspace" decoded.message;
-  Alcotest.(check string) "session_id" "grpc-test-001" decoded.session_id;
-  Alcotest.(check int) "active_agents count" 1 (List.length decoded.active_agents);
-  let agent = List.hd decoded.active_agents in
+  let bytes = T.StatusResponse.to_bytes resp in
+  let decoded = T.StatusResponse.of_bytes bytes in
+  Alcotest.(check int) "agents count" 1 (List.length decoded.agents);
+  let agent = List.hd decoded.agents in
   Alcotest.(check string) "agent name" "agent_llm_a-swift-fox" agent.T.name;
   Alcotest.(check string) "agent status" "active" agent.T.status;
   Alcotest.(check (list string)) "agent capabilities" [ "code" ] agent.T.capabilities
@@ -229,7 +228,7 @@ let test_status_response_roundtrip () =
             ; status = "active"
             ; capabilities = []
             ; last_heartbeat_ms = 0L
-            ; joined_at_ms = 0L
+            ; session_bound_at_ms = 0L
             ; current_task_id = ""
             }
           ]
@@ -402,17 +401,25 @@ let test_get_status_projects_backlog_tasks () =
 let test_empty_request_handling () =
   (* Verify graceful handling of empty protobuf message (all defaults). *)
   let bytes =
-    T.JoinRequest.to_bytes { agent_name = ""; capabilities = []; metadata = [] }
+    T.ToolCallRequest.to_bytes
+      { agent_name = ""; session_id = ""; tool_name = ""; arguments_json = "" }
   in
-  let req = T.JoinRequest.of_bytes bytes in
+  let req = T.ToolCallRequest.of_bytes bytes in
   Alcotest.(check string) "empty agent_name" "" req.agent_name;
-  Alcotest.(check (list string)) "empty capabilities" [] req.capabilities
+  Alcotest.(check string) "empty tool_name" "" req.tool_name
 ;;
 
 let test_protobuf_binary_format () =
   (* Verify that serialized output is protobuf binary, not JSON. *)
-  let req = T.JoinRequest.{ agent_name = "test"; capabilities = []; metadata = [] } in
-  let bytes = T.JoinRequest.to_bytes req in
+  let req =
+    T.ToolCallRequest.
+      { agent_name = "test"
+      ; session_id = "grpc-test"
+      ; tool_name = "masc_status"
+      ; arguments_json = "{}"
+      }
+  in
+  let bytes = T.ToolCallRequest.to_bytes req in
   (* Protobuf binary does not start with '{' like JSON. *)
   Alcotest.(check bool) "not JSON" true (String.length bytes = 0 || bytes.[0] <> '{')
 ;;
@@ -424,8 +431,8 @@ let test_protobuf_binary_format () =
       to decode, so operators can identify the wire boundary without
       reading the stack trace. The type_name parameter on
       [Masc_grpc_types.decode_result] makes this an enforced contract. *)
-let test_join_request_invalid_bytes_result () =
-  match T.JoinRequest.of_bytes_result malformed_protobuf with
+let test_subscribe_request_invalid_bytes_result () =
+  match T.SubscribeRequest.of_bytes_result malformed_protobuf with
   | Ok _ -> Alcotest.fail "expected decode failure"
   | Error msg ->
     Alcotest.(check bool)
@@ -433,9 +440,9 @@ let test_join_request_invalid_bytes_result () =
       true
       (String.starts_with ~prefix:"protobuf decode error:" msg);
     Alcotest.(check bool)
-      "error names the failing protobuf type (JoinRequest)"
+      "error names the failing protobuf type (SubscribeRequest)"
       true
-      (String_util.contains_substring msg"JoinRequest")
+      (String_util.contains_substring msg"SubscribeRequest")
 ;;
 
 let test_tool_call_request_invalid_bytes_result () =
@@ -480,18 +487,18 @@ let test_lsp_response_invalid_bytes_result () =
       (String_util.contains_substring msg"LspResponse")
 ;;
 
-let test_join_handler_invalid_bytes_raise_grpc_status () =
+let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  with_temp_dir "masc-grpc-invalid-join" (fun dir ->
+  with_temp_dir "masc-grpc-invalid-tool-call" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
     let service =
       Masc_mcp.Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
     in
-    match Grpc_eio.Service.get_method service "Join" with
+    match Grpc_eio.Service.get_method service "ToolCall" with
     | Some { handler = `Unary handler; _ } ->
       (match handler malformed_protobuf with
        | _ -> Alcotest.fail "expected typed gRPC decode error"
@@ -502,7 +509,7 @@ let test_join_handler_invalid_bytes_raise_grpc_status () =
            (String.starts_with
               ~prefix:"Grpc_error(INVALID_ARGUMENT:"
               (Printexc.to_string exn)))
-    | _ -> Alcotest.fail "Join unary handler missing")
+    | _ -> Alcotest.fail "ToolCall unary handler missing")
 ;;
 
 let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
@@ -588,9 +595,18 @@ let () =
   Alcotest.run
     "masc_grpc_workspace"
     [ ( "types_roundtrip"
-      , [ Alcotest.test_case "JoinRequest" `Quick test_join_request_roundtrip
-        ; Alcotest.test_case "LeaveRequest" `Quick test_leave_request_roundtrip
-        ; Alcotest.test_case "JoinResponse" `Quick test_join_response_roundtrip
+      , [ Alcotest.test_case
+            "SubscribeRequest filtered"
+            `Quick
+            test_subscribe_filter_request_roundtrip
+        ; Alcotest.test_case
+            "ToolCallRequest dispatch"
+            `Quick
+            test_tool_call_dispatch_request_roundtrip
+        ; Alcotest.test_case
+            "StatusResponse agents"
+            `Quick
+            test_status_agents_response_roundtrip
         ; Alcotest.test_case "BroadcastRequest" `Quick test_broadcast_request_roundtrip
         ; Alcotest.test_case "BroadcastResponse" `Quick test_broadcast_response_roundtrip
         ; Alcotest.test_case "HeartbeatPing" `Quick test_heartbeat_ping_roundtrip
@@ -603,9 +619,9 @@ let () =
         ; Alcotest.test_case "empty_request" `Quick test_empty_request_handling
         ; Alcotest.test_case "protobuf_binary" `Quick test_protobuf_binary_format
         ; Alcotest.test_case
-            "JoinRequest invalid bytes result"
+            "SubscribeRequest invalid bytes result"
             `Quick
-            test_join_request_invalid_bytes_result
+            test_subscribe_request_invalid_bytes_result
         ; Alcotest.test_case
             "ToolCallRequest invalid bytes result"
             `Quick
@@ -626,9 +642,9 @@ let () =
             `Quick
             test_get_status_projects_backlog_tasks
         ; Alcotest.test_case
-            "join invalid bytes raise grpc status"
+            "tool call invalid bytes raise grpc status"
             `Quick
-            test_join_handler_invalid_bytes_raise_grpc_status
+            test_tool_call_handler_invalid_bytes_raise_grpc_status
         ; Alcotest.test_case
             "subscribe invalid bytes raise grpc status"
             `Quick

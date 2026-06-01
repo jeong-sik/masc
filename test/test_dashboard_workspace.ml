@@ -41,7 +41,7 @@ let string_list_field key json =
 let test_workspace_projection_includes_messages_and_mentions () =
   with_workspace
   @@ fun config ->
-  ignore (Workspace.join config ~agent_name:"sangsu" ~capabilities:[] ());
+  ignore (Workspace.bind_session config ~agent_name:"sangsu" ~capabilities:[] ());
   ignore (Workspace.broadcast config ~from_agent:"operator" ~content:"hello @sangsu");
   ignore
     (Workspace.broadcast

@@ -74,15 +74,15 @@ let write_dated_file dir month day lines =
    ============================================================ *)
 
 let test_event_agent_session_bounded () =
-  let e = Telemetry_eio.Agent_bound {
+  let e = Telemetry_eio.Agent_session_bound {
     agent_id = "agent_llm_a-001";
     capabilities = ["code"; "review"];
   } in
   match e with
-  | Telemetry_eio.Agent_bound r ->
+  | Telemetry_eio.Agent_session_bound r ->
       check string "agent_id" "agent_llm_a-001" r.agent_id;
       check int "capabilities" 2 (List.length r.capabilities)
-  | _ -> fail "expected Agent_bound"
+  | _ -> fail "expected Agent_session_bound"
 
 let test_event_agent_unbound () =
   let e = Telemetry_eio.Agent_unbound {
@@ -176,7 +176,7 @@ let test_event_tool_called () =
 let test_event_record_type () =
   let r : Telemetry_eio.event_record = {
     timestamp = 1704067200.0;
-    event = Telemetry_eio.Agent_bound {
+    event = Telemetry_eio.Agent_session_bound {
       agent_id = "test";
       capabilities = [];
     };
@@ -393,7 +393,7 @@ let test_metrics_json_roundtrip () =
    ============================================================ *)
 
 let test_event_to_json_agent_session_bounded () =
-  let e = Telemetry_eio.Agent_bound {
+  let e = Telemetry_eio.Agent_session_bound {
     agent_id = "test";
     capabilities = ["a"; "b"];
   } in
@@ -423,21 +423,21 @@ let test_count_active_agents_empty () =
 
 let test_count_active_agents_one_bound () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_bound { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
   ] in
   check int "one bound" 1 (Telemetry_eio.count_active_agents events)
 
 let test_count_active_agents_bound_then_unbound () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_bound { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
     { timestamp = 2.0; event = Agent_unbound { agent_id = "a1"; reason = "done" } };
   ] in
   check int "bound then unbound" 0 (Telemetry_eio.count_active_agents events)
 
 let test_count_active_agents_multiple () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_bound { agent_id = "a1"; capabilities = [] } };
-    { timestamp = 2.0; event = Agent_bound { agent_id = "a2"; capabilities = [] } };
+    { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 2.0; event = Agent_session_bound { agent_id = "a2"; capabilities = [] } };
     { timestamp = 3.0; event = Agent_unbound { agent_id = "a1"; reason = "x" } };
   ] in
   check int "multiple" 1 (Telemetry_eio.count_active_agents events)
@@ -589,7 +589,7 @@ let test_track_applies_default_retention_days () =
           Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
         in
         write_dated_file telemetry_dir "2020-01" "01" [ {|{"old":true}|} ];
-        Telemetry_eio.track_agent_session_bounded config ~agent_id:"retention-test" ();
+        Telemetry_eio.track_agent_session_bound config ~agent_id:"retention-test" ();
         check bool "old telemetry file pruned by default retention" false
           (Sys.file_exists old_file))))
 
@@ -611,7 +611,7 @@ let test_track_applies_telemetry_max_bytes () =
           [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'a') ];
         write_dated_file telemetry_dir "2020-01" "02"
           [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'b') ];
-        Telemetry_eio.track_agent_session_bounded config ~agent_id:"max-bytes-test" ();
+        Telemetry_eio.track_agent_session_bound config ~agent_id:"max-bytes-test" ();
         check bool "old telemetry file 1 pruned by max bytes" false
           (Sys.file_exists old_file_1);
         check bool "old telemetry file 2 pruned by max bytes" false

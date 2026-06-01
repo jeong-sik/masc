@@ -364,7 +364,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   (match init_mode with
   | Fresh -> ()
   | Init_only -> ensure_initialized fixture
-  | Init_bound ->
+  | Init_joined ->
       ensure_initialized fixture;
       ensure_bound fixture);
   fixture

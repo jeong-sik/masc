@@ -13,7 +13,7 @@ let test_digest_workspace_prefers_fresh_operator_judgment () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
-      ignore (Workspace.join config ~agent_name:"operator" ~capabilities:[] ());
+      ignore (Workspace.bind_session config ~agent_name:"operator" ~capabilities:[] ());
       record_operator_judgment config ~surface:"command.namespace"
         ~target_type:Operator_judgment.Workspace ~target_id:None
         ~summary:"Pause the namespace before taking any destructive action."
@@ -70,7 +70,7 @@ let test_digest_workspace_ignores_stale_operator_judgment () =
     (fun () ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
-      ignore (Workspace.join config ~agent_name:"operator" ~capabilities:[] ());
+      ignore (Workspace.bind_session config ~agent_name:"operator" ~capabilities:[] ());
       record_operator_judgment config ~surface:"command.namespace"
         ~target_type:Operator_judgment.Workspace ~target_id:None
         ~summary:"This judgment is stale." ~fresh_for_sec:(-5.0) ();

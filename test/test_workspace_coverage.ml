@@ -1243,11 +1243,11 @@ let test_join_leave_emit_observability () =
   with_test_env (fun config ->
     let before_seq = latest_ring_seq () in
     let join_result =
-      Workspace.join config ~agent_name:"provider_f" ~capabilities:[ "review" ] ()
+      Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[ "review" ] ()
     in
     Alcotest.(check bool) "join succeeds" true (contains_check join_result);
     let provider_f = find_agent_name_by_prefix config "provider_f" in
-    let leave_result = Workspace.leave config ~agent_name:provider_f in
+    let leave_result = Workspace.end_session config ~agent_name:provider_f in
     Alcotest.(check bool) "leave succeeds" true (contains_check leave_result);
     let audit_entries = Audit_log.read_entries ~n:50 config in
     Alcotest.(check bool)
@@ -1257,9 +1257,9 @@ let test_join_leave_emit_observability () =
          audit_entries
          ~agent_id:provider_f
          ~action_pred:(function
-           | Audit_log.Join -> true
+           | Audit_log.Custom "agent_session_bound" -> true
            | _ -> false)
-         ~details:[ "event_family", "agent_lifecycle"; "event_kind", "join" ]);
+         ~details:[ "event_family", "agent_lifecycle"; "event_kind", "session_bound" ]);
     Alcotest.(check bool)
       "audit leave recorded"
       true
@@ -1267,15 +1267,15 @@ let test_join_leave_emit_observability () =
          audit_entries
          ~agent_id:provider_f
          ~action_pred:(function
-           | Audit_log.Leave -> true
+           | Audit_log.Custom "agent_session_ended" -> true
            | _ -> false)
-         ~details:[ "event_family", "agent_lifecycle"; "event_kind", "leave" ]);
+         ~details:[ "event_family", "agent_lifecycle"; "event_kind", "session_ended" ]);
     let telemetry_events = Telemetry_eio.read_all_events config in
     let has_bound =
       List.exists
         (fun (entry : Telemetry_eio.event_record) ->
            match entry.event with
-           | Telemetry_eio.Agent_bound { agent_id; _ } -> String.equal agent_id provider_f
+           | Telemetry_eio.Agent_session_bound { agent_id; _ } -> String.equal agent_id provider_f
            | _ -> false)
         telemetry_events
     in
@@ -1284,11 +1284,11 @@ let test_join_leave_emit_observability () =
         (fun (entry : Telemetry_eio.event_record) ->
            match entry.event with
            | Telemetry_eio.Agent_unbound { agent_id; reason } ->
-             String.equal agent_id provider_f && String.equal reason "leave"
+             String.equal agent_id provider_f && String.equal reason "session_ended"
            | _ -> false)
         telemetry_events
     in
-    Alcotest.(check bool) "telemetry join recorded" true has_joined;
+    Alcotest.(check bool) "telemetry session bound recorded" true has_bound;
     Alcotest.(check bool) "telemetry leave recorded" true has_left;
     let ring_entries =
       Log.Ring.recent ~limit:50 ~module_filter:"Workspace" ~since_seq:before_seq ()
@@ -1299,7 +1299,7 @@ let test_join_leave_emit_observability () =
       (ring_has_entry
          ring_entries
          ~details:
-           [ "event_family", "agent_lifecycle"; "event_kind", "join"; "agent_id", provider_f ]);
+           [ "event_family", "agent_lifecycle"; "event_kind", "session_bound"; "agent_id", provider_f ]);
     Alcotest.(check bool)
       "ring leave recorded"
       true
@@ -1307,7 +1307,7 @@ let test_join_leave_emit_observability () =
          ring_entries
          ~details:
            [ "event_family", "agent_lifecycle"
-           ; "event_kind", "leave"
+           ; "event_kind", "session_ended"
            ; "agent_id", provider_f
            ]))
 ;;
@@ -1608,7 +1608,7 @@ let test_get_tasks_raw_empty () =
 
 let test_get_agents_raw () =
   with_test_env (fun config ->
-    let _ = Workspace.join config ~agent_name:"provider_f" ~capabilities:[ "test" ] () in
+    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[ "test" ] () in
     let agents : Masc_domain.agent list = Workspace.get_agents_raw config in
     (* agent_llm_a from init + provider_f *)
     Alcotest.(check bool) "at least 2 agents" true (List.length agents >= 2))
@@ -1622,7 +1622,7 @@ let test_get_messages_raw () =
     Alcotest.(check bool) "has messages" true (List.length msgs >= 2))
 ;;
 
-let test_is_agent_session_bounded () =
+let test_is_agent_session_bound () =
   with_test_env (fun config ->
     (* agent_llm_a is bound from init *)
     (* Note: agent names are auto-generated with nicknames, so we check by type prefix *)
@@ -1751,7 +1751,7 @@ let test_task_id_to_int_only_prefix () =
 
 let test_update_agent_status () =
   with_test_env (fun config ->
-    let _ = Workspace.join config ~agent_name:"provider_f" ~capabilities:[ "test" ] () in
+    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[ "test" ] () in
     (* Get the actual agent name (auto-generated nickname) *)
     let agents = Workspace.get_agents_raw config in
     let provider_f =
@@ -1773,7 +1773,7 @@ let test_update_agent_status () =
 
 let test_update_agent_capabilities () =
   with_test_env (fun config ->
-    let _ = Workspace.join config ~agent_name:"provider_f" ~capabilities:[] () in
+    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
     let agents = Workspace.get_agents_raw config in
     let provider_f =
       List.find_opt
@@ -1997,7 +1997,7 @@ let () =
         ; Alcotest.test_case "get tasks raw empty" `Quick test_get_tasks_raw_empty
         ; Alcotest.test_case "get agents raw" `Quick test_get_agents_raw
         ; Alcotest.test_case "get messages raw" `Quick test_get_messages_raw
-        ; Alcotest.test_case "is agent joined" `Quick test_is_agent_session_bounded
+        ; Alcotest.test_case "is agent joined" `Quick test_is_agent_session_bound
         ] )
     ; (* === Result Variants === *)
       ( "result_variants"

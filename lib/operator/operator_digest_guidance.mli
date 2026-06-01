@@ -11,6 +11,8 @@
 val active_guidance_fields :
   config:Workspace.config ->
   actor:string ->
+  target_type:string ->
+  target_id:string option ->
   fallback_recommendations:Operator_digest_types.recommended_action list ->
   fallback_summary:Yojson.Safe.t ->
   (string * Yojson.Safe.t) list

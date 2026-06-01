@@ -8,7 +8,7 @@
     RFC-0088 §4 Option A (2026-05-15): [For_testing.warn_telemetry_drop]
     now takes a typed [Workspace_telemetry_drop_event.t] instead of two free
     strings. The Prometheus label values remain byte-for-byte identical
-    (["agent_lifecycle", "leave"] / ["agent_lifecycle", "join"]) so the
+    (["agent_lifecycle", "session_ended"] / ["agent_lifecycle", "session_bound"]) so the
     assertions below — which still pin the wire label values — are the
     correct regression coverage for the swap-over. *)
 
@@ -22,7 +22,7 @@ let counter_value ~event_family ~event_kind =
 
 let test_lifecycle_drop_increments_counter () =
   let event : Workspace_telemetry_drop_event.t =
-    Agent_lifecycle Lifecycle_leave
+    Agent_lifecycle Session_ended
   in
   let event_family = Workspace_telemetry_drop_event.family_to_wire event in
   let event_kind = Workspace_telemetry_drop_event.kind_to_wire event in
@@ -31,15 +31,15 @@ let test_lifecycle_drop_increments_counter () =
     (Failure "simulated non-Eio telemetry drop");
   let after = counter_value ~event_family ~event_kind in
   Alcotest.(check (float 0.001))
-    "drop counter increments by exactly 1 for the leave label"
+    "drop counter increments by exactly 1 for the session_ended label"
     1.0 (after -. before)
 
-(* Same path, join variant: the warn label switches to "join" so a
-   single regression on the wrong label key (e.g. hard-coded "leave")
+(* Same path, bind variant: the warn label switches to "session_bound" so a
+   single regression on the wrong label key (e.g. hard-coded "session_ended")
    would still pass the test above. *)
 let test_lifecycle_drop_join_label () =
   let event : Workspace_telemetry_drop_event.t =
-    Agent_lifecycle Lifecycle_join
+    Agent_lifecycle Session_bound
   in
   let event_family = Workspace_telemetry_drop_event.family_to_wire event in
   let event_kind = Workspace_telemetry_drop_event.kind_to_wire event in
@@ -48,7 +48,7 @@ let test_lifecycle_drop_join_label () =
     (Failure "simulated non-Eio telemetry drop");
   let after = counter_value ~event_family ~event_kind in
   Alcotest.(check (float 0.001))
-    "drop counter increments by exactly 1 for the join label"
+    "drop counter increments by exactly 1 for the session_bound label"
     1.0 (after -. before)
 
 (* RFC-0088 §4 Option A: confirm the wire mapping is byte-for-byte
@@ -61,12 +61,12 @@ let test_wire_mapping_stable () =
     "agent_lifecycle family"
     "agent_lifecycle"
     (Workspace_telemetry_drop_event.family_to_wire
-       (Agent_lifecycle Lifecycle_leave));
+       (Agent_lifecycle Session_ended));
   Alcotest.(check string)
-    "agent_lifecycle / leave kind"
-    "leave"
+    "agent_lifecycle / session_ended kind"
+    "session_ended"
     (Workspace_telemetry_drop_event.kind_to_wire
-       (Agent_lifecycle Lifecycle_leave));
+       (Agent_lifecycle Session_ended));
   Alcotest.(check string)
     "task_transition family"
     "task_transition"

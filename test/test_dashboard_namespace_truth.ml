@@ -265,7 +265,7 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
       let config = state.Mcp_server.workspace_config in
       ignore (Lib.Workspace.init config ~agent_name:None);
       ignore
-        (Lib.Workspace.join config
+        (Lib.Workspace.bind_session config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -307,13 +307,13 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       let config = state.Mcp_server.workspace_config in
       ignore (Lib.Workspace.init config ~agent_name:None);
       ignore
-        (Lib.Workspace.join config
+        (Lib.Workspace.bind_session config
            ~agent_name:"agent_code-test-agent"
            ~agent_type_override:(Some "agent_code")
            ~capabilities:["typescript"]
            ());
       ignore
-        (Lib.Workspace.join config
+        (Lib.Workspace.bind_session config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]

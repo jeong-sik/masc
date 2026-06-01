@@ -73,15 +73,15 @@ let write_pending_confirm config _session_id =
 
 let seed_workspace config session_id =
   ignore (Lib.Workspace.init config ~agent_name:(Some "fixture-root"));
-  ignore (Lib.Workspace.join config ~agent_name:"mission-local64-smoke"
+  ignore (Lib.Workspace.bind_session config ~agent_name:"mission-local64-smoke"
             ~capabilities:[ "operator"; "fixture"; "local64" ] ());
-  ignore (Lib.Workspace.join config ~agent_name:"llama-local-alpha"
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-alpha"
             ~capabilities:[ "worker"; "local64"; "manager" ] ());
-  ignore (Lib.Workspace.join config ~agent_name:"llama-local-beta"
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-beta"
             ~capabilities:[ "worker"; "local64"; "metacog" ] ());
-  ignore (Lib.Workspace.join config ~agent_name:"llama-local-gamma"
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-gamma"
             ~capabilities:[ "worker"; "local64"; "executor" ] ());
-  ignore (Lib.Workspace.join config ~agent_name:"llama-local-delta"
+  ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-delta"
             ~capabilities:[ "worker"; "local64"; "observer" ] ());
   ignore
     (Lib.Workspace.broadcast config ~from_agent:"mission-local64-smoke"

@@ -28,6 +28,14 @@ val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
     accepted; tool-domain [agent_name] arguments are not caller
     identity.  Blank and ["unknown"] values are ignored. *)
 
+val resolve_bind_state :
+  workspace_initialized:bool ->
+  bind_required:bool ->
+  agent_name:string ->
+  check_join:(string -> bool) ->
+  bool
+(** Test hook for the bind-required guard's read decision. *)
+
 (** {1 Test hooks} *)
 
 module For_testing : sig

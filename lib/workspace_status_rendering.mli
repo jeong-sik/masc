@@ -67,7 +67,7 @@ val deliverable_claims_completion :
 
 val status_summary_string :
   ctx:Workspace_types.context ->
-  joined:bool ->
+  bound:bool ->
   actual_name:string ->
   credential_state:Workspace_types.credential_state ->
   credential_blocked:bool ->

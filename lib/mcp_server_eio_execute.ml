@@ -12,6 +12,13 @@ let caller_agent_name_from_arguments arguments =
   Mcp_server_eio_caller_identity.caller_agent_name_from_arguments arguments
 ;;
 
+let resolve_bind_state ~workspace_initialized ~bind_required ~agent_name ~check_join =
+  workspace_initialized
+  && bind_required
+  && not (String.equal agent_name "unknown")
+  && check_join agent_name
+;;
+
 let cleanup_internal_keeper_runtime_resource ~during_exception ~label cleanup =
   try cleanup () with
   | Eio.Cancel.Cancelled _ as e when not during_exception -> raise e

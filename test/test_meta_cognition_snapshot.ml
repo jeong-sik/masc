@@ -101,8 +101,8 @@ let persistence_counter reason =
 
 let test_snapshot_detects_signals () =
   with_ctx @@ fun ctx ->
-  ignore (Workspace.join ctx.config ~agent_name:"peer" ~capabilities:[] ());
-  ignore (Workspace.join ctx.config ~agent_name:"observer" ~capabilities:[] ());
+  ignore (Workspace.bind_session ctx.config ~agent_name:"peer" ~capabilities:[] ());
+  ignore (Workspace.bind_session ctx.config ~agent_name:"observer" ~capabilities:[] ());
   let masc_dir = Workspace.masc_dir ctx.config in
   save_jsonl
     (Filename.concat masc_dir "board_posts.jsonl")

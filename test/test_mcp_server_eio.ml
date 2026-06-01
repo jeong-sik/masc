@@ -950,7 +950,7 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Workspace.init state.workspace_config ~agent_name:None in
   let _bound =
-    Masc_mcp.Workspace.join state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc_mcp.Workspace.bind_session state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   let _added =
     Masc_mcp.Workspace.add_task state.workspace_config ~title:"managed-claim"
@@ -995,7 +995,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Workspace.init state.workspace_config ~agent_name:None in
   let _bound =
-    Masc_mcp.Workspace.join state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc_mcp.Workspace.bind_session state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   ignore
     (Masc_mcp.Workspace.add_task state.workspace_config ~title:"transition-claim"
@@ -1050,7 +1050,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Workspace.init state.workspace_config ~agent_name:None in
   let _bound =
-    Masc_mcp.Workspace.join state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc_mcp.Workspace.bind_session state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   ignore
     (Masc_mcp.Workspace.add_task state.workspace_config ~title:"transition-done"
@@ -1117,7 +1117,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Workspace.init state.workspace_config ~agent_name:None in
   let _bound =
-    Masc_mcp.Workspace.join state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc_mcp.Workspace.bind_session state.workspace_config ~agent_name:"agent_code" ~capabilities:[] ()
   in
   ignore
     (Masc_mcp.Workspace.add_task state.workspace_config ~title:"deprecated-claim"
@@ -1355,7 +1355,7 @@ let test_execute_tool_explicit_alias_reuses_joined_nickname () =
   let base_path = temp_dir () in
   let config = Masc_mcp.Workspace.default_config base_path in
   let _ = Masc_mcp.Workspace.init config ~agent_name:None in
-  let _ = Masc_mcp.Workspace.join config ~agent_name:"alpha-agent" ~capabilities:[] () in
+  let _ = Masc_mcp.Workspace.bind_session config ~agent_name:"alpha-agent" ~capabilities:[] () in
   let joined_nickname = Masc_mcp.Workspace.resolve_agent_name config "alpha-agent" in
   let identity =
     test_agent_identity
@@ -1467,7 +1467,7 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
-  ignore (Masc_mcp.Workspace.join state.workspace_config ~agent_name:"stable-admin" ~capabilities:[] ());
+  ignore (Masc_mcp.Workspace.bind_session state.workspace_config ~agent_name:"stable-admin" ~capabilities:[] ());
   ignore
     (Masc_mcp.Workspace.add_task state.workspace_config ~title:"explicit-alias-claim-next"
        ~priority:2 ~description:"");
@@ -1498,7 +1498,7 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
-  ignore (Masc_mcp.Workspace.join state.workspace_config ~agent_name:"stable-admin" ~capabilities:[] ());
+  ignore (Masc_mcp.Workspace.bind_session state.workspace_config ~agent_name:"stable-admin" ~capabilities:[] ());
   ignore
     (Masc_mcp.Workspace.add_task state.workspace_config ~title:"explicit-alias-transition"
        ~priority:2 ~description:"");
@@ -1552,7 +1552,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
     (Some "task-001")
     (Masc_mcp.Planning_eio.get_current_task state.workspace_config);
   Alcotest.(check bool) "explicit alias joined" true
-    (Masc_mcp.Workspace.is_agent_session_bounded state.workspace_config
+    (Masc_mcp.Workspace.is_agent_session_bound state.workspace_config
        ~agent_name:"qa-king-warm-heron");
   cleanup_dir base_path
 
@@ -1568,7 +1568,7 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   ignore (Masc_mcp.Workspace.init state.workspace_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
-  ignore (Masc_mcp.Workspace.join state.workspace_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
+  ignore (Masc_mcp.Workspace.bind_session state.workspace_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
     (Masc_mcp.Workspace.add_task state.workspace_config ~title:"claim-next-auth-preflight"
        ~priority:2 ~description:"");
@@ -1596,7 +1596,7 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
   ignore (Masc_mcp.Workspace.init state.workspace_config ~agent_name:None);
   ignore (Masc_mcp.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
-  ignore (Masc_mcp.Workspace.join state.workspace_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
+  ignore (Masc_mcp.Workspace.bind_session state.workspace_config ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
     (Masc_mcp.Workspace.add_task state.workspace_config ~title:"transition-auth-preflight"
        ~priority:2 ~description:"");

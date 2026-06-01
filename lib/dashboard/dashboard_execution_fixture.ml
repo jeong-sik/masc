@@ -180,7 +180,7 @@ let execution_smoke_fixture_json () =
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("koreanName", `String "local-beta");
-                ("model", `String (Runtime_candidate.local_runtime_label "fixture-model-a"));
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-a"));
                 ("recent_output_preview", `String "secondary runtime is quiet; watching queue depth before escalation");
                 ("recent_event", `String "secondary runtime probe");
               ];
@@ -202,7 +202,7 @@ let execution_smoke_fixture_json () =
                 ("related_operation_id", `String "op-runtime-003");
                 ("emoji", `String "🤖");
                 ("koreanName", `String "local-gamma");
-                ("model", `String (Runtime_candidate.local_runtime_label "fixture-model-b"));
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "idle");
               ];
@@ -261,7 +261,7 @@ let execution_smoke_fixture_json () =
                 ("continuity", `String "Gen 2 · Turns 84 · Goals 2");
                 ("lifecycle", `String "handoff-imminent");
                 ("related_session_id", `Null);
-                ("model", `String (Runtime_candidate.local_runtime_label "fixture-model-a"));
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-a"));
                 ("emoji", `String "🤖");
                 ("koreanName", `String "dm-keeper");
                 ("recent_input_preview", `String "Player asked to continue the next scene without breaking continuity");
@@ -299,7 +299,7 @@ let execution_smoke_fixture_json () =
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("koreanName", `String "local-delta");
-                ("model", `String (Runtime_candidate.local_runtime_label "fixture-model-b"));
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "missing heartbeat");
               ];

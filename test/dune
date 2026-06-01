@@ -68,6 +68,7 @@
   test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
+  test_keeper_attempt_liveness
   test_actor_mailbox
   test_domain_pool
   test_sse
@@ -338,6 +339,7 @@
   test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
+  test_keeper_attempt_liveness
   test_actor_mailbox
   test_domain_pool
   test_sse

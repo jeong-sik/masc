@@ -229,14 +229,8 @@ let budget_for_candidate ~candidate_key =
 (* RFC-0022 §1 — see .mli for contract. *)
 let outer_wall_for_attempt
     ~mode ~observer_attached ~per_provider_timeout_s ~candidate_key =
-  match mode, observer_attached with
-  | Enforce, true -> None
-  | _, true ->
-      let resolved = budget_for_candidate ~candidate_key in
-      let budget_wall =
-        resolved.budget.Keeper_attempt_liveness.attempt_wall_max
-      in
-      Option.map
-        (fun t -> Float.max t budget_wall)
-        per_provider_timeout_s
-  | _, false -> per_provider_timeout_s
+  ignore mode;
+  ignore candidate_key;
+  match observer_attached with
+  | true -> None
+  | false -> per_provider_timeout_s

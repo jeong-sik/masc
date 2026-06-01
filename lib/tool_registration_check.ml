@@ -32,17 +32,13 @@ let add_names names tbl =
   List.iter (fun name -> Hashtbl.replace tbl name ()) names;
   tbl
 
-let raw_masc_tool_names () =
+let registered_tool_names () =
   Config.raw_all_tool_schemas
-  |> List.filter_map (fun (schema : Masc_domain.tool_schema) ->
-    if String.starts_with ~prefix:"masc_" schema.name then Some schema.name
-    else None)
+  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
 let runtime_keeper_tool_names () =
   Hashtbl.create 512
-  |> add_names Agent_tool_dispatch_runtime.keeper_internal_candidate_tool_names
-  |> add_names (Agent_tool_dispatch_runtime.effective_core_tools ())
-  |> add_names (raw_masc_tool_names ())
+  |> add_names (registered_tool_names ())
 
 let validate ?policy_config () : validation_result =
   match policy_config with

@@ -5,6 +5,49 @@ module Types = Masc_domain
 open Masc_mcp
 
 let () = Random.self_init ()
+let () = Task_keeper_backend.install_hooks ()
+
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let ensure_test_runtime =
+  let initialized = ref false in
+  fun () ->
+    if not !initialized
+    then (
+      let path = Filename.temp_file "tool_task_runtime_" ".toml" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc test_runtime_toml);
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove path with
+          | Sys_error _ -> ())
+        (fun () ->
+           match Runtime.init_default ~config_path:path with
+           | Ok () -> initialized := true
+           | Error msg -> failwith msg))
+;;
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
@@ -34,6 +77,7 @@ let test name f =
   test_cases := (name, fun () ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
+    ensure_test_runtime ();
     with_isolated_runtime_env f) :: !test_cases
 
 (* Create test context *)

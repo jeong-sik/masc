@@ -499,7 +499,7 @@ let assemble_hooks
                 in
                 let turn_completion_contract =
                   Keeper_tool_completion_contract.completion_contract_of_tool_choice
-                    current_params.tool_choice
+                    provider_tool_choice
                 in
                 acc.completion_contract <- turn_completion_contract;
                 if turn_completion_contract = Keeper_tool_completion_contract.Require_tool_use

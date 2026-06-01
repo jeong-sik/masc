@@ -205,6 +205,25 @@ copy_install_smoke() {
   cp "$BINARY" "$installed_bin"
   chmod +x "$installed_bin"
   cp config/tool_policy.toml "$base_path/.masc/config/tool_policy.toml"
+  cat >"$base_path/.masc/config/keeper_runtime.toml" <<'EOF'
+[runtime]
+default = "release_evidence.smoke"
+
+[providers.release_evidence]
+display-name = "Release Evidence Smoke"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.smoke]
+api-name = "smoke"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[release_evidence.smoke]
+is-default = true
+max-concurrent = 1
+EOF
 }
 
 capture_installed_version() {

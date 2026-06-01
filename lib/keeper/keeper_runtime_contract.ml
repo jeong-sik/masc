@@ -230,13 +230,17 @@ let redact_backend_details = function
 let path_resolution_contract_json =
   `Assoc
     [ "read_implicit_cwd", `Bool false
+    ; "read_explicit_cwd_supported", `Bool true
     ; ( "read_basis"
       , `String
-          "Read file_path is absolute or relative to the keeper sandbox/allowed_paths; \
-           it does not inherit Execute cwd." )
+          "Read file_path resolves against explicit cwd when cwd is provided; otherwise \
+           it is relative to the keeper sandbox/allowed_paths. It does not inherit \
+           Execute cwd implicitly." )
     ; ( "discover_before_read"
       , `String
-          "When unsure, use Grep or Execute ls to discover concrete paths before Read."
+          "When unsure, use Grep or Execute ls to discover concrete paths before Read. \
+           For repo files, use cwd=\"repos/<repo>\" plus file_path=\"lib/...\", or use \
+           file_path=\"repos/<repo>/lib/...\"."
       )
     ]
 

@@ -173,6 +173,10 @@ let read_path meta path = Filename.concat (read_repo_dir meta) path
 
 let read_args meta path = `Assoc [ "file_path", `String (read_path meta path) ]
 
+let read_args_with_cwd ~cwd path =
+  `Assoc [ "file_path", `String path; "cwd", `String cwd ]
+;;
+
 let ensure_read_repo_dir config meta =
   let root = Keeper_alerting_path.project_root_of_config config in
   Fs_compat.mkdir_p (Filename.concat root (read_repo_dir meta))
@@ -770,6 +774,78 @@ let test_missing_file_error_redacts_directory_suggestions () =
             | `Null | `List [] -> true
             | _ -> false)
        | Ok _ -> fail "missing file should be surfaced as tool error")
+;;
+
+let test_read_file_resolves_relative_path_against_explicit_cwd () =
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+            [ "name", `String "test-keeper-read-cwd"
+            ; "agent_name", `String "test-keeper-read-cwd"
+            ; "trace_id", `String "test-trace-read-cwd"
+            ; ( "tool_access"
+              , Keeper_meta_tool_access.tool_access_to_json
+                  (Keeper_meta_tool_access.default_tool_access_of_meta_json ()) )
+            ])
+    with
+    | Ok meta -> { meta with allowed_paths = [ "repos" ] }
+    | Error e -> failwith (Printf.sprintf "make_read_cwd_meta failed: %s" e)
+  in
+  let ctx_snapshot = make_test_ctx () in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_tools_read_cwd_%d" (Random.int 100000))
+  in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Workspace.default_config dir in
+       let read_dir =
+         Filename.concat (Keeper_alerting_path.project_root_of_config config)
+           (read_repo_dir meta)
+       in
+       Fs_compat.mkdir_p read_dir;
+       let existing = Filename.concat read_dir "known.txt" in
+       Out_channel.with_open_text existing (fun oc ->
+         Out_channel.output_string oc "known via cwd");
+       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+       let tool = find_read_tool tools in
+       let check_known_read ~case args =
+         match Tool.execute tool args with
+         | Ok { Agent_sdk.Types.content; _ } ->
+           let json = Yojson.Safe.from_string content in
+           let result = Yojson.Safe.Util.member "result" json in
+           check string
+             (case ^ " content")
+             "known via cwd"
+             (Yojson.Safe.Util.member "content" result |> Yojson.Safe.Util.to_string);
+           check string
+             (case ^ " resolved path")
+             existing
+             (Yojson.Safe.Util.member "path" result |> Yojson.Safe.Util.to_string)
+         | Error { Agent_sdk.Types.message; _ } ->
+           fail (case ^ " should succeed: " ^ message)
+       in
+       check_known_read ~case:"explicit cwd"
+         (read_args_with_cwd ~cwd:(read_repo_dir meta) "known.txt");
+       check_known_read
+         ~case:"sandbox-rooted file_path is not doubled under cwd"
+         (read_args_with_cwd ~cwd:(read_repo_dir meta) (read_path meta "known.txt"));
+       (match Tool.execute tool (read_args_with_cwd ~cwd:(read_repo_dir meta) "") with
+        | Error { Agent_sdk.Types.message; _ } ->
+          check string "empty file_path still rejected" "path_required" message
+        | Ok _ -> fail "empty file_path should be rejected");
+       (match Tool.execute tool (read_args_with_cwd ~cwd:(read_repo_dir meta) "   ") with
+        | Error { Agent_sdk.Types.message; _ } ->
+          check string "blank file_path still rejected" "path_required" message
+        | Ok _ -> fail "blank file_path should be rejected"))
 ;;
 
 let test_repeated_error_results_are_blocked () =
@@ -1841,6 +1917,10 @@ let () =
             "missing file error redacts suggestions"
             `Quick
             test_missing_file_error_redacts_directory_suggestions
+        ; test_case
+            "Read resolves file_path against explicit cwd"
+            `Quick
+            test_read_file_resolves_relative_path_against_explicit_cwd
         ; test_case
             "repeated errors are blocked"
             `Quick

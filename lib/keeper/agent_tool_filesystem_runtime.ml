@@ -47,6 +47,119 @@ let read_file_default_max_bytes = Tool_shard_limits.read_file_default_max_bytes
 let read_file_min_max_bytes = 512
 let read_file_max_max_bytes = 200_000
 
+type read_file_resolution_error =
+  | Missing_file of
+      { target : string
+      ; error : string
+      }
+  | Read_path_error of string
+
+let string_opt_nonempty name json =
+  match Safe_ops.json_string_opt name json with
+  | None -> None
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then None else Some trimmed
+;;
+
+let relative_path_has_segment_prefix prefix raw =
+  String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
+;;
+
+let sandbox_rooted_relative_path raw =
+  Filename.is_relative raw
+  && List.exists
+       (fun prefix -> relative_path_has_segment_prefix prefix raw)
+       [ "repos"; "mind"; Common.masc_dirname; "playground" ]
+;;
+
+let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd =
+  match cwd with
+  | None -> Ok (keeper_default_read_root ~config ~meta)
+  | Some raw_cwd ->
+    (match resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd with
+     | Error e -> Error e
+     | Ok cwd when safe_is_dir cwd -> Ok cwd
+     | Ok cwd when safe_file_exists cwd ->
+       Error (Printf.sprintf "cwd_not_directory: %s (path_is_file_not_directory)" cwd)
+     | Ok cwd ->
+       Error
+         (Printf.sprintf
+            "cwd_not_directory: %s (directory does not exist; Read will not create cwd)"
+            cwd))
+;;
+
+let read_file_path_relative_to_project_root ~(config : Workspace.config) path =
+  match project_relative_host_path ~config path with
+  | Some relative -> relative
+  | None -> path
+;;
+
+let read_file_resolver_input ~(config : Workspace.config) ~cwd ~(raw_path : string) =
+  let raw_path = String.trim raw_path in
+  if
+    raw_path = ""
+    || (not (Filename.is_relative raw_path))
+    || sandbox_rooted_relative_path raw_path
+  then raw_path
+  else Filename.concat cwd raw_path |> read_file_path_relative_to_project_root ~config
+;;
+
+let resolve_read_file_target
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(args : Yojson.Safe.t)
+      ~(raw_path : string)
+  =
+  let cwd = string_opt_nonempty "cwd" args in
+  let raw_path = String.trim raw_path in
+  if raw_path = ""
+  then
+    Error
+      (Read_path_error
+         (Keeper_alerting_path.rejection_to_user_message Keeper_alerting_path.Path_required))
+  else match resolve_read_file_cwd ~config ~meta ~cwd with
+  | Error e -> Error (Read_path_error e)
+  | Ok cwd_abs ->
+    let resolver_input = read_file_resolver_input ~config ~cwd:cwd_abs ~raw_path in
+    let resolve_once candidate =
+      match playground_relative_unless_allowed_root ~config ~meta candidate with
+      | Error e -> Error (Read_path_error e)
+      | Ok normalized ->
+        (match
+           Keeper_alerting_path.resolve_keeper_read_path
+             ~config
+             ~allowed_paths:(keeper_effective_allowed_paths ~meta)
+             ~raw_path:normalized
+         with
+         | Ok target -> Ok target
+         | Error (Not_found_relative { raw }) ->
+           let root = Keeper_alerting_path.project_root_of_config config in
+           let target =
+             if Filename.is_relative normalized then Filename.concat root normalized else normalized
+           in
+           Error
+             (Missing_file
+                { target
+                ; error =
+                    Keeper_alerting_path.rejection_to_user_message
+                      (Not_found_relative { raw })
+                })
+         | Error rej ->
+           Error
+             (Read_path_error (Keeper_alerting_path.rejection_to_user_message rej)))
+    in
+    (match resolve_once resolver_input with
+     | Ok _ as ok -> ok
+     | Error original ->
+       (match Agent_tool_execute_path.auto_correct_path ~meta resolver_input with
+        | Some corrected ->
+          (match resolve_once corrected with
+           | Ok _ as ok -> ok
+           | Error _ -> Error original)
+        | None -> Error original))
+;;
+
 let handle_read_file
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -61,30 +174,19 @@ let handle_read_file
     |> fun n -> max read_file_min_max_bytes (min read_file_max_max_bytes n)
   in
   let fallback_dir = keeper_default_read_root ~config ~meta in
-  match playground_relative_unless_allowed_root ~config ~meta path with
-  | Error e -> error_json e
-  | Ok normalized ->
-    (match
-       Keeper_alerting_path.resolve_keeper_read_path
-         ~config
-         ~allowed_paths:(keeper_effective_allowed_paths ~meta)
-         ~raw_path:normalized
-     with
-     | Error (Not_found_relative { raw }) ->
-       (* Path within root but doesn't exist — use structured error with suggestions *)
-       let root = Keeper_alerting_path.project_root_of_config config in
-       let target =
-         if Filename.is_relative path then Filename.concat root path else path
-       in
-       missing_file_error_json
-         ~config
-         ~meta
-         ~target
-         ~fallback_dir
-         ~error:
-           (Keeper_alerting_path.rejection_to_user_message (Not_found_relative { raw }))
-     | Error rej -> error_json (Keeper_alerting_path.rejection_to_user_message rej)
-     | Ok target ->
+  let cwd = string_opt_nonempty "cwd" args in
+  match resolve_read_file_target ~config ~meta ~args ~raw_path:path with
+  | Error (Read_path_error e) -> error_json e
+  | Error (Missing_file { target; error }) ->
+    missing_file_error_json
+      ~cwd
+      ~raw_path:(Some path)
+      ~config
+      ~meta
+      ~target
+      ~fallback_dir
+      ~error
+  | Ok target ->
        (* RFC-0006 Phase B-1: Docker keepers are always contained to their
        playground bundle on the host before any read-side I/O proceeds.
        The resolver-level allowed_paths check is augmented by this
@@ -135,25 +237,32 @@ let handle_read_file
                        ; "content", `String body
                        ; "via", `String Keeper_sandbox_read_runner.backend_via
                        ]))
-             else (
-               match Safe_ops.read_file_safe target with
-               | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
-                 missing_file_error_json ~config ~meta ~target ~fallback_dir ~error:e
-               | Error e -> error_json ~fields:[ "path", `String target ] e
-               | Ok content ->
-                 let total = String.length content in
+              else (
+                match Safe_ops.read_file_safe target with
+                | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
+                 missing_file_error_json
+                   ~cwd
+                   ~raw_path:(Some path)
+                   ~config
+                   ~meta
+                   ~target
+                   ~fallback_dir
+                   ~error:e
+                | Error e -> error_json ~fields:[ "path", `String target ] e
+                | Ok content ->
+                  let total = String.length content in
                  let truncated = total > max_bytes in
                  let body =
                    if truncated then String.sub content 0 max_bytes else content
                  in
                  Yojson.Safe.to_string
                    (`Assoc
-                       [ "ok", `Bool true
-                       ; "path", `String target
-                       ; "bytes", `Int total
-                       ; "truncated", `Bool truncated
-                       ; "content", `String body
-                       ])))))
+                        [ "ok", `Bool true
+                        ; "path", `String target
+                        ; "bytes", `Int total
+                        ; "truncated", `Bool truncated
+                        ; "content", `String body
+                        ]))))
 ;;
 
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When

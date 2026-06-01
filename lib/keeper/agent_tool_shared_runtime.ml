@@ -115,6 +115,8 @@ let actionable_path_error
 let file_not_found_prefix = "File not found:"
 
 let missing_file_error_json
+      ~(raw_path : string option)
+      ~(cwd : string option)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(target : string)
@@ -134,17 +136,22 @@ let missing_file_error_json
         ; "error", `String error
         ; "path", `String target
         ; "your_playground", `String playground
+        ; "input_file_path", Json_util.string_opt_to_json raw_path
         ; ( "path_resolution"
           , `Assoc
               [ "implicit_cwd", `Bool false
+              ; "explicit_cwd_supported", `Bool true
+              ; "cwd", Json_util.string_opt_to_json cwd
               ; ( "basis"
                 , `String
-                    "Read resolves file_path against the keeper sandbox or explicit \
-                     allowed_paths; it does not inherit Execute cwd." )
+                    "Read resolves file_path against explicit cwd when cwd is provided; \
+                     otherwise it resolves against the keeper sandbox or explicit \
+                     allowed_paths. It does not inherit Execute cwd implicitly." )
               ; ( "next_action"
                 , `String
-                    "Use Grep or Execute ls to discover the exact file path, then pass \
-                     that path to Read." )
+                    "For repo-relative files, pass cwd=\"repos/<repo>\" with \
+                     file_path=\"lib/...\", or pass file_path=\"repos/<repo>/lib/...\". \
+                     Use Grep or Execute ls first when the exact path is unclear." )
               ] )
         ])
 ;;

@@ -154,7 +154,7 @@ let effective_declarative_runtime_id
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  match defaults.tool_custom_list with
+  match defaults.tool_access with
   | Some tools -> normalize_tool_names tools
   | None -> meta.tool_access
 

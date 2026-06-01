@@ -14,28 +14,26 @@ type credential_scope =
   | Keeper_identity
   | Root_fallback
 
-let root_repo_cli_identity = "root"
+let root_credential_identity = "root"
 
 let credential_scope_to_string = function
   | Keeper_identity -> "keeper_identity"
   | Root_fallback -> "root_fallback"
 
 type keeper_binding = {
-  configured_repo_cli_identity : string option;
-  effective_repo_cli_identity : string;
+  credential_identity : string;
   credential_scope : credential_scope;
-  git_identity_mode : string;
   bundle_root : string;
   gh_config_dir : string;
 }
 
-let bundle_root (config : Workspace.config) ~(repo_cli_identity : string) =
+let bundle_root (config : Workspace.config) ~(credential_identity : string) =
   Filename.concat
     (Filename.concat (Workspace.masc_dir config) "repo-cli-identities")
-    repo_cli_identity
+    credential_identity
 
 let root_bundle_root config =
-  bundle_root config ~repo_cli_identity:root_repo_cli_identity
+  bundle_root config ~credential_identity:root_credential_identity
 
 let repo_cli_config_dir_of_bundle bundle_root =
   Filename.concat bundle_root "gh"
@@ -79,87 +77,48 @@ let config_dir (config : Workspace.config) : string option =
   let dir = root_repo_cli_config_dir config in
   if repo_cli_config_dir_exists dir then Some dir else None
 
-let binding_of_repo_cli_identity
-    ~(configured_repo_cli_identity : string option)
-    ~(effective_repo_cli_identity : string)
+let binding_of_credential_identity
+    ~(credential_identity : string)
     ~(credential_scope : credential_scope)
-    ~(git_identity_mode : string)
     ~(bundle_root : string)
     ~(gh_config_dir : string) =
   {
-    configured_repo_cli_identity;
-    effective_repo_cli_identity;
+    credential_identity;
     credential_scope;
-    git_identity_mode;
     bundle_root;
     gh_config_dir;
   }
 
-let repo_cli_config_dir_matches_identity ~expected gh_config_dir =
-  String.equal (Filename.basename gh_config_dir) "gh"
-  && String.equal (Filename.basename (Filename.dirname gh_config_dir)) expected
-
-let credential_matches_explicit_repo_cli_identity ~expected
-    (cred : Repo_manager_types.credential) =
-  let expected = String.trim expected in
-  expected <> ""
-  && (String.equal cred.id expected
-      || String.equal cred.username expected
-      ||
-      match cred.gh_config_dir with
-      | Some gh_config_dir ->
-          repo_cli_config_dir_matches_identity ~expected (String.trim gh_config_dir)
-      | None -> false)
-
 let binding_of_mapped_credential
     ~(keeper_name : string)
-    ~(defaults : Keeper_types_profile.keeper_profile_defaults)
     (cred : Repo_manager_types.credential) =
-  match defaults.repo_cli_identity, defaults.git_identity_mode with
-  | Some expected, Some "repo_cli_identity"
-    when not (credential_matches_explicit_repo_cli_identity ~expected cred) ->
-      let gh_config_dir =
-        Option.value ~default:"<none>" cred.Repo_manager_types.gh_config_dir
-      in
+  match cred.gh_config_dir with
+  | None ->
       Error
         (Printf.sprintf
-           "keeper %s declares repo_cli_identity %s but credential mapping selected credential_id=%s username=%s gh_config_dir=%s. Update keeper_repo_mappings.toml or the keeper TOML so both credential SSOTs agree."
-           keeper_name expected cred.id cred.username gh_config_dir)
-  | _ -> (
-      match cred.gh_config_dir with
-      | None ->
-          Error
-            (Printf.sprintf
-               "credential %s selected for keeper %s has no gh_config_dir"
-               cred.id keeper_name)
-      | Some raw_gh_config_dir ->
-          let gh_config_dir = String.trim raw_gh_config_dir in
-          if gh_config_dir = "" then
-            Error
-              (Printf.sprintf
-                 "credential %s selected for keeper %s has empty gh_config_dir"
-                 cred.id keeper_name)
-          else if not (repo_cli_config_dir_exists gh_config_dir) then
-            Error
-              (Printf.sprintf
-                 "credential %s selected for keeper %s points at missing GH config dir %s"
-                 cred.id keeper_name gh_config_dir)
-          else
-            let git_identity_mode =
-              match defaults.git_identity_mode with
-              | Some "keeper_alias" -> "keeper_alias"
-              | _ -> "repo_cli_identity"
-            in
-            Ok
-              (binding_of_repo_cli_identity
-                 ~configured_repo_cli_identity:(Some cred.username)
-                 ~effective_repo_cli_identity:cred.username
-                 ~credential_scope:Keeper_identity
-                 ~git_identity_mode
-                 ~bundle_root:(Filename.dirname gh_config_dir)
-                 ~gh_config_dir))
+           "credential %s selected for keeper %s has no gh_config_dir"
+           cred.id keeper_name)
+  | Some raw_gh_config_dir ->
+      let gh_config_dir = String.trim raw_gh_config_dir in
+      if gh_config_dir = "" then
+        Error
+          (Printf.sprintf
+             "credential %s selected for keeper %s has empty gh_config_dir"
+             cred.id keeper_name)
+      else if not (repo_cli_config_dir_exists gh_config_dir) then
+        Error
+          (Printf.sprintf
+             "credential %s selected for keeper %s points at missing GH config dir %s"
+             cred.id keeper_name gh_config_dir)
+      else
+        Ok
+          (binding_of_credential_identity
+             ~credential_identity:cred.username
+             ~credential_scope:Keeper_identity
+             ~bundle_root:(Filename.dirname gh_config_dir)
+             ~gh_config_dir)
 
-let mapped_keeper_binding ~(config : Workspace.config) ~keeper_name ~defaults =
+let mapped_keeper_binding ~(config : Workspace.config) ~keeper_name =
   match
     Keeper_repo_mapping.credentials_for_keeper
       ~base_path:config.Workspace.base_path ~keeper_id:keeper_name
@@ -180,7 +139,7 @@ let mapped_keeper_binding ~(config : Workspace.config) ~keeper_name ~defaults =
               ~base_path:config.Workspace.base_path)
            keeper_name)
   | Ok [ credential ] ->
-      binding_of_mapped_credential ~keeper_name ~defaults credential
+      binding_of_mapped_credential ~keeper_name credential
   | Ok credentials ->
       Error
         (Printf.sprintf
@@ -189,9 +148,7 @@ let mapped_keeper_binding ~(config : Workspace.config) ~keeper_name ~defaults =
 
 let keeper_binding (config : Workspace.config) ~(keeper_name : string) :
     (keeper_binding, string) result =
-  match Keeper_types_profile.load_keeper_profile_defaults_result keeper_name with
-  | Error reason -> Error reason
-  | Ok defaults -> mapped_keeper_binding ~config ~keeper_name ~defaults
+  mapped_keeper_binding ~config ~keeper_name
 
 let keeper_config_dir (config : Workspace.config) ~(keeper_name : string) :
     (string, string) result =

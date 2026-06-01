@@ -304,21 +304,9 @@ let resolve_sandbox_profile ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback
   |> Option.value ~default:default_sandbox_profile
 
-let resolve_network_mode ~sandbox_profile ~preferred ~fallback =
+let resolve_network_mode ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback
-  |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
-
-
-let private_workspace_root_rel ~sandbox_profile keeper_name =
-  Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_name
-  |> Keeper_alerting_path.strip_trailing_slashes
-
-let private_workspace_root_abs ~(config : Workspace.config) ~sandbox_profile keeper_name =
-  Filename.concat
-    (Keeper_alerting_path.project_root_of_config config)
-    (private_workspace_root_rel ~sandbox_profile keeper_name)
-  |> Keeper_alerting_path.normalize_path_for_check
-  |> Keeper_alerting_path.strip_trailing_slashes
+  |> Option.value ~default:Network_inherit
 
 let sandbox_allowed_path_has_forbidden_segments path =
   let has_glob =
@@ -334,65 +322,17 @@ let sandbox_allowed_path_has_forbidden_segments path =
            | "." | ".." -> true
            | _ -> false))
 
-let sandbox_allowed_path_within_private_root
-    ~(config : Workspace.config)
-    ~keeper_name
-    ~sandbox_profile
-    path =
-  let trimmed = String.trim path in
-  if trimmed = "" then false
-  else if sandbox_allowed_path_has_forbidden_segments trimmed then
-    false
-  else
-    let private_root =
-      private_workspace_root_abs ~config ~sandbox_profile keeper_name
-    in
-    let candidate =
-      (if Filename.is_relative trimmed then
-         Filename.concat
-           (Keeper_alerting_path.project_root_of_config config)
-           trimmed
-       else
-         trimmed)
-      |> Keeper_alerting_path.normalize_path_for_check
-      |> Keeper_alerting_path.strip_trailing_slashes
-    in
-    candidate = private_root
-    || String.starts_with ~prefix:(private_root ^ "/") candidate
-
-let validate_sandbox_settings
-    ~(config : Workspace.config)
-    ~keeper_name
-    ~repo_cli_identity
-    ~sandbox_profile
-    ~network_mode
-    ~allowed_paths =
+let validate_sandbox_settings ~allowed_paths =
   if allowed_paths = [ "*" ] then
     Error "allowed_paths=[\"*\"] is not supported; enumerate explicit paths instead"
   else
-  match sandbox_profile with
-  | Local -> (
-      match network_mode with
-      | Network_inherit -> Ok ()
-      | Network_none ->
-          Error
-            "network_mode=none requires sandbox_profile=docker")
-  | Docker ->
-      let profile_label = sandbox_profile_to_string sandbox_profile in
-      let escaping =
-        List.filter
-          (fun path ->
-            not
-              (sandbox_allowed_path_within_private_root
-                 ~config ~keeper_name ~sandbox_profile path))
-          allowed_paths
-      in
-      match escaping with
-      | [] -> Ok ()
-      | _ ->
-          Error
-            (Printf.sprintf
-               "%s allowed_paths must stay under %s (rejected: %s)"
-               profile_label
-               (private_workspace_root_rel ~sandbox_profile keeper_name)
-               (String.concat ", " escaping))
+    match
+      List.filter sandbox_allowed_path_has_forbidden_segments allowed_paths
+    with
+    | [] -> Ok ()
+    | rejected ->
+        Error
+          (Printf.sprintf
+             "allowed_paths entries may not contain globs or traversal segments \
+              (rejected: %s)"
+             (String.concat ", " rejected))

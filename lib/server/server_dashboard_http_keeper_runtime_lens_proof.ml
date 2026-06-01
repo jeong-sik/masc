@@ -11,8 +11,6 @@ type runtime_lens_proof_acc =
   ; mutable failed_tool_call_count : int
   ; mutable latest_ts : float option
   ; mutable docker_visible : bool
-  ; mutable git_credentials_enabled : bool
-  ; mutable repo_cli_identity_materialized : bool
   ; tools : (string, unit) Hashtbl.t
   ; successful_tools : (string, unit) Hashtbl.t
   ; failed_tools : (string, unit) Hashtbl.t
@@ -26,8 +24,6 @@ let runtime_lens_proof_acc () =
   ; failed_tool_call_count = 0
   ; latest_ts = None
   ; docker_visible = false
-  ; git_credentials_enabled = false
-  ; repo_cli_identity_materialized = false
   ; tools = Hashtbl.create 8
   ; successful_tools = Hashtbl.create 8
   ; failed_tools = Hashtbl.create 8
@@ -74,26 +70,9 @@ let rec runtime_lens_json_string_values field = function
   | `List values -> List.concat_map (runtime_lens_json_string_values field) values
   | _ -> []
 
-let rec runtime_lens_json_bool_values field = function
-  | `Assoc fields ->
-      let direct =
-        match List.assoc_opt field fields with
-        | Some (`Bool value) -> [ value ]
-        | _ -> []
-      in
-      direct
-      @ List.concat_map
-          (fun (_, value) -> runtime_lens_json_bool_values field value)
-          fields
-  | `List values -> List.concat_map (runtime_lens_json_bool_values field) values
-  | _ -> []
-
 let runtime_lens_has_string_field json field expected =
   runtime_lens_json_string_values field json
   |> List.exists (String.equal expected)
-
-let runtime_lens_has_true_field json field =
-  runtime_lens_json_bool_values field json |> List.exists Fun.id
 
 let runtime_lens_tool_text json =
   let input = (match Json_util.assoc_member_opt "input" json with Some v -> v | None -> `Null) |> Yojson.Safe.to_string in
@@ -115,31 +94,6 @@ let runtime_lens_call_has_docker_proof json output_opt text =
       runtime_lens_has_string_field output "sandbox_profile" "docker"
       || runtime_lens_has_string_field output "via" "docker"
   | None -> false
-
-let runtime_lens_call_has_git_credentials output_opt text =
-  runtime_lens_text_contains text "\"git_creds_enabled\":true"
-  ||
-  match output_opt with
-  | Some output -> runtime_lens_has_true_field output "git_creds_enabled"
-  | None -> false
-
-let runtime_lens_call_has_repo_cli_identity output_opt text =
-  let structured =
-    match output_opt with
-    | Some output ->
-        runtime_lens_has_string_field output "credential_scope" "keeper_identity"
-        &&
-        (runtime_lens_has_string_field output "git_identity_mode" "repo_cli_identity"
-         || runtime_lens_has_string_field output "state" "materialized")
-    | None -> false
-  in
-  structured
-  ||
-   (runtime_lens_text_contains text "\"credential_scope\":\"keeper_identity\""
-    &&
-   (runtime_lens_text_contains text "\"git_identity_mode\":\"repo_cli_identity\""
-    || runtime_lens_text_contains text
-         "\"credential_state\":{\"state\":\"materialized\""))
 
 let runtime_lens_collect_profile acc json =
   let add_from table field source =
@@ -167,11 +121,7 @@ let runtime_lens_accumulate_tool_proof acc json =
   let output_opt = parse_tool_output_json_opt json in
   let text = runtime_lens_tool_text json in
   if runtime_lens_call_has_docker_proof json output_opt text
-  then acc.docker_visible <- true;
-  if runtime_lens_call_has_git_credentials output_opt text
-  then acc.git_credentials_enabled <- true;
-  if runtime_lens_call_has_repo_cli_identity output_opt text
-  then acc.repo_cli_identity_materialized <- true
+  then acc.docker_visible <- true
 
 let runtime_lens_runtime_proof_json ~keeper_name ~trace_id ?turn_id () =
   let acc = runtime_lens_proof_acc () in
@@ -180,16 +130,8 @@ let runtime_lens_runtime_proof_json ~keeper_name ~trace_id ?turn_id () =
        if tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json
        then runtime_lens_accumulate_tool_proof acc json);
   let status =
-    if
-      acc.docker_visible
-      && (acc.git_credentials_enabled || acc.repo_cli_identity_materialized)
-    then "pass"
-    else if
-      acc.matched_tool_call_count > 0
-      && (acc.docker_visible
-          || acc.git_credentials_enabled
-          || acc.repo_cli_identity_materialized)
-    then "warn"
+    if acc.docker_visible then "pass"
+    else if acc.matched_tool_call_count > 0 then "warn"
     else "missing"
   in
   `Assoc
@@ -206,8 +148,6 @@ let runtime_lens_runtime_proof_json ~keeper_name ~trace_id ?turn_id () =
         Json_util.json_string_list (runtime_lens_sorted_set acc.sandbox_profiles) )
     ; ("network_modes", Json_util.json_string_list (runtime_lens_sorted_set acc.network_modes))
     ; ("docker_visible", `Bool acc.docker_visible)
-    ; ("git_credentials_enabled", `Bool acc.git_credentials_enabled)
-    ; ("repo_cli_identity_materialized", `Bool acc.repo_cli_identity_materialized)
     ; ( "latest_at",
         match acc.latest_ts with
         | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)

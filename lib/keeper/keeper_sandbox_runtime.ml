@@ -625,8 +625,6 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     [ "backend", `String "docker"
     ; "status", `String (if preflight.ok then "ok" else "error")
     ; "ok", `Bool preflight.ok
-    ; "credential_fallbacks_disabled", `Bool preflight.credential_fallbacks_disabled
-    ; "git_egress", `String preflight.git_egress
     ; "image", `String preflight.image
     ; "docker_runtime_ok", `Bool preflight.docker_runtime_ok
     ; Json_util.string_opt_field "docker_runtime_error" preflight.docker_runtime_error
@@ -804,11 +802,6 @@ let docker_preflight ~timeout_sec () =
           && image_present
           && command_error = None
           && missing_commands = []
-      ; credential_fallbacks_disabled = false
-      ; git_egress =
-          (if Env_config_sandbox.Runtime.git_dispatch ()
-           then "repo_cli_identity_dispatch"
-           else "container_network_policy")
       ; image
       ; docker_runtime_ok
       ; docker_runtime_error

@@ -24,14 +24,6 @@ let normalize_name_list_opt items =
   | [] -> None
   | xs -> Some xs
 
-let normalize_git_identity_mode_opt = function
-  | None -> None
-  | Some raw -> (
-      match String.trim (String.lowercase_ascii raw) with
-      | "keeper_alias" -> Some "keeper_alias"
-      | "repo_cli_identity" -> Some "repo_cli_identity"
-      | _ -> None)
-
 let normalize_social_model_opt = function
   | None -> None
   | Some raw -> (

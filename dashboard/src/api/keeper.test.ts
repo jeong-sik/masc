@@ -238,8 +238,6 @@ describe('keeper runtime trace', () => {
             sandbox_profiles: ['docker'],
             network_modes: ['inherit'],
             docker_visible: true,
-            git_credentials_enabled: true,
-            repo_cli_identity_materialized: true,
             latest_at: '2026-05-13T00:00:01Z',
           },
         },
@@ -327,7 +325,6 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.axes.provider_attempt.terminal_status).toBe('timeout')
     expect(result.runtime_lens.axes.runtime_proof.status).toBe('pass')
     expect(result.runtime_lens.axes.runtime_proof.docker_visible).toBe(true)
-    expect(result.runtime_lens.axes.runtime_proof.repo_cli_identity_materialized).toBe(true)
     expect(result.runtime_lens.axes.runtime_proof.tools).toEqual(['Execute', 'SearchFiles'])
     expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')

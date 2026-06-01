@@ -212,9 +212,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 sandbox_profile = None;
                 sandbox_image = None;
                 network_mode = None;
-                repo_cli_identity = None;
-                git_identity_mode = None;
-                tool_custom_list = None;
+                tool_access = None;
                 tool_denylist =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_denylist" keeper_json);

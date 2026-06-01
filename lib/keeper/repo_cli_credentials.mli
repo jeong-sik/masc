@@ -9,27 +9,24 @@ type credential_scope =
   | Root_fallback
 
 type keeper_binding = {
-  configured_repo_cli_identity : string option;
-      (** Keeper-configured repo CLI identity, if one was declared. *)
-  effective_repo_cli_identity : string;
+  credential_identity : string;
       (** Identity whose bundle will actually be used. *)
   credential_scope : credential_scope;
-  git_identity_mode : string;
   bundle_root : string;
   gh_config_dir : string;
 }
 
 (** Reserved root fallback identity. *)
-val root_repo_cli_identity : string
+val root_credential_identity : string
 
 val credential_scope_to_string : credential_scope -> string
 
 (** Resolve the root fallback repo CLI config dir when it exists. *)
 val config_dir : Workspace.config -> string option
 
-(** [bundle_root config ~repo_cli_identity] is the on-disk root of the repo CLI
+(** [bundle_root config ~credential_identity] is the on-disk root of the repo CLI
     identity bundle: [$base_path/.masc/repo-cli-identities/<id>]. *)
-val bundle_root : Workspace.config -> repo_cli_identity:string -> string
+val bundle_root : Workspace.config -> credential_identity:string -> string
 
 val root_bundle_root : Workspace.config -> string
 
@@ -45,9 +42,9 @@ val git_config_env_pairs : (string * string) list
 
 val root_repo_cli_config_dir_exists : Workspace.config -> bool
 
-(** Resolve the keeper's repo CLI identity binding, or an error string
-    explaining why the binding cannot be established (missing identity
-    in profile defaults, missing GH config dir on disk, etc.). *)
+(** Resolve the keeper's repo CLI credential binding from
+    [keeper_repo_mappings.toml], or return an error string explaining
+    why the binding cannot be established. *)
 val keeper_binding :
   Workspace.config -> keeper_name:string -> (keeper_binding, string) result
 
@@ -69,12 +66,12 @@ val with_env : Workspace.config -> string -> string
     canonical lists. *)
 val compose_base_with_repo_cli_config : dir:string -> string array
 
-(** [process_env config] returns the composed env for the root repo CLI
-    identity path. It never uses the operator's ambient GH config. *)
+(** [process_env config] returns the composed env for the root credential
+    path. It never uses the operator's ambient GH config. *)
 val process_env : Workspace.config -> string array option
 
 (** [keeper_process_env config ~keeper_name] returns the composed env
-    for a specific keeper's repo CLI identity, or an error if the binding
-    cannot be resolved. *)
+    for a specific keeper credential, or an error if the binding cannot
+    be resolved. *)
 val keeper_process_env :
   Workspace.config -> keeper_name:string -> (string array option, string) result

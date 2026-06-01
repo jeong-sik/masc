@@ -415,13 +415,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("container_playground_root",
             string_or_null
               (Env_config_sandbox.Runtime.docker_playground_container_root ()));
-          ("git_egress",
-            `String
-              (if Env_config_sandbox.Runtime.git_dispatch () then
-                 "repo_cli_identity_dispatch"
-               else
-                 "container_network_policy"));
-          ("credential_fallbacks_disabled", `Bool false);
           ("docker_image",
             match effective_sandbox_image with
             | Some img -> string_or_null img

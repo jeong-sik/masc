@@ -37,7 +37,10 @@ let () =
    | Ok _ ->
      Printf.printf "FAIL test2: config fields should be rejected\n"; exit 1
    | Error msg ->
-     if not (String.contains msg ':') then begin
+     let prefix =
+       "config-only keeper meta fields are no longer supported in runtime JSON: "
+     in
+     if not (String.starts_with ~prefix msg) then begin
        Printf.printf "FAIL test2: unexpected rejection: %s\n" msg; exit 1
      end;
      Printf.printf "test2: PASS — config fields rejected\n");

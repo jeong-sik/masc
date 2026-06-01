@@ -197,8 +197,13 @@ let test_persisted_retired_runtime_meta_fields_rejected () =
   match Keeper_meta_json_parse.meta_of_json legacy_json with
   | Ok _ -> fail "retired runtime meta fields should be rejected"
   | Error msg ->
-    check bool "mentions removed fields" true
-      (String.contains msg ':')
+    let prefix = "removed keeper meta fields are no longer supported: " in
+    check bool "uses removed-field rejection prefix" true
+      (String.starts_with ~prefix msg);
+    check bool "mentions a retired field" true
+      (List.exists
+         (fun (field, _) -> String_util.contains_substring msg field)
+         retired_fields)
 
 let () =
   run "keeper_auto_pause_blocker_persist_12683"

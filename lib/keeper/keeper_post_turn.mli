@@ -19,6 +19,11 @@
 type compaction_event =
   { attempted : bool
   ; applied : bool
+  ; started_dispatched : bool
+        (** [true] when [on_compaction_started] completed without raising,
+            meaning the FSM is at [Compaction_compacting].  [false] when
+            the callback failed or was never called (recovery path), so
+            the FSM is still at [Compaction_accumulating]. *)
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision

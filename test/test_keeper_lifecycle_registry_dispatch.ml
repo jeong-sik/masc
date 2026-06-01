@@ -122,6 +122,7 @@ let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_li
       {
         attempted = false;
         applied = false;
+        started_dispatched = false;
         failure_reason = None;
         trigger = None;
         decision = KEC.Blocked_below_thresholds;
@@ -181,6 +182,7 @@ let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
             {
               attempted = true;
               applied = true;
+              started_dispatched = true;
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
@@ -239,6 +241,7 @@ let test_post_turn_compaction_runs_from_failing_health_lane () =
             {
               attempted = true;
               applied = true;
+              started_dispatched = true;
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
@@ -287,6 +290,7 @@ let test_compaction_completion_without_started_is_nonfatal () =
             {
               attempted = true;
               applied = true;
+              started_dispatched = true;
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;
@@ -333,6 +337,7 @@ let test_post_turn_compaction_restarts_after_done_stage () =
             {
               attempted = true;
               applied = true;
+              started_dispatched = true;
               failure_reason = None;
               trigger = Some Compaction_trigger.Manual;
               decision = KEC.Applied Compaction_trigger.Manual;

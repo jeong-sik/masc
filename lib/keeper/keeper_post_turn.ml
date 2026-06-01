@@ -57,6 +57,14 @@ open Keeper_context_core
 type compaction_event = {
   attempted : bool;
   applied : bool;
+  (** [started_dispatched] is [true] when the [on_compaction_started] callback
+      successfully dispatched [Compaction_started] to the registry, placing the
+      FSM in [Compaction_compacting].  When [false] (callback failed, skipped,
+      or not attempted), the FSM is still at [Compaction_accumulating] and
+      [dispatch_post_turn_lifecycle_events] must dispatch [Compaction_started]
+      before [Compaction_completed] to avoid the forbidden
+      accumulating -> done transition. *)
+  started_dispatched : bool;
   failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
@@ -499,6 +507,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
           {
             attempted = false;
             applied = false;
+            started_dispatched = false;
             failure_reason = None;
             trigger = None;
             decision = no_checkpoint_decision;
@@ -536,6 +545,14 @@ let apply_post_turn_lifecycle_with_resilience_handles
       let compaction_decided =
         Keeper_compact_policy.compaction_decision_applied decision
       in
+      (* Track whether on_compaction_started succeeded, so
+         dispatch_post_turn_lifecycle_events knows the FSM state.
+         If the callback raised (swallowed by Cancel_safe.observe) or
+         dispatch_event returned Error (silently logged by
+         dispatch_keeper_phase_event), the FSM is still at
+         Compaction_accumulating and the downstream dispatch must
+         emit Compaction_started before Compaction_completed. *)
+      let started_dispatched = ref false in
       (* Attempt save before updating meta so that a save failure is treated as
          compaction not applied — keeping ctx/checkpoint/metrics consistent. *)
       let effective_compaction_applied, compaction_failure_reason, effective_ctx, checkpoint =
@@ -560,7 +577,9 @@ let apply_post_turn_lifecycle_with_resilience_handles
               ~on_exn:(fun exn ->
                 Keeper_callback_failure.record ~base_dir ~meta:base_meta
                   ~callback:"on_compaction_started" exn)
-              on_compaction_started
+              (fun () ->
+                 on_compaction_started ();
+                 started_dispatched := true)
           in
           let session =
             create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
@@ -651,6 +670,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
           {
             attempted = compaction_decided;
             applied = effective_compaction_applied;
+            started_dispatched = !started_dispatched;
             failure_reason = compaction_failure_reason;
             trigger;
             decision;
@@ -826,6 +846,7 @@ let recover_latest_checkpoint_for_overflow_retry
           {
             attempted = true;
             applied = true;
+            started_dispatched = false;  (* recovery path: no callback fires *)
             failure_reason = None;
             trigger;
             decision = base_decision;

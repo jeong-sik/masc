@@ -98,6 +98,7 @@ type handoff_rollover =
 type compaction_event =
   { attempted : bool
   ; applied : bool
+  ; started_dispatched : bool
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision

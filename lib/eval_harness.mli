@@ -100,6 +100,9 @@ type eval_result = {
   mean_score : float;
   consistency : float;
   total_cost_usd : float;
+  ci95_low : float;
+  ci95_high : float;
+  min_runs_met : bool;
 }
 
 type eval_suite_result = {

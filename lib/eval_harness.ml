@@ -94,6 +94,8 @@ type eval_run = {
   error : string option;
 }
 
+let min_runs_for_ci = 5
+
 type eval_result = {
   scenario : scenario;
   runs : eval_run list;
@@ -101,6 +103,9 @@ type eval_result = {
   mean_score : float;       (** Mean weighted score across runs *)
   consistency : float;      (** Std dev of scores (lower = more consistent) *)
   total_cost_usd : float;   (** Sum of all run costs *)
+  ci95_low : float;         (** Lower bound of 95% confidence interval for mean_score *)
+  ci95_high : float;        (** Upper bound of 95% confidence interval for mean_score *)
+  min_runs_met : bool;      (** Whether the [min_runs_for_ci] requirement is satisfied *)
 }
 
 type eval_suite_result = {
@@ -222,6 +227,52 @@ let score_std_dev (scores : float list) : float =
         acc +. (s -. mean) ** 2.0) 0.0 scores /. n in
       sqrt variance
 
+let score_sample_std_dev (scores : float list) : float =
+  match scores with
+  | [] | [_] -> 0.0
+  | _ ->
+      let n = float_of_int (List.length scores) in
+      let mean = List.fold_left (+.) 0.0 scores /. n in
+      let variance =
+        List.fold_left (fun acc s -> acc +. (s -. mean) ** 2.0) 0.0 scores
+        /. (n -. 1.0)
+      in
+      sqrt variance
+
+let t_critical_95_for_df = function
+  | df when df <= 0 -> 0.0
+  | 1 -> 12.706
+  | 2 -> 4.303
+  | 3 -> 3.182
+  | 4 -> 2.776
+  | 5 -> 2.571
+  | 6 -> 2.447
+  | 7 -> 2.365
+  | 8 -> 2.306
+  | 9 -> 2.262
+  | 10 -> 2.228
+  | 11 -> 2.201
+  | 12 -> 2.179
+  | 13 -> 2.160
+  | 14 -> 2.145
+  | 15 -> 2.131
+  | 16 -> 2.120
+  | 17 -> 2.110
+  | 18 -> 2.101
+  | 19 -> 2.093
+  | 20 -> 2.086
+  | 21 -> 2.080
+  | 22 -> 2.074
+  | 23 -> 2.069
+  | 24 -> 2.064
+  | 25 -> 2.060
+  | 26 -> 2.056
+  | 27 -> 2.052
+  | 28 -> 2.048
+  | 29 -> 2.045
+  | 30 -> 2.042
+  | _ -> 1.960
+
 (** Build eval_result from a list of eval_runs for one scenario. *)
 let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : eval_result =
   let n = List.length runs in
@@ -230,12 +281,25 @@ let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : ev
   let mean = if n = 0 then 0.0
     else List.fold_left (+.) 0.0 scores /. float_of_int n in
   let total_cost = List.fold_left (fun a (r : eval_run) -> a +. r.total_cost_usd) 0.0 runs in
+  let std_dev = score_std_dev scores in
+  let ci95_margin =
+    if n > 1 then
+      t_critical_95_for_df (n - 1)
+      *. score_sample_std_dev scores
+      /. sqrt (float_of_int n)
+    else 0.0
+  in
+  let ci95_low = Float.max 0.0 (mean -. ci95_margin) in
+  let ci95_high = Float.min 1.0 (mean +. ci95_margin) in
   { scenario;
     runs;
     pass_at_k = compute_pass_at_k ~k ~n ~c;
     mean_score = mean;
-    consistency = score_std_dev scores;
+    consistency = std_dev;
     total_cost_usd = total_cost;
+    ci95_low;
+    ci95_high;
+    min_runs_met = n >= min_runs_for_ci;
   }
 
 (* ================================================================ *)
@@ -283,6 +347,9 @@ let eval_result_to_json (r : eval_result) : Yojson.Safe.t =
     ("consistency", `Float r.consistency);
     ("total_cost_usd", `Float r.total_cost_usd);
     ("num_runs", `Int (List.length r.runs));
+    ("ci95_low", `Float r.ci95_low);
+    ("ci95_high", `Float r.ci95_high);
+    ("min_runs_met", `Bool r.min_runs_met);
     ("runs", `List (List.map eval_run_to_json r.runs));
   ]
 

@@ -249,7 +249,7 @@ jobs:
             health_snapshot=true
           fi
 
-          if has_match '^(\.github/workflows/ci\.yml|lib/|dune-project$|dune-workspace$|.*\.opam$|scripts/analyze_lib_deps\.py$|scripts/lib_dep_report\.py$|scripts/lib_dep_delta_ci\.sh$)'; then
+          if has_match '^(\.github/workflows/ci\.yml|lib/|dune-project$|dune-workspace$|.*\.opam$|scripts/analyze_lib_deps\.py$|scripts/lib_dep_report\.py$|scripts/lib_dep_delta_ci\.sh$|scripts/audit-sublib-cycle\.py$)'; then
             lib_deps=true
           fi
 
@@ -363,6 +363,10 @@ jobs:
       - name: Run report self-test
         if: needs.changes.outputs.lib_deps == 'true'
         run: python3 scripts/lib_dep_report.py --self-test
+
+      - name: Sublib boundary gate self-test (RFC-0056 G1)
+        if: needs.changes.outputs.lib_deps == 'true'
+        run: python3 scripts/audit-sublib-cycle.py --self-test
 
       - name: Generate lib dependency delta
         if: needs.changes.outputs.lib_deps == 'true'

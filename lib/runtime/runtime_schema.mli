@@ -129,6 +129,12 @@ type config =
   ; models : model_spec list
   ; bindings : binding list
   ; default_runtime_id : string option
+  ; keeper_assignments : (string * string) list
+    (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
+        Sole SSOT for keeper→runtime assignment (persona⊥{model,runtime}). A
+        keeper absent from this table routes to the default runtime; an
+        assignment to an unknown id is rejected at load. The id is an opaque
+        binding key (only the OAS adapter parses it into provider/model/spec). *)
   }
 [@@deriving show, eq]
 

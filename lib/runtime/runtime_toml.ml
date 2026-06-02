@@ -524,11 +524,47 @@ let extract_after_all_errors_guard ~label = function
          label)
 ;;
 
+(* [[runtime.assignments]] — keeper name → runtime id ["provider.model"]. The
+   sole SSOT for keeper→runtime assignment (persona⊥{model,runtime}). Each
+   value must be a TOML string (an opaque runtime id resolved later against the
+   binding list at {!Runtime.load_list}). A non-string value is a parse error,
+   not a silent drop — an operator typo (e.g. an inline table) must fail loud
+   rather than route the keeper to the default. *)
+let parse_keeper_assignments (toml : Otoml.t)
+  : ((string * string) list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ "runtime"; "assignments" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    let oks, errs =
+      List.partition_map
+        (fun (keeper_name, value) ->
+          match value with
+          | Otoml.TomlString runtime_id -> Left (keeper_name, runtime_id)
+          | _ ->
+            Right
+              { path = Printf.sprintf "runtime.assignments.%s" keeper_name
+              ; message = "keeper runtime assignment must be a string runtime id"
+              })
+        entries
+    in
+    if errs <> [] then Error errs else Ok oks
+  | Some _ ->
+    Error
+      [ { path = "runtime.assignments"
+        ; message = "[runtime.assignments] must be a table of keeper = runtime-id"
+        }
+      ]
+;;
+
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
+  let assignments_result = parse_keeper_assignments toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
-  let all_errors = errs providers_result @ errs models_result in
+  let all_errors =
+    errs providers_result @ errs models_result @ errs assignments_result
+  in
   let bindings = parse_bindings toml in
   let default_runtime_id =
     Otoml.find_opt toml Otoml.get_string [ "runtime"; "default" ]
@@ -540,7 +576,16 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       extract_after_all_errors_guard ~label:"providers" providers_result
     in
     let models = extract_after_all_errors_guard ~label:"models" models_result in
-    Ok { Runtime_schema.providers; models; bindings; default_runtime_id })
+    let keeper_assignments =
+      extract_after_all_errors_guard ~label:"assignments" assignments_result
+    in
+    Ok
+      { Runtime_schema.providers
+      ; models
+      ; bindings
+      ; default_runtime_id
+      ; keeper_assignments
+      })
 ;;
 
 let parse_string (content : string) : (Runtime_schema.config, parse_error list) result =

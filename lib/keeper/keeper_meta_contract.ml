@@ -635,22 +635,6 @@ let missing_required_sandbox_profile_error ~keeper_name
     manifest_hint
 ;;
 
-let runtime_id_of_profile_defaults
-    (defaults : Keeper_types_profile.keeper_profile_defaults) =
-  match defaults.model with
-  | Some runtime_id ->
-    let runtime_id = String.trim runtime_id in
-    if String.equal runtime_id "" then Keeper_config.default_runtime_id ()
-    else runtime_id
-  | None -> Keeper_config.default_runtime_id ()
-;;
-
-let runtime_id_of_meta (meta : keeper_meta) =
-  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
-  | Ok defaults -> runtime_id_of_profile_defaults defaults
-  | Error _ -> Keeper_config.default_runtime_id ()
-;;
-
 let effective_meta_of_profile_defaults
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) : (keeper_meta, string) result =

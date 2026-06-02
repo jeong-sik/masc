@@ -1,0 +1,213 @@
+(** Cdal_evidence_gate — evidence-substantiveness decision tests.
+
+    The gate verifies task/goal completion by the presence of evidence the
+    verifier keeper / human reviewer can inspect downstream: substantive
+    notes plus the contract's required_evidence, or a handoff reference.
+    There is no verdict ledger; the gate consults only the task + notes +
+    handoff. *)
+
+open Alcotest
+open Masc_mcp
+
+module Gate = Cdal_evidence_gate
+
+let make_task
+      ?(id = "task-1")
+      ?(contract : Masc_domain.task_contract option = None)
+      ?(handoff_context : Masc_domain.task_handoff_context option = None)
+      ()
+    : Masc_domain.task
+  =
+  { id
+  ; title = "test"
+  ; description = "test task"
+  ; task_status = Masc_domain.Todo
+  ; priority = 3
+  ; files = []
+  ; created_at = "2026-05-26T00:00:00Z"
+  ; created_by = None
+  ; goal_id = None
+  ; stage = None
+  ; contract
+  ; handoff_context
+  ; cycle_count = 0
+  ; reclaim_policy = None
+  ; do_not_reclaim_reason = None
+  }
+
+let make_contract
+      ?(strict = false)
+      ?(completion_contract = [])
+      ?(required_tools = [])
+      ?(required_evidence = [])
+      ?(inspect_gate_evidence = [])
+      ?(verify_gate_evidence = [])
+      ()
+    : Masc_domain.task_contract
+  =
+  { strict
+  ; completion_contract
+  ; required_tools
+  ; required_evidence
+  ; required_evidence_typed = []
+  ; inspect_gate_evidence
+  ; verify_gate_evidence
+  ; links = { operation_id = None; session_id = None }
+  }
+
+let handoff_with_refs refs : Masc_domain.task_handoff_context =
+  { summary = "submitted"
+  ; reason = None
+  ; next_step = None
+  ; failure_mode = None
+  ; reclaim_policy = None
+  ; evidence_refs = refs
+  ; updated_at = None
+  ; updated_by = None
+  }
+
+(* ─────────────────────────────────────────────────────────────── *)
+(* No contract → Pass (analysis-only task bypass)                   *)
+(* ─────────────────────────────────────────────────────────────── *)
+let test_no_contract_passes () =
+  match
+    Gate.decide
+      ~task_id:"task-analysis"
+      ~task_opt:(Some (make_task ()))
+      ~notes:""
+      ~handoff_context:None
+      ()
+  with
+  | Gate.Pass -> ()
+  | Gate.Reject { rule_id; _ } ->
+    failf "no-contract task should Pass, got Reject rule_id=%s" rule_id
+
+let test_no_task_passes () =
+  match
+    Gate.decide
+      ~task_id:"task-ghost"
+      ~task_opt:None
+      ~notes:""
+      ~handoff_context:None
+      ()
+  with
+  | Gate.Pass -> ()
+  | Gate.Reject { rule_id; _ } ->
+    failf "missing task should Pass, got Reject rule_id=%s" rule_id
+
+(* Contract + all required_evidence mentioned + substantive notes → Pass *)
+let test_required_evidence_satisfied_passes () =
+  let contract = make_contract ~required_evidence:[ "src/main.ml" ] () in
+  let task = make_task ~contract:(Some contract) () in
+  match
+    Gate.decide
+      ~task_id:"task-ev"
+      ~task_opt:(Some task)
+      ~notes:"completed work on src/main.ml"
+      ~handoff_context:None
+      ()
+  with
+  | Gate.Pass -> ()
+  | Gate.Reject { rule_id; _ } ->
+    failf "satisfied required_evidence should Pass, got Reject rule_id=%s" rule_id
+
+(* Contract (no required_evidence) + substantive notes → Pass *)
+let test_substantive_notes_pass () =
+  let task = make_task ~contract:(Some (make_contract ())) () in
+  match
+    Gate.decide
+      ~task_id:"task-notes"
+      ~task_opt:(Some task)
+      ~notes:"see commit abc123 for the typed evidence-gate collapse"
+      ~handoff_context:None
+      ()
+  with
+  | Gate.Pass -> ()
+  | Gate.Reject { rule_id; _ } ->
+    failf "substantive notes should Pass, got Reject rule_id=%s" rule_id
+
+(* Contract (no required_evidence) + handoff reference url, empty notes → Pass *)
+let test_handoff_reference_passes () =
+  let task = make_task ~contract:(Some (make_contract ())) () in
+  match
+    Gate.decide
+      ~task_id:"task-handoff"
+      ~task_opt:(Some task)
+      ~notes:""
+      ~handoff_context:
+        (Some (handoff_with_refs [ "https://example.test/pr/42" ]))
+      ()
+  with
+  | Gate.Pass -> ()
+  | Gate.Reject { rule_id; _ } ->
+    failf "handoff reference should Pass, got Reject rule_id=%s" rule_id
+
+(* Contract + required_evidence unsatisfied → Reject *)
+let test_required_evidence_unsatisfied_rejects () =
+  let contract =
+    make_contract ~required_evidence:[ "test_results"; "coverage_report" ] ()
+  in
+  let task = make_task ~contract:(Some contract) () in
+  match
+    Gate.decide
+      ~task_id:"task-missing"
+      ~task_opt:(Some task)
+      ~notes:"finished the work, see PR"
+      ~handoff_context:None
+      ()
+  with
+  | Gate.Pass -> fail "unsatisfied required_evidence must Reject"
+  | Gate.Reject { rule_id; payload_json; _ } ->
+    check string "rule_id" Gate.rule_id_evidence_incomplete rule_id;
+    (match payload_json with
+     | `Assoc fields ->
+       (match List.assoc_opt "required_evidence_unsatisfied" fields with
+        | Some (`List xs) -> check int "unsatisfied count" 2 (List.length xs)
+        | _ -> fail "payload missing required_evidence_unsatisfied");
+       (match List.assoc_opt "evidence_summary" fields with
+        | Some (`Assoc _) -> ()
+        | _ -> fail "payload missing evidence_summary")
+     | _ -> fail "payload is not Assoc")
+
+(* Contract (no required_evidence) + placeholder notes, no handoff → Reject *)
+let test_placeholder_notes_reject () =
+  let task = make_task ~contract:(Some (make_contract ())) () in
+  List.iter
+    (fun placeholder ->
+       match
+         Gate.decide
+           ~task_id:"task-placeholder"
+           ~task_opt:(Some task)
+           ~notes:placeholder
+           ~handoff_context:None
+           ()
+       with
+       | Gate.Pass ->
+         failf "placeholder note %S should Reject" placeholder
+       | Gate.Reject { rule_id; _ } ->
+         check string "rule_id" Gate.rule_id_evidence_incomplete rule_id)
+    [ ""; "done"; "ok"; "n/a"; "pending"; "draft" ]
+
+let test_rule_id_constant_stable () =
+  check string "evidence_incomplete rule_id" "cdal_evidence_incomplete"
+    Gate.rule_id_evidence_incomplete
+
+let () =
+  Alcotest.run
+    "cdal_evidence_gate"
+    [ ( "evidence-substantiveness"
+      , [ test_case "no contract → Pass" `Quick test_no_contract_passes
+        ; test_case "no task → Pass" `Quick test_no_task_passes
+        ; test_case "required_evidence satisfied → Pass" `Quick
+            test_required_evidence_satisfied_passes
+        ; test_case "substantive notes → Pass" `Quick test_substantive_notes_pass
+        ; test_case "handoff reference → Pass" `Quick test_handoff_reference_passes
+        ; test_case "required_evidence unsatisfied → Reject" `Quick
+            test_required_evidence_unsatisfied_rejects
+        ; test_case "placeholder notes → Reject" `Quick
+            test_placeholder_notes_reject
+        ] )
+    ; ( "stable constants"
+      , [ test_case "rule_id constant" `Quick test_rule_id_constant_stable ] )
+    ]
+;;

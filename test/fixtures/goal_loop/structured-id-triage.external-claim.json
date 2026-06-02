@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "triage_id": "goal-loop-structured-id-family-triage-2026-05-06",
+  "source_catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
+  "status": "TRIAGED",
+  "expected_uncataloged_ids_total": 72,
+  "expected_uncataloged_occurrences": 260,
+  "scope_note": "Ownership manifest for broader structured IDs found in the prompt-supplied GOAL LOOP source documents but intentionally not folded into the strict 206-row audit catalog.",
+  "families": [
+    {
+      "family": "F",
+      "uncataloged": 4,
+      "owner_catalog": "llm_compatibility_failure_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md"],
+      "sample_ids": ["F01", "F02", "F03", "F04"]
+    },
+    {
+      "family": "NEW",
+      "uncataloged": 10,
+      "owner_catalog": "live_issue_backlog_delta_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md"],
+      "sample_ids": ["NEW-1", "NEW-10", "NEW-2", "NEW-3", "NEW-4", "NEW-5", "NEW-6", "NEW-7", "NEW-8", "NEW-9"]
+    },
+    {
+      "family": "P-DASH",
+      "uncataloged": 13,
+      "owner_catalog": "dashboard_heuristic_backlog_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": [
+        "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
+        "prompt_corpus/GOAL_LOOP/artifact_synthesis.md"
+      ],
+      "sample_ids": ["P-DASH-01", "P-DASH-02", "P-DASH-03", "P-DASH-04", "P-DASH-06", "P-DASH-07", "P-DASH-08", "P-DASH-09", "P-DASH-10", "P-DASH-11"]
+    },
+    {
+      "family": "P-EIO",
+      "uncataloged": 7,
+      "owner_catalog": "eio_runtime_backlog_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/artifact_synthesis.md"],
+      "sample_ids": ["P-EIO-01", "P-EIO-02", "P-EIO-04", "P-EIO-05", "P-EIO-06", "P-EIO-07", "P-EIO-08"]
+    },
+    {
+      "family": "P-FSM",
+      "uncataloged": 10,
+      "owner_catalog": "goal_task_fsm_backlog_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/artifact_synthesis.md"],
+      "sample_ids": ["P-FSM-01", "P-FSM-02", "P-FSM-03", "P-FSM-04", "P-FSM-05", "P-FSM-06", "P-FSM-07", "P-FSM-08", "P-FSM-09", "P-FSM-10"]
+    },
+    {
+      "family": "P-HARD",
+      "uncataloged": 5,
+      "owner_catalog": "hardcoded_boundary_backlog_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/artifact_synthesis.md"],
+      "sample_ids": ["P-HARD-01", "P-HARD-02", "P-HARD-03", "P-HARD-04", "P-HARD-05"]
+    },
+    {
+      "family": "P-MUT",
+      "uncataloged": 2,
+      "owner_catalog": "mutation_safety_backlog_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/artifact_synthesis.md"],
+      "sample_ids": ["P-MUT-01", "P-MUT-02"]
+    },
+    {
+      "family": "P-PROAC",
+      "uncataloged": 1,
+      "owner_catalog": "proactive_keeper_backlog_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/artifact_synthesis.md"],
+      "sample_ids": ["P-PROAC-01"]
+    },
+    {
+      "family": "P-PROV",
+      "uncataloged": 4,
+      "owner_catalog": "provider_runtime_backlog_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/artifact_synthesis.md"],
+      "sample_ids": ["P-PROV-01", "P-PROV-02", "P-PROV-03", "P-PROV-04"]
+    },
+    {
+      "family": "P-STR",
+      "uncataloged": 3,
+      "owner_catalog": "string_matching_backlog_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/artifact_synthesis.md"],
+      "sample_ids": ["P-STR-01", "P-STR-02", "P-STR-03"]
+    },
+    {
+      "family": "P-TURN",
+      "uncataloged": 3,
+      "owner_catalog": "turn_slot_backlog_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/artifact_synthesis.md"],
+      "sample_ids": ["P-TURN-02", "P-TURN-03", "P-TURN-04"]
+    },
+    {
+      "family": "S",
+      "uncataloged": 10,
+      "owner_catalog": "llm_compatibility_scenario_catalog",
+      "disposition": "separate_catalog",
+      "source_paths": ["prompt_corpus/GOAL_LOOP/llm_compatibility.agent.final.md"],
+      "sample_ids": ["S01", "S02", "S03", "S04", "S05", "S06", "S07", "S08", "S09", "S10"]
+    }
+  ]
+}

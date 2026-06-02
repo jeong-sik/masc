@@ -1,0 +1,234 @@
+import { html } from 'htm/preact'
+import type { ComponentChildren } from 'preact'
+import { useState } from 'preact/hooks'
+import { TimeAgo } from './common/time-ago'
+import type { Keeper } from '../types'
+import { keepers } from '../store'
+import { KeeperPhaseAndStage } from './keeper-phase-indicator'
+import { keeperDisplayModel } from '../lib/keeper-runtime-display'
+
+function SectionLabel({ children }: { children: unknown }) {
+  return html`<div class="text-3xs font-semibold uppercase tracking-[var(--track-label)] text-[var(--color-fg-muted)]">${children}</div>`
+}
+
+function KeeperModelChip({ keeper }: { keeper: Keeper }) {
+  const display = keeperDisplayModel(keeper)
+  if (!display) return null
+  return html`
+    <span
+      class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-20)]"
+      title=${`${display.label}: ${display.value}`}
+    >${display.value}</span>
+  `
+}
+
+export function KeeperDetailMissingState({
+  keeperName,
+  onClose,
+}: {
+  keeperName: string
+  onClose: () => void
+}) {
+  // #12283: split the message by registry state. If [keepers.value] is empty
+  // we are likely in a refresh transition (data still loading); if it has
+  // entries but our target is missing, the keeper is genuinely absent — most
+  // commonly a stale-watchdog kill (KeeperHeartbeat.tla idle_turn class) or
+  // an operator stop. Naming the cause lets the operator decide between
+  // "wait for refresh" and "filter is pointing at a dead keeper".
+  const liveCount = keepers.value.length
+  const isLikelyDead = liveCount > 0
+  const explanation = isLikelyDead
+    ? `현재 fleet에 ${keeperName}이(가) 없습니다 (live ${liveCount}명). watchdog 종료 또는 operator stop 가능성이 높습니다 — masc_keeper_stale_termination_total{keeper=\"${keeperName}\"} 에서 종료 시각을 확인하세요.`
+    : '레지스트리가 아직 로드되지 않았습니다. 잠시 후 자동 갱신됩니다.'
+  return html`
+    <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
+      <div class="rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 py-6 shadow-[var(--shadow-raised)]">
+        <${SectionLabel}>키퍼 상세</${SectionLabel}>
+        <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--color-fg-primary)]">${keeperName}</h2>
+        <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
+          ${explanation}
+        </p>
+        <div class="mt-4">
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+            onClick=${onClose}
+          >
+            목록으로 돌아가기
+          </button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+export function KeeperDetailHeaderInfo({
+  keeper,
+  titleId,
+  phaseEnteredAtSec,
+  onClose,
+}: {
+  keeper: Keeper
+  titleId: string
+  phaseEnteredAtSec: number | null
+  onClose: () => void
+}) {
+  return html`
+    <div class="flex min-w-0 flex-wrap items-start gap-4">
+      <button
+        type="button"
+        onClick=${onClose}
+        class="inline-flex shrink-0 items-center gap-2 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+      >
+        <span aria-hidden="true">←</span>
+        목록
+      </button>
+      <div class="size-12 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
+      <div class="flex min-w-[12rem] flex-1 flex-col gap-0.5">
+        <${SectionLabel}>모니터링 / 에이전트 / 키퍼 상세</${SectionLabel}>
+        <div class="mt-1 flex flex-wrap items-center gap-2.5">
+          <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>
+          <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />
+          <${KeeperModelChip} keeper=${keeper} />
+        </div>
+        ${keeper.koreanName || keeper.created_at ? html`
+          <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--color-fg-muted)]">
+            ${keeper.koreanName ? html`<span>${keeper.koreanName}</span>` : null}
+            ${'' /* 활동 시각은 사이드바의 keeperActivityDisplay()가 SSOT. 여기서는 keeper 생성 시각만 표시하며 라벨로 의미를 분리한다. */}
+            ${keeper.created_at ? html`<span class="font-mono tabular-nums opacity-60">생성 <${TimeAgo} timestamp=${keeper.created_at} /></span>` : null}
+          </div>
+        ` : null}
+      </div>
+    </div>
+  `
+}
+
+type KeeperDetailSectionId =
+  | 'keeper-summary'
+  | 'keeper-comms'
+  | 'keeper-runtime'
+  | 'keeper-identity'
+  | 'keeper-config'
+  | 'keeper-debug'
+
+const KEEPER_DETAIL_SECTIONS: Array<{
+  id: KeeperDetailSectionId
+  label: string
+  summary: string
+}> = [
+  {
+    id: 'keeper-summary',
+    label: '상태 개요',
+    summary: '상태 기계, KPI, 메모리/추론 지표를 먼저 봅니다.',
+  },
+  {
+    id: 'keeper-comms',
+    label: '대화 / 세션',
+    summary: '실시간 대화와 세션 이벤트를 함께 봅니다.',
+  },
+  {
+    id: 'keeper-runtime',
+    label: '진단 / 운영',
+    summary: 'runtime action, eval, supervisor, 품질 시그널을 모았습니다.',
+  },
+  {
+    id: 'keeper-identity',
+    label: '정체성 / 세대',
+    summary: '프로필, 관계, generation lineage, checkpoint를 함께 봅니다.',
+  },
+  {
+    id: 'keeper-config',
+    label: '설정 / 작업 방식',
+    summary: '허용 도구, repos, config를 한 곳에서 조정합니다.',
+  },
+  {
+    id: 'keeper-debug',
+    label: '디버그',
+    summary: '저널과 원시 데이터를 마지막에 몰아 둡니다.',
+  },
+]
+
+function scrollToKeeperDetailSection(sectionId: KeeperDetailSectionId): void {
+  document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+// `KeeperDetailOverviewSidebar` previously rendered a 4-cell QuickFact
+// grid (상태 / 컨텍스트 / 런타임 / 최근 활동) above the navigation. Each
+// cell duplicated information shown elsewhere on the page (page header
+// status chip, KpiGrid context ratio, hardcoded placeholder
+// '런타임 runtime', page header activity subtitle). The grid was removed
+// 2026-05-19 as part of the SSOT reconciliation plan (Phase 5). What
+// remains is the sticky scroll navigation — the only piece that was
+// providing unique value.
+export function KeeperDetailOverviewSidebar() {
+  return html`
+    <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start" aria-label="키퍼 프로필 요약">
+      <div class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3.5 shadow-[var(--shadow-panel)]">
+        <${SectionLabel}>빠른 이동</${SectionLabel}>
+        <div class="mt-3 flex flex-col gap-2">
+          ${KEEPER_DETAIL_SECTIONS.map((section) => html`
+            <button
+              type="button"
+              class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg-hover)]"
+              onClick=${() => scrollToKeeperDetailSection(section.id)}
+            >
+              <div class="text-sm font-medium text-[var(--color-fg-primary)]">${section.label}</div>
+              <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${section.summary}</div>
+            </button>
+          `)}
+        </div>
+      </div>
+    </aside>
+  `
+}
+
+export function KeeperDetailSection({
+  id,
+  eyebrow,
+  title,
+  defaultCollapsed = false,
+  children,
+}: {
+  id: KeeperDetailSectionId
+  eyebrow: string
+  title: string
+  /** When true, the section body starts collapsed and the operator
+   *  expands it by clicking the header. Defaults to expanded so the
+   *  long-standing always-open behaviour is preserved for callers
+   *  that do not opt in. Quick-jump links via [scrollToKeeperDetailSection]
+   *  still resolve to the header anchor regardless of the body state. */
+  defaultCollapsed?: boolean
+  children: ComponentChildren
+}) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed)
+  const bodyId = `${id}-body`
+  return html`
+    <section
+      id=${id}
+      class="scroll-mt-24 rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]"
+      aria-label=${title}
+    >
+      <button
+        type="button"
+        class="flex w-full items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-5 py-4 text-left transition-colors hover:bg-[var(--color-bg-hover)] sm:px-6"
+        aria-expanded=${!collapsed}
+        aria-controls=${bodyId}
+        onClick=${() => setCollapsed((c: boolean) => !c)}
+      >
+        <div class="min-w-0">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-muted)]">${eyebrow}</div>
+          <h3 class="m-0 mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">${title}</h3>
+        </div>
+        <span
+          aria-hidden="true"
+          class=${`shrink-0 text-[var(--color-fg-muted)] transition-transform duration-[var(--t-med)] ${collapsed ? '' : 'rotate-180'}`}
+        >▾</span>
+      </button>
+      ${collapsed ? null : html`
+        <div id=${bodyId} class="flex flex-col gap-4 px-5 py-5 sm:px-6">
+          ${children}
+        </div>
+      `}
+    </section>
+  `
+}

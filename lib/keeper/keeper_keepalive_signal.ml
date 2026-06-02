@@ -1,0 +1,498 @@
+(* keeper_keepalive_signal — gRPC client refs, FSM guard identity helpers,
+   interruptible sleep, wakeup dispatch, board-reactive wakeup filtering,
+   stage_timing type, event dispatch helpers.
+
+   Extracted from keeper_keepalive.ml. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
+open Keeper_memory
+open Keeper_execution
+
+(** Optional gRPC client + env — WORM Atomic: set at server bootstrap
+    when [MASC_AGENT_TRANSPORT=grpc]. *)
+let grpc_client_ref : Masc_grpc_client.t option Atomic.t = Atomic.make None
+
+let grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
+
+let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
+  Atomic.set grpc_client_ref (Some c);
+  Atomic.set grpc_env_ref env
+;;
+
+(* Skip log throttle removed with manual_reconcile blocker — no more
+   sticky reconcile state means no flood of "reconcile pending" skip logs. *)
+
+let format_since_last_scheduled_autonomous = function
+  | Some s when s = max_int -> "never"
+  | Some s -> string_of_int s
+  | None -> "-"
+
+(* ── KeeperHeartbeat.tla spec-action runtime guards (Cycle 43) ────────
+
+   Identity helpers carrying [@@fsm_guard] payloads that mirror the
+   honest actions of [specs/keeper-state-machine/KeeperHeartbeat.tla].
+   Each helper is wrapped at the call site by
+   [Keeper_fsm_guard_runtime.wrap_unit], so an [Assert_failure] from a
+   PPX-injected guard increments the Prometheus violation counter and
+   re-raises. The bug-action [MissedWakeup] is
+   intentionally NOT instrumented — it is the failure mode these guards
+   are designed to detect, not to enforce. *)
+
+(* Heartbeat turn lifecycle flag, mirroring KeeperHeartbeat.tla's
+   [turn_state] in the {"idle", "running"} alphabet. Read inside
+   identity helpers; written by the caller around [run_heartbeat_loop]
+   and the dispatch sites. Single-fiber by construction — only the
+   keeper's own heartbeat loop touches its [turn_running] ref. *)
+let pre_turn_complete_heartbeat ~(turn_running : bool ref) = ignore turn_running
+  [@@fsm_guard "!turn_running = true"]
+
+let post_turn_complete_heartbeat ~(turn_running : bool ref) = ignore turn_running
+  [@@fsm_guard "!turn_running = false"]
+
+(* WakeupSignal: external code sets the wakeup atomic to TRUE. Spec
+   says the post-condition is [wakeup_signaled = TRUE]. The OCaml
+   [Atomic.set] is idempotent so the assert is trivially true on the
+   honest path; the guard catches a regression where someone replaces
+   [Atomic.set ... true] with [Atomic.set ... false] or forgets the
+   set entirely. *)
+let post_wakeup_signal ~(wakeup : bool Atomic.t) = ignore wakeup
+  [@@fsm_guard "Atomic.get wakeup = true"]
+
+(* SubmitTask (KeeperTaskAcquisition.tla, Cycle 44): an external
+   producer (operator directive in this case) attaches a task_id to the
+   keeper's [current_task_id]. The post-action invariant is that the
+   meta carries the assigned id after [persist_directive_meta_update]
+   returns. The honest path is trivially true; the guard catches a
+   regression where someone updates [persist_directive_meta_update] to
+   skip the [current_task_id] field or persist a different id. *)
+let post_submit_task ~(meta : keeper_meta) ~(task_id : Keeper_id.Task_id.t) =
+  ignore meta; ignore task_id
+  [@@fsm_guard "meta.current_task_id = Some task_id"]
+
+(* HeartbeatTick: the [compare_and_set wakeup true false] in
+   [interruptible_sleep] succeeded — wakeup transitioned TRUE -> FALSE
+   and the sleep returned so the loop can dispatch. Spec post-condition
+   is [wakeup_signaled = FALSE]. False-positive risk: a producer that
+   re-sets the atomic to TRUE between the CAS and this read would make
+   the guard fire. The [interruptible_sleep] body is single-fiber and
+   the only producer is external, so the window is one tick and the
+   counter signal is operationally meaningful — a non-zero count means
+   producers are racing the consumer, which is itself a bug class. *)
+let post_heartbeat_tick ~(wakeup : bool Atomic.t) = ignore wakeup
+  [@@fsm_guard "Atomic.get wakeup = false"]
+
+type sleep_outcome =
+  | Stopped
+  | Woken
+  | Timeout
+
+(** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
+    effect within ~chunk_sec instead of waiting for the full interval. *)
+let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
+  let chunk_sec = Env_config.KeeperKeepalive.sleep_chunk_sec in
+  let rec wait remaining =
+    if Atomic.get stop
+    then Stopped
+    else if (* Spec: KeeperHeartbeat.tla HeartbeatTick action — wakeup is
+              consumed (TRUE -> FALSE) and the caller proceeds to dispatch.
+              Returning [Woken] lets [run_smart_heartbeat_gate] honour
+              the spec's [turn_state' = "running"] postcondition; without
+              the discriminator the [Skip_idle] branch would consume the
+              CAS and then skip the cycle (the [MissedWakeup] bug-action). *)
+            Atomic.compare_and_set wakeup true false
+    then (
+      (* Cycle 43: post-action guard mirrors the spec's [wakeup_signaled =
+         FALSE] postcondition. The [@@fsm_guard] PPX routes the
+         assertion through [wrap_unit ~stage:"guard"] automatically. *)
+      post_heartbeat_tick ~wakeup;
+      Woken)
+    else if remaining <= 0.0
+    then Timeout
+    else (
+      let chunk = Float.min chunk_sec remaining in
+      Eio.Time.sleep clock chunk;
+      wait (remaining -. chunk))
+  in
+  wait duration
+;;
+
+(** Wake up a specific keeper immediately, causing it to skip the rest of
+    its sleep and run the next heartbeat cycle. Used by broadcast notification
+    when a @mention targets a running keeper.
+
+    When [?stimulus] is provided, the stimulus is appended to the keeper's
+    Event Layer queue ([Keeper_registry_event_queue.enqueue]) before the wakeup
+    flag flips. This is RFC-0020 Rule 1 (enqueue is independent of policy)
+    + the data-channel half of the layer split — [fiber_wakeup] remains the
+    hint signal, the queue is the authoritative payload. *)
+let wakeup_keeper ?base_path ?stimulus name =
+  Keeper_registry.all ?base_path ()
+  |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+    if String.equal entry.name name && entry.phase = Keeper_state_machine.Running
+    then begin
+      Option.iter
+        (fun s ->
+          Keeper_registry_event_queue.enqueue ~base_path:entry.base_path name s)
+        stimulus;
+      Keeper_registry.wakeup ~base_path:entry.base_path name
+    end)
+;;
+
+(** Wake up all running keepers — used when a broadcast mentions @@all
+    or when a system-wide event requires immediate attention.
+    [None] preserves the legacy global wakeup behavior. *)
+let wakeup_all_keepers ?base_path () =
+  match base_path with
+  | None -> Keeper_registry.wakeup_all ()
+  | Some expected ->
+      Keeper_registry.all ~base_path:expected ()
+      |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
+           if entry.phase = Keeper_state_machine.Running then
+             Keeper_registry.wakeup ~base_path:entry.base_path entry.name)
+
+(* ── Board-reactive policy constants ── *)
+
+let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
+
+let board_reactive_generic_wakeup_limit =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_BOARD_GENERIC_WAKEUP_LIMIT"
+    ~default:3
+    ~min_v:0
+    ~max_v:20
+;;
+
+let board_reactive_wakeup_max =
+  Keeper_config.int_of_env_default
+    "MASC_KEEPER_BOARD_WAKEUP_MAX" ~default:4 ~min_v:1 ~max_v:64
+;;
+
+let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
+  Keeper_registry.board_wakeup_allowed
+    ~base_path
+    keeper_name
+    ~post_id
+    ~debounce_sec:board_reactive_debounce_sec
+;;
+
+let take = List.take
+
+let select_board_wakeup_candidates
+    ?(generic_limit = board_reactive_generic_wakeup_limit)
+    ?(total_limit = board_reactive_wakeup_max)
+    candidates =
+  let explicit =
+    candidates
+    |> List.filter_map (fun (item, reason) ->
+      match reason with
+      | Some "explicit_mention" -> Some (item, "explicit_mention")
+      | _ -> None)
+  in
+  match explicit with
+  | _ :: _ -> explicit, 0
+  | [] ->
+    let selected_by_reason, generic_dropped =
+      List.fold_left
+        (fun (selected, generic_seen, generic_dropped) (item, reason) ->
+          match reason with
+          | None -> selected, generic_seen, generic_dropped
+          | Some "board_activity" ->
+            let next_seen = generic_seen + 1 in
+            if generic_seen < generic_limit then
+              (item, "board_activity") :: selected, next_seen, generic_dropped
+            else
+              selected, next_seen, generic_dropped + 1
+          | Some reason -> (item, reason) :: selected, generic_seen, generic_dropped)
+        ([], 0, 0)
+        candidates
+      |> fun (selected_rev, _generic_seen, generic_dropped) ->
+      List.rev selected_rev, generic_dropped
+    in
+    let prioritized =
+      let non_generic, generic =
+        List.partition (fun (_, reason) -> reason <> "board_activity")
+          selected_by_reason
+      in
+      non_generic @ generic
+    in
+    let selected = take total_limit prioritized in
+    let total_dropped = List.length prioritized - List.length selected in
+    selected, generic_dropped + total_dropped
+;;
+
+let board_signal_kind_to_string = function
+  | Board_dispatch.Board_post_created -> "post_created"
+  | Board_dispatch.Board_comment_added -> "comment_added"
+;;
+
+let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.board_signal) =
+  let payload =
+    `Assoc
+      [ "source", `String "board_signal"
+      ; "kind", `String (board_signal_kind_to_string signal.kind)
+      ; "post_id", `String signal.post_id
+      ; "author", `String signal.author
+      ; "title", `String signal.title
+      ; "content", `String signal.content
+      ; "hearth", Json_util.string_opt_to_json signal.hearth
+      ; ( "updated_at_unix", Json_util.float_opt_to_json signal.updated_at )
+      ; "wake_reason", `String reason
+      ]
+    |> Yojson.Safe.to_string
+  in
+  { Keeper_event_queue.post_id = signal.post_id
+  ; urgency =
+      (if String.equal reason "explicit_mention"
+       then Keeper_event_queue.Immediate
+       else Keeper_event_queue.Normal)
+  ; arrived_at = Time_compat.now ()
+  ; payload
+  }
+;;
+
+let board_signal_entry_is_wakeup_candidate (entry : Keeper_registry.registry_entry) =
+  match entry.phase with
+  | Keeper_state_machine.Running | Keeper_state_machine.Paused -> true
+  | _ -> false
+;;
+
+let board_signal_wake_paused_keeper
+      ~(config : Workspace.config)
+      ~(stimulus : Keeper_event_queue.stimulus)
+      (meta : keeper_meta)
+  =
+  let resumed_meta = { meta with paused = false; updated_at = now_iso () } in
+  match
+    write_meta_with_merge
+      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+      config
+      resumed_meta
+  with
+  | Ok () ->
+    Keeper_registry.update_meta ~base_path:config.base_path meta.name resumed_meta;
+    Keeper_registry.dispatch_event_unit
+      ~base_path:config.base_path
+      resumed_meta.name
+      Keeper_state_machine.Operator_resume;
+    Keeper_registry_event_queue.enqueue
+      ~base_path:config.base_path
+      resumed_meta.name
+      stimulus;
+    Keeper_registry.wakeup ~base_path:config.base_path resumed_meta.name;
+    Ok ()
+  | Error err ->
+    Prometheus.inc_counter
+      Keeper_metrics.(to_string WriteMetaFailures)
+      ~labels:[ ("keeper", meta.name); ("phase", "board_signal_resume_sync") ]
+      ();
+    Error (Printf.sprintf "failed to write resumed meta: %s" err)
+;;
+
+let board_signal_wake_keeper
+      ~(config : Workspace.config)
+      ~(reason : string)
+      ~(signal : Board_dispatch.board_signal)
+      (meta : keeper_meta)
+  =
+  let stimulus = board_signal_stimulus ~reason signal in
+  if meta.paused
+  then board_signal_wake_paused_keeper ~config ~stimulus meta
+  else (
+    wakeup_keeper ~base_path:config.base_path ~stimulus meta.name;
+    Ok ())
+;;
+
+let wakeup_relevant_keeper_for_board_signal
+      ~(config : Workspace.config)
+      (signal : Board_dispatch.board_signal)
+  =
+  let registry_entries =
+    Keeper_registry.all ~base_path:config.base_path ()
+    |> List.filter board_signal_entry_is_wakeup_candidate
+  in
+  let signal_kind_label =
+    match signal.kind with
+    | Board_dispatch.Board_post_created -> "post_created"
+    | Board_dispatch.Board_comment_added -> "comment_added"
+  in
+  (* Yield meter: scanning all running keepers' meta files is CPU-bound
+     when many keepers share a domain.  Yield every ~1000 iterations. *)
+  let board_ym = Eio_guard.create_yield_meter () in
+  let candidates =
+    registry_entries
+    |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
+      let result =
+        match read_meta config entry.name with
+        | Ok (Some meta) ->
+          let wake_reason =
+            Keeper_world_observation.board_signal_wake_reason
+              ~continuity_summary:meta.continuity_summary
+              ~meta
+              ~signal
+          in
+          (* Visibility for the REPO_WAKE_UP audit finding: a [None]
+             wake_reason means the running keeper had no explicit_mention
+             match, scope feed disabled, and (for comments) no external
+             reply after a self-comment. Without this counter, operators
+             cannot distinguish between a board post that legitimately
+             had no addressee and one that was silently dropped by a
+             keeper whose mention_targets configuration is too narrow. *)
+          (match wake_reason, entry.phase with
+           | None, Keeper_state_machine.Running ->
+             Prometheus.inc_counter
+               Keeper_metrics.(to_string BoardSignalNoWakeTotal)
+               ~labels:[
+                 ("keeper", meta.name);
+                 ("kind", signal_kind_label);
+               ]
+               ()
+           | None, _ | Some _, _ -> ());
+          (match entry.phase, wake_reason with
+           | Keeper_state_machine.Paused, Some "explicit_mention" ->
+             Some (meta, wake_reason)
+           | Keeper_state_machine.Paused, _ -> None
+           | Keeper_state_machine.Running, _ -> Some (meta, wake_reason)
+           | _ -> None)
+        | _ -> None
+      in
+      Eio_guard.yield_step board_ym;
+      result)
+  in
+  let wake_meta (meta : keeper_meta) reason =
+    if
+      board_reactive_wakeup_allowed
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+        ~post_id:signal.post_id
+    then (
+      match board_signal_wake_keeper ~config ~reason ~signal meta with
+      | Ok () ->
+        Log.Keeper.info
+          "board signal wakeup: keeper=%s reason=%s post=%s paused_auto_resume=%b"
+          meta.name
+          reason
+          signal.post_id
+          meta.paused
+      | Error err ->
+        Log.Keeper.warn
+          "board signal wakeup failed: keeper=%s reason=%s post=%s error=%s"
+          meta.name
+          reason
+          signal.post_id
+          err)
+  in
+  let selected, dropped = select_board_wakeup_candidates candidates in
+  let yield_meter = Eio_guard.create_yield_meter ~interval:1 () in
+  selected
+  |> List.iter (fun (meta, reason) ->
+         wake_meta meta reason;
+         Eio_guard.yield_step yield_meter);
+  if dropped > 0 then begin
+    (* Counter tracks wakeups dropped by the cap, not capped events; under
+       high fanout [dropped] can be >1 per signal, so add the actual amount
+       (not a fixed 1) to keep BOARD-CAPPED accurate on the compact dashboard. *)
+    Prometheus.inc_counter
+      Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
+      ~labels:[("kind", signal_kind_label)]
+      ~delta:(float_of_int dropped)
+      ();
+    Log.Keeper.info
+      "board signal wakeup capped by configured fanout: dropped=%d post=%s \
+       generic_limit=%d total_limit=%d"
+      dropped
+      signal.post_id
+      board_reactive_generic_wakeup_limit
+      board_reactive_wakeup_max
+  end
+;;
+
+(* Per-stage timing accumulator for Phase 0 profiling.
+   In-memory ring of last 100 cycles. Flushed as aggregate at snapshot cadence.
+   No additional file I/O — appended to existing snapshot JSON. *)
+type stage_timing =
+  { presence_ms : float
+  ; snapshot_ms : float
+  ; board_ms : float
+  ; turn_ms : float
+  ; recurring_ms : float
+  }
+
+let stage_timing_ring_size () =
+  Runtime_params.get Governance_registry.keeper_stage_timing_ring_size
+;;
+
+let percentile arr p =
+  let n = Array.length arr in
+  if n = 0
+  then 0.0
+  else (
+    let sorted = Array.copy arr in
+    Array.sort Float.compare sorted;
+    let idx = Float.to_int (Float.round (float_of_int (n - 1) *. p)) in
+    sorted.(min idx (n - 1)))
+;;
+
+let stage_timing_to_json ~ring ~count =
+  let n = min count (Array.length ring) in
+  if n = 0
+  then `Null
+  else (
+    let extract field =
+      let arr = Array.init n (fun i -> field ring.(i)) in
+      `Assoc
+        [ "p50", `Float (percentile arr 0.5)
+        ; "p95", `Float (percentile arr 0.95)
+        ; "max", `Float (percentile arr 1.0)
+        ; "samples", `Int n
+        ]
+    in
+    `Assoc
+      [ "presence", extract (fun t -> t.presence_ms)
+      ; "snapshot", extract (fun t -> t.snapshot_ms)
+      ; "board", extract (fun t -> t.board_ms)
+      ; "turn", extract (fun t -> t.turn_ms)
+      ; "recurring", extract (fun t -> t.recurring_ms)
+      ])
+;;
+
+let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string) =
+  match Keeper_registry.get_phase ~base_path:ctx.config.base_path keeper_name with
+  | None -> true
+  | Some (Keeper_state_machine.Stopped | Keeper_state_machine.Dead) -> false
+  | Some _ -> true
+
+let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
+  if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
+    Keeper_registry.dispatch_event_unit
+      ~base_path:ctx.config.base_path keeper_name event
+
+let dispatch_keepalive_event_with_audit
+      ~(ctx : _ context)
+      ~(keeper_name : string)
+      ~snapshot
+      ~events_fired
+      ~selected_event
+      event
+  =
+  if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
+    (match Keeper_registry.dispatch_event_with_audit_and_log
+       ~base_path:ctx.config.base_path
+       ~snapshot
+       ~events_fired
+       ~selected_event
+       keeper_name
+       event
+     with
+     | Ok _ -> ()
+     | Error err ->
+         Prometheus.inc_counter
+           Keeper_metrics.(to_string KeepaliveSignalFailures)
+           ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
+           ();
+         Log.Keeper.warn
+           "%s: keepalive late-event dispatch rejected: %s"
+           keeper_name
+           (Keeper_state_machine.transition_error_to_string err))

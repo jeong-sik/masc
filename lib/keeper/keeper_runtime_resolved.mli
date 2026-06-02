@@ -1,0 +1,75 @@
+(** Keeper_runtime_resolved — freeze keeper runtime knobs after bootstrap.
+
+    Values resolve with the existing precedence order:
+    environment > keeper_runtime.toml boot override > compiled default.
+
+    Before [init] is called, readers see a live snapshot of the current env/boot
+    override state. After [init], reads are frozen to the bootstrap snapshot so
+    late env drift cannot change keeper execution behaviour. *)
+
+type source =
+  | Env
+  | Toml
+  | Default
+  | Derived
+
+type 'a field = {
+  value : 'a;
+  source : source;
+}
+
+type t = {
+  bootstrap_max_active_keepers : int field;
+  reactive_max_turns_per_call : int field;
+  autonomous_max_turns_per_call : int field;
+  reactive_max_idle_turns : int field;
+  autonomous_max_idle_turns : int field;
+  turn_timeout_sec : float field;
+  admission_wait_timeout_sec : float field;
+  oas_timeout_override_sec : float option field;
+  stream_idle_timeout_sec : float field;
+  body_timeout_override_sec : float option field;
+  oas_timeout_per_1k : float field;
+  oas_timeout_per_turn : float field;
+}
+
+val max_turns_per_call_min : int
+val max_turns_per_call_max : int
+
+val init : unit -> unit
+val reset_for_tests : unit -> unit
+val current : unit -> t
+
+val source_to_string : source -> string
+val to_yojson : t -> Yojson.Safe.t
+
+val bootstrap_max_active_keepers : unit -> int
+val reactive_max_turns_per_call : unit -> int
+val autonomous_max_turns_per_call : unit -> int
+val reactive_max_idle_turns : unit -> int
+val autonomous_max_idle_turns : unit -> int
+val turn_timeout_sec : unit -> float
+val admission_wait_timeout_sec : unit -> float
+val stream_idle_timeout_sec : unit -> float
+val stream_idle_timeout_for_total_timeout : total_timeout_s:float -> float
+
+(** Total HTTP body-consumption deadline override.
+    [None] (env unset) lets the runtime attempt fall back to the per-
+    attempt [max_execution_time]. [Some s] is forwarded to
+    [Runtime_agent_context.body_timeout_s] -> [Builder.with_body_timeout],
+    surfacing [Retry.Timeout] before the turn cap so runtime falls
+    forward at the attempt boundary.
+
+    SSOT: {!Env_config_keeper.KeeperKeepalive.body_timeout_sec_override}. *)
+val body_timeout_override_sec : unit -> float option
+
+(** CLI subprocess stdout-idle timeout, read fresh per turn from
+    [MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC] and clamped to [10, 600].
+    Default 120 s. Honoured by [Json_stream_cli_transport_local]; other CLI
+    transports require an OAS upstream change to expose
+    [stdout_idle_timeout_s]. *)
+val cli_subprocess_idle_sec : unit -> float
+val oas_call_timeout_sec : unit -> float
+(** Resolved OAS-call timeout: legacy override
+    [oas_timeout_override_sec] when set, otherwise [turn_timeout_sec].
+    RFC-0156: no token- or turn-budget dependence. *)

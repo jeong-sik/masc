@@ -1,0 +1,28 @@
+name: Path SSOT Check
+
+# RFC-0121: enforce that all .masc/<sub> paths derive from
+# [Config_dir_resolver.<accessor>] (or its Common-forwarding helpers in
+# host_config's cycle-workaround). Catches inline string concat and
+# silent $HOME / non-canonical-env regressions before they reach main.
+#
+# Allowlist: .ci/path-ssot-allowlist.txt
+# Gate script: scripts/audit-path-ssot.sh
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit-path-ssot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Run path SSOT audit
+        run: bash scripts/audit-path-ssot.sh

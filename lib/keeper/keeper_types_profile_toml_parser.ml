@@ -1,0 +1,412 @@
+include Keeper_config
+include Keeper_types_profile_sandbox
+include Keeper_types_profile_defaults
+include Keeper_types_profile_toml_normalizers
+include Keeper_types_profile_oas_env
+
+let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
+    : (keeper_profile_defaults, string) result =
+  let k key = "keeper." ^ key in
+  let str key = Keeper_toml_loader.toml_string_opt doc (k key) in
+  let bool_ key = Keeper_toml_loader.toml_bool_opt doc (k key) in
+  let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
+  let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
+  let has key = List.mem_assoc (k key) doc in
+  let has_raw key = List.mem_assoc key doc in
+  let tool_access_defaults_result =
+    let key = k "tool_access" in
+    if has_raw key then
+      let tools = Keeper_toml_loader.toml_string_list doc key in
+      Ok (Some (normalize_name_list tools))
+    else Ok None
+  in
+  let per_provider_timeout_state, per_provider_timeout =
+    per_provider_timeout_of_toml
+      ~source:"keeper TOML"
+      doc
+      (k "per_provider_timeout")
+  in
+  let removed_present =
+    removed_keeper_input_key_names
+    |> List.map k
+    |> List.filter (fun key -> List.mem_assoc key doc)
+  in
+  let result =
+    match removed_present with
+    | [] -> Ok ()
+    | fields ->
+        Error
+          (Printf.sprintf
+             "removed keeper TOML keys: %s"
+             (String.concat ", " fields))
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "persona_name" with
+        | Some raw when not (validate_name raw) ->
+            Error (Printf.sprintf "invalid persona_name '%s'" raw)
+        | _ -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "social_model" with
+        | Some raw -> (
+            match normalize_social_model_opt (Some raw) with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid social_model '%s' (allowed: %s)"
+                     raw
+                     (String.concat ", " valid_social_model_strings)))
+        | None -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "sandbox_profile" with
+        | Some raw -> (
+            match sandbox_profile_of_string raw with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid sandbox_profile '%s' (allowed: %s)"
+                     raw
+                     (String.concat ", " valid_sandbox_profile_strings)))
+        | None -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "network_mode" with
+        | Some raw -> (
+            match network_mode_of_string raw with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid network_mode '%s' (allowed: none, inherit)"
+                     raw))
+        | None -> Ok ())
+  in
+  let runtime_id_result =
+    let trimmed key =
+      match str key with
+      | None -> None
+      | Some raw ->
+        let value = String.trim raw in
+        if value = "" then None else Some value
+    in
+    match trimmed "model", trimmed "runtime_id" with
+    | Some _, _ -> Error "removed keeper.model key. Use keeper.runtime_id."
+    | None, runtime_id -> Ok runtime_id
+  in
+  let result =
+    Result.bind result (fun () ->
+        let has_proactive_idle = has "proactive_idle_sec" in
+        let has_proactive_cooldown = has "proactive_cooldown_sec" in
+        match (has_proactive_idle, has_proactive_cooldown) with
+        | false, true ->
+            Error
+              "proactive_cooldown_sec is set but proactive_idle_sec is missing"
+        | true, false ->
+            Error
+              "proactive_idle_sec is set but proactive_cooldown_sec is missing"
+        | _ -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () -> tool_access_defaults_result)
+  in
+  let result =
+    Result.bind result (fun tool_access ->
+      Result.map (fun runtime_id_opt -> tool_access, runtime_id_opt) runtime_id_result)
+  in
+  Result.map
+    (fun (tool_access, runtime_id_opt) ->
+      {
+        id = None;
+        manifest_path = None;
+        persona_name = str "persona_name";
+        goal = str "goal";
+        short_goal =
+          str "short_goal"
+          |> normalize_goal_horizon_opt;
+        mid_goal =
+          str "mid_goal"
+          |> normalize_goal_horizon_opt;
+        long_goal =
+          str "long_goal"
+          |> normalize_goal_horizon_opt;
+        will = str "will";
+        needs = str "needs";
+        desires = str "desires";
+        instructions = str "instructions";
+        autoboot_enabled = bool_ "autoboot_enabled";
+        mention_targets = strs "mention_targets";
+        proactive_enabled = bool_ "proactive_enabled";
+        proactive_idle_sec = int_ "proactive_idle_sec";
+        proactive_cooldown_sec = int_ "proactive_cooldown_sec";
+        shards =
+          (match strs "shards" with
+           | [] -> None
+           | xs -> Some xs);
+        allowed_paths =
+          if has "allowed_paths" then Some (strs "allowed_paths")
+          else None;
+        sandbox_profile =
+          Option.bind (str "sandbox_profile") sandbox_profile_of_string;
+        sandbox_image = str "sandbox_image";
+        network_mode =
+          Option.bind (str "network_mode") network_mode_of_string;
+        tool_access;
+        tool_denylist = normalize_name_list_opt (strs "tool_denylist");
+        active_goal_ids =
+          if has "active_goal_ids" then
+            Some (normalize_name_list (strs "active_goal_ids"))
+          else None;
+        telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
+        telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
+        per_provider_timeout_state;
+        per_provider_timeout;
+        always_approve = bool_ "always_approve";
+        max_turns_per_call = int_ "max_turns_per_call";
+        max_turns_per_call_scheduled_autonomous =
+          int_ "max_turns_per_call_scheduled_autonomous";
+        social_model = normalize_social_model_opt (str "social_model");
+        model = runtime_id_opt;
+        models = None;
+        oas_env = extract_oas_env_from_doc doc;
+        unknown_toml_keys = [];
+      })
+    result
+
+(** Fields actually read by [profile_defaults_of_toml] from the [[keeper]]
+    TOML table.  Keep this in sync with the record construction above — the
+    compile-time assertion below will fail if the two lists diverge. *)
+let parsed_field_key_names =
+  [ "name"
+  ; "persona_name"
+  ; "goal"
+  ; "short_goal"
+  ; "mid_goal"
+  ; "long_goal"
+  ; "will"
+  ; "needs"
+  ; "desires"
+  ; "instructions"
+  ; "autoboot_enabled"
+  ; "mention_targets"
+  ; "proactive_enabled"
+  ; "proactive_idle_sec"
+  ; "proactive_cooldown_sec"
+  ; "shards"
+  ; "allowed_paths"
+  ; "sandbox_profile"
+  ; "sandbox_image"
+  ; "network_mode"
+  ; "tool_access"
+  ; "tool_denylist"
+  ; "active_goal_ids"
+  ; "telemetry_feedback_enabled"
+  ; "telemetry_feedback_window_hours"
+  ; "per_provider_timeout"
+  ; "always_approve"
+  ; "max_turns_per_call"
+  ; "max_turns_per_call_scheduled_autonomous"
+  ; "social_model"
+  ; "runtime_id"
+  ]
+
+(** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
+    Keys outside this set under [[keeper]] (or any other table) are silently
+    ignored by the loader, which historically let dead config accumulate
+    (e.g. legacy [legacy_scope], [scope_kind]).  [warn_unknown_keeper_toml_keys]
+    uses this list to surface drift on boot, symmetric with
+    [warn_unknown_keeper_meta_keys] on the JSON side.
+
+    Must be kept in sync with [parsed_field_key_names] — the assertion below
+    catches drift at compile time. *)
+let canonical_keeper_toml_key_names =
+  [ "name"
+  ; "persona_name"
+  ; "goal"
+  ; "short_goal"
+  ; "mid_goal"
+  ; "long_goal"
+  ; "will"
+  ; "needs"
+  ; "desires"
+  ; "instructions"
+  ; "autoboot_enabled"
+  ; "mention_targets"
+  ; "proactive_enabled"
+  ; "proactive_idle_sec"
+  ; "proactive_cooldown_sec"
+  ; "shards"
+  ; "allowed_paths"
+  ; "sandbox_profile"
+  ; "sandbox_image"
+  ; "network_mode"
+  ; "tool_access"
+  ; "tool_denylist"
+  ; "active_goal_ids"
+  ; "telemetry_feedback_enabled"
+  ; "telemetry_feedback_window_hours"
+  ; "per_provider_timeout"
+  ; "always_approve"
+  ; "max_turns_per_call"
+  ; "max_turns_per_call_scheduled_autonomous"
+  ; "social_model"
+  ; "runtime_id"
+  ]
+
+let loader_level_keeper_toml_key_names = [ "base" ]
+
+let () =
+  assert (
+    List.sort String.compare canonical_keeper_toml_key_names
+    = List.sort String.compare parsed_field_key_names)
+
+(** Pure detector: returns TOML keys that [profile_defaults_of_toml] does not
+    consume.  Exposed separately from the logging wrapper so tests can
+    assert on the key list without mocking the Log subsystem. *)
+let detect_unknown_keeper_toml_keys (doc : Keeper_toml_loader.toml_doc) =
+  let known =
+    (canonical_keeper_toml_key_names @ loader_level_keeper_toml_key_names)
+    |> List.map (fun k -> "keeper." ^ k)
+  in
+  let oas_env_prefix = oas_env_key_prefix in
+  let oas_env_prefix_len = String.length oas_env_prefix in
+  let starts_with_oas_env k =
+    String.length k > oas_env_prefix_len
+    && String.starts_with k ~prefix:oas_env_prefix
+  in
+  doc
+  |> List.map fst
+  |> List.filter (fun key ->
+       not (List.mem key known) && not (starts_with_oas_env key))
+  |> dedupe_keep_order
+
+let unknown_keeper_toml_warning_key_limit = 256
+let unknown_keeper_toml_warning_keys : string list Atomic.t = Atomic.make []
+
+let current_unknown_keeper_toml_warning_keys () =
+  Atomic.get unknown_keeper_toml_warning_keys
+
+let rec take_warning_keys n keys =
+  match n, keys with
+  | n, _ when n <= 0 -> []
+  | _, [] -> []
+  | n, key :: rest -> key :: take_warning_keys (n - 1) rest
+
+let normalize_unknown_keeper_toml_keys unknown =
+  List.sort_uniq String.compare unknown
+;;
+
+let warn_unknown_keeper_toml_keys_once ~path unknown =
+  let normalized_unknown = normalize_unknown_keeper_toml_keys unknown in
+  let warning_key =
+    path ^ "\x1f" ^ String.concat "," normalized_unknown
+  in
+  let rec loop () =
+    let seen = Atomic.get unknown_keeper_toml_warning_keys in
+    if List.mem warning_key seen then
+      false
+    else
+      let next =
+        take_warning_keys unknown_keeper_toml_warning_key_limit (warning_key :: seen)
+      in
+      if Atomic.compare_and_set unknown_keeper_toml_warning_keys seen next then
+        true
+      else
+        loop ()
+  in
+  loop ()
+
+let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
+  match detect_unknown_keeper_toml_keys doc with
+  | [] -> ()
+  | unknown ->
+    let unknown = normalize_unknown_keeper_toml_keys unknown in
+    if warn_unknown_keeper_toml_keys_once ~path unknown then begin
+      Prometheus.inc_counter
+        Prometheus.metric_config_unknown_keys_ignored
+        ~labels:[("file_path", path)]
+        ~delta:(float_of_int (List.length unknown))
+        ();
+      Log.Keeper.warn
+        "keeper TOML %s has unknown keys: %s"
+        path
+        (String.concat ", " unknown)
+    end
+
+let merge_string_list ~base overlay =
+  match overlay with [] -> base | xs -> xs
+
+let merge_keeper_profile_defaults
+    ~agent_name
+    ~(base : keeper_profile_defaults)
+    ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
+  ignore agent_name;
+  let prefer overlay_value base_value =
+    match overlay_value with Some _ -> overlay_value | None -> base_value
+  in
+  let per_provider_timeout_state, per_provider_timeout =
+    match overlay.per_provider_timeout_state with
+    | Per_provider_timeout_unset ->
+        base.per_provider_timeout_state, base.per_provider_timeout
+    | Per_provider_timeout_invalid ->
+        Per_provider_timeout_invalid, None
+    | Per_provider_timeout_set ->
+        Per_provider_timeout_set, overlay.per_provider_timeout
+  in
+  {
+    id = prefer overlay.id base.id;
+    manifest_path = prefer overlay.manifest_path base.manifest_path;
+    persona_name = prefer overlay.persona_name base.persona_name;
+    goal = prefer overlay.goal base.goal;
+    short_goal = prefer overlay.short_goal base.short_goal;
+    mid_goal = prefer overlay.mid_goal base.mid_goal;
+    long_goal = prefer overlay.long_goal base.long_goal;
+    will = prefer overlay.will base.will;
+    needs = prefer overlay.needs base.needs;
+    desires = prefer overlay.desires base.desires;
+    instructions = prefer overlay.instructions base.instructions;
+    autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;
+    mention_targets =
+      merge_string_list ~base:base.mention_targets overlay.mention_targets;
+    proactive_enabled = prefer overlay.proactive_enabled base.proactive_enabled;
+    proactive_idle_sec = prefer overlay.proactive_idle_sec base.proactive_idle_sec;
+    proactive_cooldown_sec =
+      prefer overlay.proactive_cooldown_sec base.proactive_cooldown_sec;
+    shards = prefer overlay.shards base.shards;
+    allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
+    sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
+    sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
+    network_mode = prefer overlay.network_mode base.network_mode;
+    tool_access = prefer overlay.tool_access base.tool_access;
+    tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
+    active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
+    telemetry_feedback_enabled =
+      prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
+    telemetry_feedback_window_hours =
+      prefer overlay.telemetry_feedback_window_hours
+        base.telemetry_feedback_window_hours;
+    per_provider_timeout_state;
+    per_provider_timeout;
+    always_approve = prefer overlay.always_approve base.always_approve;
+    social_model = prefer overlay.social_model base.social_model;
+    model = prefer overlay.model base.model;
+    models = None;
+    max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
+    max_turns_per_call_scheduled_autonomous =
+      prefer overlay.max_turns_per_call_scheduled_autonomous
+        base.max_turns_per_call_scheduled_autonomous;
+    oas_env =
+      (let overlay_keys = List.map fst overlay.oas_env in
+       let surviving_base =
+         List.filter (fun (k, _) -> not (List.mem k overlay_keys)) base.oas_env
+       in
+       surviving_base @ overlay.oas_env);
+    unknown_toml_keys =
+      merge_string_list ~base:base.unknown_toml_keys overlay.unknown_toml_keys;
+  }

@@ -1,0 +1,224 @@
+@import "tailwindcss";
+
+/* MASC Dashboard — Global Styles
+ *
+ * Foundation:
+ *   tokens.css       — @theme design tokens
+ *   variables.css    — :root CSS custom properties
+ *   base.css         — html, body, #app base styles
+ *   keyframes.css    — all @keyframes animations
+ *
+ * Feature styles are in separate files imported below.
+ * Shared utilities (card, status-badge, control-input, ops-workbench,
+ * table, app shell, header) are defined after all imports.
+ */
+
+/* ── Foundation imports ──────────────────────────────────────── */
+@import "./tokens.generated.css";
+@import "./variables.css";
+@import "./base.css";
+@import "./keyframes.css";
+
+/* ── Feature imports (alphabetical, a11y.css last for runtime) ── */
+
+@import "./board.css";
+@import "./chat.css";
+@import "./dashboard.css";
+@import "./governance.css";
+@import "./governance-agent.css";
+@import "./keeper-detail.css";
+@import "./live-monitor.css";
+@import "./ops.css";
+@import "./pipeline.css";
+@import "./pixel-avatar.css";
+@import "./tools.css";
+@import "./ui.css";
+@import "./responsive.css";
+@import "./a11y.css"; /* after feature styles so reduced-motion overrides win */
+
+/* Strangler Fig migration bridge — bridges legacy CSS hooks to
+ * data-attributes during in-progress component migrations. Per-iter
+ * blocks are appended here; the entire file is removed in the cleanup
+ * PR once every consumer has migrated. RFC 0002 §"Per-iter PR shape" §5. */
+@import "../../design-system/migration-bridge.css";
+
+/* ── Card / Section / Headline base styles ─────────────────────
+   Shared across the dashboard. Every card, title, headline, and
+   badge gets consistent depth, 8px-grid spacing, and hierarchy.
+   ──────────────────────────────────────────────────────────── */
+
+@utility card {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  padding: var(--spacing-card);
+  box-shadow: var(--shadow-inset);
+  transition: border-color var(--t-fast), background var(--t-fast);
+  &:hover { border-color: var(--color-border-strong); background: var(--color-bg-elevated); }
+}
+
+@utility monitor-headline {
+  font: var(--type-title);
+  font-weight: var(--fw-semi);
+  color: var(--color-fg-primary);
+  letter-spacing: var(--track-normal);
+  line-height: 1.25;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+@utility monitor-subheadline {
+  font-size: var(--fs-xs);
+  color: var(--color-fg-muted);
+  line-height: 1.35;
+  margin-top: 4px;
+}
+
+@utility monitor-surface-card {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: var(--color-bg-surface);
+}
+
+@utility monitor-surface-card-strong {
+  box-shadow: var(--shadow-inset);
+}
+
+@utility monitor-surface-card-medium {
+  box-shadow: var(--shadow-inset);
+}
+
+@utility monitor-muted-panel {
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: color-mix(in srgb, var(--color-bg-panel-alt) 72%, transparent);
+}
+
+/* ── Section header (reusable pattern) ─────────────────────── */
+
+@utility section-header {
+  font: var(--type-label);
+  font-weight: var(--fw-semi);
+  color: var(--color-fg-primary);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-border-default);
+  margin-bottom: 8px;
+}
+
+/* ── Status Badge base ───────────────────────────────────────
+   State-specific colors (.active, .busy, etc.) as variants.
+   Shared pill shape and sizing. */
+
+@utility status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px 7px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  letter-spacing: var(--track-wide);
+  line-height: 1.35;
+  white-space: nowrap;
+  text-transform: uppercase;
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
+  &.ok { background: var(--color-ok-soft); color: var(--color-ok-fg); }
+  &.warn { background: var(--color-warn-soft); color: var(--color-warn-fg); }
+  &.bad { background: var(--color-err-soft); color: var(--color-err-fg); }
+  &.info { background: var(--color-info-soft); color: var(--color-info-fg); }
+  &.neutral { background: var(--color-idle-soft); color: var(--color-idle-fg); }
+  &.active { background: var(--color-ok-soft); color: var(--color-ok-fg); }
+  &.claimed { background: var(--color-warn-soft); color: var(--color-warn-fg); }
+  &.busy { background: var(--color-warn-soft); color: var(--color-warn-fg); }
+  &.listening { background: var(--color-info-soft); color: var(--color-info-fg); }
+  &.idle { background: var(--color-idle-soft); color: var(--color-idle-fg); }
+  &.offline { background: var(--color-idle-soft); color: var(--color-idle-fg); }
+  &.todo { background: var(--color-idle-soft); color: var(--color-idle-fg); }
+  &.in-progress, &.in_progress { background: var(--color-warn-soft); color: var(--color-warn-fg); }
+  &.done, &.completed { background: var(--color-ok-soft); color: var(--color-ok-fg); }
+  &.running { background: var(--color-warn-soft); color: var(--color-warn-fg); }
+  &.interrupted { background: var(--color-info-soft); color: var(--color-info-fg); }
+  &.stopped { background: var(--color-idle-soft); color: var(--color-idle-fg); }
+  &.error, &.failed { background: var(--color-err-soft); color: var(--color-err-fg); }
+}
+
+@utility control-textarea {
+  padding: 6px 8px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: color-mix(in srgb, var(--color-bg-panel-alt) 72%, transparent);
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  transition: border-color var(--t-fast);
+  resize: vertical;
+  min-height: 64px;
+  &:focus { outline: none; border-color: var(--color-border-strong); }
+}
+
+
+/* ── Table improvements (zebra, padding, hover) ────────────── */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+thead th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semi);
+  color: var(--color-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  border-bottom: 1px solid var(--color-border-default);
+  background: color-mix(in srgb, var(--color-bg-panel-alt) 76%, transparent);
+}
+
+tbody td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border-default);
+  color: var(--color-fg-secondary);
+  vertical-align: top;
+}
+
+tbody tr:nth-child(even) {
+  background: var(--hover-overlay);
+}
+
+tbody tr:hover {
+  background: var(--hover-overlay-strong);
+}
+
+#app > div > header {
+  border-color: var(--color-border-default);
+  padding-block: 6px;
+  box-shadow: inset 0 -1px 0 rgb(var(--brass-glow) / .08);
+}
+
+#app > div > div.flex-1 {
+  gap: var(--sp-1h);
+  padding: var(--sp-1h);
+}
+
+#dashboard-side-rail,
+#main-content {
+  border-color: var(--color-border-default);
+  border-radius: var(--r-1);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .015);
+}
+
+#main-content > div {
+  padding: var(--spacing-card);
+}
+
+/* Tone border utilities — applied via toneClass() helper */
+@utility ok { border-color: var(--ok-22); }
+@utility warn { border-color: var(--warn-soft); }
+@utility bad { border-color: rgb(var(--err-glow) / .15); }

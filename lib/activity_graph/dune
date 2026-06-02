@@ -1,0 +1,24 @@
+(include_subdirs no)
+
+(library
+ (name masc_activity_graph)
+ (public_name masc_mcp.activity_graph)
+ (modules
+   activity_graph
+   activity_graph_types
+   activity_graph_registry
+   activity_graph_reducer)
+ (wrapped false)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ (flags (:standard -w +4))
+ (libraries
+   masc_workspace
+   masc_core
+   masc_types
+   masc_log
+   masc_mcp.dashboard_utils
+   fs_compat
+   time_compat
+   yojson
+   eio
+   unix))

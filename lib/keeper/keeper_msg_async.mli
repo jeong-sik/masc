@@ -1,0 +1,73 @@
+(** Keeper_msg_async — Fire-and-forget keeper message execution.
+
+    Background fibers run [keeper_msg] turns. MCP tool returns
+    immediately with a [request_id]; clients poll via
+    [masc_keeper_msg_result] for completion. Completed entries auto-expire
+    from memory after [max_age_sec] (1h), while accepted request records are
+    persisted under the active [.masc] root for recovery diagnostics. Terminal
+    disk records follow the same age-based cleanup policy. *)
+
+(** {1 Types} *)
+
+type request_status =
+  | Queued
+  | Running
+  | Lost of { reason : string }
+  | Done of
+      { ok : bool
+      ; body : string
+      }
+
+type entry =
+  { request_id : string
+  ; keeper_name : string
+  ; base_path : string
+  ; status : request_status
+  ; submitted_at : float
+  ; completed_at : float option
+  }
+
+(** {1 Submit and poll} *)
+
+(** [submit ?clock ?timeout_sec ~sw ~f ~keeper_name] forks a background daemon fiber on
+    [sw] that runs [f] and stores the result. Returns the fresh
+    [request_id] synchronously. When both [clock] and [timeout_sec] are
+    provided, the worker records a terminal timeout error if [f] does not
+    return before the deadline. Cancellation of [sw] interrupts the worker
+    and records a terminal [Lost] state before stopping, so pollers do not
+    observe an indefinite [Running] request. *)
+val submit
+  :  ?clock:_ Eio.Time.clock
+  -> ?timeout_sec:float
+  -> sw:Eio.Switch.t
+  -> base_path:string
+  -> f:(unit -> Keeper_types_profile.tool_result)
+  -> keeper_name:string
+  -> unit
+  -> string
+
+(** [poll ?base_path request_id] returns the current entry, or [None] when the
+    id was never seen. If [base_path] is supplied and a persisted non-terminal
+    request exists without an in-memory worker, it is returned as [Lost] and the
+    terminal lost state is persisted. *)
+val poll : ?base_path:string -> string -> entry option
+
+(** [list_for_keeper ~keeper_name] returns all entries for a keeper
+    sorted most-recent-first. *)
+val list_for_keeper : keeper_name:string -> entry list
+
+(** {1 JSON output} *)
+
+val status_to_string : request_status -> string
+
+(** JSON encoding with [request_id], [keeper_name], [status],
+    [submitted_at], and — depending on state — [completed_at] /
+    [elapsed_sec] / [ok] + [result]. *)
+val entry_to_json : entry -> Yojson.Safe.t
+
+module For_testing : sig
+  val forget : string -> unit
+  val clear : unit -> unit
+  val record_path : base_path:string -> request_id:string -> string option
+  val gc_stale_disk : base_path:string -> int
+end

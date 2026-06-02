@@ -1,0 +1,139 @@
+(* RFC-0004 Phase A0.1 PR-1 — typed SSE event payload schemas.
+
+   Scope: agent_started payload only.  Subsequent PRs extend with
+   agent_completed, agent_failed, tool_*, turn_*, handoff_*,
+   context_*, content_replacement_*, slot_scheduler_observed.
+
+   Envelope (type, event_type, ts_unix, correlation_id, run_id,
+   agent_name, task_id, turn, tool_name, payload) is wrapped by
+   [Sse_event.wrap_envelope] in [sse_event.ml] — keeping the
+   nullable-with-empty-string-coerced-to-null semantics of
+   [lib/runtime/runtime_event_bridge.json_string_opt] outside the
+   atd schema (atd's default nullable cannot express it). *)
+
+type agent_started_payload = {
+  agent_name: string;
+  task_id: string;
+}
+
+(* PR-3 events: tool_called, tool_completed, turn_started,
+   turn_completed, turn_ready.  All simple records -- byte-equal
+   guaranteed by atdgen -j -j-std, verified in test_sse_event.ml. *)
+
+type tool_called_payload = {
+  agent_name: string;
+  tool_name: string;
+}
+
+type tool_completed_payload = {
+  agent_name: string;
+  tool_name: string;
+}
+
+type turn_started_payload = {
+  agent_name: string;
+  turn: int;
+}
+
+type turn_completed_payload = {
+  agent_name: string;
+  turn: int;
+}
+
+type turn_ready_payload = {
+  agent_name: string;
+  turn: int;
+  count: int;
+  names_hash: string;
+  tool_names: string list;
+}
+
+(* PR-4 events: handoff_requested, handoff_completed, context_compacted,
+   context_overflow_imminent, context_compact_started,
+   content_replacement_replaced, content_replacement_kept,
+   slot_scheduler_observed.  All simple records.  Side effects in the
+   runtime arms (Context_overflow_action_tracker, Prometheus counters)
+   remain in runtime_event_bridge.ml -- typed constructors emit JSON
+   only. *)
+
+type handoff_requested_payload = {
+  from_agent: string;
+  to_agent: string;
+  reason: string;
+}
+
+type handoff_completed_payload = {
+  from_agent: string;
+  to_agent: string;
+  elapsed_s: float;
+}
+
+type context_compacted_payload = {
+  agent_name: string;
+  before_tokens: int;
+  after_tokens: int;
+  phase: string;
+}
+
+type context_overflow_imminent_payload = {
+  agent_name: string;
+  estimated_tokens: int;
+  limit_tokens: int;
+  ratio: float;
+}
+
+type context_compact_started_payload = {
+  agent_name: string;
+  trigger: string;
+}
+
+type content_replacement_replaced_payload = {
+  tool_use_id: string;
+  preview: string;
+  original_chars: int;
+  seen_count_after: int;
+}
+
+type content_replacement_kept_payload = {
+  tool_use_id: string;
+  seen_count_after: int;
+}
+
+type slot_scheduler_observed_payload = {
+  max_slots: int;
+  active: int;
+  available: int;
+  queue_length: int;
+  state: string;
+}
+
+(* PR-3b events: agent_completed, agent_failed.
+
+   These two events carry a variable-shape payload tail beyond the
+   three base fields (agent_name, task_id, elapsed_s).  The tail is
+   produced by runtime-local helpers that close over Agent_sdk
+   variant types (Agent_sdk.Types.api_response, Agent_sdk.Error.t,
+   Keeper_agent_error / Keeper_turn_terminal_code).
+
+   Bringing those variant types into a leaf event library would
+   force Agent_sdk dependency on the leaf -- the same boundary
+   violation that motivated splitting agent_completed / agent_failed
+   off of PR-3.
+
+   Design choice: atd encodes the three base fields only, and the
+   typed constructor in [Sse_event] accepts a caller-supplied
+   [(string * Yojson.Safe.t) list] addendum which is appended to
+   the atd record output.  Byte-equality with the previous inline
+   `Assoc-construction path is verified in test_sse_event.ml. *)
+
+type agent_completed_payload = {
+  agent_name: string;
+  task_id: string;
+  elapsed_s: float;
+}
+
+type agent_failed_payload = {
+  agent_name: string;
+  task_id: string;
+  elapsed_s: float;
+}

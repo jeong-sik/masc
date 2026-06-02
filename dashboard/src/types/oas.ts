@@ -1,0 +1,107 @@
+// OAS (Open Agent SDK) event types for dashboard runtime monitoring.
+// Keep this slice as a discriminated union so each event kind has a stable
+// contract instead of one wide product type with many unrelated optionals.
+
+import type { KeeperPhase } from './core'
+
+interface OasAgentEventBase {
+  agent_name: string
+  event_type?: string
+  correlation_id?: string
+  run_id?: string
+  event_key?: string
+  timestamp: number
+}
+
+interface OasAgentSelectedEvent extends OasAgentEventBase {
+  type: 'selected'
+  actor_kind: 'agent'
+  trigger?: string
+  thompson_score?: number
+  final_score?: number
+}
+
+interface OasAgentDecisionEvent extends OasAgentEventBase {
+  type: 'decision'
+  actor_kind: 'agent'
+  action?: string
+  trigger_reason?: string
+}
+
+interface OasAgentActionExecutedEvent extends OasAgentEventBase {
+  type: 'action_executed'
+  actor_kind: 'agent'
+  action?: string
+  success?: boolean
+}
+
+// `phase` is the keeper FSM phase at emit time. Backend emits the
+// lowercase wire form via `Keeper_state_machine.phase_to_string`
+// (lib/runtime/runtime_events.ml:170–179); the factory in
+// `oas-runtime-store.ts` normalizes it to the canonical PascalCase
+// `KeeperPhase` so consumers don't carry around two casing forms.
+// `null` means either the lifecycle event genuinely had no phase
+// (e.g. a `Custom_event` with `phase = None`) or the wire value
+// didn't match any known variant — both cases collapse to the same
+// "no typed phase" state.
+export interface OasKeeperLifecycleEvent extends OasAgentEventBase {
+  type: 'keeper_lifecycle'
+  actor_kind: 'keeper'
+  keeper_name?: string
+  event?: string
+  phase?: KeeperPhase | null
+  detail?: string
+}
+
+interface OasTrustUpdatedEvent extends OasAgentEventBase {
+  type: 'trust_updated'
+  actor_kind: 'agent'
+  secondary_agent?: string
+  trust_score?: number
+}
+
+interface OasReputationChangedEvent extends OasAgentEventBase {
+  type: 'reputation_changed'
+  actor_kind: 'agent'
+  old_score?: number
+  new_score?: number
+  trend?: string
+}
+
+export type OasAgentEvent =
+  | OasAgentSelectedEvent
+  | OasAgentDecisionEvent
+  | OasAgentActionExecutedEvent
+  | OasKeeperLifecycleEvent
+  | OasTrustUpdatedEvent
+  | OasReputationChangedEvent
+
+export interface OasKeeperSnapshot {
+  keeper_name: string
+  generation: number
+  context_ratio: number
+  message_count: number
+  timestamp: number
+}
+
+export interface OasHealthSummary {
+  agentEventsCount: number
+  keeperSnapshotsCount: number
+  lastKeeperTick: number | null
+  totalEvents: number
+  replayLoadedEvents: number
+  replayTotalMatchingEvents: number
+  replayTruncated: boolean
+  totalLlmCalls: number
+  totalErrors: number
+  lastLlmCallTs: number | null
+  lastErrorTs: number | null
+  evidenceRefsCount: number
+  artifactRefsCount: number
+  rawTraceRefsCount: number
+  reportRefsCount: number
+  proofRefsCount: number
+  telemetryRefsCount: number
+  runtimeEvidenceRefsCount: number
+  lastEvidenceTs: number | null
+}

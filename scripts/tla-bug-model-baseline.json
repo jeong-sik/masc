@@ -1,0 +1,7 @@
+{
+  "_comment": "TLA+ Bug Model coverage baseline. Regenerate with scripts/tla-bug-model-ratchet.sh --regenerate.",
+  "_metrics": "See scripts/tla-bug-model-ratchet.sh STRICT_METRICS array.",
+  "_audit": "docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md",
+  "bug_model_coverage_specs": 74,
+  "domains_without_bug_model": 5
+}

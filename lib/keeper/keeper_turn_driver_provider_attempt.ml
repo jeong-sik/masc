@@ -1,0 +1,402 @@
+(** Provider-attempt provenance and health helpers for keeper turn driver. *)
+
+let provider_attempt_status_of_result = function
+  | Ok _ -> "provider_returned"
+  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }))
+    when Keeper_oas_timeout_message.is_structural message ->
+    "timeout"
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
+    "timeout"
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
+    "timeout"
+  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) -> "timeout"
+  | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) -> "timeout"
+  | Error _ -> "error"
+
+let provider_attempt_exception_kind_of_result = function
+  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }))
+    when Keeper_oas_timeout_message.is_structural message ->
+    Some "oas_agent_execution_timeout"
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
+    Some "oas_agent_execution_timeout"
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
+    Some "oas_agent_idle_timeout"
+  | Error (Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)) ->
+    Some "outer_oas_timeout"
+  | Error (Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)) ->
+    Some "outer_oas_timeout"
+  | Ok _ | Error _ -> None
+
+let provider_attempt_status_and_error_of_exception = function
+  | Eio.Time.Timeout -> "timeout", "Eio.Time.Timeout"
+  | Eio.Cancel.Cancelled inner ->
+    ( "cancelled"
+    , Printf.sprintf
+        "Eio.Cancel.Cancelled(%s)"
+        (Printexc.to_string inner) )
+  | exn -> "exception", Printexc.to_string exn
+
+type provider_attempt_provenance =
+  { model_source : string
+  ; resolved_model_source : string
+  ; capability_source : string
+  ; fallback_authority : string
+  ; provider_source_runtime : string option
+  }
+
+let base_provider_attempt_provenance =
+  { model_source = "named_runtime"
+  ; resolved_model_source = "runtime_catalog_binding"
+  ; capability_source = "provider_config_from_runtime_catalog"
+  ; fallback_authority = "declared_runtime"
+  ; provider_source_runtime = None
+  }
+
+let provider_attempt_provenance_fields p =
+  let base =
+    [ ("model_source", `String p.model_source)
+    ; ("resolved_model_source", `String p.resolved_model_source)
+    ; ("capability_source", `String p.capability_source)
+    ; ("fallback_authority", `String p.fallback_authority)
+    ]
+  in
+  match p.provider_source_runtime with
+  | None -> base
+  | Some source_runtime ->
+      ("provider_source_runtime", `String source_runtime) :: base
+
+type provider_attempt_started_record =
+  { started_provenance : provider_attempt_provenance
+  ; started_is_last : bool
+  ; started_per_provider_timeout_s : float option
+  ; started_attempt_timeout_source : string
+  ; started_attempt_watchdog_source : string
+  ; started_liveness_mode : string
+  ; started_liveness_budget_source : string option
+  }
+
+type provider_attempt_finished_record =
+  { finished_provenance : provider_attempt_provenance
+  ; finished_status : string
+  ; finished_latency_ms : float
+  ; finished_checkpoint_after_present : bool
+  ; finished_error : Yojson.Safe.t
+  ; finished_exception_kind : string option
+  }
+
+let provider_attempt_started_decision record =
+  `Assoc
+    (provider_attempt_provenance_fields record.started_provenance
+     @ [
+         ("is_last", `Bool record.started_is_last);
+         ( "per_provider_timeout_s",
+           match record.started_per_provider_timeout_s with
+           | None -> `Null
+           | Some timeout -> `Float timeout );
+         ( "attempt_timeout_s",
+           match record.started_per_provider_timeout_s with
+           | None -> `Null
+           | Some timeout -> `Float timeout );
+         ("attempt_timeout_source", `String record.started_attempt_timeout_source);
+         ("attempt_watchdog_source", `String record.started_attempt_watchdog_source);
+         ("liveness_mode", `String record.started_liveness_mode);
+         ( "liveness_budget_source",
+           match record.started_liveness_budget_source with
+           | None -> `Null
+           | Some source -> `String source );
+       ])
+;;
+
+let provider_attempt_finished_decision record =
+  let decision_fields =
+    [
+      ("latency_ms", `Float record.finished_latency_ms);
+      ("checkpoint_after_present", `Bool record.finished_checkpoint_after_present);
+      ("error", record.finished_error);
+    ]
+  in
+  let decision_fields =
+    provider_attempt_provenance_fields record.finished_provenance @ decision_fields
+  in
+  let decision_fields =
+    match record.finished_exception_kind with
+    | None -> decision_fields
+    | Some kind -> ("exception_kind", `String kind) :: decision_fields
+  in
+  `Assoc decision_fields
+;;
+
+let client_capacity_full_decision ~capacity_key =
+  `Assoc
+    [ "blocker", `String "client_capacity_full"
+    ; "capacity_key", `String capacity_key
+    ; "provider_attempt_started", `Bool false
+    ]
+;;
+
+let success_selected_model_raw candidate =
+  Some (Runtime_candidate.model_health_key candidate)
+
+(* Error/rejected/exhausted observations intentionally leave the concrete
+   selected model absent. Downstream attribution uses candidate_models or the
+   runtime route for those outcomes. *)
+let error_selected_model_raw = None
+
+let health_error_kind label =
+  Keeper_binding_health.error_kind_of_string label
+
+let record_candidate_health_success candidate ~latency_ms =
+  Runtime_candidate.health_keys candidate
+  |> List.iter (fun provider_key ->
+    Keeper_binding_health.record_success
+      Keeper_binding_health.global
+      ~provider_key
+      ~latency_ms
+      ())
+
+let record_candidate_health_rejected candidate ~reason =
+  let error_kind = health_error_kind "accept_rejected" in
+  Runtime_candidate.health_keys candidate
+  |> List.iter (fun provider_key ->
+    Keeper_binding_health.record_rejected
+      Keeper_binding_health.global
+      ~provider_key
+      ~error_kind
+      ~error_reason:reason
+      ())
+
+(* Hard-quota SDK error classifiers, re-homed from the deleted runtime attempt
+   FSM (RFC-0206).  Generic provider-error classification, not runtime-specific. *)
+let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
+    : string option =
+  match api_err with
+  | Llm_provider.Retry.RateLimited { message; _ } -> Some message
+  | Llm_provider.Retry.NetworkError { message; _ } -> Some message
+  | Llm_provider.Retry.Overloaded { message } -> Some message
+  | Llm_provider.Retry.ServerError { message; _ } -> Some message
+  | Llm_provider.Retry.InvalidRequest { message } -> Some message
+  | Llm_provider.Retry.AuthError _
+  | Llm_provider.Retry.NotFound _
+  | Llm_provider.Retry.ContextOverflow _
+  | Llm_provider.Retry.Timeout _ -> None
+
+let cli_wrapped_hard_quota_indicators = [
+  "hard_quota";
+  "terminalquotaerror";
+  "quota_exhausted";
+  "exhausted your capacity on this model";
+  "quota will reset after";
+  "\"api_error_status\":429";
+  "you've hit your limit";
+  "monthly usage limit";
+  "org's monthly usage limit";
+  "resets apr ";
+  "reached your specified api usage limits";
+  "you will regain access on";
+]
+
+let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
+  let contains needle = String_util.contains_substring_ci message needle in
+  List.exists contains cli_wrapped_hard_quota_indicators
+  ||
+  (contains "exited with code 1"
+   && contains "\"api_error_status\":429"
+   && contains "you've hit your limit")
+
+let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) -> true
+  | Agent_sdk.Error.Api api_err ->
+    Llm_provider.Retry.is_hard_quota api_err
+    ||
+    (match api_error_message_for_quota_scan api_err with
+     | Some message -> message_looks_like_cli_wrapped_hard_quota message
+     | None -> false)
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> false
+
+let capacity_backpressure_indicators = [
+  "client capacity";
+  "capacity exhausted";
+  "local_resource_exhaustion";
+  "slot full";
+]
+
+let message_looks_like_capacity_backpressure (message : string) : bool =
+  let contains needle = String_util.contains_substring_ci message needle in
+  List.exists contains capacity_backpressure_indicators
+
+let message_looks_like_terminal_provider_runtime_failure message =
+  let contains needle = String_util.contains_substring_ci message needle in
+  (contains "provider cli rejected" && contains "exit 1")
+  || (contains "provider cli startup crash" && contains "unicodedecodeerror")
+  || contains "unicodedecodeerror"
+  || (contains "jsonrpcmessage"
+      && (contains "validationerror" || contains "invalid json"))
+  || (contains "error parsing sse message"
+      && (contains "jsonrpc" || contains "jsonrpcmessage"))
+
+let network_error_kind_is_terminal
+    (kind : Llm_provider.Http_client.network_error_kind) : bool =
+  match kind with
+  | Llm_provider.Http_client.Connection_refused -> true
+  | Llm_provider.Http_client.Dns_failure -> true
+  | Llm_provider.Http_client.Tls_error
+  | Llm_provider.Http_client.Timeout
+  | Llm_provider.Http_client.Local_resource_exhaustion
+  | Llm_provider.Http_client.End_of_file
+  | Llm_provider.Http_client.Unknown -> false
+
+let sdk_error_is_terminal_provider_runtime_failure
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  let direct_typed_network =
+    match err with
+    | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError { kind; _ }) ->
+        network_error_kind_is_terminal kind
+    | _ -> false
+  in
+  let direct_api_message =
+    match err with
+    | Agent_sdk.Error.Api
+        (Llm_provider.Retry.NetworkError { message; _ }
+        | Llm_provider.Retry.Overloaded { message }
+        | Llm_provider.Retry.ServerError { message; _ }
+        | Llm_provider.Retry.InvalidRequest { message }
+        | Llm_provider.Retry.RateLimited { message; _ }
+        | Llm_provider.Retry.AuthError { message }
+        | Llm_provider.Retry.NotFound { message }
+        | Llm_provider.Retry.ContextOverflow { message; _ }
+        | Llm_provider.Retry.Timeout { message }) ->
+        message_looks_like_terminal_provider_runtime_failure message
+    | _ -> false
+  in
+  direct_typed_network
+  || direct_api_message
+  || message_looks_like_terminal_provider_runtime_failure
+       (Agent_sdk.Error.to_string err)
+
+let sdk_error_is_required_tool_contract_violation
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Agent
+      (Agent_sdk.Error.CompletionContractViolation { contract; _ }) ->
+    contract = Agent_sdk.Completion_contract_id.Require_tool_use
+  | _ -> false
+
+(* RFC-0206: runtime rotation is gone, but "max turns exceeded" still surfaces
+   as a structured masc_internal_error envelope on a single dispatch. *)
+let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some
+      (Keeper_internal_error.Runtime_exhausted
+         { reason = Keeper_meta_contract.Max_turns_exceeded; _ }) -> true
+  | Some _ | None -> false
+
+let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
+  : float option option =
+  match err with
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as api_err)
+    when not (Llm_provider.Retry.is_hard_quota api_err) ->
+    Some retry_after
+  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
+    Some retry_after
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> None
+
+let fallback_class_hard_quota = "hard_quota"
+let fallback_class_max_turns = "max_turns"
+let fallback_class_required_tool_contract_violation =
+  "required_tool_contract_violation"
+
+let sdk_error_runtime_fallback_class (err : Agent_sdk.Error.sdk_error) :
+    string option =
+  if sdk_error_is_hard_quota err then Some fallback_class_hard_quota
+  else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns
+  else if sdk_error_is_required_tool_contract_violation err then
+    Some fallback_class_required_tool_contract_violation
+  else None
+
+let record_candidate_health_error candidate sdk_err =
+  let error_reason = Agent_sdk.Error.to_string sdk_err in
+  let health_keys = Runtime_candidate.health_keys candidate in
+  if sdk_error_is_hard_quota sdk_err
+  then (
+    let error_kind = health_error_kind "hard_quota" in
+    health_keys
+    |> List.iter (fun provider_key ->
+      Keeper_binding_health.record_hard_quota
+        Keeper_binding_health.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()))
+  else if sdk_error_is_terminal_provider_runtime_failure sdk_err
+  then (
+    let error_kind = health_error_kind "terminal_provider_runtime_failure" in
+    health_keys
+    |> List.iter (fun provider_key ->
+      Keeper_binding_health.record_terminal_failure
+        Keeper_binding_health.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()))
+  else if sdk_error_is_required_tool_contract_violation sdk_err
+  then (
+    let error_kind = health_error_kind "required_tool_contract_violation" in
+    health_keys
+    |> List.iter (fun provider_key ->
+      Keeper_binding_health.record_terminal_failure
+        Keeper_binding_health.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()))
+  else
+    match sdk_error_soft_rate_limited sdk_err with
+    | Some retry_after_s ->
+      let error_kind = health_error_kind "soft_rate_limited" in
+      health_keys
+      |> List.iter (fun provider_key ->
+        Keeper_binding_health.record_soft_rate_limited
+          Keeper_binding_health.global
+          ~provider_key
+          ?retry_after_s
+          ~error_kind
+          ~error_reason
+          ())
+    | None ->
+      let error_kind = health_error_kind "provider_error" in
+      health_keys
+      |> List.iter (fun provider_key ->
+        Keeper_binding_health.record_failure
+          Keeper_binding_health.global
+          ~provider_key
+          ~error_kind
+          ~error_reason
+          ())
+
+let runtime_candidate_label = "runtime"

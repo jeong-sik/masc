@@ -1,0 +1,5 @@
+(include_subdirs no)
+
+(test
+ (name test_session_tracker_qa)
+ (libraries alcotest))

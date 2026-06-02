@@ -1,0 +1,27 @@
+; RFC-0056 Phase 1D — extract Briefing_compactors leaf module from flat
+; masc_mcp namespace. Stacked on Phase 1C (host_config).
+;
+; Briefing_compactors is dependency-leaf: stdlib (Float, List, Option,
+; Printf, String) + Yojson + Masc_domain (already its own sub-library
+; lib/types/, dune name masc_mcp.masc_types). 174+21 LoC, fan-in 2 (1
+; lib caller + 1 test).
+;
+; Note: was previously listed in parent (private_modules) — promoting to
+; its own (wrapped false) sub-library keeps it accessible to the same
+; internal callers without expanding external surface (test/deps/dune
+; re_export controls test access only).
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the top-level identifier `Briefing_compactors`.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_briefing_compactors)
+ (public_name masc_mcp.briefing_compactors)
+ (wrapped false)
+ (flags (:standard -w +4))
+ (libraries
+  yojson
+  masc_core
+  masc_mcp.masc_types
+  masc_mcp.dashboard_utils))

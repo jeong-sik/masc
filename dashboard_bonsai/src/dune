@@ -1,0 +1,5 @@
+(library
+ (name dashboard_bonsai_lib)
+ (libraries bonsai_web virtual_dom brr yojson)
+ (js_of_ocaml (javascript_files runtime_stubs.js))
+ (preprocess (pps ppx_jane ppx_css js_of_ocaml-ppx)))

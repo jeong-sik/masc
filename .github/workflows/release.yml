@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14  # Apple Silicon
+            arch: macos-arm64
+            may-fail: true   # upstream opam macOS arm64 binary missing (#7475)
+          - os: ubuntu-latest
+            arch: linux-x64
+            may-fail: false
+
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.may-fail }}
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check version truth
+        run: |
+          chmod +x scripts/check-version-truth.sh
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            scripts/check-version-truth.sh --tag "${GITHUB_REF_NAME}"
+          else
+            scripts/check-version-truth.sh
+          fi
+
+      - name: Setup OCaml
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin private dependencies
+        run: |
+          chmod +x scripts/opam-pin-external-deps.sh
+          scripts/opam-pin-external-deps.sh --with-compact-protocol
+
+
+      - name: Install native dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install libpq openssl@3
+
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+
+      - name: Refresh apt index
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq
+
+      - name: Install dependencies
+        run: |
+          for attempt in 1 2 3; do
+            opam install . --deps-only -y && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "opam install failed (attempt ${attempt}); retrying in 15s..."
+            sleep 15
+          done
+
+      - name: Build
+        run: opam exec -- dune build --release bin/main_eio.exe
+
+      - name: Release binary smoke (boot + README drift)
+        run: |
+          chmod +x scripts/release-binary-smoke.sh
+          scripts/release-binary-smoke.sh _build/default/bin/main_eio.exe
+
+      - name: Generate release evidence bundle
+        run: |
+          chmod +x scripts/release-evidence.sh
+          mkdir -p dist
+          scripts/release-evidence.sh \
+            _build/default/bin/main_eio.exe \
+            dist/release-evidence-${{ matrix.arch }}.md
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp _build/default/bin/main_eio.exe dist/masc-mcp-${{ matrix.arch }}
+          chmod +x dist/masc-mcp-${{ matrix.arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: masc-mcp-${{ matrix.arch }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    timeout-minutes: 15
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true

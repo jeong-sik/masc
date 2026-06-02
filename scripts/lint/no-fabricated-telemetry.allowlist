@@ -1,0 +1,10 @@
+# Allowlist for scripts/lint/no-fabricated-telemetry.sh
+#
+# Format: "path:line", '#' comments allowed.
+# Add an entry only after confirming the Math.random() is for genuine
+# UI randomness (animation seed, ephemeral DOM id) rather than fake
+# metric data.
+#
+# Empty by default — Sprint 0 audit (2026-05-05) found Math.random() in
+# .ts files (sse.ts, command-bar.ts) only, both for legitimate id
+# generation. Component files (.jsx/.tsx) currently have zero matches.

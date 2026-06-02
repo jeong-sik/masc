@@ -1,0 +1,47 @@
+(** Tool schema registry and visibility helpers. *)
+
+val dedupe_schemas : Masc_domain.tool_schema list -> Masc_domain.tool_schema list
+(** Remove duplicate tool schemas by name, keeping the first occurrence. *)
+
+val raw_all_tool_schemas : Masc_domain.tool_schema list
+(** All tool schemas before capability filtering. *)
+
+val validate_schemas : Masc_domain.tool_schema list -> unit
+(** Validate tool schemas at module initialization time.
+    Logs warnings for duplicates, empty names/descriptions, non-object input_schema. *)
+
+val all_tool_schemas : Masc_domain.tool_schema list
+(** All tool schemas after capability filtering and validation. *)
+
+val all_tool_names : unit -> string list
+(** List of all tool names. *)
+
+val is_tool_visible : string -> bool
+(** Check if a tool is visible. *)
+
+val is_raw_tool_name : string -> bool
+(** [is_raw_tool_name name] is [true] when [name] appears in
+    {!raw_all_tool_schemas} — i.e. the tool universe before any
+    capability / visibility filtering.  O(1) via a name-keyed Hashtbl
+    built once at module init.  Used on the MCP dispatch hot path
+    where the alternative was rebuilding the entire visible schema
+    list per call just to membership-test one name. *)
+
+val visible_tool_schemas :
+  ?include_hidden:bool ->
+  unit -> Masc_domain.tool_schema list
+(** Get visible tool schemas. *)
+
+val surface_tool_schemas :
+  ?include_hidden:bool ->
+  unit -> Masc_domain.tool_schema list
+(** Subset of [visible_tool_schemas] whose [Tool_scope.classify] is
+    [Surface]. Initial agent-internal list is empty, so on PR-N0
+    merge this returns the same set as [visible_tool_schemas]. PR-N1+
+    populate the agent-internal list, narrowing this surface. *)
+
+val agent_internal_tool_schemas : unit -> Masc_domain.tool_schema list
+(** Subset whose [Tool_scope.classify] is [Agent_internal]. Includes
+    hidden tools by default since keeper personas may reach tools the
+    external MCP surface does not expose. Empty until PR-N1 populates
+    the agent-internal list. *)

@@ -1,0 +1,106 @@
+(** Error translation helpers for keeper Agent.run orchestration. *)
+
+type keeper_internal_error =
+  | Keeper_tool_surface_empty of
+      { keeper_name : string
+      ; turn_lane : string
+      ; affordances : string list
+      ; fallback_used : bool
+      }
+  | Keeper_tool_surface_mismatch of
+      { keeper_name : string
+      ; required_tools : string list
+      ; missing_required_tools : string list
+      ; visible_tools : string list
+      }
+
+(** Prefix prepended to the JSON-encoded internal-error message. *)
+val keeper_internal_error_prefix : string
+
+(** Encode a [keeper_internal_error] as a JSON object suitable for log
+    payloads and dashboard surfaces. *)
+val keeper_internal_error_to_json : keeper_internal_error -> Yojson.Safe.t
+
+(** Wrap a [keeper_internal_error] inside [Agent_sdk.Error.Internal] so it
+    flows through the standard SDK error channel with a recognizable
+    prefix. *)
+val sdk_error_of_keeper_internal_error
+  :  keeper_internal_error
+  -> Agent_sdk.Error.sdk_error
+
+(** Coarse categorisation of [Agent_sdk.Error.sdk_error] (for dashboards). *)
+val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
+
+(** Layer-aware termination semantics for SDK errors crossing the OAS ->
+    keeper boundary.
+
+    DD-015: adjacent runtimes use "turn" and "timeout" at different
+    layers.  This contract keeps OAS turn-budget stops distinct from
+    keeper wall-clock/provider timeouts before they collapse to receipt
+    outcomes. *)
+type sdk_termination_semantics =
+  | Provider_wall_clock_timeout
+  | Oas_agent_execution_timeout
+  | Oas_turn_budget_exhausted
+  | Oas_idle_budget_exhausted
+  | Oas_exit_condition_reached
+  | Oas_token_budget_exhausted
+  | Oas_cost_budget_exhausted
+  | Oas_cost_budget_unenforceable
+  | Oas_contract_violation
+  | Oas_tool_retry_exhausted
+  | Oas_guardrail_violation
+  | Oas_tripwire_violation
+  | Oas_input_required
+  | Sdk_error_failure
+
+val sdk_termination_semantics
+  :  Agent_sdk.Error.sdk_error
+  -> sdk_termination_semantics
+
+val sdk_termination_semantics_to_string : sdk_termination_semantics -> string
+
+(** RFC-0042 PR-2.5: typed bridge variants of the wire accessors.
+    Wrap the existing parametrised wire string in
+    [Keeper_turn_terminal_code.Sdk_error]. PR-3 swaps
+    [Keeper_turn_terminal.t.code] from [string] to
+    [Keeper_turn_terminal_code.t] and uses these accessors at every
+    emit site. RFC §5.2 explicitly defers per-variant constructors
+    (~25-variant explosion); a follow-up RFC will split [Sdk_error] once
+    production traces narrow the actual sub-kind set.
+
+    Byte invariant guarded by [test_keeper_sdk_error_typed_bridge].
+
+    @since 0.193.1 *)
+val terminal_reason_code_of_sdk_error : Agent_sdk.Error.sdk_error -> string
+
+val terminal_reason_code_of_sdk_error_typed
+  :  Agent_sdk.Error.sdk_error
+  -> Keeper_turn_terminal_code.t
+
+(** Typed counterpart of [api_error_terminal_reason_code]. *)
+val api_error_terminal_reason_code_typed
+  :  Agent_sdk.Error.api_error
+  -> Keeper_turn_terminal_code.t
+
+(** Receipt outcome for terminal SDK errors.  Provider timeouts map to
+    [`Cancelled] to match [KeeperTurnFSM.tla] [ProviderTimeout], while
+    all other SDK errors remain ordinary failed receipts. *)
+val receipt_outcome_kind_of_sdk_error
+  :  Agent_sdk.Error.sdk_error
+  -> Keeper_execution_receipt.outcome_kind
+
+(** Structured internal error for post-turn checkpoint persistence
+    failures.  Used to prevent an otherwise successful keeper turn from
+    returning [Ok] when the replay checkpoint is not durable. *)
+val checkpoint_persistence_error
+  :  keeper_name:string
+  -> detail:string
+  -> Agent_sdk.Error.sdk_error
+
+(** Map an optional runtime observation to a typed runtime outcome
+    ([Runtime_passed_to_next_model] / [Runtime_completed] /
+    [Runtime_not_observed]). *)
+val runtime_outcome_of_observation
+  :  Keeper_observation.runtime_observation option
+  -> Keeper_execution_receipt.runtime_outcome

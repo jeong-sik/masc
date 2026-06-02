@@ -1,0 +1,101 @@
+(* Exact keys copied from agent_llm_a-code's GHA_SUBPROCESS_SCRUB list at
+   src/utils/subprocessEnv.ts:15-53.
+
+   Each group is documented in the reference. Rationale preserved so a
+   future reader can justify additions or removals. *)
+
+let scrub : string list =
+  [
+    (* Anthropic auth — MASC re-reads these per-request, subprocesses don't
+       need them and leaking them into a sandboxed container creates an
+       escape surface. *)
+    "ANTHROPIC_API_KEY";
+    "CLAUDE_CODE_OAUTH_TOKEN";
+    "ANTHROPIC_AUTH_TOKEN";
+    "ANTHROPIC_FOUNDRY_API_KEY";
+    "ANTHROPIC_CUSTOM_HEADERS";
+
+    (* OTLP exporter headers — documented to carry Authorization: Bearer
+       tokens for monitoring backends; read in-process by the OTEL SDK. *)
+    "OTEL_EXPORTER_OTLP_HEADERS";
+    "OTEL_EXPORTER_OTLP_LOGS_HEADERS";
+    "OTEL_EXPORTER_OTLP_METRICS_HEADERS";
+    "OTEL_EXPORTER_OTLP_TRACES_HEADERS";
+
+    (* Cloud provider creds — same pattern (lazy SDK reads). *)
+    "AWS_SECRET_ACCESS_KEY";
+    "AWS_SESSION_TOKEN";
+    "AWS_BEARER_TOKEN_BEDROCK";
+    "GOOGLE_APPLICATION_CREDENTIALS";
+    "AZURE_CLIENT_SECRET";
+    "AZURE_CLIENT_CERTIFICATE_PATH";
+
+    (* GitHub Actions OIDC — consumed by the action's JS before the keeper
+       spawns; leaking these allows minting an App installation token. *)
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN";
+    "ACTIONS_ID_TOKEN_REQUEST_URL";
+
+    (* GitHub Actions artifact/cache API — cache poisoning pivot. *)
+    "ACTIONS_RUNTIME_TOKEN";
+    "ACTIONS_RUNTIME_URL";
+
+    (* Workflow-level duplicates — ALL_INPUTS contains api keys as JSON. *)
+    "ALL_INPUTS";
+    "OVERRIDE_GITHUB_TOKEN";
+    "DEFAULT_WORKFLOW_TOKEN";
+    "SSH_SIGNING_KEY";
+
+    (* Keeper GitHub work must use the selected MASC credential bundle.
+       Ambient host credentials would turn credential labels into a cosmetic
+       boundary. *)
+    "GH_TOKEN";
+    "GITHUB_TOKEN";
+    "GH_CONFIG_DIR";
+    "SSH_AUTH_SOCK";
+    "GIT_CONFIG_GLOBAL";
+    "GIT_CONFIG_SYSTEM";
+    "GIT_CONFIG_COUNT";
+
+    (* Stress test 2026-05-26 — same-category extensions to the reference
+       list. The reference (agent_llm_a-code) inherits from gh CLI usage,
+       but these were missed: *)
+    (* gh Enterprise token: same role as GH_TOKEN, different env name. *)
+    "GH_ENTERPRISE_TOKEN";
+    (* gh endpoint host override — operator setting GH_HOST=evil.com
+       would redirect keeper API calls without changing token. *)
+    "GH_HOST";
+    (* git credential helper / SSH command override — these let a host
+       env subvert keeper identity by injecting an arbitrary askpass or
+       ssh binary. Same category as GIT_CONFIG_GLOBAL above. *)
+    "GIT_ASKPASS";
+    "GIT_SSH";
+    "GIT_SSH_COMMAND";
+  ]
+
+let pass : string list =
+  [
+    (* Git user identity is not a credential by itself. Git config
+       location/count env is intentionally scrubbed above because it can
+       inject credential helpers or host-global settings. *)
+    "GIT_AUTHOR_NAME";
+    "GIT_AUTHOR_EMAIL";
+    "GIT_COMMITTER_NAME";
+    "GIT_COMMITTER_EMAIL";
+  ]
+
+let scrub_table =
+  let t = Hashtbl.create (List.length scrub) in
+  List.iter (fun k -> Hashtbl.replace t k ()) scrub;
+  t
+
+let is_scrubbed key = Hashtbl.mem scrub_table key
+
+let key_of_entry entry =
+  match String.index_opt entry '=' with
+  | None -> entry
+  | Some i -> String.sub entry 0 i
+
+let filter_environment existing =
+  Array.to_list existing
+  |> List.filter (fun e -> not (is_scrubbed (key_of_entry e)))
+  |> Array.of_list

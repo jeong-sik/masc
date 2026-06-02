@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""Discover candidate GOAL LOOP strict row corpus artifacts."""
+
+from __future__ import annotations
+
+import argparse
+import bz2
+import gzip
+import json
+import lzma
+import os
+import sys
+import tarfile
+import zipfile
+from pathlib import Path
+from typing import Any
+
+from orient_goal_loop_logs import (
+    load_audit_catalog_input,
+    validate_strict_row_corpus,
+)
+
+
+DEFAULT_MARKERS = (
+    "source_catalog_id",
+    "corpus_id",
+    "expected_findings_total",
+    "strict_row",
+    "strict-row",
+    "goal-loop-206-audit-external-claim-2026-05-05",
+)
+TEXT_SUFFIXES = {
+    ".css",
+    ".csv",
+    ".html",
+    ".js",
+    ".json",
+    ".jsonl",
+    ".md",
+    ".ml",
+    ".mli",
+    ".py",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
+ZIP_TEXT_SUFFIXES = TEXT_SUFFIXES | {".xml"}
+ARCHIVE_SUFFIXES = {".docx", ".jar", ".ods", ".xlsx", ".zip"}
+TAR_TEXT_SUFFIXES = ZIP_TEXT_SUFFIXES
+COMPRESSED_TEXT_SUFFIXES = {".bz2", ".gz", ".xz"}
+TAR_SUFFIX_PATTERNS = {
+    (".tar",),
+    (".tar", ".bz2"),
+    (".tar", ".gz"),
+    (".tar", ".xz"),
+    (".tbz2",),
+    (".tgz",),
+    (".txz",),
+}
+
+
+def path_error(path: Path, exc: BaseException | str) -> dict[str, str]:
+    message = exc if isinstance(exc, str) else f"{type(exc).__name__}: {exc}"
+    return {"path": str(path), "error": message}
+
+
+def iter_dir_paths(root: Path, path_errors: list[dict[str, str]]) -> list[Path]:
+    paths: list[Path] = []
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    entry_path = Path(entry.path)
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            paths.append(entry_path)
+                        elif entry.is_dir(follow_symlinks=False):
+                            stack.append(entry_path)
+                    except OSError as exc:
+                        path_errors.append(path_error(entry_path, exc))
+        except OSError as exc:
+            path_errors.append(path_error(current, exc))
+    return paths
+
+
+def iter_paths(roots: list[Path]) -> tuple[list[Path], list[dict[str, str]]]:
+    paths: list[Path] = []
+    path_errors: list[dict[str, str]] = []
+    for root in roots:
+        try:
+            if root.is_dir():
+                paths.extend(iter_dir_paths(root, path_errors))
+            elif root.is_file():
+                paths.append(root)
+            else:
+                path_errors.append(path_error(root, "missing"))
+        except OSError as exc:
+            path_errors.append(path_error(root, exc))
+    return sorted(paths), sorted(path_errors, key=lambda item: item["path"])
+
+
+def read_text_file(path: Path, max_bytes: int) -> str | None:
+    try:
+        with path.open("rb") as handle:
+            data = handle.read(max_bytes + 1)
+    except OSError:
+        return None
+    if len(data) > max_bytes:
+        data = data[:max_bytes]
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("utf-8", errors="ignore")
+
+
+def bounded_decode(data: bytes, max_bytes: int) -> str:
+    if len(data) > max_bytes:
+        data = data[:max_bytes]
+    return data.decode("utf-8", errors="ignore")
+
+
+def suffix_tuple(path: Path) -> tuple[str, ...]:
+    return tuple(suffix.lower() for suffix in path.suffixes)
+
+
+def is_tar_archive(path: Path) -> bool:
+    suffixes = suffix_tuple(path)
+    return any(suffixes[-len(pattern) :] == pattern for pattern in TAR_SUFFIX_PATTERNS)
+
+
+def compressed_inner_suffix(path: Path) -> str | None:
+    suffixes = suffix_tuple(path)
+    if len(suffixes) < 2 or suffixes[-1] not in COMPRESSED_TEXT_SUFFIXES:
+        return None
+    if is_tar_archive(path):
+        return None
+    return suffixes[-2]
+
+
+def read_compressed_text_file(path: Path, max_bytes: int) -> str | None:
+    suffixes = suffix_tuple(path)
+    if not suffixes:
+        return None
+    opener = {
+        ".bz2": bz2.open,
+        ".gz": gzip.open,
+        ".xz": lzma.open,
+    }.get(suffixes[-1])
+    if opener is None:
+        return None
+    try:
+        with opener(path, "rb") as handle:
+            data = handle.read(max_bytes + 1)
+    except (EOFError, OSError, gzip.BadGzipFile, lzma.LZMAError):
+        return None
+    return bounded_decode(data, max_bytes=max_bytes)
+
+
+def zip_member_texts(path: Path, max_bytes: int) -> list[tuple[str, str]]:
+    texts: list[tuple[str, str]] = []
+    try:
+        with zipfile.ZipFile(path) as archive:
+            for member in archive.infolist():
+                if member.is_dir():
+                    continue
+                suffix = Path(member.filename).suffix.lower()
+                if suffix not in ZIP_TEXT_SUFFIXES:
+                    continue
+                try:
+                    with archive.open(member) as handle:
+                        data = handle.read(max_bytes + 1)
+                except (KeyError, RuntimeError, OSError, zipfile.BadZipFile):
+                    continue
+                if len(data) > max_bytes:
+                    data = data[:max_bytes]
+                text = data.decode("utf-8", errors="ignore")
+                texts.append((member.filename, text))
+    except (OSError, zipfile.BadZipFile):
+        return []
+    return texts
+
+
+def tar_member_texts(path: Path, max_bytes: int) -> list[tuple[str, str]]:
+    texts: list[tuple[str, str]] = []
+    try:
+        with tarfile.open(path, mode="r:*") as archive:
+            for member in archive:
+                if not member.isfile():
+                    continue
+                suffix = Path(member.name).suffix.lower()
+                if suffix not in TAR_TEXT_SUFFIXES:
+                    continue
+                try:
+                    handle = archive.extractfile(member)
+                    if handle is None:
+                        continue
+                    with handle:
+                        data = handle.read(max_bytes + 1)
+                except (EOFError, OSError, tarfile.TarError):
+                    continue
+                texts.append((member.name, bounded_decode(data, max_bytes=max_bytes)))
+    except (EOFError, OSError, tarfile.TarError):
+        return []
+    return texts
+
+
+def marker_hits(text: str, markers: tuple[str, ...]) -> list[str]:
+    return [marker for marker in markers if marker in text]
+
+
+def maybe_json_object(text: str) -> dict[str, Any] | None:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def scan_text_unit(
+    *,
+    location: str,
+    text: str,
+    markers: tuple[str, ...],
+    catalog: dict[str, Any] | None,
+) -> dict[str, Any]:
+    hits = marker_hits(text, markers)
+    result: dict[str, Any] = {
+        "location": location,
+        "marker_hits": hits,
+    }
+    obj = maybe_json_object(text)
+    if obj is None:
+        return result
+    findings = obj.get("findings")
+    if not isinstance(findings, list):
+        return result
+    report = validate_strict_row_corpus(obj, catalog=catalog)
+    result["candidate_corpus"] = {
+        "row_count": report["row_count"],
+        "expected_findings_total": report.get("expected_findings_total"),
+        "source_catalog_id": report.get("source_catalog_id"),
+        "validated": report["validated"],
+        "errors": report["errors"],
+    }
+    return result
+
+
+def discover(
+    roots: list[Path],
+    *,
+    catalog: dict[str, Any] | None = None,
+    markers: tuple[str, ...] = DEFAULT_MARKERS,
+    max_bytes: int = 10_000_000,
+) -> dict[str, Any]:
+    files, path_errors = iter_paths(roots)
+    text_units_scanned = 0
+    marker_matches: list[dict[str, Any]] = []
+    candidate_corpora: list[dict[str, Any]] = []
+    validated_corpora: list[dict[str, Any]] = []
+
+    for path in files:
+        suffix = path.suffix.lower()
+        units: list[tuple[str, str]] = []
+        if suffix in TEXT_SUFFIXES:
+            text = read_text_file(path, max_bytes=max_bytes)
+            if text is not None:
+                units.append((str(path), text))
+        elif is_tar_archive(path):
+            units.extend(
+                (f"{path}!/{member}", text)
+                for member, text in tar_member_texts(path, max_bytes=max_bytes)
+            )
+        elif compressed_inner_suffix(path) in TEXT_SUFFIXES:
+            text = read_compressed_text_file(path, max_bytes=max_bytes)
+            if text is not None:
+                units.append((str(path), text))
+        elif suffix in ARCHIVE_SUFFIXES:
+            units.extend(
+                (f"{path}!/{member}", text)
+                for member, text in zip_member_texts(path, max_bytes=max_bytes)
+            )
+
+        for location, text in units:
+            text_units_scanned += 1
+            scanned = scan_text_unit(
+                location=location,
+                text=text,
+                markers=markers,
+                catalog=catalog,
+            )
+            if scanned["marker_hits"]:
+                marker_matches.append(
+                    {
+                        "location": location,
+                        "markers": scanned["marker_hits"],
+                    }
+                )
+            candidate = scanned.get("candidate_corpus")
+            if isinstance(candidate, dict):
+                candidate_with_location = {"location": location, **candidate}
+                candidate_corpora.append(candidate_with_location)
+                if candidate["validated"] is True:
+                    validated_corpora.append(candidate_with_location)
+
+    return {
+        "roots": [str(root) for root in roots],
+        "markers_checked": list(markers),
+        "files_considered": len(files),
+        "path_errors_total": len(path_errors),
+        "path_errors": path_errors,
+        "text_units_scanned": text_units_scanned,
+        "marker_hits_total": len(marker_matches),
+        "marker_matches": marker_matches,
+        "candidate_corpora_total": len(candidate_corpora),
+        "candidate_corpora": candidate_corpora,
+        "validated_strict_corpora_total": len(validated_corpora),
+        "validated_strict_corpora": validated_corpora,
+    }
+
+
+def report_to_text(report: dict[str, Any]) -> str:
+    lines = [
+        (
+            "strict_row_corpus_discovery: "
+            f"validated={report['validated_strict_corpora_total']} "
+            f"candidates={report['candidate_corpora_total']} "
+            f"marker_hits={report['marker_hits_total']} "
+            f"text_units={report['text_units_scanned']} "
+            f"files={report['files_considered']} "
+            f"path_errors={report['path_errors_total']}"
+        )
+    ]
+    for error in report["path_errors"]:
+        lines.append(f"PATH_ERROR: {error['path']} error={error['error']}")
+    for candidate in report["candidate_corpora"]:
+        status = "VALID" if candidate["validated"] else "INVALID"
+        lines.append(
+            f"{status}: {candidate['location']} "
+            f"rows={candidate['row_count']} "
+            f"expected={candidate.get('expected_findings_total')} "
+            f"errors={','.join(candidate['errors']) or '-'}"
+        )
+    return "\n".join(lines)
+
+
+def positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be > 0")
+    return parsed
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Search files/directories for GOAL LOOP strict row corpus candidates. "
+            "Discovery does not mark closeout complete; feed any valid result into "
+            "orient_goal_loop_logs.py --strict-row-corpus."
+        )
+    )
+    parser.add_argument("roots", nargs="+", help="Files or directories to scan.")
+    parser.add_argument(
+        "--audit-catalog",
+        help="Optional audit catalog JSON used to validate candidate corpora.",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default="text",
+        help="Output format (default: text).",
+    )
+    parser.add_argument(
+        "--max-bytes",
+        type=positive_int,
+        default=10_000_000,
+        help="Maximum bytes to read per text unit (default: 10000000).",
+    )
+    parser.add_argument(
+        "--require-found",
+        action="store_true",
+        help="Exit non-zero unless at least one valid strict corpus is found.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    catalog = load_audit_catalog_input(args.audit_catalog)
+    report = discover(
+        [Path(root) for root in args.roots],
+        catalog=catalog,
+        max_bytes=args.max_bytes,
+    )
+    if args.format == "json":
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(report_to_text(report))
+    if args.require_found and report["validated_strict_corpora_total"] == 0:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

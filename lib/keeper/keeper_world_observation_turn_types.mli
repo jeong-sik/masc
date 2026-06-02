@@ -1,0 +1,45 @@
+(** Keeper cycle channel + turn-verdict variants + bijection helpers. *)
+
+type keeper_cycle_channel =
+  | Reactive
+  | Scheduled_autonomous
+
+type unified_turn_channel = keeper_cycle_channel
+
+type turn_reason =
+  | Mention_pending
+  | Board_event_pending
+  | Scope_message_pending
+  | Scheduled_autonomous_turn
+  | Idle_cooldown_elapsed of
+      { idle_sec : int
+      ; cooldown : int
+      }
+  | Cooldown_elapsed
+  | Task_backlog of
+      { unclaimed : int
+      ; failed : int
+      }
+  | Task_reactive_cooldown_elapsed
+  | Never_started
+  | Min_interval_elapsed
+  | Entropic_oscillation
+
+type skip_reason =
+  | Keeper_paused
+  | Approval_pending
+  | Scheduled_autonomous_disabled
+  | Provider_cooldown_pending of { remaining_sec : int }
+  | Idle_gate_pending of { remaining_sec : int }
+  | Cooldown_pending of { remaining_sec : int }
+  | No_signal
+
+type turn_verdict =
+  | Run of { reasons : turn_reason * turn_reason list }
+  | Skip of { reasons : skip_reason * skip_reason list }
+
+val turn_reason_to_string : turn_reason -> string
+val skip_reason_to_string : skip_reason -> string
+val channel_to_string : keeper_cycle_channel -> string
+val is_autonomous_channel : string -> bool
+val verdict_reasons_to_strings : turn_verdict -> string list

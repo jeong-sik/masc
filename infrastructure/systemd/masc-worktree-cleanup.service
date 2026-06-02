@@ -1,0 +1,52 @@
+# Periodic stale/merged worktree cleanup for masc-mcp hosts.
+# Wraps scripts/cleanup-stale-worktrees.sh + cleanup-merged-worktrees.sh,
+# both of which are in-tree but had no scheduling layer prior to this
+# unit (closing report matrix item #33).
+#
+# Activated by masc-worktree-cleanup.timer.
+#
+# Why two scripts in one service:
+#   The existing in-tree scripts run independently and are idempotent.
+#   Running them in sequence in the same Type=oneshot guarantees a single
+#   journal entry per cleanup pass and serialises the underlying
+#   git worktree prune, which is not safe to run twice in parallel.
+#
+# Install:
+#   sudo install -m 0644 infrastructure/systemd/masc-worktree-cleanup.service \
+#     /etc/systemd/system/masc-worktree-cleanup.service
+#   sudo install -m 0644 infrastructure/systemd/masc-worktree-cleanup.timer \
+#     /etc/systemd/system/masc-worktree-cleanup.timer
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now masc-worktree-cleanup.timer
+
+[Unit]
+Description=MASC MCP worktree cleanup (stale + merged)
+Documentation=https://github.com/jeong-sik/masc-mcp
+After=network.target
+
+[Service]
+Type=oneshot
+User=masc
+Group=masc
+WorkingDirectory=/opt/masc-mcp
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+
+# Stale: drops worktrees older than 7 days (default in script).
+ExecStart=/opt/masc-mcp/scripts/cleanup-stale-worktrees.sh --apply
+# Merged: drops worktrees whose branch is fully merged.
+ExecStart=/opt/masc-mcp/scripts/cleanup-merged-worktrees.sh --apply
+
+# Conservative timeout — if git worktree prune blocks longer than this,
+# something else (lock file, NFS hang) needs human investigation.
+TimeoutStartSec=10min
+
+# Hardening: this service only reads/writes worktree paths under
+# WorkingDirectory + system git config.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/masc-mcp
+
+StandardOutput=journal
+StandardError=journal

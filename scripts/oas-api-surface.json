@@ -1,0 +1,51 @@
+{
+  "pinned_sha": "10a5024e0b1d5b4bb9d272eccb5051dead5421c4",
+  "pinned_version": "v0.200.7",
+  "surfaces": {
+    "event_bus_payload_variants": [
+      "AgentCompleted",
+      "AgentFailed",
+      "AgentStarted",
+      "ContentReplacementKept",
+      "ContentReplacementReplaced",
+      "ContextCompacted",
+      "ContextCompactStarted",
+      "ContextOverflowImminent",
+      "Custom",
+      "ElicitationCompleted",
+      "HandoffCompleted",
+      "HandoffRequested",
+      "InferenceTelemetry",
+      "SlotSchedulerObserved",
+      "ToolCalled",
+      "ToolCompleted",
+      "TurnCompleted",
+      "TurnReady",
+      "TurnStarted"
+    ],
+    "http_error_variants": [
+      "AcceptRejected",
+      "HttpError",
+      "NetworkError",
+      "ProviderFailure",
+      "ProviderTerminal",
+      "TimeoutError"
+    ],
+    "metrics_fields": [
+      "on_cache_hit",
+      "on_cache_miss",
+      "on_capability_drop",
+      "on_circuit_state",
+      "on_error",
+      "on_http_status",
+      "on_request_end",
+      "on_request_start",
+      "on_retry",
+      "on_streaming_chunk",
+      "on_streaming_first_chunk",
+      "on_token_usage",
+      "on_tool_calls",
+      "provider"
+    ]
+  }
+}

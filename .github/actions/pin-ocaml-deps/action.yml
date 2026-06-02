@@ -1,0 +1,23 @@
+name: Pin External OCaml Dependencies
+description: Pin external/private opam dependencies with elapsed-time logging.
+
+inputs:
+  pin-flags:
+    description: Extra flags for opam-pin-external-deps.sh
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Pin external dependencies
+      shell: bash
+      env:
+        PIN_FLAGS: ${{ inputs.pin-flags }}
+      run: |
+        set -euo pipefail
+        start="$(date +%s)"
+        chmod +x .github/actions/pin-ocaml-deps/pin.sh scripts/opam-pin-external-deps.sh
+        .github/actions/pin-ocaml-deps/pin.sh
+        elapsed="$(( $(date +%s) - start ))"
+        echo "Pinned external OCaml dependencies in ${elapsed}s"

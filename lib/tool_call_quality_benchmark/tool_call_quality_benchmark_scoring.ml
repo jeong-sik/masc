@@ -1,0 +1,293 @@
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
+open Tool_call_quality_benchmark_types
+
+let avg_float values =
+  match values with
+  | [] -> 0.0
+  | _ ->
+      List.fold_left ( +. ) 0.0 values /. Stdlib.Float.of_int (List.length values)
+
+let split_path path =
+  let path = String.trim path in
+  if String.equal path "$" then []
+  else
+    let path =
+      if String.starts_with ~prefix:"$." path then
+        String.sub path 2 (String.length path - 2)
+      else if String.starts_with ~prefix:"$" path then
+        String.sub path 1 (String.length path - 1)
+      else
+        path
+    in
+    if String.equal path "" then [] else String.split_on_char '.' path
+
+let rec json_at_path json segments =
+  match segments, json with
+  | [], _ -> Some json
+  | segment :: rest, `Assoc fields -> (
+      match List.assoc_opt segment fields with
+      | Some value -> json_at_path value rest
+      | None -> None)
+  | segment :: rest, `List items -> (
+      match Stdlib.int_of_string_opt segment with
+      | Some idx when idx >= 0 && idx < List.length items ->
+          (match List.nth_opt items idx with
+           | Some item -> json_at_path item rest
+           | None -> None)
+      | _ -> None)
+  | _ -> None
+
+let string_of_json value =
+  match value with
+  | `String s -> s
+  | _ -> Yojson.Safe.to_string value
+
+let evaluate_json_check ~(target : Yojson.Safe.t option) (check : json_check) =
+  let actual =
+    match target with
+    | Some json -> json_at_path json (split_path check.path)
+    | None -> None
+  in
+  let present_ok =
+    match check.present with
+    | None -> true
+    | Some true -> (match actual with Some `Null | None -> false | Some _ -> true)
+    | Some false -> (match actual with Some value when not ((=) value `Null) -> false | _ -> true)
+  in
+  let equals_ok =
+    match check.equals with
+    | None -> true
+    | Some expected -> Option.equal (=) actual (Some expected)
+  in
+  let contains_ok =
+    match check.contains with
+    | None -> true
+    | Some needle -> (
+        match actual with
+        | Some value -> String_util.contains_substring (string_of_json value) needle
+        | None -> false)
+  in
+  let min_int_ok =
+    match check.min_int with
+    | None -> true
+    | Some min_value -> (
+        match actual with
+        | Some (`Int value) -> value >= min_value
+        | Some (`Float value) -> Stdlib.Float.compare value (Stdlib.Float.of_int min_value) >= 0
+        | _ -> false)
+  in
+  present_ok && equals_ok && contains_ok && min_int_ok
+
+let tool_used tool_name (run : evidence_run) =
+  List.exists (fun call -> String.equal call.tool_name tool_name) run.tool_calls
+
+(* Build a name-keyed set over [run.tool_calls] in one pass.  Used by
+   [required_tool_score] and [forbidden_tool_used] to replace
+   O(R × C) repeated linear scans with O(C + R) build + lookup. *)
+let tool_call_name_set (run : evidence_run) =
+  let tbl = Hashtbl.create (List.length run.tool_calls) in
+  List.iter (fun call -> Hashtbl.replace tbl call.tool_name ()) run.tool_calls;
+  tbl
+
+let name_set_of_list names =
+  let tbl = Hashtbl.create (List.length names) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) names;
+  tbl
+
+let arg_check_passes (run : evidence_run) (check : arg_check) =
+  let predicate call =
+    String.equal call.tool_name check.tool_name
+    && evaluate_json_check ~target:(Some call.input)
+         { path = check.path
+         ; equals = check.equals
+         ; contains = check.contains
+         ; min_int = check.min_int
+         ; present = check.present
+         }
+  in
+  List.exists predicate run.tool_calls
+
+let tool_sequence (run : evidence_run) =
+  run.tool_calls |> List.map (fun call -> call.tool_name)
+
+let required_tool_score (benchmark_case : benchmark_case) (run : evidence_run) =
+  match benchmark_case.category with
+  | Tool_forbidden ->
+      if Stdlib.List.length run.tool_calls = 0 then 1.0 else 0.0
+  | _ ->
+      (match benchmark_case.required_tools with
+       | [] -> 1.0
+       | required_tools ->
+           (* Build the run's tool-name set once; replaces R × O(C) scans
+              with O(C) build + R × O(1) lookups. *)
+           let used = tool_call_name_set run in
+           required_tools
+           |> List.map (fun tool_name ->
+                  if Hashtbl.mem used tool_name then 1.0 else 0.0)
+           |> avg_float)
+
+let forbidden_tool_used (benchmark_case : benchmark_case) (run : evidence_run) =
+  match benchmark_case.category with
+  | Tool_forbidden -> Stdlib.List.length run.tool_calls > 0
+  | _ ->
+      (* Same shape as [required_tool_score]: one O(C) build, F lookups. *)
+      let used = tool_call_name_set run in
+      List.exists
+        (fun tool_name -> Hashtbl.mem used tool_name)
+        benchmark_case.forbidden_tools
+
+let task_pass_score (benchmark_case : benchmark_case) (run : evidence_run) =
+  let reported = Option.value ~default:false run.task_success in
+  let checks =
+    benchmark_case.success_checks
+    |> List.for_all (evaluate_json_check ~target:run.final_result)
+  in
+  if reported && checks then 1.0 else 0.0
+
+let arg_validity_score (benchmark_case : benchmark_case) (run : evidence_run) =
+  match benchmark_case.arg_checks with
+  | [] -> 1.0
+  | checks ->
+      checks
+      |> List.map (fun check -> if arg_check_passes run check then 1.0 else 0.0)
+      |> avg_float
+
+let recovery_score (benchmark_case : benchmark_case) (run : evidence_run) task_pass =
+  match benchmark_case.recovery_policy with
+  | None -> 1.0
+  | Some policy when not policy.required -> 1.0
+  | Some policy ->
+      let calls = run.tool_calls in
+      let rec find_success_after failures_seen failures_before_success = function
+        | [] -> None
+        | call :: rest ->
+            if call.success then
+              if failures_seen then Some failures_before_success
+              else find_success_after failures_seen failures_before_success rest
+            else
+              find_success_after true (failures_before_success + 1) rest
+      in
+      let success_after_failure =
+        if policy.success_after_failure then find_success_after false 0 calls else Some 0
+      in
+      let failure_limit_ok =
+        match success_after_failure, policy.max_failures_before_success with
+        | Some _, None -> true
+        | Some failures, Some max_failures -> failures <= max_failures
+        | None, _ -> false
+      in
+      if Stdlib.Float.compare task_pass 1.0 = 0 && failure_limit_ok && Option.is_some success_after_failure then 1.0
+      else 0.0
+
+let unnecessary_tool_rate (benchmark_case : benchmark_case) (run : evidence_run) =
+  let call_count = List.length run.tool_calls in
+  if call_count = 0 then 0.0
+  else
+    match benchmark_case.category with
+    | Tool_forbidden -> 1.0
+    | _ ->
+        (* Iteration is reversed here vs [forbidden_tool_used]: we scan
+           run.tool_calls and check each name against forbidden_tools,
+           so build the set from forbidden_tools (F entries) and let
+           the scan be C × O(1). *)
+        let forbidden_set = name_set_of_list benchmark_case.forbidden_tools in
+        let forbidden_count =
+          run.tool_calls
+          |> List.filter (fun call -> Hashtbl.mem forbidden_set call.tool_name)
+          |> List.length
+        in
+        let over_limit = max 0 (call_count - benchmark_case.max_tool_calls) in
+        Stdlib.Float.min 1.0
+          (Stdlib.Float.of_int (forbidden_count + over_limit) /. Stdlib.Float.of_int call_count)
+
+let efficiency_score (benchmark_case : benchmark_case) (run : evidence_run) =
+  let call_count = List.length run.tool_calls in
+  match benchmark_case.category with
+  | Tool_forbidden ->
+      if call_count = 0 then 1.0 else 0.0
+  | _ ->
+      if benchmark_case.max_tool_calls <= 0 then
+        if call_count = 0 then 1.0 else 0.0
+      else
+        let over_limit = max 0 (call_count - benchmark_case.max_tool_calls) in
+        Stdlib.Float.max 0.0
+          (1.0 -. (Stdlib.Float.of_int over_limit /. Stdlib.Float.of_int benchmark_case.max_tool_calls))
+
+let score_run ~cases (run : evidence_run) =
+  if not ((=) run.status Run_ok) then None
+  else
+    let cases_by_id =
+      cases
+      |> List.to_seq
+      |> Stdlib.Seq.map (fun case -> (case.id, case))
+      |> Hashtbl.of_seq
+    in
+    match Hashtbl.find_opt cases_by_id run.case_id with
+    | None -> None
+    | Some benchmark_case ->
+        if not (List.mem run.keeper_profile benchmark_case.keeper_profiles) then None
+        else
+          let task_pass = task_pass_score benchmark_case run in
+          let required_score = required_tool_score benchmark_case run in
+          let tool_selection =
+            if forbidden_tool_used benchmark_case run then 0.0 else required_score
+          in
+          let arg_validity = arg_validity_score benchmark_case run in
+          let recovery = recovery_score benchmark_case run task_pass in
+          let efficiency = efficiency_score benchmark_case run in
+          let unnecessary_tool_rate = unnecessary_tool_rate benchmark_case run in
+          let composite_score =
+            (40.0 *. task_pass)
+            +. (25.0 *. tool_selection)
+            +. (15.0 *. arg_validity)
+            +. (10.0 *. recovery)
+            +. (10.0 *. efficiency)
+          in
+          let passed =
+            Stdlib.Float.compare task_pass 1.0 = 0
+            && Stdlib.Float.compare tool_selection 1.0 = 0
+            && Stdlib.Float.compare arg_validity 1.0 = 0
+            && Stdlib.Float.compare recovery 1.0 = 0
+            && Stdlib.Float.compare efficiency 1.0 = 0
+          in
+          Some
+            {
+              case_id = run.case_id;
+              provider = run.provider;
+              model = run.model;
+              keeper_profile = run.keeper_profile;
+              passed;
+              task_pass;
+              tool_selection;
+              arg_validity;
+              recovery;
+              efficiency;
+              unnecessary_tool_rate;
+              composite_score;
+              tool_call_count = List.length run.tool_calls;
+              latency_ms = run.latency_ms;
+              input_tokens = run.input_tokens;
+              output_tokens = run.output_tokens;
+              cost_usd = run.cost_usd;
+              prompt_fingerprint = run.prompt_fingerprint;
+              tool_sequence = tool_sequence run;
+            }
+
+let to_reward_advice ~agent_name ?task_id score =
+  Reward_advice_artifact.of_benchmark_case_score ~agent_name ?task_id score

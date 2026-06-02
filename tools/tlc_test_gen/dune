@@ -1,0 +1,4 @@
+(library
+ (name tlc_test_gen)
+ (modules ttrace_parser ocaml_emit)
+ (libraries str))

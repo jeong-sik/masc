@@ -1,0 +1,303 @@
+(** Keeper_world_observation — Structured world state for keeper cycles.
+
+    Extracts and normalizes observation signals from workspace state, keeper meta,
+    and context so the unified prompt builder and turn runner can consume
+    a single coherent snapshot instead of re-reading scattered sources.
+
+    @since Unified Keeper Loop *)
+
+(** Structured board activity delivered to keepers without routing heuristics. *)
+type pending_board_event = {
+  post_id : string;
+  author : string;
+  title : string;
+  preview : string;
+  hearth : string option;
+  post_kind : Board_types.post_kind;
+  updated_at : float;
+  explicit_mention : bool;
+  matched_targets : string list;
+  self_commented : bool;
+  (** [true] if this keeper has previously commented on this post. *)
+  new_external_since : int;
+  (** Number of external comments posted after the keeper's latest comment. *)
+  latest_external_author : string option;
+  (** Author of the most recent external comment (for prompt context). *)
+  latest_external_preview : string option;
+  (** Preview of the most recent external comment content. *)
+}
+
+(** Snapshot of the world as seen by a keeper at heartbeat time. *)
+type world_observation = {
+  pending_mentions : (string * string) list;
+  (** [(from_agent, content)] pairs of unprocessed direct mentions. *)
+
+  pending_board_events : pending_board_event list;
+  (** Structured board events needing triage. *)
+
+  pending_scope_messages : (string * string) list;
+  (** [(from_agent, content)] pairs of unprocessed non-direct messages that a
+      global/all keeper is explicitly allowed to observe in the flattened
+      namespace. *)
+
+  message_cursor_updates : (string * int) list;
+  (** Deterministic message cursor watermarks collected during observation.
+      These are applied to keeper meta before the next turn to avoid
+      reprocessing the same broadcast stream. *)
+
+  idle_seconds : int;
+  (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
+
+  active_goals : string list;
+  (** Goal IDs currently assigned to this keeper. *)
+
+  continuity_summary : string;
+  (** Latest continuity snapshot text (empty if unavailable). *)
+
+  context_ratio : float;
+  (** Current context window utilization [0.0, 1.0]. *)
+
+  economic_pressure : Agent_economy.pressure_mode;
+  (** Agent economy mode: Normal, Frugal, or Hustle. *)
+
+  unclaimed_task_count : int;
+  (** Number of unclaimed tasks in the workspace backlog. *)
+
+  claimable_task_count : int;
+  (** Number of unclaimed tasks this keeper can claim with its current tool
+      surface. This is a matched subset of [unclaimed_task_count]. *)
+
+  provider_capacity_blocked_task_count : int;
+  (** Number of otherwise-claimable tasks currently held back by provider
+      capacity/cooldown when no fail-open runtime is available. *)
+
+  failed_task_count : int;
+  (** Number of failed/cancelled tasks in the workspace backlog. *)
+
+  pending_verification_count : int;
+  (** Number of tasks awaiting cross-agent verification. *)
+
+  backlog_updated_since_last_scheduled_autonomous : bool;
+  (** [true] when the backlog changed after the keeper's last scheduled
+      autonomous attempt. Lets task-triggered wakeups bypass cooldown once
+      so newly added work is not delayed behind the previous turn's timer. *)
+
+  active_agent_count : int;
+  (** Number of agents currently active in the workspace. *)
+
+  last_turn_budget : (int * int) option;
+  (** Previous generation's turn usage as [(used, total)], if available. *)
+}
+
+type keeper_cycle_channel =
+  | Reactive
+  | Scheduled_autonomous
+
+type unified_turn_channel = keeper_cycle_channel
+
+(** Typed reason for running a keeper cycle. Each variant corresponds to
+    exactly one code path in {!keeper_cycle_decision}. *)
+type turn_reason =
+  | Mention_pending
+  | Board_event_pending
+  | Scope_message_pending
+  | Scheduled_autonomous_turn
+  | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }
+  | Cooldown_elapsed
+  | Task_backlog of { unclaimed : int; failed : int }
+  | Task_reactive_cooldown_elapsed
+  | Never_started
+  | Min_interval_elapsed
+  | Entropic_oscillation
+
+(** Typed reason for skipping a keeper turn. *)
+type skip_reason =
+  | Keeper_paused
+  | Approval_pending
+  | Scheduled_autonomous_disabled
+  | Provider_cooldown_pending of { remaining_sec : int }
+  | Idle_gate_pending of { remaining_sec : int }
+  | Cooldown_pending of { remaining_sec : int }
+  | No_signal
+
+(** Keeper cycle decision with non-empty reason list (NEL).
+    [Run] guarantees at least one trigger reason.
+    [Skip] guarantees at least one skip reason.
+    Channel is held by [keeper_cycle_decision], not duplicated here. *)
+type turn_verdict =
+  | Run of { reasons : turn_reason * turn_reason list }
+  | Skip of { reasons : skip_reason * skip_reason list }
+
+(** Convert a single turn reason to a flat string tag.
+    The tag is a stable snake_case form of the typed variant.
+    Variant payloads are intentionally omitted. *)
+val turn_reason_to_string : turn_reason -> string
+
+(** Convert a single skip reason to a flat string tag.
+    The tag is a stable snake_case form of the typed variant.
+    Variant payloads are intentionally omitted. *)
+val skip_reason_to_string : skip_reason -> string
+
+(** Convert channel to string tag. *)
+val channel_to_string : keeper_cycle_channel -> string
+
+(** Check if a string channel tag represents an autonomous cycle
+    (scheduled_autonomous or proactive). *)
+val is_autonomous_channel : string -> bool
+
+(** Extract all reasons as flat string tags from a verdict.
+    Tags map 1:1 to the typed reasons carried by the verdict and do not
+    include variant payloads. *)
+val verdict_reasons_to_strings : turn_verdict -> string list
+
+type keeper_cycle_decision = {
+  should_run : bool;
+  channel : keeper_cycle_channel;
+  verdict : turn_verdict;
+  since_last_scheduled_autonomous : int option;
+  effective_cooldown : int option;
+  task_reactive_cooldown : int option;
+  idle_gate_sec : int option;
+}
+
+type unified_turn_decision = keeper_cycle_decision
+
+type board_signal_match = {
+  explicit_mention : bool;
+  matched_targets : string list;
+  score : int;
+}
+
+(** Collect recent board activity within the keeper's heartbeat window.
+    Returns [(events, new_post_count, mention_count)].
+    Used by both the world observation builder and the deliberation triage
+    in keepalive to populate board-related triggers. *)
+val collect_board_events :
+  base_path:string ->
+  continuity_summary:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  pending_board_event list * int * int
+
+val collect_board_events_without_advancing_cursor :
+  base_path:string ->
+  continuity_summary:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  pending_board_event list * int * int
+
+val board_signal_match :
+  continuity_summary:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  signal:Board_dispatch.board_signal ->
+  board_signal_match
+
+val board_signal_wake_reason :
+  continuity_summary:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  signal:Board_dispatch.board_signal ->
+  string option
+
+(** Convert a queued Event Layer stimulus back into structured board activity
+    for the next keeper prompt. Returns [None] for non-board stimuli. *)
+val pending_board_event_of_stimulus :
+  continuity_summary:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  Keeper_event_queue.stimulus ->
+  pending_board_event option
+
+(** Read the best available continuity summary for a keeper.
+    Recovery order is progress log -> checkpoint snapshot -> meta summary. *)
+val read_continuity_summary :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  string
+
+(** Build a world observation from workspace state and keeper metadata.
+
+    Reads workspace backlog, agent list, checkpoint context, economy state,
+    and recent board activity.
+    All I/O errors are caught and produce safe defaults (0, empty, Normal).
+
+    @param pending_board_events Pre-collected board event summaries for this
+      heartbeat, if already fetched during triage
+    @param config Workspace configuration for I/O operations
+    @param meta Current keeper metadata *)
+val observe :
+  pending_board_events:pending_board_event list option ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  world_observation
+
+(** Build the observation used by direct [masc_keeper_msg] turns.
+
+    This intentionally reads durable workspace/task state, including pending
+    verification counts, while suppressing transient board/message events and
+    cursor updates. Direct operator messages should not advance autonomous
+    cursors, inherit unrelated workspace chatter, or synthesize scheduled
+    scheduled timer signals, but they must still see the durable work
+    signals that drive tool-use contracts. *)
+val observe_direct_keeper_msg :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  world_observation
+
+(** Non-mutating probe for the smart-heartbeat gate.
+
+    Returns [true] when durable workspace state already contains work that should
+    force a keeper cycle even if the adaptive heartbeat would otherwise
+    [Skip_idle]. Unlike {!observe}, this helper does not advance board or
+    message cursors. *)
+val durable_signal_present :
+  pending_board_events:pending_board_event list option ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  bool
+
+(** Structured work signal present in the observation itself. *)
+val actionable_signal_present : world_observation -> bool
+
+val apply_message_cursor_updates :
+  Keeper_meta_contract.keeper_meta ->
+  (string * int) list ->
+  Keeper_meta_contract.keeper_meta
+
+(** Compute effective scheduled autonomous cooldown with idle decay.
+    After extended idle (> base cooldown), halve the cooldown each
+    additional period, down to a configurable floor. *)
+val effective_scheduled_autonomous_cooldown :
+  base_cooldown:int -> since_last:int ->
+  ?consecutive_noop_count:int -> unit -> int
+
+val provider_cooldown_remaining_sec_for_runtime :
+  runtime_id:string -> int option
+
+val provider_capacity_blocked_task_count :
+  ?provider_cooldown_remaining_sec:
+    (runtime_id:string -> int option) ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  claimable_task_count:int ->
+  unit ->
+  int
+
+val entropic_oscillation_interval_sec : int
+(** Minimum scheduled-autonomous silence before entropy injection can wake a
+    keeper. *)
+
+val entropic_oscillation_probability_percent : int
+(** Percent chance sampled after the interval gate has elapsed. *)
+
+val should_inject_entropic_oscillation :
+  since_last_scheduled_autonomous:int -> draw_percent:int -> bool
+(** Deterministic policy predicate for the stochastic entropy wakeup. *)
+
+val keeper_cycle_decision :
+  ?provider_cooldown_remaining_sec:
+    (runtime_id:string -> int option) ->
+  meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
+
+val unified_turn_decision :
+  ?provider_cooldown_remaining_sec:
+    (runtime_id:string -> int option) ->
+  meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
+
+val should_run_keeper_cycle :
+  meta:Keeper_meta_contract.keeper_meta -> world_observation -> bool

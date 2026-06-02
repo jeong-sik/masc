@@ -1,0 +1,464 @@
+(** Keeper_context_runtime — facade that re-exports from domain sub-modules.
+
+    Working context types live in {!Keeper_types}.
+    Pure context operations are in {!Keeper_context_core}.
+    Compaction policy is in {!Keeper_compact_policy}.
+    Handoff rollover is in {!Keeper_rollover}.
+    Post-turn lifecycle is in {!Keeper_post_turn}.
+
+    This module preserves the original public API so that callers
+    do not need updating. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+
+(* ================================================================ *)
+(* Re-export from Keeper_context_core                                *)
+(* ================================================================ *)
+
+type working_context = Keeper_types.working_context
+type session_context = Keeper_types.session_context
+
+let text_of_message = Keeper_context_core.text_of_message
+let msg_tokens = Keeper_context_core.msg_tokens
+let count_tokens = Keeper_context_core.count_tokens
+let max_tokens_of_context = Keeper_context_core.max_tokens_of_context
+let token_count = Keeper_context_core.token_count
+let message_count = Keeper_context_core.message_count
+let context_ratio = Keeper_context_core.context_ratio
+let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
+let resume_checkpoint_of_context =
+  Keeper_context_core.resume_checkpoint_of_context
+let oas_context_of_context = Keeper_context_core.oas_context_of_context
+let with_max_tokens = Keeper_context_core.with_max_tokens
+let system_prompt_of_context = Keeper_context_core.system_prompt_of_context
+let messages_of_context = Keeper_context_core.messages_of_context
+let create = Keeper_context_core.create
+let set_system_prompt = Keeper_context_core.set_system_prompt
+let append = Keeper_context_core.append
+let append_many = Keeper_context_core.append_many
+let sync_oas_context = Keeper_context_core.sync_oas_context
+let role_to_string = Keeper_context_core.role_to_string
+let role_of_string_opt = Keeper_context_core.role_of_string_opt
+let message_to_json = Keeper_context_core.message_to_json
+let message_of_json = Keeper_context_core.message_of_json
+let serialize_context = Keeper_context_core.serialize_context
+let deserialize_context = Keeper_context_core.deserialize_context
+let context_to_json = Keeper_context_core.context_to_json
+let create_session = Keeper_context_core.create_session
+let persist_message = Keeper_context_core.persist_message
+
+let timed = Keeper_context_core.timed
+let zero_usage = Keeper_context_core.zero_usage
+let usage_of_response = Keeper_context_core.usage_of_response
+let total_tokens = Keeper_context_core.total_tokens
+
+let log_keeper_exn = Keeper_context_core.log_keeper_exn
+let checkpoint_max_tokens = Keeper_context_core.checkpoint_max_tokens
+let context_of_oas_checkpoint = Keeper_context_core.context_of_oas_checkpoint
+let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint
+let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
+
+(* ================================================================ *)
+(* Re-export from Keeper_rollover                                    *)
+(* ================================================================ *)
+
+type handoff_rollover = Keeper_rollover.handoff_rollover = {
+  updated_meta : keeper_meta;
+  handoff_json : Yojson.Safe.t option;
+  attempted : bool;
+  failure_reason : string option;
+  context_ratio : float;
+  context_tokens : int;
+  context_max : int;
+  message_count : int;
+}
+
+let maybe_rollover_oas_handoff = Keeper_rollover.maybe_rollover_oas_handoff
+
+type rollover_gate_decision = Keeper_rollover.rollover_gate_decision =
+  | Skip of string
+  | Go of string
+
+let blocker_class_indicates_overflow = Keeper_rollover.blocker_class_indicates_overflow
+let classify_rollover_gate = Keeper_rollover.classify_rollover_gate
+
+(* ================================================================ *)
+(* Re-export from Keeper_compact_policy                              *)
+(* ================================================================ *)
+
+let compaction_policy_of_keeper = Keeper_compact_policy.compaction_policy_of_keeper
+
+type compaction_decision = Keeper_compact_policy.compaction_decision =
+  | Applied of Compaction_trigger.t
+  | Blocked_below_thresholds
+  | Skipped_no_checkpoint
+  | Skipped_continuity_reflection of {
+      hold_s : float;
+      cooldown_sec : int;
+    }
+
+let compaction_decision_to_string =
+  Keeper_compact_policy.compaction_decision_to_string
+
+let compaction_decision_applied =
+  Keeper_compact_policy.compaction_decision_applied
+
+
+(* ================================================================ *)
+(* Re-export from Keeper_post_turn                                   *)
+(* ================================================================ *)
+
+type compaction_event = Keeper_post_turn.compaction_event = {
+  attempted : bool;
+  applied : bool;
+  started_dispatched : bool;
+  failure_reason : string option;
+  trigger : Compaction_trigger.t option;
+  decision : Keeper_compact_policy.compaction_decision;
+  before_tokens : int;
+  after_tokens : int;
+  saved_tokens : int;
+}
+
+type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
+  updated_meta : keeper_meta;
+  checkpoint : Agent_sdk.Checkpoint.t option;
+  handoff_json : Yojson.Safe.t option;
+  handoff_attempted : bool;
+  handoff_failure_reason : string option;
+  compaction : compaction_event;
+  turn_generation : int;
+  context_ratio : float;
+  context_tokens : int;
+  context_max : int;
+  message_count : int;
+}
+
+type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
+  checkpoint : Agent_sdk.Checkpoint.t;
+  compaction : compaction_event;
+  turn_generation : int;
+}
+
+type max_context_resolution = {
+  requested_override : int option;
+  primary_budget : int;
+  runtime_budget : int;
+  turn_budget : int;
+  effective_budget : int;
+}
+
+let apply_post_turn_lifecycle_with_resilience_handles =
+  Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles
+let recover_latest_checkpoint_for_overflow_retry =
+  Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
+
+let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
+  Prometheus.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
+    ();
+  Log.Keeper.warn
+    "%s: keeper lifecycle dispatch rejected origin=%s event=%s error=%s"
+    keeper_name
+    (Keeper_registry.lifecycle_event_origin_to_string origin)
+    (Keeper_state_machine.event_to_string event)
+    error
+
+let dispatch_keeper_phase_event
+    ~(config : Workspace.config)
+    ?(origin = Keeper_registry.Generic_dispatch)
+    ~keeper_name
+    event =
+  match
+    Keeper_registry.dispatch_event
+      ~base_path:config.base_path
+      ~origin
+      keeper_name
+      event
+  with
+  | Ok _ -> ()
+  | Error err ->
+      record_lifecycle_dispatch_rejection
+        ~keeper_name
+        ~origin
+        event
+        ~error:(Keeper_state_machine.transition_error_to_string err)
+  | exception (Keeper_registry_types.Compaction_transition_violation _ as exn) ->
+      record_lifecycle_dispatch_rejection
+        ~keeper_name
+        ~origin
+        event
+        ~error:(Printexc.to_string exn)
+
+(* #9988 Option B follow-up: centralize [Compaction_completed] dispatch
+   so both emit paths (manual recovery in [keeper_tool_surface] and automatic
+   post-turn lifecycle) share the same outcome counter + warn log.
+
+   [masc_keeper_compaction_outcome_total{keeper,outcome}] splits into
+   [outcome=ok] (real savings) and [outcome=noop] (before==after or
+   after>before).  The FSM (#9993) already refuses to clear
+   [context_overflow] in the noop branch; the counter exposes the
+   surface so dashboards/Grafana can alert on rising noop rate —
+   the operational signal for "reducer has nothing to strip, switch
+   profile or hand off". *)
+let compaction_outcome_metric = "masc_keeper_compaction_outcome_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:compaction_outcome_metric
+    ~help:
+      "Total Compaction_completed dispatches classified by token \
+       savings. Labels: keeper, outcome (ok = saved_tokens > 0, \
+       noop = before == after or after > before). Rising noop \
+       rate is the operational signal for \"reducer has nothing \
+       to strip, switch profile or hand off\" (#9988)."
+    ()
+
+(* Observability-only: bump the outcome counter and log the warn
+   when saved_tokens <= 0.  Split from [dispatch_compaction_completed]
+   so unit tests can verify classification without needing a full
+   [Workspace.config] / [Keeper_registry] setup. *)
+let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
+  let saved_tokens = before_tokens - after_tokens in
+  let outcome = if saved_tokens > 0 then "ok" else "noop" in
+  Prometheus.inc_counter compaction_outcome_metric
+    ~labels:[ ("keeper", keeper_name); ("outcome", outcome) ] ();
+  if saved_tokens <= 0 then
+    Log.Keeper.warn
+      "#9988 compaction_completed but saved_tokens=%d \
+       (before=%d after=%d) keeper=%s — context_overflow will stay set \
+       (FSM noop branch).  If this repeats, switch to a stronger \
+       compaction profile or escalate to operator."
+      saved_tokens before_tokens after_tokens keeper_name
+
+let dispatch_compaction_completed
+    ~(config : Workspace.config)
+    ~origin
+    ~keeper_name
+    ~before_tokens
+    ~after_tokens =
+  record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
+  Prometheus.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
+    ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
+  dispatch_keeper_phase_event ~config ~origin ~keeper_name
+    (Keeper_state_machine.Compaction_completed
+       { before_tokens; after_tokens })
+
+let dispatch_post_turn_lifecycle_events
+    ~(config : Workspace.config)
+    ~keeper_name
+    (lifecycle : post_turn_lifecycle) =
+  if lifecycle.compaction.attempted then
+    if lifecycle.compaction.applied then begin
+      (* FSM boundary: compaction_stage must be Compaction_compacting
+         before we dispatch Compaction_completed.  If the
+         on_compaction_started callback succeeded (started_dispatched =
+         true), the FSM is already in compacting.  If it failed or was
+         never called (recovery path), the FSM is still at accumulating
+         and we must dispatch Compaction_started first.  The Started
+         dispatch is idempotent from compacting, so this is safe in
+         both cases. *)
+      if not lifecycle.compaction.started_dispatched then begin
+        Prometheus.inc_counter Keeper_metrics.(to_string CompactionCallbackRecoveries)
+          ~labels:[ ("keeper", keeper_name) ] ();
+        Log.Keeper.warn
+          "%s: on_compaction_started callback did not fire — \
+           dispatching Compaction_started before Completed to recover \
+           FSM path.  If this repeats, investigate registry contention \
+           or keeper registration timing."
+          keeper_name;
+        dispatch_keeper_phase_event ~config
+          ~origin:Keeper_registry.Post_turn_lifecycle
+          ~keeper_name
+          Keeper_state_machine.Compaction_started
+      end;
+      dispatch_compaction_completed
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
+        ~before_tokens:lifecycle.compaction.before_tokens
+        ~after_tokens:lifecycle.compaction.after_tokens
+    end
+    else
+      dispatch_keeper_phase_event
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
+        (Keeper_state_machine.Compaction_failed
+           {
+             reason =
+               Option.value lifecycle.compaction.failure_reason
+                 ~default:
+                   (compaction_decision_to_string
+                      lifecycle.compaction.decision);
+           });
+  match lifecycle.handoff_attempted, lifecycle.handoff_json with
+  | true, Some _json ->
+      dispatch_keeper_phase_event
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
+        (Keeper_state_machine.Handoff_completed
+           {
+             generation = lifecycle.updated_meta.runtime.generation;
+             new_trace_id =
+               Keeper_id.Trace_id.to_string
+                 lifecycle.updated_meta.runtime.trace_id;
+           })
+  | true, None ->
+      dispatch_keeper_phase_event
+        ~config
+        ~origin:Keeper_registry.Post_turn_lifecycle
+        ~keeper_name
+        (Keeper_state_machine.Handoff_failed
+           {
+             reason =
+               Option.value lifecycle.handoff_failure_reason
+                 ~default:"handoff_aborted";
+           })
+  | false, _ -> ()
+
+(* ================================================================ *)
+(* Remaining functions (not extracted — small utilities)              *)
+(* ================================================================ *)
+
+let generate_trace_id = Keeper_identity.generate_trace_id
+
+let keeper_board_write_tool_names =
+  [ "keeper_board_post"
+  ; "keeper_board_comment"
+  ; "keeper_board_vote"
+  ; "keeper_board_curation_submit"
+  ]
+
+let canonical_tool_name name = Keeper_tool_resolution.canonical_tool_name name
+
+let keeper_tool_name_matches tool name =
+  String.equal (canonical_tool_name name) tool
+
+let keeper_write_done tool_names =
+  List.exists
+    (fun name ->
+       List.exists (fun tool -> keeper_tool_name_matches tool name)
+         keeper_board_write_tool_names)
+    tool_names
+
+let keeper_action_kind_of_tool_names tool_names =
+  [ "keeper_board_post", "post"
+  ; "keeper_board_comment", "comment"
+  ; "keeper_board_vote", "vote"
+  ; "keeper_board_curation_submit", "curation"
+  ]
+  |> List.find_map (fun (tool, action_kind) ->
+    if List.exists (keeper_tool_name_matches tool) tool_names then Some action_kind
+    else None)
+  |> Option.value ~default:"none"
+
+let effective_model_labels_for_turn (m : keeper_meta) : string list =
+  (* provider filtering now handled by OAS runtime via ~provider_filter *)
+  let configured = Keeper_model_labels.configured_model_labels_of_meta m in
+  match String.trim (Keeper_status_runtime.active_model_of_meta m) with
+  | "" -> configured
+  | model ->
+      let model_allowed =
+        List.mem model configured
+        || List.exists
+             (fun label ->
+               Runtime_provider_binding.label_matches_runtime_id
+                 ~label
+                 ~runtime_id:model)
+             configured
+      in
+      if model_allowed
+      then dedupe_keep_order (model :: configured)
+      else configured
+
+let resolve_max_context_resolution ~requested_override (labels : string list)
+    : max_context_resolution =
+  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
+  let clamp resolved =
+    let local_clamped = resolved in
+    max min_keeper_context local_clamped
+  in
+  let default_budget = Runtime.default_max_context () |> clamp in
+  let runtime_budget =
+    labels
+    |> List.find_map (fun label ->
+           String.trim label
+           |> Runtime.max_context_of_runtime_id
+           |> Option.map clamp)
+    (* Labels are an ordered runtime-budget preference list. If none resolve,
+       the precomputed default runtime budget preserves config-less tests.
+       DET-OK: dispatch still fail-fast validates the selected runtime id before
+       provider execution. *)
+    |> Option.value ~default:default_budget
+  in
+  (* RFC-0207: budget against the same per-keeper runtime id that dispatch uses. *)
+  let primary_budget = runtime_budget in
+  let turn_budget =
+    match requested_override with
+    | Some requested when requested > 0 ->
+      max min_keeper_context requested
+    | _ -> primary_budget
+  in
+  let effective_budget = min turn_budget primary_budget in
+  { requested_override; primary_budget; runtime_budget; turn_budget; effective_budget }
+
+let resolve_max_context_resolution_of_meta (m : keeper_meta)
+    : max_context_resolution =
+  (* RFC-0207: the per-keeper routed runtime ([runtime_id_of_meta] — the same id
+     [keeper_turn_driver] dispatches to) is the authoritative budget source.
+     [effective_model_labels_for_turn] projects through
+     [Provider_runtime_projection.default_execution_model_strings], which ignores
+     the runtime id and returns the GLOBAL preferred labels (an RFC-0206
+     single-binding artifact), so on its own the budget would size against
+     [runtime].default and could admit prompts exceeding a smaller per-keeper
+     model's window.  Prepend the routed id so [resolve_max_context_resolution]'s
+     [find_map] sizes against it first; the projection labels remain as
+     fallback. *)
+  let labels = runtime_id_of_meta m :: effective_model_labels_for_turn m in
+  resolve_max_context_resolution
+    ~requested_override:m.max_context_override labels
+
+let exact_direct_mention_present ~(targets : string list) (content : string) :
+    bool =
+  Mention.any_mentioned ~targets content
+
+(* Delegate to Keeper_prompt — single source of truth for keeper prompts. *)
+let keeper_constitution = Keeper_prompt.keeper_constitution
+
+let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt
+
+let append_trait_clause ~(base : string) ~(clause : string) : string =
+  let b = String.trim base in
+  let c = String.trim clause in
+  if c = "" then b
+  else if b = "" then c
+  else if String_util.contains_substring_ci b c then b
+  else Printf.sprintf "%s; %s" b c
+
+
+include Keeper_text_processing
+
+let memory_check_default_json () : Yojson.Safe.t =
+  `Assoc [
+    ("performed", `Bool false);
+    ("query_kind", `String "none");
+    ("expected_topic", `Null);
+    ("candidate_count", `Int 0);
+    ("initial_score", `Float 0.0);
+    ("final_score", `Float 0.0);
+    ("threshold", `Float 0.18);
+    ("passed", `Bool true);
+    ("best_match", `Null);
+    ("correction_applied", `Bool false);
+    ("correction_success", `Bool false);
+    ("prompt_fallback_applied", `Bool false);
+    ("prompt_fallback_success", `Bool false);
+    ("deterministic_fallback_applied", `Bool false);
+    ("recall_fallback_applied", `Bool false);
+  ]

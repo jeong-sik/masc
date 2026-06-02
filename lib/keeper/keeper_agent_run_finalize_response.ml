@@ -1,0 +1,196 @@
+(** Keeper_agent_run_finalize_response — Process provider text and finalize turn.
+
+    Extracted from [Keeper_agent_run.run_turn]. Handles response text
+    finalization, sidecar persistence, checkpoint saving, CDAL proof
+    evaluation, post-turn memory, and result construction. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_agent_result
+
+let finalize
+    ~config
+    ~meta
+    ~generation
+    ~manifest_keeper_turn_id
+    ~trace_id
+    ~session
+    ~(append_manifest : Keeper_agent_run_sidecar.append_manifest_fn)
+    ~model
+    ~(acc : Keeper_run_tools.hook_accumulator)
+    ~memory
+    ~actual_keeper_tool_names
+    ~actual_keeper_tool_names_ref
+    ~(result : Runtime_agent.run_result)
+    ~checkpoint_persistence_error
+    ~post_turn_t0
+    ?provider_filter
+    ~runtime_id_string
+    ~prompt_metrics
+    ~ctx_composition
+    ~usage
+    ~receipt_response_text_present_ref
+    ~history_assistant_source
+    ~pre_dispatch_compacted
+    ~pre_dispatch_compaction_trigger
+    ~pre_dispatch_compaction_before_tokens
+    ~pre_dispatch_compaction_after_tokens
+    ~raw_response_text
+    () =
+  let
+    { Keeper_agent_run_response_text.state_snapshot; response_text }
+    =
+    Keeper_agent_run_response_text.finalize
+      ~keeper_name:meta.name
+      ~goal:meta.goal
+      ~actual_keeper_tool_names:!actual_keeper_tool_names_ref
+      ~fallback_tool_names:actual_keeper_tool_names
+      ~stop_reason:result.stop_reason
+      ~raw_response_text
+  in
+  let state_snapshot_source =
+    if
+      Option.is_some
+        (Keeper_memory_policy.parse_state_snapshot_from_reply
+           raw_response_text)
+    then "model_state_block"
+    else "synthesized"
+  in
+  let { Keeper_agent_run_sidecar.working_state = _
+      ; state_snapshot_saved = _
+      ; working_state_saved = _
+      } =
+    Keeper_agent_run_sidecar.save_sidecars
+      ~keeper_name:meta.name
+      ~agent_name:meta.agent_name
+      ~trace_id
+      ~generation
+      ~keeper_turn_id:manifest_keeper_turn_id
+      ~oas_turn_count:result.turns
+      ~session_dir:session.session_dir
+      ~state_snapshot
+      ~state_snapshot_source
+      ~append_manifest
+      ()
+  in
+  receipt_response_text_present_ref := true;
+  let assistant_msg =
+    Agent_sdk.Types.make_message
+      ~role:Agent_sdk.Types.Assistant
+      ~metadata:
+        [ ( Keeper_memory_policy.replay_metadata_key
+          , Keeper_memory_policy.replay_metadata_of_snapshot
+              state_snapshot )
+        ]
+      [ Agent_sdk.Types.Text response_text ]
+  in
+  Keeper_context_runtime.persist_message
+    ~source:history_assistant_source
+    session
+    assistant_msg;
+  let saved_checkpoint_result =
+    match result.checkpoint with
+    | Some checkpoint ->
+      let patched =
+        Keeper_context_core.patch_checkpoint_last_assistant
+          checkpoint
+          ~session_id:
+            (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~response_text
+          ~snapshot:state_snapshot
+      in
+      (match
+         Keeper_checkpoint_store.save_oas
+           ~session_dir:session.session_dir
+           patched
+       with
+       | Ok () ->
+         append_manifest ~site:"checkpoint_saved"
+           ~keeper_turn_id:manifest_keeper_turn_id
+           ~oas_turn_count:result.turns
+           ~checkpoint_path:
+             (Keeper_checkpoint_store.oas_checkpoint_path
+                ~session_dir:session.session_dir
+                ~session_id:patched.session_id)
+           ~decision:
+             (`Assoc
+               [
+                 ("session_id", `String patched.session_id);
+                 ("turns", `Int result.turns);
+                 ("model", `String model);
+               ])
+           Keeper_runtime_manifest.Checkpoint_saved;
+         Ok (Some patched)
+       | Error e ->
+         Log.Keeper.error
+           "keeper:%s runtime=%s OAS checkpoint save failed: %s"
+           meta.name
+           (Keeper_meta_contract.runtime_id_of_meta meta)
+           e;
+         Prometheus.inc_counter
+           Keeper_metrics.(to_string CheckpointFailures)
+           ~labels:[ "keeper", meta.name; "site", "save" ]
+           ();
+         Error
+           (checkpoint_persistence_error
+              ~keeper_name:meta.name
+              ~detail:("OAS checkpoint save failed: " ^ e)))
+    | None ->
+      Log.Keeper.error
+        "keeper:%s runtime=%s missing OAS checkpoint after run"
+        meta.name
+        (Keeper_meta_contract.runtime_id_of_meta meta);
+      Prometheus.inc_counter
+        Keeper_metrics.(to_string CheckpointFailures)
+        ~labels:[ "keeper", meta.name; "site", "missing" ]
+        ();
+      Error
+        (checkpoint_persistence_error
+           ~keeper_name:meta.name
+           ~detail:"missing OAS checkpoint after run")
+  in
+  match saved_checkpoint_result with
+  | Error e -> Error e
+  | Ok saved_checkpoint ->
+    (* CDAL proof evaluation / verdict-ledger persistence removed: task/goal
+       completion is verified by [Cdal_evidence_gate] (evidence-substantiveness),
+       not by an internal proof/verdict pipeline. *)
+    Keeper_agent_run_post_turn_memory.run
+      ~config
+      ~meta
+      ~memory
+      ~turn:manifest_keeper_turn_id
+      ~oas_turn_count:result.turns
+      ~response_text
+      ~actual_tools:actual_keeper_tool_names
+      ~state_snapshot
+      ~post_turn_t0
+      ?provider_filter
+      ~runtime_id:runtime_id_string
+      ~inference_telemetry:result.response.telemetry
+      ();
+    Ok
+      { response_text
+      ; model_used = model
+      ; prompt_metrics
+      ; ctx_composition
+      ; runtime_observation = result.runtime_observation
+      ; turn_count = result.turns
+      ; tool_calls_made = List.length actual_keeper_tool_names
+      ; usage
+      ; usage_reported = Option.is_some result.response.usage
+      ; tools_used = actual_keeper_tool_names
+      ; tool_calls = List.rev acc.tool_calls
+      ; checkpoint = saved_checkpoint
+      ; trace_ref = result.trace_ref
+      ; run_validation = result.run_validation
+      ; stop_reason = result.stop_reason
+      ; inference_telemetry = result.response.telemetry
+      ; tool_surface = acc.tool_surface
+      ; pre_dispatch_compacted
+      ; pre_dispatch_compaction_trigger
+      ; pre_dispatch_compaction_before_tokens
+      ; pre_dispatch_compaction_after_tokens
+      }
+;;

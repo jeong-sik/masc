@@ -1,0 +1,882 @@
+(** Keeper_world_observation — Structured world state for keeper cycles.
+
+    Extracts and normalizes observation signals from workspace state, keeper meta,
+    and context so the unified prompt and turn runner consume a single snapshot.
+
+    @since Unified Keeper Loop *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_memory
+
+type pending_board_event =
+  { post_id : string
+  ; author : string
+  ; title : string
+  ; preview : string
+  ; hearth : string option
+  ; post_kind : Board.post_kind
+  ; updated_at : float
+  ; explicit_mention : bool
+  ; matched_targets : string list
+  ; self_commented : bool
+  ; new_external_since : int
+  ; latest_external_author : string option
+  ; latest_external_preview : string option
+  }
+
+type world_observation =
+  { pending_mentions : (string * string) list
+  ; pending_board_events : pending_board_event list
+  ; pending_scope_messages : (string * string) list
+  ; message_cursor_updates : (string * int) list
+  ; idle_seconds : int
+  ; active_goals : string list
+  ; continuity_summary : string
+  ; context_ratio : float
+  ; economic_pressure : Agent_economy.pressure_mode
+  ; unclaimed_task_count : int
+  ; claimable_task_count : int
+  ; provider_capacity_blocked_task_count : int
+  ; failed_task_count : int
+  ; pending_verification_count : int
+  ; backlog_updated_since_last_scheduled_autonomous : bool
+  ; active_agent_count : int
+  ; last_turn_budget : (int * int) option
+  }
+
+type keeper_cycle_channel =
+  Keeper_world_observation_turn_types.keeper_cycle_channel =
+  | Reactive
+  | Scheduled_autonomous
+
+type unified_turn_channel = keeper_cycle_channel
+
+type turn_reason = Keeper_world_observation_turn_types.turn_reason =
+  | Mention_pending
+  | Board_event_pending
+  | Scope_message_pending
+  | Scheduled_autonomous_turn
+  | Idle_cooldown_elapsed of
+      { idle_sec : int
+      ; cooldown : int
+      }
+  | Cooldown_elapsed
+  | Task_backlog of
+      { unclaimed : int
+      ; failed : int
+      }
+  | Task_reactive_cooldown_elapsed
+  | Never_started
+  | Min_interval_elapsed
+  | Entropic_oscillation
+
+type skip_reason = Keeper_world_observation_turn_types.skip_reason =
+  | Keeper_paused
+  | Approval_pending
+  | Scheduled_autonomous_disabled
+  | Provider_cooldown_pending of { remaining_sec : int }
+  | Idle_gate_pending of { remaining_sec : int }
+  | Cooldown_pending of { remaining_sec : int }
+  | No_signal
+
+type turn_verdict = Keeper_world_observation_turn_types.turn_verdict =
+  | Run of { reasons : turn_reason * turn_reason list }
+  | Skip of { reasons : skip_reason * skip_reason list }
+
+let turn_reason_to_string =
+  Keeper_world_observation_turn_types.turn_reason_to_string
+let skip_reason_to_string =
+  Keeper_world_observation_turn_types.skip_reason_to_string
+let channel_to_string = Keeper_world_observation_turn_types.channel_to_string
+let is_autonomous_channel =
+  Keeper_world_observation_turn_types.is_autonomous_channel
+let verdict_reasons_to_strings =
+  Keeper_world_observation_turn_types.verdict_reasons_to_strings
+
+type keeper_cycle_decision =
+  { should_run : bool
+  ; channel : keeper_cycle_channel
+  ; verdict : turn_verdict
+  ; since_last_scheduled_autonomous : int option
+  ; effective_cooldown : int option
+  ; task_reactive_cooldown : int option
+  ; idle_gate_sec : int option
+  }
+
+type unified_turn_decision = keeper_cycle_decision
+
+module Board_signal = Keeper_world_observation_board_signal
+
+type board_signal_match = Board_signal.match_result =
+  { explicit_mention : bool
+  ; matched_targets : string list
+  ; score : int
+  }
+
+module Message_scope = Keeper_world_observation_message_scope
+module Inputs = Keeper_world_observation_inputs
+
+let self_identity_tokens = Message_scope.self_identity_tokens
+let is_self_author = Message_scope.is_self_author
+let collect_message_scope = Message_scope.collect_message_scope
+let apply_message_cursor_updates = Message_scope.apply_message_cursor_updates
+let read_backlog_counts = Inputs.read_backlog_counts
+let count_active_agents = Inputs.count_active_agents
+let compute_idle_seconds = Inputs.compute_idle_seconds
+let read_context_ratio = Inputs.read_context_ratio
+let board_signal_match = Board_signal.match_signal
+let check_self_comment_status = Board_signal.check_self_comment_status
+let board_signal_wake_reason = Board_signal.wake_reason
+let compare_board_cursor_token = Board_signal.compare_cursor_token
+let board_cursor_token_of_post = Board_signal.cursor_token_of_post
+let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
+
+module Continuity = Keeper_world_observation_continuity
+
+let read_continuity_summary = Continuity.read_continuity_summary
+
+(** Board event cursor bootstrap window (seconds). *)
+let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
+
+let pending_board_event_of_board_signal
+      ~continuity_summary
+      ~(meta : keeper_meta)
+      ~(arrived_at : float)
+      (signal : Board_dispatch.board_signal)
+  : pending_board_event
+  =
+  let self_tokens = self_identity_tokens meta in
+  let matched = board_signal_match ~continuity_summary ~meta ~signal in
+  let post_snapshot =
+    match Board_dispatch.get_post ~post_id:signal.post_id with
+    | Ok post -> Some post
+    | Error _ -> None
+  in
+  let title, preview, hearth, post_kind, updated_at =
+    match post_snapshot with
+    | Some (post : Board.post) ->
+      ( post.title
+      , short_preview ~max_len:80 post.content
+      , post.hearth
+      , post.post_kind
+      , post.updated_at )
+    | None ->
+      ( signal.title
+      , short_preview ~max_len:80 signal.content
+      , signal.hearth
+      , Board.Human_post
+      , arrived_at )
+  in
+  let self_commented, new_external_since, latest_external_author, latest_external_preview =
+    match signal.kind with
+    | Board_dispatch.Board_post_created -> false, 0, None, None
+    | Board_dispatch.Board_comment_added ->
+      (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
+       | `New_external (count, author, preview) -> true, count, Some author, Some preview
+       | `No_new_external ->
+         true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content)
+       | `Never ->
+         false, 1, Some signal.author, Some (short_preview ~max_len:60 signal.content))
+  in
+  { post_id = signal.post_id
+  ; author = signal.author
+  ; title
+  ; preview
+  ; hearth
+  ; post_kind
+  ; updated_at
+  ; explicit_mention = matched.explicit_mention
+  ; matched_targets = matched.matched_targets
+  ; self_commented
+  ; new_external_since
+  ; latest_external_author
+  ; latest_external_preview
+  }
+;;
+
+let pending_board_event_of_stimulus
+      ~continuity_summary
+      ~(meta : keeper_meta)
+  (stimulus : Keeper_event_queue.stimulus)
+  : pending_board_event option
+  =
+  Board_signal.of_stimulus_payload stimulus.payload
+  |> Option.map
+       (pending_board_event_of_board_signal
+          ~continuity_summary
+          ~meta
+          ~arrived_at:stimulus.arrived_at)
+;;
+
+(** Collect recent board activity using cursor-based tracking.
+    Cursor state lives in Keeper_registry as [(updated_at, post_id)].
+    Returns (structured events, new post count, mention count).
+
+    Comment-stream dedup: after the initial cursor + author filter,
+    each candidate post is scanned for self-authored comments.
+    Posts where the keeper has already commented and no new external
+    replies have arrived are excluded. This prevents duplicate reactive
+    comments while allowing legitimate follow-ups. *)
+let collect_board_events_with_cursor_policy
+      ~advance_cursor
+      ~(base_path : string)
+      ~(continuity_summary : string)
+      ~(meta : keeper_meta)
+  : pending_board_event list * int * int
+  =
+  try
+    let cursor_ts, cursor_post_id =
+      Keeper_registry.get_board_cursor ~base_path meta.name
+    in
+    let base_cursor =
+      if cursor_ts > 0.0
+      then cursor_ts, cursor_post_id
+      else Time_compat.now () -. bootstrap_window_sec, None
+    in
+    let posts = list_board_posts_after_cursor base_cursor in
+    let self_tokens = self_identity_tokens meta in
+    let recent =
+      List.filter
+        (fun (p : Board.post) ->
+           not (is_self_author ~self_tokens (Board.Agent_id.to_string p.author)))
+        posts
+    in
+    let new_count = List.length recent in
+    let targets =
+      if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
+    in
+    let mention_count =
+      List.length
+        (List.filter
+           (fun (p : Board.post) ->
+              let haystack =
+                String.lowercase_ascii (p.title ^ " " ^ p.body ^ " " ^ p.content)
+              in
+              List.exists
+                (fun target ->
+                   let needle = "@" ^ String.lowercase_ascii target in
+                   String_util.contains_substring haystack needle)
+                targets)
+           recent)
+    in
+    let event_limit = Keeper_config.keeper_board_event_limit () in
+    let rec consume_posts remaining last_cursor acc = function
+      | [] -> List.rev acc, last_cursor
+      | (p : Board.post) :: rest ->
+        let post_id = Board.Post_id.to_string p.id in
+        let next_cursor = board_cursor_token_of_post p in
+        let comment_status = check_self_comment_status ~self_tokens ~post_id in
+        (match comment_status with
+         | `No_new_external ->
+           Log.Keeper.debug
+             "board dedup: skipping post_id=%s (no new external since my comment)"
+             post_id;
+           consume_posts remaining (Some next_cursor) acc rest
+         | `Never ->
+           let signal : Board_dispatch.board_signal =
+             { kind = Board_dispatch.Board_post_created
+             ; post_id
+             ; author = Board.Agent_id.to_string p.author
+             ; title = p.title
+             ; content = p.content
+             ; hearth = p.hearth
+             ; updated_at = Some p.updated_at
+             }
+           in
+           let matched = board_signal_match ~continuity_summary ~meta ~signal in
+           if not matched.explicit_mention
+           then (
+             Log.Keeper.debug
+               "board dedup: skipping post_id=%s (no explicit mention and no prior \
+                keeper participation)"
+               post_id;
+             consume_posts remaining (Some next_cursor) acc rest)
+           else if remaining <= 0
+           then List.rev acc, last_cursor
+           else
+             consume_posts
+               (remaining - 1)
+               (Some next_cursor)
+               ({ post_id
+                ; author = Board.Agent_id.to_string p.author
+                ; title = p.title
+                ; preview = short_preview ~max_len:80 p.content
+                ; hearth = p.hearth
+                ; post_kind = p.post_kind
+                ; updated_at = p.updated_at
+                ; explicit_mention = matched.explicit_mention
+                ; matched_targets = matched.matched_targets
+                ; self_commented = false
+                ; new_external_since = 0
+                ; latest_external_author = None
+                ; latest_external_preview = None
+                }
+                :: acc)
+               rest
+         | `New_external (count, ext_author, ext_preview) ->
+           if remaining <= 0
+           then List.rev acc, last_cursor
+           else (
+             let signal : Board_dispatch.board_signal =
+               { kind = Board_dispatch.Board_post_created
+               ; post_id
+               ; author = Board.Agent_id.to_string p.author
+               ; title = p.title
+               ; content = p.content
+               ; hearth = p.hearth
+               ; updated_at = Some p.updated_at
+               }
+             in
+             let matched = board_signal_match ~continuity_summary ~meta ~signal in
+             consume_posts
+               (remaining - 1)
+               (Some next_cursor)
+               ({ post_id
+                ; author = Board.Agent_id.to_string p.author
+                ; title = p.title
+                ; preview = short_preview ~max_len:80 p.content
+                ; hearth = p.hearth
+                ; post_kind = p.post_kind
+                ; updated_at = p.updated_at
+                ; explicit_mention = matched.explicit_mention
+                ; matched_targets = matched.matched_targets
+                ; self_commented = true
+                ; new_external_since = count
+                ; latest_external_author = Some ext_author
+                ; latest_external_preview = Some ext_preview
+                }
+                :: acc)
+               rest))
+    in
+    let final_events, last_cursor = consume_posts event_limit None [] recent in
+    if advance_cursor
+    then (
+      match last_cursor with
+      | Some (ts, post_id)
+        when compare_board_cursor_token
+               (ts, post_id)
+               (fst base_cursor, Option.value ~default:"" (snd base_cursor))
+             > 0 ->
+        Keeper_reaction_ledger.record_board_cursor_ack
+          ~base_path
+          ~keeper_name:meta.name
+          ~stimulus_id:(Keeper_reaction_ledger.board_stimulus_id ~post_id)
+          ~cursor_ts:ts
+          ~post_id:(Some post_id)
+          ();
+        Keeper_registry.set_board_cursor ~base_path meta.name ts (Some post_id)
+      | Some (ts, post_id) ->
+        Log.Keeper.debug
+          "board cursor not advanced for %s: new=(%f, %s) not greater than base=(%f, %s)"
+          meta.name
+          ts
+          post_id
+          (fst base_cursor)
+          (Option.value ~default:"" (snd base_cursor))
+      | None ->
+        if final_events <> []
+        then (
+          Prometheus.inc_counter
+            Keeper_metrics.(to_string ObservationQueryFailures)
+            ~labels:[ ("operation", Keeper_observation_query_operation.(to_label Cursor_stale)) ]
+            ();
+          Log.Keeper.warn
+            "board cursor not updated for %s despite %d events processed"
+            meta.name
+            (List.length final_events)));
+    final_events, new_count, mention_count
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Prometheus.inc_counter
+      Keeper_metrics.(to_string ObservationQueryFailures)
+      ~labels:[ ("operation", Keeper_observation_query_operation.(to_label Board_events)) ]
+      ();
+    Log.Keeper.warn "board event collection failed: %s" (Printexc.to_string exn);
+    [], 0, 0
+;;
+
+let collect_board_events
+      ~(base_path : string)
+      ~(continuity_summary : string)
+      ~(meta : keeper_meta)
+  : pending_board_event list * int * int
+  =
+  collect_board_events_with_cursor_policy
+    ~advance_cursor:true
+    ~base_path
+    ~continuity_summary
+    ~meta
+;;
+
+let collect_board_events_without_advancing_cursor
+      ~(base_path : string)
+      ~(continuity_summary : string)
+      ~(meta : keeper_meta)
+  : pending_board_event list * int * int
+  =
+  collect_board_events_with_cursor_policy
+    ~advance_cursor:false
+    ~base_path
+    ~continuity_summary
+    ~meta
+;;
+
+include Keeper_world_observation_provider_cooldown
+
+let observe
+      ~(pending_board_events : pending_board_event list option)
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+  : world_observation
+  =
+  let pending_mentions, pending_scope_messages, message_cursor_updates =
+    collect_message_scope ~config ~meta
+  in
+  let ( unclaimed_task_count
+      , claimable_task_count
+      , failed_task_count
+      , pending_verification_count
+      , backlog_updated_since_last_scheduled_autonomous )
+    =
+    read_backlog_counts ~config ~meta
+  in
+  let provider_capacity_blocked_task_count =
+    provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
+  in
+  let active_agent_count = count_active_agents ~config in
+  let idle_seconds = compute_idle_seconds ~meta in
+  let context_ratio = read_context_ratio ~config ~meta in
+  let continuity_summary = read_continuity_summary ~config ~meta in
+  let economic_pressure =
+    Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
+  in
+  let pending_board_events =
+    match pending_board_events with
+    | Some events -> events
+    | None ->
+      let events, _board_new_count, _board_mention_count =
+        collect_board_events ~base_path:config.base_path ~meta ~continuity_summary
+      in
+      events
+  in
+  { pending_mentions
+  ; pending_board_events
+  ; pending_scope_messages
+  ; message_cursor_updates
+  ; idle_seconds
+  ; active_goals = meta.active_goal_ids
+  ; continuity_summary
+  ; context_ratio
+  ; economic_pressure
+  ; unclaimed_task_count
+  ; claimable_task_count
+  ; provider_capacity_blocked_task_count
+  ; failed_task_count
+  ; pending_verification_count
+  ; backlog_updated_since_last_scheduled_autonomous
+  ; active_agent_count
+  ; last_turn_budget = None
+  }
+;;
+
+let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
+  : world_observation
+  =
+  let ( unclaimed_task_count
+      , claimable_task_count
+      , failed_task_count
+      , pending_verification_count
+      , backlog_updated_since_last_scheduled_autonomous )
+    =
+    read_backlog_counts ~config ~meta
+  in
+  let provider_capacity_blocked_task_count =
+    provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
+  in
+  { pending_mentions = []
+  ; pending_board_events = []
+  ; pending_scope_messages = []
+  ; message_cursor_updates = []
+  ; idle_seconds = compute_idle_seconds ~meta
+  ; active_goals = meta.active_goal_ids
+  ; continuity_summary = read_continuity_summary ~config ~meta
+  ; context_ratio = read_context_ratio ~config ~meta
+  ; economic_pressure =
+      Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
+  ; unclaimed_task_count
+  ; claimable_task_count
+  ; provider_capacity_blocked_task_count
+  ; failed_task_count
+  ; pending_verification_count
+  ; backlog_updated_since_last_scheduled_autonomous
+  ; active_agent_count = count_active_agents ~config
+  ; last_turn_budget = None
+  }
+;;
+
+let durable_signal_present
+      ~pending_board_events
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+  : bool
+  =
+  let pending_mentions, pending_scope_messages, _message_cursor_updates =
+    collect_message_scope ~config ~meta
+  in
+  let ( _unclaimed_task_count
+      , claimable_task_count
+      , failed_task_count
+      , pending_verification_count
+      , _backlog_updated_since_last_scheduled_autonomous )
+    =
+    read_backlog_counts ~config ~meta
+  in
+  let pending_board_events =
+    match pending_board_events with
+    | Some events -> events
+    | None ->
+      let events, _board_new_count, _board_mention_count =
+        collect_board_events_without_advancing_cursor
+          ~base_path:config.base_path
+          ~meta
+          ~continuity_summary:meta.continuity_summary
+      in
+      events
+  in
+  pending_mentions <> []
+  || pending_board_events <> []
+  || pending_scope_messages <> []
+  || claimable_task_count > 0
+  || failed_task_count > 0
+  || pending_verification_count > 0
+;;
+
+let actionable_signal_present (observation : world_observation) =
+  observation.pending_mentions <> []
+  || observation.pending_board_events <> []
+  || observation.pending_scope_messages <> []
+  || observation.claimable_task_count > 0
+  || observation.failed_task_count > 0
+  || observation.pending_verification_count > 0
+;;
+
+let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_observation) =
+  let task_backlog_signal =
+    observation.claimable_task_count > 0
+     || observation.failed_task_count > 0
+     || observation.pending_verification_count > 0
+  in
+  observation.pending_mentions <> []
+  || observation.pending_board_events <> []
+  || observation.pending_scope_messages <> []
+  || task_backlog_signal
+  || Option.is_some meta.current_task_id
+;;
+
+(** Compute effective scheduled autonomous cooldown with idle decay.
+    After extended idle (> base cooldown), halve the cooldown each
+    additional period, down to a configurable floor.  This prevents
+    permanent silence when no external events arrive. *)
+let effective_scheduled_autonomous_cooldown
+      ~(base_cooldown : int)
+      ~(since_last : int)
+      ?(consecutive_noop_count = 0)
+      ()
+  : int
+  =
+  (* Noop backoff: consecutive observation-only cycles multiply the base
+     cooldown by 2^min(n, 3), capping at 8x. This prevents token waste when
+     the keeper repeatedly reads board_list without taking action. *)
+  let noop_multiplier =
+    if consecutive_noop_count <= 0 then 1 else 1 lsl min consecutive_noop_count 3
+    (* 1, 2, 4, 8 *)
+  in
+  let effective_base = base_cooldown * noop_multiplier in
+  let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in
+  (* Floor must not exceed the effective base cooldown — otherwise decay would
+     paradoxically increase a short cooldown. *)
+  let floor = min min_cooldown effective_base in
+  if since_last <= effective_base
+  then effective_base
+  else (
+    let decay_periods = (since_last - effective_base) / max 1 effective_base in
+    let capped_periods = min decay_periods 4 in
+    let factor = 1.0 /. Float.pow 2.0 (float_of_int capped_periods) in
+    max floor (int_of_float (float_of_int effective_base *. factor)))
+;;
+
+let entropic_oscillation_interval_sec = 600
+let entropic_oscillation_probability_percent = 5
+
+let should_inject_entropic_oscillation ~since_last_scheduled_autonomous ~draw_percent =
+  since_last_scheduled_autonomous >= entropic_oscillation_interval_sec
+  && draw_percent >= 0
+  && draw_percent < entropic_oscillation_probability_percent
+;;
+
+let keeper_cycle_decision
+      ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
+      ~(meta : keeper_meta)
+      (observation : world_observation)
+  =
+  let reactive_triggers =
+    [ (if observation.pending_mentions <> [] then Some Mention_pending else None)
+    ; (if observation.pending_board_events <> [] then Some Board_event_pending else None)
+    ; (if observation.pending_scope_messages <> []
+       then Some Scope_message_pending
+       else None)
+    ]
+    |> List.filter_map Fun.id
+  in
+  let blocked_channel =
+    match reactive_triggers with
+    | _ :: _ -> Reactive
+    | [] -> Scheduled_autonomous
+  in
+  let blocked reason =
+    { should_run = false
+    ; channel = blocked_channel
+    ; verdict = Skip { reasons = reason, [] }
+    ; since_last_scheduled_autonomous = None
+    ; effective_cooldown = None
+    ; task_reactive_cooldown = None
+    ; idle_gate_sec = None
+    }
+  in
+  if meta.paused
+  then blocked Keeper_paused
+  else if Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name
+  then blocked Approval_pending
+  else (
+    match reactive_triggers with
+    | first :: rest ->
+      { should_run = true
+      ; channel = Reactive
+      ; verdict = Run { reasons = first, rest }
+      ; since_last_scheduled_autonomous = None
+      ; effective_cooldown = None
+      ; task_reactive_cooldown = None
+      ; idle_gate_sec = None
+      }
+    | [] ->
+      let since_last_scheduled_autonomous =
+        if meta.runtime.proactive_rt.last_ts <= 0.0
+        then max_int
+        else
+          int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
+      in
+      let idle_gate_sec = meta.proactive.idle_sec in
+      if not meta.proactive.enabled
+      then
+        { should_run = false
+        ; channel = Scheduled_autonomous
+        ; verdict = Skip { reasons = Scheduled_autonomous_disabled, [] }
+        ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
+        ; effective_cooldown = None
+        ; task_reactive_cooldown = None
+        ; idle_gate_sec = Some idle_gate_sec
+        }
+      else (
+        let effective_cooldown =
+          effective_scheduled_autonomous_cooldown
+            ~base_cooldown:meta.proactive.cooldown_sec
+            ~since_last:since_last_scheduled_autonomous
+            ~consecutive_noop_count:meta.runtime.proactive_rt.consecutive_noop_count
+            ()
+        in
+        let task_cooldown_divisor =
+          Keeper_config.keeper_proactive_task_cooldown_divisor ()
+        in
+        let task_cooldown_floor =
+          Keeper_config.keeper_proactive_task_min_cooldown_sec ()
+        in
+        let task_reactive_cooldown =
+          max task_cooldown_floor (effective_cooldown / max 1 task_cooldown_divisor)
+        in
+        let has_actionable_tasks =
+          observation.claimable_task_count > 0 || observation.failed_task_count > 0
+        in
+        let idle_gate_elapsed = observation.idle_seconds >= idle_gate_sec in
+        let cooldown_elapsed = since_last_scheduled_autonomous >= effective_cooldown in
+        let backlog_elapsed =
+          has_actionable_tasks
+          && since_last_scheduled_autonomous >= task_reactive_cooldown
+        in
+        let backlog_fresh =
+          has_actionable_tasks
+          && observation.backlog_updated_since_last_scheduled_autonomous
+        in
+        let proactive_work_ready = proactive_work_signal_present ~meta observation in
+        (* Phase 1 — Bootstrap bypass: keeper has never completed a scheduled
+           autonomous turn (last_ts <= 0.0, so since_last = max_int). Fire
+           immediately without requiring work signals or time gates, so a
+           fresh keeper always gets at least one warm-up turn regardless of
+           observable backlog state.  This breaks the "no signal → no turn →
+           no signal" bootstrap deadlock. *)
+        let is_bootstrap = since_last_scheduled_autonomous = max_int in
+        (* Phase 2 — Minimum proactive cadence: even with no observable work
+           signals, fire a housekeeping turn once the minimum interval has
+           elapsed.  Default: 900s (15 min).  Prevents permanent silence when
+           external events never arrive and decouples liveness from signal
+           availability.  Controlled by MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC
+           / keeper.proactive.min_interval_sec. *)
+        let proactive_min_interval_sec =
+          Keeper_config.keeper_proactive_min_interval_sec ()
+        in
+        let min_interval_elapsed =
+          (* Exclude the bootstrap case: when is_bootstrap is true, the bootstrap
+             bypass already fires the turn and emits Never_started.  Using
+             min_interval_elapsed here would also set Min_interval_elapsed on a
+             bootstrap turn, which is misleading — the two paths are mutually
+             exclusive by design. *)
+          (not is_bootstrap)
+          && since_last_scheduled_autonomous >= proactive_min_interval_sec
+        in
+        (* Backlog bypass: when actionable tasks exist and task_reactive_cooldown
+           has elapsed, skip the idle_gate check. task_reactive_cooldown is
+           already a (shorter) subdivision of idle_gate; requiring idle_gate_elapsed
+           on top defeats its purpose. Without this bypass, keepers ignore
+           unclaimed work for idle_gate seconds even when the backlog signal
+           is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
+        let should_oscillate =
+          (not min_interval_elapsed)
+          && should_inject_entropic_oscillation
+               ~since_last_scheduled_autonomous
+               ~draw_percent:(Random.int 100)
+        in
+        let should_run =
+          is_bootstrap
+          || should_oscillate
+          || min_interval_elapsed
+          || (proactive_work_ready
+              && (backlog_fresh
+                  || backlog_elapsed
+                  || (idle_gate_elapsed && cooldown_elapsed)))
+        in
+        let runtime_id = runtime_id_of_meta meta in
+        let provider_cooldown_remaining_sec =
+          if should_run
+          then
+            provider_cooldown_remaining_sec
+              ~runtime_id:(runtime_id)
+          else None
+        in
+        let provider_cooldown_fail_open =
+          match provider_cooldown_remaining_sec with
+          | Some _ ->
+            fallback_runtime_for_provider_cooldown
+              ~base_runtime:runtime_id
+              ~effective_runtime:runtime_id
+          | None -> None
+        in
+        let verdict =
+          if
+            Option.is_some provider_cooldown_remaining_sec
+            && Option.is_none provider_cooldown_fail_open
+          then
+            Skip
+              { reasons =
+                  ( Provider_cooldown_pending
+                      { remaining_sec =
+                          Option.value ~default:0 provider_cooldown_remaining_sec
+                      }
+                  , [] )
+              }
+          else if should_run
+          then (
+            let run_reasons =
+              [ Some Scheduled_autonomous_turn
+              ; (if should_oscillate then Some Entropic_oscillation else None)
+              ; (if is_bootstrap then Some Never_started else None)
+              ; (if min_interval_elapsed then Some Min_interval_elapsed else None)
+              ; (if idle_gate_elapsed
+                 then
+                   Some
+                     (Idle_cooldown_elapsed
+                        { idle_sec = observation.idle_seconds
+                        ; cooldown = effective_cooldown
+                        })
+                 else None)
+              ; (if cooldown_elapsed then Some Cooldown_elapsed else None)
+              ; (if has_actionable_tasks
+                 then
+                   Some
+                     (Task_backlog
+                        { unclaimed = observation.claimable_task_count
+                        ; failed = observation.failed_task_count
+                        })
+                 else None)
+              ; (if backlog_fresh || backlog_elapsed
+                 then Some Task_reactive_cooldown_elapsed
+                 else None)
+              ]
+              |> List.filter_map Fun.id
+            in
+            (* NEL: scheduled autonomous runs always emit the synthetic
+               Scheduled_autonomous_turn tag first, so the reason list
+               cannot be empty even if future edits change the payload list. *)
+            match run_reasons with
+            | first :: rest -> Run { reasons = first, rest }
+            | [] ->
+              (* Structurally unreachable: the synthetic Scheduled_autonomous_turn
+                   tag is always added first, so the list is never empty.
+                   Defensive: log warning and fall through to skip so that
+                   should_run (derived below) stays consistent with verdict. *)
+              Prometheus.inc_counter
+                Keeper_metrics.(to_string ObservationQueryFailures)
+                ~labels:
+                  [ ("operation", Keeper_observation_query_operation.(to_label Empty_run_reasons))
+                  ]
+                ();
+              Log.Keeper.warn "unreachable: should_run=true but run_reasons is empty";
+              Skip { reasons = No_signal, [] })
+          else (
+            let skip_reasons =
+              [ (if not proactive_work_ready then Some No_signal else None)
+              ; (if not idle_gate_elapsed
+                 then
+                   Some
+                     (Idle_gate_pending
+                        { remaining_sec = idle_gate_sec - observation.idle_seconds })
+                 else None)
+              ; (if idle_gate_elapsed && not cooldown_elapsed
+                 then
+                   Some
+                     (Cooldown_pending
+                        { remaining_sec =
+                            effective_cooldown - since_last_scheduled_autonomous
+                        })
+                 else None)
+              ]
+              |> List.filter_map Fun.id
+            in
+            match skip_reasons with
+            | first :: rest -> Skip { reasons = first, rest }
+            | [] -> Skip { reasons = No_signal, [] })
+        in
+        (* Derive should_run from verdict to guarantee consistency.
+           The earlier [let should_run] is an intent signal; verdict is
+           authoritative after the reason-list construction. *)
+        let should_run =
+          match verdict with
+          | Run _ -> true
+          | Skip _ -> false
+        in
+        { should_run
+        ; channel = Scheduled_autonomous
+        ; verdict
+        ; since_last_scheduled_autonomous = Some since_last_scheduled_autonomous
+        ; effective_cooldown = Some effective_cooldown
+        ; task_reactive_cooldown = Some task_reactive_cooldown
+        ; idle_gate_sec = Some idle_gate_sec
+        }))
+;;
+
+let unified_turn_decision = keeper_cycle_decision
+
+let should_run_keeper_cycle ~(meta : keeper_meta) (observation : world_observation) =
+  (keeper_cycle_decision ~meta observation).should_run
+;;

@@ -1,0 +1,243 @@
+// ActionButton — reusable button with variant styles
+// Replaces repeated inline button patterns across dashboard.
+//
+// Props are a strict whitelist — htm/preact function components do not
+// implicitly spread unlisted props to children (see the parallel note
+// in ../common/input.ts). If you want a new attribute to reach the
+// <button>, add it to the interface AND forward it below. Missing
+// entries silently drop, which is how the pre-refactor callers that
+// passed `aria-busy` / `data-*` ended up rendering plain buttons and
+// forced a couple of sites to fall back to raw <button>.
+
+import { html } from 'htm/preact'
+import type { ComponentChildren } from 'preact'
+import { isNonEmptyString } from '../../lib/format-string'
+import { ringFocusClasses } from './ring'
+
+export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle' | 'ok' | 'warn'
+export type ButtonSize = 'sm' | 'md' | 'lg'
+export type ButtonType = 'button' | 'submit' | 'reset'
+export type ButtonPressedState = 'unset' | 'true' | 'false'
+
+export interface ActionButtonSummary {
+  readonly variant: ButtonVariant
+  readonly size: ButtonSize
+  readonly type: ButtonType
+  readonly block: boolean
+  readonly disabled: boolean
+  readonly busy: boolean
+  readonly pressedState: ButtonPressedState
+  readonly hasCustomClass: boolean
+  readonly classNameLength: number
+  readonly hasId: boolean
+  readonly idLength: number
+  readonly hasAriaLabel: boolean
+  readonly ariaLabelLength: number
+  readonly hasTitle: boolean
+  readonly titleLength: number
+  readonly hasTestId: boolean
+  readonly testIdLength: number
+  readonly hasOnClick: boolean
+  readonly hasChildren: boolean
+}
+
+const SIZE_CLASSES: Record<ButtonSize, string> = {
+  sm: 'py-1 px-2 text-2xs',
+  md: 'py-1.5 px-2.5 text-2xs',
+  lg: 'py-2 px-4 text-sm',
+}
+
+// Component-level token slots (button-{variant}-bg/fg/border/bg-hover/bg-pressed).
+// Defined in dashboard/design-system/tokens/source.ts §"Component-level role
+// tokens". Each alias resolves to the same hex via var() chain; swapping
+// the slot at the token layer (e.g. shipping a brand re-skin) propagates
+// here without touching this file.
+//
+// All 6 variants now map to component-level aliases (#11898 added the
+// remaining warn/subtle slots). border-none is preserved as an explicit
+// utility for the variants whose `--button-{warn,subtle}-border` slot
+// is `transparent` (rendering-as-none for layout-grid stability).
+const VARIANT_CLASSES: Record<ButtonVariant, string> = {
+  primary: 'border border-solid border-[var(--button-primary-border)] bg-[var(--button-primary-bg)] text-[var(--button-primary-fg)] hover:bg-[var(--button-primary-bg-hover)]',
+  ghost: 'border border-solid border-[var(--button-ghost-border)] bg-[var(--button-ghost-bg)] text-[var(--button-ghost-fg)] hover:bg-[var(--button-ghost-bg-hover)]',
+  danger: 'border border-solid border-[var(--button-danger-border)] bg-[var(--button-danger-bg)] text-[var(--button-danger-fg)] hover:bg-[var(--button-danger-bg-hover)]',
+  subtle: 'border-none bg-[var(--button-subtle-bg)] text-[var(--button-subtle-fg)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--button-subtle-bg-hover)]',
+  ok: 'border border-solid border-[var(--button-ok-border)] bg-[var(--button-ok-bg)] text-[var(--button-ok-fg)] hover:bg-[var(--button-ok-bg-hover)]',
+  warn: 'border-none bg-[var(--button-warn-bg)] text-[var(--button-warn-fg)] hover:bg-[var(--button-warn-bg-hover)]',
+}
+
+// Pressed-state overrides per variant. Applied when `pressed=true` so the
+// button visually conveys the "selected" / "active filter" / "active tab"
+// state that aria-pressed announces to assistive tech. Without this the
+// button can be aria-pressed but visually identical to unpressed, which
+// is a confusing mismatch.
+//
+// ghost pressed deliberately swaps its border/fg to the primary slots —
+// the active state borrows primary's affordance so the user reads it
+// as "selected" instead of "still neutral".
+const PRESSED_CLASSES: Record<ButtonVariant, string> = {
+  primary: 'bg-[var(--button-primary-bg-pressed)]',
+  ghost: 'bg-[var(--button-ghost-bg-pressed)] border-[var(--button-primary-border)] text-[var(--button-primary-fg)]',
+  danger: 'bg-[var(--button-danger-bg-pressed)]',
+  subtle: 'bg-[var(--button-subtle-bg-pressed)] text-[var(--color-fg-primary)]',
+  ok: 'bg-[var(--button-ok-bg-pressed)]',
+  warn: 'bg-[var(--button-warn-bg-pressed)]',
+}
+
+// `duration-[var(--t-med)]` reads from the design-token duration scale
+// (--t-med = 200ms by default). Token retune (e.g. dampening interaction
+// motion for accessibility) propagates without callsite edits.
+const BASE = `rounded-[var(--r-1)] cursor-pointer transition-[background-color,border-color,box-shadow,transform,opacity] duration-[var(--t-med)] font-medium ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} active:scale-[0.97] active:opacity-90`
+
+export interface ActionButtonProps {
+  variant?: ButtonVariant
+  size?: ButtonSize
+  type?: ButtonType
+  class?: string
+  id?: string
+  disabled?: boolean
+  /** Full width */
+  block?: boolean
+  ariaLabel?: string
+  /** Announce "busy" to assistive tech while an async op backed by
+      this button is in flight. Pair with a disabled=${true} to lock
+      the UI; the busy role informs AT, the disabled flag handles
+      pointer events. */
+  ariaBusy?: boolean
+  /** Tab-like / toggle-like buttons that convey selection state.
+      When true, applies aria-pressed=true plus a variant-specific
+      visual override (see PRESSED_CLASSES). Use for tier filters,
+      view toggles, and similar selection patterns where multiple
+      buttons share a slot and one is "active". */
+  pressed?: boolean
+  /** Hover tooltip text (native browser title). */
+  title?: string
+  /** Rendered as `data-testid` so E2E / unit tests can target this
+      button without coupling to visible text (which may be i18n'd). */
+  testId?: string
+  onClick?: (e: Event) => void
+  children: ComponentChildren
+}
+
+function pressedState(pressed: boolean | undefined): ButtonPressedState {
+  if (pressed === true) return 'true'
+  if (pressed === false) return 'false'
+  return 'unset'
+}
+
+export function summarizeActionButton({
+  variant = 'primary',
+  size = 'md',
+  type = 'button',
+  class: cx,
+  id,
+  disabled,
+  block,
+  ariaLabel,
+  ariaBusy,
+  pressed,
+  title,
+  testId,
+  onClick,
+  children,
+}: ActionButtonProps): ActionButtonSummary {
+  return {
+    variant,
+    size,
+    type,
+    block: block === true,
+    disabled: disabled === true,
+    busy: ariaBusy === true,
+    pressedState: pressedState(pressed),
+    hasCustomClass: isNonEmptyString(cx),
+    classNameLength: cx?.length ?? 0,
+    hasId: isNonEmptyString(id),
+    idLength: id?.length ?? 0,
+    hasAriaLabel: isNonEmptyString(ariaLabel),
+    ariaLabelLength: ariaLabel?.length ?? 0,
+    hasTitle: isNonEmptyString(title),
+    titleLength: title?.length ?? 0,
+    hasTestId: isNonEmptyString(testId),
+    testIdLength: testId?.length ?? 0,
+    hasOnClick: typeof onClick === 'function',
+    hasChildren: children !== undefined && children !== null,
+  }
+}
+
+export function ActionButton({
+  variant = 'primary',
+  size = 'md',
+  type = 'button',
+  class: cx,
+  id,
+  disabled,
+  block,
+  ariaLabel,
+  ariaBusy,
+  pressed,
+  title,
+  testId,
+  onClick,
+  children,
+}: ActionButtonProps) {
+  const summary = summarizeActionButton({
+    variant,
+    size,
+    type,
+    class: cx,
+    id,
+    disabled,
+    block,
+    ariaLabel,
+    ariaBusy,
+    pressed,
+    title,
+    testId,
+    onClick,
+    children,
+  })
+  const cls = [
+    BASE,
+    SIZE_CLASSES[size],
+    VARIANT_CLASSES[variant],
+    pressed ? PRESSED_CLASSES[variant] : '',
+    block ? 'w-full' : '',
+    disabled ? 'opacity-50 pointer-events-none' : '',
+    cx,
+  ].filter(Boolean).join(' ')
+
+  return html`
+    <button
+      type=${type}
+      id=${id}
+      class=${cls}
+      onClick=${onClick}
+      disabled=${disabled}
+      aria-label=${ariaLabel}
+      aria-busy=${ariaBusy === true ? 'true' : undefined}
+      aria-pressed=${pressed === true ? 'true' : pressed === false ? 'false' : undefined}
+      title=${title}
+      data-testid=${testId}
+      data-action-button
+      data-action-button-variant=${summary.variant}
+      data-action-button-size=${summary.size}
+      data-action-button-type=${summary.type}
+      data-action-button-block=${summary.block}
+      data-action-button-disabled=${summary.disabled}
+      data-action-button-busy=${summary.busy}
+      data-action-button-pressed-state=${summary.pressedState}
+      data-action-button-has-custom-class=${summary.hasCustomClass}
+      data-action-button-class-length=${summary.classNameLength}
+      data-action-button-has-id=${summary.hasId}
+      data-action-button-id-length=${summary.idLength}
+      data-action-button-has-aria-label=${summary.hasAriaLabel}
+      data-action-button-aria-label-length=${summary.ariaLabelLength}
+      data-action-button-has-title=${summary.hasTitle}
+      data-action-button-title-length=${summary.titleLength}
+      data-action-button-has-test-id=${summary.hasTestId}
+      data-action-button-test-id-length=${summary.testIdLength}
+      data-action-button-has-click-handler=${summary.hasOnClick}
+      data-action-button-has-children=${summary.hasChildren}
+    >${children}</button>
+  `
+}

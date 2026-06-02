@@ -1,0 +1,925 @@
+(** Mcp_server_eio_call_tool — Tool call handler and result envelope
+
+    Extracted from mcp_server_eio.ml.
+    Handles tools/call JSON-RPC method: timeout, retry, result envelope,
+    telemetry, and audit logging.
+*)
+
+type tool_profile = Mcp_server_eio_types.tool_profile =
+  | Full
+  | Managed_agent
+  | Operator_remote
+
+let log_mcp_exn ~label exn =
+  let tag = match exn with
+    | Sys_error _ | Failure _ | Not_found | End_of_file
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
+    | _ -> "[UNEXPECTED] "
+  in
+  Log.Mcp.info "%s%s: %s" tag label (Printexc.to_string exn)
+
+(* Substring containment, ASCII case-insensitive.  Delegates to
+   [String_util.contains_substring_ci] (which scans byte-wise without
+   allocating) and preserves the local "empty needle matches all"
+   semantic with an explicit guard. *)
+let contains_casefold haystack needle =
+  String.length needle = 0
+  || String_util.contains_substring_ci haystack needle
+
+let parse_status_from_message ~success ~message =
+  if not success then
+    if
+      contains_casefold message "input required"
+      || contains_casefold message "ask agent"
+      || contains_casefold message "ask agent question"
+    then
+      ("ask_agent_question", Some "ask_agent_question")
+    else if
+      contains_casefold message "auth required"
+      || contains_casefold message "authentication required"
+      || contains_casefold message "unauthorized"
+    then
+      ("ask_for_auth", Some "ask_for_auth")
+    else
+      ("error", None)
+  else
+    ("ok", None)
+
+let quality_issue severity code message attempts =
+  `Assoc [
+    ("severity", `String severity);
+    ("code", `String code);
+    ("message", `String message);
+    ("retry_attempts", `Int attempts);
+  ]
+
+let quality_from_result ~success ~message ~attempts =
+  if success then
+    `Assoc [
+      ("passed", `Bool true);
+      ("issues", `List []);
+    ]
+  else
+    let issue =
+      if contains_casefold message "timeout" || contains_casefold message "timed out" then
+        quality_issue "error" "tool_timeout" message attempts
+      else
+        quality_issue "error" "tool_failure" message attempts
+    in
+    `Assoc [
+      ("passed", `Bool false);
+      ("issues", `List [issue]);
+    ]
+
+let activity_preview_string value =
+  value
+  |> Safe_ops.sanitize_text_utf8
+  |> Observability_redact.redact_preview
+  |> Safe_ops.sanitize_text_utf8
+
+let activity_plain_string value = Safe_ops.sanitize_text_utf8 value
+
+let activity_tool_called_payload ~tool_name ~success ~duration_ms ~source
+    ?error_detail ?tool_args_preview arguments =
+  let activity_string_field key =
+    match Safe_ops.json_string_opt key arguments with
+    | Some value ->
+        let preview = activity_preview_string value in
+        if String.trim preview <> "" then Some (key, `String preview) else None
+    | None -> None
+  in
+  let activity_int_field key =
+    match Safe_ops.json_int_opt key arguments with
+    | Some value -> Some (key, `Int value)
+    | None -> None
+  in
+  `Assoc
+    ([
+       ("tool_name", `String (activity_plain_string tool_name));
+       ("success", `Bool success);
+       ("duration_ms", `Int duration_ms);
+       ("source", `String (activity_plain_string source));
+       ( "error",
+         match error_detail with
+         | Some e -> `String (activity_plain_string e)
+         | None -> `Null );
+       ( "tool_args_preview",
+         match tool_args_preview with
+         | Some preview -> `String (activity_plain_string preview)
+         | None -> `Null );
+     ]
+     @ List.filter_map activity_string_field
+         [
+           "cmd";
+           "task_id";
+           "repo";
+           "path";
+           "message";
+           "branch";
+           "branch_name";
+           "title";
+           "session_id";
+           "operation_id";
+           "verification_id";
+         ]
+     @ List.filter_map activity_int_field [ "pr_number"; "issue_number" ])
+  |> Safe_ops.sanitize_json_utf8
+
+module For_testing = struct
+  let activity_tool_called_payload = activity_tool_called_payload
+end
+
+let nonempty_string_opt = function
+  | Some value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | None -> None
+
+type keeper_runtime_mcp_log_context = {
+  keeper_name : string;
+  agent_name : string option;
+  model : string;
+  trace_id : string option;
+  session_id : string option;
+  generation : int option;
+  turn : int option;
+  keeper_turn_id : int option;
+  task_id : string option;
+  goal_ids : string list option;
+  sandbox_profile : string option;
+  sandbox_root : string option;
+  allowed_paths : string list option;
+  network_mode : string option;
+  approval_mode : string option;
+  tool_surface_class : string option;
+  visible_tool_count : int option;
+  required_tools : string list option;
+  missing_required_tools : string list option;
+  runtime_profile : string option;
+}
+
+let runtime_mcp_tool_surface_class allowed_tool_names =
+  if allowed_tool_names = [] then "none"
+  else if List.for_all Tool_catalog.is_public_mcp allowed_tool_names then
+    "public_only"
+  else
+    "mixed"
+
+let runtime_mcp_keeper_log_context_of_entry
+    ?mcp_session_id
+    (entry : Keeper_registry.registry_entry)
+    ~(arguments : Yojson.Safe.t) : keeper_runtime_mcp_log_context =
+  let trace_id =
+    Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id
+  in
+  let model = "runtime" in
+  let session_id =
+    match Json_util.get_string_nonempty arguments "session_id" with
+    | Some _ as session_id -> session_id
+    | None ->
+        (match nonempty_string_opt mcp_session_id with
+         | Some _ as session_id -> session_id
+         | None -> Some trace_id)
+  in
+  let turn =
+    match entry.current_turn_observation with
+    | Some obs -> Some obs.turn_id
+    | None -> None
+  in
+  let goal_ids =
+    match entry.meta.active_goal_ids with
+    | [] -> None
+    | ids -> Some ids
+  in
+  let allowed_tool_names =
+    Keeper_tool_policy.keeper_allowed_tool_names
+      ~phase:entry.phase
+      entry.meta
+  in
+  let config = Workspace.default_config entry.base_path in
+  let profile_defaults =
+    Keeper_types_profile.load_keeper_profile_defaults entry.meta.name
+  in
+  let keeper_oas_context =
+    Keeper_types_profile.keeper_oas_context_of_defaults profile_defaults
+  in
+  {
+    keeper_name = entry.name;
+    agent_name = Some entry.meta.agent_name;
+    model;
+    trace_id = Some trace_id;
+    session_id;
+    generation = Some entry.meta.runtime.generation;
+    turn;
+    keeper_turn_id = turn;
+    task_id = Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id;
+    goal_ids;
+    sandbox_profile =
+      Some (Keeper_types_profile_sandbox.sandbox_profile_to_string entry.meta.sandbox_profile);
+    sandbox_root =
+      Some (Keeper_sandbox.host_root_abs_of_meta ~config entry.meta);
+    allowed_paths =
+      Some (Keeper_alerting_path.effective_allowed_paths ~meta:entry.meta);
+    network_mode =
+      Some (Keeper_types_profile_sandbox.network_mode_to_string entry.meta.network_mode);
+    approval_mode = keeper_oas_context.gemini_approval_mode;
+    tool_surface_class =
+      Some (runtime_mcp_tool_surface_class allowed_tool_names);
+    visible_tool_count = Some (List.length allowed_tool_names);
+    required_tools = Some [];
+    missing_required_tools = Some [];
+    runtime_profile = Some (Keeper_meta_contract.runtime_id_of_meta entry.meta);
+  }
+
+let runtime_mcp_keeper_error_preview message =
+  let max_chars = 400 in
+  let s = String.trim message in
+  String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"..." s
+  |> String_util.to_string
+
+let runtime_mcp_keeper_tool_call_sse_payload
+    ~(keeper_name : string)
+    ~(tool_name : string)
+    ~(duration_ms : int)
+    ~(success : bool)
+    ~(arguments : Yojson.Safe.t)
+    ~(message : string) : Yojson.Safe.t =
+  let base_fields =
+    [
+      ("type", `String "keeper_tool_call");
+      ("name", `String keeper_name);
+      ("tool_name", `String tool_name);
+      ("duration_ms", `Int duration_ms);
+      ("success", `Bool success);
+      ("ts_unix", `Float (Time_compat.now ()));
+    ]
+  in
+  let error_fields =
+    if success then []
+    else [ ("error_text", `String (runtime_mcp_keeper_error_preview message)) ]
+  in
+  let io_fields =
+    Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
+      ~tool_name
+      ~input:arguments
+      ~output:message
+      ()
+  in
+  `Assoc (base_fields @ error_fields @ io_fields)
+
+let runtime_mcp_masc_root ~base_path =
+  match Keeper_tool_call_log.configured_masc_root () with
+  | Some masc_root -> masc_root
+  | None ->
+      let config = Workspace.default_config base_path in
+      Workspace.masc_root_dir config
+
+let record_runtime_mcp_trajectory_coverage_gap
+    ~(masc_root : string)
+    ~(keeper_name : string)
+    ~(trace_id : string)
+    ~(stale_reason : string)
+    (exn : exn) : unit =
+  try
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"trajectory_tool_call"
+      ~producer:"mcp_server_eio_call_tool.runtime_mcp"
+      ~durable_store:(Trajectory.trajectory_path masc_root keeper_name trace_id)
+      ~dashboard_surface:"/api/v1/keepers/:name/tool-stats"
+      ~stale_reason
+      ~keeper_name
+      ~trace_id
+      ~exn
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | gap_exn ->
+      log_mcp_exn
+        ~label:"runtime MCP trajectory coverage gap append failed"
+        gap_exn
+
+let record_runtime_mcp_keeper_trajectory
+    (ctx : keeper_runtime_mcp_log_context)
+    ~(base_path : string)
+    ~(tool_name : string)
+    ~(arguments : Yojson.Safe.t)
+    ~(message : string)
+    ~(success : bool)
+    ~(duration_ms : int) : unit =
+  let trace_id = Option.value ~default:"runtime-mcp" ctx.trace_id in
+  let masc_root = runtime_mcp_masc_root ~base_path in
+  let safe_input = Observability_redact.redact_json_value arguments in
+  let safe_output =
+    Observability_redact.redact_preview ~max_len:4000 message
+  in
+  let turn = Option.value ~default:0 ctx.turn in
+  let round =
+    Trajectory.next_round
+      ~masc_root
+      ~keeper_name:ctx.keeper_name
+      ~trace_id
+      ~turn
+  in
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
+      ~keeper_name:ctx.keeper_name
+      ?agent_name:ctx.agent_name
+      ?trace_id:ctx.trace_id
+      ?session_id:ctx.session_id
+      ?generation:ctx.generation
+      ?keeper_turn_id:ctx.keeper_turn_id
+      ?task_id:ctx.task_id
+      ?goal_ids:ctx.goal_ids
+      ?sandbox_profile:ctx.sandbox_profile
+      ?sandbox_root:ctx.sandbox_root
+      ?allowed_paths:ctx.allowed_paths
+      ?network_mode:ctx.network_mode
+      ?approval_mode:ctx.approval_mode
+      ?tool_surface_class:ctx.tool_surface_class
+      ?visible_tool_count:ctx.visible_tool_count
+      ?required_tools:ctx.required_tools
+      ?missing_required_tools:ctx.missing_required_tools
+      ?runtime_profile:ctx.runtime_profile
+      ()
+  in
+  let error = if success then None else Some safe_output in
+  let action_radius =
+    Keeper_runtime_contract.action_radius_json
+      ~tool_name
+      ~input:safe_input
+      ~success
+      ~duration_ms:(float_of_int duration_ms)
+      ?error
+      ?sandbox_target:ctx.sandbox_profile
+      ()
+  in
+  let now = Time_compat.now () in
+  let entry : Trajectory.tool_call_entry =
+    {
+      ts = now;
+      ts_iso = Masc_domain.iso8601_of_unix_seconds now;
+      turn;
+      round;
+      tool_name;
+      args_json = Yojson.Safe.to_string safe_input;
+      gate_decision = Trajectory.Pass;
+      result = Some safe_output;
+      duration_ms;
+      error;
+      cost_usd = Trajectory.tool_cost_estimate tool_name;
+    }
+  in
+  try
+    Trajectory.append_entry
+      ~runtime_contract
+      ~action_radius
+      ~masc_root
+      ~keeper_name:ctx.keeper_name
+      ~trace_id
+      entry
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      record_runtime_mcp_trajectory_coverage_gap
+        ~masc_root
+        ~keeper_name:ctx.keeper_name
+        ~trace_id
+        ~stale_reason:"runtime_mcp_trajectory_append_failed"
+        exn
+
+let record_runtime_mcp_keeper_tool_trace
+    ?mcp_session_id
+    (entry : Keeper_registry.registry_entry)
+    ~(tool_name : string)
+    ~(arguments : Yojson.Safe.t)
+    ~(message : string)
+    ~(success : bool)
+    ~(duration_ms : int) : unit =
+  let ctx =
+    runtime_mcp_keeper_log_context_of_entry
+      ?mcp_session_id
+      entry
+      ~arguments
+  in
+  Keeper_tool_call_log.log_call
+    ~keeper_name:ctx.keeper_name
+    ~tool_name
+    ~input:arguments
+    ~output_text:message
+    ~success
+    ~duration_ms:(float_of_int duration_ms)
+    ~model:ctx.model
+    ~lane:"runtime_mcp"
+    ?agent_name:ctx.agent_name
+    ?trace_id:ctx.trace_id
+    ?session_id:ctx.session_id
+    ?generation:ctx.generation
+    ?turn:ctx.turn
+    ?keeper_turn_id:ctx.keeper_turn_id
+    ?task_id:ctx.task_id
+    ?goal_ids:ctx.goal_ids
+    ?sandbox_profile:ctx.sandbox_profile
+    ?sandbox_root:ctx.sandbox_root
+    ?allowed_paths:ctx.allowed_paths
+    ?network_mode:ctx.network_mode
+    ?approval_mode:ctx.approval_mode
+    ?tool_surface_class:ctx.tool_surface_class
+    ?visible_tool_count:ctx.visible_tool_count
+    ?required_tools:ctx.required_tools
+    ?missing_required_tools:ctx.missing_required_tools
+    ?runtime_profile:ctx.runtime_profile
+    ~result_bytes:(String.length message)
+    ();
+  record_runtime_mcp_keeper_trajectory
+    ctx
+    ~base_path:entry.base_path
+    ~tool_name
+    ~arguments
+    ~message
+    ~success
+    ~duration_ms;
+  Sse.broadcast
+    (runtime_mcp_keeper_tool_call_sse_payload
+       ~keeper_name:ctx.keeper_name
+       ~tool_name
+       ~duration_ms
+       ~success
+       ~arguments
+       ~message)
+
+let read_only_retry_limit () =
+  Env_config.Tools.readonly_retry_limit
+
+let read_only_retry_wait ~attempt =
+  let attempt = float_of_int attempt in
+  min 1.5 (0.2 *. attempt)
+
+let call_tool_with_readonly_retry
+    ~clock
+    ~run_tool
+    ~is_read_only
+    () =
+  let max_attempts = read_only_retry_limit () in
+  let rec loop attempt =
+    let result = run_tool () in
+    let success = Tool_result.is_success result in
+    if
+      success
+      || attempt >= max_attempts
+      || not is_read_only
+      || (match Tool_result.failure_class result with
+          | Some cls -> not (Tool_result.is_retryable cls)
+          | None -> false)
+    then
+      (result, attempt)
+    else (
+      Eio.Time.sleep clock (read_only_retry_wait ~attempt);
+      loop (attempt + 1))
+  in
+  loop 1
+
+type resolved_tool_timeout = Mcp_server_eio_tool_timeout.resolved_tool_timeout =
+  { timeout_sec : float
+  ; source_env : string option
+  }
+
+let tool_timeout = Mcp_server_eio_tool_timeout.tool_timeout
+let tool_timeout_sec_opt = Mcp_server_eio_tool_timeout.tool_timeout_sec_opt
+
+(** Resolve managed agent tool call to canonical operation *)
+let resolve_managed_agent_call ?mcp_session_id params =
+  let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
+  let arguments = Yojson.Safe.Util.member "arguments" params in
+  let identity =
+    Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
+  in
+  Sdk_tool_contract.resolve_requested_tool_call
+    ~agent_name:identity.Agent_identity.agent_name
+    ~requested_name ~arguments
+
+(** Handle tools/call JSON-RPC method *)
+let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
+    ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
+    ?auth_token ?(internal_keeper_runtime = false) state id params =
+  let make_response = Mcp_transport_protocol.make_response in
+  let (name, arguments) =
+    match profile with
+    | Managed_agent -> (
+        match resolve_managed_agent_call ?mcp_session_id params with
+        | Ok resolved -> resolved
+        | Error msg ->
+            raise
+              (Invalid_argument
+                 ("managed agent tool translation failed: " ^ msg)))
+    | Full | Operator_remote ->
+        (Json_util.get_string params "name" |> Option.value ~default:"", Yojson.Safe.Util.member "arguments" params)
+  in
+  let is_read_only =
+    Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
+  in
+
+  (* Measure execution time for telemetry *)
+  let start_time = Eio.Time.now clock in
+  let timeout_hit = ref false in
+  let execute_with_timeout () =
+    let local_timeout_hit = ref false in
+    let execute_core () =
+      try
+        match tool_timeout ~tool_name:name ~_arguments:arguments with
+        | None ->
+            execute_tool_eio ~sw ~clock ?profile:(Some profile) ?mcp_session_id ?auth_token
+              ?internal_keeper_runtime:(Some internal_keeper_runtime)
+              state ~name ~arguments
+        | Some { timeout_sec; source_env } ->
+            (try
+               Eio.Time.with_timeout_exn
+                 clock
+                 timeout_sec
+                 (fun () ->
+                   execute_tool_eio
+                     ~sw
+                     ~clock
+                     ?profile:(Some profile)
+                     ?mcp_session_id
+                     ?auth_token
+                     ?internal_keeper_runtime:(Some internal_keeper_runtime)
+                     state
+                     ~name
+                     ~arguments)
+             with Eio.Time.Timeout ->
+               local_timeout_hit := true;
+               Log.Mcp.error "tools/call timeout: %s after %.0fs" name timeout_sec;
+               let source =
+                 match source_env with
+                 | Some source -> Printf.sprintf " (timeout source: %s)" source
+                 | None -> ""
+               in
+               (* RFC-0189: timeout = retry-friendly transient
+                  failure.  Caller can retry with a longer
+                  [timeout_sec] or wait for the slow upstream to
+                  finish. *)
+               Tool_result.error
+                 ~failure_class:(Some Tool_result.Transient_error)
+                 ~tool_name:name ~start_time
+                 (Printf.sprintf "Tool timed out after %.0fs: %s%s"
+                    timeout_sec name source))
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | Workspace.Not_initialized ->
+       (* RFC-0189: server bootstrap incomplete — Masc_domain
+          System NotInitialized.  [Runtime_failure] (caller
+          cannot fix; the operator must initialise MASC). *)
+       Tool_result.error
+         ~failure_class:(Some Tool_result.Runtime_failure)
+         ~tool_name:name ~start_time
+         (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
+     | exn ->
+       (* Never let a tool exception crash the MCP server. *)
+       let err = Printexc.to_string exn in
+       let trace = Printexc.get_backtrace () in
+       let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
+       (Log.Mcp.error "tools/call crashed: %s" err_detail;
+          (* RFC-0189: catch-all for unexpected exceptions —
+             [Runtime_failure].  Could become more specific via
+             [of_exn] once the exception variants are typed; for
+             now blanket Runtime preserves operator-visible
+             severity (the existing log line stays ERROR). *)
+          Tool_result.error
+            ~failure_class:(Some Tool_result.Runtime_failure)
+            ~tool_name:name ~start_time
+            (Printf.sprintf "Internal error: %s" err_detail))
+    in
+    let result =
+      Tool_resource_gate.with_permit
+        ~clock
+        ~tool_name:name
+        ~arguments
+        ~is_read_only
+        ~start_time
+        execute_core
+    in
+    if !local_timeout_hit then timeout_hit := true;
+    result
+  in
+  let (result, attempts) =
+    if is_read_only then
+      call_tool_with_readonly_retry
+        ~clock
+        ~run_tool:execute_with_timeout
+        ~is_read_only
+        ()
+    else
+      (execute_with_timeout (), 1)
+  in
+  let success = Tool_result.is_success result
+  and message = Tool_result.message result
+  in
+  let end_time = Eio.Time.now clock in
+  let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
+  let jsonrpc_id_str =
+    match id with
+    | `String s -> s
+    | `Int i -> string_of_int i
+    | `Intlit s -> s
+    | `Float f -> Printf.sprintf "%0.0f" f
+    | _ -> "unknown"
+  in
+  let mcp_session_detail = Json_util.string_opt_to_json mcp_session_id in
+
+  (* Resolve caller identity for telemetry.  HTTP auth injects [_agent_name];
+     tool-domain [agent_name] is not a caller identity. *)
+  let agent_name =
+    let from_transport =
+      Safe_ops.json_string ~default:"" "_agent_name" arguments
+    in
+    if from_transport <> "" then from_transport
+    else
+      let identity =
+        Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
+      in
+      let resolved = identity.Agent_identity.agent_name in
+      if resolved <> "" then resolved else "unknown"
+  in
+  let telemetry_session_id =
+    match Json_util.get_string_nonempty arguments "session_id" with
+    | Some _ as session_id -> session_id
+    | None -> nonempty_string_opt mcp_session_id
+  in
+  let telemetry_operation_id = Json_util.get_string_nonempty arguments "operation_id" in
+  let telemetry_worker_run_id = Json_util.get_string_nonempty arguments "worker_run_id" in
+  let error_detail =
+    if success then None
+    else
+      let truncated =
+        let error_preview_max = 200 in
+        String_util.utf8_safe ~max_bytes:(error_preview_max + 3) ~suffix:"..." message |> String_util.to_string
+      in
+      Some (Printf.sprintf "timeout=%d|duration_ms=%d|detail=%s"
+              (if !timeout_hit then 1 else 0) duration_ms truncated)
+  in
+  let otel_trace_id = Otel_spans.current_trace_id () in
+  Audit_log.log_tool_call state.Mcp_server.workspace_config
+    ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
+    ?trace_id:otel_trace_id ();
+  if not success then (
+    let failure_class =
+      match Tool_result.failure_class result with
+      | Some cls -> cls
+      | None -> Tool_result.Runtime_failure
+    in
+    Log.Mcp.emit (Tool_result.log_level_of_failure_class failure_class)
+      ~details:
+        (`Assoc
+          [
+            ("event_family", `String "tool_call_failure");
+            ( "failure_class",
+              `String (Tool_result.tool_failure_class_to_string failure_class) );
+            ("tool_name", `String name);
+            ("phase", `String "failure");
+            ("request_id", `String jsonrpc_id_str);
+            ("session_id", mcp_session_detail);
+            ("outcome", `String "error");
+            ("agent_name", `String agent_name);
+            ("duration_ms", `Int duration_ms);
+            ("timeout_hit", `Bool !timeout_hit);
+            ("attempts", `Int attempts);
+            ("error_detail", `String (Option.value ~default:"" error_detail));
+          ])
+      (Printf.sprintf "tool call failed: %s — %s" name
+         (Option.value ~default:"(no detail)" error_detail)));
+
+  (* Classify call source: Keeper_internal if the resolved agent_name matches
+     a registered keeper (keeper-internal dispatch via cli_agent runtime),
+     otherwise External_mcp (true external MCP client).  Sound partial:
+     missing identity falls through to External_mcp.  Issue #8915. *)
+  let keeper_entry =
+    if String.length agent_name = 0 then None
+    else Keeper_registry_lookup.find_by_agent_name agent_name
+  in
+  let source : Tool_registry.call_source =
+    match keeper_entry with
+    | Some _ -> Keeper_internal
+    | None -> External_mcp
+  in
+  (match keeper_entry with
+   | Some entry ->
+       Keeper_registry.record_tool_use
+         ~base_path:entry.base_path entry.name ~tool_name:name ~success;
+       Keeper_registry_tool_usage_persistence.mark_dirty ~base_path:entry.base_path entry.name
+   | None -> ());
+
+  (* #10358: classify failure mode at the dispatch boundary so
+     telemetry carries the diagnostic.  Mirrors the vocabulary
+     [Tool_assignment_telemetry.emit_completed] uses below; hoisted
+     here so [track_tool_called] can fan out a paired
+     [Error_occurred] event for the previously-dead ADT variant. *)
+  let telemetry_error_kind =
+    if not success then
+      Some
+        (Telemetry_eio.error_kind_of_string
+           (if !timeout_hit then "timeout" else "tool_failure"))
+    else None
+  in
+  let telemetry_failure_class =
+    if success then None else Tool_result.failure_class result
+  in
+  (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
+  let telemetry_enabled = Env_config_core.telemetry_enabled () in
+  if telemetry_enabled then
+    (match state.Mcp_server.fs with
+     | Some fs ->
+         (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
+                ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
+                ~source:(Tool_registry.string_of_source source)
+                ?session_id:telemetry_session_id
+                ?operation_id:telemetry_operation_id
+                ?worker_run_id:telemetry_worker_run_id
+                ?failure_class:telemetry_failure_class
+                ?error_kind:telemetry_error_kind
+                ?error_message:error_detail
+                ()
+          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+            log_mcp_exn ~label:"telemetry tracking failed" exn)
+     | None -> ());
+
+  (* Prometheus: record errors for failed tool calls *)
+  if not success then
+    Prometheus.record_error ~error_type:name ();
+
+  (* Track in-memory call counter for all declared tool names (including hidden). *)
+  (* Tool assignment telemetry: Called → Completed causal chain.
+     Lookup latest assignment for this agent, emit Called at start
+     and Completed after result is known. *)
+  let assignment_id_opt =
+    Tool_assignment_telemetry.find_latest_assignment_id ~agent_id:agent_name
+  in
+  let called_assignment_id_opt =
+    match assignment_id_opt with
+    | Some aid ->
+        let args_hash =
+          Digestif.SHA256.(digest_string (Yojson.Safe.to_string arguments) |> to_hex)
+        in
+        Tool_assignment_telemetry.emit_called
+          ~agent_id:agent_name
+          ~tool_name:name
+          ~arguments_hash:args_hash
+          ~source:(Tool_registry.string_of_source source)
+          ()
+    | None -> None
+  in
+  (match called_assignment_id_opt with
+   | Some aid ->
+       let error_kind =
+         if not success then
+           let kind = if !timeout_hit then "timeout" else "tool_failure" in
+           Some (Tool_assignment_telemetry.error_kind_of_string kind)
+         else None
+       in
+       Tool_assignment_telemetry.emit_completed
+         ~assignment_id:aid
+         ~tool_name:name
+         ~success
+         ~duration_ms:(float_of_int duration_ms)
+         ?error_kind
+         ()
+   | None -> ());
+
+  (* Track in-memory call counter for all declared tool names (including hidden). *)
+  Tool_registry.record_call_if_known ~source ?assignment_id:called_assignment_id_opt
+    ~tool_name:name ~success ~duration_ms ();
+
+  let activity_payload =
+    let tool_args_preview =
+      Observability_redact.redact_tool_input ~tool_name:name arguments
+    in
+    activity_tool_called_payload
+      ~tool_name:name
+      ~success
+      ~duration_ms
+      ~source:(Tool_registry.string_of_source source)
+      ?error_detail
+      ?tool_args_preview
+      arguments
+  in
+
+  (* Emit activity graph event for tool call — enables real-time dashboard tracking *)
+  (try
+    (* fire-and-forget: activity graph emission must not change the tool-call result. *)
+    ignore (Activity_graph.emit state.Mcp_server.workspace_config
+      ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
+      ~subject:(Activity_graph.entity ~kind:"tool" name)
+      ~kind:"tool.called"
+      ~payload:activity_payload
+      ~tags:(if success then ["tool"; "success"] else ["tool"; "failure"])
+      ())
+  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+    log_mcp_exn ~label:"activity graph emit failed" exn);
+
+  let trace_id =
+    match otel_trace_id with
+    | Some tid -> tid
+    | None -> jsonrpc_id_str
+  in
+  (* Append recovery hint on failure *)
+  let message =
+    if success then message
+    else
+      let hint = Masc_error_recovery.recovery_hint message in
+      match hint with
+      | None -> message
+      | Some h -> message ^ "\n\nRecovery: " ^ h
+  in
+  (match keeper_entry with
+   | Some entry ->
+       (try
+          record_runtime_mcp_keeper_tool_trace
+            ?mcp_session_id
+            entry
+            ~tool_name:name
+            ~arguments
+            ~message
+            ~success
+            ~duration_ms
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+          log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn)
+   | None -> ());
+  let (status, required_follow_up) = parse_status_from_message ~success ~message in
+  let quality = quality_from_result ~success ~message ~attempts in
+  let envelope =
+    `Assoc [
+      ("kind", `String "tool_call");
+      ("summary", `String message);
+      ("status", `String status);
+      ("tool", `String name);
+      ("required_follow_up", Json_util.string_opt_to_json required_follow_up);
+      ("trace_id", `String trace_id);
+      ("quality", quality);
+    ]
+  in
+  let content_items =
+    [
+      `Assoc
+        [
+          ("type", `String "text");
+          ("text", `String message);
+        ]
+    ]
+  in
+  let structured_content = Tool_result.structured_payload_of_message message in
+  let meta_fields =
+    [
+      ("trace_id", `String trace_id);
+      ("agent_id", `String agent_name);
+      ("tool", `String name);
+      ("duration_ms", `Int duration_ms);
+      ("attempts", `Int attempts);
+      ("timestamp", `String (Masc_domain.now_iso ()));
+    ]
+    @ (if !timeout_hit then [ ("timeout_hit", `Bool true) ] else [])
+  in
+  let result_fields =
+    [
+      ("resultEnvelope", envelope);
+      ("content", `List content_items);
+      ("isError", `Bool (not success));
+      ("_meta", `Assoc meta_fields);
+    ]
+    @
+    match structured_content with
+    | Some value -> [ ("structuredContent", value) ]
+    | None -> []
+  in
+  let result = make_response ~id (`Assoc result_fields) in
+
+  maybe_emit_resource_notifications ~success ~tool_name:name;
+  if success
+     && List.mem name [ "masc_tool_admin_update" ]
+  then
+    broadcast_tools_list_changed ();
+
+  (* Log result *)
+  let preview =
+    String_util.utf8_safe ~max_bytes:83 ~suffix:"..." message |> String_util.to_string
+  in
+  let preview = String.map (function '\n' -> ' ' | c -> c) preview in
+  let outcome = if success then Tool_result.Ok else Tool_result.Error in
+  Log.Mcp.emit (Tool_result.log_level_of_tool_call_outcome outcome)
+    ~details:
+      (`Assoc
+        [
+          ("event_family", `String "tool_call");
+          ("tool_name", `String name);
+          ("phase", `String "result");
+          ("request_id", `String jsonrpc_id_str);
+          ("session_id", mcp_session_detail);
+          ("agent_name", `String agent_name);
+          ("outcome", `String (Tool_result.string_of_tool_call_outcome outcome));
+          ("success", `Bool success);
+          ("duration_ms", `Int duration_ms);
+          ("attempts", `Int attempts);
+          ("timeout_hit", `Bool !timeout_hit);
+        ])
+    (Printf.sprintf "%s -> %s" name preview);
+
+  result

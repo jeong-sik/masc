@@ -1,0 +1,6 @@
+; Archived modules — sources kept for restoration but excluded from the
+; build graph. Each [archive/<date>-<topic>/] subdirectory has its own
+; README.md describing why the module was archived and how to restore it.
+; See docs/audit-responses/ for cross-reference.
+
+(data_only_dirs *)

@@ -1,0 +1,79 @@
+(** Shell_ir_risk — phantom-typed risk envelope for Shell IR.
+
+    RFC-0160 S3: type-level invariant that every IR reaching dispatch
+    has been classified. [undecided t] values must pass through
+    [classify] to obtain a [decided decided_ir] before dispatch. *)
+
+type undecided
+type decided
+
+type risk_class =
+  | R0_Read
+  | R1_Reversible_mutation
+  | R2_Irreversible
+  | Destructive_protected
+
+val string_of_risk_class : risk_class -> string
+val pp_risk_class : Format.formatter -> risk_class -> unit
+
+(** Phantom wrapper. Zero runtime overhead. *)
+type _ t
+
+val undecided : Shell_ir.t -> undecided t
+val unwrap : 'phase t -> Shell_ir.t
+
+type 'phase decided_ir = { ir : Shell_ir.t; risk : risk_class }
+
+val risk_class : decided decided_ir -> risk_class
+val is_r0 : decided decided_ir -> bool
+val is_r1 : decided decided_ir -> bool
+val is_r2 : decided decided_ir -> bool
+val is_destructive : decided decided_ir -> bool
+
+val classify : undecided t -> decided decided_ir
+(** Run the unified risk classifier over the wrapped IR.
+    Uses [Exec_policy_mutation_classifier] for bash operations,
+    then repo-hosting CLI subcommand tables for ["gh"] command operations,
+    defaulting to R0.
+
+    [Simple] commands are lowered to the [Shell_ir_typed] GADT and
+    classified by [risk_of_typed]; the [Generic] escape hatch falls back
+    to the word-list classifier [classify_words]. [Pipeline]s compose the
+    per-stage decision with [max_risk] (RFC-0208 P0), so every stage
+    contributes its typed and word-list verdict rather than the pipeline
+    deferring wholesale to the head-anchored floor. *)
+
+val typed_hit_of_ir : Shell_ir.t -> bool
+(** [true] when the typed lowering classified every [Simple] node via a
+    real [Shell_ir_typed] constructor rather than the [Generic] escape
+    hatch. RFC-0208 P1 observability instrument: lets the dispatch log and
+    the differential harness measure real typed coverage vs [Generic]
+    fallback over live traffic. A [Pipeline] is a typed hit only when all
+    of its stages are. *)
+
+val risk_of_typed : Shell_ir_typed.wrapped -> risk_class
+(** Risk opinion implied by the typed command shape alone (RFC-0160 §S1)
+    — the first decision path that reads the [Shell_ir_typed] GADT.
+    Exhaustive over [Shell_ir_typed_types.command]: a new constructor
+    forces a compile error here. [classify] combines this with
+    [classify_words] by taking the stricter of the two, so [Gh]/[Generic]
+    may return a lower opinion here than the word-list floor supplies. *)
+
+val classify_words : string list -> risk_class
+(** Word-list risk classifier — the pre-GADT decision path, retained as
+    the safety floor in [classify] for [Generic]/[Pipeline] and for
+    risk-bearing tokens the typed model does not yet capture (gh
+    -X METHOD / graphql body). *)
+
+val is_write_operation : string list -> bool
+(** [true] when the flattened word list indicates a write-level operation:
+    git push/commit/merge/rebase/reset/checkout -c/-C/-m/-M/branch,
+    or non-git commands that touch state.
+
+    Used by [Exec_policy_mutation_classifier.is_write_operation] for
+    the IR-typed entry point. *)
+
+val classify_repo_hosting_cli : string list -> risk_class
+(** Direct repo-hosting CLI word-list classification without IR construction.
+    The current command literal is ["gh"], but the API is named for the
+    Shell-IR capability boundary rather than a product-level GH helper family. *)

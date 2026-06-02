@@ -1,0 +1,23 @@
+name: Spawn-bounded ratchet (RFC-0109)
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spawn-bounded-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spawn-bounded:
+    name: Spawn-bounded ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y ripgrep
+      - name: Run lint
+        run: bash scripts/lint-spawn-bounded.sh

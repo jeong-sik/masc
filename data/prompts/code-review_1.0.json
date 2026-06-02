@@ -1,0 +1,9 @@
+{
+  "id": "code-review",
+  "template": "Review this code for bugs, security issues, and best practices:\n\n```{{language}}\n{{source_code}}\n```\n\nProvide a detailed review covering:\n1. Potential bugs\n2. Security vulnerabilities\n3. Code style improvements\n4. Performance optimizations",
+  "version": "1.0",
+  "variables": ["language", "source_code"],
+  "metrics": null,
+  "created_at": 1705968000.0,
+  "deprecated": false
+}

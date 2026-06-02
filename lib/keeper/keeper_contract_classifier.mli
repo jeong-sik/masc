@@ -1,0 +1,92 @@
+(** Typed classifier for keeper turn completion contract. *)
+
+type actionable_signal =
+  | Has_unclaimed_tasks
+  | Has_board_activity
+  | No_actionable_signal
+      (** Caller observed neither tasks nor board activity in the structured
+          world snapshot. *)
+
+type actionable_signal_context = private
+  | No_actionable_signal_context
+  | Turn_affordance_requires_tool
+  | Keeper_world_signal of actionable_signal
+
+type contract_status =
+  | Tool_surface_mismatch of { missing : string list }
+  | Missing_required_tool_use
+  | Claim_only_after_owned_task
+  | Needs_execution_progress
+  | Passive_only
+  | Satisfied_completion
+  | Satisfied_execution
+
+val actionable_signal_label : actionable_signal -> string
+val actionable_signal_context_label : actionable_signal_context -> string
+val contract_status_label : contract_status -> string
+val pp_contract_status : Format.formatter -> contract_status -> unit
+
+(** Structured per-turn world snapshot consumed by
+    [classify_actionable_signal]. This is intentionally smaller than
+    {!Keeper_world_observation.world_observation}: it carries only the
+    signals needed by the required-tool contract gate. *)
+type world_observation = {
+  unclaimed_task_count : int;
+      (** Number of unclaimed tasks in the keeper's queue.
+          Mirrors the integer rendered into the
+          ["**Unclaimed tasks (N total ...) ..."] section. *)
+  board_activity_count : int;
+      (** Count of fresh board entries the keeper has not yet
+          processed. Mirrors the count rendered after
+          ["### Board Activity"]. *)
+}
+
+(** Project the full keeper heartbeat observation into the compact contract
+    snapshot. The task count uses [claimable_task_count], not global backlog
+    size, so keepers without a matching claim surface do not get forced into
+    an impossible required-tool contract. *)
+val of_keeper_world_observation :
+  Keeper_world_observation.world_observation -> world_observation
+
+(** [classify_actionable_signal o] returns the most-specific
+    actionable signal observed in [o], following the precedence
+    [unclaimed_tasks > board_activity].
+
+    The precedence reflects the action ladder a keeper should
+    descend: a claimable task is the highest-leverage move; engaging
+    with board activity is next.
+
+    Boolean-compatible:
+    [classify_actionable_signal o <> No_actionable_signal]
+    is the structured equivalent of a required actionable context. *)
+val classify_actionable_signal : world_observation -> actionable_signal
+
+(** Like [classify_actionable_signal], but skips a candidate signal when
+    the active tool surface has no tool capable of acting on that signal.
+
+    This preserves the documented precedence while avoiding unwinnable
+    contract violations. Example: if unclaimed tasks exist but the keeper
+    cannot see a claim tool, board activity can still become the selected
+    actionable signal when board tools are visible. *)
+val classify_actionable_signal_for_tools :
+  allowed_tool_names:string list -> world_observation -> actionable_signal
+
+(** [requires_tool_support_for_allowed_tools ~allowed_tool_names o] is true
+    when [o] carries an actionable signal that can be satisfied by at least
+    one tool in [allowed_tool_names]. Use this before provider routing so the
+    same structured signal that later enforces the completion contract also
+    selects a provider capable of exposing keeper tools. *)
+val requires_tool_support_for_allowed_tools :
+  allowed_tool_names:string list -> world_observation -> bool
+
+val make_actionable_signal_context
+  :  tool_gate_required:bool
+  -> actionable_signal:actionable_signal
+  -> actionable_signal_context
+
+(** [is_actionable s] is [false] iff [s = No_actionable_signal].
+    Provided so callers comparing the structured signal against the
+    legacy boolean can do so without a manual pattern match. *)
+val is_actionable : actionable_signal -> bool
+
+val is_actionable_signal_context : actionable_signal_context -> bool

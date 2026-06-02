@@ -1,0 +1,19 @@
+(** Input query helpers for keeper world observation. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+val backlog_updated_since_last_scheduled_autonomous
+  :  meta:keeper_meta
+  -> backlog:Masc_domain.backlog
+  -> bool
+
+val read_backlog_counts
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> int * int * int * int * bool
+
+val count_active_agents : config:Workspace.config -> int
+val compute_idle_seconds : meta:keeper_meta -> int
+val read_context_ratio : config:Workspace.config -> meta:keeper_meta -> float

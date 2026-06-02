@@ -1,0 +1,85 @@
+/* Chat — transcript, bubble, avatar, role-chip, detail-panel/callout. Extracted for #3915. */
+
+/* ── Chat (merged from chat.css) ───────────────────────── */
+
+@utility chat-transcript {
+  background:
+    radial-gradient(circle at top left, rgb(var(--color-accent-glow) / .12), transparent 38%),
+    var(--color-bg-page);
+}
+
+@utility chat-bubble {
+  box-shadow: var(--elev-4-shadow);
+  &.user {
+    align-self: flex-end;
+    background: linear-gradient(180deg, rgb(var(--color-accent-glow) / .12), var(--color-bg-elevated));
+    border-color: var(--color-border-strong);
+  }
+  &.assistant {
+    align-self: flex-start;
+    background: linear-gradient(180deg, rgb(var(--color-accent-glow) / .08), var(--color-bg-panel-alt));
+    border-color: var(--color-status-info);
+  }
+  &.system,
+  &.error {
+    align-self: flex-start;
+  }
+  &.error {
+    border-color: var(--color-status-err);
+    background: linear-gradient(180deg, rgb(var(--color-status-err) / .12), var(--color-bg-elevated));
+  }
+}
+
+@utility chat-avatar {
+  &.user {
+    border-color: var(--color-accent-fg-dim);
+    background: var(--color-accent-soft);
+    color: var(--chat-user-avatar);
+  }
+  &.assistant {
+    border-color: var(--color-status-info);
+    background: rgb(var(--color-accent-glow) / .18);
+    color: var(--chat-assistant-avatar);
+  }
+  &.error {
+    border-color: var(--color-status-err);
+    background: rgb(var(--color-status-err) / .12);
+    color: var(--chat-error-avatar);
+  }
+}
+
+@utility chat-role-chip {
+  &.user {
+    border-color: var(--color-accent-fg-dim);
+    color: var(--chat-user-chip);
+    background: rgb(var(--color-accent-glow) / .14);
+  }
+  &.assistant {
+    border-color: var(--color-status-info);
+    color: var(--chat-assistant-chip);
+    background: rgb(var(--color-accent-glow) / .10);
+  }
+  &.error {
+    border-color: var(--color-status-err);
+    color: var(--chat-error-chip);
+    background: rgb(var(--color-status-err) / .10);
+  }
+}
+
+@utility chat-detail-panel {
+  background:
+    linear-gradient(180deg, var(--color-bg-page), var(--color-bg-elevated));
+  & pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--font-mono);
+    font-size: var(--fs-12);
+    line-height: 1.55;
+    color: var(--chat-code-callout);
+  }
+}
+
+@utility chat-detail-callout {
+  background: linear-gradient(180deg, rgb(var(--color-accent-glow) / .10), var(--color-bg-surface));
+}

@@ -1,0 +1,21 @@
+; RFC-0056 Phase 1B — extract Keeper_skill_routing leaf module from flat
+; masc_mcp namespace. Stacked on Phase 1A (lib/trajectory/).
+;
+; Keeper_skill_routing is dependency-leaf: only stdlib (List, Printf,
+; String) and masc_core (String_util). 215 LoC, fan-in ~9 bare + 1
+; wrapped caller — small enough that the qualifier-removal delta stays
+; trivial (RFC-0056 §3.1 G5 budget).
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the top-level identifier `Keeper_skill_routing`
+; unchanged for bare callers — only `Keeper_skill_routing.X`
+; sites in tests need prefix removal.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_keeper_skill_routing)
+ (public_name masc_mcp.keeper_skill_routing)
+ (wrapped false)
+ (flags (:standard -w +4))
+ (libraries
+  masc_core))

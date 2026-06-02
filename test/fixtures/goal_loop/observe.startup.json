@@ -1,0 +1,69 @@
+{
+  "files": [
+    "fixtures/live-startup.log"
+  ],
+  "matched_lines": 79,
+  "patterns": {
+    "alive_but_stuck": {
+      "count": 6,
+      "samples": [
+        {
+          "line": "[WARN] [Keeper] nick0cave: alive-but-stuck detected (elapsed=924857s, threshold=1800s)",
+          "line_no": 31
+        }
+      ],
+      "severity": "critical"
+    },
+    "config_unknown_key": {
+      "count": 2,
+      "samples": [
+        {
+          "line": "[WARN] [Keeper] keeper TOML jobsian_purist.toml has unknown keys: keeper.base",
+          "line_no": 58
+        }
+      ],
+      "severity": "warning"
+    },
+    "credential_archived_starvation": {
+      "count": 14,
+      "samples": [
+        {
+          "line": "[WARN] [Auth] archived credential analyst (reason: bare-form keeper credential is dead after PR-3b1 starvation)",
+          "line_no": 24
+        }
+      ],
+      "severity": "critical"
+    },
+    "governance_unparseable": {
+      "count": 1,
+      "samples": [
+        {
+          "line": "[WARN] [Governance] Governance judge returned unparseable response",
+          "line_no": 49
+        }
+      ],
+      "severity": "warning"
+    },
+    "lenient_json_fallback": {
+      "count": 1,
+      "samples": [
+        {
+          "line": "[WARN] [Governance] Lenient_json fallback hit; 3809 chars",
+          "line_no": 50
+        }
+      ],
+      "severity": "warning"
+    },
+    "provider_health_skipped": {
+      "count": 55,
+      "samples": [
+        {
+          "line": "{\"status\":\"skipped\",\"error\":\"runtime provider health is advisory; bootstrap skips live probe\"}",
+          "line_no": 4
+        }
+      ],
+      "severity": "critical"
+    }
+  },
+  "total_lines": 50005
+}

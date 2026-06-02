@@ -1,0 +1,135 @@
+import { html } from 'htm/preact'
+import { useEffect, useRef, useState } from 'preact/hooks'
+import { EmptyState } from './feedback-state'
+import { loadMermaid, type MermaidApi } from './mermaid-loader'
+
+let mermaidConfigured = false
+let mermaidRenderCount = 0
+
+async function getMermaid(): Promise<MermaidApi> {
+  const mermaid = await loadMermaid()
+  if (mermaidConfigured) return mermaid
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    securityLevel: 'strict',
+    suppressErrorRendering: true,
+  })
+  mermaidConfigured = true
+  return mermaid
+}
+
+function nextRenderId(prefix: string): string {
+  mermaidRenderCount += 1
+  return `${prefix}-${mermaidRenderCount}`
+}
+
+// mermaid.render() manipulates shared DOM state internally.
+// Concurrent calls produce corrupt SVG for the second caller.
+// Serialize all render calls through a single queue.
+let renderQueue: Promise<void> = Promise.resolve()
+
+function serializedRender(
+  mermaid: MermaidApi,
+  id: string,
+  source: string,
+): Promise<{ svg: string }> {
+  const job = renderQueue.then(() => mermaid.render(id, source))
+  // Update queue tail regardless of success/failure so the next
+  // caller waits for this one to finish (not for it to succeed).
+  renderQueue = job.then(
+    () => {},
+    () => {},
+  )
+  return job
+}
+
+interface MermaidGraphProps {
+  source: string
+  prefix?: string
+  class?: string
+  diagramClass?: string
+  minHeightClass?: string
+  fallbackText?: string
+}
+
+export function MermaidGraph({
+  source,
+  prefix = 'mermaid-graph',
+  class: className = '',
+  diagramClass = '',
+  minHeightClass = 'min-h-40',
+  fallbackText,
+}: MermaidGraphProps) {
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const host = hostRef.current
+    if (!host) return undefined
+    host.textContent = ''
+    setError(null)
+
+    const render = async () => {
+      try {
+        const mermaid = await getMermaid()
+        const { svg } = await serializedRender(
+          mermaid,
+          nextRenderId(prefix),
+          source,
+        )
+        const hostEl = hostRef.current
+        if (cancelled || !hostEl) return
+        const parser = new DOMParser()
+        const doc = parser.parseFromString(svg, 'image/svg+xml')
+        const parseError = doc.querySelector('parsererror')
+        const rootTag = doc.documentElement?.tagName?.toLowerCase()
+        if (parseError || rootTag !== 'svg') {
+          if (!cancelled) setError('SVG parse failed')
+          return
+        }
+        const svgEl = doc.documentElement
+        if (svgEl) {
+          hostEl.textContent = ''
+          hostEl.appendChild(svgEl)
+        } else {
+          if (!cancelled) setError('Mermaid returned non-SVG output')
+        }
+      } catch (err) {
+        if (cancelled) return
+        setError(
+          err instanceof Error ? err.message : 'Mermaid 렌더링에 실패했습니다',
+        )
+      }
+    }
+
+    void render()
+    return () => {
+      cancelled = true
+      if (hostRef.current) hostRef.current.textContent = ''
+    }
+  }, [prefix, source])
+
+  return html`
+    <div class=${`${className} ${minHeightClass}`.trim()}>
+      ${error ? html`
+        <div class="space-y-2">
+          <${EmptyState} message=${error} compact />
+          ${fallbackText ? html`
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm leading-loose text-[var(--color-fg-disabled)]">
+              ${fallbackText}
+            </div>
+          ` : null}
+        </div>
+      ` : html`
+        <div
+          class=${`overflow-auto rounded-[var(--radius-lg)] p-3 bg-[var(--color-bg-surface)] ${diagramClass}`.trim()}
+          ref=${hostRef}
+          role="img"
+          aria-label=${fallbackText ?? '다이어그램'}
+        ></div>
+      `}
+    </div>
+  `
+}

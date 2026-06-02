@@ -1,0 +1,967 @@
+import { html } from 'htm/preact'
+import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
+import { RefreshCw, Sparkles, Trophy } from 'lucide-preact'
+import { ActionButton } from '../common/button'
+import { SectionCard } from '../common/card'
+import { TimeAgo } from '../common/time-ago'
+import { showToast } from '../common/toast'
+import { requestConfirm } from '../common/confirm-dialog'
+import { EmptyState } from '../common/feedback-state'
+import { LoadingState } from '../common/feedback-state'
+import { TextInput } from '../common/input'
+import { Select } from '../common/select'
+import { Checkbox } from '../common/checkbox'
+import { RichComposer } from '../common/rich-composer'
+import { RichContent } from '../common/rich-content'
+import { CursorPagination } from '../common/pagination'
+import { stripStateBlocks } from '../../keeper-message'
+import { navigate, navigateToPost, route } from '../../router'
+import { votePost } from '../../api/board'
+import { deleteBoardPost } from '../../api/actions'
+import { registerBoardHearthsRefresh } from '../../sse-store'
+import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
+import { MessageWorkspaceTimeline } from './message-workspace-timeline'
+import { BoardCurationPanel } from './board-curation-panel'
+import { BoardKarmaPanel } from './board-karma-panel'
+import { MentionInbox } from './mention-inbox'
+import { ModerationBadge } from './moderation-badge'
+import { PostDetail } from './post-detail'
+import { ReactionBar } from './reaction-bar'
+import { StateBlockMessages } from './state-block-messages'
+import {
+  boardActorAvatarKey,
+  boardActorDisplayName,
+  boardActorTitle,
+  contributorQualityBadgeClass,
+  contributorQualityBandLabel,
+  contributorQualityPercent,
+  navigateToAuthor,
+  stripInlineMarkdown,
+} from '../../lib/board-utils'
+import { hasRichMarkdownSignals } from '../common/rich-content-utils'
+import { ringFocusClasses } from '../common/ring'
+import {
+  boardPosts,
+  boardSortMode,
+  boardHiddenCategories,
+  boardAuthorFilter,
+  boardHearthFilter,
+  boardHearths,
+  boardHearthsLoading,
+  boardHearthsError,
+  boardFlairs,
+  boardFlairsLoading,
+  boardFlairsError,
+  subBoardOptions,
+  subBoardOptionsLoading,
+  subBoardOptionsError,
+  boardExcludeAutomation,
+  boardLoading,
+  boardLoadingMore,
+  boardHasMore,
+  lastBoardRefreshAt,
+  refreshBoard,
+  loadMoreBoardPosts,
+  SORT_MODES,
+  CONTENT_CATEGORIES,
+  detailPost,
+  detailLoading,
+  detailPostId,
+  showNewPostForm,
+  newPostTitle,
+  newPostContent,
+  newPostHearth,
+  newPostFlair,
+  newPostSubmitting,
+  PAGE_SIZE,
+  categoryVisibleLimits,
+  visibleLimit,
+  automationVisibleLimit,
+  systemVisibleLimit,
+  deletingPostId,
+  selectedPostIds,
+  bulkDeleting,
+  loadPostDetail,
+  submitNewPost,
+  togglePostSelection,
+  bulkDeleteSelected,
+  splitVisiblePosts,
+  filterHint,
+  isUpdated,
+  contentCategory,
+  categoryLabel,
+  categoryBadgeColor,
+  authorAvatar,
+  visibilityLabel,
+  visibilityBadgeColor,
+  postVisibilityAuditLabel,
+  postVisibilityAuditDetails,
+  refreshBoardHearths,
+  refreshBoardFlairs,
+  loadSubBoardOptionsForPost,
+} from './board-state'
+import type { BoardPost, ContentCategory } from './board-state'
+
+/**
+ * Pure filter for board posts.
+ *
+ * Case-insensitive substring match on `post.title` and `post.body` so the
+ * operator can locate a post by a keyword in the headline or anywhere in
+ * the content. Title is checked first (cheapest, strongest signal), then
+ * body. Existing server-side `boardAuthorFilter` handles the author axis,
+ * so this client-side filter is intentionally scoped to textual content.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated; BoardPost is treated as readonly.
+ */
+function filterBoardPosts(
+  posts: readonly BoardPost[],
+  query: string,
+): readonly BoardPost[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return posts
+  return posts.filter(post => {
+    if (post.title && post.title.toLowerCase().includes(needle)) return true
+    if (post.body && post.body.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
+// ── Scroll sentinel (IntersectionObserver auto-load) ──────────────
+function ScrollSentinel({ onVisible }: { onVisible: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const cb = useCallback(onVisible, [onVisible])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting) cb() },
+      { rootMargin: '200px' },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [cb])
+  return html`<div ref=${ref} class="h-1" />`
+}
+
+// ── Render section (paginated group by category) ──────────────────
+/** Expand the visible slice for this category by PAGE_SIZE.
+ *  If the category has run out of locally-loaded posts AND the server
+ *  still has more, also trigger a server-side page fetch. */
+function expandCategory(
+  category: ContentCategory,
+  limits: Record<string, number>,
+  currentLimit: number,
+  localPostCount: number,
+) {
+  const nextLimit = currentLimit + PAGE_SIZE
+  categoryVisibleLimits.value = { ...limits, [category]: nextLimit }
+  // Exhausted the locally-loaded slice for this category — ask the server
+  // for more. loadMoreBoardPosts is a noop if already loading or has_more=false.
+  if (nextLimit >= localPostCount && boardHasMore.value) {
+    void loadMoreBoardPosts()
+  }
+}
+
+function collapseCategory(
+  category: ContentCategory,
+  limits: Record<string, number>,
+  currentLimit: number,
+) {
+  const nextLimit = Math.max(PAGE_SIZE, currentLimit - PAGE_SIZE)
+  categoryVisibleLimits.value = { ...limits, [category]: nextLimit }
+}
+
+function renderCategorySection(
+  category: ContentCategory,
+  posts: BoardPost[],
+  total: number,
+  hidden: number,
+) {
+  const meta = CONTENT_CATEGORIES.find(c => c.id === category)
+  const label = meta ? `${meta.icon} ${meta.label}` : category
+  const limits = categoryVisibleLimits.value
+  const limit = limits[category] ?? PAGE_SIZE
+  // "has more" considers both the locally-loaded posts and the server's
+  // signal. Without boardHasMore, once the category's slice catches up to
+  // the loaded window the button disappears and the next server page is
+  // never requested — that was the #7118 regression.
+  const hasMoreLocal = posts.length > limit
+  const hasMoreRemote = boardHasMore.value
+  const hasMore = hasMoreLocal || hasMoreRemote
+  const loadingMore = boardLoadingMore.value
+  const remainingLabel = hasMoreLocal
+    ? `${posts.length - limit}개 남음`
+    : '다음 페이지 불러오기'
+  const visibleCount = Math.min(limit, posts.length)
+  const cursorLabel = hasMoreRemote && !hasMoreLocal
+    ? `${visibleCount} / ${total}+`
+    : `${visibleCount} / ${total}`
+
+  if (posts.length === 0 && hidden === 0) return null
+  if (posts.length === 0 && hidden > 0) {
+    return html`
+      <div class="mb-3 px-3 py-2 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-xs text-[var(--color-fg-muted)]">
+        ${label} — ${hidden}건 숨김
+      </div>
+    `
+  }
+
+  return html`
+    <${SectionCard} label=${`${label} (${total})`} class="mb-4">
+      <div class="flex flex-col gap-2">
+        ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
+      </div>
+      ${hasMore ? html`
+        <${ScrollSentinel} onVisible=${() => {
+          if (loadingMore) return
+          expandCategory(category, limits, limit, posts.length)
+        }} />
+        <div class="flex justify-center py-3">
+          <${CursorPagination}
+            cursor=${cursorLabel}
+            cursorLabel="표시"
+            hasPrevious=${limit > PAGE_SIZE}
+            hasNext=${hasMore}
+            previousLabel="줄이기"
+            nextLabel=${loadingMore ? '불러오는 중...' : `더 보기 (${remainingLabel})`}
+            ariaLabel=${`${categoryLabel(category)} 게시글 페이지`}
+            disabled=${loadingMore}
+            testId=${`board-category-pagination-${category}`}
+            onPrevious=${() => {
+              collapseCategory(category, limits, limit)
+            }}
+            onNext=${() => {
+              expandCategory(category, limits, limit, posts.length)
+            }}
+          />
+        </div>
+      ` : null}
+    <//>
+  `
+}
+
+function CategorySection({ group }: { group: { category: ContentCategory; posts: BoardPost[]; total: number; hidden: number } }) {
+  return renderCategorySection(group.category, group.posts, group.total, group.hidden)
+}
+
+// ── New post form ──────────────────────────────────────────────────
+function NewPostForm() {
+  useEffect(() => {
+    if (showNewPostForm.value && boardFlairs.value.length === 0 && !boardFlairsLoading.value) {
+      void refreshBoardFlairs()
+    }
+    if (showNewPostForm.value && subBoardOptions.value.length === 0 && !subBoardOptionsLoading.value) {
+      void loadSubBoardOptionsForPost()
+    }
+  }, [showNewPostForm.value])
+
+  if (!showNewPostForm.value) {
+    return html`
+      <button type="button"
+        class="w-full py-2.5 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-sm text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] transition-colors bg-transparent"
+        onClick=${() => {
+          newPostHearth.value = boardHearthFilter.value
+          showNewPostForm.value = true
+        }}
+      >+ 새 글 작성</button>
+    `
+  }
+
+  const subBoardSelectOptions = subBoardOptions.value.map(sb => ({ value: sb.slug, label: sb.name }))
+  const activeHearth = newPostHearth.value.trim()
+  const selectedSubBoardOptions = activeHearth
+    && !subBoardSelectOptions.some(option => option.value === activeHearth)
+    ? [{ value: activeHearth, label: activeHearth }, ...subBoardSelectOptions]
+    : subBoardSelectOptions
+  const categorySelectOptions = [
+    { value: '', label: 'No category' },
+    ...selectedSubBoardOptions,
+  ]
+  const activeFlair = newPostFlair.value.trim()
+  const flairSelectOptions = [
+    { value: '', label: 'No flair' },
+    ...boardFlairs.value.map(flair => ({
+      value: flair.name,
+      label: `${flair.emoji ? `${flair.emoji} ` : ''}${flair.label}`,
+    })),
+  ]
+  const selectedFlairOptions = activeFlair
+    && !flairSelectOptions.some(option => option.value === activeFlair)
+    ? [{ value: activeFlair, label: activeFlair }, ...flairSelectOptions]
+    : flairSelectOptions
+
+  return html`
+    <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] grid gap-3">
+      <${TextInput}
+        name="board_post_title"
+        ariaLabel="새 글 제목"
+        autoComplete="off"
+        placeholder="제목"
+        value=${newPostTitle.value}
+        onInput=${(e: Event) => { newPostTitle.value = (e.target as HTMLInputElement).value }}
+      />
+      <${RichComposer}
+        value=${newPostContent.value}
+        onValueChange=${(next: string) => { newPostContent.value = next }}
+        rows=${8}
+        placeholder="내용을 입력하세요. Markdown, 코드 스니펫, URL, 이미지 링크를 그대로 붙일 수 있습니다."
+        helpText="예: ts 코드펜스, 일반 URL 링크 카드, 단독 이미지 URL 자동 인라인"
+        previewLimit=${2}
+      />
+      <div class="grid gap-3 md:grid-cols-2">
+        <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+          Category
+          <${Select}
+            value=${newPostHearth.value}
+            options=${categorySelectOptions}
+            disabled=${newPostSubmitting.value || subBoardOptionsLoading.value}
+            ariaLabel="새 글 category"
+            onInput=${(value: string) => { newPostHearth.value = value }}
+          />
+        </label>
+        <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+          Flair
+          <${Select}
+            value=${newPostFlair.value}
+            options=${selectedFlairOptions}
+            disabled=${newPostSubmitting.value || boardFlairsLoading.value}
+            ariaLabel="새 글 flair"
+            onInput=${(value: string) => { newPostFlair.value = value }}
+          />
+        </label>
+      </div>
+      ${boardFlairsError.value ? html`
+        <div class="text-2xs text-[var(--color-status-warn)]">Flair 목록을 불러오지 못했습니다. 직접 [flair:name] prefix를 사용할 수 있습니다.</div>
+      ` : null}
+      ${subBoardOptionsError.value ? html`
+        <div class="text-2xs text-[var(--color-status-warn)]">Sub-board 목록을 불러오지 못했습니다. Category 값을 직접 입력하려면 현재 Board 필터를 먼저 선택하세요.</div>
+      ` : null}
+      <div class="flex gap-2 justify-end">
+        <button type="button"
+          class="px-3 py-1.5 rounded-[var(--r-1)] text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled=${newPostSubmitting.value}
+          onClick=${() => {
+            showNewPostForm.value = false
+            newPostTitle.value = ''
+            newPostContent.value = ''
+            newPostHearth.value = ''
+            newPostFlair.value = ''
+          }}
+        >취소</button>
+        <button type="button"
+          class="px-4 py-1.5 rounded-[var(--r-1)] text-sm font-medium border border-[var(--info-border)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
+          disabled=${newPostSubmitting.value || !newPostTitle.value.trim() || !newPostContent.value.trim()}
+          onClick=${() => { void submitNewPost() }}
+        >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>
+      </div>
+    </div>
+  `
+}
+
+function setBoardHearthFilter(nextHearth: string) {
+  if (boardHearthFilter.value === nextHearth) return
+  boardHearthFilter.value = nextHearth
+  visibleLimit.value = PAGE_SIZE
+  automationVisibleLimit.value = PAGE_SIZE
+  systemVisibleLimit.value = PAGE_SIZE
+  categoryVisibleLimits.value = {
+    article: PAGE_SIZE,
+    review: PAGE_SIZE,
+    notice: PAGE_SIZE,
+    system: PAGE_SIZE,
+  }
+  refreshBoard()
+}
+
+function HearthFilterBar() {
+  const hearths = boardHearths.value
+  const active = boardHearthFilter.value
+  const activeInList = active !== '' && hearths.some(hearth => hearth.name === active)
+
+  const chipClass = (selected: boolean) => `px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer ${
+    selected
+      ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] border-[var(--accent-20)]'
+      : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
+  }`
+
+  // PR #13152 review (P2): when initial refreshBoardHearths() fails the
+  // list ends up empty + not loading, and the original early-return hid
+  // the entire bar — including the refresh button — leaving users with no
+  // in-UI retry path.  Render a minimal bar (refresh button only) in that
+  // state so the manual retry stays reachable.
+  if (hearths.length === 0 && active === '' && !boardHearthsLoading.value) {
+    return html`
+      <div class="flex items-center gap-1.5 flex-wrap">
+        ${boardHearthsError.value ? html`
+          <span class="text-2xs text-[var(--color-fg-muted)]" aria-hidden="true">hearth 목록을 불러오지 못했습니다</span>
+        ` : null}
+        <button
+          type="button"
+          class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
+          aria-label="hearth 목록 새로고침"
+          disabled=${boardHearthsLoading.value}
+          onClick=${() => { void refreshBoardHearths() }}
+        >
+          <${RefreshCw} size=${12} class=${boardHearthsLoading.value ? 'animate-spin' : ''} aria-hidden="true" />
+        </button>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="flex items-center gap-1.5 flex-wrap">
+      <span class="text-2xs font-semibold text-[var(--color-fg-muted)]" aria-hidden="true">#</span>
+      <button
+        type="button"
+        class=${chipClass(active === '')}
+        aria-pressed=${active === ''}
+        aria-label="전체 hearth"
+        onClick=${() => setBoardHearthFilter('')}
+      >전체</button>
+      ${hearths.map(hearth => html`
+        <button
+          key=${hearth.name}
+          type="button"
+          class=${chipClass(active === hearth.name)}
+          aria-pressed=${active === hearth.name}
+          aria-label=${`hearth ${hearth.name} ${hearth.count} posts`}
+          onClick=${() => setBoardHearthFilter(hearth.name)}
+        >${hearth.name} <span class="tabular-nums opacity-70">${hearth.count}</span></button>
+      `)}
+      ${active !== '' && !activeInList ? html`
+        <button
+          type="button"
+          class=${chipClass(true)}
+          aria-pressed="true"
+          aria-label=${`hearth ${active}`}
+          onClick=${() => setBoardHearthFilter(active)}
+        >${active}</button>
+      ` : null}
+      <button
+        type="button"
+        class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
+        aria-label="hearth 목록 새로고침"
+        disabled=${boardHearthsLoading.value}
+        onClick=${() => { void refreshBoardHearths() }}
+      >
+        <${RefreshCw} size=${12} class=${boardHearthsLoading.value ? 'animate-spin' : ''} aria-hidden="true" />
+      </button>
+    </div>
+  `
+}
+
+// ── Sort bar ───────────────────────────────────────────────────────
+function SortBar() {
+  const current = boardSortMode.value
+  const grouped = splitVisiblePosts(boardPosts.value)
+  return html`
+    <div class="flex flex-col gap-3 mb-4 p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+      <div class="flex items-center gap-1.5 flex-wrap">
+        ${SORT_MODES.map(mode => html`
+          <button type="button"
+            class="px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
+              ${current === mode.id
+                ? 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)]'
+                : 'bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
+              }"
+            onClick=${() => {
+              boardSortMode.value = mode.id
+              visibleLimit.value = PAGE_SIZE
+              automationVisibleLimit.value = PAGE_SIZE
+              systemVisibleLimit.value = PAGE_SIZE
+              refreshBoard()
+            }}
+          >
+            ${mode.label}
+          </button>
+        `)}
+      </div>
+      <${HearthFilterBar} />
+      <div class="flex items-center gap-2 flex-wrap">
+        ${grouped.groups.map(g => {
+          const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
+          const isHidden = boardHiddenCategories.value.has(g.category)
+          return html`
+            <button type="button"
+              class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
+                ${isHidden
+                  ? 'bg-[var(--accent-12)] text-[var(--color-accent-fg)] border-[var(--accent-18)] line-through opacity-60'
+                  : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]'
+                }"
+              onClick=${() => {
+                const next = new Set(boardHiddenCategories.value)
+                if (next.has(g.category)) next.delete(g.category)
+                else next.add(g.category)
+                boardHiddenCategories.value = next
+              }}
+            >
+              ${meta?.icon ?? ''} ${meta?.label ?? g.category} (${g.total})
+            </button>
+          `
+        })}
+        <button type="button"
+          class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
+            ${boardExcludeAutomation.value
+              ? 'bg-[var(--accent-12)] text-[var(--color-accent-fg)] border-[var(--accent-18)]'
+              : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]'
+            }"
+          aria-pressed=${boardExcludeAutomation.value}
+          aria-label="자동화 게시글 숨김 토글"
+          title="자동화 게시글 숨김 — direct/system 만 표시"
+          onClick=${() => {
+            boardExcludeAutomation.value = !boardExcludeAutomation.value
+            visibleLimit.value = PAGE_SIZE
+            automationVisibleLimit.value = PAGE_SIZE
+            systemVisibleLimit.value = PAGE_SIZE
+            refreshBoard()
+          }}
+        >
+          ${boardExcludeAutomation.value ? '🤖 숨김' : '🤖 자동화 포함'}
+        </button>
+        <${TextInput}
+          type="text"
+          placeholder="작성자"
+          ariaLabel="작성자 필터"
+          value=${boardAuthorFilter.value}
+          class="!bg-transparent !px-2.5 !py-1 !text-2xs !font-medium w-28"
+          onKeyDown=${(e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+              boardAuthorFilter.value = (e.target as HTMLInputElement).value.trim()
+              refreshBoard()
+            }
+          }}
+          onBlur=${(e: FocusEvent) => {
+            const val = (e.target as HTMLInputElement).value.trim()
+            if (val !== boardAuthorFilter.value) {
+              boardAuthorFilter.value = val
+              refreshBoard()
+            }
+          }}
+        />
+        <div class="ml-auto flex items-center gap-2">
+          ${selectedPostIds.value.size > 0 ? html`
+            <${ActionButton}
+              variant="danger"
+              size="md"
+              class="!px-3"
+              onClick=${bulkDeleteSelected}
+              disabled=${bulkDeleting.value}
+              ariaBusy=${bulkDeleting.value}
+              ariaLabel="선택한 게시글 일괄 삭제"
+            >
+              ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
+            <//>
+            <button type="button"
+              class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]"
+              onClick=${() => { selectedPostIds.value = new Set() }}
+            >선택 해제</button>
+          ` : null}
+          <button type="button"
+            class="px-3 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick=${refreshBoard}
+            disabled=${boardLoading.value}
+          >
+            ${boardLoading.value ? '새로고침 중...' : '새로고침'}
+          </button>
+        </div>
+      </div>
+    </div>
+  `
+}
+
+// ── Board summary stats (compact inline) ─────────────────────────
+function renderLatencyChip(label: string, metric: BoardLatencyMetric) {
+  if (metric.last_latency_ms === null) return null
+  const failed = metric.last_ok === false
+  return html`
+    <span
+      class=${`text-2xs tabular-nums px-1.5 py-0.5 rounded-[var(--r-0)] border ${
+        failed
+          ? 'text-[var(--color-status-err)] border-[var(--bad-30)] bg-[var(--bad-10)]'
+          : 'text-[var(--color-fg-muted)] border-[var(--color-border-divider)] bg-[var(--color-bg-hover)]'
+      }`}
+      title=${failed && metric.last_error ? metric.last_error : `${label} latency`}
+      aria-label=${failed ? `${label} 지연 ${metric.last_latency_ms}밀리초 실패` : `${label} 지연 ${metric.last_latency_ms}밀리초`}
+    >
+      ${label} ${metric.last_latency_ms}ms${failed ? ' 실패' : ''}
+    </span>
+  `
+}
+
+function BoardSummary() {
+  const grouped = splitVisiblePosts(boardPosts.value)
+  const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
+  const metrics = boardLatencyMetrics.value
+  return html`
+    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
+      <span class="font-semibold text-[var(--color-fg-secondary)] tabular-nums text-md">${visibleCount}</span>
+      <span>개 표시 중</span>
+      ${grouped.groups.map(g => {
+        const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
+        return html`
+          <span class="text-[var(--color-fg-muted)]" aria-hidden="true">·</span>
+          <span>${meta?.icon ?? ''} ${g.posts.length}</span>
+        `
+      })}
+      ${renderLatencyChip('목록', metrics.list)}
+      ${renderLatencyChip('리액션', metrics.reaction_toggle)}
+      ${lastBoardRefreshAt.value ? html`
+        <span class="ml-auto text-2xs">갱신 <${TimeAgo} timestamp=${lastBoardRefreshAt.value} /></span>
+      ` : null}
+      <${ActionButton}
+        variant="ghost"
+        size="sm"
+        class="${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
+        onClick=${() => navigate('workspace', { section: 'board', focus: 'curation' })}
+        ariaLabel="보드 큐레이션 열기"
+      >
+        <span class="inline-flex items-center gap-1">
+          <${Sparkles} size=${12} aria-hidden="true" />
+          큐레이션
+        </span>
+      <//>
+      <${ActionButton}
+        variant="ghost"
+        size="sm"
+        class="!px-2"
+        onClick=${() => navigate('workspace', { section: 'board', focus: 'karma' })}
+        ariaLabel="보드 카르마 열기"
+      >
+        <span class="inline-flex items-center gap-1">
+          <${Trophy} size=${12} aria-hidden="true" />
+          Karma
+        </span>
+      <//>
+    </div>
+  `
+}
+
+// ── Post card (list item) ──────────────────────────────────────────
+function PostCard({ post }: { post: BoardPost }) {
+  const cat = contentCategory(post)
+  const isDeleting = deletingPostId.value === post.id
+  const previewBody = stripStateBlocks(post.body)
+  const richPreview = hasRichMarkdownSignals(previewBody)
+  const authorLabel = boardActorDisplayName(post.author, post.author_identity)
+  const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
+  const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const qualityPercent = contributorQualityPercent(post.contributor_quality)
+  const qualityBand = contributorQualityBandLabel(post.contributor_quality)
+  const qualityTitle = qualityPercent === null
+    ? undefined
+    : `기여자 품질 ${qualityPercent}점 · ${qualityBand}`
+  const upvoteActive = post.current_vote === 'up'
+  const downvoteActive = post.current_vote === 'down'
+  const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
+  const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
+  const auditLabel = postVisibilityAuditLabel(post)
+  const auditDetails = postVisibilityAuditDetails(post)
+  const sortLabel = SORT_MODES.find(mode => mode.id === boardSortMode.value)?.label ?? boardSortMode.value
+  const reactionPreview = post.reactions?.some(summary => summary.count > 0 || summary.reacted || summary.has_reacted)
+
+  const handleVote = async (dir: 'up' | 'down', event: Event) => {
+    event.stopPropagation()
+    try {
+      await votePost(post.id, dir)
+      refreshBoard()
+    } catch (err) {
+      console.warn(`[board] vote failed (post=${post.id}, dir=${dir})`, err instanceof Error ? err.message : err)
+      showToast('투표에 실패했습니다', 'error')
+    }
+  }
+
+  const handleDelete = async (event: Event) => {
+    event.stopPropagation()
+    const confirmed = await requestConfirm({
+      title: '게시글 삭제',
+      message: `"${post.title}" 게시글을 삭제하시겠습니까?`,
+      tone: 'danger'
+    })
+    if (!confirmed) return
+    deletingPostId.value = post.id
+    try {
+      await deleteBoardPost(post.id)
+      showToast('게시글을 삭제했습니다', 'success')
+      refreshBoard()
+    } catch (err) {
+      console.warn('[board] post delete failed', err instanceof Error ? err.message : err)
+      showToast('게시글 삭제에 실패했습니다', 'error')
+    } finally {
+      deletingPostId.value = null
+    }
+  }
+
+  const openPost = () => navigateToPost(post.id)
+  const handlePostKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    openPost()
+  }
+
+  return html`
+    <article
+      role="button"
+      tabIndex=${0}
+      aria-label=${`게시글 열기: ${stripInlineMarkdown(post.title)}`}
+      class=${`board-post group w-full flex gap-3 rounded-[var(--r-1)] p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-20)] transition-[background-color,border-color] duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
+      onClick=${openPost}
+      onKeyDown=${handlePostKeyDown}
+    >
+      <!-- Select checkbox -->
+      <div class="flex items-start pt-1">
+        <${Checkbox}
+          ariaLabel=${`게시글 선택: ${post.id}`}
+          class="!w-3.5 !h-3.5"
+          checked=${selectedPostIds.value.has(post.id)}
+          onClick=${(e: Event) => togglePostSelection(post.id, e)}
+        />
+      </div>
+
+      <!-- Vote column -->
+      <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-14">
+        <button type="button"
+          aria-label="추천"
+          aria-pressed=${upvoteActive ? 'true' : 'false'}
+          disabled=${upvoteActive}
+          class=${`vote-btn upvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] cursor-pointer'}`}
+          onClick=${(event: Event) => handleVote('up', event)}
+        ><span aria-hidden="true">▲</span></button>
+        <span
+          class=${post.vote_blind
+            ? 'max-w-14 text-center text-[10px] font-medium leading-tight text-[var(--color-fg-muted)]'
+            : 'text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]'}
+          aria-label=${voteScoreAria}
+          title=${voteScoreLabel}
+        >${voteScoreLabel}</span>
+        <button type="button"
+          aria-label="비추천"
+          aria-pressed=${downvoteActive ? 'true' : 'false'}
+          disabled=${downvoteActive}
+          class=${`vote-btn downvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)] cursor-pointer'}`}
+          onClick=${(event: Event) => handleVote('down', event)}
+        ><span aria-hidden="true">▼</span></button>
+      </div>
+
+      <!-- Post body -->
+      <div class="flex-1 min-w-0">
+        <!-- Title -->
+        <div class="text-md font-semibold text-[var(--color-fg-secondary)] leading-snug mb-1.5 group-hover:text-[var(--color-accent-fg)] transition-colors">${stripInlineMarkdown(post.title)}</div>
+
+        <!-- Content preview: rendered markdown, height-capped -->
+        <div class="board-post-preview text-sm text-[var(--color-fg-primary)] leading-paragraph mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
+          <${RichContent} text=${previewBody} class="board-post-preview__content" previewLimit=${1} />
+          <div class="absolute bottom-0 left-0 right-0 ${richPreview ? 'h-10' : 'h-6'} bg-gradient-to-t from-[var(--color-bg-surface)] to-transparent pointer-events-none" />
+        </div>
+
+        <!-- Footer: author + meta + badges -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <!-- Author line -->
+          <span class="text-xs text-[var(--color-fg-muted)]">${authorAvatar(authorAvatarKey)}</span>
+          <a
+            class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] transition-colors cursor-pointer"
+            href=${`#monitoring/agents/${encodeURIComponent(post.author_identity?.raw ?? post.author)}`}
+            title=${authorTitle}
+            onClick=${(e: Event) => {
+              e.preventDefault()
+              navigateToAuthor(post.author, e, post.author_identity)
+            }}
+          >${authorLabel}</a>
+          <span class="text-2xs text-[var(--color-fg-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
+          ${isUpdated(post) ? html`<span class="text-3xs text-[var(--color-fg-muted)] opacity-50">(수정됨)</span>` : null}
+
+          <!-- Separator -->
+          <span class="text-[var(--color-fg-muted)] opacity-30">|</span>
+
+          <!-- Counts -->
+          <span class="text-2xs text-[var(--color-fg-muted)]">댓글 ${post.comment_count}</span>
+
+          <!-- Category badges -->
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
+          ${post.flair ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
+          ${qualityPercent !== null ? html`
+            <span
+              class=${`inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
+              aria-label=${qualityTitle}
+              title=${qualityTitle}
+            >품질 ${qualityPercent}</span>
+          ` : null}
+          ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+          <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />
+
+          <!-- Delete button — reveal on row hover via opacity utilities -->
+          <${ActionButton}
+            variant="danger"
+            size="sm"
+            class="ml-auto !py-0.5 opacity-0 group-hover:opacity-100"
+            onClick=${handleDelete}
+            disabled=${isDeleting}
+            ariaBusy=${isDeleting}
+            ariaLabel=${`게시글 삭제: ${post.id}`}
+          >
+            ${isDeleting ? '삭제 중...' : '삭제'}
+          <//>
+        </div>
+        <div
+          class="mt-2 flex items-center gap-1.5 flex-wrap text-2xs text-[var(--color-fg-muted)]"
+          aria-label=${`게시글 표시 감사: ${auditLabel}; 현재 정렬 ${sortLabel}`}
+          title=${`${auditLabel} · 현재 정렬 ${sortLabel}`}
+        >
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] border border-[var(--ok-30)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] font-medium">표시 중</span>
+          <span>${auditDetails}</span>
+          <span class="opacity-60">· 정렬 ${sortLabel}</span>
+        </div>
+        <div
+          class=${reactionPreview ? 'mt-2' : 'mt-2 opacity-75 transition-opacity group-hover:opacity-100'}
+          onClick=${(event: Event) => event.stopPropagation()}
+          onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}
+        >
+          <${ReactionBar}
+            targetType="post"
+            targetId=${post.id}
+            compact
+            initialSummaries=${post.reactions ?? []}
+          />
+        </div>
+      </div>
+    </article>
+  `
+}
+
+// ── Main Board component (public API) ──────────────────────────────
+export function BoardSurface() {
+  useEffect(() => () => { selectedPostIds.value = new Set() }, [])
+  useEffect(() => registerBoardHearthsRefresh(() => {
+    void refreshBoardHearths()
+  }), [])
+  useEffect(() => {
+    if (boardHearths.value.length === 0) void refreshBoardHearths()
+  }, [])
+  useEffect(() => {
+    if (boardFlairs.value.length === 0) void refreshBoardFlairs()
+  }, [])
+  const [contentQuery, setContentQuery] = useState('')
+  const rawPosts = boardPosts.value
+  const filteredPosts = useMemo(
+    () => filterBoardPosts(rawPosts, contentQuery),
+    [rawPosts, contentQuery],
+  )
+  const isFiltering = contentQuery.trim() !== ''
+  const grouped = splitVisiblePosts(filteredPosts)
+  const posts = grouped.groups.flatMap(g => g.posts)
+  const hint = filterHint(grouped)
+  const focus = route.value.params.focus ?? null
+  const postId = route.value.params.post ?? null
+  const post = postId
+    ? posts.find(row => row.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)
+    : null
+
+  if (postId && !post && detailPostId.value !== postId && !detailLoading.value) {
+    void loadPostDetail(postId)
+  }
+
+  if (postId) {
+    return post
+      ? html`
+          <${BoardSummary} />
+          <${PostDetail} post=${post} />
+        `
+      : html`
+          <div>
+            <${BoardSummary} />
+            <button type="button"
+              class="mb-4 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors cursor-pointer"
+              onClick=${() => navigate('workspace', { section: 'board' })}
+            >← 게시판으로 돌아가기</button>
+            ${detailLoading.value
+              ? html`<${LoadingState}>글 불러오는 중...<//>`
+              : html`<${EmptyState} message="글을 찾지 못했습니다" compact />`}
+          </div>
+        `
+  }
+
+  if (focus === 'mention-inbox') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${MentionInbox} />
+      </div>
+    `
+  }
+
+  if (focus === 'messages-workspace') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${MessageWorkspaceTimeline} />
+      </div>
+    `
+  }
+
+  if (focus === 'state-block') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${StateBlockMessages} />
+      </div>
+    `
+  }
+
+  if (focus === 'curation') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${BoardCurationPanel} />
+      </div>
+    `
+  }
+
+  if (focus === 'karma') {
+    return html`
+      <div>
+        <${BoardSummary} />
+        <${BoardKarmaPanel} />
+      </div>
+    `
+  }
+
+  return html`
+    <div>
+      <${BoardSummary} />
+      <${SortBar} />
+      ${hint ? html`
+        <div class="mb-4 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
+          ${hint}
+        </div>
+      ` : null}
+      <div class="mb-4">
+        <${NewPostForm} />
+      </div>
+      <div class="mb-3 flex items-center gap-2">
+        <${TextInput}
+          type="search"
+          value=${contentQuery}
+          placeholder="제목/본문에서 검색"
+          ariaLabel="게시글 본문 필터"
+          onInput=${(e: Event) => setContentQuery((e.target as HTMLInputElement).value)}
+          class="min-w-45 max-w-80 flex-1 !px-2 !py-1 !text-xs"
+        />
+      </div>
+      ${isFiltering && posts.length === 0 && rawPosts.length > 0
+        ? html`<div class="py-4 text-center text-xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${rawPosts.length} items)</div>`
+          : posts.length === 0 && boardLoading.value
+          ? html`<${LoadingState}>게시판 불러오는 중...<//>`
+          : posts.length === 0
+            ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
+            : html`
+                ${boardLoading.value ? html`<div class="mb-2 text-2xs text-[var(--color-fg-muted)] animate-pulse">업데이트 중...</div>` : null}
+                ${grouped.groups.map(g => html`
+                  <${CategorySection} key=${g.category} group=${g} />
+                `)}
+              `}
+    </div>
+  `
+}

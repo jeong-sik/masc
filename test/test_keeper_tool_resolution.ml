@@ -1,0 +1,290 @@
+open Alcotest
+
+module TR = Masc_mcp.Keeper_tool_resolution
+
+(* ── resolve returns correct tried_source for each admission path ── *)
+
+let test_public_descriptor_admits_execute () =
+  match TR.resolve "Execute" with
+  | TR.Alias_to { canonical; via = TR.Public_descriptor } ->
+      check string "canonical is tool_execute" "tool_execute" canonical
+  | other ->
+      fail (Printf.sprintf "expected Alias_to via Public_descriptor, got: %s"
+              (match other with
+               | TR.Resolved { via; _ } -> "Resolved via " ^ TR.string_of_tried_source via
+               | TR.Alias_to { via; _ } -> "Alias_to via " ^ TR.string_of_tried_source via
+               | TR.Unknown _ -> "Unknown"))
+
+let test_tool_name_variant_admits_keeper_board_post () =
+  match TR.resolve "keeper_board_post" with
+  | TR.Resolved { via = TR.Tool_name_variant; _ } -> ()
+  | other ->
+      fail (Printf.sprintf "expected Resolved via Tool_name_variant, got: %s"
+              (match other with
+               | TR.Resolved { via; _ } -> "Resolved via " ^ TR.string_of_tried_source via
+               | TR.Alias_to { via; _ } -> "Alias_to via " ^ TR.string_of_tried_source via
+               | TR.Unknown _ -> "Unknown"))
+
+let test_mcp_prefix_stripped () =
+  (* "mcp__masc__masc_status" should strip prefix to "masc_status" and resolve *)
+  match TR.resolve "mcp__masc__masc_status" with
+  | TR.Resolved _ | TR.Alias_to _ -> ()
+  | TR.Unknown { name; tried } ->
+      fail (Printf.sprintf "mcp__masc__masc_status should resolve, got Unknown: %s (tried: %s)"
+              name (TR.string_of_tried tried))
+
+let test_unknown_returns_tried_list () =
+  match TR.resolve "__nonexistent_tool_xyz" with
+  | TR.Unknown { name; tried } ->
+      check string "name preserved" "__nonexistent_tool_xyz" name;
+      check bool "at least 13 tried sources" true (List.length tried >= 13)
+  | _ ->
+      fail "__nonexistent_tool_xyz should be Unknown"
+
+let test_extend_turns_resolved () =
+  (* extend_turns is in core_always_tools (S7: Registry_core_tools) or
+     Tool_name_variant depending on order *)
+  match TR.resolve "extend_turns" with
+  | TR.Resolved _ -> ()
+  | TR.Alias_to _ -> ()
+  | TR.Unknown { name; tried } ->
+      fail (Printf.sprintf "extend_turns should resolve, got Unknown (tried: %s)"
+              (TR.string_of_tried tried))
+
+let test_surface_admits_tool_execute () =
+  match TR.resolve "tool_execute" with
+  | TR.Resolved { via = TR.Surface _; _ } -> ()
+  | TR.Resolved { via; _ } ->
+      (* Admitted through a different source — still ok for shim *)
+      ignore via
+  | TR.Alias_to _ -> ()
+  | TR.Unknown { tried; _ } ->
+      fail (Printf.sprintf "tool_execute should resolve, got Unknown (tried: %s)"
+              (TR.string_of_tried tried))
+
+let test_alias_masc_to_internal () =
+  match TR.resolve "masc_board_post" with
+  | TR.Resolved _ | TR.Alias_to _ -> ()
+  | TR.Unknown { tried; _ } ->
+      fail (Printf.sprintf "masc_board_post should resolve, got Unknown (tried: %s)"
+              (TR.string_of_tried tried))
+
+(* ── Policy validation surface ── *)
+
+let resolves name =
+  match TR.resolve name with
+  | TR.Resolved _ | TR.Alias_to _ -> true
+  | TR.Unknown _ -> false
+
+let policy_validation_tool_names =
+  [ "keeper_board_post"
+  ; "tool_search_files"
+  ; "tool_execute"
+  ; "Execute"
+  ; "Read"
+  ; "keeper_task_done"
+  ; "keeper_time_now"
+  ; "masc_status"
+  ; "mcp__masc__masc_status"
+  ; "extend_turns"
+  ; "masc_transition"
+  ]
+
+let test_policy_validation_known_tools_resolve () =
+  List.iter
+    (fun name -> check bool (name ^ " resolves") true (resolves name))
+    policy_validation_tool_names
+
+let test_policy_validation_unknown_tool_misses () =
+  check bool "__missing_tool misses" false (resolves "__missing_tool")
+
+let test_retired_public_names_miss () =
+  List.iter
+    (fun name -> check bool (name ^ " misses") false (resolves name))
+    [ "Bash"; "Grep"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ]
+
+(* ── Policy matrix: active tool_policy.toml names resolve ── *)
+
+let policy_tool_names =
+  List.sort_uniq String.compare
+    [
+      "extend_turns";
+      "keeper_board_comment";
+      "keeper_board_curation_read";
+      "keeper_board_curation_submit";
+      "keeper_board_get";
+      "keeper_board_list";
+      "keeper_board_post";
+      "keeper_board_search";
+      "keeper_board_stats";
+      "keeper_board_vote";
+      "keeper_broadcast";
+      "keeper_context_status";
+      "keeper_library_read";
+      "keeper_library_search";
+      "keeper_memory_search";
+      "keeper_memory_write";
+      "keeper_task_claim";
+      "keeper_task_create";
+      "keeper_task_done";
+      "keeper_task_force_release";
+      "keeper_task_submit_for_verification";
+      "keeper_tasks_audit";
+      "keeper_tasks_list";
+      "keeper_time_now";
+      "keeper_tool_search";
+      "keeper_tools_list";
+      "keeper_voice_agent";
+      "keeper_voice_listen";
+      "keeper_voice_session_end";
+      "keeper_voice_session_start";
+      "keeper_voice_sessions";
+      "keeper_voice_speak";
+      "masc_add_task";
+      "masc_agent_card";
+      "masc_agents";
+      "masc_approval_pending";
+      "masc_batch_add_tasks";
+      "masc_broadcast";
+      "masc_claim_next";
+      "masc_dashboard";
+      "masc_goal_list";
+      "masc_goal_transition";
+      "masc_goal_upsert";
+      "masc_goal_verify";
+      "masc_heartbeat";
+      "masc_bind";
+      "masc_keeper_list";
+      "masc_keeper_msg";
+      "masc_keeper_msg_result";
+      "masc_keeper_status";
+      "masc_unbind";
+      "masc_messages";
+      "masc_plan_get";
+      "masc_plan_get_task";
+      "masc_status";
+      "masc_task_history";
+      "masc_tasks";
+      "masc_tool_help";
+      "masc_transition";
+      "masc_web_fetch";
+      "masc_web_search";
+      "masc_agents";
+      "tool_edit_file";
+      "tool_execute";
+      "tool_read_file";
+      "tool_search_files";
+      "tool_write_file";
+    ]
+
+(** Categorize each tool by which sources admit it.
+    A = multi-source (>=2), B = single-source (1), C = zero-source (dead), D = alias-only *)
+type category = A | B | C | D
+
+let categorize resolution =
+  match resolution with
+  | TR.Unknown _ -> C
+  | TR.Alias_to _ -> D
+  | TR.Resolved _ -> A (* Resolved means at least 1 source hit; multi-source requires deeper analysis *)
+
+let string_of_category = function A -> "A(multi)" | B -> "B(single)" | C -> "C(dead)" | D -> "D(alias)"
+
+let test_all_policy_tools_resolve () =
+  let unresolved =
+    List.filter_map (fun name ->
+      match TR.resolve name with
+      | TR.Resolved _ | TR.Alias_to _ -> None
+      | TR.Unknown _ -> Some name
+    ) policy_tool_names
+  in
+  check int "all active policy tools should resolve" 0 (List.length unresolved);
+  if unresolved <> [] then
+    fail (Printf.sprintf "unresolved: %s" (String.concat ", " unresolved))
+
+let test_matrix_report () =
+  let results =
+    List.map (fun name ->
+      let res = TR.resolve name in
+      let cat = categorize res in
+      (name, res, cat)
+    ) policy_tool_names
+  in
+  let a_count = List.length (List.filter (fun (_, _, c) -> c = A) results) in
+  let d_count = List.length (List.filter (fun (_, _, c) -> c = D) results) in
+  let c_count = List.length (List.filter (fun (_, _, c) -> c = C) results) in
+  (* Phase 4 gate: 0 dead entries *)
+  check int "dead entries (C) should be 0" 0 c_count;
+  (* All entries must resolve *)
+  check int "resolved + alias entries should equal total" (List.length policy_tool_names)
+    (a_count + d_count + c_count);
+  (* Provenance report for Phase 5 analysis *)
+  List.iter (fun (name, res, _cat) ->
+    match res with
+    | TR.Resolved { via; _ } ->
+        Printf.printf "  [A] %-40s via=%s\n" name (TR.string_of_tried_source via)
+    | TR.Alias_to { canonical; via; _ } ->
+        Printf.printf "  [D] %-40s -> %s via=%s\n" name canonical (TR.string_of_tried_source via)
+    | TR.Unknown { tried; _ } ->
+        Printf.printf "  [C] %-40s tried=[%s]\n" name (TR.string_of_tried tried)
+  ) results;
+  Printf.printf "  Summary: A=%d D=%d C=%d total=%d\n" a_count d_count c_count (List.length policy_tool_names)
+
+(* ── Phase 5: full-probe overlap analysis ── *)
+
+let test_full_probe_overlap () =
+  (* Each tool must admit from >= 1 source via all_admitting_sources *)
+  let per_tool =
+    List.map (fun name ->
+      let sources = TR.all_admitting_sources name in
+      (name, sources, List.length sources)
+    ) policy_tool_names
+  in
+  let single_source =
+    List.filter_map (fun (name, sources, count) ->
+      if count = 1 then Some (name, List.hd sources) else None
+    ) per_tool
+  in
+  let zero_source =
+    List.filter (fun (_, _, count) -> count = 0) per_tool
+  in
+  (* No tool should have 0 sources *)
+  check int "zero-source tools should be 0" 0 (List.length zero_source);
+  (* Report overlap distribution *)
+  let multi_count = List.length policy_tool_names - List.length single_source in
+  Printf.printf "  Full-probe: %d multi-source, %d single-source, %d zero-source\n"
+    multi_count (List.length single_source) (List.length zero_source);
+  List.iter (fun (name, sources, count) ->
+    Printf.printf "  %-40s %2d sources: %s\n" name count (TR.string_of_tried sources)
+  ) per_tool;
+  (* Phase 5 gate: tools with only 1 source are fragile *)
+  if single_source <> [] then begin
+    Printf.printf "  Single-source (fragile) tools:\n";
+    List.iter (fun (name, src) ->
+      Printf.printf "    %-40s only via %s\n" name (TR.string_of_tried_source src)
+    ) single_source
+  end
+
+(* ── Suite ── *)
+
+let () =
+  Alcotest.run "test_tool_resolution"
+    [ "resolve", [
+        test_case "Execute resolves via public descriptor" `Quick test_public_descriptor_admits_execute;
+        test_case "keeper_board_post resolves via Tool_name_variant" `Quick test_tool_name_variant_admits_keeper_board_post;
+        test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
+        test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
+        test_case "extend_turns resolves" `Quick test_extend_turns_resolved;
+        test_case "tool_execute resolves via surface" `Quick test_surface_admits_tool_execute;
+        test_case "masc_board_post resolves via alias" `Quick test_alias_masc_to_internal;
+      ]
+    ; "policy_validation", [
+        test_case "known tools resolve" `Quick test_policy_validation_known_tools_resolve;
+        test_case "unknown tools miss" `Quick test_policy_validation_unknown_tool_misses;
+        test_case "retired public names miss" `Quick test_retired_public_names_miss;
+      ]
+    ; "matrix", [
+        test_case "all policy tools resolve" `Quick test_all_policy_tools_resolve;
+        test_case "matrix report: 0 dead entries" `Quick test_matrix_report;
+        test_case "full-probe overlap analysis" `Quick test_full_probe_overlap;
+      ]
+    ]

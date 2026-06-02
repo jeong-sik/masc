@@ -1,0 +1,179 @@
+/* UI — toast animation, markdown content, think block, SPA refresh tabs, button.agent,
+   project-snapshot card, monitor buttons, agent-event-badge variants. Extracted from global.css for #3915. */
+
+/* ═══ UI ═══ */
+
+/* ── Toast Notifications (styling moved to component Tailwind) ── */
+/* @keyframes slideInRight → keyframes.css (canonical) */
+
+/* ── Markdown Rendered Content (marked GFM output) ────────── */
+@utility markdown-content {
+  line-height: 1.55;
+  color: var(--color-fg-secondary);
+
+  & p { margin: 6px 0; }
+
+  & h1 { font-size: var(--fs-16); font-weight: var(--fw-bold); margin: 16px 0 8px; color: var(--color-fg-primary); }
+  & h2 { font-size: var(--fs-14); font-weight: var(--fw-semi); margin: 12px 0 6px; color: var(--color-fg-primary); }
+  & h3 { font-size: var(--fs-13); font-weight: var(--fw-semi); margin: 8px 0 4px; color: var(--color-fg-secondary); }
+
+  & code {
+    background: var(--color-bg-elevated);
+    color: var(--brass-1);
+    padding: 1px 5px;
+    border-radius: var(--r-1);
+    font-size: 0.9em; /* intentional: relative em scales with parent context — not replaceable with px-based --fs-* tokens */
+  }
+
+  & pre {
+    background: var(--color-bg-panel-alt);
+    padding: 12px 14px;
+    border-radius: var(--r-2);
+    border: 1px solid var(--color-border-default);
+    overflow-x: auto;
+    font-size: var(--fs-sm);
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    line-height: 1.6;
+    margin: 8px 0;
+  }
+
+  & pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+    border-radius: 0;
+  }
+
+  & blockquote {
+    border-left: 3px solid var(--brass-border);
+    padding-left: 12px;
+    color: var(--color-fg-muted);
+    margin: 8px 0;
+  }
+
+  & ul { list-style: disc; padding-left: 20px; margin: 6px 0; }
+  & ol { list-style: decimal; padding-left: 20px; margin: 6px 0; }
+  & li { margin: 2px 0; }
+  & li > ul, & li > ol { margin: 2px 0; }
+
+  & hr { border: none; border-top: 1px solid var(--color-border-default); margin: 12px 0; }
+
+  & a { color: var(--brass-1); &:hover { text-decoration: underline; } }
+  & strong { font-weight: var(--fw-semi); }
+  & del { color: var(--color-fg-muted); }
+
+  & table { margin: 8px 0; }
+
+  & img { max-width: 100%; height: auto; border-radius: var(--r-2); margin: 4px 0; }
+}
+
+/* ── Mermaid rendered output ──────────────────────────────── */
+.mermaid-rendered {
+  border-radius: var(--r-2);
+  padding: var(--sp-4);
+  margin: 8px 0;
+  background: var(--color-bg-panel-alt);
+  border: 1px solid var(--color-border-default);
+  overflow-x: auto;
+}
+
+/* ── Think Block (collapsible) ─────────────────────────────── */
+@utility think-block {
+  background: var(--purple-12);
+  border: 1px solid var(--purple-12);
+  padding: 10px 14px;
+  margin: 8px 0;
+  & summary { cursor: pointer; color: var(--color-purple); font-size: var(--fs-sm); }
+}
+
+/* button.agent/agent-card: element+class selector, kept as raw CSS */
+button.agent,
+button.agent-card {
+  cursor: pointer;
+  &:hover { background: var(--color-bg-elevated); }
+}
+
+/* button.monitor-alert/row: element+class selector, kept as raw CSS */
+button.monitor-alert,
+button.monitor-row {
+  transition: border-color var(--t-med) var(--ease), transform var(--t-med) var(--ease), background var(--t-med) var(--ease);
+  &:hover { transform: translateY(-1px); border-color: var(--color-border-strong); background: var(--color-bg-hover); }
+  &.ok { border-color: rgb(var(--ok-glow) / .18); }
+  &.warn { border-color: rgb(var(--warn-glow) / .28); }
+  &.bad { border-color: rgb(var(--err-glow) / .34); }
+}
+
+/* status-badge state variants: folded into @utility status-badge above */
+
+/* ── Agent List (Overview) ─────────────────────────────────── */
+/* agent-card:hover → dashboard.css (canonical, includes box-shadow + transform) */
+
+/* ── Agent Monitor — runtime strip + live timeline ──────────── */
+
+/* ── Runtime Strip ─────────────────────────────────────────── */
+@utility agent-runtime-strip {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-bg-page) 85%, black) 0%,
+    color-mix(in srgb, var(--color-bg-surface) 70%, black) 100%
+  );
+}
+
+@utility agent-runtime-ctx-fill {
+  transition: width var(--t-slow) var(--ease);
+  &.warn { background: var(--warn); }
+  &.bad { background: var(--err); }
+}
+
+/* ── Live Timeline ─────────────────── */
+
+/* Event kind badge variants */
+@utility agent-event-badge--heartbeat { background: rgb(var(--ok-glow) / .12); color: var(--ok); }
+@utility agent-event-badge--lifecycle { background: rgb(var(--brass-glow) / .12); color: var(--brass-1); }
+@utility agent-event-badge--keeper { background: rgb(var(--brass-glow) / .15); color: var(--brass-1); }
+@utility agent-event-badge--error { background: rgb(var(--err-glow) / .15); color: var(--err); }
+@utility agent-event-badge--broadcast { background: var(--purple-12); color: var(--color-purple); }
+@utility agent-event-badge--task { background: rgb(var(--warn-glow) / .12); color: var(--warn); }
+@utility agent-event-badge--board { background: var(--info-soft); color: var(--info-fg); }
+@utility agent-event-badge--default { background: var(--color-border-default); color: var(--color-fg-muted); }
+
+/* ── Micro-Interactions (Task 289) ── */
+@utility pressable {
+  transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease-out);
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+    opacity: 0.9;
+  }
+}
+
+@utility hover-lift {
+  transition: transform var(--t-med) var(--ease), border-color var(--t-med) var(--ease-out), background-color var(--t-med) var(--ease-out);
+  &:hover:not(:disabled) {
+    transform: translateY(-2px);
+  }
+}
+
+@utility micro-fade {
+  transition: opacity var(--t-med) var(--ease-inout), background-color var(--t-med) var(--ease-inout), color var(--t-med) var(--ease-inout), border-color var(--t-med) var(--ease-inout);
+}
+
+/* ── Automatic Global Micro-Interactions (Task 289) ── */
+.cursor-pointer {
+  @apply pressable micro-fade;
+}
+
+.monitor-surface-card, 
+.activity-item,
+.focus-agent-card,
+.board-comment,
+.cmd-card {
+  @apply hover-lift;
+}
+
+/* Explicit button interactions */
+button:not(:disabled),
+.vote-btn,
+.action-btn {
+  @apply pressable;
+}

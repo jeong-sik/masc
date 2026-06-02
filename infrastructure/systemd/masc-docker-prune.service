@@ -1,0 +1,49 @@
+# Periodic Docker resource prune for masc-mcp hosts that build images
+# locally (CI runners, dev workstations, smoke-test hosts). Wraps
+# scripts/docker-prune.sh which was added in this PR but had no
+# scheduling layer. Named volumes are intentionally not touched; see the
+# script comment header for scope.
+#
+# Activated by masc-docker-prune.timer. Skip installing this on hosts
+# that only consume pre-built images from a registry.
+#
+# Install:
+#   sudo install -m 0644 infrastructure/systemd/masc-docker-prune.service \
+#     /etc/systemd/system/masc-docker-prune.service
+#   sudo install -m 0644 infrastructure/systemd/masc-docker-prune.timer \
+#     /etc/systemd/system/masc-docker-prune.timer
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now masc-docker-prune.timer
+
+[Unit]
+Description=MASC MCP weekly Docker resource prune
+Documentation=https://github.com/jeong-sik/masc-mcp
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# `docker` requires either root or membership in the docker group.
+# Hosts that run rootless docker should drop the User= line.
+User=masc
+Group=docker
+WorkingDirectory=/opt/masc-mcp
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=AGE_HOURS=168
+
+ExecStart=/opt/masc-mcp/scripts/docker-prune.sh --apply
+# Also reap orphaned keeper sandbox containers that lost their parent.
+ExecStart=/opt/masc-mcp/scripts/cleanup-orphaned-keeper-containers.sh --apply
+
+TimeoutStartSec=15min
+
+# Hardening. PrivateTmp is safe here because this unit only invokes Docker CLI
+# prune operations; mktemp scratch files do not need to be visible to dockerd.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/masc-mcp
+
+StandardOutput=journal
+StandardError=journal

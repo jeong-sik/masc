@@ -1,0 +1,27 @@
+; RFC-0056 Phase 1I — extract Keeper_event_queue leaf module from
+; lib/keeper/ flat masc_mcp namespace. Stacked on Phase 1H.
+;
+; Keeper_event_queue is the first lib/keeper/ leaf to be promoted to
+; its own dune sub-library. It is dependency-leaf: stdlib + Unix only.
+; Pure data structure module (urgency variants + FIFO queue + dedup
+; bookkeeping) backed by specs/keeper-state-machine/KeeperEventQueue.tla.
+;
+; 91+87 LoC. Fan-in: 4 lib (keeper_supervisor, keeper_registry.mli,
+; keeper_keepalive_signal.mli, keeper_keepalive.mli) + 6 test files.
+; All wrapped-pattern callers (Masc_mcp.Keeper_event_queue, 7 sites)
+; drop prefix via G5 sed.
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the bare identifier `Keeper_event_queue`.
+(include_subdirs no)
+
+(library
+ (name masc_mcp_keeper_event_queue)
+ (public_name masc_mcp.keeper_event_queue)
+ (wrapped false)
+ ;; Drop -w +4 (fragile-match) because we are *moving* a pre-existing
+ ;; module whose stimulus_class match (line 81) predates that flag.
+ ;; Tightening lint here is out of scope for this RFC-0056 G2 mechanical
+ ;; extraction — same precedent as Phase 1H benchmark closure.
+ (libraries
+  unix))

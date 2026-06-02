@@ -1,0 +1,6 @@
+# no-legacy-tool-surface-name allowlist
+#
+# Format: `path:line:literal` keys. Empty file = baseline 0 occurrences.
+# Add only when the descriptor refactor genuinely needs to mention the legacy
+# name (e.g. backwards-compat shim documentation). Each entry should cite the
+# PR that introduced it.

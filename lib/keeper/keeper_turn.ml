@@ -1,0 +1,704 @@
+(** Keeper_turn -- keeper lifecycle and message-turn handlers.
+
+    Orchestrates keeper turns by building domain-specific system prompt
+    configuration and delegating to {!Keeper_agent_run.run_turn} which
+    owns the full OAS-backed context lifecycle (checkpoint, prompt state,
+    Agent.run).
+
+    Sub-modules:
+    - Keeper_turn_up: start/reconfigure
+    - Keeper_turn_setup: ensure_keeper_exists
+    - Keeper_turn_lifecycle: shutdown *)
+
+open Tool_args
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
+open Keeper_memory
+open Keeper_alerting
+open Keeper_keepalive
+open Keeper_execution
+open Keeper_turn_setup
+
+type tool_result = Keeper_types_profile.tool_result
+
+let handle_keeper_up = Keeper_turn_up.handle_keeper_up
+let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
+
+let turn_cost_for_result (result : Keeper_agent_run.run_result) : float =
+  let usage_trust =
+    Keeper_unified_metrics.classify_usage_trust
+      ~usage_reported:result.usage_reported
+      ~usage:result.usage
+      ~context_max:0
+  in
+  if Keeper_unified_metrics.usage_trust_is_trusted usage_trust then
+    Keeper_unified_metrics.estimate_trusted_usage_cost_usd
+      ~usage_trusted:true
+      result.usage
+  else 0.0
+
+let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
+    (result : Keeper_agent_run.run_result) : keeper_meta =
+  let now_ts = Time_compat.now () in
+  let turn_cost = turn_cost_for_result result in
+  let usage_trust =
+    Keeper_unified_metrics.classify_usage_trust
+      ~usage_reported:result.usage_reported
+      ~usage:result.usage
+      ~context_max:0
+  in
+  let usage_trusted =
+    Keeper_unified_metrics.usage_trust_is_trusted usage_trust
+  in
+  let trusted_input_tokens =
+    if usage_trusted then result.usage.input_tokens else 0
+  in
+  let trusted_output_tokens =
+    if usage_trusted then result.usage.output_tokens else 0
+  in
+  let trusted_total_tokens =
+    if usage_trusted then Keeper_context_runtime.total_tokens result.usage else 0
+  in
+  let updated_meta = {
+    meta with
+    updated_at = now_iso ();
+    runtime =
+      {
+        meta.runtime with
+        usage =
+          {
+            total_turns = meta.runtime.usage.total_turns + 1;
+            total_input_tokens =
+              meta.runtime.usage.total_input_tokens + trusted_input_tokens;
+            total_output_tokens =
+              meta.runtime.usage.total_output_tokens + trusted_output_tokens;
+            total_tokens =
+              meta.runtime.usage.total_tokens + trusted_total_tokens;
+            total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
+            last_turn_ts = now_ts;
+            last_input_tokens = trusted_input_tokens;
+            last_output_tokens = trusted_output_tokens;
+            last_total_tokens = trusted_total_tokens;
+            last_latency_ms = latency_ms;
+          };
+      };
+  } in
+  Keeper_unified_metrics.record_keeper_total_cost_usd
+    ~keeper_name:updated_meta.name
+    ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
+  updated_meta
+
+let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
+    Keeper_world_observation.world_observation =
+  Keeper_world_observation.observe_direct_keeper_msg
+    ~config
+    ~meta
+
+let resolve_turn_runtime_id (meta : keeper_meta) =
+  let runtime_id = String.trim (Keeper_meta_contract.runtime_id_of_meta meta) in
+  if runtime_id = "" then
+    Error (Printf.sprintf "invalid runtime_id for keeper %s: empty" meta.name)
+  else
+    Ok runtime_id
+
+let keeper_msg_timeout_override args =
+  match get_float_opt args "timeout_sec" with
+  | None -> Ok None
+  | Some timeout_sec
+    when Float.is_finite timeout_sec && timeout_sec > 0.0 ->
+      Ok (Some timeout_sec)
+  | Some _ -> Error "timeout_sec must be a positive finite number"
+
+let preflight_keeper_msg ctx args : (unit, string) result =
+  let name = get_string args "name" "" in
+  let message = get_string args "message" "" in
+  if not (validate_name name) then
+    Error
+      (Printf.sprintf
+         "invalid keeper name %S (must be non-empty and match \
+          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+         name)
+  else if message = "" then
+    Error "message is required"
+  else
+    let direct_reply = get_bool args "direct_reply" false in
+    match keeper_msg_timeout_override args with
+    | Error e -> Error e
+    | Ok _ ->
+    (match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" args with
+    | Error e -> Error e
+    | Ok () ->
+    (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> Error e
+    | Ok () ->
+    (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> Error e
+    | Ok () ->
+    match ensure_keeper_exists ~ctx ~name with
+    | Error e -> Error e
+    | Ok meta ->
+      match resolve_turn_runtime_id meta with
+      | Error e -> Error e
+      | Ok turn_runtime_id ->
+        let effective_models =
+          if direct_reply then
+            Provider_runtime_projection.default_execution_model_strings
+              (                 (turn_runtime_id))
+          else
+            effective_model_labels_for_turn meta
+        in
+        match Keeper_types_support.ensure_api_keys_for_labels effective_models with
+        | Error e -> Error e
+        | Ok () ->
+          Keeper_turn_helpers.ensure_local_discovery_ready effective_models)))
+
+(* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
+
+let handle_keeper_msg ?on_text_delta ctx args : tool_result =
+  let on_event = match on_text_delta with
+    | None -> None
+    | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
+        match evt with
+        | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
+        | _ -> ())
+  in
+  let name = get_string args "name" "" in
+  let message = get_string args "message" "" in
+  if not (validate_name name) then
+    tool_result_error
+      (Printf.sprintf
+         "invalid keeper name %S (must be non-empty and match \
+          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+         name)
+  else if message = "" then
+    tool_result_error "message is required"
+  else
+    let turn_instructions = get_string_opt args "turn_instructions" in
+    let no_skill_route = get_bool args "no_skill_route" false in
+    let no_state_block = get_bool args "no_state_block" false in
+    let direct_reply = get_bool args "direct_reply" false in
+    let channel_session_key = get_string_opt args "channel_session_key" in
+    let required_tool_names =
+      get_string_list args "required_tools"
+      @ get_string_list args "required_tool_names"
+      |> List.map String.trim
+      |> List.filter (fun name -> name <> "")
+      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+    in
+    (match keeper_msg_timeout_override args with
+    | Error e -> tool_result_error e
+    | Ok keeper_msg_oas_timeout_s ->
+    (match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" args with
+    | Error e -> tool_result_error ("" ^ e)
+    | Ok () ->
+    (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> tool_result_error ("" ^ e)
+    | Ok () ->
+    (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
+    | Error e -> tool_result_error ("" ^ e)
+    | Ok () ->
+    match ensure_keeper_exists
+      ~ctx ~name
+    with
+    | Error e -> tool_result_error ("" ^ e)
+    | Ok meta0 ->
+      let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
+        name (int_of_float (Time_compat.now () *. 1000.0)) in
+      let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
+      Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
+      let meta = meta0 in
+      match resolve_turn_runtime_id meta with
+      | Error e ->
+        Progress.stop_tracking turn_task_id;
+        tool_result_error ("" ^ e)
+      | Ok turn_runtime_id ->
+      (* start_keepalive is deferred AFTER run_turn completes.
+         Starting it here causes the heartbeat fiber to immediately grab LLM
+         slots, starving the synchronous run_turn call (Issue #2610). *)
+      (* auto execution session interception removed in #2908 *)
+      (* === Harness: trajectory accumulator + eval gate config === *)
+      let masc_root = Workspace.masc_root_dir ctx.config in
+      let trajectory_acc =
+        Trajectory.create_accumulator
+          ~masc_root
+          ~keeper_name:meta.name
+          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~generation:meta.runtime.generation ()
+      in
+      let effective_models =
+        if direct_reply then
+          Provider_runtime_projection.default_execution_model_strings
+            (               (turn_runtime_id))
+              else
+          effective_model_labels_for_turn meta
+      in
+      Progress.Tracker.step turn_tracker ~message:"Validating API keys" ();
+      (match Keeper_types_support.ensure_api_keys_for_labels effective_models with
+       | Error e ->
+         Progress.stop_tracking turn_task_id;
+         tool_result_error ("" ^ e)
+       | Ok () ->
+         Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
+         (match Keeper_turn_helpers.ensure_local_discovery_ready effective_models with
+          | Error e ->
+            Progress.stop_tracking turn_task_id;
+            tool_result_error ("" ^ e)
+          | Ok () ->
+         let max_runtime_context =
+           let resolution =
+             Keeper_context_runtime.resolve_max_context_resolution
+               ~requested_override:meta.max_context_override effective_models
+           in
+            (match resolution.requested_override with
+            | Some requested ->
+              Log.Keeper.debug
+                "%s: using max_context_override=%d context_budget=%d primary_budget=%d effective_budget=%d (manual turn)"
+                meta.name requested resolution.turn_budget resolution.primary_budget
+                resolution.effective_budget
+            | None -> ());
+           resolution.turn_budget
+         in
+            let base_dir =
+              let root = session_base_dir ctx.config in
+              match channel_session_key with
+              | Some key when direct_reply ->
+                let d = Filename.concat (Filename.concat root "channels") key in
+                let (_ : string) = Keeper_fs.ensure_dir d in
+                d
+              | _ -> root
+            in
+            let effective_no_skill_route = no_skill_route || direct_reply in
+            let effective_no_state_block = no_state_block || direct_reply in
+            let fallback_skill_route =
+              route_keeper_skill  ~message
+            in
+            let live_worktree_change = None in
+            let build_turn_prompt ~base_system_prompt ~messages
+                : Keeper_agent_run.turn_prompt =
+              (* === SOFT CONTEXT (injected via extra_system_context) === *)
+              (* 1. Recovery + tiered memory context *)
+              let continuity_snapshot = latest_state_snapshot_from_messages messages in
+              let progress_cache =
+                Keeper_memory_policy.read_progress_snapshot_cache
+                  ~config:ctx.config ~name:meta.name
+              in
+              let recovery_snapshot, recovery_generation, recovery_source =
+                match
+                  progress_cache
+                with
+                | Some cache ->
+                    (Some cache.snapshot, cache.generation, "progress_log")
+                | None ->
+                    (match continuity_snapshot with
+                     | Some snapshot -> (Some snapshot, Some meta.runtime.generation, "checkpoint")
+                     | None ->
+                         (match
+                            Keeper_memory_policy.state_snapshot_of_summary_text
+                              meta.continuity_summary
+                          with
+                          | Some snapshot ->
+                              (Some snapshot, None, "meta_summary")
+                          | None -> (None, None, "none")))
+              in
+              let continuity_text =
+                let recovery_sections =
+                  match recovery_snapshot with
+                  | None -> []
+                  | Some snapshot ->
+                      Keeper_memory_policy.prompt_memory_sections_of_snapshot
+                        ~current_generation:meta.runtime.generation
+                        ?source_generation:recovery_generation
+                        snapshot
+                in
+                (* RFC-0149 §3.1 — route through typed Result resolver
+                   so a memory bank IO fault is rendered as an explicit
+                   [unavailable] marker in the prompt context instead of
+                   collapsing into an empty block indistinguishable from
+                   "no long-term notes recorded". *)
+                let durable_text =
+                  match
+                    read_recent_memory_texts_result ctx.config
+                      ~name:meta.name
+                      ~horizon:Keeper_memory_policy.long_term_horizon
+                      ~max_bytes:(128 * 1024)
+                      ~max_lines:200
+                      ~limit:3
+                  with
+                  | Ok [] -> ""
+                  | Ok items ->
+                      "Long-term memory:\n- "
+                      ^ String.concat "\n- " (List.map String.trim items)
+                  | Error exn_class ->
+                      Printf.sprintf
+                        "Long-term memory: [unavailable: %s]"
+                        (Keeper_memory_recall_exn_class.to_label exn_class)
+                in
+                let recovery_fallback =
+                  if recovery_sections <> [] then []
+                  else
+                    let summary =
+                      match continuity_snapshot with
+                      | Some s -> keeper_state_snapshot_to_summary_text s
+                      | None ->
+                          continuity_fallback_summary_text
+                            ~continuity_summary:meta.continuity_summary
+                            ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
+                    in
+                    if summary = "" || summary = "No continuity snapshot available."
+                    then []
+                    else [ summary ]
+                in
+                let blocks =
+                  (if recovery_sections = [] then recovery_fallback else recovery_sections)
+                  @ (if String.trim durable_text = "" then [] else [ durable_text ])
+                in
+                match blocks with
+                | [] -> ""
+                | _ ->
+                    Printf.sprintf
+                      "Recent continuity snapshot (%s):\n%s"
+                      recovery_source
+                      (String.concat "\n\n" blocks)
+              in
+              (* 2. Skill route *)
+              let skill_route_text =
+                if effective_no_skill_route then ""
+                else
+                  skill_route_context_text
+                    ~fallback_route:fallback_skill_route
+                    
+              in
+              (* 3. Worktree changes *)
+              let worktree_text =
+                match live_worktree_change with
+                | Some summary when String.trim summary <> "" -> summary
+                | _ -> ""
+              in
+              (* 4. Turn instructions *)
+              let turn_instructions_text =
+                match turn_instructions with
+                | None -> ""
+                | Some ti ->
+                  "--- Turn-specific instructions ---\n" ^ ti
+              in
+              let required_tools_text =
+                match required_tool_names with
+                | [] -> ""
+                | tools ->
+                  "--- Required tools for this turn ---\n"
+                  ^ "Use all of these tools before your final reply: "
+                  ^ String.concat ", " tools
+              in
+              let telemetry_feedback_text =
+                match meta.telemetry_feedback_enabled with
+                | Some true ->
+                  let window_hours =
+                    match meta.telemetry_feedback_window_hours with
+                    | Some n when n > 0 -> min n 168
+                    | _ -> 24
+                  in
+                  let window_minutes = window_hours * 60 in
+                  (try
+                     Model_inference_metrics.compute
+                       ~base_path:ctx.config.base_path
+                       ~window_minutes
+                     |> Model_inference_metrics.render_keeper_prompt_feedback
+                   with exn ->
+                     Log.Keeper.warn
+                       "%s: telemetry feedback render failed: %s"
+                       meta.name (Printexc.to_string exn);
+                     "")
+                | Some false | None -> ""
+              in
+              let soft_parts = List.filter
+                (fun s -> String.trim s <> "")
+                [ continuity_text;
+                  skill_route_text;
+                  worktree_text;
+                  telemetry_feedback_text;
+                  turn_instructions_text;
+                  required_tools_text ]
+              in
+              let dynamic_context = String.concat "\n\n" soft_parts in
+              (* === HARD CONSTRAINTS (stay in system_prompt) === *)
+              (* 1. Direct reply mode *)
+              let prompt =
+                if direct_reply then
+                  Keeper_prompt.append_direct_reply_mode_prompt
+                    ~base_prompt:base_system_prompt
+                else
+                  base_system_prompt
+              in
+              (* 2. Policy guards + tool-use guidance *)
+              let prompt =
+                let policy_guards = [
+                  (effective_no_skill_route,
+                   "Output guard: NEVER output lines starting with SKILL: or SKILL_REASON:.");
+                  (effective_no_state_block,
+                   Keeper_prompt.state_block_output_guard_text);
+                ] in
+                let policy_lines =
+                  List.filter_map
+                    (fun (active, line) -> if active then Some line else None)
+                    policy_guards
+                in
+                let tool_use_lines = [
+                  "Tool-use guidance:";
+                  "- If the user asks you to speak, use voice, make sound, or output TTS, prefer keeper_voice_session_start and keeper_voice_speak.";
+                  "- Do not simulate spoken audio with plain text roleplay when a voice tool can handle the request.";
+                  "- If voice execution fails, say that voice output is unavailable and continue in text.";
+                ] in
+                match policy_lines @ tool_use_lines with
+                | [] -> prompt
+                | _ ->
+                    Printf.sprintf "%s\n\n%s"
+                      prompt
+                      (String.concat "\n" (policy_lines @ tool_use_lines))
+              in
+              { system_prompt = prompt; dynamic_context }
+            in
+            Progress.Tracker.step turn_tracker
+              ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
+            let world_observation = direct_turn_observation ~config:ctx.config meta in
+            let turn_affordances =
+              Keeper_unified_metrics.observed_affordances_of_observation
+                ~meta
+                world_observation
+            in
+            let run_result, latency_ms =
+              Keeper_context_runtime.timed (fun () ->
+                  Keeper_agent_run.run_turn
+                    ~config:ctx.config ~meta ~base_dir
+                    ~max_context:max_runtime_context
+                    ~build_turn_prompt
+                    ~user_message:message
+                    ~runtime_id:
+                      (                         (turn_runtime_id))
+                    ~world_observation
+                    ~turn_affordances
+                    ~required_tool_names
+                    ?oas_timeout_s:keeper_msg_oas_timeout_s
+                    ?provider_filter:(Env_config_keeper.KeeperRuntimeProviderFilter.provider_allowlist ())
+                    ~generation:meta.runtime.generation
+                    ?on_event
+                    ~trajectory_acc
+                    ?event_bus:(Keeper_event_bus.get ())
+                    ())
+            in
+            match run_result with
+            | Error err ->
+              let e_str = Agent_sdk.Error.to_string err in
+              (try
+                 let _ = Trajectory.finalize trajectory_acc
+                   (Trajectory.Failed e_str) in
+                 ()
+               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
+                 ~label:"trajectory finalize (agent_run error)" exn);
+              start_keepalive ctx meta;
+              Progress.stop_tracking turn_task_id;
+              tool_result_error (Printf.sprintf "Agent.run failed: %s" e_str)
+            | Ok result ->
+              let explicit_accountability_claim =
+                Keeper_social_model.extract_accountability_claim result
+              in
+              (try
+                 let _ = Trajectory.finalize trajectory_acc
+                   Trajectory.Completed in
+                 ()
+               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
+                 ~label:"trajectory finalize (agent_run ok)" exn);
+              let resilience_handles =
+                Keeper_turn_runtime_budget.post_turn_resilience_handles
+                  ~config:ctx.config ~meta
+              in
+              let lifecycle =
+                Keeper_context_runtime.apply_post_turn_lifecycle_with_resilience_handles
+                  ~resilience_audit_store:
+                    resilience_handles.resilience_audit_store
+                  ~resilience_strategy_executor:
+                    resilience_handles.resilience_strategy_executor
+                  ~base_dir
+                  ~on_compaction_started:(fun () ->
+                    Keeper_context_runtime.dispatch_keeper_phase_event
+                      ~config:ctx.config
+                      ~origin:Keeper_registry.Post_turn_lifecycle
+                      ~keeper_name:meta.name
+                      Keeper_state_machine.Compaction_started)
+                  ~on_handoff_started:(fun () ->
+                    Keeper_context_runtime.dispatch_keeper_phase_event
+                      ~config:ctx.config
+                      ~origin:Keeper_registry.Post_turn_lifecycle
+                      ~keeper_name:meta.name
+                      Keeper_state_machine.Handoff_started)
+                  ~meta
+                  ~model:result.model_used
+                  ~primary_model_max_tokens:max_runtime_context
+                  ~current_turn_blocker_info:None
+                  ~checkpoint:result.checkpoint
+                |> resilience_handles.sync_lifecycle_meta
+              in
+              Keeper_context_runtime.dispatch_post_turn_lifecycle_events
+                ~config:ctx.config
+                ~keeper_name:meta.name
+                lifecycle;
+              let updated_meta =
+                update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
+              in
+              (* #9733: keeper_msg turn-completion is the same race shape
+                 as the unified-turn failure path — heartbeat updates
+                 [last_seen] in parallel and bumps
+                 [meta_version], so a bare [write_meta] loses the CAS
+                 race and silently drops the turn payload (usage tokens,
+                 trace_history, generation).  Use the same merged-CAS
+                 retry as [keeper_unified_turn.ml:1683] so the cycle
+                 payload wins at the cycle-owned fields and heartbeat-
+                 owned fields are taken from disk. *)
+              (match
+                 write_meta_with_merge
+                   ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                   ctx.config updated_meta
+               with
+               | Ok () -> ()
+               | Error msg ->
+                   Prometheus.inc_counter
+                     Keeper_metrics.(to_string WriteMetaFailures)
+                     ~labels:
+                       [ ("keeper", updated_meta.name);
+                         ("phase",
+                          if is_version_conflict_error msg
+                          then "keeper_msg_turn_cas_race"
+                          else "keeper_msg_turn")
+                       ]
+                     ();
+                   if is_version_conflict_error msg then
+                     Log.Keeper.warn
+                       "write_meta lost CAS race after retries (keeper_msg turn): %s"
+                       msg
+                   else
+                     Log.Keeper.error
+                       "write_meta failed after keeper_msg turn: %s" msg);
+              (try
+                 Keeper_unified_metrics.append_metrics_snapshot
+                   ~config:ctx.config
+                   ~meta:updated_meta
+                   ~observation:(direct_turn_observation ~config:ctx.config updated_meta)
+                   ~result
+                   ~latency_ms
+                   ~turn_cost:(turn_cost_for_result result)
+                   ~turn_generation:lifecycle.turn_generation
+                   ~channel:"turn"
+                   ~snapshot_source:"keeper_turn_msg"
+                   ~context_ratio:lifecycle.context_ratio
+                   ~context_tokens:lifecycle.context_tokens
+                   ~context_max:lifecycle.context_max
+                   ~message_count:lifecycle.message_count
+                   ~compaction:lifecycle.compaction
+                   ~handoff_json:lifecycle.handoff_json
+                   ()
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                   (* #10047: surface the drop as a Prometheus counter so
+                      dashboards can alert when state advances without a
+                      matching metric record. The log alone was too easy
+                      to miss and operators trusted metric jsonl as
+                      ground truth. *)
+                   Prometheus.inc_counter
+                     Keeper_metrics.(to_string MetricEmitDropped)
+                     ~labels:[
+                       ("keeper", updated_meta.name);
+                       ("channel", "turn");
+                       ("site", "keeper_turn_msg");
+                     ] ();
+                   Prometheus.inc_counter
+                     Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
+                     ~labels:[("keeper", updated_meta.name); ("site", "turn")]
+                     ();
+                   Log.Keeper.error
+                     "write metrics snapshot failed after keeper_msg turn: %s"
+                     (Printexc.to_string exn));
+              Keeper_unified_metrics.broadcast_lifecycle_events
+                ~name:updated_meta.name
+                ~turn_generation:lifecycle.turn_generation
+                ~compaction:lifecycle.compaction
+                ~handoff_json:lifecycle.handoff_json;
+              (match explicit_accountability_claim with
+              | Some claim ->
+                  let trace_id =
+                    Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id
+                  in
+                  let strong_evidence =
+                    result.tools_used
+                    |> List.exists (fun tool_name ->
+                           let trimmed = String.trim tool_name in
+                           trimmed <> ""
+                           && not (String.equal trimmed "keeper_stay_silent"))
+                  in
+                  let tool_refs =
+                    result.tools_used
+                    |> List.filter_map (fun tool_name ->
+                           let trimmed = String.trim tool_name in
+                           if trimmed = ""
+                              || String.equal trimmed "keeper_stay_silent"
+                           then None
+                           else Some ("tool:" ^ trimmed))
+                  in
+                  let turn_refs =
+                    [ Printf.sprintf "turn:%s:%d" trace_id
+                        updated_meta.runtime.usage.total_turns ]
+                  in
+                  Keeper_accountability.record_completion_claim ctx.config
+                    ~keeper_name:updated_meta.name
+                    ~agent_name:updated_meta.agent_name
+                    ~trace_id
+                    ~turn_number:updated_meta.runtime.usage.total_turns
+                    ~subject:claim.subject
+                    ?task_id:claim.task_id
+                    ~evidence_refs:claim.evidence_refs
+                    ~surface:"keeper_msg"
+                    ~strong_evidence
+                    ~strong_evidence_refs:(tool_refs @ turn_refs)
+                    ()
+              | None -> ());
+              start_keepalive ctx updated_meta;
+              Progress.Tracker.complete turn_tracker
+                ~message:(Printf.sprintf "Turn completed: %d tool calls" result.tool_calls_made) ();
+              let reply_json =
+                let surface_model_used = Keeper_agent_run.runtime_lane_label in
+                let u = result.usage in
+                let cost_field = match u.cost_usd with
+                  | Some c -> `Float c
+                  | None -> `Null
+                in
+                let tool_call_evidence =
+                  result.tool_calls
+                  |> List.filter_map (fun detail ->
+                         match detail.Keeper_agent_run.route_evidence with
+                         | Some _ ->
+                             Some
+                               (Keeper_agent_run.tool_call_detail_to_json
+                                  detail)
+                         | None -> None)
+                in
+                `Assoc [
+                  ("reply", `String result.response_text);
+                  ("model", `String surface_model_used);
+                  ("model_used_raw", `String surface_model_used);
+                  ("turns", `Int result.turn_count);
+                  ("tool_calls", `Int result.tool_calls_made);
+                  ( "tool_call_evidence",
+                    `List tool_call_evidence );
+                  ("usage", `Assoc [
+                    ("input_tokens", `Int u.input_tokens);
+                    ("output_tokens", `Int u.output_tokens);
+                    ("cache_creation_input_tokens", `Int u.cache_creation_input_tokens);
+                    ("cache_read_input_tokens", `Int u.cache_read_input_tokens);
+                    ("cost_usd", cost_field);
+                  ]);
+                ]
+              in
+              tool_result_ok (Yojson.Safe.to_string reply_json)
+
+))))))

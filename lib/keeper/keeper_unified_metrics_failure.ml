@@ -1,0 +1,227 @@
+(** Failure-path metric update for unified keeper cycle, extracted from
+    keeper_unified_metrics.ml.
+
+    Pure write-only side-effect: updates keeper_meta runtime/social
+    fields based on a failure observation. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_context_runtime
+module Social = Keeper_social_model
+
+include Keeper_unified_metrics_support
+include Keeper_unified_metrics_json_support
+
+let provider_timeout_failure_summary
+      ~budget_sec
+      ~keeper_turn_timeout_sec
+      ~estimated_input_tokens
+      ~source
+      ~remaining_turn_budget_sec
+      ~min_required_sec
+      ~phase
+  =
+  let remaining =
+    match remaining_turn_budget_sec with
+    | Some value -> Printf.sprintf "%.1fs" value
+    | None -> "unknown"
+  in
+  Printf.sprintf
+    "Provider timeout exhausted; phase=%s; source=%s; budget=%.1fs; remaining=%s; min_required=%.1fs; estimated_input_tokens=%d; keeper_turn_timeout=%.1fs"
+    phase
+    source
+    budget_sec
+    remaining
+    min_required_sec
+    estimated_input_tokens
+    keeper_turn_timeout_sec
+;;
+
+let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
+    ~(observation : Keeper_world_observation.world_observation)
+    ~(reason : string) ?social_state ?social_transition_reason
+    ?sdk_error
+    () : keeper_meta =
+  let now_ts = Time_compat.now () in
+  record_keeper_idle_seconds
+    ~keeper_name:meta.name
+    ~idle_seconds:observation.idle_seconds;
+  let is_scheduled_autonomous_cycle =
+    is_scheduled_autonomous_cycle_of_observation observation
+  in
+  let public_reason =
+    match sdk_error with
+    | Some err -> (
+        match Keeper_turn_driver.classify_masc_internal_error err with
+        | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
+            let trimmed = String.trim detail in
+            if trimmed = "" then reason else trimmed
+        | Some
+            (Keeper_turn_driver.Provider_timeout
+               {
+                 budget_sec;
+                 keeper_turn_timeout_sec;
+                 estimated_input_tokens;
+                 source;
+                 remaining_turn_budget_sec;
+                 min_required_sec;
+                 phase;
+               }) ->
+            provider_timeout_failure_summary
+              ~budget_sec
+              ~keeper_turn_timeout_sec
+              ~estimated_input_tokens
+              ~source
+              ~remaining_turn_budget_sec
+              ~min_required_sec
+              ~phase
+        | Some (Keeper_turn_driver.Capacity_backpressure _ as err) ->
+            Option.value
+              ~default:reason
+              (Keeper_turn_driver.summary_of_masc_internal_error err)
+        | Some (Keeper_turn_driver.Runtime_exhausted _ as err) -> (
+            match Keeper_turn_driver.summary_of_masc_internal_error err with
+            | Some summary -> summary
+            | None -> reason)
+        | _ -> reason)
+    | None -> reason
+  in
+  let failure_counts_for_proactive_backoff =
+    is_scheduled_autonomous_cycle
+    &&
+    match sdk_error with
+    | Some err -> (
+        match Keeper_turn_driver.classify_masc_internal_error err with
+        | Some
+            (Keeper_turn_driver.Provider_timeout _
+            | Keeper_turn_driver.Turn_timeout _
+            | Keeper_turn_driver.Admission_queue_timeout _
+            | Keeper_turn_driver.Admission_queue_rejected _
+            | Keeper_turn_driver.Resumable_cli_session _
+            | Keeper_turn_driver.Capacity_backpressure _
+            (* No_tool_capable (inside Runtime_exhausted) excluded:
+               this is a configuration/capability mismatch, not a
+               transient condition.  Counting it toward noop_backoff
+               causes spurious keeper fiber kills (59/day on 2026-05-24)
+               without resolving the underlying filter mismatch.
+               See #18317, #18315. *)
+            | Keeper_turn_driver.Retry_admission_denied _) ->
+            true
+        | Some _ | None -> false)
+    | None -> false
+  in
+  (* #10474: emit Prometheus counters for no_tool_provider and proactive
+     cycle outcomes so Grafana can surface fleet-wide health ratios. *)
+  (match sdk_error with
+     | Some err ->
+         (match Keeper_turn_driver.classify_masc_internal_error err with
+          | Some (Keeper_turn_driver.Runtime_exhausted
+	                  { runtime_id
+	                  ; reason = Keeper_meta_contract.No_tool_capable _
+	                  ; _
+	                  }) ->
+            Prometheus.inc_counter
+              Keeper_metrics.(to_string NoToolProvider)
+              ~labels:
+                [ ("keeper", meta.name)
+                ; ("runtime_id", runtime_id)
+                ]
+              ()
+        | _ -> ())
+   | None -> ());
+  if is_scheduled_autonomous_cycle then
+    Prometheus.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
+      ~labels:[ ("keeper", meta.name); ("outcome", "error") ]
+      ();
+  let preview =
+    let trimmed = String.trim public_reason in
+    if trimmed = "" then "keeper cycle failed"
+    else short_preview trimmed
+  in
+  {
+    meta with
+    updated_at = now_iso ();
+    runtime = { meta.runtime with
+      usage = { meta.runtime.usage with
+        total_turns = meta.runtime.usage.total_turns + 1;
+        last_turn_ts = now_ts;
+        last_latency_ms = latency_ms;
+      };
+      proactive_rt = { meta.runtime.proactive_rt with
+        count_total =
+          meta.runtime.proactive_rt.count_total
+          + (if is_scheduled_autonomous_cycle then 1 else 0);
+        (* Always update last_ts on scheduled_autonomous attempts,
+           including transient errors. Without this, transient errors
+           (e.g. llama-server down) leave last_ts stale, causing
+           cooldown_elapsed=false permanently → scheduled turns never
+           resume. last_ts tracks attempts, not successes.
+           Root cause of keeper zombie state: #5594. *)
+        last_ts =
+          if is_scheduled_autonomous_cycle then now_ts
+          else meta.runtime.proactive_rt.last_ts;
+        last_outcome =
+          if is_scheduled_autonomous_cycle then Proactive_error
+          else meta.runtime.proactive_rt.last_outcome;
+        last_reason =
+          if is_scheduled_autonomous_cycle
+          then "unified:error:" ^ String.trim public_reason
+          else meta.runtime.proactive_rt.last_reason;
+        last_preview =
+          if is_scheduled_autonomous_cycle then preview
+          else meta.runtime.proactive_rt.last_preview;
+        consecutive_noop_count =
+          (if failure_counts_for_proactive_backoff then
+             meta.runtime.proactive_rt.consecutive_noop_count + 1
+           else meta.runtime.proactive_rt.consecutive_noop_count);
+      };
+      last_speech_act =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Social.speech_act_to_string state.speech_act
+         | None -> meta.runtime.last_speech_act);
+      last_social_transition_reason =
+        (match social_transition_reason with
+         | Some value -> String.trim value
+         | None -> meta.runtime.last_social_transition_reason);
+      last_active_desire =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Option.value ~default:"" state.active_desire
+         | None -> meta.runtime.last_active_desire);
+      last_current_intention =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Option.value ~default:"" state.current_intention
+         | None -> meta.runtime.last_current_intention);
+      last_blocker =
+        (* Merge: typed klass from sdk_error becomes authoritative;
+           detail picks up the social-state blocker text or a public-
+           reason preview as observability context.  When the SDK
+           error carries no typed mapping we refuse to fabricate a
+           class — the previous string-only stamp is the substring
+           anti-pattern this refactor closes (CLAUDE.md
+           "워크어라운드 거부 기준 #2"). *)
+        (match sdk_error with
+         | Some err ->
+             (match Keeper_status_bridge.blocker_class_of_sdk_error err with
+              | Some klass ->
+                  let detail =
+                    match social_state with
+                    | Some (state : Social.social_state) ->
+                        Option.value ~default:"" state.blocker
+                    | None -> short_preview public_reason
+                  in
+                  Some (Keeper_meta_contract.blocker_info_of_class
+                          ~detail klass)
+              | None -> None)
+         | None -> None);
+      last_need =
+        (match social_state with
+         | Some (state : Social.social_state) ->
+             Option.value ~default:"" state.need
+         | None -> meta.runtime.last_need);
+      last_turn_tool_calls = [];
+    };
+  }

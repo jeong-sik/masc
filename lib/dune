@@ -1,0 +1,622 @@
+(include_subdirs unqualified)
+(library
+ (name masc_mcp)
+ (public_name masc_mcp)
+ (foreign_stubs
+  (language c)
+  (names nofile_stubs))
+(private_modules
+ auth_nickname
+ plan_action_outcome
+ prometheus_text
+ http_body_buffer
+ http_response_payload
+ error_event_type
+ keeper_alert_persist_kind
+ keeper_metrics_sse_failure_kind
+ keeper_paused_state_persist_phase
+ keeper_bookkeeping_failure_kind
+ keeper_checkpoint_failure_operation
+ keeper_memory_llm_summary_outcome
+ keeper_tool_call_log_route_evidence
+ memory_oas_bridge_cache
+ memory_oas_bridge_op_outcome
+ keeper_user_visible_reply_source
+ keeper_continuity_summary_source
+ keeper_world_observation_board_signal
+ keeper_world_observation_continuity
+ keeper_world_observation_inputs
+ keeper_world_observation_message_scope
+ keeper_profile_load_failure_site
+ keeper_turn_cleanup_failure_site
+ keeper_event_bus_drain_site
+ keeper_turn_metrics_snapshot_failure_site
+ keeper_metric_emit_dropped_site
+ keeper_post_turn_wirein_failure_site
+ atomic_orphan_size_class
+ operator_control_context_snapshot
+ silent_dashboard_actor_outcome
+ sse_jsonrpc_filter
+ prometheus_format
+ prometheus_key
+ prometheus_store
+ prometheus_render
+ prometheus_process
+ prometheus_builtin_metric_names
+ prometheus_builtin_metrics_part1
+ prometheus_builtin_metrics_part2
+ prometheus_builtin_metrics_part3
+ prometheus_builtin_metrics_part4
+ prometheus_builtin_metrics_part5
+ prometheus_builtin_metrics
+ prometheus_transport_metric_names
+ prometheus_core_metric_names
+ prometheus_oas_metric_names
+ prometheus_runtime_metric_names
+ prometheus_policy_metric_names
+ keeper_tool_call_log_context
+ dashboard_http_keeper_metrics
+ dashboard_http_keeper_detail
+ dashboard_http_tool_quality
+ dashboard_keeper_decision_log_proof
+ dashboard_keeper_feature_catalog
+ dashboard_keeper_feature_proof
+ dashboard_keeper_tool_failure_proof
+ board_core_json
+ board_core
+ board_curation
+ board_votes_json
+ board_votes
+ dashboard_execution_helpers
+ dashboard_execution_fixture
+ dashboard_execution_sessions
+ dashboard_execution_builders
+ briefing_gaps
+ briefing_sections
+ dashboard_briefing_agents
+ dashboard_briefing_assembly
+ keeper_persona_authoring_contract
+ keeper_persona_authoring_slug
+ keeper_types_profile_sandbox
+ keeper_types_profile_persona
+ keeper_types_profile_oas_env
+ keeper_types_profile_defaults
+ keeper_types_profile
+ keeper_meta_tool_access
+ keeper_meta_contract
+ keeper_personality_io
+ keeper_meta_json_parse
+ keeper_meta_json
+ keeper_types_support
+ keeper_meta_store
+
+ server_dashboard_http_cache
+ server_dashboard_surface
+ server_dashboard_http_perf
+ server_dashboard_http_memory_subsystems
+ dashboard_http_helpers
+ dashboard_http_monitoring
+ dashboard_http_keeper_outcomes
+ dashboard_http_keeper_trust
+ dashboard_http_keeper_feeds
+ dashboard_http_keeper
+ server_dashboard_http_keeper_api_trace
+ server_dashboard_http_keeper_api_checkpoints
+ server_dashboard_http_keeper_api_runtime_lens
+ server_dashboard_http_keeper_runtime_manifest_scan
+ server_dashboard_http_keeper_runtime_lens_clock_edges
+ server_dashboard_http_keeper_runtime_lens_clock_groups
+ server_dashboard_http_keeper_runtime_lens_proof
+ server_dashboard_http_keeper_runtime_lens_swimlane
+ server_dashboard_http_keeper_runtime_lens_summaries
+ server_dashboard_http_keeper_runtime_lens_gaps
+ server_dashboard_http_core_entities
+ dashboard_goal_loop
+ dashboard_harness_health
+ dashboard_goals
+ server_routes_http_common
+ server_routes_http_pages
+ server_routes_http_runtime
+ server_routes_http_keeper_stream
+ server_routes_http_sidecar_paths
+ server_routes_http_routes_frontend
+ server_routes_http_routes_workspace
+ server_routes_http_dashboard_provider_logs
+ server_routes_http_routes_dashboard
+ server_routes_http_routes_activity
+ server_runtime_config_root_bootstrap
+ server_mcp_transport_http_types
+ server_mcp_transport_http_session
+ server_mcp_transport_http_headers
+ server_mcp_request_context
+ server_mcp_actor_injection
+ server_mcp_transport_http_sse
+ server_mcp_transport_http_conn
+ server_mcp_transport_http_respond
+ server_mcp_transport_http_agui
+ server_mcp_streaming_tools
+ mcp_server_eio_tool_timeout
+  agent_tool_descriptor agent_tool_descriptor_resolution agent_tool_runtime keeper_tool_registry
+  keeper_tool_resolution
+  keeper_tool_policy_config
+  keeper_discovered_tools
+  keeper_tool_affinity
+  agent_tool_shared_runtime
+   keeper_path_check_error
+   agent_tool_board_runtime
+   agent_tool_filesystem_runtime
+   agent_tool_remote_mcp_runtime
+   agent_tool_ide_runtime
+   keeper_sandbox_docker
+   keeper_workspace_op agent_tool_execute_timeout agent_tool_execute_runtime_paths agent_tool_execute_path
+   agent_tool_execute_readonly_policy agent_tool_execute_command_parse agent_tool_execute_command_words keeper_workspace_read_ops
+   agent_tool_execute_input
+   agent_tool_execute_runtime
+   keeper_workspace_ops
+   agent_tool_command_runtime
+   credential_bundle
+   credential_provider
+   credential_host_config_provider
+   credential_in_container_login_provider
+   keeper_activation_readiness
+   agent_tool_task_runtime
+   agent_tool_voice_runtime
+   agent_tool_dispatch_runtime
+  keeper_status_metrics
+  keeper_status_runtime
+  provider_tool_support
+  voice_runtime_overlay
+  keeper_status_detail_observability
+  keeper_status_detail
+  agent_tool_persona_runtime
+  keeper_model_labels
+  keeper_fs
+  keeper_identity
+  keeper_current_task_reconcile keeper_checkpoint_store
+  keeper_registry_orphan_drops
+  keeper_registry_spawn_slots
+  keeper_registry_error_tracking
+  keeper_text_processing
+  keeper_summarizer
+  keeper_context_core_message_json
+  keeper_context_core_history
+  keeper_context_core
+  keeper_compact_policy
+  keeper_compact_audit
+  keeper_rollover
+  keeper_approval_queue
+  keeper_post_turn
+  keeper_tool_progress
+  keeper_tool_observation
+  keeper_tool_response
+  keeper_tool_query
+  keeper_tool_selection
+  keeper_tool_capability_axis
+  keeper_turn_telemetry
+  keeper_agent_prompt_metrics keeper_agent_tool_surface
+  keeper_agent_run_phase0_telemetry keeper_agent_run_post_turn_memory keeper_agent_run_phase5_task_link keeper_agent_run_contract_retry keeper_agent_run_actionable_contract
+  keeper_agent_run_contract_violation_log keeper_agent_run_contract_helpers keeper_agent_run_response_text keeper_agent_run_thinking_trajectory
+  keeper_agent_run_tool_observation keeper_agent_run_tool_surface_violation keeper_agent_run_receipt_append keeper_agent_run_receipt keeper_agent_run_sidecar keeper_agent_run_finalize_response
+  keeper_agent_result keeper_agent_error
+  keeper_agent_memory_episode
+  keeper_run_tools_hooks
+  keeper_run_tools_search
+  keeper_run_tools_setup
+  provider_runtime_projection
+  voice_bridge_transport
+  keeper_oas_checkpoint
+  keeper_turn_driver_provider_attempt
+  keeper_turn_driver
+  keeper_turn_driver_helpers
+  keeper_turn_driver_try_provider
+  keeper_turn_driver_try_runtime
+  keeper_turn_driver_wrappers
+  keeper_unified_metrics_json_support
+  keeper_unified_metrics_support
+  keeper_unified_turn_event_bus
+  keeper_unified_turn_stay_silent
+  keeper_unified_turn_success
+  keeper_unified_turn_failure
+  keeper_unified_turn_phase_plan
+  keeper_unified_turn_phase_gate
+  keeper_unified_turn_pre_dispatch
+  keeper_unified_turn_retry_setup
+  keeper_unified_turn_terminal_error
+  keeper_unified_turn_attempt_watchdog
+  keeper_unified_turn_execution
+  keeper_unified_turn_livelock_block
+  keeper_context_runtime
+  keeper_guards
+  keeper_agent_run_turn_helpers
+  keeper_turn_setup
+  keeper_turn_up_args
+  keeper_turn_up_create
+  keeper_turn_up_update
+  keeper_turn_up
+  keeper_turn_lifecycle
+  keeper_msg_async
+  keeper_event_bus
+  keeper_heartbeat_loop_observations
+  keeper_supervisor_startup_helpers
+  keeper_supervisor_alive_but_stuck
+  keeper_supervisor_liveness_recovery
+  keeper_supervisor_restart_noop
+  keeper_supervisor_self_preservation
+  ;; keeper_event_queue: promoted to lib/keeper_event_queue/ sub-library
+  ;; (RFC-0056 Phase 1I) — listed in (libraries) below.
+  keeper_relevance_check
+  masc_event_bus
+  ;; worker_container sub-modules
+  worker_container_types
+  worker_container
+  worker_container_runners
+  exec_policy_paths
+  exec_policy_log_sanitize
+  exec_policy_command_syntax
+  exec_policy_mutation_classifier
+  exec_policy_path_arg_descriptor
+  exec_shell_adapter
+  ;; keeper_memory sub-modules
+  keeper_memory_policy_summary_filter
+  keeper_memory_policy
+  keeper_memory_bank
+  keeper_memory_llm_summary
+  keeper_memory_recall
+  keeper_status_bridge
+  keeper_runtime_trust_timeline
+  keeper_hooks_oas_response_metrics
+  keeper_hooks_oas_cost_events
+  keeper_hooks_oas_idle
+  keeper_hooks_oas_introspection
+  keeper_tools_oas_markers
+  keeper_tools_oas_workflow
+  keeper_tools_oas_deterministic_error
+  keeper_tools_oas_handler_telemetry
+  keeper_tools_oas_handler_exec
+  keeper_tools_oas_handler
+  keeper_tools_oas_bundle
+  keeper_sandbox
+  keeper_sandbox_control
+  keeper_alerting_path
+  keeper_sandbox_containment
+  keeper_sandbox_runtime
+  keeper_sandbox_read_backend
+  ;; tool_local_runtime sub-modules
+  tool_local_runtime_http
+  tool_local_runtime_verify
+  tool_local_runtime_bench
+  tool_local_runtime_status
+  tool_local_runtime_probe
+  ;; tool_inline_dispatch sub-modules
+  tool_inline_dispatch_types
+  tool_inline_dispatch_workspace
+  tool_inline_dispatch_comm
+  workspace_goals_verification
+  ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
+  tool_schema_dsl
+  tool_misc_admin
+  keeper_tool_persona_audit
+  enforcement_status
+  tool_misc_web_search
+  tool_misc_web_fetch
+  meta_cognition_types
+  meta_cognition_rules
+  meta_cognition_snapshot
+  meta_cognition_parse
+  meta_cognition_interpret
+  meta_cognition_digest
+  tool_task_schemas
+  tool_board_schemas
+  tool_board_format
+  tool_board_cache
+  tool_board_handlers
+  tool_board_post
+  tool_board_sub_board
+  tool_board_curation
+  tool_board_registry
+  tool_board_dispatch
+  tool_shard_schemas
+  board_core_classify
+  board_core_payload
+  server_ide_http
+  lsp_process_manager
+  lsp_message_router
+  lsp_overlay_provider
+  server_ide_lsp_proxy
+  ;; Stage 04 (godfile decomposition build plan, Lane A) — internal
+  ;; facade-only siblings of Model_inference_metrics. The public
+  ;; surface lives in model_inference_metrics.mli.
+  model_inference_metrics_entry
+  model_inference_metrics_parser
+  model_inference_metrics_reader
+  model_inference_metrics_aggregate
+  model_inference_metrics_json
+  ;; godfile decomposition Lane D — internal facade-only sibling of
+  ;; Tool_catalog. Owns effect_domain / tool_group types and typed-name
+  ;; inference tables. Public surface stays in tool_catalog.mli.
+  tool_catalog_inference
+  )
+ (libraries
+   mcp_protocol
+   mcp_protocol.eio
+   yojson
+   otoml
+   base64
+   graphql
+   graphql_parser
+   httpun-ws
+   httpun-ws-eio
+   bigstringaf
+   sqlite3
+   unix
+   threads
+   logs
+   optint
+   re
+   re.str
+   str
+   re.pcre
+   mirage-crypto
+   mirage-crypto-ec
+   mirage-crypto-rng
+   mirage-crypto-rng.unix
+   cstruct
+   digestif
+   ocaml-protoc-plugin
+   ;; Protobuf-generated types from proto/masc_workspace.proto
+   masc_proto
+   ;; grpc grpc-lwt - disabled (h2 version conflict with httpun-eio)
+   ;; grpc-direct (native Eio gRPC from lib/grpc-direct)
+   grpc-direct
+   grpc-direct-core
+   h2
+   h2-eio
+   ;; ctypes/ctypes-foreign removed (was only used by webrtc_bindings.ml)
+   ;; WebRTC DataChannel transport (ocaml-webrtc library)
+   ocaml-webrtc
+   ;; OCaml 5.x Eio concurrency (required for *_eio.ml modules)
+   eio
+   eio_main
+   eio.unix
+   httpun-eio
+   httpun
+   gluten-eio
+   gluten
+   ipaddr
+   fmt
+   cohttp
+   cohttp-eio
+   agent_sdk
+   agent_sdk.base
+   agent_sdk.llm_provider
+   ;; RFC-0086 PR-2H moved Tool_args / Tool_result into a wrapped-false
+   ;; leaf sub-library. The parent library still references those modules
+   ;; unqualified, so it must depend on the leaf explicitly.
+   masc_mcp.tool_types
+   ;; RFC-0132 PR-1 — Boundary_redaction SSOT for external-surface
+   ;; provider/model label redaction. Codemod in PR-2 routes "runtime"
+   ;; literals in lib/runtime and lib/keeper through this leaf.
+   masc_mcp.types_boundary
+   masc_mcp.cdal_runtime
+   ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/
+   ;; as its own sub-library. Hosts Cdal_types + Adversarial_eval +
+   ;; Labeling. Phase 1 will move judge / eval_v1 / loader once their
+   ;; root-namespace cycles (Proof_artifact_reader, Bounded, Session,
+   ;; Attribution, Violation_record) are resolved.
+   masc_mcp.cdal
+   ;; RFC-0056 Phase 1A — Trajectory leaf module promoted out of flat
+   ;; masc_mcp namespace. Unblocks Wave A keeper/server godfile extractions
+   ;; (PR-1+) by removing the parent ↔ sub-lib cycle on `Trajectory.X`.
+   ;; (wrapped false) preserves the bare `Trajectory` identifier; only
+   ;; wrapped-pattern callers (Masc_mcp.Trajectory.X in tests) drop prefix.
+   masc_mcp.trajectory
+   ;; RFC-0056 Phase 1B — Keeper_skill_routing leaf utility extracted to
+   ;; lib/keeper_skill_routing/. 215 LoC, only stdlib + masc_core deps.
+   ;; First step in unblocking lib/keeper/ flat-namespace decoupling.
+   masc_mcp.keeper_skill_routing
+   ;; RFC-0056 Phase 1C — Host_config leaf module extracted to
+   ;; lib/host_config/. RFC-0084 §1.5/§3.4 typed host configuration record;
+   ;; deps: stdlib + masc_mcp.workspace (already sub-library).
+   masc_mcp.host_config
+   ;; RFC-0056 Phase 1D — Briefing_compactors leaf module extracted to
+   ;; lib/briefing_compactors/. 174+21 LoC, deps: stdlib + Yojson +
+   ;; masc_mcp.masc_types (Masc_domain). Was previously in
+   ;; (private_modules); promotion preserves internal-only access.
+   masc_mcp.briefing_compactors
+   ;; RFC-0056 Phase 1E — Dashboard_eval_feed leaf module extracted to
+   ;; lib/dashboard_eval_feed/. 178+59 LoC, deps: stdlib + Yojson +
+   ;; agent_sdk + masc_core (Json_util/Safe_ops).
+   masc_mcp.dashboard_eval_feed
+   ;; RFC-0004 Phase A0.1 PR-1 — Typed SSE event lib (lib/sse_event/).
+   ;; atdgen-generated payload types + hand-rolled envelope wrap that
+   ;; mirrors runtime_event_bridge.wrap_event and
+   ;; runtime_event_bridge_inference.json_string_opt
+   ;; semantics.  PR-2 onwards: runtime_event_bridge arms call into
+   ;; Sse_event.<event>_constructor instead of inline `Assoc.
+   masc_mcp.sse_event
+   ;; RFC-0056 Phase 1F — Memory_jsonl leaf module extracted to
+   ;; lib/memory_jsonl/. 219+22 LoC, deps: stdlib + Yojson + Eio +
+   ;; agent_sdk + fs_compat + time_compat + masc_log. OAS Memory
+   ;; long_term_backend over JSONL files.
+   masc_mcp.memory_jsonl
+   ;; RFC-0056 Phase 1G — Chronicle_event leaf module extracted to
+   ;; lib/chronicle_event/. 460+170 LoC, deps: stdlib + Yojson only.
+   ;; Chronicle wire format (Actor / Target / Content / Event records
+   ;; + to_yojson / of_yojson serializers).
+   masc_mcp.chronicle_event
+   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark + scoring closure
+   ;; extracted to lib/tool_call_quality_benchmark/. 8 modules, ~2065 LoC,
+   ;; deps: stdlib + Yojson + masc_core + time_compat. Bundles benchmark
+   ;; family (6) + reward_advice_artifact + post_verifier to break the
+   ;; Reward_advice_artifact ↔ Tool_call_quality_benchmark_types cycle.
+   masc_mcp.tool_call_quality_benchmark
+   ;; RFC-0056 Phase 1I — Keeper_event_queue (first lib/keeper/ leaf)
+   ;; extracted to lib/keeper_event_queue/. 91+87 LoC, deps: stdlib +
+   ;; Unix only. Pure data structure (urgency variants + FIFO + dedup)
+   ;; backed by specs/keeper-state-machine/KeeperEventQueue.tla.
+   ;; Referenced by keeper_supervisor + keeper_registry godfiles.
+   masc_mcp.keeper_event_queue
+   ;; RFC-0056 Phase 1J — Keeper_invariant (second lib/keeper/ leaf)
+   ;; extracted to lib/keeper_invariant/. 119+77 LoC, stdlib-only
+   ;; (List/Printf/Set/String/StringSet/Result). Fan-in: 1 lib + 1 test.
+   masc_mcp.keeper_invariant
+   ;; RFC-0056 Phase 1K — Compaction_trigger (third lib/keeper/ leaf)
+   ;; extracted to lib/compaction_trigger/. 94+45 LoC, deps: stdlib +
+   ;; Yojson + masc_log. Compaction trigger heuristic + JSON serializer.
+   masc_mcp.compaction_trigger
+   ;; Bounded_event_dedupe — shared stdlib-only Hashtbl + Mutex +
+   ;; threshold-once state machine for keeper/task log-noise reducers.
+   masc_mcp.bounded_event_dedupe
+   ;; Keeper_recording_error_state — typed dedupe state for
+   ;; Keeper_registry.record_error log noise (MASC/OAS Error-Warn
+   ;; Reduction Goal §P6). Domain adapter over Bounded_event_dedupe so
+   ;; the standalone test executable can link in seconds without the
+   ;; main library.
+   masc_mcp.keeper_recording_error_state
+   ;; ETA-LIVELOCK (2026-05-19): typed escalation state for the
+   ;; Keeper_turn_livelock dispatch-guard log noise (~15K ERROR/day
+   ;; from 4 keepers re-blocking the same turn_id every ~30 s).
+   ;; Domain adapter over Bounded_event_dedupe so the standalone
+   ;; alcotest builds without dragging the main library.
+   masc_mcp.keeper_livelock_state
+   ;; IOTA-RETRY (2026-05-19): typed dedupe state for the
+   ;; Keeper_tools_oas retry-loop ERROR log noise (12+ events from
+   ;; 5+ tools in a 1000-line system_log sample — tool_execute x4,
+   ;; Execute x2, retired PR-review wrapper x2,
+   ;; masc_transition x2, Bash x2). Single emit site at
+   ;; lib/keeper/keeper_tools_oas.ml:733. Domain adapter over
+   ;; Bounded_event_dedupe so the standalone alcotest builds in seconds
+   ;; without dragging the main library.
+   masc_mcp.keeper_tool_retry_state
+   ;; LAMBDA-HOOK-ERROR (2026-05-19): typed dedupe state for the
+   ;; Keeper_hooks_oas on_tool_error hook ERROR log noise (8 events
+   ;; from 4 distinct (keeper, tool) triples in a 1000-line system_log
+   ;; sample — keeper:verifier × Bash, lifecycle-worker-fast-1 ×
+   ;; Execute, lifecycle-reviewer-fast-1 × retired
+   ;; PR-review wrapper, analyst × masc_transition). Single
+   ;; emit site at lib/keeper/keeper_hooks_oas.ml:720. Sibling of
+   ;; keeper_tool_retry_state with a (keeper, tool, signature) key.
+   ;; Domain adapter over Bounded_event_dedupe so the standalone
+   ;; alcotest builds in seconds without dragging the main library.
+   masc_mcp.keeper_tool_hook_error_state
+   ;; RFC-0086 Phase 2.B prereq — Tool_catalog_surfaces (lib/ root, 554+103 LoC)
+   ;; extracted to lib/tool_catalog_surfaces/. deps: Agent_sdk + stdlib only.
+   ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.
+   masc_mcp.tool_catalog_surfaces
+   ;; RFC-0086 Phase 2.B prereq — Config_dir_resolver (lib/ root, 563+156 LoC)
+   ;; extracted to lib/config_dir_resolver/. deps: masc_core (Common) +
+   ;; masc_mcp.config (Env_config_core) + masc_mcp.host_config + masc_log + yojson.
+   ;; Unblocks one of 6 cycle modules identified in plan §8.14 iter-2.
+   masc_mcp.config_dir_resolver
+   ;; RFC-0058 Phase 1 — Declarative runtime TOML config. Separate sub-library
+   ;; to avoid type name collisions (transport, provider, binding, tier, strategy)
+   ;; with identically-named types in the main library.
+   ;; RFC-0163 Phase D1 — Runtime_name leaf extraction (lib/runtime_id/).
+   ;; Pure canonical-name validation, stdlib-only.
+
+   uri
+   tls
+   tls-eio
+   domain-name
+   ca-certs
+   pbrt
+   mtime
+   mtime.clock
+   mtime.clock.os
+   uuidm
+   ;; Zstd compression
+   zstd
+   ;; Version auto-sync from dune-project
+   dune-build-info
+   ;; Time compatibility (Eio-native with Unix fallback)
+   time_compat
+   ;; Filesystem compatibility (Eio-native with Unix fallback)
+   fs_compat
+   ;; Date-split JSONL storage (YYYY-MM/DD.jsonl)
+   dated_jsonl
+   ;; HTTP client with fd-leak prevention (extracted sub-library)
+   masc_http_client
+   ;; Neo4j Bolt native driver (OCaml 5.x Eio)
+   ;; Structured logging (extracted sub-library)
+   masc_log
+   ;; Core types (extracted sub-library)
+   masc_types
+   ;; Core utilities (extracted sub-library)
+   masc_core
+   ;; Channel Gate (extracted sub-library) — pure protocol/state/metrics
+   masc_gate
+   ;; Pulse (extracted sub-library) — beat engine for Spaces
+   masc_pulse
+   ;; Shared compression codec (extracted sub-library)
+   masc_compression
+   ;; Eio context (extracted sub-library)
+   masc_eio_context
+   ;; Cancel-safe try-with combinators (RFC-0106 P0)
+   masc_cancel_safe
+   ;; Backend storage (extracted sub-library)
+   masc_backend
+   ;; Process execution + file locking (extracted sub-library)
+   masc_process
+   ;; Typed exec approval substrate (RFC v5)
+   masc_mcp.masc_exec
+   ;; Bash subset parser (RFC v5 A1) — for shadow AST telemetry
+   ;; in worker_dev_tools pending regex-to-AST migration.
+   masc_mcp.masc_exec_bash_parser
+   ;; Phase 1 SSOT command gate facade (Shell IR Promotion Goal Plan
+   ;; 2026-05-18). Advisory-only in Phase 1; new callers target this
+   ;; module so Phase 2+ can retire lib-root duplicates.
+   masc_mcp.masc_exec_command_gate
+   ;; Board types (extracted sub-library — first step toward board isolation)
+   masc_board
+   ;; Random identifier helper — shared between masc_workspace and masc_mcp
+   ;; so the vrf-/p-/c-/fn- generation algorithm lives in one place.
+   masc_random_id
+   ;; Workspace workspace (extracted sub-library)
+   masc_workspace
+   ;; Environment configuration (extracted sub-library)
+   masc_mcp.config
+   masc_mcp.ide
+   ;; Dashboard utilities (extracted sub-library)
+   masc_mcp.dashboard_utils
+   ;; Dashboard API wire contracts (extracted sub-library)
+   ;; Shared typed JSON contracts between OCaml handlers and Bonsai island.
+   masc_mcp.masc_dashboard_api_types
+   ;; Team session types removed (Epic #6107)
+   ;; MCP tool schema cluster (extracted sub-library)
+   masc_mcp.tool_schemas
+   ;; Content-addressed blob store for externalizing large tool outputs.
+   ;; Used by tool_bridge to keep ToolResult.content compact while moving
+   ;; bytes into a sha256-addressed filesystem store.
+   masc_mcp.masc_tool_blob_store
+   ;; Activity graph event/model cluster (extracted sub-library)
+   masc_mcp.activity_graph
+   ;; Prompt registry and override storage (extracted sub-library)
+   masc_mcp.prompt_registry
+   ;; MCP transport/session leaf primitives (extracted sub-libraries)
+   masc_mcp.mcp_transport_protocol
+   masc_mcp.mcp_session
+   ;; Response envelope leaf primitive (extracted sub-library)
+   masc_mcp.response
+   ;; AG-UI event bridge leaf primitive (extracted sub-library)
+   masc_mcp.ag_ui
+   ;; OpenTelemetry (spans + OTLP exporter + metrics)
+   opentelemetry
+   opentelemetry.client
+   ambient-context
+   ambient-context-eio
+   ;; Autonomous engine sub-library (Tier B3-A4) used by Keeper post-turn wire-in (Tier A5)
+   masc_mcp.autonomous
+   masc_mcp.shared_audit
+   masc_mcp.shared_types
+   ;; Resilience sub-library (Tier B6-B7) used by Keeper post-turn wire-in (Tier A6)
+   masc_mcp.resilience
+   ;; Multimodal artifact GADT sub-library (Tier B8) — Code/Image/Audio/Doc + Payload + Provenance
+   masc_mcp.multimodal
+   ;; Repository manager sub-library (multi-repository feature)
+   masc_mcp.repo_manager
+   ;; Parse_outcome — RFC-0145 canonical helper for parse-with-failure
+   ;; boundaries (replaces silent [try ... with _ -> None] pattern).
+   masc_mcp.parse_outcome
+   )
+ (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
+ (instrumentation (backend bisect_ppx)))

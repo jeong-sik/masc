@@ -1,0 +1,210 @@
+(** Keeper_turn_driver — MASC named-runtime and model-label execution entry points.
+
+    Public API for running OAS agents through MASC-managed named runtime
+    profiles ([run_named])
+    or explicit model label ([run_model_by_label]), with optional MASC
+    tool bridging variants.
+
+    @since God file decomposition — extracted from oas_worker.ml *)
+
+open Result.Syntax
+
+(* Sub-module includes (God file decomposition).
+   Each sub-module is self-contained; the facade re-exports everything
+   so existing callers do not need qualification. *)
+include Runtime_oas_runner
+include Keeper_internal_error
+include Keeper_turn_driver_helpers
+
+include Keeper_turn_driver_provider_attempt
+include Keeper_turn_driver_backpressure
+
+let release_client_capacity_quietly =
+  Keeper_turn_driver_admission.release_client_capacity_quietly
+
+let provider_config_identity_key =
+  Keeper_turn_driver_admission.provider_config_identity_key
+
+let runtime_candidates_of_providers =
+  Keeper_turn_driver_admission.runtime_candidates_of_providers
+let run_named
+    ~runtime_id
+    ?base_path
+    ?(keeper_name = "")
+    ~goal
+    ?provider_filter
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
+    ?priority
+    ?session_id
+    ?(system_prompt = "")
+    ?(tools = [])
+    ?(initial_messages = [])
+    ?(max_turns = 20)
+    ?(max_idle_turns = 3)
+    ?stream_idle_timeout_s
+    ?(temperature = Llm_provider.Constants.Inference_profile.agent_default.temperature)
+    ?(max_tokens = Llm_provider.Constants.Inference_profile.agent_default.max_tokens)
+    ?max_input_tokens
+    ?max_cost_usd
+    ?wait_timeout_sec
+    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?guardrails
+    ?hooks
+    ?context_reducer
+    ?memory
+    ?tool_retry_policy
+    ?(required_tool_satisfaction =
+      Agent_sdk.Completion_contract.any_tool_call_satisfies)
+    ?raw_trace
+    ?on_event
+    ?on_yield
+    ?on_resume
+    ?agent_ref
+    ?transport
+    ?(allowed_paths = [])
+    ?checkpoint_sidecar
+    ?(cache_system_prompt = false)
+    ?(yield_on_tool = false)
+    ?compact_ratio
+    ?(oas_auto_context_overflow_retry = true)
+    ?checkpoint_dir
+    ?context_injector
+    ?context
+    ?slot_id
+    ?enable_thinking
+    ?approval
+    ?exit_condition
+    ?exit_condition_result
+    ?summarizer
+    ?oas_checkpoint
+    ?event_bus
+    ?runtime_manifest_context
+    ?runtime_manifest_append
+    ?(runtime_manifest_required_tool_names = [])
+    ?sw
+    ?net
+    ?per_provider_timeout_s
+    ()
+  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
+  match require_eio ?sw ?net () with
+  | Error e -> Error (eio_context_error_to_sdk_error e)
+  | Ok (sw, net) ->
+  (* Single-runtime dispatch (RFC-0206 runtime purge).  The former named-runtime
+     resolution + multi-candidate selection / health / capacity / strategy /
+     cycle / admission-rotation machinery is deleted.  There is exactly one
+     default Runtime: resolve its provider config, build one execution
+     candidate, and run a single provider attempt.  A failed runtime surfaces
+     its [sdk_error] directly — there is nothing left to "exhaust". *)
+  let runtime_id = String.trim runtime_id in
+  let error_runtime_id = runtime_id in
+  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
+  (* Keeper-internal tools cannot degrade to a text-only CLI palette: the model
+     would see no callable schema and emit misleading diagnostics. *)
+  let require_tool_support =
+    require_tool_support
+    || keeper_internal_tools_require_materialized_runtime_surface
+         ~keeper_name tools
+  in
+  (* Parameters that only fed the deleted multi-candidate machinery
+     (provider selection, admission queue gating, per-candidate accept). *)
+  ignore provider_filter;
+  ignore base_path;
+  ignore wait_timeout_sec;
+  ignore (accept : Agent_sdk_response.api_response -> bool);
+  (* RFC-0207: dispatch to the *requested* runtime (a keeper's persona [model]
+     selection or the global default, both produced by [runtime_id_of_meta])
+     instead of unconditionally the default.  A requested id that does not
+     resolve is a config/validation bug — fail-fast rather than silently
+     substituting the default (RFC-0206 §2.1: no Unknown→Permissive fallback). *)
+  match Runtime.get_runtime_by_id runtime_id with
+  | None ->
+    Error
+      (Agent_sdk.Error.Internal
+         (Printf.sprintf
+            "requested runtime %S not found among configured runtimes \
+             (no silent fallback to default — RFC-0207/RFC-0206 §2.1)"
+            runtime_id))
+  | Some runtime ->
+  let candidate =
+    Runtime_candidate.of_provider_config runtime.Runtime.provider_config
+  in
+  let name = Printf.sprintf "oas-%s" runtime_id in
+  let transport_resolved =
+    match transport with
+    | Some t -> t
+    | None -> Masc_grpc_transport.from_env ()
+  in
+  let turn_start = Mtime_clock.now () in
+  let seq_ref = ref 0 in
+  let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
+    runtime_id;
+    error_runtime_id;
+    keeper_name;
+    name;
+    goal;
+    require_tool_choice_support;
+    require_tool_support;
+    priority;
+    session_id;
+    system_prompt;
+    tools;
+    initial_messages;
+    max_turns;
+    max_idle_turns;
+    stream_idle_timeout_s;
+    temperature;
+    max_tokens;
+    max_input_tokens;
+    max_cost_usd;
+    guardrails;
+    hooks;
+    context_reducer;
+    memory;
+    tool_retry_policy;
+    required_tool_satisfaction;
+    raw_trace;
+    transport_resolved;
+    runtime_mcp_policy;
+    allowed_paths;
+    checkpoint_sidecar;
+    cache_system_prompt;
+    yield_on_tool;
+    compact_ratio;
+    oas_auto_context_overflow_retry;
+    checkpoint_dir;
+    context_injector;
+    context;
+    slot_id;
+    enable_thinking;
+    approval;
+    exit_condition;
+    exit_condition_result;
+    summarizer;
+    oas_checkpoint;
+    sw;
+    net;
+    on_event;
+    on_yield;
+    on_resume;
+    agent_ref;
+    event_bus;
+    runtime_manifest_context;
+    runtime_manifest_append;
+    runtime_manifest_required_tool_names;
+    turn_start;
+    seq_ref;
+  } in
+  let result, _checkpoint, _success_sample =
+    Keeper_turn_driver_try_provider.run_try_provider
+      try_provider_ctx ?per_provider_timeout_s candidate
+  in
+  result
+
+
+module For_testing = struct
+  let checkpoint_after_attempt = checkpoint_after_attempt
+  let missing_required_tool_names_after_lane_by_name =
+    missing_required_tool_names_after_lane_by_name
+  let success_selected_model_raw = success_selected_model_raw
+end

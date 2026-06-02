@@ -1,0 +1,81 @@
+/* MASC Dashboard — Responsive Overrides (Task 292) */
+
+@media (max-width: 1024px) {
+  .app-shell {
+    width: calc(100% - 16px);
+    margin: 8px auto 16px;
+  }
+
+  .dashboard-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--sp-4);
+    padding: var(--sp-4);
+    min-height: auto;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 768px) {
+  /* Mobile font-size scale-down — overrides the canonical @theme tokens
+     so BOTH Tailwind utilities (text-sm, text-base, ...) AND legacy CSS
+     `var(--fs-*)` consumers (which now alias to --font-size-* in
+     variables.css) shrink. Pre-consolidation only --fs-* shrank;
+     Tailwind utilities bypassed the override. */
+  :root {
+    --font-size-base: 13px;
+    --font-size-sm: 12px;
+    --font-size-xs: 11px;
+    --font-size-2xs: 10px;
+  }
+
+  .header-title-wrap h1 {
+    font-size: var(--fs-22);
+  }
+
+  /* Stack all common grids */
+  .monitor-grid, 
+  .control-row,
+  .dashboard-main-grid,
+  .agent-monitor-layout,
+  .ops-triple-column {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  /* Responsive cards and panels */
+  .monitor-surface-card {
+    min-height: auto !important;
+    padding: 16px !important;
+  }
+
+  .dashboard-panel {
+    padding: 12px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .dashboard-header {
+    padding: var(--sp-3);
+  }
+
+  .header-title-wrap h1 {
+    font-size: var(--fs-18);
+  }
+
+  .header-subtitle {
+    font-size: var(--fs-11);
+  }
+
+  .tab-pill-bar {
+    overflow-x: auto;
+    justify-content: flex-start !important;
+    padding-bottom: 4px;
+    &::-webkit-scrollbar { display: none; }
+  }
+}

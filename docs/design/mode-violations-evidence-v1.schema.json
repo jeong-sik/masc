@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CDAL Mode Violations Evidence v1",
+  "description": "Current OAS-emitted blocked-attempt evidence for phase-1B single-run friction. This schema describes what exists today, not the richer evidence-v2 target.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "ts",
+      "tool_name",
+      "input_summary",
+      "effective_mode",
+      "violation_kind"
+    ],
+    "properties": {
+      "ts": {
+        "type": "number",
+        "description": "Unix timestamp in seconds when the violation was recorded."
+      },
+      "tool_name": {
+        "type": "string"
+      },
+      "input_summary": {
+        "type": "string",
+        "description": "Truncated JSON-string summary of tool input. Informational only; must not be used for semantic reconstruction in deterministic replay."
+      },
+      "effective_mode": {
+        "type": "string",
+        "enum": ["diagnose", "draft", "execute"]
+      },
+      "violation_kind": {
+        "type": "string",
+        "enum": [
+          "mutating_in_diagnose",
+          "external_in_draft",
+          "scope_violation"
+        ]
+      }
+    },
+    "additionalProperties": false
+  }
+}

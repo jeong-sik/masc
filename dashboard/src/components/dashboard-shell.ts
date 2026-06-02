@@ -1,0 +1,1268 @@
+import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
+import { lazy, Suspense } from 'preact/compat'
+import { useEffect } from 'preact/hooks'
+import type { RouteState, TabId } from '../types'
+import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
+import { hashForRoute, navigate, route } from '../router'
+import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
+import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
+import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
+import { isKeeperPaused } from '../lib/keeper-predicates'
+import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution } from '../store'
+import { missionSnapshot, missionLoading } from '../mission-signals'
+import { namespaceTruth, namespaceTruthInitializing } from '../namespace-truth-store'
+import {
+  configuredCountSourceLabel,
+  formatKeeperCountBreakdown,
+  resolveRuntimeCounts,
+  runtimeCountSourceLabel,
+} from '../runtime-counts'
+import { ErrorBoundary } from './common/error-boundary'
+import { TimeAgo } from './common/time-ago'
+import { LoadingState } from './common/feedback-state'
+import {
+  DASHBOARD_SURFACES,
+  DASHBOARD_NAV_ITEMS,
+  currentSectionForRoute,
+  visibleSectionItemsForTab,
+} from '../config/navigation'
+import { ObservatoryFilterBar } from './common/observatory-filter-bar'
+import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import { ExternalLink } from 'lucide-preact'
+import { ScrollToTopButton } from './common/scroll-to-top'
+import { CopyIdButton } from './common/copy-id-button'
+import { formatElapsedCompact } from '../lib/format-time'
+import { unacknowledgedCount } from './common/error-notification-state'
+import { ErrorPanel } from './common/error-panel'
+import { Bell } from 'lucide-preact'
+import { ringFocusClasses } from './common/ring'
+import { SurfaceIcon } from './surface-icon'
+import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
+import { RouteLink } from './common/route-link'
+import {
+  isWidgetSoloRoute,
+  WidgetSoloBar,
+  widgetSoloUrlForRoute,
+} from './widget-solo'
+
+const buildIdentityOpen = signal(false)
+
+function BuildInfoRow({ label, children }: { label: string; children: unknown }) {
+  return html`
+    <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
+      <span>${label}</span>
+      ${children}
+    </div>
+  `
+}
+
+const LazyOverview = lazy(async () => ({ default: (await import('./overview/overview')).Overview }))
+const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
+const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
+const LazyOperations = lazy(async () => ({ default: (await import('./operations-panel')).OperationsPanel }))
+const LazyConnectors = lazy(async () => ({ default: (await import('./connector-status')).ConnectorStatusPanel }))
+const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
+const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
+const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
+const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
+
+function lazyTabFallback(label: string) {
+  return html`<${LoadingState}>Loading ${label}...<//>`
+}
+
+/** Pure: describe a "reconnecting" state as a user-facing label plus
+    tooltip. Reference UIs: Discord shows "Reconnecting... (5s · try 3)";
+    Slack shows "Trying to reconnect..." with timestamp on hover;
+    Linear flashes a subtle red dot + tooltip. Goal here: operator can
+    tell at a glance whether a flicker (sub-5s) is worth noticing and,
+    on hover, see when the last successful session ended + cumulative
+    reconnect count — so a reconnect loop is diagnosable without
+    opening devtools.
+
+    Inputs are all primitives so the helper is trivially testable. */
+function describeReconnecting(args: {
+  disconnectedAt: number
+  now: number
+  reconnects: number
+}): { label: string; title: string } {
+  const { disconnectedAt, now, reconnects } = args
+  if (disconnectedAt === 0) {
+    return { label: 'Reconnecting...', title: '' }
+  }
+  const sec = Math.max(0, Math.round((now - disconnectedAt) / 1000))
+  const elapsed = sec < 5
+    ? ''
+    : sec < 60
+      ? ` · ${sec}s`
+      : ` · ${Math.round(sec / 60)}m`
+  const label = `Reconnecting${elapsed}`
+  const titleParts: string[] = []
+  if (sec >= 5) {
+    const d = new Date(disconnectedAt)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const when = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+    titleParts.push(`Disconnected at ${when}`)
+  }
+  if (reconnects > 0) {
+    titleParts.push(`Reconnect attempts ${reconnects}`)
+  }
+  return { label, title: titleParts.join(' · ') }
+}
+
+export function ConnectionStatus() {
+  const wsOnly = dashboardWsOnlyEnabled()
+  const isConnected = wsOnly
+    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
+    : connected.value
+  const snap = missionSnapshot.value
+  const attentionCount = snap?.attention_queue?.length ?? 0
+  const reconn = reconnectCount.value
+
+  const statusLabel = isConnected
+    ? reconn > 0 ? 'Reconnected' : 'Connected'
+    : describeReconnecting({
+        disconnectedAt: lastDisconnectedAt.value,
+        now: Date.now(),
+        reconnects: reconn,
+      }).label
+  const titleAttr = isConnected
+    ? reconn > 0 ? `Reconnect attempts ${reconn}` : ''
+    : describeReconnecting({
+        disconnectedAt: lastDisconnectedAt.value,
+        now: Date.now(),
+        reconnects: reconn,
+      }).title
+
+  return html`
+    <div
+      class="flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}"
+      title=${titleAttr || undefined}
+    >
+      <span class="inline-block size-[8px] rounded-[var(--r-0)] ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
+      <span class="status-text">${statusLabel}</span>
+      ${attentionCount > 0 ? html`
+        <${RouteLink}
+          tab="overview"
+          class="inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 tabular-nums attention-badge"
+        >Attention ${attentionCount}<//>
+      ` : null}
+    </div>
+  `
+}
+
+type DashboardHealthChipTone = 'ok' | 'warn' | 'bad' | 'muted'
+
+interface DashboardHealthChipRoute {
+  tab: TabId
+  params: Record<string, string>
+}
+
+interface DashboardHealthChip {
+  key: string
+  label: string
+  detail: string
+  tone: DashboardHealthChipTone
+  // Optional drill-down route. When set, DashboardHealthStrip renders this
+  // chip as a RouteLink so operators can jump from "Source mismatch" /
+  // "Paused keepers N" / "Reaction ledger pending N" straight to the page
+  // that explains the signal. Chips without a route render as static spans
+  // (e.g. transport-offline — no view helps).
+  route?: DashboardHealthChipRoute
+}
+
+interface DashboardHealthInput {
+  connected: boolean
+  counts: {
+    agents?: number
+    tasks?: number
+    keepers: number
+    total_runtimes?: number
+    configured_keepers: number
+  } | null
+  namespaceTruthCounts?: {
+    agents?: number
+    tasks?: number
+    keepers?: number
+    total_runtimes?: number
+  }
+  namespaceTruthConfiguredKeepers?: number
+  keepers: Keeper[]
+  runtimeResolution: DashboardRuntimeResolution | null
+  executionError: string | null
+  loading: boolean
+}
+
+// RFC-0135 PR-3: the local `keeperLooksPaused` was one of four
+// parallel paused-predicate chains. Canonical implementation now in
+// `../lib/keeper-predicates.ts` covers exactly the same four axes
+// (paused / phase / pipeline_stage / status).
+//
+// Note: the canonical predicate compares `phase === 'Paused'` (PascalCase
+// per `KeeperPhase`) instead of the previous lowercased comparison —
+// this matches the wire type and the three other former chains.
+
+function fdPressureBlockedKeepers(fleetSafety: DashboardFleetSafetyHealth): number {
+  const candidates = [
+    fleetSafety.keeper_fd_pressure?.admission_blocked_keepers,
+    fleetSafety.keeper_fd_pressure?.blocked_keepers,
+    fleetSafety.keeper_fd_pressure?.blocked_count,
+  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  return candidates.length > 0 ? Math.max(...candidates) : 0
+}
+
+function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): DashboardHealthChip | null {
+  if (!fleetSafety) return null
+  const fibers = fleetSafety.keeper_fibers
+  const paused = fleetSafety.paused_keepers ?? 0
+  const fleet = fleetSafety.keeper_fleet_safety
+  const fleetStatus = fleet?.status
+  const runningFibers = fleet?.running_keeper_fiber_count ?? fibers
+  const healthyRunningFibers = fleet?.healthy_running_keeper_fiber_count ?? runningFibers
+  const failingFibers = fleet?.failing_keeper_fiber_count ?? null
+  const executableFibers = fleet?.executable_keeper_fiber_count
+    ?? fleet?.executable_reaction_capacity_count
+    ?? runningFibers
+  const pausedKeepers = fleet?.paused_keeper_count ?? paused
+  const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
+  const targetCapacity = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count ?? null
+  const bootableKeepers = fleet?.bootable_keeper_count ?? null
+  const minimumRunning = fleet?.minimum_running_fibers ?? null
+  const noFibers = fleet?.no_running_fibers ?? fleetSafety.keeper_fleet_no_fibers
+  const requiresAction = fleet?.operator_action_required === true
+  const capacityBelowTarget = fleet?.reaction_capacity_below_target === true
+  const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? (
+    targetCapacity != null && runningFibers != null ? Math.max(0, targetCapacity - runningFibers) : null
+  )
+  const fdPressureBlocked = fdPressureBlockedKeepers(fleetSafety)
+  const pausedOnlyNoExecutable =
+    executableFibers === 0
+    && pausedAutobootKeepers != null
+    && pausedAutobootKeepers > 0
+    && targetCapacity != null
+    && pausedAutobootKeepers >= targetCapacity
+  if (pausedOnlyNoExecutable) {
+    const capacityDetail = [
+      `status=${fleetStatus ?? 'paused'}`,
+      `running_keeper_fiber_count=${runningFibers ?? 0}`,
+      `executable_keeper_fiber_count=${executableFibers}`,
+      `paused_keeper_count=${pausedKeepers}`,
+      `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}`,
+      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
+      minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,
+    ].filter((item): item is string => item != null).join(', ')
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'Fleet paused',
+      detail: `${capacityDetail}; paused is lifecycle state. Inspect row-level runtime blocker evidence before treating it as a blocker.`,
+      tone: 'warn',
+    }
+  }
+  if (fleetStatus === 'blocked' || (requiresAction && (runningFibers === 0 || noFibers === true))) {
+    const capacityDetail = [
+      `status=${fleetStatus ?? 'blocked'}`,
+      `running_keeper_fiber_count=${runningFibers ?? 0}`,
+      executableFibers != null ? `executable_keeper_fiber_count=${executableFibers}` : null,
+      `paused_keeper_count=${pausedKeepers}`,
+      pausedAutobootKeepers != null ? `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}` : null,
+      bootableKeepers != null ? `bootable_keeper_count=${bootableKeepers}` : null,
+      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
+      minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,
+    ].filter((item): item is string => item != null).join(', ')
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'P0 fleet blocked',
+      detail: `${capacityDetail}; resume selected paused keepers or confirm an intentional operator pause policy.`,
+      tone: 'bad',
+    }
+  }
+  if (fdPressureBlocked >= 24) {
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'Fleet liveness risk',
+      detail: `FD pressure admission is blocking ${fdPressureBlocked} keepers; keeper turns may not start.`,
+      tone: 'bad',
+    }
+  }
+  if (fleetStatus === 'degraded' || (requiresAction && capacityBelowTarget)) {
+    const capacityDetail = [
+      `status=${fleetStatus ?? 'degraded'}`,
+      `healthy_running_keeper_fiber_count=${healthyRunningFibers ?? 0}`,
+      executableFibers != null ? `executable_keeper_fiber_count=${executableFibers}` : null,
+      failingFibers != null ? `failing_keeper_fiber_count=${failingFibers}` : null,
+      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
+      capacityShortfall != null ? `reaction_capacity_shortfall_count=${capacityShortfall}` : null,
+      fleet?.blocker ? `blocker=${fleet.blocker}` : null,
+    ].filter((item): item is string => item != null).join(', ')
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'Fleet capacity degraded',
+      detail: `${capacityDetail}; restore missing keeper fibers or confirm a reduced target capacity.`,
+      tone: 'warn',
+    }
+  }
+  if (fleetSafety.keeper_fleet_no_fibers === true || (fibers != null && fibers <= 1 && paused > 0)) {
+    return {
+      key: 'fleet-liveness-risk',
+      label: 'Fleet liveness risk',
+      detail: `keeper_fibers=${fibers ?? 0}, paused_keepers=${paused}; keeper fleet may be stalled.`,
+      tone: 'bad',
+    }
+  }
+  return null
+}
+
+function ledgerCount(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function reactionLedgerHealthChip(
+  ledger: DashboardKeeperReactionLedgerHealth | null | undefined,
+): DashboardHealthChip | null {
+  if (!ledger) return null
+  const pending = ledgerCount(ledger.pending_stimulus_count)
+  const cursorSwept = ledgerCount(ledger.cursor_swept_stimulus_count)
+  const legacySwept = ledgerCount(ledger.legacy_cursor_swept_stimulus_count)
+  const readErrors = ledgerCount(ledger.read_error_count)
+  const cursorAck = ledgerCount(ledger.cursor_ack_count)
+  const status = ledger.status ?? 'unknown'
+  const requiresAction = ledger.operator_action_required === true
+  const totalSwept = cursorSwept + legacySwept
+  if (!requiresAction && pending === 0 && readErrors === 0 && totalSwept === 0 && status !== 'degraded') {
+    return null
+  }
+  const tone: DashboardHealthChipTone = readErrors > 0
+    ? 'bad'
+    : requiresAction || pending > 0 || status === 'degraded'
+      ? 'warn'
+      : 'ok'
+  const label = pending > 0
+    ? `Reaction ledger pending ${pending}`
+    : totalSwept > 0
+      ? `Reaction ledger swept ${totalSwept}`
+      : `Reaction ledger ${status}`
+  return {
+    key: 'reaction-ledger',
+    label,
+    detail: [
+      `status=${status}`,
+      `pending=${pending}`,
+      `cursor_swept=${cursorSwept}`,
+      `legacy_swept=${legacySwept}`,
+      `cursor_ack=${cursorAck}`,
+      `read_errors=${readErrors}`,
+    ].join(', '),
+    tone,
+    route: {
+      tab: 'monitoring',
+      params: { section: 'fleet-health', view: 'keeper-health' },
+    },
+  }
+}
+
+function cdalHealthChip(cdal: DashboardCdalHealth | null | undefined): DashboardHealthChip | null {
+  if (!cdal) return null
+  const writerStatus = cdal.writer_status ?? 'unknown'
+  const proofStatus = cdal.proof_store?.status ?? 'unknown'
+  const taskStatus = cdal.task_scope?.status ?? 'unknown'
+  const incomplete = cdal.proof_store?.completeness?.incomplete_run_dirs ?? 0
+  const stale = cdal.proof_store?.completeness?.stale_incomplete_run_dirs ?? 0
+  const terminal = cdal.proof_store?.completeness?.terminal_incomplete_run_dirs ?? 0
+  const currentMissing = cdal.task_scope?.current_writer_missing_task_scope_rows ?? 0
+  const requiresAction = cdal.operator_action_required === true
+  if (!requiresAction && writerStatus === 'active' && incomplete === 0 && currentMissing === 0) {
+    return null
+  }
+  const tone: DashboardHealthChipTone =
+    requiresAction || stale > 0 || currentMissing > 0 ? 'bad' : terminal > 0 || incomplete > 0 ? 'warn' : 'ok'
+  const label = stale > 0 || terminal > 0 || incomplete > 0
+    ? `CDAL proof incomplete ${incomplete}`
+    : currentMissing > 0
+      ? `CDAL task scope ${currentMissing}`
+      : `CDAL ${writerStatus}`
+  return {
+    key: 'cdal-runtime-health',
+    label,
+    detail: [
+      `writer_status=${writerStatus}`,
+      `proof_store=${proofStatus}`,
+      `task_scope=${taskStatus}`,
+      `incomplete=${incomplete}`,
+      `stale=${stale}`,
+      `terminal=${terminal}`,
+      `current_missing_task_scope=${currentMissing}`,
+    ].join(', '),
+    tone,
+    route: {
+      tab: 'monitoring',
+      params: { section: 'fleet-health' },
+    },
+  }
+}
+
+// Drill-down routes for each chip key. Centralized so the builder stays
+// readable and tests can audit the routing table separately. Returning
+// undefined keeps the chip as a static span (transport-offline,
+// execution-error: no view helps; hydrating/runtime-ok: nothing to drill).
+function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
+  switch (key) {
+    case 'source-mismatch':
+    case 'runtime-warning':
+      return { tab: 'monitoring', params: { section: 'runtime' } }
+    case 'paused-keepers':
+    case 'fleet-liveness-risk':
+    case 'no-keeper-rows':
+      return { tab: 'monitoring', params: { section: 'fleet-health' } }
+    case 'keeper-count-basis':
+      return { tab: 'monitoring', params: { section: 'agents', view: 'keepers' } }
+    default:
+      return undefined
+  }
+}
+
+export function dashboardHealthChips(input: DashboardHealthInput): DashboardHealthChip[] {
+  const chips: DashboardHealthChip[] = []
+  if (!input.connected) {
+    chips.push({
+      key: 'transport-offline',
+      label: 'Transport offline',
+      detail: 'Dashboard stream is disconnected; live state can be stale.',
+      tone: 'bad',
+    })
+  }
+
+  const runtime = input.runtimeResolution
+  if (runtime?.source_mismatch || runtime?.server_workspace_mismatch) {
+    chips.push({
+      key: 'source-mismatch',
+      label: 'Source mismatch',
+      detail: 'Server, workspace, or resolved base path source differs.',
+      tone: 'warn',
+    })
+  } else if (runtime?.status && runtime.status !== 'ready') {
+    chips.push({
+      key: 'runtime-warning',
+      label: 'Runtime warning',
+      detail: runtime.warnings[0] ?? runtime.status,
+      tone: 'warn',
+    })
+  }
+
+  const pausedKeepers = input.keepers.filter(isKeeperPaused).length
+  const fallbackRunningKeepers = Math.max(0, input.keepers.length - pausedKeepers)
+  const runtimeCounts = resolveRuntimeCounts({
+    executionLoaded: input.counts !== null || input.keepers.length > 0,
+    agentsCount: input.counts?.agents ?? 0,
+    keepersCount: input.counts?.keepers ?? fallbackRunningKeepers,
+    pausedKeepersCount: pausedKeepers,
+    namespaceTruthCounts: input.namespaceTruthCounts,
+    namespaceTruthConfiguredKeepers: input.namespaceTruthConfiguredKeepers,
+    shellCounts: input.counts,
+    shellConfiguredKeepers: input.counts?.configured_keepers,
+  })
+  const configured = runtimeCounts.configured.keepers
+  const liveKeepers = runtimeCounts.live.keepers
+  const activeCountSource = input.counts !== null
+    ? 'shell'
+    : input.keepers.length > 0
+      ? '상세 행'
+      : runtimeCountSourceLabel(runtimeCounts.source)
+  if (configured > 0 && (configured !== liveKeepers || pausedKeepers > 0)) {
+    chips.push({
+      key: 'keeper-count-basis',
+      label: formatKeeperCountBreakdown({
+        liveKeepers,
+        pausedKeepers,
+        configuredKeepers: configured,
+      }),
+      detail: `활성=${activeCountSource} runtime, paused=상세 행 lifecycle, 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper inventory.`,
+      tone: 'muted',
+    })
+  }
+
+  if (pausedKeepers > 0) {
+    chips.push({
+      key: 'paused-keepers',
+      label: `Paused keepers ${pausedKeepers}`,
+      detail: 'One or more keeper rows are paused; board/tool activity may look quiet.',
+      tone: 'warn',
+    })
+  }
+
+  const fleetChip = fleetSafetyHealthChip(runtime?.fleet_safety ?? null)
+  if (fleetChip) {
+    chips.push(fleetChip)
+  }
+
+  const reactionLedgerChip = reactionLedgerHealthChip(runtime?.fleet_safety?.keeper_reaction_ledger)
+  if (reactionLedgerChip) {
+    chips.push(reactionLedgerChip)
+  }
+
+  const cdalChip = cdalHealthChip(runtime?.cdal)
+  if (cdalChip) {
+    chips.push(cdalChip)
+  }
+
+  if (configured > 0 && liveKeepers === 0) {
+    chips.push({
+      key: 'no-keeper-rows',
+      label: 'No keeper rows',
+      detail: `${configured} keepers are configured but no live keeper rows are visible.`,
+      tone: 'warn',
+    })
+  }
+
+  if (input.executionError) {
+    chips.push({
+      key: 'execution-error',
+      label: 'Execution refresh failed',
+      detail: input.executionError,
+      tone: 'bad',
+    })
+  }
+
+  if (chips.length === 0) {
+    chips.push({
+      key: input.loading ? 'hydrating' : 'runtime-ok',
+      label: input.loading ? 'Hydrating' : 'Runtime UI healthy',
+      detail: input.loading
+        ? 'Dashboard data is still loading.'
+        : 'No transport, source, paused-keeper, or execution-refresh issue is currently visible.',
+      tone: input.loading ? 'muted' : 'ok',
+    })
+  }
+
+  // Attach drill-down routes via the central chipRouteFor() table. Chips
+  // that already carry an inline `route` (reaction-ledger) keep theirs.
+  return chips.map(chip => chip.route ? chip : { ...chip, route: chipRouteFor(chip.key) })
+}
+
+function healthChipClass(tone: DashboardHealthChipTone): string {
+  switch (tone) {
+    case 'ok':
+      return 'border-[var(--ok-30)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
+    case 'warn':
+      return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
+    case 'bad':
+      return 'border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
+    case 'muted':
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
+  }
+}
+
+export function DashboardHealthStrip() {
+  const wsOnly = dashboardWsOnlyEnabled()
+  const live = wsOnly
+    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
+    : connected.value
+  const chips = dashboardHealthChips({
+    connected: live,
+    counts: shellCounts.value,
+    namespaceTruthCounts: namespaceTruth.value?.root.counts,
+    namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
+    keepers: keepers.value,
+    runtimeResolution: shellRuntimeResolution.value,
+    executionError: executionError.value,
+    loading: dashboardLoading.value || namespaceTruthInitializing.value,
+  })
+
+  return html`
+    <div
+      class="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-1.5 text-2xs"
+      role="status"
+      aria-label="Dashboard runtime health"
+      data-testid="dashboard-health-strip"
+    >
+      <span class="font-mono uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Health</span>
+      ${chips.map(chip => chip.route ? html`
+        <${RouteLink}
+          key=${chip.key}
+          tab=${chip.route.tab}
+          params=${chip.route.params}
+          class=${`inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium transition-opacity hover:opacity-80 ${healthChipClass(chip.tone)}`}
+          title=${chip.detail}
+          data-testid=${`dashboard-health-chip-${chip.key}`}
+        >${chip.label}<//>
+      ` : html`
+        <span
+          key=${chip.key}
+          class=${`inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium ${healthChipClass(chip.tone)}`}
+          title=${chip.detail}
+          data-testid=${`dashboard-health-chip-${chip.key}`}
+        >
+          ${chip.label}
+        </span>
+      `)}
+    </div>
+  `
+}
+
+const errorPanelOpen = signal(false)
+
+export function ErrorCounterBadge() {
+  const count = unacknowledgedCount.value
+  const open = errorPanelOpen.value
+  const label = count > 0
+    ? `${count} unacknowledged dashboard errors`
+    : 'No dashboard errors'
+
+  return html`
+    <div class="relative" role="status">
+      <button
+        type="button"
+        class="flex items-center gap-1.5 cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 transition-colors hover:bg-[var(--color-bg-elevated)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
+        title=${label}
+        aria-label=${label}
+        onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}
+        aria-expanded=${open}
+        aria-haspopup="true"
+      >
+        <${Bell} size=${14} />
+        ${count > 0 ? html`
+          <span class="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[var(--color-status-err)] text-2xs font-semibold text-white tabular-nums">${count > 99 ? '99+' : count}</span>
+        ` : null}
+      </button>
+      ${open ? html`<${ErrorPanel} onClose=${() => { errorPanelOpen.value = false }} />` : null}
+    </div>
+  `
+}
+
+function shortCommit(commit: string | null | undefined): string {
+  const value = commit?.trim()
+  if (!value) return 'dev'
+  return value.length > 10 ? value.slice(0, 10) : value
+}
+
+/** Canonical upstream repo. Used to resolve commit-hash text into a
+    clickable GitHub permalink. Hard-coded because this is the only
+    origin the dashboard is ever built from — a future fork would
+    override this via a build-time constant, not a runtime flag. */
+const UPSTREAM_REPO = 'jeong-sik/masc-mcp'
+
+/** Pure: turn a raw commit hash into a GitHub commit URL. Returns
+    null for empty / non-hex-looking input so the dropdown renders
+    the plain string for dev builds without creating a bogus link.
+    Reference: Vercel / Railway / Render deployment dashboards always
+    link commit hashes out to the source host — operators who land
+    on the build identity dropdown usually want the diff, not the
+    hash itself. */
+function githubCommitUrl(commit: string | null | undefined): string | null {
+  const value = commit?.trim() ?? ''
+  if (value === '') return null
+  // Accept full (40-char) or short (≥ 7 char) hex SHAs only. Anything
+  // else (dev labels, semver, free text) gets rendered as plain text
+  // so we never produce a link to github.com/.../commit/dev.
+  if (!/^[0-9a-f]{7,40}$/i.test(value)) return null
+  return `https://github.com/${UPSTREAM_REPO}/commit/${value}`
+}
+
+/** Pure: render uptime seconds as a human-readable duration for the
+    build-identity dropdown. Delegates to formatElapsedCompact ("3s",
+    "5m 10s", "2h 30m"). Negative / NaN / non-number inputs return
+    "Unknown" so the dropdown never prints "NaNs" or "-5s". */
+function formatUptimeSecondsHuman(
+  seconds: number | null | undefined,
+): string {
+  if (typeof seconds !== 'number' || Number.isNaN(seconds) || seconds < 0) {
+    return 'Unknown'
+  }
+  return formatElapsedCompact(seconds)
+}
+
+
+/** Pure: compose a multi-line native-title tooltip for the build
+    identity badge so hovering reveals version + commit + uptime
+    without needing to open the dropdown. Reference UIs: Vercel
+    deployment pill, Render build badge, Railway service chip — all
+    surface the one-glance summary on hover and reserve the click for
+    \"deep details\". \n renders verbatim in native tooltips. */
+function composeBuildBadgeTitle(
+  build: { release_version?: string | null; commit?: string | null; uptime_seconds?: number | null } | null | undefined,
+  fallbackVersion: string | null | undefined,
+): string {
+  if (!build && !fallbackVersion) return 'Build unavailable'
+  const lines: string[] = ['Server build']
+  const version = build?.release_version ?? fallbackVersion
+  if (version != null && version !== '') {
+    const commit = build?.commit != null && build.commit !== ''
+      ? ` · ${shortCommit(build.commit)}`
+      : ' · dev'
+    lines.push(`  · v${version}${commit}`)
+  }
+  const uptime = formatUptimeSecondsHuman(build?.uptime_seconds)
+  if (uptime !== 'Unknown') {
+    lines.push(`  · Uptime ${uptime}`)
+  }
+  lines.push('  · Click for details')
+  return lines.join('\n')
+}
+
+export function BuildIdentityBadge() {
+  const status = serverStatus.value
+  const build = status?.build
+  const label = build
+    ? `v${build.release_version} · ${shortCommit(build.commit)}`
+    : status?.version
+      ? `v${status.version} · dev`
+      : 'Build unavailable'
+  const hoverTitle = composeBuildBadgeTitle(build, status?.version)
+
+  return html`
+    <div class="relative">
+      <button type="button"
+        class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+        aria-expanded=${buildIdentityOpen.value}
+        aria-label=${`Server build ${label}`}
+        title=${hoverTitle}
+        onClick=${() => {
+          buildIdentityOpen.value = !buildIdentityOpen.value
+        }}
+      >
+        ${label}
+      </button>
+      ${buildIdentityOpen.value
+        ? html`
+            <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[var(--shadow-panel)] grid gap-1.5">
+              <${BuildInfoRow} label="Release">
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
+              <//>
+              <${BuildInfoRow} label="Commit">
+                ${(() => {
+                  const url = githubCommitUrl(build?.commit)
+                  const text = build?.commit ?? 'git not detected (dev)'
+                  return url !== null
+                    ? html`<a
+                        href=${url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-right font-bold text-[color:var(--color-fg-secondary)] underline decoration-dotted underline-offset-2 decoration-[color:var(--color-fg-disabled)] hover:decoration-[color:var(--color-accent-fg)] hover:text-[color:var(--color-accent-fg)]"
+                        data-build-commit-link
+                        title="View this commit on GitHub"
+                      >${text} ↗</a>`
+                    : html`<strong class="text-[color:var(--color-fg-secondary)] text-right">${text}</strong>`
+                })()}
+              <//>
+              <${BuildInfoRow} label="Server started">
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : 'Unknown'}</strong>
+              <//>
+              <${BuildInfoRow} label="Uptime">
+                <strong
+                  class="text-[color:var(--color-fg-secondary)] text-right tabular-nums"
+                  title=${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s raw` : undefined}
+                >${formatUptimeSecondsHuman(build?.uptime_seconds)}</strong>
+              <//>
+              <${BuildInfoRow} label="Shell snapshot">
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : 'Unknown'}</strong>
+              <//>
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+
+
+/** Pure: gather the top-N attention-item summaries as tooltip lines so
+    hovering the bottom-left health dot answers "what are the N
+    things?" without a click. Reference UIs: Datadog monitor rollup
+    tooltip, Vercel deployment status footer, Gmail "2 unread" with
+    sender preview — all reveal the contributing items on hover so the
+    operator decides whether to navigate. Exposed for tests. */
+function summarizeAttentionPreview(
+  items: ReadonlyArray<{ summary?: string | null; kind?: string | null }>,
+  max = 3,
+): string[] {
+  // Two-pass: first filter to valid (non-empty summary or kind), then
+  // cap. This separates "skipped for noise" from "truncated for max"
+  // so the tail count only reflects genuinely pending items that
+  // didn't fit — never padding from null/empty rows.
+  const valid: string[] = []
+  for (const item of items) {
+    if (!item) continue
+    const summary = item.summary?.trim()
+    const kind = item.kind?.trim()
+    const raw = (summary && summary !== '') ? summary : (kind && kind !== '' ? kind : '')
+    if (raw === '') continue
+    valid.push(raw.length > 60 ? `${raw.slice(0, 57)}...` : raw)
+  }
+  if (valid.length <= max) return valid
+  return [...valid.slice(0, max), `... +${valid.length - max} more`]
+}
+
+/** Pure: compose the full title-attribute string for the health
+    indicator — label on the first line, attention previews indented
+    under it. Newlines render in native title tooltips on all major
+    browsers, so no HTML escaping or markup is needed. */
+function composeHealthIndicatorTitle(
+  label: string,
+  attentionLines: ReadonlyArray<string>,
+): string {
+  if (attentionLines.length === 0) return label
+  const indented = attentionLines.map(line => `  · ${line}`)
+  return [label, ...indented].join('\n')
+}
+
+function dashboardRouteBoundaryKey(routeState: RouteState): string {
+  const params = routeState.params
+  const parts = [
+    routeState.tab,
+    params.section,
+    params.view ? `view=${params.view}` : '',
+    params.session_id ? `session=${params.session_id}` : '',
+    params.operation_id ? `operation=${params.operation_id}` : '',
+    params.worker_run_id ? `worker=${params.worker_run_id}` : '',
+  ]
+
+  if (routeState.tab === 'monitoring' && params.section === 'agents') {
+    parts.push(
+      params.agent ? `agent=${params.agent}` : '',
+      params.keeper ? `keeper=${params.keeper}` : '',
+    )
+  }
+
+  return parts.filter(Boolean).join(':')
+}
+
+function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
+  const wsOnly = dashboardWsOnlyEnabled()
+  const live = wsOnly
+    ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
+    : connected.value
+  const snap = missionSnapshot.value
+  const sessions = snap?.sessions ?? []
+  let blockers = 0
+  for (let i = 0; i < sessions.length; i++) {
+    if (sessions[i]?.blocker_summary) blockers++
+  }
+  const attentionQueue = snap?.attention_queue ?? []
+  const attentionCount = attentionQueue.length
+
+  let dotClass: string
+  let label: string
+
+  if (!live) {
+    dotClass = 'bg-[var(--color-status-err)]'
+    label = 'Transport offline'
+  } else if (!snap) {
+    dotClass = 'bg-[var(--color-fg-muted)]'
+    label = missionLoading.value ? 'Mission loading' : 'Mission idle'
+  } else if (blockers > 0 || attentionCount > 0) {
+    dotClass = 'bg-[var(--color-status-warn)]'
+    const total = blockers + attentionCount
+    label = `Mission attention ${total}`
+  } else {
+    dotClass = 'bg-[var(--color-status-ok)]'
+    label = 'Mission healthy'
+  }
+
+  const attentionLines = attentionCount > 0 ? summarizeAttentionPreview(attentionQueue) : []
+  const titleText = composeHealthIndicatorTitle(label, attentionLines)
+
+  const dot = html`<span class="block size-2 shrink-0 rounded-[var(--r-0)] ${dotClass} shadow-1"></span>`
+
+  if (collapsed) {
+    return html`<div class="flex justify-center" title=${titleText} role="img" aria-label=${label}>${dot}</div>`
+  }
+
+  return html`
+    <div class="flex items-center gap-2 px-1" role="status" aria-label=${label} title=${titleText}>
+      ${dot}
+      <span class="text-2xs text-[var(--color-fg-muted)] truncate">${label}</span>
+    </div>
+  `
+}
+
+export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggle?: () => void }) {
+  const currentTab = route.value.tab
+  const currentSection = currentSectionForRoute(route.value)
+  const visibleSurfaces = DASHBOARD_SURFACES.filter(surface => surface.hidden !== true)
+
+  return html`
+    <nav class="flex flex-col h-full" aria-label="Dashboard navigation">
+      <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} border-b border-[var(--color-border-default)] px-2 pt-2 pb-2">
+        ${!collapsed ? html`
+          <div class="px-1 leading-none">
+            <div class="font-mono text-[var(--fs-9)] font-bold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-disabled)]">MASC</div>
+            <div class="mt-1 font-mono text-[var(--fs-11)] font-semibold uppercase tracking-[0.14em] text-[var(--color-fg-secondary)]">Cockpit</div>
+          </div>
+        ` : null}
+        <button type="button"
+          class=${`flex size-6 items-center justify-center rounded-[var(--r-0)] border border-transparent text-[var(--color-fg-muted)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+          aria-label=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          onClick=${onToggle}
+          title=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          ${collapsed ? html`<${ChevronRight} size=${14} />` : html`<${ChevronLeft} size=${14} />`}
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-2 py-2">
+        ${!collapsed ? html`
+          <div class="px-1 pb-1.5 font-mono text-[var(--fs-9)] font-bold uppercase tracking-[0.2em] text-[var(--color-fg-disabled)]">Surfaces</div>
+        ` : null}
+        <div class="flex flex-col gap-1">
+          ${visibleSurfaces.map(surface => {
+            const isSurfaceActive = surface.id === currentTab
+            const sections = visibleSectionItemsForTab(surface.id)
+
+            if (collapsed) {
+              return html`
+                <${RouteLink}
+                  tab=${surface.defaultTab}
+                  params=${surface.defaultParams}
+                  class="flex h-7 w-full items-center justify-center rounded-[var(--r-0)] border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
+                  title=${surface.label}
+                  aria-label=${surface.label}
+                  ariaCurrent=${isSurfaceActive ? 'page' : undefined}
+                >
+                  <span aria-hidden="true"><${SurfaceIcon} icon=${surface.icon} size=${15} /></span>
+                  <span class="sr-only">${surface.label}</span>
+                <//>
+              `
+            }
+
+            return html`
+              <div class="flex flex-col gap-0.5 border-t border-[var(--color-border-divider)] pt-1 first:border-t-0 first:pt-0">
+                <${RouteLink}
+                  tab=${surface.defaultTab}
+                  params=${surface.defaultParams}
+                  class="flex min-h-7 w-full items-center gap-1.5 rounded-[var(--r-0)] border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
+                  ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
+                >
+                  <span class="flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] ${isSurfaceActive ? 'bg-[var(--select-10)] text-[var(--select)]' : 'bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'}" aria-hidden="true">
+                    <${SurfaceIcon} icon=${surface.icon} size=${13} />
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="truncate font-mono text-[var(--fs-11)] font-semibold uppercase leading-4 tracking-[var(--track-caps)] ${isSurfaceActive ? 'text-[var(--select)]' : ''}">${surface.label}</div>
+                  </div>
+                <//>
+
+                ${sections.length > 1 ? html`
+                  <div class="ml-2.5 flex flex-col gap-px border-l border-[var(--color-border-divider)] pl-2.5" role="list">
+                    ${sections.map(item => {
+                      const isSectionActive = isSurfaceActive && currentSection?.id === item.id
+                      return html`
+                        <div role="listitem">
+                          <${RouteLink}
+                            tab=${surface.id}
+                            params=${item.params}
+                            class="block w-full rounded-[var(--r-0)] border px-2 py-0.5 text-left font-mono text-[var(--fs-10)] uppercase leading-5 tracking-[var(--track-sub)] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-primary)]'}"
+                            ariaCurrent=${isSectionActive ? 'page' : undefined}
+                          >
+                            <div class="truncate">${item.label}</div>
+                          <//>
+                        </div>
+                      `
+                    })}
+                  </div>
+                ` : null}
+              </div>
+            `
+          })}
+        </div>
+      </div>
+
+      <div class="shrink-0 border-t border-[var(--color-border-default)] px-2 py-2">
+        <${HealthIndicator} collapsed=${collapsed} />
+      </div>
+    </nav>
+  `
+}
+
+function TabContent() {
+  const tab = route.value.tab
+
+  switch (tab) {
+    case 'overview':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Overview')}>
+          <${LazyOverview} />
+        <//>
+      `
+    case 'monitoring':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Monitor')}>
+          <${LazyStatus} />
+        <//>
+      `
+    case 'workspace':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Workspace')}>
+          <${LazyWork} />
+        <//>
+      `
+    case 'command':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Command')}>
+          <${LazyOperations} />
+        <//>
+      `
+    case 'connectors':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Connectors')}>
+          <${LazyConnectors} />
+        <//>
+      `
+    case 'lab':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Lab')}>
+          <${LazyLabSurface} />
+        <//>
+      `
+    case 'cockpit':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Cockpit')}>
+          <${LazyCockpit} />
+        <//>
+      `
+    case 'code':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Code IDE')}>
+          <${LazyIdeShell} />
+        <//>
+      `
+    case 'logs':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('System Logs')}>
+          <${LazyLogViewer} />
+        <//>
+      `
+    default:
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Overview')}>
+          <${LazyOverview} />
+        <//>
+      `
+  }
+}
+
+/** Pure: build the shareable URL for the current section. Uses
+    window.location as the truth source (the router writes to it
+    already) so we never diverge from what the browser address bar
+    shows. Returns empty string when window is unavailable
+    (SSR/happy-dom without location) so the caller can hide the
+    share affordance gracefully. */
+function currentSectionShareUrl(): string {
+  if (typeof window === 'undefined' || window.location === undefined) {
+    return ''
+  }
+  return window.location.href
+}
+
+/** Pure: derive the navigation trail rendered above the section title.
+    Each crumb is either a clickable ancestor (tab) or the terminal
+    leaf (current section label, non-navigable). Returns a flat array:
+    [] when both tab + section are absent (home / unknown),
+    [tab] when only tab is active (no section drilldown),
+    [tab, section] when the operator has drilled into a per-section view.
+
+    Why this exists: SurfaceLead previously rendered only the leaf
+    label (\"Discord\"). The parent tab (\"Connectors\") was implied by
+    the left nav but not surfaced in the content area — a newcomer
+    opening a deep link had to infer the hierarchy. Every modern web
+    app (GitHub / Linear / Notion / Vercel) renders the trail above
+    the page title for exactly this reason. */
+interface BreadcrumbCrumb {
+  label: string
+  navigableTab: TabId | null
+}
+function deriveBreadcrumbTrail(
+  tabLabel: string | null,
+  sectionLabel: string | null,
+  tabId: TabId | null,
+): BreadcrumbCrumb[] {
+  if (tabLabel === null && sectionLabel === null) return []
+  if (sectionLabel === null) {
+    return tabLabel !== null ? [{ label: tabLabel, navigableTab: null }] : []
+  }
+  if (tabLabel === null) {
+    return [{ label: sectionLabel, navigableTab: null }]
+  }
+  // Drilldown view — tab becomes a clickable parent crumb, section is
+  // the non-navigable leaf (you're already there, clicking it would
+  // be a no-op).
+  return [
+    { label: tabLabel, navigableTab: tabId },
+    { label: sectionLabel, navigableTab: null },
+  ]
+}
+
+function navigateCrumb(event: MouseEvent, tab: TabId): void {
+  if (
+    event.defaultPrevented
+    || event.button !== 0
+    || event.metaKey
+    || event.ctrlKey
+    || event.shiftKey
+    || event.altKey
+  ) {
+    return
+  }
+  event.preventDefault()
+  navigate(tab)
+}
+
+function breadcrumbItemsForTrail(trail: BreadcrumbCrumb[]): BreadcrumbItem[] {
+  return trail.map((crumb, index) => {
+    const current = index === trail.length - 1
+    if (crumb.navigableTab !== null && !current) {
+      return {
+        label: crumb.label,
+        href: hashForRoute(crumb.navigableTab),
+        onClick: (event: MouseEvent) => navigateCrumb(event, crumb.navigableTab!),
+      }
+    }
+    return { label: crumb.label, current }
+  })
+}
+
+
+/** Pure: compose the browser tab title from the current surface +
+    section. Reference: every polished SPA (GitHub / Linear / Notion /
+    Vercel) sets document.title so operators with multiple tabs open
+    can distinguish them from the browser's tab list. Without this,
+    4 dashboard tabs all say \"MASC Dashboard\" — users lose track.
+
+    Format: \"MASC · {section}\" when drilled into a section,
+            \"MASC · {tab}\" when on a tab default,
+            \"MASC Dashboard\" on home / unknown (original fallback). */
+function composeDocumentTitle(
+  tabLabel: string | null,
+  sectionLabel: string | null,
+): string {
+  const leaf = sectionLabel ?? tabLabel
+  if (leaf === null || leaf.trim() === '') return 'MASC Dashboard'
+  return `MASC · ${leaf}`
+}
+
+function useSurfaceDocumentTitle(): void {
+  const currentTab = route.value.tab
+  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
+  const currentSection = currentSectionForRoute(route.value)
+
+  useEffect(() => {
+    document.title = composeDocumentTitle(currentView?.label ?? null, currentSection?.label ?? null)
+  }, [currentView?.label, currentSection?.label])
+}
+
+function SurfaceLead() {
+  const currentTab = route.value.tab
+  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
+  const currentSection = currentSectionForRoute(route.value)
+  const soloUrl = widgetSoloUrlForRoute(route.value)
+
+  const description = currentSection?.description ?? currentView?.description ?? null
+  const title = currentSection?.label ?? currentView?.label ?? 'Home'
+  const shareUrl = currentSectionShareUrl()
+  // Only surface a trail when the operator has drilled into a section —
+  // otherwise the crumb would be \"Connectors\" right above a \"Connectors\"
+  // title, pure duplication.
+  const trail = currentSection !== null
+    ? deriveBreadcrumbTrail(currentView?.label ?? null, currentSection.label, currentTab)
+    : []
+
+  return html`
+    <div class="mb-3 flex flex-col gap-1.5">
+      ${trail.length > 0
+        ? html`<${Breadcrumb}
+            items=${breadcrumbItemsForTrail(trail)}
+            ariaLabel="Breadcrumb"
+            testId="surface-breadcrumb"
+            dataSurfaceBreadcrumb=${true}
+          />`
+        : null}
+      <div class="flex items-center gap-2">
+        <h2 class="text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)] leading-tight">
+          ${title}
+        </h2>
+        ${shareUrl !== ''
+          ? html`<${CopyIdButton}
+              value=${shareUrl}
+              label=${`Section link (${title})`}
+              ariaLabel="Copy current section URL"
+              size=${14}
+            />`
+          : null}
+        <a
+          href=${soloUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          class=${`inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+          title="Open this surface in a solo view"
+          aria-label="Open this surface in a solo view"
+          data-testid="dashboard-widget-solo-link"
+        >
+          <${ExternalLink} size=${14} aria-hidden="true" />
+        </a>
+      </div>
+      ${description ? html`<p class="m-0 max-w-[72rem] text-xs leading-[var(--lh-body)] text-[var(--color-fg-muted)]">${description}</p>` : null}
+    </div>
+  `
+}
+
+export function DashboardMain() {
+  useSurfaceDocumentTitle()
+
+  if (dashboardLoading.value && !connected.value && !namespaceTruthInitializing.value) {
+    return html`<${LoadingState}>Loading dashboard...<//>`
+  }
+
+  const routeLabel = dashboardRouteBoundaryKey(route.value)
+  const soloMode = isWidgetSoloRoute(route.value)
+  const immersiveSurface = route.value.tab === 'code'
+  const warmingBanner = namespaceTruthInitializing.value ? html`
+    <div class=${immersiveSurface
+      ? 'shrink-0 border-b border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'
+      : 'mb-3 shrink-0 rounded-[var(--r-2)] border border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'}>
+      Server data warming; this view will refresh automatically.
+    </div>
+  ` : null
+
+  if (soloMode) {
+    const soloBodyClass = route.value.tab === 'code'
+      ? 'min-h-0 flex-1 overflow-hidden'
+      : 'min-h-0 flex-1 overflow-y-auto p-3 max-[520px]:p-2'
+
+    return html`
+      <div class="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] bg-[var(--color-bg-page)]">
+        <${WidgetSoloBar} routeState=${route.value} />
+        <${ObservatoryFilterBar} />
+        <div class=${soloBodyClass}>
+          ${warmingBanner}
+          <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
+            <div class=${route.value.tab === 'code' ? 'h-full min-h-0 overflow-hidden' : 'animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both'}>
+              <${TabContent} />
+            </div>
+          <//>
+        </div>
+      </div>
+    `
+  }
+
+  if (immersiveSurface) {
+    return html`
+      <div class=${`animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both h-full min-h-0 overflow-hidden ${namespaceTruthInitializing.value ? 'grid grid-rows-[auto_minmax(0,1fr)]' : ''}`}>
+        ${warmingBanner}
+        <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
+          <div class="h-full min-h-0 overflow-hidden">
+            <${TabContent} />
+          </div>
+        <//>
+      </div>
+    `
+  }
+
+  return html`
+    ${warmingBanner}
+    <${SurfaceLead} />
+    <${ObservatoryFilterBar} />
+    <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
+      <div class="animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both">
+        <${TabContent} />
+      </div>
+    <//>
+    <${ScrollToTopButton} />
+  `
+}

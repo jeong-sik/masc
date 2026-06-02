@@ -1,0 +1,3 @@
+# HELP some_other_counter Unrelated metric
+# TYPE some_other_counter counter
+some_other_counter 42

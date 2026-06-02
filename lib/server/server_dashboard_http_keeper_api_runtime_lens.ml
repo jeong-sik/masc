@@ -1,0 +1,381 @@
+open Server_dashboard_http_keeper_api_types
+open Server_dashboard_http_keeper_runtime_manifest_scan
+open Server_dashboard_http_keeper_runtime_lens_swimlane
+
+module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
+
+let memory_summary_json = Scan_summary.memory_summary_json
+let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
+let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
+
+let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
+  let ( tool_decision
+      , lane_decision
+      , requested_tools
+      , required_tools
+      , materialized_tools
+      , missing_required_tools )
+    =
+    Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_tool_surface_parts
+      scan
+  in
+  let keeper_turn_id = selected_keeper_turn_id ?turn_id scan in
+  let terminal_event_present =
+    terminal_event_present_for_turn ?keeper_turn_id scan
+  in
+  let swimlane_scan =
+    match (turn_id, keeper_turn_id) with
+    | Some _, _ | _, None -> scan
+    | None, Some selected_turn_id ->
+      read_runtime_manifest_scan ~config ~keeper_name ~trace_id
+        ~turn_id:selected_turn_id ~limit:scan.limit ()
+  in
+  let claim_scope =
+    Server_dashboard_http_keeper_runtime_lens_summaries.claim_scope_summary_json
+      ~keeper_name
+      ~trace_id
+      ?turn_id
+      ()
+  in
+  let config_drift =
+    Server_dashboard_http_keeper_runtime_lens_summaries.config_drift_summary_json
+      ~config
+      ~keeper_name
+  in
+  let runtime_proof =
+    Server_dashboard_http_keeper_runtime_lens_proof.runtime_lens_runtime_proof_json
+      ~keeper_name
+      ~trace_id
+      ?turn_id
+      ()
+  in
+  let gaps =
+    Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_gaps
+      ~terminal_event_present
+      ~claim_scope
+      ~config_drift
+      scan
+  in
+  let has_provider_lane =
+    runtime_manifest_scan_event_count scan
+      Keeper_runtime_manifest.Provider_lane_resolved
+    > 0
+  in
+  let provider_lane_status =
+    Option.map
+      (fun row -> row.Keeper_runtime_manifest.status)
+      scan.latest_provider_lane_row
+  in
+  let tool_runtime_status =
+    if missing_required_tools <> [] then "missing_required_tool"
+    else if
+      runtime_lens_event_count scan
+        Keeper_runtime_manifest.Tool_surface_selected
+      > 0
+    then "selected"
+    else "empty"
+  in
+  let tool_lineage_stage_counts () =
+    match scan.latest_tool_lineage_decision with
+    | None -> []
+    | Some decision ->
+      let stages =
+        [ "searched"
+        ; "visible"
+        ; "materialized"
+        ; "emitted"
+        ; "executed"
+        ; "verified"
+        ]
+      in
+      List.filter_map
+        (fun stage ->
+           match Json_util.assoc_member_opt stage decision with
+           | Some (`Assoc _ as obj) -> (
+             match Json_util.assoc_member_opt "count" obj with
+             | Some (`Int count) when count > 0 -> Some (stage, count)
+             | _ -> None)
+           | _ -> None)
+        stages
+  in
+  `Assoc
+    [
+      ( "turn_clock",
+        `Assoc
+          [
+            ("trace_id", `String trace_id);
+            ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
+            ("max_oas_turn_count", Json_util.int_opt_to_json scan.max_oas_turn_count);
+            ("terminal_event_present", `Bool terminal_event_present);
+            ( "terminal_event",
+              if terminal_event_present then `String "turn_finished" else `Null );
+            ("manifest_total_rows", `Int scan.total_rows);
+          ] );
+      ( "axes",
+        `Assoc
+          [
+            ( "lifecycle",
+              `Assoc
+                [
+                  ( "turn_started_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Turn_started) );
+                  ( "phase_gate_decided_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Phase_gate_decided) );
+                  ( "pre_dispatch_blocked_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Pre_dispatch_blocked) );
+                  ( "receipt_appended_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Receipt_appended) );
+                  ( "turn_finished_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Turn_finished) );
+                  ( "terminal_status",
+                    `String
+                      (runtime_lens_keeper_terminal_status
+                         ~terminal_event_present
+                         scan) );
+                ] );
+            ( "tool_surface",
+              `Assoc
+                [
+                  ("requested_tools", Json_util.json_string_list requested_tools);
+                  ("required_tools", Json_util.json_string_list required_tools);
+                  ("materialized_tools", Json_util.json_string_list materialized_tools);
+                  ( "missing_required_tools",
+                    Json_util.json_string_list missing_required_tools );
+                  ( "turn_lane",
+                    Json_util.string_opt_to_json
+                      (Json_util.get_string tool_decision "turn_lane") );
+                  ( "tool_surface_class",
+                    Json_util.string_opt_to_json
+                      (Json_util.get_string tool_decision
+                         "tool_surface_class") );
+                  ( "tool_requirement",
+                    Json_util.string_opt_to_json
+                      (first_string_opt
+                         [
+                           Json_util.get_string tool_decision
+                             "tool_requirement";
+                           Json_util.get_string lane_decision
+                             "tool_requirement";
+                         ]) );
+                  ( "visible_tool_count",
+                    Json_util.int_opt_to_json
+                      (first_int_opt
+                         [
+                           Json_util.get_int tool_decision "visible_tool_count";
+                           Json_util.get_int lane_decision "effective_tool_count";
+                         ]) );
+                  ( "tool_gate_enabled",
+                    Json_util.bool_opt_to_json
+                      (Json_util.get_bool tool_decision "tool_gate_enabled") );
+                  ( "tool_surface_fallback_used",
+                    Json_util.bool_opt_to_json
+                      (Json_util.get_bool tool_decision "tool_surface_fallback_used") );
+                  ("terminal_status", `String tool_runtime_status);
+                ] );
+            ( "provider_lane",
+              `Assoc
+                [
+                  ("resolved", `Bool has_provider_lane);
+                  ("status", Json_util.string_opt_to_json provider_lane_status);
+                  ( "resolved_lane",
+                    Json_util.string_opt_to_json
+                      (Json_util.get_string lane_decision "resolved_lane")
+                  );
+                  ( "effective_tool_count",
+                    Json_util.int_opt_to_json
+                      (Json_util.get_int lane_decision "effective_tool_count") );
+                  ( "runtime_mcp_policy_present",
+                    Json_util.bool_opt_to_json
+                      (Json_util.get_bool lane_decision "runtime_mcp_policy_present") );
+                  ("required_tools", Json_util.json_string_list required_tools);
+                  ("materialized_tools", Json_util.json_string_list materialized_tools);
+                  ( "missing_required_tools",
+                    Json_util.json_string_list missing_required_tools );
+                ] );
+            ( "tool_lineage",
+              `Assoc
+                [
+                  ( "recorded",
+                    `Bool (Option.is_some scan.latest_tool_lineage_decision)
+                  );
+                  ( "decision",
+                    match scan.latest_tool_lineage_decision with
+                    | Some value -> value
+                    | None -> `Null );
+                ] );
+            ( "payload_role",
+              `Assoc
+                (Hashtbl.fold
+                   (fun role count acc -> (role, `Int count) :: acc)
+                   scan.payload_role_counts []) );
+            ( "source_clock",
+              `Assoc
+                (Hashtbl.fold
+                   (fun clock count acc -> (clock, `Int count) :: acc)
+                   scan.source_clock_counts []) );
+            ( "provider_attempt",
+              `Assoc
+                [
+                  ("started_count", `Int scan.provider_started_count);
+                  ("finished_count", `Int scan.provider_finished_count);
+                  ( "terminal_status",
+                    Json_util.string_opt_to_json
+                      (Option.map
+                         (fun row -> row.Keeper_runtime_manifest.status)
+                         scan.provider_terminal_row) );
+                ] );
+            ("claim_scope", claim_scope);
+            ("config_drift", config_drift);
+            ("runtime_proof", runtime_proof);
+            ( "context",
+              `Assoc
+                [
+                  ("context_injected_count", `Int scan.context_injected_count);
+                  ( "context_compacted_event_count",
+                    `Int scan.context_compacted_event_count );
+                  ( "event_bus_correlated_count",
+                    `Int scan.event_bus_count );
+                  ( "context_compact_started_count",
+                    `Int scan.context_compact_started_count );
+                  ( "context_compacted_count",
+                    `Int scan.context_compacted_count );
+                  ( "checkpoint_loaded_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Checkpoint_loaded) );
+                  ( "checkpoint_saved_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Checkpoint_saved) );
+                  ( "state_snapshot_sidecar_saved_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.State_snapshot_sidecar_saved)
+                  );
+                  ( "working_state_sidecar_saved_count",
+                    `Int
+                      (runtime_lens_event_count scan
+                         Keeper_runtime_manifest.Working_state_sidecar_saved)
+                  );
+                  ( "active_open_loop_count",
+                    `Int
+                      (Option.value scan.active_open_loop_count ~default:0) );
+                  ( "last_compaction",
+                    match scan.last_compaction with
+                    | Some value -> value
+                    | None -> `Null );
+                ] );
+            ("memory", memory_summary_json scan);
+          ] );
+      ( "swimlanes",
+        `Assoc
+          [
+            ( "keeper",
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"keeper"
+                ~label:"Keeper"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Turn_started;
+                    Keeper_runtime_manifest.Phase_gate_decided;
+                    Keeper_runtime_manifest.Pre_dispatch_blocked;
+                    Keeper_runtime_manifest.Receipt_appended;
+                    Keeper_runtime_manifest.Turn_finished;
+                  ]
+                ~terminal_status:
+                  (runtime_lens_keeper_terminal_status ~terminal_event_present scan)
+                ~synthetic_events:[]
+            );
+            ( "masc_policy_runtime",
+              runtime_lens_swimlane_json swimlane_scan gaps
+                ~lane:"masc_policy_runtime" ~label:"MASC Runtime"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Runtime_routed;
+                    Keeper_runtime_manifest.Provider_lane_resolved;
+                  ]
+                ~terminal_status:
+                  (Option.value provider_lane_status
+                     ~default:
+                       (if has_provider_lane then "resolved" else "empty"))
+                ~synthetic_events:[]
+            );
+            ( "oas_agent",
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"oas_agent"
+                ~label:"OAS"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Checkpoint_loaded;
+                    Keeper_runtime_manifest.State_snapshot_sidecar_saved;
+                    Keeper_runtime_manifest.Working_state_sidecar_saved;
+                    Keeper_runtime_manifest.Checkpoint_saved;
+                  ]
+                ~terminal_status:
+                  (if
+                     runtime_lens_event_count scan
+                       Keeper_runtime_manifest.Checkpoint_saved
+                     > 0
+                   then "checkpoint_saved"
+                   else if
+                     runtime_lens_event_count scan
+                       Keeper_runtime_manifest.Checkpoint_loaded
+                     > 0
+                   then "checkpoint_loaded"
+                   else "empty")
+                ~synthetic_events:[] );
+            ( "provider",
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"provider"
+                ~label:"Provider"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Provider_attempt_started;
+                    Keeper_runtime_manifest.Provider_attempt_finished;
+                  ]
+                ~terminal_status:(runtime_lens_provider_terminal_status scan)
+                ~synthetic_events:[]
+            );
+            ( "tool_runtime",
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"tool_runtime"
+                ~label:"Tool Runtime"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Tool_surface_selected;
+                    Keeper_runtime_manifest.Tool_lineage_recorded;
+                  ]
+                ~synthetic_events:(tool_lineage_stage_counts ())
+                ~terminal_status:tool_runtime_status );
+            ( "memory_context",
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"memory_context"
+                ~label:"Memory/Context/Checkpoint"
+                ~events:
+                  [
+                    Keeper_runtime_manifest.Context_injected;
+                    Keeper_runtime_manifest.Context_compacted;
+                    Keeper_runtime_manifest.Event_bus_correlated;
+                    Keeper_runtime_manifest.Memory_injected;
+                    Keeper_runtime_manifest.Memory_flushed;
+                    Keeper_runtime_manifest.Checkpoint_loaded;
+                    Keeper_runtime_manifest.Checkpoint_saved;
+                    Keeper_runtime_manifest.State_snapshot_sidecar_saved;
+                    Keeper_runtime_manifest.Working_state_sidecar_saved;
+                  ]
+                ~terminal_status:(runtime_lens_memory_terminal_status scan)
+                ~synthetic_events:[] );
+          ] );
+      ( "clock_edges",
+        Server_dashboard_http_keeper_runtime_lens_clock_edges.runtime_lens_clock_edges_json
+          scan );
+      ( "clock_groups",
+        Server_dashboard_http_keeper_runtime_lens_clock_groups.runtime_lens_clock_groups_json
+          scan );
+      ("gaps", `List (List.map runtime_lens_gap_json gaps));
+    ]

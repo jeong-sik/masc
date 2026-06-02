@@ -1,0 +1,264 @@
+(** Keeper_unified_turn — Single entry point for keeper turns via OAS Agent.run().
+
+    Replaces the 3-path dispatcher (social/scheduled-autonomous/autonomy) with a unified
+    observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
+    The model decides what to do; code only enforces safety and observes results.
+
+    Error classification predicates are in [Keeper_error_classify].
+
+    @since Unified Keeper Loop *)
+
+type provider_timeout_budget =
+  { effective_timeout_sec : float
+  ; adaptive_timeout_sec : float
+  ; keeper_turn_timeout_sec : float
+  ; remaining_turn_budget_sec : float
+  ; estimated_input_tokens : int
+  ; max_turns : int
+  ; source : string
+  }
+
+val resolve_bounded_provider_timeout_budget_with_turn_budget
+  :  allow_wall_clock_retry_budget:bool
+  -> is_retry:bool
+  -> estimated_input_tokens:int
+  -> max_turns:int
+  -> remaining_turn_budget_s:float
+  -> provider_timeout_budget option
+(** See [Keeper_turn_runtime_budget] for first-attempt retry reserve and
+    retry-attempt budget semantics. *)
+
+(** Per-attempt watchdog used around the OAS call. It fires before the
+    enclosing keeper-turn wall-clock timeout so recoverable provider stalls can
+    still rotate through the degraded runtime path. *)
+val attempt_watchdog_timeout_sec
+  :  remaining_turn_budget_s:float
+  -> provider_timeout_budget
+  -> float
+
+val allow_wall_clock_retry_budget_for_attempt
+  :  is_retry:bool
+  -> degraded_rotation_first_attempt:bool
+  -> attempt:int
+  -> attempted_runtimes:string list
+  -> bool
+
+val provider_retry_budget_available_for_turn
+  :  allow_wall_clock_retry_budget:bool
+  -> is_retry:bool
+  -> estimated_input_tokens:int
+  -> max_turns:int
+  -> remaining_turn_budget_s:float
+  -> bool
+
+val degraded_retry_slot_phase_budget_sec : float
+val degraded_retry_slot_phase_available : time_spent_in_turn_s:float -> bool
+
+(** Reclassify a structural OAS timeout only when the current attempt
+    actually dispatched with an provider timeout budget. This prevents a
+    pre-retry turn-budget exhaustion from borrowing a stale previous
+    attempt budget and incorrectly rotating runtimes. *)
+val reclassify_provider_timeout_for_attempt
+  :  provider_timeout_budget:provider_timeout_budget option
+  -> Agent_sdk.Error.sdk_error
+  -> Agent_sdk.Error.sdk_error
+
+type degraded_retry_budget_decision =
+  | No_degraded_retry
+  | Degraded_retry_slot_phase_exhausted of Keeper_error_classify.degraded_retry
+  | Degraded_retry_budget_exhausted of Keeper_error_classify.degraded_retry
+  | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
+
+val next_fail_open_runtime_for_turn_with_budget
+  :  base_runtime:string
+  -> effective_runtime:string
+  -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
+  -> attempted_runtimes:string list
+  -> estimated_input_tokens:int
+  -> max_turns:int
+  -> ?time_spent_in_turn_s:float
+  -> remaining_turn_budget_s:float
+  -> Agent_sdk.Error.sdk_error
+  -> degraded_retry_budget_decision
+
+(** Turn-local overflow hint published by the OAS event bus before a
+    proactive compaction attempt. Exposed for regression tests. *)
+type turn_event_bus_overflow =
+  { estimated_tokens : int
+  ; limit_tokens : int
+  }
+
+type turn_event_bus_compaction =
+  { before_tokens : int
+  ; after_tokens : int
+  ; tokens_freed : int
+  ; phase_hint : string
+  }
+
+(** Summary of event-bus signals observed during a single keeper turn.
+    Exposed for regression tests. *)
+type turn_event_bus_summary =
+  { correlation_id : string option
+  ; run_id : string option
+  ; caused_by : string option
+  ; event_count : int
+  ; payload_kinds : string list
+  ; overflow_imminent : turn_event_bus_overflow option
+  ; context_compact_started_count : int
+  ; context_compacted_count : int
+  ; last_compaction : turn_event_bus_compaction option
+  }
+
+(** Fold the drained OAS event-bus events for a single keeper turn into
+    the signals MASC currently consumes. *)
+val summarize_turn_event_bus : Agent_sdk.Event_bus.event list -> turn_event_bus_summary
+
+(** Turn-local tool-event pairing state used to detect event-bus integrity
+    failures before side-effect retry logic falls back to unknown input.
+    Exposed for targeted tests. *)
+type turn_tool_event_tracker
+
+val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
+
+val record_turn_tool_events
+  :  ?has_mutating_side_effect_with_input:(tool_name:string -> input:Yojson.Safe.t -> bool)
+  -> keeper_name:string
+  -> turn_tool_event_tracker
+  -> Agent_sdk.Event_bus.event list
+  -> unit
+
+val turn_tool_event_integrity_error
+  :  turn_tool_event_tracker
+  -> Agent_sdk.Error.sdk_error option
+
+val committed_mutating_tools_from_events : turn_tool_event_tracker -> string list
+
+(** Build the keeper overflow event from either a drained event-bus
+    signal or the structured OAS error fallback. Exposed for tests. *)
+val context_overflow_event_of_error
+  :  fallback_tokens:int
+  -> ?turn_event_bus:turn_event_bus_summary
+  -> Agent_sdk.Error.sdk_error
+  -> Keeper_state_machine.event
+
+(** Resolve the initial keeper turn context budget from the keeper's routed
+    runtime, so lifecycle context math matches the provider that will receive
+    the first request. Exposed for regression tests. *)
+val resolved_max_context_for_turn : meta:Keeper_meta_contract.keeper_meta -> int
+
+(** Persist paused/resumed state before mutating the live registry/phase.
+    Returns [Error] when disk sync fails so callers can surface the failure
+    instead of silently diverging runtime vs persisted state. *)
+val sync_keeper_paused_state
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> paused:bool
+  -> (Keeper_meta_contract.keeper_meta, string) result
+
+(** Required-tool contract failures are persistent keeper/provider contract
+    failures, not transient provider blips. Repeated occurrences should pause
+    the keeper before the generic supervisor crash/restart loop re-enters the
+    same prompt and model family. Exposed for regression tests. *)
+val should_auto_pause_required_tool_contract_violation
+  :  paused:bool
+  -> consecutive_failures:int
+  -> Agent_sdk.Error.sdk_error
+  -> bool
+
+(** Ensure local-provider discovery is refreshed before a turn when the
+    selected labels depend on runtime discovery. Exposed for targeted tests. *)
+val ensure_local_discovery_ready
+  :  ?refresh:(string list -> bool)
+  -> string list
+  -> (unit, string) result
+
+(* runtime→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
+   (Keeper_turn_liveness 에서 적출됨 — 단일 runtime 에서 죽은 코드). *)
+
+(** Typed phase-gate output for the first turn pipeline boundary.
+    [run_keeper_cycle] converts this record into the manifest
+    [Phase_gate_decided] row and then dispatches the matching terminal or
+    runtime-routing branch. *)
+type turn_plan_status =
+  | Turn_plan_dispatch
+  | Turn_plan_skipped
+  | Turn_plan_cancelled
+  | Turn_plan_error
+
+type turn_plan =
+  { turn_plan_keeper_turn_id : int
+  ; turn_plan_phase : string option
+  ; turn_plan_status : turn_plan_status
+  ; turn_plan_executable : bool
+  ; turn_plan_reason : string
+  ; turn_plan_terminal_reason_code : string option
+  }
+
+val decide_turn_plan_at_phase_gate
+  :  keeper_turn_id:int
+  -> supervisor_stop_at_entry:bool
+  -> Keeper_state_machine.phase option
+  -> turn_plan
+
+val turn_plan_manifest_status : turn_plan -> string
+val turn_plan_manifest_decision : turn_plan -> Yojson.Safe.t
+
+(** Resolve the next runtime to try after an auto-recoverable failure.
+    Uses the current effective runtime, the turn tool requirement, and
+    the default degraded rotation candidate, then suppresses suggestions
+    that would loop back to a runtime already attempted during the current
+    turn. Exposed for targeted tests. *)
+val next_fail_open_runtime_for_turn
+  :  base_runtime:string
+  -> effective_runtime:string
+  -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
+  -> attempted_runtimes:string list
+  -> Agent_sdk.Error.sdk_error
+  -> Keeper_error_classify.degraded_retry option
+
+(** Record the streaming-cancel observation shared by the Eio.Cancel handler.
+    Exposed so tests can pin the supervisor [fiber_stop] branch without forcing
+    a live provider cancellation. *)
+val record_streaming_cancelled_observation
+  :  config:Workspace.config
+  -> run_meta:Keeper_meta_contract.keeper_meta
+  -> run_generation:int
+  -> runtime_id:string
+  -> keeper_turn_id:int
+  -> unit
+  -> unit
+
+val run_keeper_cycle
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> observation:Keeper_world_observation.world_observation
+  -> generation:int
+  -> ?channel:Keeper_world_observation.keeper_cycle_channel
+  -> ?semaphore_wait_ms:int
+  -> ?turn_slot_control:Keeper_turn_slot.keeper_turn_slot_control
+  -> ?shared_context:Agent_sdk.Context.t
+  -> unit
+  -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
+
+(** Run a unified keeper turn.
+
+    1. Builds unified prompt from meta + observation
+    2. Calls [Keeper_agent_run.run_turn] with keeper tools and hooks
+    3. Observes tool history from result to update metrics
+    4. Returns updated keeper_meta
+
+    @param config Workspace configuration
+    @param meta Current keeper metadata
+    @param observation World state snapshot
+    @param generation Current generation counter *)
+
+val bounded_provider_timeout_for_turn_budget
+  :  estimated_input_tokens:int
+  -> remaining_turn_budget_s:float
+  -> float option
+
+val bounded_provider_timeout_for_turn_budget_with_turn_budget
+  :  estimated_input_tokens:int
+  -> max_turns:int
+  -> remaining_turn_budget_s:float
+  -> float option

@@ -1,0 +1,15 @@
+(** Keeper_turn_lifecycle — keeper shutdown handlers.
+
+    Extracted from keeper_turn.ml. *)
+
+type tool_result = Keeper_types_profile.tool_result
+
+(** Handle the [masc_keeper_down] MCP tool call: stop keepalive,
+    optionally remove meta and/or session directory, broadcast
+    Operator_pause to the registry. *)
+val handle_keeper_down :
+  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
+
+(** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
+val handle_keeper_down_config :
+  config:Workspace.config -> Yojson.Safe.t -> tool_result

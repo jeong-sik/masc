@@ -1,0 +1,49 @@
+(** Boot-time audit for keeper egress policy file placement (Leak 11).
+
+    Inspects the file system without writes; classifies each keeper's
+    [egress.json] location.  Boot hooks, tests, and ops tooling
+    consume the structured results to decide on logging, alerting,
+    or repair. *)
+
+type audit_status =
+  | Ok_present
+  | Missing_at_expected of { expected_path : string }
+  | Stale_orphan of { expected_path : string; orphan_path : string }
+
+type result = {
+  agent_name : string;
+  keeper_name : string;
+  sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile;
+  status : audit_status;
+}
+
+val audit_one :
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> result
+(** Audit a single keeper's egress policy file location. *)
+
+val audit_all :
+  config:Workspace.config ->
+  metas:Keeper_meta_contract.keeper_meta list ->
+  result list
+(** Audit every keeper meta supplied; pure mapping over [audit_one]. *)
+
+val host_direct_egress_path :
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> string
+(** Pre-Leak-11 host-direct location: [playground/<name>/egress.json].
+    Exposed so boot hooks and tests can construct the same path the
+    audit uses for [Stale_orphan] detection. *)
+
+val format_log_line : result -> string
+(** Grep-friendly one-line summary tagged
+    [[egress_audit:ok|missing|stale_orphan]]. *)
+
+val format_missing_summary_line : result list -> string option
+(** Single WARN-line summary for active missing policies. Keeps boot logs
+    bounded while per-keeper metrics still preserve cardinality. *)
+
+val inactive_missing_reason : Keeper_meta_contract.keeper_meta -> string option
+(** [Some reason] when a missing egress policy should not page operators
+    because the keeper is intentionally inactive. *)
+
+val partition : result list -> result list * result list * result list
+(** Split into [(ok, missing, stale_orphan)] in input order. *)

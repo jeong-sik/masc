@@ -6,12 +6,14 @@
     single-run point estimate is noise (Bjarnason/Silva/Monperrus,
     arXiv 2602.07150, 2026-03; pp figures unverified — used as motivation).
 
-    Pure stdlib: this module deliberately has NO dependency on the rest of
-    [masc_mcp] (no cascade / runtime / OAS). It models the statistics; the
-    N-run execution driver and the wiring into {!Eval_harness} reporting and
-    {!Eval_gate} thresholds are separate (and currently blocked on the
-    cascade->Runtime migration leaving the monolith green). Keeping the core
-    standalone lets it be verified in isolation today.
+    Stdlib-only statistics core: this module deliberately has NO dependency
+    on the rest of [masc_mcp] (no cascade / runtime / OAS). The JSON helper
+    functions expose [Yojson.Safe.t] and require yojson, but the computations
+    themselves are plain stdlib. It models the statistics; the N-run execution
+    driver and the wiring into {!Eval_harness} reporting and {!Eval_gate}
+    thresholds are separate (and currently blocked on the cascade->Runtime
+    migration leaving the monolith green). Keeping the core standalone lets it
+    be verified in isolation today.
 
     Design: illegal states are unrepresentable — a band cannot be built from
     fewer than 2 score samples (variance undefined) or 0 trials, so the

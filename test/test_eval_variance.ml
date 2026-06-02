@@ -1,6 +1,7 @@
 (* Deterministic tests for Eval_variance (task-628 / M1 run-variance spine).
    Pure statistics over fixed inputs — no I/O, no provider, fully reproducible.
-   Runnable as a standalone executable; exits non-zero on the first failure. *)
+   Runnable as a standalone executable; accumulates failures and exits non-zero
+   at the end. *)
 
 module Eval_variance = Masc_mcp.Eval_variance
 
@@ -14,6 +15,9 @@ let check name cond =
 
 let approx ?(eps = 1e-6) a b = Float.abs (a -. b) <= eps
 
+let finite x =
+  match classify_float x with FP_nan | FP_infinite -> false | _ -> true
+
 let some_band = function Some b -> b | None -> failwith "expected Some band"
 
 let () =
@@ -24,6 +28,12 @@ let () =
     (approx ~eps:1e-3 (Eval_variance.z_for_confidence 0.90) 1.644854);
   check "z@0.99 ~ 2.57583"
     (approx ~eps:1e-3 (Eval_variance.z_for_confidence 0.99) 2.575829);
+  check "NaN confidence sanitizes to finite z"
+    (finite (Eval_variance.z_for_confidence nan));
+  check "+Inf confidence clamps to finite z"
+    (finite (Eval_variance.z_for_confidence infinity));
+  check "-Inf confidence clamps to finite z"
+    (finite (Eval_variance.z_for_confidence neg_infinity));
 
   print_endline "band_of_scores";
   check "empty -> None" (Eval_variance.band_of_scores [] = None);

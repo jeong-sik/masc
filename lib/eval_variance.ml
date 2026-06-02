@@ -50,7 +50,11 @@ let probit p =
 (* Keep a confidence level strictly inside (0,1) so probit is finite. *)
 let clamp_confidence c =
   let eps = 1e-9 in
-  if c < eps then eps else if c > 1.0 -. eps then 1.0 -. eps else c
+  match classify_float c with
+  | FP_nan -> 0.95
+  | FP_infinite -> if c < 0.0 then eps else 1.0 -. eps
+  | FP_normal | FP_subnormal | FP_zero ->
+      if c < eps then eps else if c > 1.0 -. eps then 1.0 -. eps else c
 
 let z_for_confidence c =
   let c = clamp_confidence c in
@@ -65,7 +69,11 @@ let band_of_scores ?(confidence = 0.95) (scores : float list) :
       let nf = float_of_int n in
       let mean = List.fold_left ( +. ) 0.0 scores /. nf in
       let ss =
-        List.fold_left (fun acc s -> acc +. ((s -. mean) ** 2.0)) 0.0 scores
+        List.fold_left
+          (fun acc s ->
+            let d = s -. mean in
+            acc +. (d *. d))
+          0.0 scores
       in
       (* sample variance: n-1 denominator (unbiased) *)
       let variance = ss /. (nf -. 1.0) in

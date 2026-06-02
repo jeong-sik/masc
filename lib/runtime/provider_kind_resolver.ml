@@ -1,4 +1,5 @@
-(** Sum-typed provider-kind resolver. See .mli for the contract. *)
+(** Sum-typed provider-kind resolver inside the runtime/OAS boundary.
+    See .mli for the contract. *)
 
 type resolution =
   | Registered of {

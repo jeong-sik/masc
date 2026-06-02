@@ -13,11 +13,11 @@
 #
 #   warn     (--include-internals):
 #     - `Llm_provider.Provider_kind` qualified module access
-#       outside lib/provider_kind_resolver.{ml,mli}
+#       outside lib/runtime/provider_kind_resolver.{ml,mli}
 #       (informational; allowed uses include serialization, type
 #       annotations, local-module aliases, and comments).
 #     - `Llm_provider.Constants` qualified access outside
-#       lib/oas_compat/ and lib/provider_kind_resolver.{ml,mli}
+#       lib/oas_compat/ and lib/runtime/provider_kind_resolver.{ml,mli}
 #       (informational; runtime subsystem currently legitimately
 #       reads default inference params).
 #
@@ -96,16 +96,16 @@ scan_strict_agent_sdk_internal() {
 }
 
 scan_warn_provider_kind_external() {
-  # Provider_kind qualified access outside provider_kind_resolver.
+  # Provider_kind qualified access outside runtime/provider_kind_resolver.
   local matches
   matches="$(rg -n 'Llm_provider\.Provider_kind|\bProvider_kind\.' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
-    | grep -v 'lib/provider_kind_resolver\.' \
+    | grep -v 'lib/runtime/provider_kind_resolver\.' \
     | filter_noise || true)"
   if [[ -n "$matches" ]]; then
     if [[ "$strict_internals" -eq 1 ]]; then
-      echo "FAIL [internals]: Llm_provider.Provider_kind raw access outside provider_kind_resolver" >&2
+      echo "FAIL [internals]: Llm_provider.Provider_kind raw access outside runtime/provider_kind_resolver" >&2
     else
-      echo "WARN [internals]: Llm_provider.Provider_kind raw access outside provider_kind_resolver" >&2
+      echo "WARN [internals]: Llm_provider.Provider_kind raw access outside runtime/provider_kind_resolver" >&2
     fi
     echo "$matches" >&2
     return 1
@@ -114,17 +114,17 @@ scan_warn_provider_kind_external() {
 }
 
 scan_warn_constants_external() {
-  # Llm_provider.Constants outside oas_compat / provider_kind_resolver.
+  # Llm_provider.Constants outside oas_compat / runtime/provider_kind_resolver.
   local matches
   matches="$(rg -n 'Llm_provider\.Constants' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
     | grep -v 'lib/oas_compat/' \
-    | grep -v 'lib/provider_kind_resolver\.' \
+    | grep -v 'lib/runtime/provider_kind_resolver\.' \
     | filter_noise || true)"
   if [[ -n "$matches" ]]; then
     if [[ "$strict_internals" -eq 1 ]]; then
-      echo "FAIL [internals]: Llm_provider.Constants raw access outside oas_compat / provider_kind_resolver" >&2
+      echo "FAIL [internals]: Llm_provider.Constants raw access outside oas_compat / runtime/provider_kind_resolver" >&2
     else
-      echo "WARN [internals]: Llm_provider.Constants raw access outside oas_compat / provider_kind_resolver" >&2
+      echo "WARN [internals]: Llm_provider.Constants raw access outside oas_compat / runtime/provider_kind_resolver" >&2
     fi
     echo "$matches" >&2
     return 1

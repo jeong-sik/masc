@@ -42,19 +42,8 @@ let make_tool_bundle
      instances with a factory.  in_playground/cwd are unknown at
      turn-start, so the factory defers
      [Keeper_sandbox_runner.effective_sandbox_profile] resolution until
-     each tool call site that already knows its [cwd].  The git variant
-     carries a [default_network_override] so resolved runtimes always
-     inherit the host network. *)
+     each tool call site that already knows its [cwd]. *)
   let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
-  let turn_sandbox_factory_git =
-    Some
-      (Keeper_sandbox_factory.create
-         ~default_network_override:Network_inherit
-         ~credential_mounts_enabled:true
-         ~config
-         ~meta
-         ())
-  in
   let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
   (* Build Tool.t for the full universe so BM25 and Tool_op can
      discover tools beyond the active tool_access list.  Progressive disclosure
@@ -117,11 +106,10 @@ let make_tool_bundle
                ~name:td.name
                ~input_schema:td.input_schema
                ~config
-               ~meta
-               ~ctx_snapshot
-               ?turn_sandbox_factory
-               ?turn_sandbox_factory_git
-               ~exec_cache
+	               ~meta
+	               ~ctx_snapshot
+	               ?turn_sandbox_factory
+	               ~exec_cache
                ?search_fn
                ?on_tool_called
                ?clock
@@ -167,11 +155,10 @@ let make_tool_bundle
                  ~name:internal
                  ~input_schema:internal_def.input_schema
                  ~config
-                 ~meta
-                 ~ctx_snapshot
-                 ?turn_sandbox_factory
-                 ?turn_sandbox_factory_git
-                 ~exec_cache
+	                 ~meta
+	                 ~ctx_snapshot
+	                 ?turn_sandbox_factory
+	                 ~exec_cache
                  ?search_fn
                  ?on_tool_called
                  ?clock
@@ -188,12 +175,11 @@ let make_tool_bundle
       Agent_tool_descriptor.public_descriptors
   in
   let bundle =
-    { tools = internal_tools @ alias_tools
-    ; cleanup =
-        (fun () ->
-          Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory;
-          Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory_git)
-    }
+	    { tools = internal_tools @ alias_tools
+	    ; cleanup =
+	        (fun () ->
+	          Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
+	    }
   in
   Prometheus_hotpath.observe
     ~metric:Prometheus_hotpath.metric_oas_make_tool_bundle_sec

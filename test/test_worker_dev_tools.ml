@@ -83,7 +83,6 @@ let registered_repo id local_path : Repo_manager_types.repository =
   ; local_path
   ; aliases = []
   ; default_branch = "main"
-  ; credential_id = ""
   ; keepers = []
   ; status = Repo_manager_types.Active
   ; auto_sync = false
@@ -126,7 +125,7 @@ let with_registered_repo_fixture f =
          match
            Keeper_repo_mapping.save_mapping
              ~base_path
-             { keeper_id; repository_ids; mapped_credential_id = None }
+             { keeper_id; repository_ids }
          with
          | Ok () -> ()
          | Error msg -> Alcotest.fail ("mapping setup failed: " ^ msg)

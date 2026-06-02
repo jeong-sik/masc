@@ -228,4 +228,6 @@ in the meantime.
 
 - `docs/observability/runtime-metrics.md` -- same observability pattern for runtime routing decisions.
 - `docs/observability/goal-loop-observe-metrics.md` -- the boot-time exporter contract that this surface plugs into (`metric_config_credential_archived_starvation_total` is part of the GoalLoop contract presence check).
-- `RFC-0019 Keeper Credential Unification` -- the narrower split-brain reconciliation in PR #15112 sits inside the architecture sketched in RFC-0019 §4.
+- `RFC-0019 Keeper Credential Unification` is withdrawn; this auth metric surface
+  remains scoped to bearer/admin credential aliasing, not repository GitHub
+  identity materialization.

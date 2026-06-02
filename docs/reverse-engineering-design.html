@@ -652,7 +652,7 @@
             <tr><td>Append logs</td><td><code>Jsonl_atomic</code>, <code>Dated_jsonl</code></td><td>In-process mutex serialization; cross-process race protection is not in scope.</td></tr>
             <tr><td>Config root</td><td><code>Config_dir_resolver</code></td><td><code>MASC_CONFIG_DIR</code> wins; checked-in repo config is seed, not active fallback.</td></tr>
             <tr><td>Bearer auth</td><td><code>Auth</code> + <code>Server_auth</code></td><td>Raw tokens live under <code>&lt;base&gt;/.masc/auth</code>; credentials are hashed and role/permission-gated.</td></tr>
-            <tr><td>Keeper GitHub credentials</td><td><code>Credential_materializer</code> + <code>Keeper_host_config_provider</code></td><td>Materialized <code>hosts.yml</code> with <code>oauth_token</code> is required for Docker portability; host keyring-only auth is stale.</td></tr>
+            <tr><td>Repository git</td><td><code>Repo_git</code> + repository routes</td><td>Repository operations run with non-interactive git environment only; repo-manager does not own GitHub identity materialization.</td></tr>
             <tr><td>Metrics</td><td><code>Prometheus</code> + domain metric modules</td><td>In-process metrics endpoint, with some transitional split ownership such as runtime metric names.</td></tr>
           </tbody>
         </table>
@@ -707,11 +707,11 @@
               <td>upsert -> transition -> await verification/approval -> quorum -> completed/rejected</td>
             </tr>
             <tr>
-              <td>Credential / sandbox</td>
-              <td><code>Keeper_sandbox_runtime</code>, <code>Credential_materializer</code></td>
-              <td>repo mapping, host config provider, docker read/execution</td>
-              <td>Auth tokens, <code>GH_CONFIG_DIR</code>, mount specs</td>
-              <td>credential record -> materialize on disk -> Docker-safe mount -> keeper git/gh action</td>
+              <td>Repo sandbox</td>
+              <td><code>Keeper_sandbox_runtime</code>, <code>Keeper_repo_readiness</code></td>
+              <td>repo mapping, sandbox read/execution</td>
+              <td>Auth tokens, repository config</td>
+              <td>repository mapping -> optional clone -> ordinary sandbox execution</td>
             </tr>
           </tbody>
         </table>

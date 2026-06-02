@@ -110,7 +110,6 @@ let seed_single_playground_repo ~config ~(meta : Keeper_meta_contract.keeper_met
   let mapping : Repo_manager_types.keeper_repo_mapping =
     { keeper_id = meta.name
     ; repository_ids = [ "masc-mcp" ]
-    ; mapped_credential_id = None
     }
   in
   (match Keeper_repo_mapping.save_mapping ~base_path:config.Workspace.base_path mapping with

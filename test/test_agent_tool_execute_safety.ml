@@ -400,7 +400,6 @@ let test_tool_execute_rejects_parent_git_repo_path_arg () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -435,7 +434,6 @@ let test_tool_execute_rejects_wrapped_git_repo_path_arg () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -478,7 +476,6 @@ let test_tool_execute_rg_pattern_under_repos_is_not_repo_path () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -508,7 +505,6 @@ let test_tool_execute_rejects_inline_git_work_tree_path_arg () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -543,7 +539,6 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -578,7 +573,6 @@ let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -836,7 +830,6 @@ let test_tool_execute_runtime_error_reports_default_execution_location () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -940,7 +933,6 @@ let test_tool_execute_typed_process_runs_via_shell_ir () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -974,7 +966,6 @@ let test_tool_execute_typed_pipeline_runs_via_shell_ir () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -1017,7 +1008,6 @@ let test_tool_execute_typed_docker_falls_back_to_local_playground () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -1245,8 +1235,7 @@ let test_execute_missing_typed_input_field () =
   let meta = make_docker_meta "missing-typed-input" in
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
-      ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None
+      ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc []) ()
   in
@@ -1315,7 +1304,6 @@ let test_rg_regex_pipe_pattern_via_typed_execute () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -1346,7 +1334,6 @@ let test_rg_literal_pipe_in_pattern () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -1377,7 +1364,6 @@ let test_rg_metachar_not_pipe () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -1404,7 +1390,6 @@ let test_literal_pipe_in_typed_argv () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta

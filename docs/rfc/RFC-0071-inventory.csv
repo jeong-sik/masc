@@ -350,7 +350,7 @@ lib/compaction_trigger/compaction_trigger.ml,60,None,unclassified
 lib/compaction_trigger/compaction_trigger.ml,66,None,unclassified
 lib/compaction_trigger/compaction_trigger.ml,72,None,unclassified
 lib/compaction_trigger/compaction_trigger.ml,93,None,unclassified
-lib/keeper/keeper_host_config_provider.ml,379,None,unclassified
+lib/keeper/keeper_docker_client_real.ml,76,false,unclassified
 lib/keeper/keeper_accountability.ml,68,None,unclassified
 lib/keeper/keeper_accountability.ml,85,None,unclassified
 lib/keeper/keeper_accountability.ml,173,None,unclassified
@@ -674,7 +674,6 @@ lib/process/process_eio.ml,113,false,unclassified
 lib/process/process_eio.ml,809,false,unclassified
 lib/prompt_registry/prompt_registry.ml,276,None,unclassified
 lib/provider_kind_resolver.ml,40,None,unclassified
-lib/repo_manager/credential_materializer.ml,52,false,unclassified
 lib/repo_manager/keeper_repo_mapping.ml,428,None,unclassified
 lib/reputation_autonomy.ml,23,None,unclassified
 lib/reputation_ledger_v2.ml,176,None,unclassified
@@ -766,7 +765,6 @@ lib/server/server_routes_http_keeper_stream.ml,200,false,unclassified
 lib/server/server_routes_http_routes_attribution.ml,19,None,unclassified
 lib/server/server_routes_http_routes_runtime.ml,17,None,unclassified
 lib/server/server_routes_http_routes_channel_gate.ml,177,None,unclassified
-lib/server/server_routes_http_routes_credentials.ml,236,None,unclassified
 lib/server/server_routes_http_routes_dashboard.ml,70,None,unclassified
 lib/server/server_routes_http_routes_provider_runs.ml,169,None,unclassified
 lib/server/server_routes_http_routes_provider_runs.ml,199,None,unclassified

@@ -16,7 +16,6 @@ type t =
   ; uid : int
   ; gid : int
   ; network_mode : network_mode
-  ; credential_mounts_enabled : bool
   ; mutable state : state
   }
 
@@ -28,7 +27,6 @@ let create
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?(network_mode = Network_none)
-      ?(credential_mounts_enabled = false)
       ~turn_id
       ()
   =
@@ -47,7 +45,6 @@ let create
   ; uid = Unix.getuid ()
   ; gid = Unix.getgid ()
   ; network_mode
-  ; credential_mounts_enabled
   ; state = Not_started
   }
 ;;
@@ -295,31 +292,6 @@ let start_container (t : t) ~(timeout_sec : float) =
        with
        | Error _ as err -> err
        | Ok identity_mounts ->
-         let cred_mounts, cred_envs =
-           if not t.credential_mounts_enabled
-           then [], []
-           else (
-             match
-               Credential_host_config_provider.resolve
-                 ~config:t.config ~identity:t.meta.name
-             with
-             | Ok binding ->
-               let mounts =
-                 List.concat_map
-                   (fun (m : Credential_provider.ro_mount) ->
-                      [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
-                   binding.ro_mounts
-               in
-               let envs =
-                 List.concat_map (fun (k, v) -> [ "-e"; k ^ "=" ^ v ]) binding.env
-               in
-               mounts, envs
-             | Error err ->
-               Log.Keeper.warn
-                 "%s: credential resolution failed — container will start without git/gh credentials: %s"
-                 t.meta.name (Credential_provider.pp_error err);
-               [], [])
-         in
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
            @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
@@ -359,8 +331,6 @@ let start_container (t : t) ~(timeout_sec : float) =
            @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
-           @ cred_mounts
-           @ cred_envs
            @ identity_mounts
            @ network_args
            @ [ image; "tail"; "-f"; "/dev/null" ]

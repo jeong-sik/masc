@@ -105,7 +105,7 @@ let test_docker_keeper_allows_inside_playground () =
        (Keeper_sandbox_containment.check_read_target
           ~config ~meta ~target:inside))
 
-let test_docker_git_creds_contained () =
+let test_docker_second_keeper_contained () =
   with_tmp_base @@ fun base ->
   let config = Workspace.default_config base in
   let meta = make_meta ~name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker in
@@ -146,8 +146,8 @@ let () =
             test_docker_keeper_blocks_outside;
           Alcotest.test_case "docker keeper allows inside playground"
             `Quick test_docker_keeper_allows_inside_playground;
-          Alcotest.test_case "docker git-creds also contained" `Quick
-            test_docker_git_creds_contained;
+          Alcotest.test_case "docker second keeper also contained" `Quick
+            test_docker_second_keeper_contained;
           Alcotest.test_case "lookalike sibling path blocked" `Quick
             test_path_just_outside_playground_blocked;
         ] );

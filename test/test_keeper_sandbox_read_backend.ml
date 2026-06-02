@@ -122,11 +122,11 @@ let test_docker_keeper_routes () =
     true
     (Keeper_sandbox_read_backend.should_route_read ~meta)
 
-let test_docker_git_creds_routes () =
+let test_docker_second_keeper_routes () =
   let meta =
     make_meta ~name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker
   in
-  Alcotest.(check bool) "docker git-creds also routes" true
+  Alcotest.(check bool) "docker second keeper also routes" true
     (Keeper_sandbox_read_backend.should_route_read ~meta)
 
 (* ── container_path_of_host pure mapping ─────────────────────────── *)
@@ -1262,8 +1262,8 @@ let run_tests ~clock () =
             test_legacy_keeper_never_routes;
           Alcotest.test_case "docker keeper routes" `Quick
             test_docker_keeper_routes;
-          Alcotest.test_case "docker git-creds also routes" `Quick
-            test_docker_git_creds_routes;
+          Alcotest.test_case "docker second keeper also routes" `Quick
+            test_docker_second_keeper_routes;
         ] );
       ( "container_path_of_host",
         [

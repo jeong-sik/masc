@@ -4,17 +4,9 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { post } from '../api/core'
-import { fetchCredentials } from '../api/credentials'
 import { showToast } from './common/toast'
 import { fetchRepositories, showAddRepoDialog } from './repo-sidebar'
 import { X } from 'lucide-preact'
-
-// ── Types ────────────────────────────────────────────────
-
-export interface CredentialOption {
-  id: string
-  name: string
-}
 
 // ── Form state ───────────────────────────────────────────
 
@@ -22,21 +14,16 @@ const formName = signal('')
 const formUrl = signal('')
 const formLocalPath = signal('')
 const formDefaultBranch = signal('main')
-const formCredentialId = signal('')
 const formAutoSync = signal(true)
 const formSyncInterval = signal(300)
 const formSubmitting = signal(false)
 const formError = signal<string | null>(null)
-const credentialsResource = signal<CredentialOption[]>([])
-const credentialsLoading = signal(false)
-const credentialsLoaded = signal(false)
 
 function resetForm(): void {
   formName.value = ''
   formUrl.value = ''
   formLocalPath.value = ''
   formDefaultBranch.value = 'main'
-  formCredentialId.value = ''
   formAutoSync.value = true
   formSyncInterval.value = 300
   formError.value = null
@@ -45,30 +32,11 @@ function resetForm(): void {
 export function openAddRepoDialog(): void {
   resetForm()
   showAddRepoDialog.value = true
-  void loadCredentials()
 }
 
 function closeAddRepoDialog(): void {
   showAddRepoDialog.value = false
   resetForm()
-}
-
-// ── API ──────────────────────────────────────────────────
-
-async function loadCredentials(): Promise<void> {
-  credentialsLoading.value = true
-  try {
-    const creds = await fetchCredentials()
-    credentialsResource.value = creds
-      .map(c => ({ id: c.id, name: c.name || c.username }))
-      .filter(opt => opt.id && opt.name)
-  } catch (err) {
-    console.warn('[add-repo-dialog] credentials load failed', err)
-    credentialsResource.value = []
-  } finally {
-    credentialsLoading.value = false
-    credentialsLoaded.value = true
-  }
 }
 
 async function submitAddRepo(): Promise<void> {
@@ -95,7 +63,6 @@ async function submitAddRepo(): Promise<void> {
       name,
       url,
       default_branch: defaultBranch,
-      credential_id: formCredentialId.value || 'default',
       auto_sync: formAutoSync.value,
       sync_interval: Math.max(60, formSyncInterval.value),
     }
@@ -125,12 +92,6 @@ const labelBase = 'block text-2xs font-semibold uppercase tracking-wider text-te
 export function AddRepoDialog() {
   const open = showAddRepoDialog.value
   if (!open) return null
-  if (!credentialsLoaded.value && !credentialsLoading.value) {
-    void loadCredentials()
-  }
-
-  const credentials = credentialsResource.value
-  const hasCredentials = credentials.length > 0
 
   return html`
     <div
@@ -212,26 +173,6 @@ export function AddRepoDialog() {
               onInput=${(e: Event) => { formDefaultBranch.value = (e.target as HTMLInputElement).value }}
               disabled=${formSubmitting.value}
             />
-          </div>
-
-          <div>
-            <label class="${labelBase}">인증 정보</label>
-            <select
-              class="${inputBase}"
-              value=${formCredentialId.value}
-              onChange=${(e: Event) => { formCredentialId.value = (e.target as HTMLSelectElement).value }}
-              disabled=${formSubmitting.value || credentialsLoading.value}
-            >
-              <option value="">선택 안 함</option>
-              ${hasCredentials
-                ? credentials.map(c => html`<option value=${c.id}>${c.name}</option>`)
-                : null}
-            </select>
-            ${credentialsLoading.value
-              ? html`<span class="text-2xs text-[var(--color-fg-muted)] mt-1 block">인증 정보 로딩 중...</span>`
-              : !hasCredentials
-                ? html`<span class="text-2xs text-[var(--color-fg-muted)] mt-1 block">등록된 인증 정보가 없습니다.</span>`
-                : null}
           </div>
 
           <div class="flex items-center gap-3">

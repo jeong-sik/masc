@@ -16,7 +16,6 @@ let execute_with_observers
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?turn_sandbox_factory
-      ?turn_sandbox_factory_git
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
       ?on_tool_called
@@ -33,10 +32,9 @@ let execute_with_observers
         Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
-          ~ctx_work:ctx_snapshot
-          ?turn_sandbox_factory
-          ?turn_sandbox_factory_git
-          ~exec_cache
+	          ~ctx_work:ctx_snapshot
+	          ?turn_sandbox_factory
+	          ~exec_cache
           ?search_fn
           ~name
           ~input

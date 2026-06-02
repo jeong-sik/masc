@@ -13,26 +13,7 @@ let mapping_of_toml toml keeper_id =
   let* repository_ids =
     Otoml.Helpers.find_strings_result toml (path "repositories")
   in
-  let* credential_id =
-    match Otoml.find_result toml Fun.id (path "credential_id") with
-    | Error _ -> Ok None
-    | Ok (Otoml.TomlString id) ->
-        let id = String.trim id in
-        Ok (if id = "" then None else Some id)
-    | Ok (Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
-         | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
-         | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
-         | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) ->
-        Error
-          (Printf.sprintf
-             "mapping.%s.credential_id must be a string when present" keeper_id)
-  in
-  Ok { keeper_id; repository_ids; mapped_credential_id = credential_id }
-
-let credential_type_label = function
-  | Github -> "GitHub"
-  | Gitlab -> "GitLab"
-  | Local -> "Local"
+  Ok { keeper_id; repository_ids }
 
 let toml_of_mapping mapping =
   let fields =
@@ -41,14 +22,6 @@ let toml_of_mapping mapping =
         Otoml.TomlArray
           (List.map (fun s -> Otoml.TomlString s) mapping.repository_ids) );
     ]
-  in
-  let fields =
-    match mapping.mapped_credential_id with
-    | Some id ->
-        let id = String.trim id in
-        if id = "" then fields
-        else ("credential_id", Otoml.TomlString id) :: fields
-    | None -> fields
   in
   Otoml.TomlTable fields
 
@@ -112,11 +85,8 @@ let allowed_repositories ~keeper_id ~base_path =
 
 let is_wildcard s = s = "*"
 
-(* Filter [repos] down to those whose id appears in
-   [mapping.repository_ids], with ["*"] as a wildcard that bypasses
-   filtering entirely.  Replaces two copy-pasted O(R x M) loops in
-   [credentials_for_keeper] and [apply_mapping]: each was
-   [List.filter (fun r -> List.exists (String.equal r.id) mapping.repository_ids) repos].
+(* Filter [repos] down to those whose id appears in [mapping.repository_ids],
+   with ["*"] as a wildcard that bypasses filtering entirely.
    The Hashtbl materialisation is skipped when a wildcard short-circuits
    the check, so the wildcard case avoids building the membership set
    (the [is_wildcard] predicate itself is a fully-saturated function so
@@ -135,72 +105,6 @@ let filter_repos_by_mapping (mapping : keeper_repo_mapping)
     List.filter
       (fun (r : repository) -> Hashtbl.mem mapping_id_set r.id)
       repos
-
-(** Resolve the credentials currently mapped to [keeper_id], by looking
-    through every repository the keeper is allowed to access and
-    extracting each repository's [credential_id] into a unique list of
-    [credential] records.
-
-    Returns [Ok []] when the keeper has no mapping.  Absence remains distinct
-    from load/parse errors so strict credential-provider dispatch can surface a
-    missing-mapping error.
-
-    Repository IDs from the mapping are resolved against the loaded
-    repositories; unknown repository IDs are ignored by this resolution path.
-
-    Returns [Error _] on mapping load failures (including
-    parse/validation failures) or when a credential referenced by a mapped
-    repository cannot be found.  Absence of mapping is not an error. *)
-let credentials_for_keeper ~base_path ~keeper_id =
-  match lookup_mapping ~base_path keeper_id with
-  | Mapping_missing _ -> Ok []
-  | Mapping_load_error msg -> Error msg
-  | Mapping_found mapping ->
-      let resolve_credential id =
-        match Credential_store.find ~base_path id with
-        | Ok c -> Ok c
-        | Error msg ->
-            Error
-              (Printf.sprintf
-                 "credential %s referenced by mapping for keeper %s not found \
-                  in credential store: %s"
-                 id keeper_id msg)
-      in
-      (match mapping.mapped_credential_id with
-      | Some id when String.trim id <> "" ->
-          let id = String.trim id in
-          let* credential = resolve_credential id in
-          if credential.cred_type <> Github then
-            Error
-              (Printf.sprintf
-                 "credential %s referenced by credential_id for keeper %s \
-                  must be of type GitHub, got %s"
-                 id keeper_id (credential_type_label credential.cred_type))
-          else
-            Ok [credential]
-      | Some _ | None ->
-      let* repos = Repo_store.load_all ~base_path in
-      let mapped_repos = filter_repos_by_mapping mapping repos in
-      (* Unique credential ids preserving first-seen order, so a keeper
-         with several repos pointing at the same credential collapses to
-         a single entry; the bridge can then dispatch deterministically. *)
-      let cred_ids =
-        List.fold_left
-          (fun acc (r : repository) ->
-            if List.mem r.credential_id acc then acc
-            else r.credential_id :: acc)
-          []
-          mapped_repos
-        |> List.rev
-      in
-      let rec resolve_creds acc = function
-        | [] -> Ok (List.rev acc)
-        | id :: rest -> (
-            match resolve_credential id with
-            | Ok c -> resolve_creds (c :: acc) rest
-            | Error msg -> Error msg)
-      in
-      resolve_creds [] cred_ids)
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match lookup_mapping ~base_path keeper_id with

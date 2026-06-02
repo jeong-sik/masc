@@ -62,7 +62,6 @@ val rewrite_docker_host_paths_to_container :
 
 val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
-  turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

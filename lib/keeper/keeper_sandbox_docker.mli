@@ -101,15 +101,13 @@ val docker_run_min_timeout_sec : float
 
 (** Run [cmd] inside the keeper Docker sandbox; clamps
     [timeout_sec] to [docker_run_min_timeout_sec], honours
-    [git_creds_enabled] and [network_mode], records errors via
-    [Keeper_registry]. *)
+    [network_mode], records errors via [Keeper_registry]. *)
 val run_docker_shell_command_with_status :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
-  git_creds_enabled:bool ->
   network_mode:Keeper_types_profile_sandbox.network_mode ->
   (docker_shell_result, string) result
 
@@ -123,24 +121,10 @@ val run_trusted_docker_shell_command_with_status :
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
-  git_creds_enabled:bool ->
   network_mode:Keeper_types_profile_sandbox.network_mode ->
   (docker_shell_result, string) result
 
-(** Run [cmd] inside the Docker sandbox with host credential bindings
-    forwarded (Network_inherit). Returns the JSON envelope surfaced to the LLM. *)
-val run_docker_credentialed_bash :
-  turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  timeout_sec:float ->
-  cmd:string ->
-  unit ->
-  string
-
-(** Run [cmd] inside the Docker sandbox with the caller's
-    [network_mode] and no git credentials. *)
+(** Run [cmd] inside the Docker sandbox with the caller's [network_mode]. *)
 val run_docker_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Workspace.config ->

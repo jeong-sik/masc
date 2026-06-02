@@ -102,19 +102,9 @@ let contains_substring haystack needle =
   in
   loop 0
 
-let check_line_contains msg line needle =
-  if not (contains_substring line needle) then
-    Alcotest.failf "%s: missing %S in docker line %S" msg needle line
-
 let docker_log_has_container_execution log =
   contains_substring ("\n" ^ log) "\nrun "
   || contains_substring ("\n" ^ log) "\nexec "
-
-let credential_bundle_mount_spec credential_bundle_dir =
-  credential_bundle_dir
-  ^ ":"
-  ^ Filename.concat Masc_mcp.Credential_host_config_provider.cred_root ".config/gh"
-  ^ ":ro"
 
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
@@ -237,40 +227,6 @@ let with_turn_sandbox_factory ~config ~meta f =
   Fun.protect ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory) @@ fun () ->
   f factory
 
-let with_turn_sandbox_factories ~config ~meta f =
-  let generic_factory = Keeper_sandbox_factory.create ~config ~meta () in
-  let git_factory =
-    Keeper_sandbox_factory.create
-      ~config
-      ~meta
-      ~credential_mounts_enabled:true
-      ()
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_sandbox_factory.cleanup generic_factory;
-      Keeper_sandbox_factory.cleanup git_factory)
-  @@ fun () -> f ~generic_factory ~git_factory
-
-let setup_two_docker_keepers f =
-  with_eio_fs @@ fun () ->
-  let base = temp_dir () in
-  ensure_dir (Filename.concat base Common.masc_dirname);
-  let config_dir =
-    Filename.concat (Filename.concat base Common.masc_dirname) "config"
-  in
-  ensure_dir config_dir;
-  let config = Workspace.default_config base in
-  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  Keeper_registry.clear ();
-  let meta_a = make_meta ~name:"keeper-a" ~sandbox:Keeper_types_profile_sandbox.Docker () in
-  let meta_b = make_meta ~name:"keeper-b" ~sandbox:Keeper_types_profile_sandbox.Docker () in
-  let playground_a = Keeper_sandbox.host_root_abs_of_meta ~config meta_a in
-  let playground_b = Keeper_sandbox.host_root_abs_of_meta ~config meta_b in
-  ensure_dir playground_a;
-  ensure_dir playground_b;
-  f ~config ~meta_a ~playground_a ~meta_b ~playground_b
-
 let with_fake_docker script f =
   let dir = temp_dir () in
   let docker_path = Filename.concat dir "docker" in
@@ -312,81 +268,6 @@ let with_tool_policy_config f =
   match Masc_mcp.Keeper_tool_policy.init_policy_config ~base_path:project_root with
   | Ok () -> f ()
   | Error msg -> Alcotest.failf "init_policy_config failed: %s" msg
-
-let write_fake_github_hosts credential_bundle_dir =
-  ensure_dir credential_bundle_dir;
-  write_file
-    (Filename.concat credential_bundle_dir "hosts.yml")
-    "github.com:\n\
-    \    oauth_token: ghp_fake_test_token_for_docker_route\n\
-    \    user: test-user\n"
-
-let ensure_credential_identity_bundle ~config credential_identity =
-  let masc_dir = Filename.concat config.Workspace.base_path Common.masc_dirname in
-  let credential_bundle_dir =
-    Filename.concat
-      (Filename.concat
-         (Filename.concat masc_dir "credentials")
-         credential_identity)
-      "gh"
-  in
-  write_fake_github_hosts credential_bundle_dir
-
-let credential_bundle_dir_for_credential ~config credential_identity =
-  let masc_dir = Filename.concat config.Workspace.base_path Common.masc_dirname in
-  Filename.concat
-    (Filename.concat
-       (Filename.concat masc_dir "credentials")
-       credential_identity)
-    "gh"
-
-let seed_credential_bundle_mapping
-    ?(credential_identity = Masc_mcp.Credential_bundle.root_credential_identity)
-    ?(repository_ids = [])
-    ~config
-    ~keeper_name
-    () =
-  let credential_bundle_dir = credential_bundle_dir_for_credential ~config credential_identity in
-  write_fake_github_hosts credential_bundle_dir;
-  let credential_id = "cred-" ^ keeper_name ^ "-" ^ credential_identity in
-  let credential : Repo_manager_types.credential =
-    {
-      id = credential_id;
-      cred_type = Repo_manager_types.Github;
-      username = credential_identity;
-      credential_bundle_dir = Some credential_bundle_dir;
-      ssh_key_path = None;
-      gpg_key_id = None;
-      state = Repo_manager_types.Unmaterialized;
-      token_sha256_prefix = None;
-    }
-  in
-  (match Credential_store.add ~base_path:config.Workspace.base_path credential with
-   | Ok _ -> ()
-   | Error msg when contains_substring msg "Credential already exists" -> ()
-   | Error msg -> Alcotest.failf "seed credential mapping: %s" msg);
-  let mapping : Repo_manager_types.keeper_repo_mapping =
-    {
-      keeper_id = keeper_name;
-      repository_ids;
-      mapped_credential_id = Some credential_id;
-    }
-  in
-  match
-    Keeper_repo_mapping.save_mapping ~base_path:config.Workspace.base_path mapping
-  with
-  | Ok () -> ()
-  | Error msg -> Alcotest.failf "seed keeper repo mapping: %s" msg
-
-let seed_default_mapping_if_missing ~config ~keeper_name =
-  match
-    Keeper_repo_mapping.credentials_for_keeper
-      ~base_path:config.Workspace.base_path
-      ~keeper_id:keeper_name
-  with
-  | Ok [] -> seed_credential_bundle_mapping ~config ~keeper_name ()
-  | Ok _ -> ()
-  | Error msg -> Alcotest.failf "read keeper credential mapping: %s" msg
 
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
@@ -772,7 +653,6 @@ let test_execute_typed_env_wrapper_target_rejected () =
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
-    ~turn_sandbox_factory_git:None
     ~exec_cache:None
     ~config
     ~meta
@@ -785,7 +665,6 @@ let test_execute_typed_single_stage_pipeline_rejected () =
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
-    ~turn_sandbox_factory_git:None
     ~exec_cache:None
     ~config
     ~meta
@@ -800,7 +679,6 @@ let test_execute_typed_pipeline_falls_back_to_local_playground () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -819,7 +697,6 @@ let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
-    ~turn_sandbox_factory_git:None
     ~exec_cache:None
     ~config
     ~meta
@@ -843,7 +720,6 @@ let test_execute_typed_pipeline_uses_turn_sandbox_docker_runner () =
     let raw =
       Agent_tool_command_runtime.handle_tool_execute
         ~turn_sandbox_factory:(Some factory)
-        ~turn_sandbox_factory_git:None
         ~exec_cache:None
         ~config
         ~meta
@@ -860,8 +736,7 @@ let test_execute_routes_through_docker () =
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
   in
@@ -880,8 +755,7 @@ let test_execute_legacy_skips_docker () =
   let outside_cwd = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir outside_cwd) @@ fun () ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String outside_cwd) ])
       ()
   in
@@ -965,15 +839,14 @@ fi\n\
 printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
 exit 2\n"
 
-let test_execute_git_creds_routes_through_docker () =
+let test_execute_git_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
   in
@@ -985,11 +858,10 @@ let test_execute_git_creds_routes_through_docker () =
     (Some "local_playground")
     (parse_string_field raw "sandbox_fallback")
 
-let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
+let test_execute_git_uses_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1001,8 +873,7 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
   in
@@ -1017,17 +888,12 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
         | None -> "None")
        raw);
   let log = read_file log_path in
-  Alcotest.(check bool) "credentialed git started docker session" true
+  Alcotest.(check bool) "git started docker session" true
     (contains_substring log "run -d");
-  Alcotest.(check bool) "credentialed git used docker exec" true
-    (contains_substring log "\nexec ");
-  let root_credential_bundle_dir =
-    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
-  in
-  Alcotest.(check bool) "generic typed Execute does not mount credential bundle" false
-    (contains_substring log (credential_bundle_mount_spec root_credential_bundle_dir))
+  Alcotest.(check bool) "git used docker exec" true
+    (contains_substring log "\nexec ")
 
-let test_execute_git_creds_missing_bundle_is_structured_blocker () =
+let test_execute_git_without_github_bundle_succeeds () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
@@ -1044,19 +910,18 @@ let test_execute_git_creds_missing_bundle_is_structured_blocker () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
   in
-  Alcotest.(check (option bool)) "generic typed git succeeds without GH bundle" (Some true)
+  Alcotest.(check (option bool)) "typed git succeeds without GH bundle" (Some true)
     (parse_bool_field raw "ok");
   let log = if Sys.file_exists log_path then read_file log_path else "" in
   Alcotest.(check bool) "typed git uses docker exec" true
     (contains_substring log "\nexec ");
-  Alcotest.(check bool) "generic typed git avoids credential blocker" false
+  Alcotest.(check bool) "typed git avoids credential blocker" false
     (Agent_tool_dispatch_runtime.should_apply_circuit_breaker_to_failure_payload raw)
 
 let test_execute_git_c_option_missing_dir_blocks_before_docker () =
@@ -1067,8 +932,7 @@ let test_execute_git_c_option_missing_dir_blocks_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "git"
            ~argv:[ "-C"; "repos/masc-mcp/.worktrees/missing"; "status" ])
@@ -1100,7 +964,6 @@ let test_execute_missing_playground_blocks_before_docker () =
       ~cwd:playground
       ~timeout_sec:5.0
       ~cmd:"pwd"
-      ~git_creds_enabled:false
       ~network_mode:Keeper_types_profile_sandbox.Network_inherit
     with
     | Ok _ -> Alcotest.fail "expected missing playground to block before docker"
@@ -1124,7 +987,6 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   let worktree = Filename.concat repo ".worktrees/task-229" in
   ensure_dir worktree;
@@ -1138,8 +1000,7 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "git"
            ~argv:[ "-C"; ".worktrees/task-229"; "status"; "-sb" ])
@@ -1158,7 +1019,6 @@ let test_execute_git_push_requires_write_tool_access_before_docker () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_credential_identity_bundle ~config Masc_mcp.Credential_bundle.root_credential_identity;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1166,8 +1026,7 @@ let test_execute_git_push_requires_write_tool_access_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:repo "git"
            ~argv:[ "push"; "origin"; "feature/proof" ])
@@ -1186,11 +1045,10 @@ let test_execute_git_push_requires_write_tool_access_before_docker () =
   Alcotest.(check bool) "docker container was not invoked" false
     (docker_log_has_container_execution log)
 
-let test_execute_git_push_routes_through_git_creds_docker () =
+let test_execute_git_push_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1198,8 +1056,7 @@ let test_execute_git_push_routes_through_git_creds_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:repo "git"
            ~argv:[ "push"; "origin"; "feature/proof" ])
@@ -1213,77 +1070,7 @@ let test_execute_git_push_routes_through_git_creds_docker () =
   Alcotest.(check bool) "git push started docker session" true
     (contains_substring log "run -d");
   Alcotest.(check bool) "git push used typed docker exec argv" true
-    (contains_substring log "\nexec ");
-  let root_credential_bundle_dir =
-    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
-  in
-  Alcotest.(check bool) "generic typed push does not mount credential bundle" false
-    (contains_substring log (credential_bundle_mount_spec root_credential_bundle_dir))
-
-let test_execute_env_wrapped_git_uses_git_creds_factory () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
-  with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
-  ensure_dir repo;
-  git_ok ~cwd:repo [ "init"; "-q" ];
-  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
-  with_turn_sandbox_factories ~config ~meta @@ fun ~generic_factory ~git_factory ->
-  let raw =
-    Agent_tool_command_runtime.handle_tool_execute
-      ~turn_sandbox_factory:(Some generic_factory)
-      ~turn_sandbox_factory_git:(Some git_factory)
-      ~exec_cache:None
-      ~config
-      ~meta
-      ~args:
-        (tool_execute_typed_exec_args ~cwd:repo "env"
-           ~argv:[ "git"; "status" ])
-      ()
-  in
-  Alcotest.(check (option bool)) "env git succeeds via fake docker" (Some true)
-    (parse_bool_field raw "ok");
-  let log = read_file log_path in
-  let root_credential_bundle_dir =
-    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
-  in
-  Alcotest.(check bool) "env-wrapped git uses credentialed factory" true
-    (contains_substring log (credential_bundle_mount_spec root_credential_bundle_dir))
-
-let test_execute_pipeline_gh_uses_git_creds_factory () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
-  with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  seed_credential_bundle_mapping ~config ~keeper_name:meta.name ();
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
-  ensure_dir repo;
-  git_ok ~cwd:repo [ "init"; "-q" ];
-  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
-  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
-  with_turn_sandbox_factories ~config ~meta @@ fun ~generic_factory ~git_factory ->
-  let raw =
-    Agent_tool_command_runtime.handle_tool_execute
-      ~turn_sandbox_factory:(Some generic_factory)
-      ~turn_sandbox_factory_git:(Some git_factory)
-      ~exec_cache:None
-      ~config
-      ~meta
-      ~args:
-        (tool_execute_typed_pipeline_args_of
-           ~cwd:repo
-           [ "printf", [ "{}" ]; "gh", [ "api"; "user" ] ])
-      ()
-  in
-  Alcotest.(check (option bool)) "pipeline gh succeeds via fake docker" (Some true)
-    (parse_bool_field raw "ok");
-  let log = read_file log_path in
-  let root_credential_bundle_dir =
-    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
-  in
-  Alcotest.(check bool) "pipeline gh uses credentialed factory" true
-    (contains_substring log (credential_bundle_mount_spec root_credential_bundle_dir))
+    (contains_substring log "\nexec ")
 
 let test_tool_search_files_repo_review_is_unsupported () =
   with_tool_policy_config @@ fun () ->
@@ -1333,7 +1120,6 @@ let test_docker_shell_missing_image_fails_before_run () =
       ~cwd:playground
       ~timeout_sec:5.0
       ~cmd:"pwd"
-      ~git_creds_enabled:false
       ~network_mode:Keeper_types_profile_sandbox.Network_none
   with
   | Ok _ -> Alcotest.fail "expected missing image preflight error"
@@ -1362,7 +1148,6 @@ let test_execute_missing_image_falls_back_to_local_playground () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -1398,7 +1183,6 @@ let test_execute_outside_playground_rejects_before_image_preflight () =
   let raw =
     Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
@@ -1442,7 +1226,6 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
       ~cwd:playground
       ~timeout_sec:5.0
       ~cmd:"pwd"
-      ~git_creds_enabled:false
       ~network_mode:Keeper_types_profile_sandbox.Network_none
   with
   | Error msg -> Alcotest.failf "expected fake docker run, got %s" msg
@@ -1488,9 +1271,8 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
     Alcotest.(check bool) "auth state not mounted" false
       (contains_substring line "/.masc/auth/")
 
-let run_git_creds_docker_shell ~config ~(meta : Keeper_meta_contract.keeper_meta) ~playground
+let run_docker_shell_command ~config ~(meta : Keeper_meta_contract.keeper_meta) ~playground
     ~log_path =
-  seed_default_mapping_if_missing ~config ~keeper_name:meta.name;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   if not (Sys.file_exists (Filename.concat repo ".git")) then
@@ -1509,11 +1291,11 @@ let run_git_creds_docker_shell ~config ~(meta : Keeper_meta_contract.keeper_meta
   match
     Keeper_sandbox_docker.run_docker_shell_command_with_status
       ~config ~meta ~cwd:playground ~timeout_sec:5.0
-      ~cmd:"git status" ~git_creds_enabled:true
+      ~cmd:"git status"
       ~network_mode:Keeper_types_profile_sandbox.Network_inherit
   with
   | Error msg ->
-      Alcotest.failf "expected fake docker git-creds run, got %s" msg
+      Alcotest.failf "expected fake docker shell run, got %s" msg
   | Ok result ->
       let observed =
         match result.Keeper_sandbox_docker.status with
@@ -1779,7 +1561,7 @@ let test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics () =
     None
     "gh pr view --repo jeong-sik/masc-mcp 17214"
 
-let test_git_creds_skips_missing_ssh_auth_sock () =
+let test_docker_shell_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1790,28 +1572,25 @@ let test_git_creds_skips_missing_ssh_auth_sock () =
   in
   with_env "SSH_AUTH_SOCK" missing_sock @@ fun () ->
   let line =
-    run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+    run_docker_shell_command ~config ~meta ~playground ~log_path
   in
   Alcotest.(check bool) "missing ssh-agent socket is not mounted" false
     (contains_substring line missing_sock);
   Alcotest.(check bool) "missing ssh-agent env is not forwarded" false
-    (contains_substring line
-       ("SSH_AUTH_SOCK="
-        ^ Filename.concat Masc_mcp.Credential_host_config_provider.cred_root
-            "ssh-agent.sock"))
+    (contains_substring line "SSH_AUTH_SOCK=")
 
-let test_git_creds_inherit_network_omits_invalid_network_flag () =
+let test_docker_shell_inherit_network_omits_invalid_network_flag () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   let line =
-    run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+    run_docker_shell_command ~config ~meta ~playground ~log_path
   in
   Alcotest.(check bool) "network inherit never uses invalid flag value" false
     (contains_substring line "--network inherit")
 
-let test_git_creds_mounts_numeric_user_identity () =
+let test_docker_shell_mounts_numeric_user_identity () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1819,13 +1598,8 @@ let test_git_creds_mounts_numeric_user_identity () =
   let line =
     with_env "GH_TOKEN" "host-token" @@ fun () ->
     with_env "GITHUB_TOKEN" "github-token" @@ fun () ->
-    run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+    run_docker_shell_command ~config ~meta ~playground ~log_path
   in
-  let root_credential_bundle_dir =
-    Masc_mcp.Credential_bundle.root_credential_bundle_dir config
-  in
-  check_line_contains "root credential bundle mounted" line
-    (credential_bundle_mount_spec root_credential_bundle_dir);
   Alcotest.(check bool) "ambient GH_TOKEN not forwarded" false
     (contains_substring line "GH_TOKEN=");
   Alcotest.(check bool) "ambient GITHUB_TOKEN not forwarded" false
@@ -1846,15 +1620,13 @@ let test_git_creds_mounts_numeric_user_identity () =
     (contains_substring (read_file group_path)
        (Printf.sprintf "keeper:x:%d:" (Unix.getgid ())))
 
-let test_git_creds_does_not_synthesize_git_author_identity () =
+let test_docker_shell_does_not_synthesize_git_author_identity () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  seed_credential_bundle_mapping ~config ~keeper_name:meta.name
-    ~credential_identity:"anyang-keepers" ();
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   let line =
-    run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+    run_docker_shell_command ~config ~meta ~playground ~log_path
   in
   Alcotest.(check bool) "does not synthesize git author name" false
     (contains_substring line "GIT_AUTHOR_NAME=");
@@ -1865,81 +1637,6 @@ let test_git_creds_does_not_synthesize_git_author_identity () =
   Alcotest.(check bool) "does not synthesize git committer email" false
     (contains_substring line "GIT_COMMITTER_EMAIL=")
 
-let test_git_creds_mounts_only_selected_keeper_identity () =
-  with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_two_docker_keepers
-  @@ fun ~config ~meta_a ~playground_a ~meta_b ~playground_b ->
-  let identity_a = "keeper-a-gh" in
-  let identity_b = "keeper-b-gh" in
-  ensure_credential_identity_bundle ~config
-    Masc_mcp.Credential_bundle.root_credential_identity;
-  ensure_credential_identity_bundle ~config identity_a;
-  ensure_credential_identity_bundle ~config identity_b;
-  let root_credential_bundle_dir = Masc_mcp.Credential_bundle.root_credential_bundle_dir config in
-  let credential_bundle_dir id =
-    Masc_mcp.Credential_bundle.credential_bundle_dir_of_root
-      (Masc_mcp.Credential_bundle.bundle_root config ~credential_identity:id)
-  in
-  let run_for ~(meta : Keeper_meta_contract.keeper_meta) ~playground ~credential_identity
-      ~other_identity ~log_name =
-    seed_credential_bundle_mapping ~config ~keeper_name:meta.name
-      ~credential_identity ();
-    let log_path = Filename.concat config.Workspace.base_path log_name in
-    let line =
-      run_git_creds_docker_shell ~config ~meta ~playground ~log_path
-    in
-    let selected_credential_bundle = credential_bundle_dir credential_identity in
-    let other_credential_bundle = credential_bundle_dir other_identity in
-    let mounted_playground =
-      Keeper_alerting_path.normalize_path_for_check playground
-      |> Keeper_alerting_path.strip_trailing_slashes
-    in
-    check_line_contains
-      (credential_identity ^ " selected credential bundle mounted read-only")
-      line
-      (credential_bundle_mount_spec selected_credential_bundle);
-    Alcotest.(check bool)
-      (credential_identity ^ " default credential bundle not mounted")
-      false
-      (contains_substring line (credential_bundle_mount_spec root_credential_bundle_dir));
-    Alcotest.(check bool)
-      (credential_identity ^ " sibling keeper bundle not mounted")
-      false
-      (contains_substring line (credential_bundle_mount_spec other_credential_bundle));
-    Alcotest.(check bool)
-      (credential_identity ^ " own playground mounted")
-      true
-      (contains_substring line
-         (mounted_playground ^ ":"
-          ^ Keeper_sandbox.container_root meta.name
-          ^ ":rw"));
-    line
-  in
-  let mounted_playground_a =
-    Keeper_alerting_path.normalize_path_for_check playground_a
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let mounted_playground_b =
-    Keeper_alerting_path.normalize_path_for_check playground_b
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  let line_a =
-    run_for ~meta:meta_a ~playground:playground_a
-      ~credential_identity:identity_a ~other_identity:identity_b
-      ~log_name:"docker-a.log"
-  in
-  let line_b =
-    run_for ~meta:meta_b ~playground:playground_b
-      ~credential_identity:identity_b ~other_identity:identity_a
-      ~log_name:"docker-b.log"
-  in
-  Alcotest.(check bool) "keeper A docker run does not mount keeper B playground"
-    false
-    (contains_substring line_a mounted_playground_b);
-  Alcotest.(check bool) "keeper B docker run does not mount keeper A playground"
-    false
-    (contains_substring line_b mounted_playground_a)
-
 let test_execute_fake_docker_executes () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1947,8 +1644,7 @@ let test_execute_fake_docker_executes () =
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
   in
@@ -1968,8 +1664,7 @@ let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_pipeline_args_of ~cwd:playground
            [ "ls", [ "lib/" ]; "head", [ "-20" ] ])
@@ -2001,8 +1696,7 @@ let test_execute_rg_no_match_remains_successful_in_docker_route () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "rg"
            ~argv:[ "missing_one|missing_two"; "repos/masc-mcp/lib" ])
@@ -2026,8 +1720,7 @@ let test_execute_blocks_file_redirect_before_docker () =
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -2054,8 +1747,7 @@ let test_execute_repo_checks_routes_through_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "gh"
            ~argv:[ "pr"; "checks"; "15659"; "--repo"; "jeong-sik/masc-mcp" ])
@@ -2083,8 +1775,7 @@ let test_execute_search_pipeline_exposes_structured_recovery_plan () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_pipeline_args_of ~cwd:playground
            [ "rg", [ "TODO"; "repos" ]; "head", [ "-20" ] ])
@@ -2108,8 +1799,7 @@ let test_execute_rewrites_host_path_command_for_docker () =
   ensure_dir (Filename.concat (Filename.concat playground "repos") "masc-mcp");
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
-      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "ls"
            ~argv:
@@ -2239,14 +1929,14 @@ let () =
             "docker Execute routes through docker"
             `Quick test_execute_routes_through_docker;
           Alcotest.test_case
-            "docker Execute git cmd routes through git-creds docker"
-            `Quick test_execute_git_creds_routes_through_docker;
+            "docker Execute git cmd routes through docker"
+            `Quick test_execute_git_routes_through_docker;
           Alcotest.test_case
-            "docker Execute git creds bypass warm turn runtime"
-            `Quick test_execute_git_creds_uses_oneshot_with_turn_runtime;
+            "docker Execute git uses turn runtime"
+            `Quick test_execute_git_uses_turn_runtime;
           Alcotest.test_case
-            "docker Execute git creds missing bundle is structured blocker"
-            `Quick test_execute_git_creds_missing_bundle_is_structured_blocker;
+            "docker Execute git works without credential bundle"
+            `Quick test_execute_git_without_github_bundle_succeeds;
           Alcotest.test_case
             "docker keeper git -C missing dir blocks before docker"
             `Quick test_execute_git_c_option_missing_dir_blocks_before_docker;
@@ -2257,14 +1947,8 @@ let () =
             "docker keeper git push requires write tool_access"
             `Quick test_execute_git_push_requires_write_tool_access_before_docker;
           Alcotest.test_case
-            "docker keeper git push routes through git-creds docker"
-            `Quick test_execute_git_push_routes_through_git_creds_docker;
-          Alcotest.test_case
-            "docker Execute env git uses git-creds factory"
-            `Quick test_execute_env_wrapped_git_uses_git_creds_factory;
-          Alcotest.test_case
-            "docker Execute pipeline gh uses git-creds factory"
-            `Quick test_execute_pipeline_gh_uses_git_creds_factory;
+            "docker keeper git push routes through docker"
+            `Quick test_execute_git_push_routes_through_docker;
           Alcotest.test_case
             "tool_search_files repo review is unsupported"
             `Quick test_tool_search_files_repo_review_is_unsupported;
@@ -2337,11 +2021,11 @@ let () =
             "tool_execute typed pipeline uses turn sandbox docker runner"
             `Quick test_execute_typed_pipeline_uses_turn_sandbox_docker_runner;
           Alcotest.test_case
-            "git-creds skips missing SSH_AUTH_SOCK"
-            `Quick test_git_creds_skips_missing_ssh_auth_sock;
+            "docker shell skips missing SSH_AUTH_SOCK"
+            `Quick test_docker_shell_skips_missing_ssh_auth_sock;
           Alcotest.test_case
-            "git-creds inherit network omits invalid docker flag"
-            `Quick test_git_creds_inherit_network_omits_invalid_network_flag;
+            "docker shell inherit network omits invalid docker flag"
+            `Quick test_docker_shell_inherit_network_omits_invalid_network_flag;
           Alcotest.test_case
             "docker shell mounts MASC config runtime paths"
             `Quick test_docker_shell_mounts_masc_config_runtime_paths;
@@ -2357,14 +2041,11 @@ let () =
             "missing playground bind source blocks before docker"
             `Quick test_execute_missing_playground_blocks_before_docker;
           Alcotest.test_case
-            "git-creds mounts passwd entry for numeric uid"
-            `Quick test_git_creds_mounts_numeric_user_identity;
+            "docker shell mounts passwd entry for numeric uid"
+            `Quick test_docker_shell_mounts_numeric_user_identity;
           Alcotest.test_case
-            "git-creds does not synthesize git author identity"
-            `Quick test_git_creds_does_not_synthesize_git_author_identity;
-          Alcotest.test_case
-            "git-creds mounts only the selected keeper identity"
-            `Quick test_git_creds_mounts_only_selected_keeper_identity;
+            "docker shell does not synthesize git author identity"
+            `Quick test_docker_shell_does_not_synthesize_git_author_identity;
           Alcotest.test_case
             "sandbox-root git with no repo blocks before docker exec"
             `Quick test_sandbox_root_git_cwd_zero_repo_blocks_before_exec;

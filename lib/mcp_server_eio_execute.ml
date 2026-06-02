@@ -432,40 +432,29 @@ let execute_tool_eio
                        ~system_prompt:""
                        ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
                    in
-                   let turn_sandbox_factory =
-                     Some (Keeper_sandbox_factory.create ~config ~meta ())
-                   in
-                   let turn_sandbox_factory_git =
-                     Some
-                       (Keeper_sandbox_factory.create
-                          ~default_network_override:Keeper_types_profile_sandbox.Network_inherit
-                          ~credential_mounts_enabled:true
-                          ~config
-                          ~meta
-                          ())
-                   in
-                   let cleanup_one ~during_exception label = function
-                     | None -> ()
+	                   let turn_sandbox_factory =
+	                     Some (Keeper_sandbox_factory.create ~config ~meta ())
+	                   in
+	                   let cleanup_one ~during_exception label = function
+	                     | None -> ()
                      | Some factory ->
                        cleanup_internal_keeper_runtime_resource
                          ~during_exception
                          ~label
                          (fun () -> Keeper_sandbox_factory.cleanup factory)
-                   in
-                   let cleanup ~during_exception () =
-                     cleanup_one ~during_exception "sandbox" turn_sandbox_factory;
-                     cleanup_one ~during_exception "git sandbox" turn_sandbox_factory_git
-                   in
+	                   in
+	                   let cleanup ~during_exception () =
+	                     cleanup_one ~during_exception "sandbox" turn_sandbox_factory
+	                   in
                    let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
                    let result =
                      run_with_cleanup_preserving_primary ~cleanup (fun () ->
                        Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
                          ~config
                          ~meta
-                         ~ctx_work
-                         ?turn_sandbox_factory
-                         ?turn_sandbox_factory_git
-                         ~exec_cache
+	                         ~ctx_work
+	                         ?turn_sandbox_factory
+	                         ~exec_cache
                          (* RFC-0182 Phase 5 PR-A.2: thread Eio
                             resources from execute_tool_eio scope. *)
                          ~sw

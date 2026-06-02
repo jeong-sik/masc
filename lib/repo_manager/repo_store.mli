@@ -27,7 +27,7 @@ val update :
   base_path:string -> repository_id -> repository -> (repository, string) result
 (** [update ~base_path id repo] replaces the repository with the given [id]
     with [repo], applying the same field normalization as {!add} (default
-    [local_path] and [credential_id] when blank) and forcing [repo.id = id].
+    [local_path] when blank) and forcing [repo.id = id].
     Preserves the original [created_at] and stamps a fresh [updated_at].
     Returns the persisted repository record. *)
 
@@ -77,4 +77,3 @@ val find_repo_by_path_prefix
 (** RFC-0128 §4.5. [find_repo_by_path_prefix ~base_path abs_path]
     returns the repository whose resolved {!local_path} is a directory
     ancestor of [abs_path], along with the repo-relative remainder. *)
-

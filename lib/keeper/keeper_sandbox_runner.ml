@@ -25,7 +25,6 @@ type backend_command =
   { route_cwd : string
   ; cwd : unit -> string
   ; command_text : string
-  ; git_creds_enabled : bool
   ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; trust : command_trust
   }
@@ -68,7 +67,6 @@ module type Backend = sig
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
     network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
 
@@ -78,19 +76,8 @@ module type Backend = sig
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
     network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
-
-  val run_credentialed_bash :
-    turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Workspace.config ->
-    meta:Keeper_meta_contract.keeper_meta ->
-    cwd:string ->
-    timeout_sec:float ->
-    cmd:string ->
-    unit ->
-    string
 
   val run_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
@@ -112,7 +99,6 @@ module Make (Backend : Backend) = struct
   let run_shell_command_with_status = Backend.run_shell_command_with_status
   let run_trusted_shell_command_with_status =
     Backend.run_trusted_shell_command_with_status
-  let run_credentialed_bash = Backend.run_credentialed_bash
   let run_bash = Backend.run_bash
 end
 
@@ -137,19 +123,16 @@ module Docker_backend = struct
   let private_workspace_cwd = Keeper_sandbox_docker.docker_private_workspace_cwd
 
   let run_shell_command_with_status ~config ~meta ~cwd ~timeout_sec ~cmd
-      ~git_creds_enabled ~network_mode =
+      ~network_mode =
     Keeper_sandbox_docker.run_docker_shell_command_with_status
-      ~config ~meta ~cwd ~timeout_sec ~cmd ~git_creds_enabled ~network_mode
+      ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
     |> Result.map of_docker_result
 
   let run_trusted_shell_command_with_status ~config ~meta ~cwd ~timeout_sec ~cmd
-      ~git_creds_enabled ~network_mode =
+      ~network_mode =
     Keeper_sandbox_docker.run_trusted_docker_shell_command_with_status
-      ~config ~meta ~cwd ~timeout_sec ~cmd ~git_creds_enabled ~network_mode
+      ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
     |> Result.map of_docker_result
-
-  let run_credentialed_bash =
-    Keeper_sandbox_docker.run_docker_credentialed_bash
 
   let run_bash = Keeper_sandbox_docker.run_docker_bash
 end
@@ -212,7 +195,6 @@ let run_backend_command ~config ~meta ~timeout_sec (backend : backend_command) =
       ~cwd
       ~timeout_sec
       ~cmd:backend.command_text
-      ~git_creds_enabled:backend.git_creds_enabled
       ~network_mode:backend.network_mode
   with
   | Ok result ->

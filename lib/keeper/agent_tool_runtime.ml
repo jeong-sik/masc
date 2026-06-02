@@ -15,7 +15,6 @@ type context =
   ; meta : Keeper_meta_contract.keeper_meta
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
-  ; turn_sandbox_factory_git : Keeper_sandbox_factory.t option
   ; exec_cache : Masc_exec.Exec_cache.t option
   ; search_fn : query:string -> max_results:int -> Yojson.Safe.t
   ; sw : Eio.Switch.t option
@@ -86,11 +85,10 @@ let handle_filesystem ctx descriptor args =
 let handle_shell_ir ctx descriptor args =
   match descriptor.Agent_tool_descriptor.runtime_handler with
   | Tool_execute ->
-    Some
-      (Agent_tool_command_runtime.handle_tool_execute
-         ~turn_sandbox_factory:ctx.turn_sandbox_factory
-         ~turn_sandbox_factory_git:ctx.turn_sandbox_factory_git
-         ~exec_cache:ctx.exec_cache
+	    Some
+	      (Agent_tool_command_runtime.handle_tool_execute
+	         ~turn_sandbox_factory:ctx.turn_sandbox_factory
+	         ~exec_cache:ctx.exec_cache
          ~config:ctx.config
          ~meta:ctx.meta
          ~args

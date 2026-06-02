@@ -14,7 +14,6 @@ type context =
   ; meta : Keeper_meta_contract.keeper_meta
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
-  ; turn_sandbox_factory_git : Keeper_sandbox_factory.t option
   ; exec_cache : Masc_exec.Exec_cache.t option
   ; search_fn : query:string -> max_results:int -> Yojson.Safe.t
   ; sw : Eio.Switch.t option

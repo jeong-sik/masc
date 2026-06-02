@@ -665,7 +665,7 @@ let execution_receipt_path_for_today config ~keeper_name =
 let base_dir config ~keeper_name =
   Filename.concat
     (Filename.concat
-       (Filename.concat (Workspace.masc_root_dir config) "keepers")
+       (Workspace.keepers_runtime_dir config)
        keeper_name)
     "runtime-manifests"
 

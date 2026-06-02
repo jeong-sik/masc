@@ -27,6 +27,12 @@ val state_path : config -> string
 val backlog_path : config -> string
 val archive_path : config -> string
 
+(** Cluster-aware keeper OUTPUT directory (server-written state + sidecars). The
+    trailing segment is [Common.keepers_runtime_dirname]; relocating the OUTPUT
+    root flips that one constant. base_path-only and cycle-bound callers use
+    [Common.keepers_runtime_dir_of_base] instead. *)
+val keepers_runtime_dir : config -> string
+
 (** Cluster-root state.json path. Used by bootstrap/init to gate
     one-time root setup. *)
 val root_state_path : config -> string

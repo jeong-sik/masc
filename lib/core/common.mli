@@ -45,6 +45,15 @@ val masc_dir_from_base_path : base_path:string -> string
     [Filename.concat base_path masc_dirname]. Canonical way to spell
     [<base_path>/.masc]. *)
 
+val keepers_runtime_dirname : string
+(** OUTPUT root segment for server-written keeper runtime state. Single literal
+    behind both keeper-dir SSOT functions; the input/output relocation flips it. *)
+
+val keepers_runtime_dir_of_base : base_path:string -> string
+(** [<base_path>/.masc/keepers] for callers holding only a [base_path]
+    (default cluster). Low-level SSOT that avoids the Workspace dependency cycle
+    the cluster-aware [Workspace.keepers_runtime_dir] would impose. *)
+
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
     {!Keeper_identity} can both compute it without depending on each

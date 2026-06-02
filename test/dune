@@ -1432,6 +1432,8 @@
 
 (include stanzas/test_keeper_alerting_path_norms.inc)
 
+(include stanzas/test_keepers_runtime_dir_ssot.inc)
+
 (include stanzas/test_keeper_auto_pause_blocker_persist_12683.inc)
 
 

@@ -36,7 +36,7 @@ let enabled () =
 
 let trace_path ~base_path ~keeper_name =
   Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+    (Common.keepers_runtime_dir_of_base ~base_path)
     (keeper_name ^ ".tla-trace.jsonl")
 
 let emit_transition

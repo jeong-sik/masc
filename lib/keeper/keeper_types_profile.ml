@@ -650,7 +650,7 @@ let load_persona_summary_from_path =
 let list_persona_summaries = Keeper_types_profile_persona.list_persona_summaries
 
 let keeper_dir (config : Workspace.config) =
-  let d = Filename.concat (Workspace.masc_root_dir config) "keepers" in
+  let d = Workspace.keepers_runtime_dir config in
   ensure_dir d
 
 let keeper_meta_path config name =

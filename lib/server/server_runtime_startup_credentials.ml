@@ -21,7 +21,7 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
      exception is logged and swallowed so a misbehaving keepers/ tree
      can't keep the server from starting. *)
   let config = state.Mcp_server.workspace_config in
-  let keepers_dir = Filename.concat (Workspace.masc_root_dir config) "keepers" in
+  let keepers_dir = Workspace.keepers_runtime_dir config in
   let metas =
     if not (Sys.file_exists keepers_dir) then []
     else

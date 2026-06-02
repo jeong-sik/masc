@@ -370,7 +370,7 @@ let sweep_and_recover (ctx : _ context) =
     Keeper_registry.all ~base_path () |> active_supervision_keeper_count
   in
   let restart_list =
-    let keepers_dir = Filename.concat (Workspace.masc_root_dir ctx.config) "keepers" in
+    let keepers_dir = Workspace.keepers_runtime_dir ctx.config in
     apply_self_preservation ~keepers_dir ~total_keepers:active_count !to_restart
   in
   (* Restart crashed keepers *)

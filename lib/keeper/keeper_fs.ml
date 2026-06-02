@@ -121,7 +121,7 @@ let save_json_atomic (path : string) (json : Yojson.Safe.t) : (unit, string) res
 (* ================================================================ *)
 
 let keeper_dir (config : Workspace.config) : string =
-  let d = Filename.concat (Workspace.masc_root_dir config) "keepers" in
+  let d = Workspace.keepers_runtime_dir config in
   ensure_dir d
 
 let session_base_dir (config : Workspace.config) : string =

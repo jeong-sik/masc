@@ -107,6 +107,9 @@
    ;; Goal domain extracted to lib/goal/ (masc_goal). Re-export so test code
    ;; using bare Goal_store.X / Goal_phase.X resolves after decoupling.
    (re_export masc_goal)
+   ;; Pure Turn FSM extracted to lib/turn_fsm/ (masc_turn). Re-export so test
+   ;; code using bare Turn_fsm.X resolves after the FSM carve.
+   (re_export masc_turn)
    (re_export masc_types)
    (re_export mirage-crypto)
    (re_export mirage-crypto-rng)

@@ -572,6 +572,8 @@
    masc_workspace
    ;; Goal domain (extracted sub-library — pure goal logic, decoupled from mega-lib)
    masc_goal
+   ;; Pure Turn FSM (extracted sub-library — states + transition matrix, Keeper-free)
+   masc_turn
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
    masc_mcp.ide

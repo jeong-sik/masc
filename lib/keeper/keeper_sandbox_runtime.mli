@@ -97,10 +97,9 @@ val docker_label_args
   -> unit
   -> string list
 
-(** {2 Label building blocks (RFC-0070 Phase 3e — used by
-    [Keeper_sandbox_session_plan] to compose the *deterministic* subset
-    of [docker_label_args] byte-identically; re-defining them there
-    would risk drift)} *)
+(** {2 Label building blocks (RFC-0070 Phase 3e — exposed so the
+    *deterministic* subset of [docker_label_args] can be composed
+    byte-identically without re-defining the keys and risking drift)} *)
 
 val sandbox_component_label_key : string
 val sandbox_base_path_hash_label_key : string

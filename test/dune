@@ -671,14 +671,6 @@
   test_keeper_identity_outcome_label
   test_keeper_hash_algo
   test_keeper_container_name
-  test_keeper_sandbox_oneshot_plan
-  test_keeper_sandbox_session_plan
-  test_docker_response
-  test_docker_client_mock
-  test_docker_client_real
-  test_sandbox_executor
-  test_sandbox_session_executor
-  test_keeper_backoff_policy
   test_worker_runtime
   test_capability_registry
   test_tool_local_runtime_probe
@@ -871,14 +863,6 @@
   test_keeper_identity_outcome_label
   test_keeper_hash_algo
   test_keeper_container_name
-  test_keeper_sandbox_oneshot_plan
-  test_keeper_sandbox_session_plan
-  test_docker_response
-  test_docker_client_mock
-  test_docker_client_real
-  test_sandbox_executor
-  test_sandbox_session_executor
-  test_keeper_backoff_policy
   test_worker_runtime
   test_capability_registry
   test_tool_local_runtime_probe
@@ -1027,7 +1011,7 @@
   test_board_attachment_meta
   test_board_moderation
   test_voice_config)
- (libraries masc_test_deps masc_sandbox_fixtures)
+ (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))
 
 ; Focused dashboard nudge feed projection.

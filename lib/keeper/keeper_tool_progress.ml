@@ -270,7 +270,9 @@ let is_owned_task_progress_tool_name name =
   then false
   else (
     let name = Keeper_tool_resolution.canonical_tool_name name in
-    if is_completion_tool_name name
+    if is_claim_context_tool_name name
+    then false
+    else if is_completion_tool_name name
     then true
     else if Keeper_tool_capability_axis.supports Board_activity name
     then true

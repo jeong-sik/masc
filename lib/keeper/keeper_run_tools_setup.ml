@@ -489,7 +489,8 @@ let prepare_agent_setup
   let fallback_tool_surface ~turn =
     validate_allow_list ~turn fallback_floor_tool_names
   in
-  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn ~allowed_tool_names =
+  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
+      ~claim_context_allowed ~allowed_tool_names =
     let caller_requires_tools =
       (* Enumerate every [tool_choice] variant + [None] so a new constructor
          added to [Agent_sdk.Types.tool_choice] surfaces a Warning 8 here.
@@ -507,6 +508,7 @@ let prepare_agent_setup
     && (caller_requires_tools
         || turn_affordances_require_tool_gate_with_allowed
              ~record_suppression_metric:true
+             ~claim_context_allowed
              ~allowed_tool_names
              turn_affordances)
   in
@@ -721,6 +723,7 @@ let prepare_agent_setup
     let per_call_turn = turn - start_turn_count in
     let is_last_turn = per_call_turn >= max_turns in
     let is_warning_zone = per_call_turn >= max_turns - 1 in
+    let claim_context_allowed = not (keeper_has_owned_active_task ()) in
     let turn_visible_tool_names, tool_surface_fallback_used =
       if turn_visible_tool_names = []
       then (
@@ -774,6 +777,7 @@ let prepare_agent_setup
       (not is_last_turn)
       && actionable_signal_requires_tool_gate
            ~actionable_signal
+           ~claim_context_allowed
            ~turn_affordances
            ~allowed_tool_names:turn_visible_tool_names
     in
@@ -783,6 +787,7 @@ let prepare_agent_setup
       || tool_gate_requested_for_turn
            ~current_tool_choice
            ~is_last_turn
+           ~claim_context_allowed
            ~allowed_tool_names:turn_visible_tool_names
     in
     let turn_visible_tool_names =
@@ -807,6 +812,7 @@ let prepare_agent_setup
       if tool_gate_requested && required_tool_names = []
       then
         generic_required_tool_candidate_names
+          ~claim_context_allowed
           ~turn_affordances
           ~allowed_tool_names:turn_visible_tool_names
       else []
@@ -854,6 +860,7 @@ let prepare_agent_setup
     ; tool_surface_class
     ; tool_requirement
     ; tool_gate_requested
+    ; claim_context_allowed
     ; tool_surface_fallback_used
     ; required_tool_names
     ; required_tool_candidate_names

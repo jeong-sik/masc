@@ -100,6 +100,7 @@ val classify_tool_progress : string -> tool_progress_class
 
 val is_passive_status_tool_name : string -> bool
 val is_execution_progress_tool_name : string -> bool
+val is_owned_task_progress_tool_name : string -> bool
 
 (** Increment the [keeper_require_tool_use_violations] Prometheus counter with
     [keeper] / [has_current_task] / [contract_status] labels. *)

@@ -236,10 +236,11 @@ let test_contract_filter_empty_input () =
 let test_actionable_signal_requests_tool_gate () =
   check
     bool
-    "actionable signal with executable tool requests gate"
+    "claimable signal with claim tool requests gate"
     true
     (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:true
+       ~claim_context_allowed:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim"; "Edit" ]);
   check
@@ -248,24 +249,81 @@ let test_actionable_signal_requests_tool_gate () =
     false
     (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:false
+       ~claim_context_allowed:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Edit" ]);
   check
     bool
-    "actionable signal with claim tool requests gate"
-    true
+    "owned task does not request gate for claim-only tools"
+    false
     (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:true
+       ~claim_context_allowed:false
        ~turn_affordances:[ "task_claim" ]
-       ~allowed_tool_names:[ "keeper_task_claim"; "Edit" ]);
+       ~allowed_tool_names:[ "keeper_task_claim"; "masc_claim_next" ]);
   check
     bool
-    "passive plus claim-only requests gate (claim is actionable)"
+    "no-claim task verification does not require owned-task completion"
+    false
+    (Surface.actionable_signal_requires_tool_gate
+       ~actionable_signal:true
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_task_submit_for_verification"; "keeper_task_done" ]);
+  check
+    bool
+    "owned task verification can require completion progress"
     true
     (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:true
+       ~claim_context_allowed:false
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_task_submit_for_verification" ]);
+  check
+    bool
+    "missing signal-specific tool does not fall back to workspace mutation"
+    false
+    (Surface.actionable_signal_requires_tool_gate
+       ~actionable_signal:true
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "board_post_or_comment" ]
+       ~allowed_tool_names:[ "Edit"; "Write" ]);
+  check
+    bool
+    "board signal requests gate when board tool is visible"
+    true
+    (Surface.actionable_signal_requires_tool_gate
+       ~actionable_signal:true
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "board_post_or_comment" ]
+       ~allowed_tool_names:[ "keeper_board_comment" ])
+;;
+
+let test_generic_required_candidates_match_claim_context () =
+  check
+    (list string)
+    "owned task candidates exclude claim context"
+    []
+    (Surface.generic_required_tool_candidate_names
+       ~claim_context_allowed:false
        ~turn_affordances:[ "task_claim" ]
-       ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim" ])
+       ~allowed_tool_names:[ "keeper_task_claim"; "masc_claim_next" ]);
+  check
+    (list string)
+    "no-claim candidates exclude owned-task completion"
+    []
+    (Surface.generic_required_tool_candidate_names
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_task_submit_for_verification"; "keeper_task_done" ]);
+  check
+    (list string)
+    "owned task candidates keep completion"
+    [ "keeper_task_submit_for_verification" ]
+    (Surface.generic_required_tool_candidate_names
+       ~claim_context_allowed:false
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_task_submit_for_verification" ])
 ;;
 
 let test_required_gate_surface_keeps_actionable_claim_context () =
@@ -364,6 +422,10 @@ let () =
             "actionable signal requests tool gate"
             `Quick
             test_actionable_signal_requests_tool_gate
+        ; test_case
+            "generic candidates match claim context"
+            `Quick
+            test_generic_required_candidates_match_claim_context
         ; test_case
             "gate keeps actionable claim context"
             `Quick

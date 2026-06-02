@@ -424,6 +424,7 @@ let assemble_hooks
                     append_ctx
                       ctx
                       (generic_required_tool_gate_guidance
+                         ~claim_context_allowed:computed_surface.claim_context_allowed
                          ~turn_affordances
                          ~allowed_tool_names:computed_surface.turn_visible_tool_names)
                   else if is_retry
@@ -458,10 +459,7 @@ let assemble_hooks
                   if acc.contract_violation_retries > 0
                   then
                     let satisfying_tools =
-                      Keeper_agent_tool_surface
-                      .generic_required_tool_candidate_names
-                        ~turn_affordances
-                        ~allowed_tool_names:computed_surface.turn_visible_tool_names
+                      computed_surface.required_tool_candidate_names
                     in
                     let preview =
                       satisfying_tools
@@ -525,6 +523,7 @@ let assemble_hooks
                   then
                     Some
                       (preferred_tool_choice_for_required_turn
+                         ~claim_context_allowed:computed_surface.claim_context_allowed
                          ~turn_affordances
                          ~allowed_tool_names:turn_visible_tool_names)
                   else clear_inherited_strict_tool_choice current_params.tool_choice

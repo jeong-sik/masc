@@ -122,6 +122,7 @@ type computed_tool_surface =
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; tool_gate_requested : bool
+  ; claim_context_allowed : bool
   ; tool_surface_fallback_used : bool
   ; required_tool_names : string list
   ; required_tool_candidate_names : string list
@@ -164,11 +165,14 @@ val preferred_tool_names_for_turn_affordances : string list -> string list
 
 (** Like [turn_affordances_require_tool_gate] but only fires when at
     least one of the gating affordance's tools is in
-    [allowed_tool_names] and can satisfy the required-tool contract.
-    Passive read/status tools may still be visible, but they cannot be
-    the sole reason to force [Require_tool_use]. *)
+    [allowed_tool_names] and can satisfy the current claim-context.
+    Claim/context tools only satisfy the gate while claim context is
+    allowed; owned-task turns require owned-task progress tools. Passive
+    read/status tools may still be visible, but they cannot be the sole
+    reason to force [Require_tool_use]. *)
 val turn_affordances_require_tool_gate_with_allowed :
      ?record_suppression_metric:bool
+  -> claim_context_allowed:bool
   -> allowed_tool_names:string list
   -> string list
   -> bool
@@ -196,15 +200,18 @@ val has_turn_affordance : turn_affordance -> string list -> bool
 
 val has_task_claim_affordance : string list -> bool
 
-(** Ordered executable candidates for generic required-tool gates.
-    Passive status/read tools and stay_silent are never recommended. *)
+(** Ordered executable candidates for generic required-tool gates,
+    filtered by the current claim context. Passive status/read tools and
+    stay_silent are never recommended. *)
 val generic_required_actionable_tool_names :
+  claim_context_allowed:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string list
 
 (** Pick the schema-visible [tool_choice] when the gate fires. *)
 val preferred_tool_choice_for_required_turn :
+  claim_context_allowed:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   Agent_sdk.Types.tool_choice
@@ -213,6 +220,7 @@ val preferred_tool_choice_for_required_turn :
     turns, where no explicit [required_tool_names] exist but the runtime still
     requires a keeper tool call. *)
 val generic_required_tool_gate_guidance :
+  claim_context_allowed:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string
@@ -222,6 +230,7 @@ val generic_required_tool_gate_guidance :
     generic gate with any execution-progress tool, while this list explains
     the preferred candidates exposed to the model/operator. *)
 val generic_required_tool_candidate_names :
+  claim_context_allowed:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string list
@@ -230,6 +239,7 @@ val generic_required_tool_candidate_names :
     generic required-tool gate that post-run validation already enforces. *)
 val actionable_signal_requires_tool_gate :
   actionable_signal:bool ->
+  claim_context_allowed:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   bool

@@ -102,7 +102,7 @@ let run_named
      would see no callable schema and emit misleading diagnostics. *)
   let require_tool_support =
     require_tool_support
-    || keeper_internal_tools_require_materialized_runtime_surface
+    || agent_internal_tools_require_materialized_runtime_surface
          ~keeper_name tools
   in
   (* Parameters that only fed the deleted multi-candidate machinery

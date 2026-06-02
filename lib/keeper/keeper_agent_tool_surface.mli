@@ -244,8 +244,8 @@ val sync_current_task_id_for_agent_name :
   agent_name:string ->
   unit
 
-(** Convenience [List.map Tool_name.to_string]. *)
-val tool_names : Tool_name.t list -> string list
+(** Convenience [List.map Keeper_tool_name.to_string]. *)
+val tool_names : Keeper_tool_name.t list -> string list
 
 val fallback_floor_tool_names : string list
 

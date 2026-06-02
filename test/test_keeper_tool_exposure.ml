@@ -510,7 +510,7 @@ let test_task_audit_tool_choice_allows_cleanup_followup () =
     (has_tool "keeper_task_force_release" preferred);
   let choice =
     Keeper_agent_tool_surface.preferred_tool_choice_for_required_turn
-      ~has_current_task:false
+      ~claim_context_allowed:false
       ~turn_affordances:[ "task_audit" ]
       ~allowed_tool_names
   in

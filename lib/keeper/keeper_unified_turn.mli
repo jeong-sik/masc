@@ -159,11 +159,6 @@ val sync_keeper_paused_state
     failures, not transient provider blips. Repeated occurrences should pause
     the keeper before the generic supervisor crash/restart loop re-enters the
     same prompt and model family. Exposed for regression tests. *)
-val should_auto_pause_required_tool_contract_violation
-  :  paused:bool
-  -> consecutive_failures:int
-  -> Agent_sdk.Error.sdk_error
-  -> bool
 
 (** Ensure local-provider discovery is refreshed before a turn when the
     selected labels depend on runtime discovery. Exposed for targeted tests. *)

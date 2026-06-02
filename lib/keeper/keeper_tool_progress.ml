@@ -146,69 +146,6 @@ let tool_name_can_satisfy_required_contract name =
         (Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name))
 ;;
 
-let required_tool_satisfaction ?(satisfying_tools : string list = [])
-  (call : Agent_sdk.Completion_contract.tool_call)
-  : (unit, string) result
-  =
-  let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
-  (* Generic Require_tool_use is a required-action contract at the keeper
-     boundary. Passive read/status/search tools can support a later action, but
-     they must not satisfy the action predicate by themselves. *)
-  if is_completion_tool_name tool_name
-  then Ok ()
-  else (
-    let mutates =
-      match effect_domain_for_tool_name call.name with
-      | Some Tool_catalog.Read_only -> false
-      | _ ->
-        Agent_tool_dispatch_runtime.has_mutating_side_effect_with_input ~tool_name ~input:call.input
-    in
-    if mutates
-    then Ok ()
-    else
-      let base_msg =
-        Printf.sprintf
-          "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
-          tool_name
-      in
-      match satisfying_tools with
-      | [] -> Error base_msg
-      | _ ->
-        Error
-          (Printf.sprintf
-             "%s. Call one of these instead: [%s]"
-             base_msg
-             (String.concat "; " satisfying_tools)))
-;;
-
-let required_tool_satisfaction_for_required_names
-      ?(satisfying_tools : string list = [])
-      ~(required_tool_names : string list)
-      (call : Agent_sdk.Completion_contract.tool_call)
-  : (unit, string) result
-  =
-  let required_tool_names =
-    required_tool_names
-    |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-  in
-  let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
-  if List.mem tool_name required_tool_names
-  then Ok ()
-  else required_tool_satisfaction ~satisfying_tools call
-;;
-
-let required_tool_satisfaction_for_turn
-      ?(satisfying_tools : string list = [])
-      ~(required_tool_names : string list)
-      (call : Agent_sdk.Completion_contract.tool_call)
-  : (unit, string) result
-  =
-  match required_tool_names with
-  | [] -> Ok ()
-  | _ -> required_tool_satisfaction_for_required_names ~satisfying_tools ~required_tool_names call
-;;
-
 let parse_tool_csv text =
   text
   |> String.split_on_char ','

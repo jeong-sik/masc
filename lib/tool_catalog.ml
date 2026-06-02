@@ -201,20 +201,15 @@ let admin_read_tool =
 let reset_tool =
   with_required_permission Masc_domain.CanReset destructive_tool
 
-let static_mcp_context_required_tool_names =
-  [ "masc_start"
-  ; "masc_broadcast"
-  ; "masc_messages"
-  ; "masc_approval_get"
-  ; "masc_mcp_session"
-  ]
-
 let static_destructive_tool_names =
   [ "tool_execute"
   ; "tool_edit_file"
   ; "tool_write_file"
   ; "shell_exec"
   ]
+
+let static_mcp_context_required_tool_names =
+  [ "masc_start"; "masc_broadcast"; "masc_messages"; "masc_approval_get"; "masc_mcp_session" ]
 
 let force_true_if_member name names current =
   if List.mem name names then Some true else current
@@ -426,10 +421,7 @@ let attach_static_capabilities name (meta : metadata) =
   {
     meta with
     mcp_context_required =
-      force_true_if_member
-        name
-        static_mcp_context_required_tool_names
-        meta.mcp_context_required;
+      force_true_if_member name static_mcp_context_required_tool_names meta.mcp_context_required;
     destructive =
       force_true_if_member name static_destructive_tool_names meta.destructive;
   }

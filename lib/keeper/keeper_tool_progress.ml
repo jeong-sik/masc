@@ -54,7 +54,7 @@ let effect_of_progress_class = function
 ;;
 
 let claim_context_tool_names : string list =
-  Tool_name.[ Masc Claim_next; Keeper Task_claim ] |> List.map Tool_name.to_string
+  [ Tool_name.(to_string (Masc Claim_next)); Keeper_tool_name.(to_string Task_claim) ]
 ;;
 
 let completion_tool_names : string list =
@@ -66,22 +66,26 @@ let completion_tool_names : string list =
      breaker). Without this, 4+ events/day were rejected as passive_only even
      though the LLM had decided no fit (sangsu/janitor/taskmaster on 2026-04-27
      00:17-00:58 UTC, idle_seconds 28-40h, claimable_count 44-46). *)
-  Tool_name.
-    [ Masc Deliver
-    ; Keeper Stay_silent
-    ; Keeper Task_done
-    ; Keeper Task_force_done
-    ; Keeper Task_force_release
-    ; Keeper Task_submit_for_verification
-    ]
-  |> List.map Tool_name.to_string
+  Tool_name.(to_string (Masc Deliver))
+  :: List.map
+       Keeper_tool_name.to_string
+       Keeper_tool_name.
+         [ Stay_silent
+         ; Task_done
+         ; Task_force_done
+         ; Task_force_release
+         ; Task_submit_for_verification
+         ]
 ;;
 
 let is_claim_tool_name name =
   let name = Keeper_tool_resolution.canonical_tool_name name in
-  match Tool_name.of_string name with
-  | Some (Keeper Task_claim) | Some (Masc Claim_next) -> true
-  | _ -> false
+  (match Keeper_tool_name.of_string name with
+   | Some Task_claim -> true
+   | _ -> false)
+  || (match Tool_name.of_string name with
+      | Some (Masc Claim_next) -> true
+      | _ -> false)
 ;;
 
 let is_claim_context_tool_name name =
@@ -106,8 +110,8 @@ let is_completion_tool_name name =
 
 let is_stay_silent_tool_name name =
   let name = Keeper_tool_resolution.canonical_tool_name name in
-  match Tool_name.of_string name with
-  | Some (Keeper Stay_silent) -> true
+  match Keeper_tool_name.of_string name with
+  | Some Stay_silent -> true
   | _ -> false
 ;;
 

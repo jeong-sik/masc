@@ -66,7 +66,7 @@ val prune_active_goal_ids :
 
 type orphan_goal_binding_hooks =
   { prune_orphan_goal_bindings :
-      Workspace.config -> valid_goal_ids:string list -> int
+      Workspace_utils.config -> valid_goal_ids:string list -> int
   }
 
 val set_orphan_goal_binding_hooks : orphan_goal_binding_hooks -> unit
@@ -87,4 +87,4 @@ val audit_unclaimed_goal_orphan_tasks :
 
 (** Run a full sweep: goal purge / stagnate, then owner goal-binding
     prune. Writes updated state to disk. *)
-val run : ?config:sweep_config -> Workspace.config -> sweep_result
+val run : ?config:sweep_config -> Workspace_utils.config -> sweep_result

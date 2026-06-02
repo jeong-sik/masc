@@ -21,6 +21,7 @@
 val public_mcp_surface_tools : string list
 val system_internal_surface_tools : string list
 val workspace_role_tools : string list
+val execution_role_tools : string list
 
 (** {1 Surface variant} *)
 

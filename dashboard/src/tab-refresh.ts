@@ -4,11 +4,6 @@ import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
 import { refreshOperatorWorkspaceDigest, refreshOperatorSnapshot } from './operator-store'
 
-async function refreshActivityGraphSurface(): Promise<void> {
-  const { refreshActivityGraph } = await import('./components/activity-graph-store')
-  await refreshActivityGraph()
-}
-
 async function refreshGitGraphSurface(): Promise<void> {
   const { refreshGitGraph } = await import('./components/git-graph-store')
   await refreshGitGraph()
@@ -50,7 +45,6 @@ type RefreshTask =
   | 'missionSnapshot'
   | 'execution'
   | 'observatory'
-  | 'activityGraph'
   | 'gitGraph'
   | 'board'
   | 'goals'
@@ -78,9 +72,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution']
     case 'monitoring':
       if (routeState.params.section === 'observatory') {
-        const view = routeState.params.view
-        if (view === 'activity' || view === 'graph') return ['namespaceTruth', 'activityGraph']
-        if (view === 'live') return ['namespaceTruth', 'execution', 'missionSnapshot']
         return ['namespaceTruth', 'observatory']
       }
       if (routeState.params.section === 'journey') {
@@ -146,7 +137,6 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   // through that budgeted path instead of bypassing it.
   execution: () => { void refreshExecution() },
   observatory: () => { void refreshObservatoryPanel() },
-  activityGraph: () => { void refreshActivityGraphSurface() },
   gitGraph: () => { void refreshGitGraphSurface() },
   board: () => { void refreshBoard() },
   goals: () => { void refreshGoals() },

@@ -207,13 +207,8 @@ export function statusDot(status: StatusTone): string {
   return 'bg-[var(--color-status-err)]'
 }
 
-// Renamed from `toneClass` to encode the direction of the conversion.
-// `lib/tone.ts` ships a separate `toneClass(string): 'ok' | 'warn' | 'bad'`
-// — a classifier going from free-form status strings to a closed tone
-// label — which is the *inverse* direction of this function (closed
-// `StatusTone` enum to a text-color Tailwind class). The two used to
-// share a name and could be confused on import; the new name pairs
-// nominally with the sibling `statusDot(StatusTone): bg-class` helper
+// Converts the closed `StatusTone` enum to a text-color Tailwind class.
+// The name pairs with the sibling `statusDot(StatusTone): bg-class` helper
 // just above.
 export function toneTextClass(status: StatusTone): string {
   if (status === 'ok') return 'text-[var(--color-status-ok)]'

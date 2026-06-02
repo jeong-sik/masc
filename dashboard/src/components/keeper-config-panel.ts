@@ -32,7 +32,10 @@ function MutedLabel({ children }: { children: unknown }) {
 // ── State ────────────────────────────────────────────────
 
 const configResource = createAsyncResource<KeeperConfig>()
-const configState = configResource.state
+// Exported so sibling surfaces (e.g. the runtime-model editor in the
+// 진단/운영 section) subscribe to the SAME loaded config instead of issuing
+// a second fetch and drifting. Single source of truth for a keeper's config.
+export const configState = configResource.state
 const configKeeperName = signal<string>('')
 const goalOptionsResource = createAsyncResource<GoalTreeNode[]>()
 const goalOptionsState = goalOptionsResource.state
@@ -266,6 +269,19 @@ export function resetKeeperConfig(): void {
   hookFilterQuery.value = ''
 }
 
+/**
+ * Replace the shared loaded config for [name] with a freshly-patched value.
+ *
+ * Used by sibling editors (e.g. the runtime-model card) after a successful
+ * [patchKeeperConfig] so both this panel and the card reflect the same
+ * server-confirmed state without a second fetch. No-op semantics match the
+ * panel's own post-save update (`configState.value = loaded(updated)`).
+ */
+export function applyKeeperConfigUpdate(name: string, updated: KeeperConfig): void {
+  configKeeperName.value = name
+  configState.value = loaded(updated)
+}
+
 export function peekLoadedKeeperConfig(name: string): KeeperConfig | null {
   const state = configState.value
   if (configKeeperName.value !== name || state.status !== 'loaded') return null
@@ -480,7 +496,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
   `
 }
 
-function InlineSelectRow({
+export function InlineSelectRow({
   label,
   value,
   options,

@@ -21,7 +21,7 @@
 
     3. {b compact_session_json fallback contract} — empty
        [recent_events] produces a sentinel last_event with
-       event_type = "none" and the documented "unknown" /
+       event_type = "none" and the documented "<missing status>" /
        "not_recorded" defaults.
 
     4. {b compact_keeper_json strict shape} — 13 keys with
@@ -309,8 +309,8 @@ let test_compact_session_last_event_empty_uses_sentinel () =
             | _ -> "<missing>"
           in
           assert (get "event_type" = "none");
-          assert (get "ts_iso" = "unknown");
-          assert (get "actor" = "unknown");
+          assert (get "ts_iso" = "<missing status>");
+          assert (get "actor" = "<missing status>");
           assert (get "task_title" = "no recent session events");
           assert (get "result" = "not_recorded");
           assert (get "reason" = "not_recorded");
@@ -448,7 +448,7 @@ let test_compact_keeper_max_len_truncation () =
       assert (String.length lp < 300)
   | _ -> assert false
 
-let test_compact_keeper_default_unknown_when_missing_keys () =
+let test_compact_keeper_default_missing_status_when_missing_keys () =
   (* Keeper JSON missing diagnostic block → defaults applied. *)
   let k = `Assoc [ ("name", `String "k") ] in
   let out = C.compact_keeper_json k in
@@ -459,8 +459,8 @@ let test_compact_keeper_default_unknown_when_missing_keys () =
         | Some (`String s) -> s
         | _ -> ""
       in
-      assert (get "status" = "unknown");
-      assert (get "agent_name" = "unknown");
+      assert (get "status" = "<missing status>");
+      assert (get "agent_name" = "<missing status>");
       assert (get "current_task" = "unassigned");
       assert (get "last_reply_status" = "not_recorded");
       assert (get "last_reply_preview" = "not_recorded")
@@ -577,7 +577,7 @@ let () =
   test_compact_session_goal_default_when_blank ();
   test_compact_keeper_strict_keys ();
   test_compact_keeper_max_len_truncation ();
-  test_compact_keeper_default_unknown_when_missing_keys ();
+  test_compact_keeper_default_missing_status_when_missing_keys ();
   test_compact_agent_strict_keys ();
   test_compact_agent_assignment_status_assigned ();
   test_compact_agent_assignment_status_unassigned_when_none ();

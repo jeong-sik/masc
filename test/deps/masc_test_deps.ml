@@ -21,7 +21,7 @@ let init_eio_clock ?sw env =
   Option.iter Eio_context.set_switch sw
 
 let init_keeper_tool_registry () =
-  if not (Masc_mcp.Tool_dispatch.is_tag_registry_initialized ()) then
+  if not (Tool_dispatch.is_tag_registry_initialized ()) then
     let _ = Masc_mcp.Mcp_server_eio.governance_defaults in
     ()
 

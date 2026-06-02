@@ -1,9 +1,9 @@
 (** Tests for Tool_dispatch pre-hooks, dispatch observers, and result transformers. *)
 
-module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
-module Tool_token = Masc_mcp.Tool_token
-module Dispatch_outcome = Masc_mcp.Dispatch_outcome
+module Tool_token = Tool_token
+module Dispatch_outcome = Dispatch_outcome
 
 (* Track hook execution order *)
 let call_log : string list ref = ref []

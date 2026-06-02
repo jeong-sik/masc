@@ -1,9 +1,9 @@
 (** Tests for Tool_unified — unified tool query interface. *)
 
 module Tool_unified = Masc_mcp.Tool_unified
-module Tool_catalog = Masc_mcp.Tool_catalog
-module Tool_dispatch = Masc_mcp.Tool_dispatch
-module Tool_registry = Masc_mcp.Tool_registry
+module Tool_catalog = Tool_catalog
+module Tool_dispatch = Tool_dispatch
+module Tool_registry = Tool_registry
 
 let () =
   Eio_main.run @@ fun env ->

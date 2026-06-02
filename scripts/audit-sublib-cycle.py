@@ -54,7 +54,12 @@ MEGA_LIB = "masc_mcp"
 
 # Leaf / domain libraries that MUST NOT depend on the mega-library.
 # Extend as each domain is extracted (RFC-0056 / boundary campaign).
-DEFAULT_LEAVES: tuple[str, ...] = ("masc_mcp.masc_goal",)
+DEFAULT_LEAVES: tuple[str, ...] = (
+    "masc_mcp.masc_goal",
+    # PR-S3 (LANE 2): Tool dispatch substrate. The gate enforces that the
+    # Tool layer cannot pull keeper/runtime/telemetry back in via the mega-lib.
+    "masc_mcp.masc_tool_dispatch",
+)
 
 # Recursive s-expression value: an atom (str) or a list of values.
 Sexp = Union[str, "list[Sexp]"]

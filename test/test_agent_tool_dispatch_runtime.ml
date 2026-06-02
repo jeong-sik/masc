@@ -442,7 +442,7 @@ let probe_input_schema =
   `Assoc [ ("type", `String "object"); ("properties", `Assoc []) ]
 
 let register_probe_schema tool_name =
-  Masc_mcp.Tool_dispatch.register_module_tag
+  Tool_dispatch.register_module_tag
     ~schemas:
       [ ({ name = tool_name
          ; description = "test registered dispatch probe"
@@ -450,11 +450,11 @@ let register_probe_schema tool_name =
          }
           : Masc_domain.tool_schema )
       ]
-    ~tag:Masc_mcp.Tool_dispatch.Mod_misc
+    ~tag:Tool_dispatch.Mod_misc
 
 let register_registered_dispatch_probe () =
   register_probe_schema registered_dispatch_probe_tool;
-  Masc_mcp.Tool_dispatch.register
+  Tool_dispatch.register
     ~tool_name:registered_dispatch_probe_tool
     ~handler:(fun ~name ~args:_ ->
       Some
@@ -470,7 +470,7 @@ let workflow_rejection_probe_tool = "test_keeper_workflow_rejection_probe"
 
 let register_workflow_rejection_probe () =
   register_probe_schema workflow_rejection_probe_tool;
-  Masc_mcp.Tool_dispatch.register
+  Tool_dispatch.register
     ~tool_name:workflow_rejection_probe_tool
     ~handler:(fun ~name ~args:_ ->
       Some

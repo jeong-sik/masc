@@ -47,8 +47,8 @@ let test_has_unknown_tool_returns_false () =
 
 let test_has_catalog_metadata () =
   let name = "__cap_catalog_tool" in
-  Masc_mcp.Tool_catalog.register_metadata name
-    { Masc_mcp.Tool_catalog.default_metadata with
+  Tool_catalog.register_metadata name
+    { Tool_catalog.default_metadata with
       readonly = Some true;
       mcp_context_required = Some true;
       destructive = Some true;

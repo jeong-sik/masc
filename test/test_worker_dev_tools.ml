@@ -381,6 +381,39 @@ let test_shell_exec_echo () =
    | Error { Agent_sdk.Types.message = e; _ } ->
      Alcotest.fail (Printf.sprintf "expected Ok, got Error: %s" e))
 
+(* RFC-0208: the worker shell surface authorizes by allowlist only, so a
+   destructive action-flag on an allowlisted read tool (find -delete) must be
+   refused by the risk guard before dispatch — matching the keeper path. The
+   canary verifies the guard fires before execution (no file is deleted). *)
+let test_shell_exec_find_delete_blocked () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let workdir = Filename.temp_file "wdt_find_delete_" "" in
+  Fun.protect
+    ~finally:(fun () -> try cleanup_path workdir with _ -> ())
+    (fun () ->
+       Sys.remove workdir;
+       Unix.mkdir workdir 0o755;
+       let canary = Filename.concat workdir "canary.txt" in
+       let oc = open_out canary in
+       output_string oc "keep";
+       close_out oc;
+       let tools = Worker_dev_tools.make_tools ~proc_mgr ~clock ~workdir () in
+       let tool = find_tool "shell_exec" tools in
+       (match
+          Tool.execute tool (`Assoc [ ("command", `String "find . -delete") ])
+        with
+        | Ok _ ->
+          Alcotest.fail "find . -delete must be blocked on the worker shell surface"
+        | Error { Agent_sdk.Types.message = e; _ } ->
+          Alcotest.(check bool)
+            "blocked as destructive"
+            true
+            (contains_substring e "destructive"));
+       Alcotest.(check bool) "canary survived block" true (Sys.file_exists canary))
+
 let test_shell_exec_uses_shell_ir_dispatch_cwd () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -754,6 +787,8 @@ let () =
       Alcotest.test_case "timeout floor for load-bearing commands" `Quick
         test_shell_exec_timeout_floor_for_load_bearing_commands;
       Alcotest.test_case "blocked command" `Quick test_shell_exec_blocked_command;
+      Alcotest.test_case "find -delete blocked (destructive)" `Quick
+        test_shell_exec_find_delete_blocked;
       Alcotest.test_case "env wrapper blocked command" `Quick
         test_shell_exec_blocks_env_wrapped_disallowed_command;
       Alcotest.test_case "outside path arg blocked" `Quick

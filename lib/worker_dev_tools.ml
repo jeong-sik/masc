@@ -396,6 +396,32 @@ let make_shell_exec_with_allowlist
                    ())
               on_exec;
             tool_error (block_reason_to_string reason)
+          | Ok context
+            when Masc_exec.Shell_ir_risk.is_destructive
+                   (Masc_exec.Shell_ir_risk.classify
+                      (Masc_exec.Shell_ir_risk.undecided
+                         context.Exec_shell_gate.ast)) ->
+            (* RFC-0208: this worker shell surface authorizes by allowlist
+               only — unlike the keeper path (agent_tool_execute_runtime) it
+               has no risk pre-gate. find -delete is allowlisted because find
+               is a read tool, but the risk classifier rates it
+               Destructive_protected (the delete action, like rm, is on no
+               allowlist). Refuse it here so the worker matches the keeper: a
+               Destructive command is blocked for every tool_access. R1
+               writes stay allowed — this dev surface is write-capable by
+               design. *)
+            Option.iter
+              (fun (f : tool_exec_observer) ->
+                 f
+                   ~tool_name:"shell_exec"
+                   ~success:false
+                   ~duration_ms:0
+                   ~error_kind:Command_blocked
+                   ~error_message:"destructive_operation_blocked"
+                   ())
+              on_exec;
+            tool_error
+              "This command is destructive and is blocked for all tool_access."
           | Ok context ->
             let path_workdir =
               match workdir with

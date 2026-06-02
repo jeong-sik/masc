@@ -86,6 +86,14 @@ let test_session_communication_mode_unknown () =
 
 let test_session_communication_mode_blank_or_absent () =
   let blank = session ~comm:"   " () in
+  let null =
+    `Assoc
+      [
+        ("session_id", json_string "s-null");
+        ("goal", json_string "x");
+        ("communication_mode", `Null);
+      ]
+  in
   let absent =
     `Assoc
       [
@@ -94,10 +102,10 @@ let test_session_communication_mode_blank_or_absent () =
       ]
   in
   let gaps =
-    G.collect_metadata_gaps ~sessions:[ blank; absent ] ~keepers:[]
+    G.collect_metadata_gaps ~sessions:[ blank; null; absent ] ~keepers:[]
       ~agents:[]
   in
-  assert (List.length gaps = 2);
+  assert (List.length gaps = 3);
   assert (List.for_all (fun g -> kind_of g = "session_communication_mode_missing") gaps)
 
 let test_keeper_last_reply_not_recorded () =

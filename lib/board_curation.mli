@@ -33,6 +33,8 @@ type curation_snapshot = {
   (** Unix timestamp of when the curation was produced. *)
   submitted_by : string;
   (** Agent identifier that submitted the snapshot. *)
+  model : string option;
+  (** Optional model/runtime label reported by the submitting curation agent. *)
   summary : string option;
   (** Optional TL;DR summary of the current board window. *)
   ordering : string list;

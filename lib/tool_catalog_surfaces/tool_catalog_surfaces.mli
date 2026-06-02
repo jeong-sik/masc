@@ -18,6 +18,9 @@
 
 (** {1 Tool name lists (per surface)} *)
 
+val workspace_mutating_tool_names : string list
+(** Tools that mutate the workspace filesystem. *)
+
 val keeper_internal_tools : string list
 (** Tools accepted by keeper-bound dispatchers. *)
 

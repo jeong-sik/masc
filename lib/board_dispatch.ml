@@ -680,6 +680,7 @@ let submit_curation_snapshot ~submitted_by ?summary ~ordering ~highlights
     id = Board_curation.generate_id ();
     generated_at = Time_compat.now ();
     submitted_by;
+    model = None;
     summary;
     ordering;
     highlights;

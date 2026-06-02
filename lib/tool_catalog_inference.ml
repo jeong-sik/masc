@@ -116,6 +116,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Transition
   | TN.Masc TM.Update_priority ->
       Some Masc_workspace
+  | TN.Keeper _ | TN.Masc_keeper _ -> None
 let inferred_effect_domain name =
   match Tool_name.of_string name with
   | Some typed_name -> inferred_effect_domain_of_typed_tool_name typed_name
@@ -199,6 +200,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Web_fetch
       | TM.Web_search ) ->
       Some Masc_core
+  | TN.Keeper _ | TN.Masc_keeper _ -> None
 
 let tool_group name =
   match Tool_name.of_string name with

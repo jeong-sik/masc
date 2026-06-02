@@ -40,17 +40,14 @@ let task_link_already_recorded ~keeper ~task_id ~trace_id =
     Hashtbl.mem link_task_cache (keeper, task_id, trace_id))
 
 let per_provider_timeout_for_turn
-    ~(meta : Keeper_meta_contract.keeper_meta)
+    ~meta:(_ : Keeper_meta_contract.keeper_meta)
     ?oas_timeout_s
     ?(oas_timeout_is_explicit = true)
     ~(timeout_s : float)
     () =
   match (oas_timeout_s, oas_timeout_is_explicit) with
   | (Some _ as explicit_timeout), true -> explicit_timeout
-  | _, _ -> (
-      match meta.per_provider_timeout_s with
-      | Some configured -> Some (Float.min configured timeout_s)
-      | None -> Some timeout_s)
+  | _, _ -> Some timeout_s
 
 let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   match event with

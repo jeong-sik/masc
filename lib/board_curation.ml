@@ -25,6 +25,7 @@ type curation_snapshot = {
   id : string;
   generated_at : float;
   submitted_by : string;
+  model : string option;
   summary : string option;
   ordering : string list;
   highlights : string list;
@@ -94,6 +95,7 @@ let snapshot_to_yojson (s : curation_snapshot) : Yojson.Safe.t =
     ("id", `String s.id);
     ("generated_at", `Float s.generated_at);
     ("submitted_by", `String s.submitted_by);
+    ("model", Json_util.string_opt_to_json s.model);
     ("summary", Json_util.string_opt_to_json s.summary);
     ("ordering", `List (List.map (fun id -> `String id) s.ordering));
     ("highlights", `List (List.map (fun id -> `String id) s.highlights));

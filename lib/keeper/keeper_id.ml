@@ -68,7 +68,7 @@ module Uid = struct
   (** Stable unique identifier for a keeper, assigned once and never changed.
       Format: "keeper-<uuidv4>" (44 chars total).
       Uses [Uuidm.v4_gen] with an [Eio.Mutex]-protected RNG for fiber safety,
-      following the same discipline as [Agent_identity]. *)
+      following the same discipline as [Client_identity]. *)
 
   type t = string
 

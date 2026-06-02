@@ -1,4 +1,4 @@
-(** Agent_name_kind — classifies agent name strings by origin.
+(** Client_name_kind — classifies agent name strings by origin.
 
     Extracted from [Mcp_server_eio_execute] for reuse across modules.
     Provides predicates for agent-name classification used during

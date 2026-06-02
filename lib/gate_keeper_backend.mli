@@ -1,6 +1,6 @@
 (** Gate_keeper_backend -- adapter between the Channel Gate and the keeper subsystem.
 
-    This module owns the coupling to [Keeper_tool_surface], [Agent_identity],
+    This module owns the coupling to [Keeper_tool_surface], [Client_identity],
     and [Workspace].  The gate orchestrator ([Channel_gate]) calls
     {!dispatch} without knowing how keeper dispatch works internally.
 

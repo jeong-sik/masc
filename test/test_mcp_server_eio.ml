@@ -61,7 +61,7 @@ let write_text_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let test_agent_identity ~uuid ~session_key : Masc_mcp.Agent_identity.t =
+let test_agent_identity ~uuid ~session_key : Masc_mcp.Client_identity.t =
   {
     uuid;
     session_key;

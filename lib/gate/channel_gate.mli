@@ -13,7 +13,7 @@
     Keeper dispatch adapter lives in {!Gate_keeper_backend}.
 
     @since 2.217.0
-    @modified 2.222.0 Decoupled from Agent_identity and Keeper_tool_surface *)
+    @modified 2.222.0 Decoupled from Client_identity and Keeper_tool_surface *)
 
 (** {1 Re-exported Wire Types} *)
 

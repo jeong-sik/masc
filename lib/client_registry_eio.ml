@@ -19,7 +19,7 @@ module Random = Stdlib.Random
 (** Agent Registry Eio - Global agent identity tracking for MCP sessions
 
     Provides a singleton registry for tracking agent identities across
-    MCP tool calls. Integrates with Agent_identity module.
+    MCP tool calls. Integrates with Client_identity module.
 
     Actor model: all mutable state is encapsulated in a single Mutex-protected
     record.  The three previously independent global stores (identity registry,
@@ -43,13 +43,13 @@ module SMap = Set_util.StringMap
     Held behind a single Mutex so that read-modify-write sequences are
     atomic (e.g. cache-miss create + map insert in [get_or_create_identity]). *)
 type state = {
-  registry : Agent_identity.Registry.registry;
+  registry : Client_identity.Registry.registry;
   session_map : string SMap.t;   (** mcp_session_id → session_key *)
   resolved_map : string SMap.t;  (** mcp_session_id → resolved agent_name *)
 }
 
 let make_state () = {
-  registry = Agent_identity.Registry.create ();
+  registry = Client_identity.Registry.create ();
   session_map = SMap.empty;
   resolved_map = SMap.empty;
 }
@@ -122,7 +122,7 @@ let get_or_create_identity ?mcp_session_id params =
     let reg = get_registry_locked !s in
     let find_from_cache sid =
       match SMap.find_opt sid (!s).session_map with
-      | Some session_key -> Agent_identity.Registry.find_by_session reg session_key
+      | Some session_key -> Client_identity.Registry.find_by_session reg session_key
       | None -> None
     in
     let existing =
@@ -132,18 +132,18 @@ let get_or_create_identity ?mcp_session_id params =
     in
     match existing with
     | Some identity ->
-        Agent_identity.Registry.touch reg identity.Agent_identity.session_key
+        Client_identity.Registry.touch reg identity.Client_identity.session_key
           ();
-        (match Agent_identity.Registry.find_by_session reg identity.session_key with
+        (match Client_identity.Registry.find_by_session reg identity.session_key with
          | Some updated -> updated
          | None -> identity)
     | None ->
-        let identity = Agent_identity.from_mcp_params params in
-        let registered = Agent_identity.Registry.register reg identity in
+        let identity = Client_identity.from_mcp_params params in
+        let registered = Client_identity.Registry.register reg identity in
         let s' =
           match mcp_session_id with
           | Some sid ->
-              { !s with session_map = SMap.add sid registered.Agent_identity.session_key (!s).session_map }
+              { !s with session_map = SMap.add sid registered.Client_identity.session_key (!s).session_map }
           | None -> !s
         in
         let s'' = maybe_evict_caches_locked s' in
@@ -159,13 +159,13 @@ let get_or_create_identity ?mcp_session_id params =
 (** Get identity by agent name. Returns [None] if not found. *)
 let get_by_name agent_name =
   with_state_ro (fun s ->
-    Agent_identity.Registry.find_by_name s.registry agent_name
+    Client_identity.Registry.find_by_name s.registry agent_name
   )
 
 (** Get identity by session key. Returns [None] if not found. *)
 let get_by_session session_key =
   with_state_ro (fun s ->
-    Agent_identity.Registry.find_by_session s.registry session_key
+    Client_identity.Registry.find_by_session s.registry session_key
   )
 
 (** {1 Resolved Agent Name Cache}
@@ -186,17 +186,17 @@ let set_resolved_name sid name =
 (** Get count of active agents *)
 let active_count ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
   with_state_ro (fun s ->
-    List.length (Agent_identity.Registry.list_active s.registry ~within_seconds)
+    List.length (Client_identity.Registry.list_active s.registry ~within_seconds)
   )
 
 (** Get total registered count *)
 let total_count () =
-  with_state_ro (fun s -> Agent_identity.Registry.count s.registry)
+  with_state_ro (fun s -> Client_identity.Registry.count s.registry)
 
 (** List all active identities *)
 let list_active ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
   with_state_ro (fun s ->
-    Agent_identity.Registry.list_active s.registry ~within_seconds
+    Client_identity.Registry.list_active s.registry ~within_seconds
   )
 
 (** {1 Cleanup} *)
@@ -211,7 +211,7 @@ let cleanup_stale_sessions () =
     let reg = get_registry_locked !s in
     let to_remove =
       SMap.fold (fun sid session_key acc ->
-        match Agent_identity.Registry.find_by_session reg session_key with
+        match Client_identity.Registry.find_by_session reg session_key with
         | None -> sid :: acc
         | Some _ -> acc
       ) (!s).session_map []
@@ -230,7 +230,7 @@ let cleanup_stale_sessions () =
 let unregister session_key =
   with_state_rw (fun s ->
     let reg = get_registry_locked !s in
-    Agent_identity.Registry.unregister reg session_key;
+    Client_identity.Registry.unregister reg session_key;
     let to_remove =
       SMap.fold (fun sid sk acc ->
         if String.equal sk session_key then sid :: acc else acc

@@ -21,6 +21,8 @@ type tried_source =
   | Registry_internal_candidate (** S6: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** S7: Keeper_tool_registry.effective_core_tools *)
   | Shard_schema                (** S8: Tool_shard.all_keeper_tool_schemas name extraction *)
+  | Descriptor_registry         (** S8.5: Keeper_tool_descriptor.all_descriptors public_name —
+                                    flat SSOT incl. internal_descriptors (masc_keeper_* live here) *)
   | Surface of Tool_catalog_surfaces.surface  (** S9-12: Tool_catalog_surfaces.is_on_surface *)
 
 type resolution =
@@ -43,6 +45,7 @@ let string_of_tried_source = function
   | Registry_internal_candidate -> "registry_internal_candidate"
   | Registry_core_tools -> "registry_core_tools"
   | Shard_schema -> "shard_schema"
+  | Descriptor_registry -> "descriptor_registry"
   | Surface s -> Printf.sprintf "surface:%s" (Tool_catalog_surfaces.surface_to_string s)
 
 let string_of_tried sources =
@@ -85,6 +88,21 @@ let resolve name =
               else if
                 List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas)
               then Resolved { canonical = normalized; via = Shard_schema; surface = None }
+              else if
+                List.exists
+                  (fun (d : Keeper_tool_descriptor.t) ->
+                    String.equal d.Keeper_tool_descriptor.public_name normalized)
+                  (Keeper_tool_descriptor.all_descriptors ())
+              then
+                (* Flat descriptor registry. Descriptor-backed tools live in
+                   [public_descriptors @ internal_descriptors]. masc_keeper_*
+                   (dispatched via Keeper_tool_surface.dispatch, not the handler
+                   registry) sit in internal_descriptors and were orphaned from
+                   resolution when #19797 purged the surface lists. This flat-name
+                   source restores admission without touching dispatch — resolve
+                   is a validity gate; [via] is only used for the error string. *)
+                Resolved
+                  { canonical = normalized; via = Descriptor_registry; surface = None }
               else begin
                 (* RFC-0084 §1.3 — surface coverage gate. *)
                 let surfaces_to_check =
@@ -108,6 +126,7 @@ let resolve name =
                         ; Registry_internal_candidate
                         ; Registry_core_tools
                         ; Shard_schema
+                        ; Descriptor_registry
                         ]
                         @ List.map (fun s -> Surface s) surfaces_to_check
                       in
@@ -150,6 +169,12 @@ let all_admitting_sources name =
     sources := Registry_core_tools :: !sources;
   if List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas) then
     sources := Shard_schema :: !sources;
+  if
+    List.exists
+      (fun (d : Keeper_tool_descriptor.t) ->
+        String.equal d.Keeper_tool_descriptor.public_name normalized)
+      (Keeper_tool_descriptor.all_descriptors ())
+  then sources := Descriptor_registry :: !sources;
   (* RFC-0084 §1.3 — admit-only surfaces. *)
   let surfaces_to_check =
     [ Tool_catalog_surfaces.Public_mcp

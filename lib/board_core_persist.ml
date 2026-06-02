@@ -83,13 +83,11 @@ let with_persist_lock store f =
   let started = Time_compat.now () in
   Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
     let acquired = Time_compat.now () in
-    Prometheus.observe_histogram
-      Prometheus.metric_board_persist_lock_acquire_sec
+    Board_metrics_hooks.observe_persist_lock_acquire_sec
       (acquired -. started);
     let result = f () in
     let released = Time_compat.now () in
-    Prometheus.observe_histogram
-      Prometheus.metric_board_persist_lock_held_sec
+    Board_metrics_hooks.observe_persist_lock_held_sec
       (released -. acquired);
     result)
 ;;

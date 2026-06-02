@@ -203,10 +203,8 @@ let ensure_flusher_actor store =
                 in
                 match exn with
                 | Invalid_argument msg when String.equal msg "Switch finished!" ->
-                    Prometheus.inc_counter
-                      Prometheus.metric_board_dispatch_flusher_start_outcomes
-                      ~labels:[ ("outcome", "switch_finished") ]
-                      ();
+                    Board_metrics_hooks.inc_dispatch_flusher_start_outcome
+                      ~outcome:"switch_finished";
                     Log.BoardLog.warn
                       "Skipping board flusher actor startup on finished switch"
                 | _ -> raise exn
@@ -216,10 +214,8 @@ let ensure_flusher_actor store =
                 ~attempt:(flusher_start_cas_retries - attempts_left);
               loop (attempts_left - 1)
             end else begin
-              Prometheus.inc_counter
-                Prometheus.metric_board_dispatch_flusher_start_outcomes
-                ~labels:[ ("outcome", "cas_exhausted") ]
-                ();
+              Board_metrics_hooks.inc_dispatch_flusher_start_outcome
+                ~outcome:"cas_exhausted";
               Log.BoardLog.warn
                 "Board flusher actor startup CAS contention exhausted; retrying on next backend access"
             end

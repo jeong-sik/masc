@@ -1,6 +1,6 @@
-(* RFC-0207 — per-keeper LLM runtime routing via the persona [model] selection.
+(* RFC-0207 — per-keeper LLM runtime routing via [runtime_id].
 
-   A keeper's keepers/<name>.toml [model = "provider.model"] is the single
+   A keeper's keepers/<name>.toml [runtime_id = "provider.model"] is the single
    surface for choosing its runtime.  [Keeper_meta_contract.runtime_id_of_meta]
    resolves that selection (cached by
    [Keeper_types_profile.load_keeper_profile_defaults]) so it reaches the turn
@@ -8,7 +8,7 @@
    driver's [Runtime.get_runtime_by_id] returns [None] for an id that does not
    materialize, so dispatch fails fast (no silent substitution — RFC-0206 §2.1).
 
-   This is the SAME [defaults.model] source as
+   This is the SAME declarative runtime source as
    [Keeper_runtime.effective_declarative_runtime_id] (declare/status), so there
    is one surface — the dispatcher and the reconcile change-detector cannot
    disagree. *)
@@ -131,14 +131,14 @@ let with_runtime_initialized f =
 
 (* ---- the per-keeper selection actually reaches the dispatcher ---- *)
 
-let test_persona_model_drives_runtime_id_of_meta () =
+let test_runtime_id_drives_runtime_id_of_meta () =
   with_config_dir (fun config_dir ->
     write_keeper_toml config_dir "routingtest" {|[keeper]
 goal = "route to a non-default provider-model"
-model = "openai.gpt"
+runtime_id = "openai.gpt"
 |};
     Alcotest.(check string)
-      "declared keeper dispatches to its persona [model], not the global default"
+      "declared keeper dispatches to its [runtime_id], not the global default"
       "openai.gpt"
       (KMC.runtime_id_of_meta (make_meta "routingtest")))
 ;;
@@ -146,7 +146,7 @@ model = "openai.gpt"
 let test_undeclared_keeper_falls_to_default () =
   with_config_dir (fun _config_dir ->
     with_runtime_initialized (fun () ->
-      (* no keepers/nobody.toml → defaults.model = None → [runtime].default *)
+      (* no keepers/nobody.toml → runtime_id = None → [runtime].default *)
       Alcotest.(check string)
         "undeclared keeper dispatches to [runtime].default"
         (Runtime.get_default_runtime_id ())
@@ -194,15 +194,15 @@ let test_context_budget_uses_selected_runtime () =
 ;;
 
 (* Production path: [resolve_max_context_resolution_of_meta] must budget against
-   the keeper's persona runtime (openai.gpt = 64000), NOT [runtime].default
+   the keeper's routed runtime (openai.gpt = 64000), NOT [runtime].default
    (runpod_mtp.qwen = 128000).  Without prepending [runtime_id_of_meta], the
    projection labels (global, runtime-id-agnostic) would size against the
-   default and admit oversized prompts for a per-keeper routed persona. *)
-let test_of_meta_budgets_against_persona_runtime () =
+   default and admit oversized prompts for a per-keeper routed runtime. *)
+let test_of_meta_budgets_against_routed_runtime () =
   with_config_dir (fun config_dir ->
     write_keeper_toml config_dir "budgettest" {|[keeper]
 goal = "route to a smaller-context runtime"
-model = "openai.gpt"
+runtime_id = "openai.gpt"
 |};
     with_runtime_initialized (fun () ->
       let res =
@@ -210,19 +210,36 @@ model = "openai.gpt"
           (make_meta "budgettest")
       in
       Alcotest.(check int)
-        "of_meta budgets against persona runtime (openai.gpt=64000), not default (128000)"
+        "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
         64000
         res.Keeper_context_runtime.effective_budget))
+;;
+
+let test_turn_budget_uses_routed_runtime () =
+  with_config_dir (fun config_dir ->
+    write_keeper_toml config_dir "budgettest" {|[keeper]
+goal = "route to a smaller-context runtime"
+runtime_id = "openai.gpt"
+|};
+    with_runtime_initialized (fun () ->
+      let budget =
+        Keeper_turn_runtime_budget.resolved_max_context_for_turn
+          ~meta:(make_meta "budgettest")
+      in
+      Alcotest.(check int)
+        "turn budget uses routed runtime, not runtime-id-agnostic labels"
+        64000
+        budget))
 ;;
 
 let () =
   Alcotest.run
     "runtime_per_keeper_routing"
-    [ ( "persona-model routing"
+    [ ( "runtime-id routing"
       , [ Alcotest.test_case
-            "persona [model] drives runtime_id_of_meta"
+            "[runtime_id] drives runtime_id_of_meta"
             `Quick
-            test_persona_model_drives_runtime_id_of_meta
+            test_runtime_id_drives_runtime_id_of_meta
         ; Alcotest.test_case
             "undeclared keeper falls to [runtime].default"
             `Quick
@@ -238,9 +255,13 @@ let () =
             `Quick
             test_context_budget_uses_selected_runtime
         ; Alcotest.test_case
-            "of_meta budgets against the persona runtime (production path)"
+            "of_meta budgets against the routed runtime (production path)"
             `Quick
-            test_of_meta_budgets_against_persona_runtime
+            test_of_meta_budgets_against_routed_runtime
+        ; Alcotest.test_case
+            "turn budget uses the routed runtime"
+            `Quick
+            test_turn_budget_uses_routed_runtime
         ] )
     ]
 ;;

@@ -141,11 +141,10 @@ val context_overflow_event_of_error
   -> Agent_sdk.Error.sdk_error
   -> Keeper_state_machine.event
 
-(** Resolve the initial keeper turn context budget.
-    Uses the first available model in the runtime rather than the largest
-    fallback model, so lifecycle context math matches the provider that will
-    receive the first request. Exposed for regression tests. *)
-val resolved_max_context_for_turn : meta:Keeper_meta_contract.keeper_meta -> string list -> int
+(** Resolve the initial keeper turn context budget from the keeper's routed
+    runtime, so lifecycle context math matches the provider that will receive
+    the first request. Exposed for regression tests. *)
+val resolved_max_context_for_turn : meta:Keeper_meta_contract.keeper_meta -> int
 
 (** Persist paused/resumed state before mutating the live registry/phase.
     Returns [Error] when disk sync fails so callers can surface the failure

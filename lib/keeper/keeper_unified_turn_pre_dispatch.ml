@@ -60,14 +60,11 @@ let build_runtime_execution
        Error (Agent_sdk.Error.Internal e)
      | Ok () ->
        let max_context_resolution =
-         Keeper_context_runtime.resolve_max_context_resolution
-           ~requested_override:meta.max_context_override
-           model_labels
+         Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
        in
        let max_context =
          Keeper_turn_runtime_budget.resolved_max_context_for_turn
            ~meta
-           model_labels
        in
        let temperature =
          Runtime_inference.resolve_temperature

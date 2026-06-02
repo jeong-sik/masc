@@ -55,12 +55,9 @@ let read_continuity_summary ~(config : Workspace.config) ~(meta : keeper_meta) :
         ~source:Keeper_continuity_summary_source.Progress_snapshot;
       render_bounded_snapshot snapshot
     | None ->
-      let runtime_models = Keeper_model_labels.configured_model_labels_of_meta meta in
       let primary_max_context =
         let resolution =
-          Keeper_context_runtime.resolve_max_context_resolution
-            ~requested_override:meta.max_context_override
-            runtime_models
+          Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
         in
         resolution.effective_budget
       in

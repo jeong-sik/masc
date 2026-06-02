@@ -795,19 +795,16 @@ let enqueue_partial_commit_continue_gate
     ()
 
 (* Dedupe "mixed runtime context budget" log: the values are constant
-   per (keeper_name, model_labels) because runtime config is static at
-   startup.  Logging per turn produces 15-20 duplicates per keeper per
-   minute under load. Track (name, primary, runtime_max) tuples we've
-   already announced and skip subsequent identical log lines. *)
+   per (keeper_name, primary_budget, runtime_budget) because runtime config
+   is static at startup.  Logging per turn produces 15-20 duplicates per
+   keeper per minute under load. Track the same tuple we've already
+   announced and skip subsequent identical log lines. *)
 let runtime_budget_logged : (string * int * int, unit) Hashtbl.t =
   Hashtbl.create 16
 
-let resolved_max_context_for_turn
-    ~(meta : keeper_meta)
-    (model_labels : string list) : int =
+let resolved_max_context_for_turn ~(meta : keeper_meta) : int =
   let resolution =
-    Keeper_context_runtime.resolve_max_context_resolution
-      ~requested_override:meta.max_context_override model_labels
+    Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
   in
   if resolution.primary_budget < resolution.runtime_budget then begin
     let key = (meta.name, resolution.primary_budget, resolution.runtime_budget) in

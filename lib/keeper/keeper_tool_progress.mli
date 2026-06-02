@@ -63,10 +63,6 @@ val is_completion_tool_name : string -> bool
     passive keeper observation tools remain [false]. *)
 val tool_name_can_satisfy_required_contract : string -> bool
 
-(** Extract OAS completion-contract satisfying-tool hints from an error reason.
-    Returns [] when the reason has no hint or the hint is empty. *)
-val satisfying_tools_from_contract_violation_reason : string -> string list
-
 (** Project a tool name to its [tool_progress_class]. *)
 val classify_tool_progress : string -> tool_progress_class
 

@@ -15,6 +15,7 @@ type tried_source =
   | Registry_internal_candidate (** keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** effective_core_tools *)
   | Shard_schema                (** Tool_shard.all_keeper_tool_schemas *)
+  | Descriptor_registry         (** Keeper_tool_descriptor.all_descriptors public_name (flat SSOT) *)
   | Surface of Tool_catalog_surfaces.surface
 
 (** Resolution outcome for a tool name. *)

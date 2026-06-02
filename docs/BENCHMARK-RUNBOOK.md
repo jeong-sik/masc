@@ -16,7 +16,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 
 대상 workload 예:
 
-- 코드 수정/검증/리뷰를 포함할 수 있는 `coding_task` label set
+- 코드 수정/검증/리뷰를 포함할 수 있는 `coding_task` workload profile
 - repo code + docs + tests를 함께 읽는 `repo_synthesis`
 - 최신 AI 연구/공식 발표/리뷰 수집
 - normalize / verify / curate / rank / audit 파이프라인

@@ -34,7 +34,7 @@ type binding = {
   env : (string * string) list;
       (** Subprocess env pairs.  Composed inside [resolve]; merges
           path-derived entries (HOME, GH_CONFIG_DIR, GIT_CONFIG_GLOBAL,
-          GIT_CONFIG_COUNT + GIT_CONFIG_KEY_0/VALUE_0) with
+          GIT_CONFIG_COUNT + GIT_CONFIG_KEY_0..3/VALUE_0..3) with
           {!Env_git_noninteractive.env}. *)
   ro_mounts : ro_mount list;
       (** Host paths mounted read-only (Option A).  Empty for

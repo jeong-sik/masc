@@ -3,7 +3,3 @@
 # This file freezes current coupling debt. Entries may SHRINK but must NOT GROW.
 # Regenerate with: bash scripts/lint/masc-domain-boundary-ratchet.sh --regenerate
 #
-goal_to_task_state|lib/goal/convergence.ml
-goal_to_task_state|lib/goal/convergence.mli
-goal_to_task_state|lib/goal/goal_janitor.ml
-goal_to_task_state|lib/goal/goal_janitor.mli

@@ -312,13 +312,18 @@ let parse_optional_transition_action args field =
 
 let actor_must_be_operator = Workspace_goals_verification.actor_must_be_operator
 
+let task_has_goal_id ~goal_id (task : Masc_domain.task) =
+  match task.goal_id with
+  | Some task_goal_id -> String.equal task_goal_id goal_id
+  | None -> false
+
 let validate_goal_completion_ready config ~goal_id ~override_note =
   match override_note with
   | Some note when not (String.equal (String.trim note) "") -> Ok ()
   | _ ->
     let linked_tasks =
       Workspace_query.get_tasks_safe config
-      |> List.filter (Convergence.task_matches_goal ~goal_id)
+      |> List.filter (task_has_goal_id ~goal_id)
     in
     let open_count =
       linked_tasks

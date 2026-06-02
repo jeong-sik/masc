@@ -10,7 +10,8 @@
        leftovers do not accumulate.
     3. Orphan: invoke registered owner hooks to remove goal-binding
        entries that reference non-existent goals in the Goal Store.
-    4. Escalate: report stale unclaimed tasks without goal linkage.
+    4. Escalate: invoke registered task-owner hooks to report stale
+       unclaimed tasks without goal linkage.
 
     @since 2.236.0 *)
 
@@ -73,15 +74,17 @@ val set_orphan_goal_binding_hooks : orphan_goal_binding_hooks -> unit
 (** Register owner-specific goal-binding cleanup. Goal_janitor owns
     goal liveness; binding owners own their storage. *)
 
-(** [audit_unclaimed_goal_orphan_tasks ~valid_goal_ids
-    ~min_age_seconds tasks] returns stale [Todo] tasks with no structured
-    [goal_id] linkage. *)
-val audit_unclaimed_goal_orphan_tasks :
-  ?now:float ->
-  valid_goal_ids:string list ->
-  min_age_seconds:int ->
-  Masc_domain.task list ->
-  (Masc_domain.task * int) list
+type orphan_task_escalation_hooks =
+  { escalate_orphan_tasks :
+      Workspace_utils.config ->
+      valid_goal_ids:string list ->
+      min_age_seconds:int ->
+      int
+  }
+
+val set_orphan_task_escalation_hooks : orphan_task_escalation_hooks -> unit
+(** Register owner-specific stale task escalation. Goal_janitor supplies
+    goal liveness and age threshold; task owners own task state and events. *)
 
 (** {1 Entry point} *)
 

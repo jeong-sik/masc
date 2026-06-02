@@ -17,7 +17,10 @@ let backend_of_meta (meta : keeper_meta) =
 
 let task_is_linked_to_keeper_goals goal_ids (task : Masc_domain.task) =
   List.exists
-    (fun goal_id -> Convergence.task_matches_goal ~goal_id task)
+    (fun goal_id ->
+       match task.goal_id with
+       | Some task_goal_id -> String.equal task_goal_id goal_id
+       | None -> false)
     goal_ids
 
 type claim_goal_scope = {

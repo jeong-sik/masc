@@ -5,9 +5,8 @@
     JSONL ledger persistence, and feature flag gating.
 *)
 
-(* Workaround: stale opam-installed masc_mcp shadows the local library's
-   wrapper module. Use direct module alias instead of open Masc_mcp. *)
-module Agent_economy = Masc_mcp__Agent_economy
+(* Agent_economy is now a separate leaf library (masc_agent_economy, wrapped
+   false), re-exported via masc_test_deps — bare module resolves directly. *)
 
 let () = Mirage_crypto_rng_unix.use_default ()
 

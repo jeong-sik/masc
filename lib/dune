@@ -574,6 +574,8 @@
    masc_goal
    ;; Pure Turn FSM (extracted sub-library — states + transition matrix, Keeper-free)
    masc_turn
+   ;; Agent token-ledger domain (extracted leaf — earn/spend/balance, Board-callable)
+   masc_agent_economy
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
    masc_mcp.ide

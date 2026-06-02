@@ -2,7 +2,7 @@ open Alcotest
 
 module WO = Masc_mcp.Keeper_world_observation
 module UM = Masc_mcp.Keeper_unified_metrics
-module AE = Masc_mcp.Agent_economy
+module AE = Agent_economy
 
 let base_observation : WO.world_observation =
   {

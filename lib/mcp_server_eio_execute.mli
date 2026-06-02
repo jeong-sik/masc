@@ -15,7 +15,7 @@
 
     Internal helpers stay private at this boundary
     ([log_mcp_exn] re-export,
-    {!Agent_name_kind.is_ephemeral}, {!Agent_name_kind.is_transient},
+    {!Client_name_kind.is_ephemeral}, {!Client_name_kind.is_transient},
     [silent_auth_token_error_kind],
     [direct_call_block_message]).  The [execute_tool_eio]
     body itself contains many internal sub-helpers

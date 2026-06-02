@@ -51,7 +51,7 @@ let run_all () =
    | _ -> Log.Server.warn "[Shutdown] heuristic_metrics flush failed");
   (* Clear transient A2A state to free memory *)
   (* Clear session identity caches *)
-  Agent_registry_eio.clear_session_caches ();
+  Client_registry_eio.clear_session_caches ();
   (* Best-effort cleanup of transient files under <base>/.masc/tmp/.
      Durable JSONL state and lock files outside of the tmp/ directory are
      never touched. Dir missing or symlinked → noop. Per-file errors are

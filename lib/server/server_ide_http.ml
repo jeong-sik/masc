@@ -100,17 +100,17 @@ let build_presence_snapshot state =
     else "main"
   in
   let entries =
-    let agents = Agent_registry_eio.list_active ~within_seconds:300.0 () in
+    let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
     List.map
-      (fun (a : Agent_identity.t) ->
+      (fun (a : Client_identity.t) ->
          `Assoc
-           [ "keeper_id", `String a.Agent_identity.agent_name
+           [ "keeper_id", `String a.Client_identity.agent_name
            ; "workspace_label", `String (Filename.basename base)
            ; "branch", `String branch
            ; "role", `String "keeper"
            ; "status", `String "active"
            ; ( "last_seen_ms"
-             , `Intlit (Printf.sprintf "%.0f" (a.Agent_identity.registered_at *. 1000.0))
+             , `Intlit (Printf.sprintf "%.0f" (a.Client_identity.registered_at *. 1000.0))
              )
            ])
       agents

@@ -486,10 +486,10 @@ let resolve_managed_agent_call ?mcp_session_id params =
   let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
   let arguments = Yojson.Safe.Util.member "arguments" params in
   let identity =
-    Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
+    Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
   Sdk_tool_contract.resolve_requested_tool_call
-    ~agent_name:identity.Agent_identity.agent_name
+    ~agent_name:identity.Client_identity.agent_name
     ~requested_name ~arguments
 
 (** Handle tools/call JSON-RPC method *)
@@ -630,9 +630,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     if from_transport <> "" then from_transport
     else
       let identity =
-        Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments
+        Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
       in
-      let resolved = identity.Agent_identity.agent_name in
+      let resolved = identity.Client_identity.agent_name in
       if resolved <> "" then resolved else "unknown"
   in
   let telemetry_session_id =

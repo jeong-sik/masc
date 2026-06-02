@@ -41,6 +41,26 @@ let test_unknown_returns_tried_list () =
   | _ ->
       fail "__nonexistent_tool_xyz should be Unknown"
 
+let test_descriptor_registry_admits_masc_keeper_cluster () =
+  (* Boot regression guard: #19797 purged masc_keeper_* from surface lists but
+     config/tool_policy.toml still lists them -> keeper_tool_policy_config gate
+     returned Unknown -> server exit 1. The flat Descriptor_registry source
+     (over internal_descriptors public names) restores admission without
+     touching dispatch. @check does NOT exercise this path, hence this test. *)
+  List.iter
+    (fun name ->
+      match TR.resolve name with
+      | TR.Resolved { via = TR.Descriptor_registry; _ } -> ()
+      | TR.Resolved { via; _ } | TR.Alias_to { via; _ } ->
+          fail (Printf.sprintf
+                  "%s should resolve via Descriptor_registry, got via: %s"
+                  name (TR.string_of_tried_source via))
+      | TR.Unknown { tried; _ } ->
+          fail (Printf.sprintf
+                  "%s must resolve (boot policy gate would exit 1), got Unknown (tried: %s)"
+                  name (TR.string_of_tried tried)))
+    [ "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_list"; "masc_keeper_status" ]
+
 let test_extend_turns_resolved () =
   (* extend_turns is in core_always_tools (S7: Registry_core_tools) or
      Tool_name_variant depending on order *)
@@ -275,6 +295,7 @@ let () =
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
         test_case "extend_turns resolves" `Quick test_extend_turns_resolved;
         test_case "tool_execute resolves via surface" `Quick test_surface_admits_tool_execute;
+        test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;
         test_case "masc_board_post resolves via alias" `Quick test_alias_masc_to_internal;
       ]
     ; "policy_validation", [

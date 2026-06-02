@@ -41,6 +41,30 @@ let paused_state_requires_approval (old : keeper_meta) =
   Keeper_approval_queue.has_pending_for_keeper ~keeper_name:old.name
   || blocker_requires_continue_gate old
 
+let persist_runtime_id_if_requested (p : parsed_args) =
+  match p.runtime_id_opt with
+  | None -> Ok ()
+  | Some runtime_id ->
+      (match Config_dir_resolver.keeper_toml_path_opt p.name with
+       | None ->
+           Error
+             (Printf.sprintf
+                "runtime_id update for %s requires an existing keeper TOML"
+                p.name)
+       | Some path ->
+           (match
+              Keeper_toml_loader.update_keeper_toml_field ~path
+                ~key:"runtime_id" ~value:runtime_id
+            with
+            | Error err ->
+                Error
+                  (Printf.sprintf "runtime_id update failed for %s: %s"
+                     p.name err)
+            | Ok () ->
+                Keeper_types_profile.invalidate_keeper_profile_defaults_cache
+                  p.name;
+                Ok ()))
+
 let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result =
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
   | Error msg -> tool_result_error msg
@@ -326,6 +350,9 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
              p.name err;
            tool_result_error err
        | Ok () ->
+      (match persist_runtime_id_if_requested p with
+       | Error err -> tool_result_error err
+       | Ok () ->
       (match write_meta ctx.config updated with
        | Error e ->
            Prometheus.inc_counter
@@ -336,4 +363,4 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
        | Ok () ->
          stop_keepalive ~base_path:ctx.config.base_path updated.name;
          start_keepalive ctx updated;
-         tool_result_ok (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated))))
+         tool_result_ok (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated)))))

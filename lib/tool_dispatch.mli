@@ -139,7 +139,11 @@ type module_tag =
   | Mod_compact
   | Mod_agent | Mod_task | Mod_state
   | Mod_control | Mod_agent_timeline | Mod_misc
-  | Mod_library | Mod_keeper
+  | Mod_library
+  (* [Mod_external]: dispatched by a server-boundary handler in the
+     composition root, not by a peer [Tool_*] module. The tool layer
+     stays agnostic to which subsystem (e.g. keeper) actually handles it. *)
+  | Mod_external
   | Mod_inline
   | Mod_shard
 

@@ -29,7 +29,8 @@ let collect_metadata_gaps ~sessions ~keepers ~agents =
                  ~summary:"Session goal is unassigned in briefing facts."
                  ~scope_type:"session" ~scope_id:session_id ~severity:"watch"
                :: !items;
-           if string_field "communication_mode" json = "unknown" then
+           if is_missing_status_or_unknown (string_field "communication_mode" json)
+           then
              items :=
                metadata_gap_json ~kind:"session_communication_mode_missing"
                  ~summary:"Session communication mode is not recorded."

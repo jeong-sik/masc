@@ -194,11 +194,12 @@ let test_compact_session_json_normalizes_missing_fields () =
   let compact = Briefing.compact_session_json json in
   check_string_field compact "goal" "unassigned";
   check_string_field compact "project" "default";
-  check_string_field compact "status" "unknown";
+  check_string_field compact "status" "<missing status>";
   check_list_field compact "agent_names" 0;
   check_int_field compact "active_agents_count" 0;
-  check_string_field compact "communication_mode" "unknown";
-  check_string_field compact "communication_summary" "unknown · broadcast 0 · portal 0"
+  check_string_field compact "communication_mode" "<missing status>";
+  check_string_field compact "communication_summary"
+    "<missing status> · broadcast 0 · portal 0"
 
 let test_compact_keeper_json_normalizes_missing_fields () =
   let json =
@@ -212,8 +213,8 @@ let test_compact_keeper_json_normalizes_missing_fields () =
       ]
   in
   let compact = Briefing.compact_keeper_json json in
-  check_string_field compact "status" "unknown";
-  check_string_field compact "agent_name" "unknown";
+  check_string_field compact "status" "<missing status>";
+  check_string_field compact "agent_name" "<missing status>";
   check_string_field compact "current_task" "unassigned";
   check_string_field compact "last_reply_status" "not_recorded";
   check_string_field compact "last_reply_preview" "not_recorded";

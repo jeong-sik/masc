@@ -198,7 +198,7 @@ let status_of_archived_session (session : session_context option) =
   match session with
   | Some session ->
       if is_session_concluded session.status then "inactive" else "offline"
-  | None -> "unknown"
+  | None -> Briefing_json_helpers.missing_status
 
 let archived_reason_for_session (session : session_context option) =
   match session with

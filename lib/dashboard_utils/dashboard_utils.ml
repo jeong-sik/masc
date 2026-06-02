@@ -58,6 +58,8 @@ let status_rank = function
   | "idle" -> 1
   | _ -> 0
 
+let missing_status = "<missing status>"
+
 let rec take n items =
   if n <= 0 then [] else match items with [] -> [] | x :: xs -> x :: take (n - 1) xs
 
@@ -138,7 +140,7 @@ let string_of_health_level = function
   | HL_warn -> "warn"
   | HL_degraded -> "degraded"
   | HL_ok -> "ok"
-  | HL_unknown -> "unknown"
+  | HL_unknown -> missing_status
 
 let severity_rank_of_health_level = function
   | HL_critical | HL_bad | HL_risk -> 2
@@ -185,7 +187,7 @@ let string_of_session_lifecycle = function
   | SL_stopped -> "stopped"
   | SL_interrupted -> "interrupted"
   | SL_expired -> "expired"
-  | SL_unknown -> "unknown"
+  | SL_unknown -> missing_status
 
 (** Status/health classification predicates — single source of truth.
     Used across dashboard, briefing, and operator modules. *)

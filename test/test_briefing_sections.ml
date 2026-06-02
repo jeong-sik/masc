@@ -254,6 +254,17 @@ let test_communication_unknown_mode_unclear () =
   let c = by_id sections "communication" in
   assert (section_status c = "unclear")
 
+let test_communication_missing_status_mode_unclear () =
+  (* Compacted sessions can carry "<missing status>" for missing mode. *)
+  let _ws, sections =
+    S.build_briefing_sections
+      ~briefing_summary_json:(briefing_summary ())
+      ~sessions:[ session ~mode:"<missing status>" () ]
+      ~agents:[] ~recent_messages:[] ~metadata_gaps:[]
+  in
+  let c = by_id sections "communication" in
+  assert (section_status c = "unclear")
+
 let test_communication_metadata_gap_unclear () =
   let _ws, sections =
     S.build_briefing_sections
@@ -374,6 +385,7 @@ let () =
   test_communication_positive_signal_with_gaps_watch ();
   test_communication_no_sessions_unclear ();
   test_communication_unknown_mode_unclear ();
+  test_communication_missing_status_mode_unclear ();
   test_communication_metadata_gap_unclear ();
   test_alignment_no_active_agents_unclear ();
   test_alignment_metadata_gap_unclear ();

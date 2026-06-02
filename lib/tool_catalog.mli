@@ -131,7 +131,8 @@ val is_on_surface : surface -> string -> bool
 (** O(1) check: is [name] a member of [surface]? *)
 
 val all_surfaces : surface list
-(** All defined surface variants for iteration. *)
+(** Canonical iteration surfaces. Excludes [Agent_internal], which remains a
+    compatibility alias for direct callers. *)
 
 val surface_to_string : surface -> string
 (** Machine-readable surface label. *)

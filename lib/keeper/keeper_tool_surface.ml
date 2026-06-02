@@ -739,8 +739,10 @@ let tool_required_permission = function
   | "masc_keeper_status" | "masc_keeper_persona_audit"
   | "masc_keeper_sandbox_status" ->
       Some Masc_domain.CanReadState
+  | "masc_keeper_create_from_persona" ->
+      Some Masc_domain.CanAdmin
   | "masc_persona_generate" | "masc_persona_save"
-  | "masc_keeper_create_from_persona" | "masc_keeper_up"
+  | "masc_keeper_up"
   | "masc_keeper_msg" | "masc_keeper_msg_result"
   | "masc_keeper_repair"
   | "masc_keeper_sandbox_start" | "masc_keeper_sandbox_stop"

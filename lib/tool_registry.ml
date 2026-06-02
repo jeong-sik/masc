@@ -32,11 +32,13 @@ module Float = Stdlib.Float
 type call_source =
   | External_mcp
   | Agent_internal
+  | Keeper_internal
   | Inline_dispatch
 
 let string_of_source = function
   | External_mcp -> "external_mcp"
   | Agent_internal -> "agent_internal"
+  | Keeper_internal -> "keeper_internal"
   | Inline_dispatch -> "inline_dispatch"
 ;;
 
@@ -137,6 +139,7 @@ let record_call
    | Agent_internal ->
      Atomic.incr stats.agent_internal_count;
      Atomic.incr stats.keeper_internal_count
+   | Keeper_internal -> Atomic.incr stats.keeper_internal_count
    | Inline_dispatch -> Atomic.incr stats.inline_dispatch_count);
   if success then Atomic.incr stats.success_count else Atomic.incr stats.failure_count;
   Atomic.set stats.last_called_at (Time_compat.now ());

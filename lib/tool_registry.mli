@@ -11,6 +11,7 @@
 type call_source =
   | External_mcp
   | Agent_internal
+  | Keeper_internal
   | Inline_dispatch
 
 type call_stats = {

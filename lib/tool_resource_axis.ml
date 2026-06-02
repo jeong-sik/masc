@@ -252,6 +252,10 @@ let classify_non_catalog_tool ~tool_name =
 let classify_normalized ~tool_name ~arguments ~is_read_only =
   match Tool_name.of_string tool_name with
   | Some (Tool_name.Masc tool) -> classify_masc_tool tool
+  | Some (Tool_name.Keeper _ | Tool_name.Masc_keeper _) ->
+    (match classify_non_catalog_tool ~tool_name with
+     | Some resource_class -> resource_class
+     | None -> if is_read_only then Ungated else Generic_write)
   | None ->
     (match classify_non_catalog_tool ~tool_name with
      | Some resource_class -> resource_class

@@ -98,7 +98,6 @@ let public_keeper_denied_overlap_allowed =
     [
       "masc_persona_generate";
       "masc_persona_save";
-      "masc_keeper_create_from_persona";
     ]
 
 let test_keeper_denied_public_mcp_overlap_is_explicit () =

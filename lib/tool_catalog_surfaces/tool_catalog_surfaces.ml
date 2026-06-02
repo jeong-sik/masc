@@ -142,7 +142,6 @@ let public_mcp_surface_tools =
   ; "masc_persona_schema"
   ; "masc_persona_generate"
   ; "masc_persona_save"
-  ; "masc_keeper_create_from_persona"
   ; (* Board. [masc_board_reaction] is intentionally public: it is the
        operator/client counterpart to existing board comment/vote actions. *)
     "masc_board_post"

@@ -624,8 +624,8 @@ let test_permission_for_tool_operator_confirm () =
 
 let test_permission_for_tool_keeper_create_from_persona () =
   match Auth.permission_for_tool "masc_keeper_create_from_persona" with
-  | Some Masc_domain.CanBroadcast -> ()
-  | _ -> fail "expected CanBroadcast"
+  | Some Masc_domain.CanAdmin -> ()
+  | _ -> fail "expected CanAdmin"
 
 let test_permission_for_tool_set_param () =
   match Auth.permission_for_tool "masc_set_param" with

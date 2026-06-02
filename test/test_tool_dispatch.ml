@@ -151,6 +151,21 @@ let () =
               check bool "tool_execute -> Mod_shard" true
                 (Tool_dispatch.lookup_tag "tool_execute"
                  = Some Tool_dispatch.Mod_shard));
+          test_case "typed keeper names fall through to tag registry" `Quick (fun () ->
+              let schema =
+                { Masc_domain.name = "masc_keeper_status";
+                  description = "test keeper status";
+                  input_schema = `Assoc [];
+                }
+              in
+              Tool_dispatch.register_module_tag
+                ~schemas:[schema] ~tag:Tool_dispatch.Mod_external;
+              check bool "masc_keeper_status -> Mod_external" true
+                (Tool_dispatch.lookup_tag "masc_keeper_status"
+                 = Some Tool_dispatch.Mod_external);
+              check bool "masc_keeper_status mints through registry" true
+                (Result.is_ok
+                   (Tool_dispatch.mint_token ~name:"masc_keeper_status")));
           test_case "mint_token accepts active static tool names" `Quick (fun () ->
               check bool "masc_status mints" true
                 (Result.is_ok

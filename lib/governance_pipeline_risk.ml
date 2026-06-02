@@ -167,6 +167,7 @@ let risk_of_masc (m : Tool_name.Masc.t) : risk_level =
 
 let risk_of_typed : Tool_name.t -> risk_level = function
   | Tool_name.Masc m -> risk_of_masc m
+  | Tool_name.Keeper _ | Tool_name.Masc_keeper _ -> Medium
 ;;
 
 (* Non-typed names absent from [Tool_name] keep an explicit override; the

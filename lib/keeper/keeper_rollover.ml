@@ -177,7 +177,7 @@ let maybe_rollover_oas_handoff
     ~(on_started : unit -> unit)
     ~(base_dir : string)
     ~(meta : keeper_meta)
-    ~(model : string)
+    ~model:(_ : string)
     ~(primary_model_max_tokens : int)
     ~(current_turn_blocker_info : blocker_info option)
     ~(checkpoint : Agent_sdk.Checkpoint.t option) : handoff_rollover =
@@ -279,7 +279,7 @@ let maybe_rollover_oas_handoff
                   ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
                   ~session:new_session
                   ~agent_name:base_meta.agent_name
-                  ~model ~ctx:save_ctx ~generation:next_generation with
+                  ~ctx:save_ctx ~generation:next_generation with
           | Error e ->
               Prometheus.inc_counter
                 Keeper_metrics.(to_string CheckpointFailures)

@@ -58,7 +58,7 @@ let labels_for_turn meta =
   with_worktree_config_root @@ fun () ->
   Eio_main.run @@ fun _env -> KEC.effective_model_labels_for_turn meta
 
-let make_meta ?(last_model_used = "provider_k-5.1") ?(models = []) () =
+let make_meta ?(last_model_used = "provider_k-5.1") () =
   let base =
     match
     Keeper_meta_json_parse.meta_of_json
@@ -76,7 +76,7 @@ let make_meta ?(last_model_used = "provider_k-5.1") ?(models = []) () =
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
   in
-  { base with models }
+  base
 
 (* Behavioral: stale model from a different provider is excluded from result.
    MASC does not assert specific vendor labels — only runtime behavior.
@@ -99,16 +99,6 @@ let test_matching_last_model_is_preserved_when_still_in_runtime () =
     | [] -> fail "matching allowed model resolved to empty labels"
     | actual_first :: _ ->
       check string "matching model stays first" first actual_first
-
-let test_legacy_explicit_models_do_not_override_runtime_resolution () =
-  let explicit =
-    [ "ollama:qwen3.5:35b-a3b-nvfp4"; "provider_k-coding:provider_k-5.1" ]
-  in
-  let baseline = labels_for_turn (make_meta ~last_model_used:"" ()) in
-  let labels =
-    labels_for_turn (make_meta ~last_model_used:"" ~models:explicit ())
-  in
-  check (list string) "legacy explicit models do not override runtime" baseline labels
 
 let test_meta_of_json_rejects_legacy_models () =
   match
@@ -149,8 +139,6 @@ let () =
             test_stale_last_model_is_not_reused_outside_current_runtime;
           test_case "keeps llama pin when still allowed" `Quick
             test_matching_last_model_is_preserved_when_still_in_runtime;
-          test_case "ignores legacy explicit models for runtime labels" `Quick
-            test_legacy_explicit_models_do_not_override_runtime_resolution;
           test_case "rejects legacy models while parsing keeper meta" `Quick
             test_meta_of_json_rejects_legacy_models;
           test_case "resolves config from sandbox cwd" `Quick

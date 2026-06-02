@@ -228,12 +228,17 @@ type module_tag =
   | Mod_compact
   | Mod_agent | Mod_task | Mod_state
   | Mod_control | Mod_agent_timeline | Mod_misc
-  | Mod_library | Mod_keeper
+  | Mod_library
+  (* [Mod_external]: dispatched by a server-boundary handler in the
+     composition root, not by a peer [Tool_*] module. The tool layer
+     stays agnostic to which subsystem (e.g. keeper) actually handles it. *)
+  | Mod_external
   | Mod_inline
   | Mod_shard
 
 let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
   match tool with
+  | Tool_name.Keeper _ | Tool_name.Masc_keeper _ -> None
   | Tool_name.Masc m ->
     let open Tool_name.Masc in
     match m with
@@ -325,10 +330,15 @@ let register_module_tag ~(schemas : Masc_domain.tool_schema list) ~tag =
 let register_name_tag ~tool_name ~tag =
   with_dispatch_rw (fun () -> Hashtbl.replace tag_registry tool_name tag)
 
-let lookup_tag name =
+let lookup_tag_unlocked name =
   match Tool_name.of_string name with
-  | Some tool -> static_tag_of_tool_name tool
-  | None -> with_dispatch_ro (fun () -> Hashtbl.find_opt tag_registry name)
+  | Some tool ->
+    (match static_tag_of_tool_name tool with
+     | Some _ as tag -> tag
+     | None -> Hashtbl.find_opt tag_registry name)
+  | None -> Hashtbl.find_opt tag_registry name
+
+let lookup_tag name = with_dispatch_ro (fun () -> lookup_tag_unlocked name)
 
 let lookup_schema name = with_dispatch_ro (fun () -> Hashtbl.find_opt schema_registry name)
 
@@ -346,9 +356,7 @@ let mint_token ~name =
   with_dispatch_ro (fun () ->
     Tool_token.mint_with
       ~validate:(fun n ->
-        match Tool_name.of_string n with
-        | Some tool -> Option.is_some (static_tag_of_tool_name tool)
-        | None -> Hashtbl.mem tag_registry n)
+        Option.is_some (lookup_tag_unlocked n))
       ~name)
 
 (** Enumerate every tool name registered in the tag registry. Used by

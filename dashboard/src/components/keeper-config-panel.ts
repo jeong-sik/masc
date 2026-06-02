@@ -117,6 +117,7 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
 // Runtime config draft for sandbox/proactive/compaction/handoff inline editing
 
 export type RuntimeDraft = {
+  runtime_id: string
   sandbox_profile: SandboxProfile
   active_goal_ids: string[]
   network_mode: SandboxNetworkMode
@@ -150,6 +151,7 @@ export function coerceSharedMemoryScope(raw: string | undefined): SharedMemorySc
 
 export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
+    runtime_id: c.execution.selected_runtime_id ?? '',
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
     active_goal_ids: c.workspace.active_goal_ids.length > 0
       ? c.workspace.active_goal_ids
@@ -176,6 +178,7 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   const origActiveGoalIds = orig.workspace.active_goal_ids.length > 0
     ? orig.workspace.active_goal_ids
     : orig.active_goal_ids
+  if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
@@ -569,6 +572,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   const c = state.data
   const isEditing = editMode.value
   const isSaving = saving.value
+  const runtimeCanEdit = c.sources.default_source_kind === 'toml' && Boolean(c.sources.default_manifest_path)
 
   // Initialize runtime draft if not yet set
   if (!runtimeDraft.value) {
@@ -577,6 +581,14 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   const rd = runtimeDraft.value
 
   const runtimeHasChanges = rd ? Object.keys(buildRuntimePayload(rd, c)).length > 0 : false
+  const runtimeOptions = rd
+    ? dedupeStrings([
+        rd.runtime_id,
+        c.execution.selected_runtime_id ?? '',
+        c.execution.selected_runtime_canonical ?? '',
+        ...(c.execution.runtime_options ?? []),
+      ])
+    : []
 
   async function saveRuntimeConfig() {
     if (!rd) return
@@ -720,7 +732,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${Callout}
         title="편집 가능 범위"
-        body="여기서 저장되는 값은 keeper 프롬프트와 live override 계층입니다. 활성 런타임은 keeper별 설정이 아니라 resolved config root의 keeper_runtime.toml 해석 결과로 결정됩니다."
+        body="여기서 저장되는 값은 keeper 프롬프트, live override 계층, keeper TOML의 runtime_id입니다."
       />
 
       ${promptSection}
@@ -728,7 +740,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <div class="mt-2">
         <${Callout}
           title="런타임 설정"
-          body="실행 범위 섹션에서 sandbox_profile, network_mode, allowed_paths를 저장할 수 있습니다. 프로액티브, 컴팩션, 핸드오프도 인라인 편집 가능하고, 소스/실행/런타임/조율은 읽기 전용입니다."
+          body="Runtime 선택, 실행 범위, 프로액티브, 컴팩션, 핸드오프를 인라인 편집할 수 있습니다. 레지스트리 상태와 소스 경로는 읽기 전용입니다."
         />
       </div>
 
@@ -738,7 +750,16 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         body=${runtimeSelectionSummary(c)}
       />
       <${ConfigRow} label="기본 소스" value=${c.sources.default_source_kind || MISSING_DATA_DASH} />
-      <${ConfigRow} label="선택 runtime" value=${c.execution.selected_runtime_id || MISSING_DATA_DASH} />
+      ${rd && runtimeCanEdit ? html`
+        <${InlineSelectRow}
+          label="runtime_id"
+          value=${rd.runtime_id}
+          options=${runtimeOptions}
+          onChange=${(value: string) => updateRuntimeDraft('runtime_id', value)}
+        />
+      ` : html`
+        <${ConfigRow} label="선택 runtime" value=${c.execution.selected_runtime_id || MISSING_DATA_DASH} />
+      `}
       ${c.execution.selected_runtime_canonical
         && c.execution.selected_runtime_canonical !== c.execution.selected_runtime_id
         ? html`<${ConfigRow}

@@ -99,3 +99,27 @@ let strip_from_json (json : Yojson.Safe.t) : Yojson.Safe.t =
   | `Assoc fields -> `Assoc (List.filter (fun (k, _) -> not (String.equal k "typed_outcome")) fields)
   | json -> json
 ;;
+
+(* Closed set of [no_work_reason] arguments the keeper_stay_silent tool accepts
+   as a typed no-work proof. The strings are the JSON-schema enum surfaced to the
+   model; each maps to a [No_progress] outcome that lets a stay_silent-under-signal
+   turn complete (see Keeper_tool_progress.actionable_tool_contract_violation_reason).
+   Unknown / absent values return [None] (anti-pattern #2: unknown is not a
+   permissive default), so a bare or malformed stay_silent stays a contract
+   violation under an actionable signal. The variant is reused rather than a
+   dedicated [Deliberate_no_fit]: the gate only reads "proof present?", reuse adds
+   no parser surface to [of_json] (a hand-written string match where a missed arm
+   would silently drop the proof), and the only branching consumer
+   (Keeper_tool_progress line ~242) treats No_work_available benignly. The
+   semantic gap ("signal present, no fit" vs "no work exists") is documented here
+   and in the RFC rather than encoded as a new variant. *)
+let stay_silent_no_work_reasons : string list =
+  [ "no_actionable_fit"; "no_eligible_work"; "deferred_to_other_keeper" ]
+;;
+
+let no_work_reason_of_stay_silent_arg (reason : string) : t option =
+  let reason = String.trim reason in
+  if List.mem reason stay_silent_no_work_reasons
+  then Some (No_progress { reason = No_work_available })
+  else None
+;;

@@ -31,3 +31,13 @@ val of_json : Yojson.Safe.t -> t option
 
 (** Remove [typed_outcome] field from JSON before returning to LLM. *)
 val strip_from_json : Yojson.Safe.t -> Yojson.Safe.t
+
+(** Closed set of [no_work_reason] enum values accepted by keeper_stay_silent as a
+    typed no-work proof. SSOT shared by the tool schema and the handler. *)
+val stay_silent_no_work_reasons : string list
+
+(** Parse a keeper_stay_silent [no_work_reason] argument into the typed no-work
+    proof outcome. Returns [None] for unknown or empty values (unknown is not a
+    permissive default), which leaves a bare stay_silent a contract violation
+    under an actionable signal. *)
+val no_work_reason_of_stay_silent_arg : string -> t option

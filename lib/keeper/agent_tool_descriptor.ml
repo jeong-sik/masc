@@ -553,6 +553,43 @@ let empty_object_schema =
     ]
 ;;
 
+(* keeper_stay_silent has its own schema (not the shared [empty_object_schema])
+   so it can offer the optional [no_work_reason] typed no-work proof. The field is
+   OPTIONAL: a bare keeper_stay_silent (no-signal turn) must stay valid, so the
+   SDK must not reject a call that omits it. The enum is the SSOT closed set in
+   [Keeper_tool_outcome.stay_silent_no_work_reasons]; supplying a recognized value
+   lets a stay_silent-under-actionable-signal turn complete instead of failing the
+   required-tool contract. *)
+let stay_silent_schema =
+  (* Mirror [object_schema] (no [additionalProperties]): an optional property
+     combined with [additionalProperties:false] is rejected by OpenAI strict
+     function-calling, which would make keeper_stay_silent uncallable — strictly
+     worse than the original trap. [no_work_reason] is intentionally absent from
+     [required] so a bare keeper_stay_silent stays valid. *)
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "no_work_reason"
+            , `Assoc
+                [ "type", `String "string"
+                ; ( "enum"
+                  , `List
+                      (List.map
+                         (fun r -> `String r)
+                         Keeper_tool_outcome.stay_silent_no_work_reasons) )
+                ; ( "description"
+                  , `String
+                      "Optional. When an actionable signal (unclaimed tasks / board \
+                       activity) is present but no work fits this keeper, supply a \
+                       reason here to record a typed no-work proof and complete the \
+                       turn. Omit it on ordinary no-signal turns." )
+                ] )
+          ] )
+    ; "required", `List []
+    ]
+;;
+
 (* Workspace tools historically dispatched by name in [Agent_tool_dispatch_runtime]
    without input-schema validation — the underlying handlers (Tool_board,
    Tool_library, Agent_tool_task_runtime, Agent_tool_voice_runtime, etc.) parse
@@ -835,8 +872,10 @@ let internal_descriptors : t list =
       ~name:"keeper_stay_silent"
       ~description:
         "Signal that the keeper will not emit further output this turn. \
-         Returns {status:\"silent\"}. No arguments."
-      ~input_schema:empty_object_schema
+         Returns {status:\"silent\"}. Optionally pass no_work_reason when an \
+         actionable signal is present but no work fits this keeper, to record a \
+         typed no-work proof and complete the turn."
+      ~input_schema:stay_silent_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_stay_silent
   ; in_process_descriptor

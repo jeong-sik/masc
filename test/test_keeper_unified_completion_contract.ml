@@ -143,6 +143,7 @@ let test_actionable_tool_contract_flags_no_tools () =
       ~claim_context_allowed:true
       ~actionable_signal_context:unclaimed_task_context
       ~tool_names:[]
+      ()
   with
   | Some reason ->
     check
@@ -164,6 +165,7 @@ let test_actionable_tool_contract_preserves_turn_gate_context () =
       ~claim_context_allowed:true
       ~actionable_signal_context:tool_gate_context
       ~tool_names:[]
+      ()
   with
   | Some reason ->
     check
@@ -180,6 +182,7 @@ let test_actionable_tool_contract_flags_passive_only_tools () =
       ~claim_context_allowed:true
       ~actionable_signal_context:board_activity_context
       ~tool_names:[ "keeper_board_get"; "masc_status" ]
+      ()
   with
   | Some reason ->
     check
@@ -202,6 +205,7 @@ let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () 
         ~claim_context_allowed:false
         ~actionable_signal_context:unclaimed_task_context
         ~tool_names:[ "keeper_task_claim" ]
+        ()
     with
     | Some reason ->
       check
@@ -218,7 +222,8 @@ let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () 
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_task_claim" ])
+       ~tool_names:[ "keeper_task_claim" ]
+       ())
 ;;
 
 let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
@@ -228,6 +233,7 @@ let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
         ~claim_context_allowed:false
         ~actionable_signal_context:unclaimed_task_context
         ~tool_names
+        ()
     with
     | Some reason ->
       check
@@ -254,7 +260,8 @@ let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_task_done" ])
+       ~tool_names:[ "keeper_task_done" ]
+       ())
 ;;
 
 let () =

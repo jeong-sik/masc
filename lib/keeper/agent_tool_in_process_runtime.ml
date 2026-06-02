@@ -17,8 +17,28 @@ let handle_time_now ~args:_ =
     (`Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ])
 ;;
 
-let handle_stay_silent ~args:_ =
-  Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ])
+let handle_stay_silent ~(args : Yojson.Safe.t) =
+  (* When the model supplies a recognized [no_work_reason], embed the typed
+     no-work proof as a [typed_outcome] field. The PostToolUse hook
+     (keeper_hooks_oas.ml) extracts it via [Keeper_tool_outcome.of_json], strips
+     it from the LLM-facing output, and threads it onto the tool_call_detail so
+     the required-tool contract check accepts the silence. Unknown / absent
+     reasons produce no proof, leaving a bare stay_silent a contract violation
+     under an actionable signal. *)
+  let typed_outcome_fields =
+    match args with
+    | `Assoc fields ->
+      (match List.assoc_opt "no_work_reason" fields with
+       | Some (`String reason) ->
+         (match Keeper_tool_outcome.no_work_reason_of_stay_silent_arg reason with
+          | Some outcome ->
+            [ "typed_outcome", Keeper_tool_outcome.to_json outcome ]
+          | None -> [])
+       | _ -> [])
+    | _ -> []
+  in
+  Yojson.Safe.to_string
+    (`Assoc ([ "status", `String "silent" ] @ typed_outcome_fields))
 ;;
 
 let handle_tools_list ~(meta : keeper_meta) ~args:_ =

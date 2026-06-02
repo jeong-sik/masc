@@ -2,7 +2,7 @@
 
     Pre-fix the literal ["[SYNTHETIC]"] was hardcoded in three files
     (keeper_memory_policy producer, keeper_memory_bank +
-    agent_tool_memory_runtime consumers).  This test pins the SSOT contract so
+    keeper_tool_memory_runtime consumers).  This test pins the SSOT contract so
     a marker rename or accidental case-shift cannot silently break the
     producer-consumer detection pair. *)
 

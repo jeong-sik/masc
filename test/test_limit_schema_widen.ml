@@ -11,7 +11,7 @@
                                                      same defect; bundled
                                                      per RFC-0088 §3 N-of-M.
 
-   Runtime handlers in [Agent_tool_memory_runtime] and the board list /
+   Runtime handlers in [Keeper_tool_memory_runtime] and the board list /
    search dispatchers read [limit] via [Safe_ops.json_int] which already
    accepts both shapes. The Anthropic-SDK schema rejection is purely a
    wire-format quirk. *)

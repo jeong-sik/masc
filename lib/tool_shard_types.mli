@@ -11,10 +11,10 @@ val sort_order_enum_strings : string list
 (** Hand-mirrored from [Board_dispatch.valid_sort_order_strings] (#8513). *)
 
 val tool_search_files_op_enum_strings : string list
-(** Hand-mirrored from [Agent_tool_command_runtime.valid_shell_op_strings] (#8524). *)
+(** Hand-mirrored from [Keeper_tool_command_runtime.valid_shell_op_strings] (#8524). *)
 
 val memory_search_source_enum_strings : string list
-(** Hand-mirrored from [Agent_tool_memory_runtime.valid_memory_search_source_strings]
+(** Hand-mirrored from [Keeper_tool_memory_runtime.valid_memory_search_source_strings]
     (#8484). *)
 
 val memory_kind_enum_strings : string list
@@ -22,7 +22,7 @@ val memory_kind_enum_strings : string list
     (#8527). *)
 
 val fs_write_mode_enum_strings : string list
-(** Hand-mirrored from [Agent_tool_filesystem_runtime.valid_fs_write_mode_strings]
+(** Hand-mirrored from [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings]
     (#8490). *)
 
 val vote_direction_enum_strings : string list

@@ -396,7 +396,7 @@ let preferred_tool_choice_for_actionable_gate
   in
   let exact_tool_choice_if_public = function
     | [ name ] ->
-      (match Agent_tool_descriptor.find_public name with
+      (match Keeper_tool_descriptor.find_public name with
        | Some _descriptor -> Some (Agent_sdk.Types.Tool name)
        | None -> None)
     | [] | _ :: _ :: _ -> None
@@ -535,7 +535,7 @@ let keeper_selection_bm25_prefilter_n = 30
    second alias/group table.
 
    Entries stay keyed by canonical handler names. LLM-visible public aliases
-   such as Execute/Grep project through Agent_tool_descriptor_resolution
+   such as Execute/Grep project through Keeper_tool_descriptor_resolution
    below, so retrieval shares one public-alias axis instead of carrying duplicate
    Execute/Grep rows. *)
 let tool_search_alias_entries =
@@ -601,17 +601,17 @@ let tool_search_alias_entries =
 
 let tool_search_aliases name =
   let aliases_for_descriptor descriptor =
-    Agent_tool_descriptor.internal_names descriptor
+    Keeper_tool_descriptor.internal_names descriptor
     |> List.find_map (fun internal_name -> List.assoc_opt internal_name tool_search_alias_entries)
   in
   let aliases =
     match List.assoc_opt name tool_search_alias_entries with
     | Some _ as found -> found
     | None ->
-      (match Agent_tool_descriptor_resolution.descriptor_for_tool_name name with
+      (match Keeper_tool_descriptor_resolution.descriptor_for_tool_name name with
        | Some descriptor -> aliases_for_descriptor descriptor
        | None ->
-         (match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
+         (match Keeper_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
           | Some canonical when not (String.equal canonical name) ->
             List.assoc_opt canonical tool_search_alias_entries
           | _ -> None))

@@ -689,10 +689,10 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
       (Yojson.Safe.to_string (Tool_result.data result))
 
 let tool_execute_exec_stage args =
-  match Agent_tool_execute_typed_input.of_json args with
-  | Ok (Agent_tool_execute_typed_input.Exec { executable; argv; _ }) ->
+  match Keeper_tool_execute_typed_input.of_json args with
+  | Ok (Keeper_tool_execute_typed_input.Exec { executable; argv; _ }) ->
     executable, argv
-  | Ok (Agent_tool_execute_typed_input.Pipeline _) ->
+  | Ok (Keeper_tool_execute_typed_input.Pipeline _) ->
     Alcotest.fail "expected exec input"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
@@ -741,7 +741,7 @@ let test_tool_execute_empty_executable_not_promoted () =
 
 let test_tool_execute_pipeline_find_expression_not_rewritten () =
   match
-    Agent_tool_execute_typed_input.of_json
+    Keeper_tool_execute_typed_input.of_json
       (`Assoc
         [ ( "pipeline"
           , `List
@@ -754,15 +754,15 @@ let test_tool_execute_pipeline_find_expression_not_rewritten () =
         ])
   with
   | Ok
-      (Agent_tool_execute_typed_input.Pipeline
-        { stages = { Agent_tool_execute_typed_input.argv = argv; _ } :: _; _ }) ->
+      (Keeper_tool_execute_typed_input.Pipeline
+        { stages = { Keeper_tool_execute_typed_input.argv = argv; _ } :: _; _ }) ->
     Alcotest.(check (list string))
       "pipeline find stage remains caller-authored"
       [ "-type"; "f" ]
       argv
-  | Ok (Agent_tool_execute_typed_input.Pipeline { stages = []; _ }) ->
+  | Ok (Keeper_tool_execute_typed_input.Pipeline { stages = []; _ }) ->
     Alcotest.fail "expected non-empty pipeline"
-  | Ok (Agent_tool_execute_typed_input.Exec _) -> Alcotest.fail "expected pipeline input"
+  | Ok (Keeper_tool_execute_typed_input.Exec _) -> Alcotest.fail "expected pipeline input"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute pipeline parse to pass, got %s" msg
 

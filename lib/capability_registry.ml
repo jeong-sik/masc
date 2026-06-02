@@ -165,7 +165,7 @@ let local_worker_public_tool_names : string list =
   Tool_catalog.tools_for_surface Tool_catalog.Local_worker
 
 let local_worker_internal_schemas : Masc_domain.tool_schema list =
-  Agent_tool_surfaces.local_worker_internal_schemas
+  Keeper_tool_surfaces.local_worker_internal_schemas
 
 (* RFC-0182: masc_spawn removed (dead). privileged_public_tool_names is
    currently empty — no remaining public tool requires Privileged
@@ -358,7 +358,7 @@ let public_raw_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_
    RFC-0084 §1.1 + §2.2 (PR-7) — Internal dispatch now flows through
    [Tool_dispatch.guarded_dispatch] which wraps [dispatch_structured]
    (pre-hook + handler + observer) with [Tool_telemetry.with_span].
-   The keeper turn loop in [agent_tool_remote_mcp_runtime.ml:164,218] routes through
+   The keeper turn loop in [keeper_tool_remote_mcp_runtime.ml:164,218] routes through
    the guarded entry so pre-hook chain ([governance_pipeline:203],
    [tool_input_validation:217]) covers keeper-originated calls.
    PR-8 wires the MCP server; PR-9 wires tag-dispatch fallback.
@@ -378,7 +378,7 @@ let visible_public_tool_schemas_from
 
 let local_worker_tool_schemas ?names () :
     (Masc_domain.tool_schema list, string) result =
-  Agent_tool_surfaces.local_worker_tool_schemas ?names ()
+  Keeper_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let keeper_all_tool_names : string list =
   Tool_shard.keeper_model_tools

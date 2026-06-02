@@ -24,7 +24,7 @@ Prefer canonical task-control tools such as masc_status, masc_tasks, masc_claim_
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
 let managed_agent_passthrough_tool_names =
-  Agent_tool_surfaces.spawned_agent_public_tool_names
+  Keeper_tool_surfaces.spawned_agent_public_tool_names
   |> List.filter (fun name ->
          not
            (List.mem name
@@ -143,13 +143,13 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
 
 let tool_annotations_for_profile _profile tool_name =
   let read_only =
-    Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only tool_name
+    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only tool_name
   in
   let destructive =
-    Agent_tool_descriptor_resolution.capability_has Tool_capability.Destructive tool_name
+    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Destructive tool_name
   in
   let idempotent =
-    Agent_tool_descriptor_resolution.capability_has Tool_capability.Idempotent tool_name
+    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Idempotent tool_name
   in
   (* MCP 2025-03-26: [openWorldHint] signals whether the tool can
      interact with systems outside the server's closed world.
@@ -184,7 +184,7 @@ let add_metadata_field_if_absent key value fields =
 ;;
 
 let descriptor_metadata_fields tool_name fields =
-  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  match Keeper_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
   | None -> fields
   | Some descriptor ->
     let fields =
@@ -204,13 +204,13 @@ let descriptor_metadata_fields tool_name fields =
          (`String descriptor.internal_name)
     |> add_metadata_field_if_absent
          "descriptorExecutor"
-         (`String (Agent_tool_descriptor.executor_to_string descriptor.executor))
+         (`String (Keeper_tool_descriptor.executor_to_string descriptor.executor))
     |> add_metadata_field_if_absent
          "descriptorBackend"
-         (`String (Agent_tool_descriptor.backend_to_string descriptor.backend))
+         (`String (Keeper_tool_descriptor.backend_to_string descriptor.backend))
     |> add_metadata_field_if_absent
          "descriptorSandbox"
-         (`String (Agent_tool_descriptor.sandbox_to_string descriptor.sandbox))
+         (`String (Keeper_tool_descriptor.sandbox_to_string descriptor.sandbox))
 ;;
 
 let label_words_from_identifier ident =
@@ -289,7 +289,7 @@ let tool_title_of_name name =
 
 let tool_icons_for_name name =
   let icon =
-    if Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name then
+    if Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name then
       Mcp_server.themed_icon ~label:"RD" ~bg:"#0F766E" ~fg:"#F0FDFA"
     else
       Mcp_server.themed_icon ~label:"WR" ~bg:"#9A3412" ~fg:"#FFF7ED"

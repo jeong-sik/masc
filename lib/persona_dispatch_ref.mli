@@ -5,11 +5,11 @@
     pure with respect to keeper context but the modules themselves
     transitively import [Keeper_turn] / [Keeper_turn_driver], which
     sit late in module order (deep in the keeper chain).
-    [Agent_tool_in_process_runtime] is compiled early, so a direct
+    [Keeper_tool_in_process_runtime] is compiled early, so a direct
     static import closes a cycle.
 
     Resolution: register from a late module ([Keeper_tool_surface]) into the
-    ref at module load.  [Agent_tool_in_process_runtime] reads the
+    ref at module load.  [Keeper_tool_in_process_runtime] reads the
     ref at dispatch time. *)
 
 val dispatch

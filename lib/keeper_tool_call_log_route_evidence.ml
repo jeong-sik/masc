@@ -56,9 +56,9 @@ let assoc_fields = function
 ;;
 
 let descriptor_evidence_fields tool_name =
-  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  match Keeper_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
   | None -> []
-  | Some descriptor -> Agent_tool_descriptor.route_evidence_json descriptor |> assoc_fields
+  | Some descriptor -> Keeper_tool_descriptor.route_evidence_json descriptor |> assoc_fields
 ;;
 
 let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_text =

@@ -49,24 +49,24 @@ let make_tool_bundle
      discover tools beyond the active tool_access list.  Progressive disclosure
      (AllowList filter in before_turn_hook) controls LLM visibility;
      execute_keeper_tool_call uses can_execute for the execution gate. *)
-  let universe_names = Agent_tool_dispatch_runtime.keeper_universe_tool_names meta in
-  let tool_defs = Agent_tool_dispatch_runtime.keeper_universe_model_tools meta in
+  let universe_names = Keeper_tool_dispatch_runtime.keeper_universe_tool_names meta in
+  let tool_defs = Keeper_tool_dispatch_runtime.keeper_universe_model_tools meta in
   (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): aliased internal
      names backing public aliases must NOT appear on
      the LLM-visible surface alongside their public alias.  Mirrors the
      pattern already established in [keeper_run_tools.ml] PRs #14574/#14596. *)
   let aliased_internal_names =
-    Agent_tool_descriptor.public_descriptors
-    |> List.map Agent_tool_descriptor.internal_names
+    Keeper_tool_descriptor.public_descriptors
+    |> List.map Keeper_tool_descriptor.internal_names
     |> List.concat
   in
   let alias_public_names_in_surface =
-    Agent_tool_descriptor.public_descriptors
+    Keeper_tool_descriptor.public_descriptors
     |> List.filter_map (fun descriptor ->
       if
         List.exists
           (fun internal_name -> List.mem internal_name universe_names)
-          (Agent_tool_descriptor.internal_names descriptor)
+          (Keeper_tool_descriptor.internal_names descriptor)
       then Some descriptor.public_name
       else None)
   in
@@ -138,7 +138,7 @@ let make_tool_bundle
      [descriptor.input_schema] provides the LLM-facing schema. *)
   let alias_tools =
     List.filter_map
-      (fun (descriptor : Agent_tool_descriptor.t) ->
+      (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
          if not (List.mem internal universe_names)
          then None
@@ -172,7 +172,7 @@ let make_tool_bundle
                   ~description:descriptor.description
                   ~input_schema:descriptor.input_schema
                   (fun input -> h input))))
-      Agent_tool_descriptor.public_descriptors
+      Keeper_tool_descriptor.public_descriptors
   in
   let bundle =
       { tools = internal_tools @ alias_tools

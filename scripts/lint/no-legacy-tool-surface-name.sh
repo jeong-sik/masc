@@ -46,10 +46,10 @@ done
 cd "$ROOT"
 
 SCAN_GLOBS=(
-  "lib/keeper/agent_tool_descriptor.ml"
-  "lib/keeper/agent_tool_descriptor.mli"
-  "lib/keeper/agent_tool_runtime.ml"
-  "lib/keeper/agent_tool_runtime.mli"
+  "lib/keeper/keeper_tool_descriptor.ml"
+  "lib/keeper/keeper_tool_descriptor.mli"
+  "lib/keeper/keeper_tool_runtime.ml"
+  "lib/keeper/keeper_tool_runtime.mli"
   "lib/keeper/keeper_tool_alias.ml"
   "lib/keeper/keeper_tool_alias.mli"
   "lib/keeper/keeper_tool_registry.ml"
@@ -142,7 +142,7 @@ if [[ -s "$new_tmp" ]]; then
   echo "[no-legacy-tool-surface-name] DRIFT UP: legacy public tool name re-emerged in active surface" >&2
   sed 's/^/  - /' "$new_tmp" >&2
   echo "  Use the descriptor-owned name (Execute, Read, Edit, Write, Grep, WebSearch, WebFetch)." >&2
-  echo "  See lib/keeper/agent_tool_descriptor.ml for the canonical surface." >&2
+  echo "  See lib/keeper/keeper_tool_descriptor.ml for the canonical surface." >&2
   fail=1
 fi
 

@@ -1,15 +1,15 @@
 (** RFC-0182 §3.1 — workspace dispatch dependency inversion ref.
 
-    [Agent_tool_in_process_runtime] is compiled very early in module
-    order (transitively imported by [Agent_tool_dispatch_runtime]). [Tool_workspace]
+    [Keeper_tool_in_process_runtime] is compiled very early in module
+    order (transitively imported by [Keeper_tool_dispatch_runtime]). [Tool_workspace]
     is compiled late (it depends on [Keeper_runtime] which depends on
     most of the keeper layer). A direct import from
-    [Agent_tool_in_process_runtime] to [Tool_workspace] would close a
+    [Keeper_tool_in_process_runtime] to [Tool_workspace] would close a
     cycle.
 
     Resolution: register [Tool_workspace.dispatch] into this ref from a
     late-compiled bootstrap module ([Mcp_server_eio_execute]).
-    [Agent_tool_in_process_runtime.handle_masc_workspace] reads the ref.
+    [Keeper_tool_in_process_runtime.handle_masc_workspace] reads the ref.
     Until registered the ref is a no-op returning [None] (the same
     behavior the descriptor projection stub had).
 

@@ -198,7 +198,7 @@ val list_masc_tools :
     [sw], [auth_token], and [session_id] are accepted for
     parity with {!call_masc_tool} but currently unused — the
     schema list is sourced directly from
-    [Agent_tool_surfaces.local_worker_tool_schemas].
+    [Keeper_tool_surfaces.local_worker_tool_schemas].
     [names] optionally restricts the set returned. *)
 
 val inject_default_agent_name :

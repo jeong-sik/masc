@@ -29,7 +29,7 @@ let execute_with_observers
   try
     let result, duration_ms =
       Inference_utils.timed (fun () ->
-        Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
+        Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
             ~ctx_work:ctx_snapshot

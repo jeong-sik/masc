@@ -30,18 +30,18 @@ let visible_set visible_tool_names =
 ;;
 
 let public_aliases_for_internal_name internal_name =
-  Agent_tool_descriptor_resolution.public_names_for_internal internal_name
+  Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
 ;;
 
 let public_alias_for_internal internal_name =
-  Agent_tool_descriptor_resolution.public_name_for_internal internal_name
+  Keeper_tool_descriptor_resolution.public_name_for_internal internal_name
 ;;
 
 let resolve_visible_name ~(visible_tool_names : string list) (name : string) =
   let visible = visible_set visible_tool_names in
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
   let internal_name =
-    match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name stripped with
+    match Keeper_tool_descriptor_resolution.canonical_internal_name_for_tool_name stripped with
     | Some internal_name -> internal_name
     | None -> stripped
   in

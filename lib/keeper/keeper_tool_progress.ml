@@ -125,7 +125,7 @@ let is_keeper_observation_alias name =
 ;;
 
 let effect_domain_for_tool_name name =
-  Agent_tool_descriptor_resolution.effect_domain_for_tool_name name
+  Keeper_tool_descriptor_resolution.effect_domain_for_tool_name name
 ;;
 
 let tool_name_can_satisfy_required_contract name =
@@ -150,7 +150,7 @@ let tool_name_can_satisfy_required_contract name =
         | Tool_catalog.Host_repo_write ) -> true
     | None ->
       not
-        (Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name))
+        (Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name))
 ;;
 
 let required_tool_satisfaction ?(satisfying_tools : string list = [])
@@ -168,7 +168,7 @@ let required_tool_satisfaction ?(satisfying_tools : string list = [])
       match effect_domain_for_tool_name call.name with
       | Some Tool_catalog.Read_only -> false
       | _ ->
-        Agent_tool_dispatch_runtime.has_mutating_side_effect_with_input ~tool_name ~input:call.input
+        Keeper_tool_dispatch_runtime.has_mutating_side_effect_with_input ~tool_name ~input:call.input
     in
     if mutates
     then Ok ()

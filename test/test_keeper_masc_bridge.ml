@@ -3,7 +3,7 @@ module Types = Masc_domain
 (** Test keeper masc_* tool bridge under explicit tool_access policy. *)
 
 module Workspace = Masc_mcp.Workspace
-module KET = Masc_mcp.Agent_tool_dispatch_runtime
+module KET = Masc_mcp.Keeper_tool_dispatch_runtime
 
 let init_keeper_tool_registry () =
   Masc_test_deps.init_keeper_tool_registry ()
@@ -592,7 +592,7 @@ let test_approval_pending_bridge_uses_keeper_safe_inline_dispatch () =
       in
       with_registered_keeper ~config meta (fun () ->
           let raw =
-            Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
+            Masc_mcp.Keeper_tool_remote_mcp_runtime.handle_masc_tool
               ~config
               ~keeper_name:meta.name
               ~name:"masc_approval_pending"
@@ -643,7 +643,7 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
                     )
                   ]));
             let raw =
-              Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
+              Masc_mcp.Keeper_tool_remote_mcp_runtime.handle_masc_tool
                 ~config
                 ~keeper_name:meta.name
                 ~name:"tool_read_file"
@@ -703,7 +703,7 @@ let test_write_preflight_accepts_docker_container_repo_path () =
         with_registered_keeper ~config meta (fun () ->
           register_patch_handler_for_file file_path;
           let raw =
-            Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
+            Masc_mcp.Keeper_tool_remote_mcp_runtime.handle_masc_tool
               ~config
               ~keeper_name:meta.name
               ~name:"tool_edit_file"
@@ -771,7 +771,7 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
         ignore (Masc_mcp.Keeper_registry.register ~base_path:dir keeper_name meta);
         register_patch_handler_for_file file_path;
         let raw =
-          Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
+          Masc_mcp.Keeper_tool_remote_mcp_runtime.handle_masc_tool
             ~config
             ~keeper_name
             ~name:"tool_edit_file"

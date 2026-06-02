@@ -6,7 +6,7 @@
    day's [correction_pipeline] load. Widening the advertised JSON
    Schema to [["number","string"]] lets the LLM's typical shape pass
    validation without correction. The downstream handler
-   ([Agent_tool_execute_timeout.clamp_shell_timeout] →
+   ([Keeper_tool_execute_timeout.clamp_shell_timeout] →
    [Safe_ops.json_float]) already accepts both shapes, so there is no
    semantic change — only a wire-format widening. *)
 

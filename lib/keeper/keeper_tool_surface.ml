@@ -767,7 +767,7 @@ let () =
     schemas
 
 (* RFC-0182 §3.1 — register the ctx-free persona handlers with
-   [Persona_dispatch_ref] so [Agent_tool_in_process_runtime]
+   [Persona_dispatch_ref] so [Keeper_tool_in_process_runtime]
    (compiled early in lib/keeper) can dispatch them without taking
    a static dependency on [Keeper_persona] / [Keeper_persona_authoring]
    (which transitively pull in [Keeper_turn_driver] and close a

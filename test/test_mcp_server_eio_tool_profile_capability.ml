@@ -143,7 +143,7 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
 
 let test_descriptor_resolution_capabilities_for_public_aliases () =
   let capability_has =
-    Masc_mcp.Agent_tool_descriptor_resolution.capability_has
+    Masc_mcp.Keeper_tool_descriptor_resolution.capability_has
   in
   check
     bool

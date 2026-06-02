@@ -1322,8 +1322,8 @@ let () =
         let worker_source = load_source "lib/worker_dev_tools.ml" in
         let shell_adapter_source = load_source "lib/exec_shell_adapter.ml" in
         let exec_policy_source = load_source "lib/exec_policy.ml" in
-        let tool_execute_source = load_source "lib/keeper/agent_tool_execute_runtime.ml" in
-        let agent_tool_execute_shell_ir_source = load_source "lib/keeper/agent_tool_execute_shell_ir.ml" in
+        let tool_execute_source = load_source "lib/keeper/keeper_tool_execute_runtime.ml" in
+        let keeper_tool_execute_shell_ir_source = load_source "lib/keeper/keeper_tool_execute_shell_ir.ml" in
         Alcotest.(check bool) "worker delegates command context" true
           (contains_substring
              worker_source
@@ -1339,9 +1339,9 @@ let () =
         Alcotest.(check bool) "Execute dispatches through Shell IR facade" true
           (contains_substring
              tool_execute_source
-             "Agent_tool_execute_shell_ir.dispatch_classified");
+             "Keeper_tool_execute_shell_ir.dispatch_classified");
         Alcotest.(check bool) "shell IR facade owns Execute command context" true
-          (contains_substring agent_tool_execute_shell_ir_source "let tool_execute_command_context");
+          (contains_substring keeper_tool_execute_shell_ir_source "let tool_execute_command_context");
         Alcotest.(check bool) "policy helper names are no longer worker-owned" false
           (contains_substring exec_policy_source "Worker_dev_tools_paths");
         Alcotest.(check bool) "policy uses renamed path helper" true

@@ -233,63 +233,132 @@ let test_contract_filter_empty_input () =
        [])
 ;;
 
-let test_active_task_actionable_signal_requests_gate () =
+let test_actionable_signal_requests_tool_gate () =
   check
     bool
-    "owned active task with executable tool requests gate"
+    "claimable signal with claim tool requests gate"
     true
-    (Surface.actionable_signal_requires_active_task_tool_gate
+    (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:true
-       ~has_current_task:true
+       ~claim_context_allowed:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim"; "Edit" ]);
   check
     bool
     "no actionable signal does not request gate"
     false
-    (Surface.actionable_signal_requires_active_task_tool_gate
+    (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:false
-       ~has_current_task:true
+       ~claim_context_allowed:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Edit" ]);
   check
     bool
-    "no owned active task leaves claim intake ungated"
+    "owned task does not request gate for claim-only tools"
     false
-    (Surface.actionable_signal_requires_active_task_tool_gate
+    (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:true
-       ~has_current_task:false
+       ~claim_context_allowed:false
        ~turn_affordances:[ "task_claim" ]
-       ~allowed_tool_names:[ "keeper_task_claim"; "Edit" ]);
+       ~allowed_tool_names:[ "keeper_task_claim"; "masc_claim_next" ]);
   check
     bool
-    "passive plus claim-only cannot advance owned active task"
+    "no-claim task verification does not require owned-task completion"
     false
-    (Surface.actionable_signal_requires_active_task_tool_gate
+    (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:true
-       ~has_current_task:true
-       ~turn_affordances:[ "task_claim" ]
-       ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim" ])
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_task_submit_for_verification"; "keeper_task_done" ]);
+  check
+    bool
+    "owned task verification can require completion progress"
+    true
+    (Surface.actionable_signal_requires_tool_gate
+       ~actionable_signal:true
+       ~claim_context_allowed:false
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_task_submit_for_verification" ]);
+  check
+    bool
+    "missing signal-specific tool does not fall back to workspace mutation"
+    false
+    (Surface.actionable_signal_requires_tool_gate
+       ~actionable_signal:true
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "board_post_or_comment" ]
+       ~allowed_tool_names:[ "Edit"; "Write" ]);
+  check
+    bool
+    "board signal requests gate when board tool is visible"
+    true
+    (Surface.actionable_signal_requires_tool_gate
+       ~actionable_signal:true
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "board_post_or_comment" ]
+       ~allowed_tool_names:[ "keeper_board_comment" ])
 ;;
 
-let test_required_gate_surface_excludes_owned_task_claim_context () =
+let test_actionable_gate_tools_match_claim_context () =
   check
     (list string)
-    "owned task gate keeps only execution progress tools"
-    [ "Edit"; "Write" ]
-    (Surface.tool_names_for_required_gate_surface
-       ~has_current_task:true
+    "owned task candidates exclude claim context"
+    []
+    (Surface.actionable_gate_tool_names
+       ~claim_context_allowed:false
+       ~turn_affordances:[ "task_claim" ]
+       ~allowed_tool_names:[ "keeper_task_claim"; "masc_claim_next" ]);
+  check
+    (list string)
+    "no-claim candidates exclude owned-task completion"
+    []
+    (Surface.actionable_gate_tool_names
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_task_submit_for_verification"; "keeper_task_done" ]);
+  check
+    (list string)
+    "no-claim audit candidates keep operator cleanup completion"
+    [ "keeper_task_force_release"; "keeper_task_force_done" ]
+    (Surface.actionable_gate_tool_names
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "task_audit" ]
+       ~allowed_tool_names:[ "keeper_task_force_release"; "keeper_task_force_done" ]);
+  check
+    (list string)
+    "owned task candidates keep completion"
+    [ "keeper_task_submit_for_verification" ]
+    (Surface.actionable_gate_tool_names
+       ~claim_context_allowed:false
+       ~turn_affordances:[ "task_verify" ]
+       ~allowed_tool_names:[ "keeper_task_submit_for_verification" ])
+;;
+
+let test_actionable_gate_tools_fall_back_to_satisfying_tools () =
+  check
+    (list string)
+    "board post falls back to broadcast tool"
+    [ "masc_broadcast" ]
+    (Surface.actionable_gate_tool_names
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "board_post_or_comment" ]
+       ~allowed_tool_names:[ "masc_broadcast" ])
+;;
+
+let test_actionable_gate_surface_keeps_actionable_tools () =
+  check
+    (list string)
+    "gate keeps actionable tools including claim-context"
+    [ "keeper_task_claim"; "Edit"; "Write" ]
+    (Surface.tool_names_for_actionable_gate_surface
        ~tool_gate_requested:true
-       ~required_tool_names:[]
        [ "Read"; "Grep"; "keeper_task_claim"; "keeper_stay_silent"; "Edit"; "Write" ]);
   check
     (list string)
-    "explicit required tool is preserved even when claim-like"
+    "actionable gate keeps claim-like progress tool"
     [ "keeper_task_claim" ]
-    (Surface.tool_names_for_required_gate_surface
-       ~has_current_task:true
+    (Surface.tool_names_for_actionable_gate_surface
        ~tool_gate_requested:true
-       ~required_tool_names:[ "keeper_task_claim" ]
        [ "Read"; "keeper_task_claim" ])
 ;;
 
@@ -365,15 +434,23 @@ let () =
         ; test_case "all passive: returns empty" `Quick test_contract_filter_all_passive
         ; test_case "empty input: empty output" `Quick test_contract_filter_empty_input
         ] )
-    ; ( "required_gate"
+    ; ( "actionable_gate"
       , [ test_case
-            "active task actionable signal requests gate"
+            "actionable signal requests tool gate"
             `Quick
-            test_active_task_actionable_signal_requests_gate
+            test_actionable_signal_requests_tool_gate
         ; test_case
-            "active task gate excludes claim context"
+            "tools match claim context"
             `Quick
-            test_required_gate_surface_excludes_owned_task_claim_context
+            test_actionable_gate_tools_match_claim_context
+        ; test_case
+            "tools fall back to satisfying affordance tools"
+            `Quick
+            test_actionable_gate_tools_fall_back_to_satisfying_tools
+        ; test_case
+            "gate keeps actionable claim context"
+            `Quick
+            test_actionable_gate_surface_keeps_actionable_tools
         ] )
     ]
 ;;

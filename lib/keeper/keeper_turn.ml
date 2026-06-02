@@ -180,13 +180,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     let no_state_block = get_bool args "no_state_block" false in
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
-    let required_tool_names =
-      get_string_list args "required_tools"
-      @ get_string_list args "required_tool_names"
-      |> List.map String.trim
-      |> List.filter (fun name -> name <> "")
-      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-    in
     (match keeper_msg_timeout_override args with
     | Error e -> tool_result_error e
     | Ok keeper_msg_oas_timeout_s ->
@@ -383,14 +376,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 | Some ti ->
                   "--- Turn-specific instructions ---\n" ^ ti
               in
-              let required_tools_text =
-                match required_tool_names with
-                | [] -> ""
-                | tools ->
-                  "--- Required tools for this turn ---\n"
-                  ^ "Use all of these tools before your final reply: "
-                  ^ String.concat ", " tools
-              in
               let telemetry_feedback_text =
                 match meta.telemetry_feedback_enabled with
                 | Some true ->
@@ -418,8 +403,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   skill_route_text;
                   worktree_text;
                   telemetry_feedback_text;
-                  turn_instructions_text;
-                  required_tools_text ]
+                  turn_instructions_text ]
               in
               let dynamic_context = String.concat "\n\n" soft_parts in
               (* === HARD CONSTRAINTS (stay in system_prompt) === *)
@@ -478,7 +462,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       (                         (turn_runtime_id))
                     ~world_observation
                     ~turn_affordances
-                    ~required_tool_names
                     ?oas_timeout_s:keeper_msg_oas_timeout_s
                     ?provider_filter:(Env_config_keeper.KeeperRuntimeProviderFilter.provider_allowlist ())
                     ~generation:meta.runtime.generation

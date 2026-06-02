@@ -23,6 +23,7 @@ let analyze
   in
   let tool_gate_required =
     Keeper_agent_tool_surface.turn_affordances_require_tool_gate_with_allowed
+      ~claim_context_allowed
       ~allowed_tool_names
       turn_affordances
   in

@@ -599,7 +599,7 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let hangul_ga = "\234\176\128" in
   let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
-  (match Lib.Goal_store.upsert_goal config ~title () with
+  (match Goal_store.upsert_goal config ~title () with
    | Ok _ -> ()
    | Error msg -> fail msg);
   let json = Lib.Server_dashboard_http.dashboard_planning_http_json ~config in

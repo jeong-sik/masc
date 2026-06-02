@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 module Mcp_eio = Masc_mcp.Mcp_server_eio
 module Config = Masc_mcp.Config
-module Goal_store = Masc_mcp.Goal_store
+module Goal_store = Goal_store
 
 type init_mode =
   | Fresh

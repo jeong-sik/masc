@@ -44,8 +44,8 @@ let keeper_voice_tool_schemas =
     See #4961. *)
 let core_always_tools =
   List.map
-    Tool_name.to_string
-    Tool_name.[ Keeper Context_status; Keeper Stay_silent; Keeper Tool_search ]
+    Keeper_tool_name.to_string
+    Keeper_tool_name.[ Context_status; Stay_silent; Tool_search ]
   @ [ "extend_turns" ]
 ;;
 
@@ -71,25 +71,25 @@ let core_always_tools =
 let core_discovery_tools =
   core_always_tools
   @ List.map
-      Tool_name.to_string
-      Tool_name.
+      Keeper_tool_name.to_string
+      Keeper_tool_name.
         [ (* Workspace *)
-          Keeper Broadcast
-        ; Keeper Tasks_list
-        ; Keeper Task_claim
-        ; Keeper Task_done
-        ; Keeper Task_create
-        ; Keeper Memory_search
+          Broadcast
+        ; Tasks_list
+        ; Task_claim
+        ; Task_done
+        ; Task_create
+        ; Memory_search
         ; (* Board: core interaction *)
-          Keeper Board_get
-        ; Keeper Board_post
-        ; Keeper Board_comment
-        ; Keeper Board_vote
-        ; Keeper Board_list
-        ; Keeper Board_curation_read
-        ; Keeper Board_curation_submit
+          Board_get
+        ; Board_post
+        ; Board_comment
+        ; Board_vote
+        ; Board_list
+        ; Board_curation_read
+        ; Board_curation_submit
         ; (* Discovery fallback for meta/admin tools *)
-          Keeper Tools_list
+          Tools_list
         ]
   (* RFC-0064/RFC-016x: public capability names replace internal names
      in the LLM-facing discovery surface. *)
@@ -230,22 +230,26 @@ let is_main_worktree_boundary_exempt_with_input
     be misleading dead entries. *)
 let reconcile_safe_tools =
   List.map
-    Tool_name.to_string
-    Tool_name.
-      [ Keeper Board_post
-      ; Keeper Board_comment
-      ; Keeper Board_vote
-      ; Keeper Board_comment_vote
-      ; Keeper Board_curation_submit
-      ; Keeper Broadcast
-      ; Keeper Task_done
-      ; Masc Board_post
-      ; Masc Board_comment
-      ; Masc Board_vote
-      ; Masc Board_comment_vote
-      ; Masc Board_curation_submit
-      ; Masc Broadcast
+    Keeper_tool_name.to_string
+    Keeper_tool_name.
+      [ Board_post
+      ; Board_comment
+      ; Board_vote
+      ; Board_comment_vote
+      ; Board_curation_submit
+      ; Broadcast
+      ; Task_done
       ]
+  @ List.map
+      Tool_name.to_string
+      Tool_name.
+        [ Masc Board_post
+        ; Masc Board_comment
+        ; Masc Board_vote
+        ; Masc Board_comment_vote
+        ; Masc Board_curation_submit
+        ; Masc Broadcast
+        ]
 ;;
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =
@@ -293,7 +297,7 @@ let injected_masc_tool_names () =
     the keeper tool registry — the canonical owner of keeper-internal tool
     metadata.  Consumed by [keeper_tool_policy.keeper_default_model_tools]. *)
 let keeper_tool_search_schema : Masc_domain.tool_schema =
-  { name = Tool_name.(to_string (Keeper Tool_search))
+  { name = Keeper_tool_name.to_string Keeper_tool_name.Tool_search
   ; description =
       "Search for tools by query describing what you need. Returns tool names, \
        descriptions, and usage guidance. Use when your current tools are insufficient \

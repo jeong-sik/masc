@@ -268,10 +268,10 @@ let tool_name_can_satisfy_actionable_gate ~(claim_context_allowed : bool) name =
     match
       name
       |> Keeper_tool_resolution.canonical_tool_name
-      |> Tool_name.of_string
+      |> Keeper_tool_name.of_string
     with
-    | Some (Tool_name.Keeper Tool_name.Keeper.Task_force_done)
-    | Some (Tool_name.Keeper Tool_name.Keeper.Task_force_release) -> true
+    | Some Keeper_tool_name.Task_force_done
+    | Some Keeper_tool_name.Task_force_release -> true
     | _ -> false
   in
   if claim_context_allowed
@@ -501,16 +501,16 @@ let sync_current_task_id_for_agent_name =
   Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
 
 let tool_names =
-  List.map Tool_name.to_string
+  List.map Keeper_tool_name.to_string
 
 let fallback_floor_tool_names =
   tool_names
-    Tool_name.[
-      Keeper Context_status;
-      Keeper Task_claim;
-      Keeper Tasks_list;
-      Keeper Board_list;
-      Keeper Board_get;
+    Keeper_tool_name.[
+      Context_status;
+      Task_claim;
+      Tasks_list;
+      Board_list;
+      Board_get;
     ]
 
 let is_claim_tool_name name =

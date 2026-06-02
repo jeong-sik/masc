@@ -693,7 +693,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   in
   let source : Tool_registry.call_source =
     match keeper_entry with
-    | Some _ -> Keeper_internal
+    | Some _ -> Agent_internal
     | None -> External_mcp
   in
   (match keeper_entry with

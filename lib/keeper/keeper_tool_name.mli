@@ -1,0 +1,58 @@
+(** Keeper-owned MCP tool-name vocabulary.
+
+    Lives on the keeper side of the Tool/Keeper boundary: the tool dispatch
+    substrate routes opaque tool names and the keeper subsystem owns the typed
+    vocabulary of its own tools. Dependency direction is keeper -> tool, never
+    the reverse. See the implementation header for the #19797 history. *)
+
+type t =
+  | Execute
+  | Board_comment
+  | Board_comment_vote
+  | Board_curation_read
+  | Board_curation_submit
+  | Board_get
+  | Board_list
+  | Board_post
+  | Board_search
+  | Board_stats
+  | Board_sub_board_create
+  | Board_sub_board_delete
+  | Board_sub_board_get
+  | Board_sub_board_list
+  | Board_sub_board_update
+  | Board_vote
+  | Broadcast
+  | Context_status
+  | Fs_edit
+  | Fs_write
+  | Fs_read
+  | Ide_annotate
+  | Handoff
+  | Library_read
+  | Library_search
+  | Memory_search
+  | Memory_write
+  | Search_files
+  | Stay_silent
+  | Task_claim
+  | Task_create
+  | Task_done
+  | Task_submit_for_verification
+  | Task_force_done
+  | Task_force_release
+  | Tasks_audit
+  | Tasks_list
+  | Time_now
+  | Tool_search
+  | Tools_list
+  | Voice_agent
+  | Voice_listen
+  | Voice_session_end
+  | Voice_session_start
+  | Voice_sessions
+  | Voice_speak
+
+val to_string : t -> string
+val of_string : string -> t option
+val pp : Format.formatter -> t -> unit

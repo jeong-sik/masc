@@ -413,25 +413,25 @@ type quorum_result =
   | Failed
 
 let requests_path config =
-  Filename.concat (Workspace.masc_dir config) "goal_verifications.json"
+  Filename.concat (Workspace_utils.masc_dir config) "goal_verifications.json"
 
 let events_path config =
-  Filename.concat (Workspace.masc_dir config) "goal_events.jsonl"
+  Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
 
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); requests = [] }
 
 let read_state config =
   let path = requests_path config in
-  if Workspace.path_exists config path then
-    match state_of_yojson (Workspace.read_json config path) with
+  if Workspace_utils.path_exists config path then
+    match state_of_yojson (Workspace_utils.read_json config path) with
     | Ok state -> state
     | Error _ -> default_state ()
   else
     default_state ()
 
 let write_state config (state : state) =
-  Workspace.write_json config (requests_path config) (state_to_yojson state)
+  Workspace_utils.write_json config (requests_path config) (state_to_yojson state)
 
 let principal_key (principal : goal_principal) =
   Printf.sprintf "%s:%s" (principal_kind_to_string principal.kind) principal.id
@@ -531,7 +531,7 @@ let emit_event config ~(goal_id : string) ~(event_type : string)
 
 let update_state config f =
   let lock_path = requests_path config in
-  Workspace.with_file_lock config lock_path (fun () ->
+  Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let next_state = f state in
       write_state config next_state;
@@ -607,7 +607,7 @@ let evaluate_quorum request =
 
 let cancel_request config ~(request_id : string) =
   let lock_path = requests_path config in
-  Workspace.with_file_lock config lock_path (fun () ->
+  Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
       | None -> Error "goal verification request not found"
@@ -634,7 +634,7 @@ let cancel_request config ~(request_id : string) =
 let submit_vote config ~(request_id : string) ~(principal : goal_principal)
     ~(decision : vote_decision) ?note ?(evidence_refs = []) () =
   let lock_path = requests_path config in
-  Workspace.with_file_lock config lock_path (fun () ->
+  Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       match List.find_opt (fun request -> String.equal request.id request_id) state.requests with
       | None -> Error "goal verification request not found"

@@ -28,7 +28,7 @@
 
 open Alcotest
 
-module GP = Masc_mcp.Goal_phase
+module GP = Goal_phase
 
 (* --- helper: short-hand caller for decide_transition ---- *)
 

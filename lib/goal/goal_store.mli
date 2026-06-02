@@ -162,18 +162,18 @@ val compute_rollup : goal list -> rollup
 
 (** {1 Persistence paths} *)
 
-val goals_path : Workspace.config -> string
-(** [{!Workspace.masc_dir} / "goals.json"]. *)
+val goals_path : Workspace_utils.config -> string
+(** [{!Workspace_utils.masc_dir} / "goals.json"]. *)
 
 (** {1 State I/O} *)
 
-val read_state : Workspace.config -> state
+val read_state : Workspace_utils.config -> state
 (** Reads {!goals_path}; returns an empty default state on
     missing file or parse failure.  Goals loaded from disk
     are passed through the internal normaliser ([priority]
     clamp + phase/status reconciliation). *)
 
-val write_state : Workspace.config -> state -> unit
+val write_state : Workspace_utils.config -> state -> unit
 (** Direct overwrite of {!goals_path} with the supplied state.
     Used by tests that need deterministic initial state without
     the read-modify-write cycle of {!update_state}.
@@ -181,7 +181,7 @@ val write_state : Workspace.config -> state -> unit
     Does *not* acquire the file lock; callers that need atomicity
     should use {!update_state} instead. *)
 
-val update_state : Workspace.config -> (state -> state) -> state
+val update_state : Workspace_utils.config -> (state -> state) -> state
 (** Atomic read-modify-write under the goals file lock.
     [f] receives the current state and returns the next state.
     The file lock protects against concurrent truncation races
@@ -189,10 +189,10 @@ val update_state : Workspace.config -> (state -> state) -> state
 
 (** {1 Single-goal operations} *)
 
-val get_goal : Workspace.config -> goal_id:string -> goal option
+val get_goal : Workspace_utils.config -> goal_id:string -> goal option
 
 val update_goal :
-  Workspace.config ->
+  Workspace_utils.config ->
   goal_id:string ->
   (goal -> goal) ->
   (goal, string) result
@@ -201,14 +201,14 @@ val update_goal :
     and writes back.  Errors when the [goal_id] is unknown. *)
 
 val delete_goal :
-  Workspace.config -> goal_id:string -> (unit, string) result
+  Workspace_utils.config -> goal_id:string -> (unit, string) result
 (** Removes the goal whose [.id] matches.  Errors when the
     id is unknown. *)
 
 (** {1 List + upsert} *)
 
 val list_goals :
-  Workspace.config ->
+  Workspace_utils.config ->
   ?horizon:horizon ->
   ?status:goal_status ->
   ?phase:Goal_phase.t ->
@@ -218,7 +218,7 @@ val list_goals :
     by [(horizon, priority, updated_at desc)]. *)
 
 val upsert_goal :
-  Workspace.config ->
+  Workspace_utils.config ->
   ?id:string ->
   ?horizon:horizon ->
   ?title:string ->

@@ -99,9 +99,7 @@ identified Runtime→Keeper as the next clear boundary violation.
 
 Full audit: `docs/audit/2026-06-02-runtime-keeper-boundary-severance.md`
 
-### Ratchet scope gap discovered
-
-`lib/keeper/tool_visibility_projection.ml` matches the ratchet's `tool_*.ml` glob but is
-a keeper-purpose handler. The ratchet excludes `tool_keeper_*` by filename but not
-`lib/keeper/tool_*` by directory. This causes CI failures on the merge commit.
-Fix pending: exclude `lib/keeper/` in the ratchet or rename to `tool_keeper_*`.
+### Remaining Runtime→Keeper debt
+`Keeper_identity` (2 calls in `runtime_oas_runner.ml`) and `Keeper_internal_error`
+(1 call in `runtime_inference.ml`) remain after PR #19801. These require a
+separate severance PR — see the full audit doc for details.

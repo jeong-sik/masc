@@ -15,7 +15,7 @@ excluding comments/string literals, focusing on actual module calls (not variant
 | Axis | Files with calls | Nature | Action |
 |------|-----------------|--------|--------|
 | Tool → Keeper | 0 | DONE (ratchet baseline=0) | None |
-| **Runtime → Keeper** | **4 files, ~15 refs** | Real module calls | **Severed** |
+| **Runtime → Keeper** | **4 files, ~15 refs** | Real module calls | **Partially severed** |
 | Operator → Keeper | 7 files, ~70 refs | State snapshot (management) | Future |
 | Config → Keeper | 3 files, ~5 refs | Env config | Future |
 | Dashboard → Keeper | ~25 files | Display (reads state) | Future |
@@ -64,11 +64,12 @@ not keeper-specific logic. The `Keeper_` prefix was misleading.
 
 ## 5. Open issues
 
-### Tool→Keeper ratchet scope gap
-`lib/keeper/tool_visibility_projection.ml` is a keeper-purpose handler that matches
-the ratchet's `tool_*.ml` glob. The ratchet excludes `tool_keeper_*` but not
-`lib/keeper/tool_*`. Fix: either exclude `lib/keeper/` directory in the ratchet,
-or rename to `tool_keeper_visibility_projection.ml`. This is a pre-existing main issue.
+### Remaining Runtime→Keeper debt
+PR #19801 severed `Keeper_observation` and `Keeper_oas_checkpoint`. Two modules remain:
+- `runtime_oas_runner.ml`: `Keeper_identity.keeper_agent_name`, `Keeper_identity.keeper_name_from_agent_name` (2 calls)
+- `runtime_inference.ml`: `Keeper_internal_error.Max_tokens_ceiling_violation` (1 call)
+These require separate severance: `Keeper_identity` is shared with 14 non-keeper callers,
+`Keeper_internal_error` needs a generic error type extraction.
 
 ### Next boundary candidates
 - `Keeper_identity` (14 non-keeper callers) — widely shared utility module

@@ -22,6 +22,11 @@ val public_mcp_surface_tools : string list
 val system_internal_surface_tools : string list
 val workspace_role_tools : string list
 
+(** Role-catalog tools for worker/execution agents.  Consumed by
+    [Agent_tool_surfaces.execution_tool_names]; sibling of
+    {!workspace_role_tools}. *)
+val execution_role_tools : string list
+
 (** {1 Surface variant} *)
 
 (** Tool catalog surface — each variant identifies a curated

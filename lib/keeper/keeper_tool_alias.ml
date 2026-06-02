@@ -55,19 +55,17 @@ let known_internal_names_tbl : (string, unit) Hashtbl.t =
   Hashtbl.iter
     (fun _ r ->
        List.iter
-         (fun internal_name -> Hashtbl.replace t internal_name ())
+         (fun internal_name ->
+            Hashtbl.replace t internal_name ();
+            (* Also admit the public MCP counterpart (e.g. [masc_board_post])
+               so successful MCP routes do not collapse to [tool="unknown"]
+               (PR #14585 review).  Sourced from the descriptor SSOT after the
+               keeper-internal catalog list was severed (#19797). *)
+            match Agent_tool_descriptor.public_name_for_internal internal_name with
+            | Some public -> Hashtbl.replace t public ()
+            | None -> ())
          (Agent_tool_descriptor.internal_names r.descriptor))
     routing_table;
-  List.iter
-    (fun internal ->
-       Hashtbl.replace t internal ();
-       (* Also admit the public MCP counterpart (e.g. [masc_board_post])
-          so successful MCP routes do not collapse to [tool="unknown"]
-          (PR #14585 review). *)
-       match Tool_catalog_surfaces.keeper_internal_replacement internal with
-       | Some public -> Hashtbl.replace t public ()
-       | None -> ())
-    Tool_catalog_surfaces.keeper_internal_tools;
   List.iter
     (fun public_mcp -> Hashtbl.replace t public_mcp ())
     Tool_catalog_surfaces.public_mcp_surface_tools;
@@ -119,13 +117,20 @@ let public_name_for_internal = Agent_tool_descriptor.public_name_for_internal
 (* ── MCP surface routing (separate concern) ──────────────────────── *)
 
 let public_masc_to_internal_tbl =
+  (* Reverse (public MCP name -> internal name) map, rebuilt from the
+     descriptor SSOT after the keeper-internal catalog list + replacement
+     table were severed (#19797).  Each descriptor's internal names map to
+     their canonical public name when one exists. *)
   let t = Hashtbl.create 16 in
-  List.iter
-    (fun internal ->
-       match Tool_catalog_surfaces.keeper_internal_replacement internal with
-       | Some public -> Hashtbl.replace t public internal
-       | None -> ())
-    Tool_catalog_surfaces.keeper_internal_tools;
+  Hashtbl.iter
+    (fun _ r ->
+       List.iter
+         (fun internal ->
+            match Agent_tool_descriptor.public_name_for_internal internal with
+            | Some public -> Hashtbl.replace t public internal
+            | None -> ())
+         (Agent_tool_descriptor.internal_names r.descriptor))
+    routing_table;
   t
 ;;
 

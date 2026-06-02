@@ -101,11 +101,6 @@ let resolve name =
                   ; Tool_catalog_surfaces.System_internal
                   ]
                 in
-                let _excluded_must_deny : Tool_catalog_surfaces.surface list =
-                  (* PR-7 will route [Keeper_denied] through the capability gate
-                     before admission; do not list it as an admit surface here. *)
-                  [ Tool_catalog_surfaces.Keeper_denied ]
-                in
                 let rec check_surfaces = function
                   | [] ->
                       let tried =

@@ -152,7 +152,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   post_voted:           { target: 'board' },
   comment_voted:        { target: 'board' },
   reaction_changed:     { target: 'board' },
-  // Activity graph
+  // Observatory activity telemetry
   activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
 }
 

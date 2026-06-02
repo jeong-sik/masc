@@ -233,12 +233,12 @@ let test_contract_filter_empty_input () =
        [])
 ;;
 
-let test_active_task_actionable_signal_requests_gate () =
+let test_actionable_signal_requests_tool_gate () =
   check
     bool
     "actionable signal with executable tool requests gate"
     true
-    (Surface.actionable_signal_requires_active_task_tool_gate
+    (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim"; "Edit" ]);
@@ -246,7 +246,7 @@ let test_active_task_actionable_signal_requests_gate () =
     bool
     "no actionable signal does not request gate"
     false
-    (Surface.actionable_signal_requires_active_task_tool_gate
+    (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:false
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Edit" ]);
@@ -254,7 +254,7 @@ let test_active_task_actionable_signal_requests_gate () =
     bool
     "actionable signal with claim tool requests gate"
     true
-    (Surface.actionable_signal_requires_active_task_tool_gate
+    (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "keeper_task_claim"; "Edit" ]);
@@ -262,13 +262,13 @@ let test_active_task_actionable_signal_requests_gate () =
     bool
     "passive plus claim-only requests gate (claim is actionable)"
     true
-    (Surface.actionable_signal_requires_active_task_tool_gate
+    (Surface.actionable_signal_requires_tool_gate
        ~actionable_signal:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim" ])
 ;;
 
-let test_required_gate_surface_excludes_owned_task_claim_context () =
+let test_required_gate_surface_keeps_actionable_claim_context () =
   check
     (list string)
     "gate keeps actionable tools including claim-context"
@@ -361,13 +361,13 @@ let () =
         ] )
     ; ( "required_gate"
       , [ test_case
-            "active task actionable signal requests gate"
+            "actionable signal requests tool gate"
             `Quick
-            test_active_task_actionable_signal_requests_gate
+            test_actionable_signal_requests_tool_gate
         ; test_case
-            "active task gate excludes claim context"
+            "gate keeps actionable claim context"
             `Quick
-            test_required_gate_surface_excludes_owned_task_claim_context
+            test_required_gate_surface_keeps_actionable_claim_context
         ] )
     ]
 ;;

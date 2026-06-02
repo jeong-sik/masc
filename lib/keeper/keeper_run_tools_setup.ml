@@ -770,16 +770,16 @@ let prepare_agent_setup
         ~labels:[ "keeper", meta.name ]
         ()
     else ();
-    let active_task_actionable_tool_gate_requested =
+    let actionable_signal_tool_gate_requested =
       (not is_last_turn)
-      && actionable_signal_requires_active_task_tool_gate
+      && actionable_signal_requires_tool_gate
            ~actionable_signal
            ~turn_affordances
            ~allowed_tool_names:turn_visible_tool_names
     in
     let tool_gate_requested =
       required_tool_names <> []
-      || active_task_actionable_tool_gate_requested
+      || actionable_signal_tool_gate_requested
       || tool_gate_requested_for_turn
            ~current_tool_choice
            ~is_last_turn

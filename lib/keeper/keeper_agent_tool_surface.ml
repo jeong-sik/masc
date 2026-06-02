@@ -450,7 +450,7 @@ let generic_required_tool_candidate_names
   generic_required_actionable_tool_names ~turn_affordances ~allowed_tool_names
 ;;
 
-let actionable_signal_requires_active_task_tool_gate ~(actionable_signal : bool)
+let actionable_signal_requires_tool_gate ~(actionable_signal : bool)
     ~(turn_affordances : string list)
     ~(allowed_tool_names : string list) =
   actionable_signal
@@ -479,8 +479,8 @@ let generic_required_tool_gate_guidance
     Printf.sprintf
       "[TOOL BLOCKED] This turn has an actionable runtime signal, but no \
        currently visible keeper tool can advance it. Do not call passive \
-       reads/status, claim/context tools, or keeper_stay_silent merely to \
-       satisfy the contract. Emit a concise [STATE] blocker instead."
+       reads/status or keeper_stay_silent merely to satisfy the contract. \
+       Emit a concise [STATE] blocker instead."
   else
     Printf.sprintf
       "[TOOL REQUIRED] This turn has an actionable runtime signal. Before \

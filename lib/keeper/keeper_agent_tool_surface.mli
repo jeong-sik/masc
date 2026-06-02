@@ -228,7 +228,7 @@ val generic_required_tool_candidate_names :
 
 (** Whether an actionable world signal should promote the turn to the same
     generic required-tool gate that post-run validation already enforces. *)
-val actionable_signal_requires_active_task_tool_gate :
+val actionable_signal_requires_tool_gate :
   actionable_signal:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->

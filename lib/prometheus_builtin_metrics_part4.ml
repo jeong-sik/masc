@@ -383,8 +383,8 @@ let register
     metric_workspace_bind_normalize_outcome
     "Total Workspace.bind_session identity normalizations by Keeper_identity.normalize_all_names \
      (RFC P3-a). Labels: outcome (ok | empty_input | persona_not_found | \
-     credential_missing | name_ambiguous | ephemeral_suffix_rejected). Non-ok outcomes \
-     reject agent session binding at the fail-closed identity gate; pair with \
+     name_ambiguous | ephemeral_suffix_rejected). Non-ok outcomes reject agent session \
+     binding at the fail-closed identity gate; pair with \
      masc_silent_auth_token_resolve_error_total for auth/name drift diagnosis."
     `Counter;
   add

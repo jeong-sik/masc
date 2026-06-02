@@ -21,13 +21,6 @@ let test_persona_not_found () =
   in
   check string "Persona_not_found" "persona_not_found" (label_of err)
 
-let test_credential_missing () =
-  let err =
-    Keeper_identity.Credential_missing
-      { input = dummy_input; resolved = "kpper"; searched = "/x" }
-  in
-  check string "Credential_missing" "credential_missing" (label_of err)
-
 let test_name_ambiguous () =
   let err =
     Keeper_identity.Name_ambiguous { input = dummy_input; candidates = [ "a"; "b" ] }
@@ -49,7 +42,6 @@ let () =
         [
           test_case "Empty_input" `Quick test_empty_input;
           test_case "Persona_not_found" `Quick test_persona_not_found;
-          test_case "Credential_missing" `Quick test_credential_missing;
           test_case "Name_ambiguous" `Quick test_name_ambiguous;
           test_case "Ephemeral_suffix_rejected" `Quick
             test_ephemeral_suffix_rejected;

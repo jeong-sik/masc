@@ -204,7 +204,8 @@ let transition_task_r ~identity ~task_state =
 **채택: ActivityPub + OIDC Hybrid Model**
 - `keeper_name`을 canonical identifier로 명시. 속성: immutable, never reassigned, locally unique within masc instance.
 - `agent_name`을 display/handle로 분리. `preferredUsername`처럼 mutable, non-unique. UI 표시용.
-- `persona_name` = `keeper_name` (1:1). `credential_stem` = `keeper_name` (1:1). 이 관계를 타입으로 보증.
+- `persona_name` = `keeper_name` (1:1). Credential selection is not a keeper
+  identity field; it is resolved by the credential store / repo mapping layer.
 - `canonical_keeper_name`의 4가지 prefix/suffix 조합 처리를 "legacy alias resolution"으로 재명명. 새 코드는 canonical `keeper_name`만 사용.
 - 단점: 기존 `agent_name`과 `keeper_name`이 다른 keeper들의 마이그레이션 필요. `keeper_name_from_agent_name`의 4-way match는 deprecation path 필요.
 

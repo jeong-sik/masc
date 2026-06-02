@@ -29,7 +29,6 @@ type policy =
   ; approval             : approval
   ; retryable            : bool
   ; cwd_scope            : string option
-  ; credential_profile   : string option
   }
 ```
 
@@ -84,7 +83,6 @@ type policy =
   ; approval             : approval
   ; retryable            : bool
   ; cwd_scope            : string option
-  ; credential_profile   : string option
   ; (* NEW *)
     audience             : audience_class
     (* Tool-access grant required to expose this tool. *)

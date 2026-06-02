@@ -14,7 +14,6 @@ let validate_join_identity ~base_path ~agent_name =
       ~input_agent_name:agent_name
       ~base_path
       ~check_persona:true
-      ~check_credential:true
       ()
   with
   | Ok bundle -> Ok bundle.keeper_name

@@ -9,15 +9,10 @@
     [Tool_inline_dispatch_types.context] with Eio fiber infrastructure).
 
     Note on persona path resolution: [normalize_all_names] uses
-    [Config_dir_resolver.personas_dir_opt()] first, which returns the global
-    config dir and ignores [base_path].  Credential checks DO use [base_path]
-    directly via [Common.agents_dir_from_base_path].  Therefore:
-    - Identity-level rejection tests (empty/whitespace/invalid chars) need no
-      filesystem setup — they fail before filesystem checks.
-    - Credential-only tests use [~check_persona:false] with temp dirs, since
-      credential resolution respects [base_path].
-    - Full-gate tests would require a known persona in the global config dir,
-      which is machine-dependent and excluded from CI. *)
+    [Config_dir_resolver.personas_dir_opt()] first, which can ignore
+    [base_path].  The join-gate contract test pins [MASC_PERSONAS_DIR] to a
+    known-empty temporary directory so the persona check is deterministic in
+    CI. *)
 
 open Alcotest
 open Masc_mcp
@@ -27,20 +22,50 @@ let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 let validation_error =
   testable Keeper_identity.pp_validation_error ( = )
 
-let normalize ~input ?base_path ?(check_persona = true) ?(check_credential = true) () =
+let normalize ~input ?base_path ?(check_persona = true) () =
   Keeper_identity.normalize_all_names
     ~input_agent_name:input
     ?base_path
     ~check_persona
-    ~check_credential
     ()
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let rec rm_rf path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None ->
+      (* This OCaml Unix module does not expose [unsetenv]. Config_dir_resolver
+         normalizes empty env values to [None], so this restores the effective
+         resolver state for these tests. *)
+      Unix.putenv name ""
+
+let with_empty_personas_dir f =
+  with_temp_dir "workspace-bind-personas" @@ fun personas_dir ->
+  let original = Sys.getenv_opt "MASC_PERSONAS_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_PERSONAS_DIR" original;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+      Config_dir_resolver.reset ();
+      f personas_dir)
 
 (* Same flags as handle_join uses *)
 let join_normalize ~input ?base_path () =
-  normalize ~input ?base_path ~check_persona:true ~check_credential:true ()
-
-let credential_only_normalize ~input ?base_path () =
-  normalize ~input ?base_path ~check_persona:false ~check_credential:true ()
+  normalize ~input ?base_path ~check_persona:true ()
 
 (* --------------------------------------------------------------------- *)
 (* Identity-level rejections (canonical_keeper_name returns None)         *)
@@ -70,100 +95,32 @@ let test_invalid_chars_rejected () =
            (Keeper_identity.show_validation_error other))
 
 (* --------------------------------------------------------------------- *)
-(* Helpers for temp-dir based credential tests                            *)
-(* --------------------------------------------------------------------- *)
-
-let mkdir_p path =
-  let rec ensure p =
-    if p = "" || p = "/" || Sys.file_exists p then ()
-    else (
-      ensure (Filename.dirname p);
-      try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-  in
-  ensure path
-
-let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then (
-      Array.iter
-        (fun entry -> rm_rf (Filename.concat path entry))
-        (Sys.readdir path);
-      try Unix.rmdir path with Unix.Unix_error _ -> ())
-    else try Sys.remove path with Sys_error _ -> ()
-
-let with_tmp_base f =
-  let tmp_dir = Filename.temp_file "masc_bind_gate" "" in
-  Sys.remove tmp_dir;
-  Unix.mkdir tmp_dir 0o755;
-  Fun.protect
-    ~finally:(fun () -> rm_rf tmp_dir)
-    (fun () -> f tmp_dir)
-
-let credential_path base name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat base ".masc")
-       (Filename.concat "auth" "agents"))
-    (name ^ ".json")
-
-let write_json path =
-  mkdir_p (Filename.dirname path);
-  let ch = open_out path in
-  output_string ch "{}";
-  close_out ch
-
-(* --------------------------------------------------------------------- *)
-(* Credential gate (check_persona:false — uses base_path directly)        *)
-(* --------------------------------------------------------------------- *)
-
-let test_credential_missing_rejected () =
-  with_tmp_base (fun base ->
-      match credential_only_normalize ~input:"testagent" ~base_path:base () with
-      | Ok _ -> fail "missing credential should be rejected"
-      | Error (Keeper_identity.Credential_missing _) -> ()
-      | Error other ->
-          fail
-            (Printf.sprintf
-               "missing credential expected Credential_missing, got %s"
-               (Keeper_identity.show_validation_error other)))
-
-let test_credential_present_accepted () =
-  with_tmp_base (fun base ->
-      write_json (credential_path base "testagent");
-      match credential_only_normalize ~input:"testagent" ~base_path:base () with
-      | Ok bundle ->
-          check string "keeper_name" "testagent" bundle.keeper_name;
-          check string "credential_stem" "testagent" bundle.credential_stem
-      | Error e ->
-          fail
-            (Printf.sprintf
-               "valid agent with credential should pass, got %s"
-               (Keeper_identity.show_validation_error e)))
-
-let test_wrapper_form_resolves_credential () =
-  with_tmp_base (fun base ->
-      write_json (credential_path base "alice");
-      match credential_only_normalize ~input:"keeper-alice-agent" ~base_path:base () with
-      | Ok bundle ->
-          check string "resolved keeper_name" "alice" bundle.keeper_name;
-          check string "credential_stem" "alice" bundle.credential_stem
-      | Error e ->
-          fail
-            (Printf.sprintf
-               "wrapper form should resolve, got %s"
-               (Keeper_identity.show_validation_error e)))
-
-(* --------------------------------------------------------------------- *)
 (* Join gate flags verification — documents the handle_join contract       *)
 (* --------------------------------------------------------------------- *)
 
-let test_join_gate_uses_both_checks () =
-  (* This is a documentation test: handle_join calls normalize with
-     ~check_persona:true ~check_credential:true.  The join_normalize
-     wrapper mirrors this exactly.  Empty input must fail. *)
-  match join_normalize ~input:"" () with
-  | Error _ -> ()
-  | Ok _ -> fail "join gate must reject empty input with both checks enabled"
+let test_join_gate_uses_persona_check () =
+  with_empty_personas_dir @@ fun personas_dir ->
+  let input = "missing-persona" in
+  begin
+    match normalize ~input ~check_persona:false () with
+    | Ok _ -> ()
+    | Error other ->
+        fail
+          (Printf.sprintf
+             "plain normalize without persona check should accept valid name, got %s"
+             (Keeper_identity.show_validation_error other))
+  end;
+  match join_normalize ~input () with
+  | Error (Keeper_identity.Persona_not_found { resolved; searched; _ }) ->
+      check string "resolved persona" input resolved;
+      check string "searched persona path"
+        (Filename.concat personas_dir input)
+        searched
+  | Error other ->
+      fail
+        (Printf.sprintf "join gate expected Persona_not_found, got %s"
+           (Keeper_identity.show_validation_error other))
+  | Ok _ -> fail "join gate must reject missing persona with check enabled"
 
 (* --------------------------------------------------------------------- *)
 (* Test runner                                                            *)
@@ -178,18 +135,9 @@ let () =
           test_case "whitespace input rejected" `Quick test_whitespace_rejected;
           test_case "invalid chars rejected" `Quick test_invalid_chars_rejected;
         ] );
-      ( "credential_gate",
-        [
-          test_case "missing credential rejected" `Quick
-            test_credential_missing_rejected;
-          test_case "credential present accepted" `Quick
-            test_credential_present_accepted;
-          test_case "wrapper form resolves" `Quick
-            test_wrapper_form_resolves_credential;
-        ] );
       ( "join_gate_contract",
         [
-          test_case "join gate uses both checks" `Quick
-            test_join_gate_uses_both_checks;
+          test_case "join gate uses persona check" `Quick
+            test_join_gate_uses_persona_check;
         ] );
     ]

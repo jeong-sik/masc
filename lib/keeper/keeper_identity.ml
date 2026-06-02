@@ -124,17 +124,11 @@ type name_bundle = {
   persona_name : string;
   keeper_name : string;
   agent_name : string;
-  credential_stem : string;
 }
 
 type validation_error =
   | Empty_input
   | Persona_not_found of {
-      input : string;
-      resolved : string;
-      searched : string;
-    }
-  | Credential_missing of {
       input : string;
       resolved : string;
       searched : string;
@@ -147,10 +141,6 @@ let pp_validation_error fmt = function
   | Persona_not_found { input; resolved; searched } ->
       Format.fprintf fmt
         "Persona_not_found { input=%S; resolved=%S; searched=%S }" input
-        resolved searched
-  | Credential_missing { input; resolved; searched } ->
-      Format.fprintf fmt
-        "Credential_missing { input=%S; resolved=%S; searched=%S }" input
         resolved searched
   | Name_ambiguous { input; candidates } ->
       Format.fprintf fmt "Name_ambiguous { input=%S; candidates=[%s] }" input
@@ -172,7 +162,6 @@ let show_validation_error err =
 let validation_error_outcome_label = function
   | Empty_input -> "empty_input"
   | Persona_not_found _ -> "persona_not_found"
-  | Credential_missing _ -> "credential_missing"
   | Name_ambiguous _ -> "name_ambiguous"
   | Ephemeral_suffix_rejected _ -> "ephemeral_suffix_rejected"
 
@@ -206,7 +195,7 @@ let persona_path_for ~base_path persona_name =
         persona_name
 
 let normalize_all_names ~input_agent_name ?(base_path = "")
-    ?(check_persona = false) ?(check_credential = false) () :
+    ?(check_persona = false) () :
     (name_bundle, validation_error) result =
   let trimmed = String.trim input_agent_name in
   if trimmed = "" then Error Empty_input
@@ -223,13 +212,11 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
     | Some keeper_first_pass ->
         let keeper_name = strip_nickname_once keeper_first_pass in
         let persona_name = keeper_name in
-        let credential_stem = keeper_name in
         let bundle =
           {
             persona_name;
             keeper_name;
             agent_name = input_agent_name;
-            credential_stem;
           }
         in
         let persona_check () =
@@ -242,22 +229,7 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
                 (Persona_not_found
                    { input = input_agent_name; resolved = persona_name; searched = path })
         in
-        let credential_check () =
-          if not check_credential then Ok ()
-          else
-            let path =
-              Filename.concat
-                (Common.agents_dir_from_base_path ~base_path)
-                (credential_stem ^ ".json")
-            in
-            if Sys.file_exists path then Ok ()
-            else
-              Error
-                (Credential_missing
-                   { input = input_agent_name; resolved = credential_stem; searched = path })
-        in
-        Result.bind (persona_check ()) (fun () ->
-            Result.bind (credential_check ()) (fun () -> Ok bundle))
+        Result.bind (persona_check ()) (fun () -> Ok bundle)
 
 type parsed_identity = {
   keeper_name : string;

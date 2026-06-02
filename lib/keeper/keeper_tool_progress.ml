@@ -54,7 +54,9 @@ let effect_of_progress_class = function
 ;;
 
 let claim_context_tool_names : string list =
-  [ Tool_name.(to_string (Masc Claim_next)); Keeper_tool_name.(to_string Task_claim) ]
+  [ Tool_name.(to_string (Masc (Masc.Task Task_name.Claim_next)))
+  ; Keeper_tool_name.(to_string Task_claim)
+  ]
 ;;
 
 let completion_tool_names : string list =
@@ -84,7 +86,8 @@ let is_claim_tool_name name =
    | Some Task_claim -> true
    | _ -> false)
   || (match Tool_name.of_string name with
-      | Some (Masc Claim_next) -> true
+      | Some (Tool_name.Masc (Tool_name.Masc.Task Tool_name.Task_name.Claim_next)) ->
+        true
       | _ -> false)
 ;;
 

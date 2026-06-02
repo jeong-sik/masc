@@ -168,26 +168,32 @@ let classify_structured_shell_op args =
 
 let classify_masc_tool (tool : Tool_name.Masc.t) =
   let open Tool_name.Masc in
+  (* PR-S1: domain tool names moved to Task/Board/Goal/Operator submodules.
+     Resource classification is NON-uniform across each domain (e.g.
+     Board_post is Board_write but Board_list is Ungated), so this match stays
+     flat over [Masc.t] with each domain constructor mechanically wrapped —
+     bucket groupings are byte-for-byte unchanged from before the partition,
+     and the compiler still enforces exhaustiveness over every variant. *)
   match tool with
   | Web_fetch | Web_search -> Web
-  | Board_post
-  | Board_cleanup
-  | Board_comment
-  | Board_comment_vote
-  | Board_curation_submit
-  | Board_delete
-  | Board_reaction
-  | Board_sub_board_create
-  | Board_sub_board_delete
-  | Board_sub_board_update
-  | Board_vote -> Board_write
-  | Add_task
-  | Batch_add_tasks
-  | Claim_next
+  | Board Board_post
+  | Board Board_cleanup
+  | Board Board_comment
+  | Board Board_comment_vote
+  | Board Board_curation_submit
+  | Board Board_delete
+  | Board Board_reaction
+  | Board Board_sub_board_create
+  | Board Board_sub_board_delete
+  | Board Board_sub_board_update
+  | Board Board_vote -> Board_write
+  | Task Add_task
+  | Task Batch_add_tasks
+  | Task Claim_next
   | Deliver
-  | Goal_transition
-  | Goal_upsert
-  | Goal_verify
+  | Goal Goal_transition
+  | Goal Goal_upsert
+  | Goal Goal_verify
   | Heartbeat
   | Note_add
   | Plan_clear_task
@@ -197,46 +203,46 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Reset
   | Tool_grant
   | Tool_revoke
-  | Transition
-  | Update_priority -> Workspace_write
+  | Task Transition
+  | Task Update_priority -> Workspace_write
   | Agent_update
   | Broadcast
   | Cleanup_zombies
   | Gc
-  | Operator_action
-  | Operator_confirm
+  | Operator Operator_action
+  | Operator Operator_confirm
   | Tool_admin_update -> Generic_write
   | Agent_card
   | Agent_fitness
   | Agents
   | Approval_get
   | Approval_pending
-  | Board_curation_read
-  | Board_get
-  | Board_hearths
-  | Board_list
-  | Board_profile
-  | Board_search
-  | Board_stats
-  | Board_sub_board_get
-  | Board_sub_board_list
+  | Board Board_curation_read
+  | Board Board_get
+  | Board Board_hearths
+  | Board Board_list
+  | Board Board_profile
+  | Board Board_search
+  | Board Board_stats
+  | Board Board_sub_board_get
+  | Board Board_sub_board_list
   | Check
   | Config
   | Dashboard
   | Get_metrics
-  | Goal_list
+  | Goal Goal_list
   | Mcp_session
   | Messages
-  | Operator_digest
-  | Operator_snapshot
+  | Operator Operator_digest
+  | Operator Operator_snapshot
   | Pause
   | Plan_get
   | Plan_get_task
   | Resume
   | Start
   | Status
-  | Task_history
-  | Tasks
+  | Task Task_history
+  | Task Tasks
   | Tool_admin_snapshot
   | Tool_help
   | Tool_list

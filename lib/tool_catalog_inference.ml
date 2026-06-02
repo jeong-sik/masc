@@ -39,70 +39,81 @@ let tool_group_to_string = function
 module TN = Tool_name
 module TM = Tool_name.Masc
 
+(* PR-S1: domain tool names live in these submodules; [TM.Task]/[TM.Board]/
+   [TM.Goal]/[TM.Operator] wrap them into [Masc.t]. *)
+module TTask = Tool_name.Task_name
+module TBoard = Tool_name.Board_name
+module TGoal = Tool_name.Goal_name
+module TOp = Tool_name.Operator_name
+
+(* PR-S1: NON-uniform across each domain (Board members split Read_only vs
+   Masc_workspace; Operator members split three ways), so this match stays flat
+   over [Masc.t] with each domain constructor mechanically wrapped — bucket
+   groupings unchanged, exhaustiveness still enforced. *)
 let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Deliver
-  | TN.Masc TM.Operator_action
+  | TN.Masc (TM.Operator TOp.Operator_action)
   | TN.Masc TM.Start ->
       Some Host_repo_write
   | TN.Masc TM.Agent_fitness
   | TN.Masc TM.Agent_card
   | TN.Masc TM.Agents
-  | TN.Masc TM.Board_get
-  | TN.Masc TM.Board_curation_read
-  | TN.Masc TM.Board_hearths
-  | TN.Masc TM.Board_list
-  | TN.Masc TM.Board_profile
-  | TN.Masc TM.Board_search
-  | TN.Masc TM.Board_stats
+  | TN.Masc (TM.Board TBoard.Board_get)
+  | TN.Masc (TM.Board TBoard.Board_curation_read)
+  | TN.Masc (TM.Board TBoard.Board_hearths)
+  | TN.Masc (TM.Board TBoard.Board_list)
+  | TN.Masc (TM.Board TBoard.Board_profile)
+  | TN.Masc (TM.Board TBoard.Board_search)
+  | TN.Masc (TM.Board TBoard.Board_stats)
   | TN.Masc TM.Check
   | TN.Masc TM.Config
   | TN.Masc TM.Dashboard
   | TN.Masc TM.Get_metrics
-  | TN.Masc TM.Goal_list
+  | TN.Masc (TM.Goal TGoal.Goal_list)
   | TN.Masc TM.Mcp_session
   | TN.Masc TM.Messages
-  | TN.Masc TM.Operator_digest
-  | TN.Masc TM.Operator_snapshot
+  | TN.Masc (TM.Operator TOp.Operator_digest)
+  | TN.Masc (TM.Operator TOp.Operator_snapshot)
   | TN.Masc TM.Plan_get
   | TN.Masc TM.Plan_get_task
   | TN.Masc TM.Status
-  | TN.Masc TM.Task_history
-  | TN.Masc TM.Tasks
+  | TN.Masc (TM.Task TTask.Task_history)
+  | TN.Masc (TM.Task TTask.Tasks)
   | TN.Masc TM.Tool_admin_snapshot
   | TN.Masc TM.Tool_help
   | TN.Masc TM.Tool_list
   | TN.Masc TM.Tool_stats
   | TN.Masc TM.Web_fetch
   | TN.Masc TM.Web_search
-  | TN.Masc TM.Board_sub_board_get
-  | TN.Masc TM.Board_sub_board_list
+  | TN.Masc (TM.Board TBoard.Board_sub_board_get)
+  | TN.Masc (TM.Board TBoard.Board_sub_board_list)
   | TN.Masc TM.Approval_pending
   | TN.Masc TM.Approval_get ->
       Some Read_only
-  | TN.Masc TM.Add_task
+  | TN.Masc (TM.Task TTask.Add_task)
   | TN.Masc TM.Agent_update
-  | TN.Masc TM.Batch_add_tasks
-  | TN.Masc TM.Board_cleanup
-  | TN.Masc TM.Board_comment
-  | TN.Masc TM.Board_comment_vote
-  | TN.Masc TM.Board_curation_submit
-  | TN.Masc TM.Board_delete
-  | TN.Masc TM.Board_post
-  | TN.Masc TM.Board_reaction
-  | TN.Masc TM.Board_sub_board_create
-  | TN.Masc TM.Board_sub_board_delete
-  | TN.Masc TM.Board_sub_board_update
-  | TN.Masc TM.Board_vote
+  | TN.Masc (TM.Task TTask.Batch_add_tasks)
+  | TN.Masc (TM.Board TBoard.Board_cleanup)
+  | TN.Masc (TM.Board TBoard.Board_comment)
+  | TN.Masc (TM.Board TBoard.Board_comment_vote)
+  | TN.Masc (TM.Board TBoard.Board_curation_submit)
+  | TN.Masc (TM.Board TBoard.Board_delete)
+  | TN.Masc (TM.Board TBoard.Board_post)
+  | TN.Masc (TM.Board TBoard.Board_reaction)
+  | TN.Masc (TM.Board TBoard.Board_sub_board_create)
+  | TN.Masc (TM.Board TBoard.Board_sub_board_delete)
+  | TN.Masc (TM.Board TBoard.Board_sub_board_update)
+  | TN.Masc (TM.Board TBoard.Board_vote)
   | TN.Masc TM.Broadcast
-  | TN.Masc TM.Claim_next
+  | TN.Masc (TM.Task TTask.Claim_next)
   | TN.Masc TM.Cleanup_zombies
   | TN.Masc TM.Gc
-  | TN.Masc TM.Goal_transition
-  | TN.Masc TM.Goal_upsert
-  | TN.Masc TM.Goal_verify
+  | TN.Masc (TM.Goal TGoal.Goal_transition)
+  | TN.Masc (TM.Goal TGoal.Goal_upsert)
+  | TN.Masc (TM.Goal TGoal.Goal_verify)
   | TN.Masc TM.Heartbeat
   | TN.Masc TM.Note_add
-  | TN.Masc TM.Operator_confirm
+  | TN.Masc (TM.Operator TOp.Operator_confirm)
   | TN.Masc TM.Pause
   | TN.Masc TM.Plan_clear_task
   | TN.Masc TM.Plan_init
@@ -113,36 +124,19 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Tool_admin_update
   | TN.Masc TM.Tool_grant
   | TN.Masc TM.Tool_revoke
-  | TN.Masc TM.Transition
-  | TN.Masc TM.Update_priority ->
+  | TN.Masc (TM.Task TTask.Transition)
+  | TN.Masc (TM.Task TTask.Update_priority) ->
       Some Masc_workspace
 let inferred_effect_domain name =
   match Tool_name.of_string name with
   | Some typed_name -> inferred_effect_domain_of_typed_tool_name typed_name
   | None -> None
 
+(* PR-S1: in this grouping each domain IS uniform — all Board names map to
+   [Masc_board], and all Task/Goal/Operator names map to [Masc_core] — so the
+   domains collapse to a single nested wildcard arm each. *)
 let tool_group_of_typed_tool_name = function
-  | TN.Masc
-      ( TM.Board_cleanup
-      | TM.Board_comment
-      | TM.Board_comment_vote
-      | TM.Board_curation_read
-      | TM.Board_curation_submit
-      | TM.Board_delete
-      | TM.Board_get
-      | TM.Board_hearths
-      | TM.Board_list
-      | TM.Board_post
-      | TM.Board_profile
-      | TM.Board_reaction
-      | TM.Board_search
-      | TM.Board_stats
-      | TM.Board_sub_board_create
-      | TM.Board_sub_board_delete
-      | TM.Board_sub_board_get
-      | TM.Board_sub_board_list
-      | TM.Board_sub_board_update
-      | TM.Board_vote ) ->
+  | TN.Masc (TM.Board _) ->
       Some Masc_board
   | TN.Masc
       ( TM.Plan_clear_task
@@ -154,39 +148,29 @@ let tool_group_of_typed_tool_name = function
       Some Masc_plan
   | TN.Masc (TM.Agent_fitness | TM.Agent_update | TM.Agent_card | TM.Agents) ->
       Some Masc_agent
+  | TN.Masc (TM.Task _)
+  | TN.Masc (TM.Goal _)
+  | TN.Masc (TM.Operator _)
   | TN.Masc
-      ( TM.Add_task
-      | TM.Approval_pending
+      ( TM.Approval_pending
       | TM.Approval_get
-      | TM.Batch_add_tasks
       | TM.Broadcast
       | TM.Check
-      | TM.Claim_next
       | TM.Cleanup_zombies
       | TM.Config
       | TM.Dashboard
       | TM.Deliver
       | TM.Gc
       | TM.Get_metrics
-      | TM.Goal_list
-      | TM.Goal_transition
-      | TM.Goal_upsert
-      | TM.Goal_verify
       | TM.Heartbeat
       | TM.Mcp_session
       | TM.Messages
       | TM.Note_add
-      | TM.Operator_action
-      | TM.Operator_confirm
-      | TM.Operator_digest
-      | TM.Operator_snapshot
       | TM.Pause
       | TM.Reset
       | TM.Resume
       | TM.Start
       | TM.Status
-      | TM.Task_history
-      | TM.Tasks
       | TM.Tool_admin_snapshot
       | TM.Tool_admin_update
       | TM.Tool_grant
@@ -194,8 +178,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Tool_list
       | TM.Tool_revoke
       | TM.Tool_stats
-      | TM.Transition
-      | TM.Update_priority
       | TM.Web_fetch
       | TM.Web_search ) ->
       Some Masc_core

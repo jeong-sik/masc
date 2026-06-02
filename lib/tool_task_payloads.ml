@@ -146,6 +146,7 @@ let build_verdict_sse_payload
     ~(task_id : string)
     ~(req : Anti_rationalization.review_request)
     ~(result : Anti_rationalization.review_result) : Yojson.Safe.t =
+  let cross_runtime = is_cross_runtime_verdict result in
   `Assoc
     [
       ("type", `String "oas:masc:harness:verdict_recorded");
@@ -160,7 +161,8 @@ let build_verdict_sse_payload
             ("verdict", `String (verdict_to_string result));
             ("evaluator_runtime", `String result.evaluator_runtime);
             ( "generator_runtime", Json_util.string_opt_to_json result.generator_runtime );
-            ("cross_runtime", `Bool (is_cross_runtime_verdict result));
+            ("cross_runtime", `Bool cross_runtime);
+            ("cross_model", `Bool cross_runtime);
             ( "fallback_reason", Json_util.string_opt_to_json result.fallback_reason );
           ] );
     ]

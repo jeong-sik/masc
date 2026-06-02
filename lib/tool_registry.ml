@@ -230,6 +230,7 @@ let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
       , `Assoc
           [ "external_mcp", `Int (Atomic.get stats.external_mcp_count)
           ; "agent_internal", `Int (Atomic.get stats.agent_internal_count)
+          ; "keeper_internal", `Int (Atomic.get stats.agent_internal_count)
           ; "inline_dispatch", `Int (Atomic.get stats.inline_dispatch_count)
           ] )
     ]

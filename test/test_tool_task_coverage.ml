@@ -2046,7 +2046,8 @@ let () = test "get_int_opt_missing" (fun () ->
 (* The payload is built by Tool_task.build_verdict_sse_payload —     *)
 (* a pure helper — so dashboard subscribers depend on a stable       *)
 (* JSON shape. The cross_runtime bool must match Eval_calibration's    *)
-(* inclusion rule (both runtimes non-empty AND distinct).            *)
+(* inclusion rule (both runtimes non-empty AND distinct). The legacy  *)
+(* cross_model alias stays present for dashboard subscribers.         *)
 (* ================================================================ *)
 
 let make_review_request () : Anti_rationalization.review_request =
@@ -2082,6 +2083,7 @@ let () = test "build_verdict_sse_payload: distinct runtimes = cross_runtime true
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t1" ~req ~result in
   assert (payload_member "cross_runtime" json = `Bool true);
+  assert (payload_member "cross_model" json = `Bool true);
   assert (payload_member "generator_runtime" json
           = `String Masc_mcp.(Keeper_config.default_runtime_id ()));
   assert (payload_member "evaluator_runtime" json = `String "verifier");
@@ -2098,6 +2100,7 @@ let () = test "build_verdict_sse_payload: same runtime = cross_runtime false" (f
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t2" ~req ~result in
   assert (payload_member "cross_runtime" json = `Bool false);
+  assert (payload_member "cross_model" json = `Bool false);
   assert (payload_member "generator_runtime" json = `String "verifier")
 )
 
@@ -2108,6 +2111,7 @@ let () = test "build_verdict_sse_payload: no generator = cross_runtime false + n
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t3" ~req ~result in
   assert (payload_member "cross_runtime" json = `Bool false);
+  assert (payload_member "cross_model" json = `Bool false);
   assert (payload_member "generator_runtime" json = `Null)
 )
 

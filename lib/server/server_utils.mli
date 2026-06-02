@@ -163,7 +163,7 @@ val board_reactions_lookup :
   Board.reaction_summary list
 
 val board_contributor_quality_json :
-  Agent_reputation.agent_reputation -> Yojson.Safe.t
+  Reputation.agent_reputation -> Yojson.Safe.t
 (** [board_contributor_quality_json rep] projects the existing agent
     reputation record into the compact board contributor-quality contract. *)
 
@@ -213,7 +213,7 @@ val board_post_dashboard_json :
     - [vote_blind] / [vote_blind_reason] and null score fields when
       [blind_votes] is [true] and the viewer has not voted yet.
     - [contributor_quality] when supplied by the route layer from
-      {!Agent_reputation}.
+      {!Reputation}.
 
     The base fields [title] / [votes] / [comment_count] /
     [created_at_iso] / [updated_at_iso] / [hearth_count] are

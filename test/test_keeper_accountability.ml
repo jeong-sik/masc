@@ -235,12 +235,12 @@ let test_agent_reputation_penalizes_unsupported_claims () =
              ("synthetic", `Bool false);
            ]);
       let unpenalized =
-        Agent_reputation.compute_overall_score ~completion_rate:1.0
+        Reputation.compute_overall_score ~completion_rate:1.0
           ~response_rate:0.0 ~board_posts:0 ~board_comments:0
           ~thompson_confidence:0.5
       in
       let rep =
-        Agent_reputation.compute_reputation config
+        Reputation.compute_reputation config
           ~agent_name:"keeper-rep-agent"
       in
       check int "tasks completed" 1 rep.tasks_completed;
@@ -287,7 +287,7 @@ let test_generated_alias_inherits_accountability_penalty () =
       check (float 0.0001) "alias summary inherits unsupported rate" 1.0
         (float_member "unsupported_completion_rate" summary);
       let rep =
-        Agent_reputation.compute_reputation config
+        Reputation.compute_reputation config
           ~agent_name:"adversary-eager-viper"
       in
       check string "generated alias risk band" "high"
@@ -364,7 +364,7 @@ let test_direct_agent_history_exposes_direct_source () =
         "Direct runtime alias history"
         (string_member "source_label" summary);
       let rep =
-        Agent_reputation.compute_reputation config
+        Reputation.compute_reputation config
           ~agent_name:"keeper-direct-agent"
       in
       check string "direct reputation keeper provenance" "direct"
@@ -471,7 +471,7 @@ let test_unmapped_alias_exposes_no_history_source () =
       check string "unmapped alias risk remains low" "low"
         (string_member "risk_band" summary);
       let rep =
-        Agent_reputation.compute_reputation config
+        Reputation.compute_reputation config
           ~agent_name:"orphan-eager-viper"
       in
       check string "unmapped alias keeper provenance" "orphan"

@@ -645,10 +645,10 @@ let () =
        | exn -> Log.Workspace.warn "activity_graph emit failed: %s" (Printexc.to_string exn))
 ;;
 
-(* Agent economy earn — wraps Agent_economy for task completion credits *)
+(* Agent economy earn — wraps Economy for task completion credits *)
 let () =
   Atomic.set Workspace_hooks.agent_economy_earn_fn (fun ~base_path ~agent_name ~reason ->
-    match Agent_economy.earn ~base_path ~agent_name ~kind:Earn_task_done ~reason () with
+    match Economy.earn ~base_path ~agent_name ~kind:Earn_task_done ~reason () with
     | Ok _bal -> ()
     | Error msg -> Log.Misc.error "task earn failed: %s" msg)
 ;;

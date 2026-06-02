@@ -657,11 +657,11 @@ let add_routes ~sw ~clock router =
                 ~status:`Bad_request reqd
           | Some agent_name ->
               let rep =
-                Agent_reputation.compute_reputation
+                Reputation.compute_reputation
                   state.Mcp_server.workspace_config ~agent_name
               in
               Http.Response.json_value
-                (Agent_reputation.reputation_to_json rep) reqd)
+                (Reputation.reputation_to_json rep) reqd)
        ) request reqd)
 
   (* Activity Feed API *)

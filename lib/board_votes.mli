@@ -92,7 +92,7 @@ val vote :
     Vote flips swap up↔down without re-counting (and
     {b without} earning credits, to prevent down/up
     alternation abuse).  Fresh peer upvotes earn the post
-    author a credit via [Agent_economy.earn] {b outside}
+    author a credit via [Economy.earn] {b outside}
     the lock so the ledger write does not block other
     readers.  Every vote is broadcast to
     {!Thompson_sampling.record_vote} outside the state lock

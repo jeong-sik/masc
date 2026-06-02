@@ -14,7 +14,7 @@ type provenance =
   | Thompson of string        (** signal kind, e.g. "quality_update" *)
   | Drift_guard of string     (** drift type, e.g. "factual" *)
   | Anti_rationalization of string  (** gate name, e.g. "length" / "excuse" / "llm" / "fallback" *)
-  | Agent_reputation of string      (** metric name, e.g. "overall_score" *)
+  | Reputation of string      (** metric name, e.g. "overall_score" *)
   | Relay of string                 (** relay decision site, e.g. "estimate_context" / "should_relay" *)
   | Alert_scoring of string         (** alert keyword/signal, e.g. "keyword_match" / "signal_bonus" *)
   | Pipeline_stage of string        (** stage inference, e.g. "recency_threshold" *)

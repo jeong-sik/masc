@@ -1,7 +1,7 @@
 (** Workspace Hooks — Callback refs for upper-layer dependencies.
 
     Workspace modules must not depend on Activity_graph, Board,
-    Agent_economy, Relation_materializer, or Oas_worker directly.
+    Economy, Relation_materializer, or Oas_worker directly.
     Instead, they call these callback refs which are wired at startup
     by workspace.ml (the hub module that already depends on everything).
 
@@ -43,7 +43,7 @@ let activity_emit_fn
      unit -> unit) Atomic.t
   = Atomic.make (fun _config ~actor:_ ?subject:_ ~kind:_ ~payload:_ ~tags:_ () -> ())
 
-(** Agent economy earn — wraps Agent_economy.earn for task completion credits. *)
+(** Agent economy earn — wraps Economy.earn for task completion credits. *)
 let agent_economy_earn_fn
   : (base_path:string -> agent_name:string -> reason:string -> unit) Atomic.t
   = Atomic.make (fun ~base_path:_ ~agent_name:_ ~reason:_ -> ())

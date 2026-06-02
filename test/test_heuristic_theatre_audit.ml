@@ -22,7 +22,7 @@
    rename or label reshape fails here before it reaches CI. *)
 
 module BC = Masc_mcp.Board_core_classify
-(* Thompson_sampling carved into the masc_thompson leaf (Agent_health/Prometheus
+(* Thompson_sampling carved into the masc_thompson leaf (Health/Prometheus
    edges inverted); the metric-name constant is still exported. Reference the
    bare module (re-exported via masc_test_deps) instead of Masc_mcp.*. *)
 module TS = Thompson_sampling

@@ -573,7 +573,7 @@
    ;; Pure Turn FSM (extracted sub-library — states + transition matrix, Keeper-free)
    masc_turn
    ;; Agent token-ledger domain (extracted leaf — earn/spend/balance, Board-callable)
-   masc_agent_economy
+   masc_economy
    ;; Tool dispatch substrate (extracted lib — PR-S3, RFC-0056 LANE 2).
    ;; tool_dispatch / tool_name / tool_catalog / tool_registry / tool_token /
    ;; dispatch_outcome / tool_catalog_inference. The compiler enforces
@@ -582,7 +582,7 @@
    ;; warm-up stats (Telemetry_eio) are injected at the composition root.
    ;; (wrapped false) keeps bare Tool_dispatch.X / Tool_catalog.X refs working.
    masc_mcp.masc_tool_dispatch
-   ;; Thompson Sampling agent selection (extracted leaf — Agent_health/Prometheus
+   ;; Thompson Sampling agent selection (extracted leaf — Health/Prometheus
    ;; edges inverted to callbacks; Board-callable record_vote without mega-lib cycle)
    masc_thompson
    ;; Environment configuration (extracted sub-library)

@@ -16,7 +16,7 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 module Random = Stdlib.Random
 
-(** Agent_economy — Currency/reward system for MASC agents
+(** Economy — Currency/reward system for MASC agents
 
     Append-only JSONL ledger with in-memory balance cache.
     Feature flag gated: MASC_ECONOMY_ENABLED.

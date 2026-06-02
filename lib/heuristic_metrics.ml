@@ -10,7 +10,7 @@ type provenance =
   | Thompson of string
   | Drift_guard of string
   | Anti_rationalization of string
-  | Agent_reputation of string
+  | Reputation of string
   | Relay of string
   | Alert_scoring of string
   | Pipeline_stage of string
@@ -52,7 +52,7 @@ let provenance_to_json = function
   | Drift_guard kind -> `Assoc [ "type", `String "drift_guard"; "detail", `String kind ]
   | Anti_rationalization gate ->
     `Assoc [ "type", `String "anti_rationalization"; "detail", `String gate ]
-  | Agent_reputation metric ->
+  | Reputation metric ->
     `Assoc [ "type", `String "agent_reputation"; "detail", `String metric ]
   | Relay site -> `Assoc [ "type", `String "relay"; "detail", `String site ]
   | Alert_scoring signal ->

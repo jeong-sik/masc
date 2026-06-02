@@ -16,7 +16,7 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 module Random = Stdlib.Random
 
-(** Agent_reputation — Reputation scoring from existing JSONL data
+(** Reputation — Reputation scoring from existing JSONL data
 
     Computes agent reputation from task transitions, mention inbox,
     and board posts/comments.

@@ -549,7 +549,7 @@ let create_post_with_outcome
       | Ok (`Fresh post) ->
         with_persist_lock store (fun () -> append_post post);
         (match
-           Agent_economy.earn
+           Economy.earn
              ~base_path:(board_base_path ())
              ~agent_name:author
              ~kind:Earn_board_post

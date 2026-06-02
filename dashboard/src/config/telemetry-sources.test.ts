@@ -19,7 +19,7 @@ describe('telemetrySourceLabel', () => {
   })
 
   it('returns Korean label for tool_usage', () => {
-    expect(telemetrySourceLabel('tool_usage')).toBe('Keeper 내부 호출')
+    expect(telemetrySourceLabel('tool_usage')).toBe('Agent 내부 호출')
   })
 
   it('returns Korean label for oas_event', () => {

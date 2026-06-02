@@ -67,12 +67,6 @@ type category =
       (** Capability level was lowered (e.g. L1 → L2). *)
   | DegradationRecovered
       (** Capability level was restored upward. *)
-  | SpeculativeBranchStarted
-      (** A speculative branch was forked. *)
-  | SpeculativeBranchCompleted
-      (** A speculative branch finished (won, lost, or aborted). *)
-  | SpeculativeWinnerSelected
-      (** A winning branch was committed and losers reaped. *)
   | RecoveryClassified
       (** A failure was classified and a default recovery strategy was
           selected, but no concrete executor was configured. *)

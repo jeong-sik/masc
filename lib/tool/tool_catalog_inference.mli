@@ -1,8 +1,8 @@
-(** Tool_catalog_inference — typed-tool-name -> effect_domain / tool_group.
+(** Tool_catalog_inference — typed-tool-name -> effect_domain.
 
-    Owns the {!effect_domain} and {!tool_group} types. [Tool_catalog]
-    re-exports them via type aliasing so [tool_catalog.mli] stays
-    byte-compatible. *)
+    Owns the {!effect_domain} type. [Tool_catalog] re-exports it via type
+    aliasing so [tool_catalog.mli] stays byte-compatible.  (The [tool_group]
+    display classifier was deleted in the surface-cut refactor.) *)
 
 type effect_domain =
   | Read_only
@@ -10,18 +10,7 @@ type effect_domain =
   | Playground_write
   | Host_repo_write
 
-type tool_group =
-  | Masc_board
-  | Masc_plan
-  | Masc_agent
-  | Masc_core
-
 val effect_domain_to_string : effect_domain -> string
-val tool_group_to_string : tool_group -> string
 
 val inferred_effect_domain : string -> effect_domain option
 (** [None] when the name does not parse as a typed [Tool_name.t]. *)
-
-val tool_group : string -> tool_group option
-(** [None] when the name does not parse as a typed [Tool_name.t],
-    or when the typed name falls in an arm that returns [None]. *)

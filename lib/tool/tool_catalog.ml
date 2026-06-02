@@ -45,20 +45,14 @@ type implementation_status =
   | Simulation
   | Placeholder
 
-(* effect_domain / tool_group live in Tool_catalog_inference. Re-export the
-   variants here so [tool_catalog.mli] keeps the same public constructors. *)
+(* effect_domain lives in Tool_catalog_inference. Re-export the variants here
+   so [tool_catalog.mli] keeps the same public constructors. *)
 include (Tool_catalog_inference : sig
   type effect_domain = Tool_catalog_inference.effect_domain =
     | Read_only
     | Masc_workspace
     | Playground_write
     | Host_repo_write
-
-  type tool_group = Tool_catalog_inference.tool_group =
-    | Masc_board
-    | Masc_plan
-    | Masc_agent
-    | Masc_core
 end)
 
 
@@ -396,20 +390,18 @@ let implementation_status_to_string = function
   | Simulation -> "simulation"
   | Placeholder -> "placeholder"
 
-(* effect_domain_to_string / tool_group_to_string: re-export from
-   Tool_catalog_inference to keep one definition. *)
+(* effect_domain_to_string: re-export from Tool_catalog_inference to keep one
+   definition. *)
 let effect_domain_to_string = Tool_catalog_inference.effect_domain_to_string
-let tool_group_to_string = Tool_catalog_inference.tool_group_to_string
 
 let implementation_allows_public_visibility = function
   | Real | Adapter -> true
   | Simulation | Placeholder -> false
 
-(* Typed-name inference (effect_domain / tool_group) lives in
-   Tool_catalog_inference. Re-export the public entry points so the
-   facade contract in [tool_catalog.mli] is unchanged. *)
+(* Typed-name inference (effect_domain) lives in Tool_catalog_inference.
+   Re-export the public entry point so the facade contract in
+   [tool_catalog.mli] is unchanged. *)
 let inferred_effect_domain = Tool_catalog_inference.inferred_effect_domain
-let tool_group = Tool_catalog_inference.tool_group
 
 
 let attach_inferred_effect_domain name (meta : metadata) =
@@ -555,16 +547,12 @@ let metadata_to_fields name =
         :: with_reason
     | None -> with_reason
   in
-  let with_tool_group =
-    match tool_group name with
-    | Some group ->
-        ("toolGroup", `String (tool_group_to_string group)) :: with_effect_domain
-    | None -> with_effect_domain
-  in
+  (* The "toolGroup" field was dropped in the surface-cut refactor: the
+     [tool_group] display classifier was deleted. *)
   let with_mcp_context_required =
     match meta.mcp_context_required with
-    | Some value -> ("mcpContextRequired", `Bool value) :: with_tool_group
-    | None -> with_tool_group
+    | Some value -> ("mcpContextRequired", `Bool value) :: with_effect_domain
+    | None -> with_effect_domain
   in
   let with_actor_binding =
     match meta.requires_actor_binding with

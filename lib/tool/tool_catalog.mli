@@ -22,12 +22,6 @@ type effect_domain =
   | Playground_write
   | Host_repo_write
 
-type tool_group =
-  | Masc_board
-  | Masc_plan
-  | Masc_agent
-  | Masc_core
-
 type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
@@ -74,7 +68,6 @@ val metadata : string -> metadata
 val implementation_status : string -> implementation_status
 val effect_domain : string -> effect_domain option
 val requires_actor_binding : string -> bool
-val tool_group : string -> tool_group option
 val canonical_tool_name : string -> string
 val is_placeholder : string -> bool
 val is_visible : ?include_hidden:bool -> string -> bool
@@ -86,7 +79,6 @@ val visibility_to_string : visibility -> string
 val lifecycle_to_string : lifecycle -> string
 val implementation_status_to_string : implementation_status -> string
 val effect_domain_to_string : effect_domain -> string
-val tool_group_to_string : tool_group -> string
 
 (** {1 JSON metadata} *)
 

@@ -363,7 +363,6 @@ lib/compaction_trigger/compaction_trigger.ml:60
 lib/compaction_trigger/compaction_trigger.ml:66
 lib/compaction_trigger/compaction_trigger.ml:72
 lib/compaction_trigger/compaction_trigger.ml:93
-lib/keeper/keeper_docker_client_real.ml:76
 lib/keeper/keeper_accountability.ml:68
 lib/keeper/keeper_accountability.ml:85
 lib/keeper/keeper_accountability.ml:173

@@ -85,10 +85,10 @@ let handle_filesystem ctx descriptor args =
 let handle_shell_ir ctx descriptor args =
   match descriptor.Agent_tool_descriptor.runtime_handler with
   | Tool_execute ->
-	    Some
-	      (Agent_tool_command_runtime.handle_tool_execute
-	         ~turn_sandbox_factory:ctx.turn_sandbox_factory
-	         ~exec_cache:ctx.exec_cache
+      Some
+        (Agent_tool_command_runtime.handle_tool_execute
+           ~turn_sandbox_factory:ctx.turn_sandbox_factory
+           ~exec_cache:ctx.exec_cache
          ~config:ctx.config
          ~meta:ctx.meta
          ~args

@@ -161,10 +161,10 @@ let make_keeper_tool_handler
             Keeper_tools_oas_handler_exec.execute_with_observers
               ~name
               ~config
-	              ~meta
-	              ~ctx_snapshot
-	              ?turn_sandbox_factory
-	              ~exec_cache
+                ~meta
+                ~ctx_snapshot
+                ?turn_sandbox_factory
+                ~exec_cache
               ?search_fn
               ?on_tool_called
               ~failure_counts
@@ -205,10 +205,10 @@ let make_keeper_tool_handler
                 Keeper_tools_oas_handler_exec.execute_with_observers
                   ~name
                   ~config
-	                  ~meta
-	                  ~ctx_snapshot
-	                  ?turn_sandbox_factory
-	                  ~exec_cache
+                    ~meta
+                    ~ctx_snapshot
+                    ?turn_sandbox_factory
+                    ~exec_cache
                   ?search_fn
                   ?on_tool_called
                   ~failure_counts

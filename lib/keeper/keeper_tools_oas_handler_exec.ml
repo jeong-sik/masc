@@ -32,9 +32,9 @@ let execute_with_observers
         Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
-	          ~ctx_work:ctx_snapshot
-	          ?turn_sandbox_factory
-	          ~exec_cache
+            ~ctx_work:ctx_snapshot
+            ?turn_sandbox_factory
+            ~exec_cache
           ?search_fn
           ~name
           ~input

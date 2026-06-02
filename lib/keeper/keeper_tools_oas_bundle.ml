@@ -106,10 +106,10 @@ let make_tool_bundle
                ~name:td.name
                ~input_schema:td.input_schema
                ~config
-	               ~meta
-	               ~ctx_snapshot
-	               ?turn_sandbox_factory
-	               ~exec_cache
+                 ~meta
+                 ~ctx_snapshot
+                 ?turn_sandbox_factory
+                 ~exec_cache
                ?search_fn
                ?on_tool_called
                ?clock
@@ -155,10 +155,10 @@ let make_tool_bundle
                  ~name:internal
                  ~input_schema:internal_def.input_schema
                  ~config
-	                 ~meta
-	                 ~ctx_snapshot
-	                 ?turn_sandbox_factory
-	                 ~exec_cache
+                   ~meta
+                   ~ctx_snapshot
+                   ?turn_sandbox_factory
+                   ~exec_cache
                  ?search_fn
                  ?on_tool_called
                  ?clock
@@ -175,11 +175,11 @@ let make_tool_bundle
       Agent_tool_descriptor.public_descriptors
   in
   let bundle =
-	    { tools = internal_tools @ alias_tools
-	    ; cleanup =
-	        (fun () ->
-	          Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
-	    }
+      { tools = internal_tools @ alias_tools
+      ; cleanup =
+          (fun () ->
+            Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
+      }
   in
   Prometheus_hotpath.observe
     ~metric:Prometheus_hotpath.metric_oas_make_tool_bundle_sec

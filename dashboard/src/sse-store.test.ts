@@ -421,7 +421,23 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshBoard).not.toHaveBeenCalled()
   })
 
-  it('does not trigger observatory graph refresh from the workspace board route', async () => {
+  it('refreshes observatory telemetry from activity push events on the observatory route', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshActivity = vi.fn()
+    sseStore.registerActivityRefresh(refreshActivity)
+    route.value = { tab: 'monitoring', params: { section: 'observatory' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'activity_graph_changed',
+      payload: { kind: 'activity_graph_changed' },
+    } as unknown as Parameters<typeof sseStore.routeServerPushEvent>[0])
+    vi.advanceTimersByTime(2_000)
+    await flushAsyncWork()
+
+    expect(refreshActivity).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not trigger observatory telemetry refresh from the workspace board route', async () => {
     const { sseStore } = await loadSseStore()
     const refreshActivity = vi.fn()
     sseStore.registerActivityRefresh(refreshActivity)

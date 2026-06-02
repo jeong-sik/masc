@@ -274,7 +274,9 @@ let tool_name_can_satisfy_actionable_gate ~(claim_context_allowed : bool) name =
     Keeper_tool_progress.is_claim_context_tool_name name
     || (Keeper_tool_progress.tool_name_can_satisfy_required_contract name
         && not (Keeper_tool_progress.is_completion_tool_name name))
-  else Keeper_tool_progress.is_owned_task_progress_tool_name name
+  else
+    (not (Keeper_tool_progress.is_claim_context_tool_name name))
+    && Keeper_tool_progress.is_owned_task_progress_tool_name name
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated
    affordance only counts when the keeper actually has a tool that can

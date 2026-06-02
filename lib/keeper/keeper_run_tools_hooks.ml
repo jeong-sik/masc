@@ -76,7 +76,6 @@ let assemble_hooks
       ~(runtime_id_string : string)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
-      ~(required_tool_names : string list)
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(gemini_mcp_disabled : bool)
@@ -127,10 +126,6 @@ let assemble_hooks
          List.length initial_tool_surface.turn_visible_tool_names
      ; tool_gate_enabled = initial_tool_surface.tool_gate_requested
      ; tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used
-     ; required_tool_names = initial_tool_surface.required_tool_names
-     ; required_tool_candidate_names =
-         initial_tool_surface.required_tool_candidate_names
-     ; missing_required_tool_names = initial_tool_surface.missing_required_tool_names
      ; config_root
      ; runtime_config_path
      ; gemini_mcp_disabled
@@ -139,22 +134,7 @@ let assemble_hooks
      };
   let initial_tool_surface_blocker = ref None in
   let initial_tool_surface_result =
-    if initial_tool_surface.missing_required_tool_names <> []
-    then (
-      acc.receipt_tool_contract_result <-
-        Keeper_execution_receipt.Contract_tool_surface_mismatch;
-      initial_tool_surface_blocker
-      := Some
-           (sdk_error_of_keeper_internal_error
-              (Keeper_tool_surface_mismatch
-                 { keeper_name = meta.name
-                 ; required_tools = initial_tool_surface.required_tool_names
-                 ; missing_required_tools =
-                     initial_tool_surface.missing_required_tool_names
-                 ; visible_tools = initial_tool_surface.turn_visible_tool_names
-                 }));
-      Ok initial_tool_surface)
-    else if
+    if
       initial_tool_surface.tool_gate_requested
       && initial_tool_surface.turn_visible_tool_names = []
     then (
@@ -378,20 +358,7 @@ let assemble_hooks
                      | Some e -> e ^ "\n\n" ^ text)
                 in
                 let ctx =
-                  if
-                    computed_surface.is_last_turn
-                    && computed_surface.required_tool_names <> []
-                  then
-                    append_ctx
-                      ctx
-                      (Printf.sprintf
-                         "[REQUIRED TOOLS - FINAL TURN] This Agent.run call is on its \
-                          final turn, but this message has explicit required_tools: %s. \
-                          You MUST either use every required tool now or return a \
-                          concise blocker naming the missing policy/tool/runtime \
-                          condition."
-                         (String.concat ", " computed_surface.required_tool_names))
-                  else if computed_surface.is_last_turn
+                  if computed_surface.is_last_turn
                   then
                     append_ctx
                       ctx
@@ -409,21 +376,11 @@ let assemble_hooks
                           keeper_task_submit_for_verification."
                          computed_surface.per_call_turn
                          computed_surface.per_call_max_turns)
-                  else if computed_surface.required_tool_names <> []
-                  then
-                    append_ctx
-                      ctx
-                      (Printf.sprintf
-                         "[REQUIRED TOOLS] This Agent.run call has explicit \
-                          required_tools: %s. You MUST use these exact runtime tools \
-                          before answering in natural language. Do not substitute a \
-                          shell command or status read for a listed required tool."
-                         (String.concat ", " computed_surface.required_tool_names))
                   else if computed_surface.tool_gate_requested
                   then
                     append_ctx
                       ctx
-                      (generic_required_tool_gate_guidance
+                      (actionable_tool_gate_guidance
                          ~claim_context_allowed:computed_surface.claim_context_allowed
                          ~turn_affordances
                          ~allowed_tool_names:computed_surface.turn_visible_tool_names)
@@ -451,17 +408,19 @@ let assemble_hooks
                          computed_surface.per_call_max_turns)
                   else ctx
                 in
-                (* Contract violation retry feedback: when a previous
-                   Agent.run attempt was rejected for not calling
-                   required tools, inject explicit guidance naming the
-                   satisfying tools so the model knows what to do. *)
+                (* Retry feedback: if a previous attempt ignored an actionable
+                   gate, name the visible progress tools for this turn without
+                   storing a separate tool-contract surface. *)
                 let ctx =
                   if acc.contract_violation_retries > 0
                   then
                     let satisfying_tools =
-                      match computed_surface.required_tool_names with
-                      | _ :: _ -> computed_surface.required_tool_names
-                      | [] -> computed_surface.required_tool_candidate_names
+                      actionable_gate_tool_names
+                        ~claim_context_allowed:
+                          computed_surface.claim_context_allowed
+                        ~turn_affordances
+                        ~allowed_tool_names:
+                          computed_surface.turn_visible_tool_names
                     in
                     let preview =
                       satisfying_tools
@@ -471,7 +430,7 @@ let assemble_hooks
                     let retry_action =
                       if preview = ""
                       then
-                        "No currently visible tool can satisfy this contract; \
+                        "No currently visible keeper tool can advance this gate; \
                          emit a concise blocker instead."
                       else
                         Printf.sprintf
@@ -481,9 +440,9 @@ let assemble_hooks
                     append_ctx
                       ctx
                       (Printf.sprintf
-                         "[CONTRACT VIOLATION RETRY] Your previous Agent.run \
-                          attempt was rejected because you did not call a \
-                          required tool. %s Do NOT respond with text only, do NOT substitute \
+                         "[ACTIONABLE TOOL RETRY] Your previous Agent.run \
+                          attempt did not make keeper-tool progress for an \
+                          actionable gate. %s Do NOT respond with text only, do NOT substitute \
                           status or read-only tools."
                          retry_action)
                   else ctx
@@ -511,36 +470,21 @@ let assemble_hooks
                 in
                 let tool_choice =
                   if
-                    computed_surface.required_tool_names <> []
-                    && turn_visible_tool_names <> []
-                  then
-                    Some
-                      (preferred_tool_choice_for_required_tool_names
-                         ~required_tool_names:computed_surface.required_tool_names
-                         ~allowed_tool_names:turn_visible_tool_names)
-                  else if
                     (not computed_surface.is_last_turn)
                     && computed_surface.tool_gate_requested
                     && turn_visible_tool_names <> []
                   then
                     Some
-                      (preferred_tool_choice_for_required_turn
+                      (preferred_tool_choice_for_actionable_gate
                          ~claim_context_allowed:computed_surface.claim_context_allowed
                          ~turn_affordances
                          ~allowed_tool_names:turn_visible_tool_names)
                   else clear_inherited_strict_tool_choice current_params.tool_choice
                 in
                 let turn_completion_contract =
-                  match computed_surface.tool_gate_requested, tool_choice with
-                  | true, Some Agent_sdk.Types.Auto ->
-                    Keeper_tool_completion_contract.completion_contract_of_tool_choice tool_choice
-                  | true, _ -> Keeper_tool_completion_contract.Require_tool_use
-                  | false, _ ->
-                    Keeper_tool_completion_contract.completion_contract_of_tool_choice tool_choice
+                  Keeper_tool_completion_contract.Allow_text_or_tool
                 in
                 acc.completion_contract <- turn_completion_contract;
-                if turn_completion_contract = Keeper_tool_completion_contract.Require_tool_use
-                then acc.required_tool_use_seen <- true;
                 let lane = computed_surface.lane in
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names
                   acc
@@ -553,11 +497,6 @@ let assemble_hooks
                    ; tool_gate_enabled = computed_surface.tool_gate_requested
                    ; tool_surface_fallback_used =
                        computed_surface.tool_surface_fallback_used
-                   ; required_tool_names = computed_surface.required_tool_names
-                   ; required_tool_candidate_names =
-                       computed_surface.required_tool_candidate_names
-                   ; missing_required_tool_names =
-                       computed_surface.missing_required_tool_names
                    ; config_root
                    ; runtime_config_path
                    ; gemini_mcp_disabled
@@ -602,10 +541,6 @@ let assemble_hooks
                     (Keeper_agent_tool_surface.tool_surface_class_to_string
                        computed_surface.tool_surface_class)
                   ~visible_tool_count:(List.length turn_visible_tool_names)
-                  ~required_tools:computed_surface.required_tool_names
-                  ~required_tool_candidates:
-                    computed_surface.required_tool_candidate_names
-                  ~missing_required_tools:computed_surface.missing_required_tool_names
                   ~runtime_profile:runtime_id_string
                   ();
                 (let now = Time_compat.now () in

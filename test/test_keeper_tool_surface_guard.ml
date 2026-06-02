@@ -299,12 +299,12 @@ let test_actionable_signal_requests_tool_gate () =
        ~allowed_tool_names:[ "keeper_board_comment" ])
 ;;
 
-let test_generic_required_candidates_match_claim_context () =
+let test_actionable_gate_tools_match_claim_context () =
   check
     (list string)
     "owned task candidates exclude claim context"
     []
-    (Surface.generic_required_tool_candidate_names
+    (Surface.actionable_gate_tool_names
        ~claim_context_allowed:false
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "keeper_task_claim"; "masc_claim_next" ]);
@@ -312,15 +312,15 @@ let test_generic_required_candidates_match_claim_context () =
     (list string)
     "no-claim candidates exclude owned-task completion"
     []
-    (Surface.generic_required_tool_candidate_names
+    (Surface.actionable_gate_tool_names
        ~claim_context_allowed:true
        ~turn_affordances:[ "task_verify" ]
        ~allowed_tool_names:[ "keeper_task_submit_for_verification"; "keeper_task_done" ]);
   check
     (list string)
     "no-claim audit candidates keep operator cleanup completion"
-    [ "keeper_task_force_release" ]
-    (Surface.generic_required_tool_candidate_names
+    [ "keeper_task_force_release"; "keeper_task_force_done" ]
+    (Surface.actionable_gate_tool_names
        ~claim_context_allowed:true
        ~turn_affordances:[ "task_audit" ]
        ~allowed_tool_names:[ "keeper_task_force_release"; "keeper_task_force_done" ]);
@@ -328,39 +328,37 @@ let test_generic_required_candidates_match_claim_context () =
     (list string)
     "owned task candidates keep completion"
     [ "keeper_task_submit_for_verification" ]
-    (Surface.generic_required_tool_candidate_names
+    (Surface.actionable_gate_tool_names
        ~claim_context_allowed:false
        ~turn_affordances:[ "task_verify" ]
        ~allowed_tool_names:[ "keeper_task_submit_for_verification" ])
 ;;
 
-let test_generic_required_candidates_fall_back_to_satisfying_tools () =
+let test_actionable_gate_tools_fall_back_to_satisfying_tools () =
   check
     (list string)
     "board post falls back to broadcast tool"
     [ "masc_broadcast" ]
-    (Surface.generic_required_tool_candidate_names
+    (Surface.actionable_gate_tool_names
        ~claim_context_allowed:true
        ~turn_affordances:[ "board_post_or_comment" ]
        ~allowed_tool_names:[ "masc_broadcast" ])
 ;;
 
-let test_required_gate_surface_keeps_actionable_claim_context () =
+let test_actionable_gate_surface_keeps_actionable_tools () =
   check
     (list string)
     "gate keeps actionable tools including claim-context"
     [ "keeper_task_claim"; "Edit"; "Write" ]
-    (Surface.tool_names_for_required_gate_surface
+    (Surface.tool_names_for_actionable_gate_surface
        ~tool_gate_requested:true
-       ~required_tool_names:[]
        [ "Read"; "Grep"; "keeper_task_claim"; "keeper_stay_silent"; "Edit"; "Write" ]);
   check
     (list string)
-    "explicit required tool is preserved even when claim-like"
+    "actionable gate keeps claim-like progress tool"
     [ "keeper_task_claim" ]
-    (Surface.tool_names_for_required_gate_surface
+    (Surface.tool_names_for_actionable_gate_surface
        ~tool_gate_requested:true
-       ~required_tool_names:[ "keeper_task_claim" ]
        [ "Read"; "keeper_task_claim" ])
 ;;
 
@@ -436,23 +434,23 @@ let () =
         ; test_case "all passive: returns empty" `Quick test_contract_filter_all_passive
         ; test_case "empty input: empty output" `Quick test_contract_filter_empty_input
         ] )
-    ; ( "required_gate"
+    ; ( "actionable_gate"
       , [ test_case
             "actionable signal requests tool gate"
             `Quick
             test_actionable_signal_requests_tool_gate
         ; test_case
-            "generic candidates match claim context"
+            "tools match claim context"
             `Quick
-            test_generic_required_candidates_match_claim_context
+            test_actionable_gate_tools_match_claim_context
         ; test_case
-            "generic candidates fall back to satisfying tools"
+            "tools fall back to satisfying affordance tools"
             `Quick
-            test_generic_required_candidates_fall_back_to_satisfying_tools
+            test_actionable_gate_tools_fall_back_to_satisfying_tools
         ; test_case
             "gate keeps actionable claim context"
             `Quick
-            test_required_gate_surface_keeps_actionable_claim_context
+            test_actionable_gate_surface_keeps_actionable_tools
         ] )
     ]
 ;;

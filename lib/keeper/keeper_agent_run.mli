@@ -94,7 +94,6 @@ val run_turn
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
-  -> ?required_tool_names:string list
   -> ?provider_filter:string list
   -> generation:int
   -> ?max_turns:int

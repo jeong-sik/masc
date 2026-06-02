@@ -498,7 +498,8 @@ let test_verifier_identity_uses_verdict_only_task_surface () =
 
 let test_task_audit_tool_choice_allows_cleanup_followup () =
   let allowed_tool_names =
-    [ "keeper_tasks_audit"; "keeper_task_force_release"; "keeper_tasks_list" ]
+    [ "keeper_tasks_audit"; "keeper_task_force_release"; "keeper_task_force_done";
+      "keeper_tasks_list" ]
   in
   let preferred =
     Keeper_agent_tool_surface.preferred_tool_names_for_turn_affordances [ "task_audit" ]
@@ -508,8 +509,13 @@ let test_task_audit_tool_choice_allows_cleanup_followup () =
     "task_audit force-includes force_release"
     true
     (has_tool "keeper_task_force_release" preferred);
+  check
+    bool
+    "task_audit force-includes force_done"
+    true
+    (has_tool "keeper_task_force_done" preferred);
   let choice =
-    Keeper_agent_tool_surface.preferred_tool_choice_for_required_turn
+    Keeper_agent_tool_surface.preferred_tool_choice_for_actionable_gate
       ~claim_context_allowed:false
       ~turn_affordances:[ "task_audit" ]
       ~allowed_tool_names

@@ -131,9 +131,6 @@ type tool_surface_metrics =
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
-  ; required_tool_names : string list
-  ; required_tool_candidate_names : string list
-  ; missing_required_tool_names : string list
   ; config_root : string
   ; runtime_config_path : string option
   ; gemini_mcp_disabled : bool
@@ -160,9 +157,6 @@ type computed_tool_surface =
   ; tool_gate_requested : bool
   ; claim_context_allowed : bool
   ; tool_surface_fallback_used : bool
-  ; required_tool_names : string list
-  ; required_tool_candidate_names : string list
-  ; missing_required_tool_names : string list
   ; lane : turn_lane
   ; query_text : string
   }
@@ -209,11 +203,10 @@ let turn_affordances_require_tool_gate turn_affordances =
 
 (* Affordance -> minimum viable tools that can satisfy that affordance.
    The list is intentionally narrow ("at least one of these is enough").
-   Keepers without any matching tool cannot satisfy a [Require_tool_use]
-   contract for that affordance and must be allowed to respond with text
-   instead. [Task_claim] is advisory: visible claimable backlog is an intake
-   opportunity, not proof that this keeper must take new work before responding
-   to stronger live signals. *)
+   Keepers without any matching tool cannot advance that actionable gate and
+   must be allowed to respond with text instead. [Task_claim] is advisory:
+   visible claimable backlog is an intake opportunity, not proof that this
+   keeper must take new work before responding to stronger live signals. *)
 let tools_for_gated_affordance = function
   | Board_curation ->
     [ "keeper_board_curation_submit" ]
@@ -223,7 +216,8 @@ let tools_for_gated_affordance = function
   | Task_claim ->
     [ "keeper_task_claim"; "masc_claim_next" ]
   | Task_audit ->
-    [ "keeper_tasks_audit"; "keeper_task_force_release"; "keeper_tasks_list"; "masc_tasks" ]
+    [ "keeper_tasks_audit"; "keeper_task_force_release"; "keeper_task_force_done";
+      "keeper_tasks_list"; "masc_tasks" ]
   | Task_verify ->
     [ "keeper_tasks_list"; "keeper_tasks_audit";
       "keeper_task_done"; "keeper_task_submit_for_verification";
@@ -261,7 +255,8 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
        | Task_claim ->
          [ "keeper_task_claim"; "masc_claim_next" ]
        | Task_audit ->
-         [ "keeper_tasks_audit"; "keeper_task_force_release" ]
+         [ "keeper_tasks_audit"; "keeper_task_force_release";
+           "keeper_task_force_done" ]
        | Task_verify ->
          [ "keeper_task_submit_for_verification"; "keeper_task_done";
            "masc_transition" ]
@@ -323,31 +318,18 @@ let turn_affordances_require_tool_gate_with_allowed
       gated_affordances;
   gate_requested
 
-let tool_names_for_required_gate_surface
-    ~(tool_gate_requested : bool)
-    ~(required_tool_names : string list)
+let tool_names_for_actionable_gate_surface ~(tool_gate_requested : bool)
     (tool_names : string list) : string list =
   let is_stay_silent name =
     String.equal (Keeper_tool_resolution.canonical_tool_name name) "keeper_stay_silent"
-  in
-  let canonical_required_tool_names =
-    required_tool_names
-    |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-  in
-  let is_explicit_required_tool_name name =
-    List.mem
-      (Keeper_tool_resolution.canonical_tool_name name)
-      canonical_required_tool_names
   in
   if not tool_gate_requested then tool_names
   else
     let actionable =
       tool_names
       |> List.filter (fun name ->
-        is_explicit_required_tool_name name
-        || (Keeper_tool_progress.tool_name_can_satisfy_required_contract name
-            && not (is_stay_silent name)))
+        Keeper_tool_progress.tool_name_can_satisfy_required_contract name
+        && not (is_stay_silent name))
       |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     match actionable with
@@ -372,7 +354,7 @@ let has_turn_affordance expected turn_affordances =
 
 let has_task_claim_affordance = has_turn_affordance Task_claim
 
-let generic_required_actionable_tool_names
+let actionable_gate_tool_names
     ~(claim_context_allowed : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let is_stay_silent name =
@@ -399,7 +381,7 @@ let generic_required_actionable_tool_names
     |> List.filter can_recommend_tool
     |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
-let preferred_tool_choice_for_required_turn
+let preferred_tool_choice_for_actionable_gate
     ~(claim_context_allowed : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let progress_tool_available name =
@@ -407,7 +389,7 @@ let preferred_tool_choice_for_required_turn
     && tool_name_can_satisfy_actionable_gate ~claim_context_allowed name
   in
   let actionable_tool_names =
-    generic_required_actionable_tool_names
+    actionable_gate_tool_names
       ~claim_context_allowed
       ~turn_affordances
       ~allowed_tool_names
@@ -462,32 +444,23 @@ let preferred_tool_choice_for_required_turn
     | Some tool_choice -> tool_choice
     | None -> Agent_sdk.Types.Any)
 
-let generic_required_tool_candidate_names
-    ~(claim_context_allowed : bool)
-    ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
-  generic_required_actionable_tool_names
-    ~claim_context_allowed
-    ~turn_affordances
-    ~allowed_tool_names
-;;
-
 let actionable_signal_requires_tool_gate ~(actionable_signal : bool)
     ~(claim_context_allowed : bool)
     ~(turn_affordances : string list)
     ~(allowed_tool_names : string list) =
   actionable_signal
-  && generic_required_actionable_tool_names
+  && actionable_gate_tool_names
        ~claim_context_allowed
        ~turn_affordances
        ~allowed_tool_names
      <> []
 ;;
 
-let generic_required_tool_gate_guidance
+let actionable_tool_gate_guidance
     ~(claim_context_allowed : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let actionable_tools =
-    generic_required_tool_candidate_names
+    actionable_gate_tool_names
       ~claim_context_allowed
       ~turn_affordances
       ~allowed_tool_names
@@ -504,11 +477,11 @@ let generic_required_tool_gate_guidance
     Printf.sprintf
       "[TOOL BLOCKED] This turn has an actionable runtime signal, but no \
        currently visible keeper tool can advance it. Do not call passive \
-       reads/status or keeper_stay_silent merely to satisfy the contract. \
+       reads/status or keeper_stay_silent merely to satisfy the gate. \
        Emit a concise [STATE] blocker instead."
   else
     Printf.sprintf
-      "[TOOL REQUIRED] This turn has an actionable runtime signal. Before \
+      "[ACTIONABLE TOOL] This turn has an actionable runtime signal. Before \
        answering in natural language, call one of the currently visible keeper \
        runtime tools. Preferred tools for this signal: %s%s. Passive \
        reads/status alone do not satisfy this turn."
@@ -584,7 +557,7 @@ let preferred_tool_choice_for_required_tool_names
        legacy internal MCP names; OAS exact-tool contracts
        compare raw names before MASC can canonicalize them, so exact Tool(name)
        can reject a correct call. MASC still validates the specific required
-       names after execution via [outstanding_required_tool_names]. *)
+    names after execution via [outstanding_required_tool_names]. *)
     Agent_sdk.Types.Any
   | [] -> Agent_sdk.Types.Auto
 

@@ -119,7 +119,6 @@ val prepare_agent_setup
   -> runtime_id:string
   -> is_retry:bool
   -> turn_affordances:string list
-  -> required_tool_names:string list
   -> config_root:string
   -> runtime_config_path:string option
   -> gemini_mcp_disabled:bool

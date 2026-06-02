@@ -84,6 +84,22 @@ let test_session_communication_mode_unknown () =
   assert (kind_of g = "session_communication_mode_missing");
   assert (scope_type_of g = "session")
 
+let test_session_communication_mode_blank_or_absent () =
+  let blank = session ~comm:"   " () in
+  let absent =
+    `Assoc
+      [
+        ("session_id", json_string "s-missing");
+        ("goal", json_string "x");
+      ]
+  in
+  let gaps =
+    G.collect_metadata_gaps ~sessions:[ blank; absent ] ~keepers:[]
+      ~agents:[]
+  in
+  assert (List.length gaps = 2);
+  assert (List.for_all (fun g -> kind_of g = "session_communication_mode_missing") gaps)
+
 let test_keeper_last_reply_not_recorded () =
   let k = keeper ~status:"not_recorded" () in
   let gaps = G.collect_metadata_gaps ~sessions:[] ~keepers:[ k ] ~agents:[] in
@@ -289,6 +305,7 @@ let test_evidence_filters_by_section () =
 let () =
   test_session_goal_unassigned ();
   test_session_communication_mode_unknown ();
+  test_session_communication_mode_blank_or_absent ();
   test_keeper_last_reply_not_recorded ();
   test_agent_focus_missing_when_active ();
   test_no_gaps_when_no_sentinels ();

@@ -70,9 +70,9 @@ let compact_session_json session_json =
         let detail = member_assoc "detail" latest in
         `Assoc
           [
-            ("event_type", string_json ~default:"<missing status>" (member_assoc "event_type" latest));
-            ("ts_iso", string_json ~default:"<missing status>" (member_assoc "ts_iso" latest));
-            ("actor", string_json ~default:"<missing status>" (member_assoc "actor" detail));
+            ("event_type", string_json ~default:missing_status (member_assoc "event_type" latest));
+            ("ts_iso", string_json ~default:missing_status (member_assoc "ts_iso" latest));
+            ("actor", string_json ~default:missing_status (member_assoc "actor" detail));
             ("task_title", string_json ~default:"not_recorded" (member_assoc "task_title" detail));
             ("result", string_json ~default:"not_recorded" ~max_len:160 (member_assoc "result" detail));
             ("reason", string_json ~default:"not_recorded" ~max_len:160 (member_assoc "reason" detail));
@@ -85,8 +85,8 @@ let compact_session_json session_json =
         `Assoc
           [
             ("event_type", `String "none");
-            ("ts_iso", `String "<missing status>");
-            ("actor", `String "<missing status>");
+            ("ts_iso", `String missing_status);
+            ("actor", `String missing_status);
             ("task_title", `String "no recent session events");
             ("result", `String "not_recorded");
             ("reason", `String "not_recorded");
@@ -97,14 +97,14 @@ let compact_session_json session_json =
           ]
   in
   let communication_mode =
-    string_json ~default:"<missing status>" (member_assoc "mode" communication)
+    string_json ~default:missing_status (member_assoc "mode" communication)
   in
   let broadcast_count = int_json (member_assoc "broadcast_count" communication) in
   let portal_count = int_json (member_assoc "portal_count" communication) in
   let communication_mode_text =
     match communication_mode with
     | `String value -> value
-    | _ -> "<missing status>"
+    | _ -> missing_status
   in
   let broadcast_count_value =
     match broadcast_count with
@@ -124,12 +124,12 @@ let compact_session_json session_json =
         match member_assoc "project" session with
         | `Null -> string_json ~default:"default" (member_assoc "workspace_id" session)
         | value -> string_json ~default:"default" value );
-      ("status", string_json ~default:"<missing status>" (member_assoc "status" session));
+      ("status", string_json ~default:missing_status (member_assoc "status" session));
       ("agent_names", string_list_json (member_assoc "agent_names" session));
       ("elapsed_sec", int_json (member_assoc "elapsed_sec" summary));
       ("progress_pct", float_json (member_assoc "progress_pct" summary));
       ("done_delta_total", int_json (member_assoc "done_delta_total" summary));
-      ("team_health", string_json ~default:"<missing status>" (member_assoc "status" team_health));
+      ("team_health", string_json ~default:missing_status (member_assoc "status" team_health));
       ("active_agents_count", int_json (member_assoc "active_agents_count" team_health));
       ("required_agents", int_json ~default:1 (member_assoc "required_agents" team_health));
       ("communication_mode", communication_mode);
@@ -148,8 +148,8 @@ let compact_keeper_json keeper_json =
   `Assoc
     [
       ("name", string_json ~default:"unknown-keeper" (member_assoc "name" keeper_json));
-      ("status", string_json ~default:"<missing status>" (member_assoc "status" keeper_json));
-      ("agent_name", string_json ~default:"<missing status>" (member_assoc "agent_name" keeper_json));
+      ("status", string_json ~default:missing_status (member_assoc "status" keeper_json));
+      ("agent_name", string_json ~default:missing_status (member_assoc "agent_name" keeper_json));
       ("generation", int_json (member_assoc "generation" keeper_json));
       ("context_ratio", float_json (member_assoc "context_ratio" keeper_json));
       ("last_turn_ago_s", float_json (member_assoc "last_turn_ago_s" keeper_json));
@@ -159,7 +159,7 @@ let compact_keeper_json keeper_json =
       ("last_reply_status", string_json ~default:"not_recorded" (member_assoc "last_reply_status" diagnostic));
       ("last_reply_preview", string_json ~default:"not_recorded" ~max_len:160 (member_assoc "last_reply_preview" diagnostic));
       ("active_goal_ids", string_list_json (member_assoc "active_goal_ids" keeper_json));
-      ("skill_primary", string_json ~default:"<missing status>" ~max_len:120 (member_assoc "skill_primary" keeper_json));
+      ("skill_primary", string_json ~default:missing_status ~max_len:120 (member_assoc "skill_primary" keeper_json));
     ]
 
 let compact_agent_json (agent : Masc_domain.agent) =

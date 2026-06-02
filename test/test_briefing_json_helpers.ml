@@ -66,6 +66,17 @@ let test_string_field_wrong_type () =
   let j = `Assoc [ ("count", `Int 5) ] in
   assert (B.string_field ~default:"fallback" "count" j = "fallback")
 
+(* ─── missing status sentinel ──────────────────────────────── *)
+
+let test_missing_status_sentinel () =
+  assert (B.missing_status = "<missing status>");
+  assert (B.is_missing_status_or_unknown "");
+  assert (B.is_missing_status_or_unknown "   ");
+  assert (B.is_missing_status_or_unknown "unknown");
+  assert (B.is_missing_status_or_unknown "  UNKNOWN  ");
+  assert (B.is_missing_status_or_unknown "<missing status>");
+  assert (not (B.is_missing_status_or_unknown "async"))
+
 (* ─── string_json ──────────────────────────────────────────── *)
 
 let test_string_json_passthrough () =
@@ -216,6 +227,7 @@ let () =
   test_string_field_present ();
   test_string_field_default ();
   test_string_field_wrong_type ();
+  test_missing_status_sentinel ();
   test_string_json_passthrough ();
   test_string_json_empty_uses_default ();
   test_string_json_non_string_uses_default ();

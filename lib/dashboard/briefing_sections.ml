@@ -82,9 +82,7 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
   let portal_total = sum_int_field "portal_count" sessions in
   let known_mode_count =
     count_matching_field "communication_mode" sessions ~predicate:(fun value ->
-        match String.lowercase_ascii (String.trim value) with
-        | "" | "unknown" | "<missing status>" -> false
-        | _ -> true)
+        not (is_missing_status_or_unknown value))
   in
   let metadata_evidence = evidence_of_metadata_gaps ~section:Communication metadata_gaps in
   let positive_signal =

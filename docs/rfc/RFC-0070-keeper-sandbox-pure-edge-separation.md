@@ -11,6 +11,35 @@ related: ["0002", "0003", "0006", "0036"]
 implementation_prs: [14714, 14741, 14821, 14827, 14889, 14899, 14934, 14940, 14947, 14951, 14956, 14970, 14973, 14980, 14989, 16666]
 ---
 
+## Executor-track removal (2026-06-02)
+
+The Phase 3b-iv/3e/4 *executor architecture* was removed as dead code: it
+was built across the 2026-05-12 sprint (~#14714–#15001) but the Phase 4
+cutover that would have wired it to production never landed, so its sole
+constructor `Keeper_sandbox_oneshot_plan.of_request` had zero production
+callers. The live sandbox path stayed on `Keeper_sandbox_runtime` +
+`Keeper_sandbox_read_backend` (direct hardened `docker` argv), which never
+consumed the executor functor.
+
+Removed modules (`lib/keeper/`): `keeper_sandbox_oneshot_plan`,
+`keeper_sandbox_session_plan`, `keeper_docker_client`,
+`keeper_docker_client_real`, `keeper_docker_response`,
+`keeper_backoff_policy`, plus the test fixtures
+(`Sandbox_executor` / `Sandbox_session_executor` functors,
+`Keeper_docker_client_mock`) and their tests. Confirmed dead by
+`dune build .` (zero unbound references from live code).
+
+Scope: this withdraws the **G5 mockable-executor** track and the
+pure/edge plan-replacement effort (Phases 3b-iv/3e/4). The surviving live
+path retains the G1 deterministic container-name, G2 typed `sandbox_error`,
+and G4 cleanup work. Status stays `Active` for that surviving subset; the
+executor-replacement track is withdrawn, not deferred — re-introducing a
+mockable executor would require a fresh RFC measuring the current live path.
+
+Removed by: dead-code purge (worktree `fix/keeper-oneshot-sandbox-image-602`).
+
+---
+
 ## Progress audit (2026-05-21)
 
 Status promoted Draft → Active. 16 implementation PRs landed against

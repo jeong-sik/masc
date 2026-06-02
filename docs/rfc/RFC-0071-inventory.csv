@@ -350,7 +350,6 @@ lib/compaction_trigger/compaction_trigger.ml,60,None,unclassified
 lib/compaction_trigger/compaction_trigger.ml,66,None,unclassified
 lib/compaction_trigger/compaction_trigger.ml,72,None,unclassified
 lib/compaction_trigger/compaction_trigger.ml,93,None,unclassified
-lib/keeper/keeper_docker_client_real.ml,76,false,unclassified
 lib/keeper/keeper_host_config_provider.ml,379,None,unclassified
 lib/keeper/keeper_accountability.ml,68,None,unclassified
 lib/keeper/keeper_accountability.ml,85,None,unclassified

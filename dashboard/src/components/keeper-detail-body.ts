@@ -49,6 +49,7 @@ import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperBDIPanel } from './keeper-bdi-panel'
 import { KeeperConfigPanel } from './keeper-config-panel'
+import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
 import { FsmHub } from './fsm-hub'
@@ -176,6 +177,8 @@ export function KeeperDetailBody({
           title="진단 / 운영"
           defaultCollapsed=${true}
         >
+          ${'' /* ── 런타임 model 편집 (RFC-0207 persona runtime_id) — surfaced here so it is one expand away, not buried under 설정 → Keeper 설정 → 소스 ── */}
+          <${KeeperRuntimeModelEditor} keeperName=${keeper.name} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
           <${CollapsibleSection} title="Live Truth (composite/runtime 합성)" open=${false}>

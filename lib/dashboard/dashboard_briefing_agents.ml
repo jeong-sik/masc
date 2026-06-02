@@ -360,7 +360,7 @@ let build_agent_briefs config sessions attention_queue _workspace_json (keepers 
            | None, _ -> "archived"
            | Some _, Some age when age <= 300 -> "live"
            | Some _, Some _ -> "stale"
-           | Some _, None -> "<missing status>"
+           | Some _, None -> "unknown"
          in
          let evidence_source =
            if Option.is_some latest_out || Option.is_some latest_in then

@@ -440,9 +440,9 @@ let assemble_hooks
                     append_ctx
                       ctx
                       (Printf.sprintf
-                         "[ACTIONABLE TOOL RETRY] Your previous Agent.run \
-                          attempt did not make keeper-tool progress for an \
-                          actionable gate. %s Do NOT respond with text only, do NOT substitute \
+                         "[TOOL CONTRACT RETRY] Your previous Agent.run \
+                          attempt was rejected for returning text without \
+                          calling a required keeper tool. %s Do NOT respond with text only, do NOT substitute \
                           status or read-only tools."
                          retry_action)
                   else ctx

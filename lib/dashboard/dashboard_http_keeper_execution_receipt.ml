@@ -25,13 +25,13 @@ include Dashboard_http_keeper_types
 
 let execution_receipt_dir config keeper_name =
   Filename.concat
-    (Filename.concat (Filename.concat (Workspace.masc_root_dir config) "keepers")
+    (Filename.concat (Workspace.keepers_runtime_dir config)
        keeper_name)
     "execution-receipts"
 
 let execution_receipt_store_pattern config =
   Filename.concat
-    (Filename.concat (Workspace.masc_root_dir config) "keepers")
+    (Workspace.keepers_runtime_dir config)
     "*/execution-receipts"
 
 let count_execution_receipt_entries config keeper_names =

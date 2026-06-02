@@ -35,7 +35,7 @@ let candidate_decision_keeper_names keeper_name =
 
 let keeper_decision_log_path (config : Workspace_query.config) name =
   let keepers_dir =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "keepers"
+    Common.keepers_runtime_dir_of_base ~base_path:config.base_path
   in
   Filename.concat keepers_dir (name ^ ".decisions.jsonl")
 ;;

@@ -9,7 +9,7 @@ include Keeper_config
 let ensure_dir_ = Keeper_fs.ensure_dir
 
 let keeper_dir_ (config : Workspace.config) =
-  let d = Filename.concat (Workspace.masc_root_dir config) "keepers" in
+  let d = Workspace.keepers_runtime_dir config in
   ensure_dir_ d
 
 let session_base_dir_ (config : Workspace.config) =

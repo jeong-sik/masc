@@ -142,7 +142,7 @@ let receipt_sort_key json =
 ;;
 
 let latest_execution_receipt_json config ~agent_name =
-  let keeper_root = Filename.concat (masc_root_dir config) "keepers" in
+  let keeper_root = keepers_runtime_dir config in
   keeper_receipt_candidate_names config ~agent_name
   |> List.filter_map (fun keeper_name ->
     let base_dir =

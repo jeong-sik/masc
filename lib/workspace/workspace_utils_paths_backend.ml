@@ -38,6 +38,15 @@ let state_path config = Filename.concat (masc_dir config) "state.json"
 let backlog_path config = Filename.concat (tasks_dir config) "backlog.json"
 let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
 
+(* Cluster-aware keeper OUTPUT directory (server-written state + sidecars). The
+   trailing segment is [Common.keepers_runtime_dirname] — the single literal,
+   shared with [Common.keepers_runtime_dir_of_base] — so the input/output
+   relocation flips one constant, not a call-site sweep. Callers holding only a
+   base_path, and workspace-internal / accountability modules that cannot depend
+   on Workspace without a cycle, use the Common variant instead. *)
+let keepers_runtime_dir config =
+  Filename.concat (masc_root_dir config) Common.keepers_runtime_dirname
+
 (** Shared in-memory pubsub for FileSystem and Memory backends.
     All supported backends now share the same in-memory pubsub. *)
 let shared_pubsub = Backend_types.Pubsub_mem.create ()

@@ -64,7 +64,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
     Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
   in
   let keepers_dir =
-    Filename.concat (Workspace.masc_root_dir config) "keepers"
+    Workspace.keepers_runtime_dir config
   in
   let shared_sp_events =
     try
@@ -812,7 +812,7 @@ let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
   in
   let now = Unix.gettimeofday () in
   let keeper_names = keeper_names config in
-  let keepers_root = Filename.concat (Workspace.masc_root_dir config) "keepers" in
+  let keepers_root = Workspace.keepers_runtime_dir config in
   let exists = Sys.file_exists keepers_root in
   let entry_count = count_execution_receipt_entries config keeper_names in
   let latest_ts = latest_receipt_ts_of_keeper_rows keepers in

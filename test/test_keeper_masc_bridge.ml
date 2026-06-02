@@ -25,9 +25,9 @@ let bridge_test_schemas =
 let prime_keeper_bridge () =
   init_keeper_tool_registry ();
   ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
-  Masc_mcp.Tool_dispatch.register_module_tag
+  Tool_dispatch.register_module_tag
     ~schemas:Masc_mcp.Tool_shard.all_keeper_tool_schemas
-    ~tag:Masc_mcp.Tool_dispatch.Mod_shard;
+    ~tag:Tool_dispatch.Mod_shard;
   KET.inject_masc_schemas (bridge_test_schemas @ Masc_mcp.Config.raw_all_tool_schemas)
 
 let temp_dir () =
@@ -154,7 +154,7 @@ let is_masc_alias_for allowed name =
 ;;
 
 let register_tool_json_handler ~tool_name handler =
-  Masc_mcp.Tool_dispatch.register ~tool_name ~handler:(fun ~name ~args ->
+  Tool_dispatch.register ~tool_name ~handler:(fun ~name ~args ->
     let raw = handler ~args in
     Some (Tool_result.ok ~tool_name:name ~start_time:0.0 raw))
 ;;
@@ -574,7 +574,7 @@ let test_allowlist_gates_shard_tools () =
 
 let test_dispatch_unregistered () =
   let result =
-    Masc_mcp.Tool_dispatch.mint_token ~name:"masc_nonexistent_xyz"
+    Tool_dispatch.mint_token ~name:"masc_nonexistent_xyz"
   in
   Alcotest.(check bool) "unregistered mint_token returns Error" true (Result.is_error result)
 
@@ -821,7 +821,7 @@ let test_denied_tools_excluded_from_injection () =
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
   let denied =
-    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper_denied
+    Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
   in
   List.iter
     (fun denied_name ->
@@ -846,7 +846,7 @@ let test_denied_excluded_from_allowed_names () =
   in
   let names = KET.keeper_allowed_tool_names meta in
   let denied =
-    Masc_mcp.Tool_catalog.tools_for_surface Masc_mcp.Tool_catalog.Keeper_denied
+    Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
   in
   List.iter
     (fun denied_name ->

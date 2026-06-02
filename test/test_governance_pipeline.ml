@@ -2,7 +2,7 @@
 
 module Gp = Masc_mcp.Governance_pipeline
 module Workspace = Masc_mcp.Workspace
-module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
 
 let explicit_claim_tool = "masc_claim_next"

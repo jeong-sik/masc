@@ -10,7 +10,7 @@ module Types = Masc_domain
     5. Public MCP surface is a valid subset of the full registry
     6. Non-public tools remain callable via dispatch *)
 
-module Tool_catalog = Masc_mcp.Tool_catalog
+module Tool_catalog = Tool_catalog
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Config = Masc_mcp.Config
 

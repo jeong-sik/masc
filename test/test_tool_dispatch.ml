@@ -1,6 +1,6 @@
 (** Tests for Tool_dispatch — O(1) central dispatch registry. *)
 
-module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
 module Types = Masc_domain
 
@@ -238,5 +238,54 @@ let () =
               let all = Tool_dispatch.all_registered_names () in
               check bool "contains registered name" true
                 (List.mem "__enum_check_xyz" all));
+        ] );
+      (* PR-S3: the OTel/Prometheus span wrapper is injected, not referenced
+         inline. These tests assert the injection MECHANISM fires — they prove
+         guarded_dispatch routes through [!span_wrapper_ref], so registering
+         [Tool_telemetry.with_span] at the composition root is sufficient for
+         telemetry. (The actual Otel emission is verified by code-read; this
+         covers the wiring contract that a green @check alone cannot.) *)
+      ( "span_wrapper_injection",
+        [
+          test_case "registered span wrapper wraps guarded_dispatch" `Quick
+            (fun () ->
+              Tool_dispatch.clear_hooks ();
+              let tool = "__test_span_wrap_a" in
+              register_full ~tool_name:tool ~handler:echo_handler ();
+              let calls = ref [] in
+              let probe : Tool_dispatch.span_wrapper =
+                fun ~tool_name body ->
+                  calls := tool_name :: !calls;
+                  body (fun () -> Some "probe-trace")
+              in
+              Tool_dispatch.set_span_wrapper probe;
+              let token =
+                match Tool_dispatch.mint_token ~name:tool with
+                | Ok t -> t
+                | Error e -> Alcotest.fail e
+              in
+              let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
+              check bool "result produced" true (Option.is_some result);
+              check int "wrapper invoked once" 1 (List.length !calls);
+              check string "wrapper saw tool_name" tool (List.hd !calls);
+              Tool_dispatch.clear_hooks ());
+          test_case "clear_hooks restores identity wrapper" `Quick (fun () ->
+              let tool = "__test_span_wrap_b" in
+              register_full ~tool_name:tool ~handler:echo_handler ();
+              let calls = ref 0 in
+              Tool_dispatch.set_span_wrapper (fun ~tool_name:_ body ->
+                  incr calls;
+                  body (fun () -> None));
+              Tool_dispatch.clear_hooks ();
+              let token =
+                match Tool_dispatch.mint_token ~name:tool with
+                | Ok t -> t
+                | Error e -> Alcotest.fail e
+              in
+              let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
+              (* Identity wrapper restored: dispatch still works, probe silent. *)
+              check bool "dispatch succeeds with identity" true
+                (Option.is_some result);
+              check int "cleared wrapper not invoked" 0 !calls);
         ] );
     ]

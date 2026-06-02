@@ -86,8 +86,30 @@ val set_result_transformer : result_transformer -> unit
 val apply_result_transformer : Tool_result.result -> Tool_result.result
 (** Apply the registered transformer (identity when none registered). *)
 
+(** {2 Telemetry span wrapper (injected)} *)
+
+type trace_id = string
+
+type span_wrapper =
+  tool_name:string
+  -> ((unit -> trace_id option) -> Tool_result.result option * string)
+  -> Tool_result.result option * string
+(** Wrapper applied around the dispatch body in {!guarded_dispatch}. Mirrors the
+    shape of [Tool_telemetry.with_span]: it opens a span, runs the body (which
+    receives a trace-id thunk and returns [(result, outcome_label)]), and
+    finalizes the metric with [outcome_label]. The default is the identity
+    wrapper. *)
+
+val set_span_wrapper : span_wrapper -> unit
+(** Install the dispatch span wrapper. The composition root registers
+    [Tool_telemetry.with_span] so this library (lib/tool/, [masc_tool_dispatch])
+    does not code-depend on the Otel/Prometheus telemetry stack — the compiler
+    enforces "Tool is just Tool". See
+    [Server_bootstrap_maintenance.start_background_maintenance]. *)
+
 val clear_hooks : unit -> unit
-(** Reset pre-hooks, dispatch observers, and the result transformer. *)
+(** Reset pre-hooks, dispatch observers, the result transformer, and the
+    span wrapper (back to identity). *)
 
 val run_pre_hooks :
   name:string -> args:Yojson.Safe.t -> Tool_result.result option * Yojson.Safe.t
@@ -109,9 +131,10 @@ val guarded_dispatch
   -> Tool_result.result option
 (** RFC-0084 §2.2 — Single dispatch entry with 4-label telemetry.
 
-    Owns [Tool_telemetry.with_span], the pre-hook chain, handler lookup,
-    exception capture, result transformation, and observer fan-out.
-    The dispatch return is typed [Tool_result.result option]; the old
+    Owns the injected span wrapper ({!set_span_wrapper}, registered with
+    [Tool_telemetry.with_span] at the composition root), the pre-hook chain,
+    handler lookup, exception capture, result transformation, and observer
+    fan-out. The dispatch return is typed [Tool_result.result option]; the old
     [dispatch]/[dispatch_structured] entry points are gone. *)
 
 (** {1 Introspection} *)

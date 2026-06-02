@@ -13,7 +13,7 @@ let () =
     |> sorted_unique
   in
   let public_tool_names =
-    Masc_mcp.Tool_catalog.public_mcp_tools
+    Tool_catalog.public_mcp_tools
     |> sorted_unique
   in
   let contract_inventory =

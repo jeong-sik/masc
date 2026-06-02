@@ -1,5 +1,5 @@
 module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
 
 let () = Mirage_crypto_rng_unix.use_default ()

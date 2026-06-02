@@ -113,6 +113,11 @@
    ;; Agent token-ledger extracted to lib/agent_economy/ (masc_agent_economy).
    ;; Re-export so test code using bare Agent_economy.X resolves after the carve.
    (re_export masc_agent_economy)
+   ;; Tool dispatch substrate extracted to lib/tool/ (masc_tool_dispatch, PR-S3).
+   ;; Re-export so test code using bare Tool_dispatch.X / Tool_catalog.X /
+   ;; Tool_registry.X / Tool_name.X / Tool_token.X / Dispatch_outcome.X /
+   ;; Tool_catalog_inference.X resolves after the carve.
+   (re_export masc_mcp.masc_tool_dispatch)
    ;; Thompson Sampling extracted to lib/thompson/ (masc_thompson). Re-export so
    ;; test code using bare Thompson_sampling.X resolves after the carve.
    (re_export masc_thompson)

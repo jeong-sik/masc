@@ -7,7 +7,7 @@ open Alcotest
 
 module Config = Masc_mcp.Config
 module Auth = Masc_mcp.Auth
-module Tool_catalog = Masc_mcp.Tool_catalog
+module Tool_catalog = Tool_catalog
 module Tool_help_registry = Masc_mcp.Tool_help_registry
 module Tool_shard = Masc_mcp.Tool_shard
 module Types = Masc_domain

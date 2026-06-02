@@ -64,7 +64,7 @@ let test_outcome_vocab_typed_arms () =
   (check int)
     "Dispatch_outcome.all_arms matches pinned"
     5
-    (List.length Masc_mcp.Dispatch_outcome.all_arms)
+    (List.length Dispatch_outcome.all_arms)
 ;;
 
 let test_single_public_dispatch_entry () =
@@ -119,7 +119,7 @@ let test_typed_boundaries_pinned () =
   (check int)
     "RFC-0084 §3.3 — Dispatch_outcome.t cardinality (PR-10)"
     5
-    (List.length Masc_mcp.Dispatch_outcome.all_arms)
+    (List.length Dispatch_outcome.all_arms)
 ;;
 
 (* ── Section 4: Sprint exit-criteria summary ──────────────────── *)

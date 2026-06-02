@@ -108,7 +108,7 @@ fetch 또는 in-memory aggregation. **별도 RFC 필요** (RFC-0029 후보).
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| 현재 14개 모두 `PR-3b1 starvation`으로 archived | `rg "PR-3b1\|starvation"` zero hits in `lib/keeper/credential*`. 단일 `lib/keeper/credential_provider.ml` 존재 | **D** (출처 misread) |
+| 현재 14개 모두 `PR-3b1 starvation`으로 archived | 해당 keeper repo-auth provider surface는 retired. starvation claim은 전제부터 미확인 | **D** (출처 misread) |
 | 36개 starvation → boot 불가 | 전제 자체가 미확인 | **D** |
 
 해당 axis의 과거 작업은 현재 repo-manager credential deletion으로 retired.

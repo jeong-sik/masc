@@ -70,7 +70,7 @@ let default_tool_access_of_meta_json () =
      gating, not by default tool access exclusion.
      See fleet deadlock Layer 2 analysis (2026-05-30) + runtime provider
      gap analysis (2026-05-30). *)
-  normalize_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Agent_internal)
+  normalize_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal)
 ;;
 
 (** Parse [tool_access] from persisted meta JSON.
@@ -90,3 +90,5 @@ let tool_access_of_meta_json (json : Yojson.Safe.t) =
       (Printf.sprintf "keeper tool_access must be an array of strings (received %s)"
          (Json_util.kind_name other))
 ;;
+
+let tool_access_of_meta_json_typed = tool_access_of_meta_json

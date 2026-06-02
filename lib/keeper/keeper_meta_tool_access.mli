@@ -46,3 +46,8 @@ val default_tool_access_of_meta_json : unit -> string list
     array of tool names. *)
 val tool_access_of_meta_json :
   Yojson.Safe.t -> (string list, string) result
+
+(** Typed-policy parser entry point. The keeper policy is currently represented
+    directly as the normalized string allowlist. *)
+val tool_access_of_meta_json_typed :
+  Yojson.Safe.t -> (string list, string) result

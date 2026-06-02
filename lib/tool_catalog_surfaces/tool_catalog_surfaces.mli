@@ -18,9 +18,19 @@
 
 (** {1 Tool name lists (per surface)} *)
 
+val keeper_internal_tools : string list
+(** Tools accepted by keeper-bound dispatchers. *)
+
 val public_mcp_surface_tools : string list
+val keeper_denied_surface_tools : string list
 val system_internal_surface_tools : string list
 val workspace_role_tools : string list
+
+(** {1 Replacement table} *)
+
+val keeper_internal_replacement : string -> string option
+(** [keeper_internal_replacement name] returns the public MCP tool name that
+    supersedes an internal keeper name when one exists. *)
 
 (** {1 Surface variant} *)
 
@@ -37,6 +47,10 @@ type surface =
       (** Minimum session surface (initialization tools only). *)
   | Admin
       (** Admin / operator dashboard surface. *)
+  | Keeper_internal
+      (** Tools accepted by keeper-bound dispatchers. *)
+  | Keeper_denied
+      (** Tools explicitly denied at the keeper boundary. *)
   | Agent_internal
       (** Agent-internal surface. Concrete agent runtimes install their own
           allowed tools behind their runtime boundary. *)
@@ -49,8 +63,9 @@ val tools_for_surface : surface -> string list
     constants exposed above. *)
 
 val all_surfaces : surface list
-(** Static list of every {!surface} constructor in declaration
-    order.  Used by tests and the dashboard catalog index. *)
+(** Static list of canonical surface constructors in declaration
+    order. [Agent_internal] is a compatibility alias for direct callers and is
+    intentionally omitted from this enumeration. *)
 
 val is_on_surface : surface -> string -> bool
 (** [is_on_surface s name] is [List.mem name (tools_for_surface s)]

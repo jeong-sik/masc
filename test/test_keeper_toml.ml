@@ -623,9 +623,11 @@ let test_load_keeper_toml_inherits_base_defaults () =
       if Sys.file_exists base_path then Sys.remove base_path;
       if Sys.file_exists tmp_dir then Unix.rmdir tmp_dir)
     (fun () ->
+      (* persona⊥{model,runtime}: keeper TOML carries no runtime/model
+         selection (assignment lives in runtime.toml [[runtime.assignments]]).
+         Base inheritance is still exercised by sandbox_profile/network_mode. *)
       write_file base_path {|
 [keeper]
-runtime_id = "route.keeper_turn"
 sandbox_profile = "docker"
 network_mode = "inherit"
 |};
@@ -639,9 +641,6 @@ persona_name = "sangsu"
       | Error e -> fail e
       | Ok (name, defaults) ->
           check string "name from filename" "sangsu" name;
-          (* #19574: [runtime_id] is canonical; [model] is legacy storage. *)
-          check (option string) "base runtime_id" (Some "route.keeper_turn")
-            defaults.model;
           check (option string) "base sandbox" (Some "docker")
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
           check (option string) "base network" (Some "inherit")
@@ -857,7 +856,10 @@ max_turns_per_call_scheduled_autonomous = 0
        check int "zero autonomous falls back" 10
          (KTP.effective_max_turns_per_call_scheduled_autonomous d))
 
-let test_profile_accepts_runtime_id () =
+(* persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
+   selection; a [keeper.runtime_id] (or legacy [keeper.model]) key is rejected
+   at load, pointing the operator at runtime.toml [[runtime.assignments]]. *)
+let test_profile_rejects_runtime_id_key () =
   let input = {|
 [keeper]
 goal = "test"
@@ -867,12 +869,21 @@ runtime_id = "oas-coding_first"
   | Error e -> fail e
   | Ok doc ->
     (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok defaults ->
-       check (option string)
-         "runtime_id"
-         (Some "oas-coding_first")
-         defaults.model)
+     | Ok _ -> fail "expected error: keeper.runtime_id is removed"
+     | Error _ -> ())
+
+let test_profile_rejects_model_key () =
+  let input = {|
+[keeper]
+goal = "test"
+model = "oas-coding_first"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected error: keeper.model is removed"
+     | Error _ -> ())
 
 let test_persona_resolver_omits_unspecified_tool_access () =
   with_personas_dir @@ fun personas_dir ->
@@ -1836,8 +1847,10 @@ let () =
             test_profile_rejects_removed_model_keys;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
-          test_case "runtime_id parsed" `Quick
-            test_profile_accepts_runtime_id;
+          test_case "rejects keeper.runtime_id key" `Quick
+            test_profile_rejects_runtime_id_key;
+          test_case "rejects keeper.model key" `Quick
+            test_profile_rejects_model_key;
           test_case "max_turns overrides parsed and applied" `Quick
             test_profile_max_turns_overrides;
           test_case "max_turns defaults when absent" `Quick

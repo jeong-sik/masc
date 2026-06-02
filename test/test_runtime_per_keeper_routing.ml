@@ -1,17 +1,17 @@
-(* RFC-0207 — per-keeper LLM runtime routing via [runtime_id].
+(* Per-keeper LLM runtime routing via runtime.toml [[runtime.assignments]].
 
-   A keeper's keepers/<name>.toml [runtime_id = "provider.model"] is the single
-   surface for choosing its runtime.  [Keeper_meta_contract.runtime_id_of_meta]
-   resolves that selection (cached by
-   [Keeper_types_profile.load_keeper_profile_defaults]) so it reaches the turn
-   driver; an undeclared keeper falls through to [[runtime].default]; and the
-   driver's [Runtime.get_runtime_by_id] returns [None] for an id that does not
-   materialize, so dispatch fails fast (no silent substitution — RFC-0206 §2.1).
+   persona⊥{model,runtime}: runtime.toml is the sole SSOT for keeper→runtime
+   assignment, keyed by keeper name.  [Keeper_meta_contract.runtime_id_of_meta]
+   resolves a keeper's assignment via [Runtime.runtime_id_for_keeper] so it
+   reaches the turn driver; an unassigned keeper falls through to
+   [[runtime].default]; and the driver's [Runtime.get_runtime_by_id] returns
+   [None] for an id that does not materialize, so dispatch fails fast (no silent
+   substitution — RFC-0206 §2.1).
 
-   This is the SAME declarative runtime source as
-   [Keeper_runtime.effective_declarative_runtime_id] (declare/status), so there
-   is one surface — the dispatcher and the reconcile change-detector cannot
-   disagree. *)
+   This is the SAME runtime source as
+   [Keeper_runtime.effective_declarative_runtime_id] (declare/status), which
+   delegates to [runtime_id_of_meta], so there is one surface — the dispatcher
+   and the reconcile change-detector cannot disagree by construction. *)
 
 open Alcotest
 open Masc_mcp
@@ -60,13 +60,6 @@ let with_config_dir f =
       f config_dir)
 ;;
 
-let write_keeper_toml config_dir name body =
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  (try Unix.mkdir keepers_dir 0o755 with
-   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  write_file (Filename.concat keepers_dir (name ^ ".toml")) body
-;;
-
 let make_meta name : KMC.keeper_meta =
   let json =
     `Assoc
@@ -81,11 +74,20 @@ let make_meta name : KMC.keeper_meta =
 ;;
 
 (* Runtime config materializing two bindings: the default ["runpod_mtp.qwen"]
-   and ["openai.gpt"] (used to prove [get_runtime_by_id] resolution). *)
+   and ["openai.gpt"] (used to prove [get_runtime_by_id] resolution).
+
+   persona⊥{model,runtime}: per-keeper routing is declared in
+   [[runtime.assignments]] (runtime.toml SSOT), keyed by keeper name — NOT in
+   keeper TOML.  [routingtest]/[budgettest] route to the non-default
+   [openai.gpt]; an unassigned keeper falls to [runtime].default. *)
 let runtime_config =
   {|
 [runtime]
 default = "runpod_mtp.qwen"
+
+[runtime.assignments]
+routingtest = "openai.gpt"
+budgettest = "openai.gpt"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
@@ -131,14 +133,11 @@ let with_runtime_initialized f =
 
 (* ---- the per-keeper selection actually reaches the dispatcher ---- *)
 
-let test_runtime_id_drives_runtime_id_of_meta () =
-  with_config_dir (fun config_dir ->
-    write_keeper_toml config_dir "routingtest" {|[keeper]
-goal = "route to a non-default provider-model"
-runtime_id = "openai.gpt"
-|};
+let test_assignment_drives_runtime_id_of_meta () =
+  with_runtime_initialized (fun () ->
+    (* [routingtest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
     Alcotest.(check string)
-      "declared keeper dispatches to its [runtime_id], not the global default"
+      "assigned keeper dispatches to its runtime.toml assignment, not the global default"
       "openai.gpt"
       (KMC.runtime_id_of_meta (make_meta "routingtest")))
 ;;
@@ -199,49 +198,41 @@ let test_context_budget_uses_selected_runtime () =
    projection labels (global, runtime-id-agnostic) would size against the
    default and admit oversized prompts for a per-keeper routed runtime. *)
 let test_of_meta_budgets_against_routed_runtime () =
-  with_config_dir (fun config_dir ->
-    write_keeper_toml config_dir "budgettest" {|[keeper]
-goal = "route to a smaller-context runtime"
-runtime_id = "openai.gpt"
-|};
-    with_runtime_initialized (fun () ->
-      let res =
-        Keeper_context_runtime.resolve_max_context_resolution_of_meta
-          (make_meta "budgettest")
-      in
-      Alcotest.(check int)
-        "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
-        64000
-        res.Keeper_context_runtime.effective_budget))
+  with_runtime_initialized (fun () ->
+    (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
+    let res =
+      Keeper_context_runtime.resolve_max_context_resolution_of_meta
+        (make_meta "budgettest")
+    in
+    Alcotest.(check int)
+      "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
+      64000
+      res.Keeper_context_runtime.effective_budget)
 ;;
 
 let test_turn_budget_uses_routed_runtime () =
-  with_config_dir (fun config_dir ->
-    write_keeper_toml config_dir "budgettest" {|[keeper]
-goal = "route to a smaller-context runtime"
-runtime_id = "openai.gpt"
-|};
-    with_runtime_initialized (fun () ->
-      let budget =
-        Keeper_turn_runtime_budget.resolved_max_context_for_turn
-          ~meta:(make_meta "budgettest")
-      in
-      Alcotest.(check int)
-        "turn budget uses routed runtime, not runtime-id-agnostic labels"
-        64000
-        budget))
+  with_runtime_initialized (fun () ->
+    (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
+    let budget =
+      Keeper_turn_runtime_budget.resolved_max_context_for_turn
+        ~meta:(make_meta "budgettest")
+    in
+    Alcotest.(check int)
+      "turn budget uses routed runtime, not runtime-id-agnostic labels"
+      64000
+      budget)
 ;;
 
 let () =
   Alcotest.run
     "runtime_per_keeper_routing"
-    [ ( "runtime-id routing"
+    [ ( "runtime-assignment routing"
       , [ Alcotest.test_case
-            "[runtime_id] drives runtime_id_of_meta"
+            "[runtime.assignments] drives runtime_id_of_meta"
             `Quick
-            test_runtime_id_drives_runtime_id_of_meta
+            test_assignment_drives_runtime_id_of_meta
         ; Alcotest.test_case
-            "undeclared keeper falls to [runtime].default"
+            "unassigned keeper falls to [runtime].default"
             `Quick
             test_undeclared_keeper_falls_to_default
         ] )

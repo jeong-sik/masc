@@ -3,6 +3,7 @@
 - Status: Draft
 - Date: 2026-05-30
 - Supersedes 라우팅 레이어: RFC-0038(routing-intent), RFC-0041(group-item-hierarchy), RFC-0058 §Layer-4/5(routes/aliases), RFC-0181(routes+phonebook dual-SSOT)
+- Superseded (partial): binding-key id 형식(`id = "provider.model"`, §2)은 RFC-0211이 supersede — id는 masc에 opaque, OAS만 parser. single-binding 모델/fail-fast load/§2.1은 유지.
 - Builds on: RFC-0058(provider/model/binding 선언 스키마, Layers 1-3), keeper_meta_contract(HEAD; exhaustion 분류)
 - Context: PR #19536이 `lib/runtime*`(170+파일) 전면 삭제 + 빌드 의도적 broken. 본 RFC는 그 후속 "Runtime 구현 채우기"의 설계 SSOT.
 

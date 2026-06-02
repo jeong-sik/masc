@@ -9,7 +9,13 @@
 # disabling autoboot for this file. discover_keepers_toml still loads it
 # as a profile-defaults source for downstream keepers.
 autoboot_enabled = false
-runtime_id = "runpod_mtp.qwen-runpod"
+# persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
+# selection (the parser now fail-loud rejects `runtime_id`/`model` keys).
+# keeper→runtime assignment is the sole responsibility of runtime.toml
+# [[runtime.assignments]], keyed by keeper name. The former value here was
+# `runtime_id = "runpod_mtp.qwen-runpod"`; operators preserving that exact
+# routing must add the keeper(s) inheriting this base to runtime.toml
+# [[runtime.assignments]] (otherwise they fall back to [runtime].default).
 sandbox_profile = "docker"
 network_mode = "inherit"
 

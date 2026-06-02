@@ -23,18 +23,15 @@ let workspace_surface_json (meta : keeper_meta) =
 ;;
 
 let effective_declarative_runtime_id
-      (defaults : keeper_profile_defaults)
+      (_defaults : keeper_profile_defaults)
       (meta : keeper_meta)
   =
-  (* RFC-0207: same [defaults.model] source as
-     {!Keeper_meta_contract.runtime_id_of_meta} (the dispatcher) and the
-     keeper_runtime.ml copy of this function — keep them on one source so the
-     status override view matches the wire.  Re-forking causes a re-sync storm
-     (cf. #10061). *)
-  match defaults.model, defaults.manifest_path with
-  | Some runtime_id, _ -> String.trim runtime_id
-  | None, Some _ -> (Keeper_config.default_runtime_id ())
-  | None, None -> String.trim (runtime_id_of_meta meta)
+  (* persona⊥{model,runtime}: the keeper's runtime is assigned in runtime.toml,
+     not in [_defaults].  Delegate to
+     {!Keeper_meta_contract.runtime_id_of_meta} (the dispatcher), matching the
+     keeper_runtime.ml copy, so the status override view and the wire share ONE
+     source by construction (no re-sync storm, cf. #10061). *)
+  runtime_id_of_meta meta
 ;;
 
 type override_field_detail =

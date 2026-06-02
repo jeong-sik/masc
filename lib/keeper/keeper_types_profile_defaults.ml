@@ -35,7 +35,11 @@ type keeper_profile_defaults = {
   per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  model : string option;
+  (* NB: there is no per-keeper [model]/[runtime_id] field. persona⊥
+     {model,runtime}: keeper→runtime assignment is the sole responsibility of
+     runtime.toml [[runtime.assignments]] (keyed by keeper name), resolved via
+     {!Runtime.runtime_id_for_keeper}.  Neither persona JSON nor keeper TOML
+     carries a runtime selection. *)
   models : string list option;
   (* Turn budget overrides. None = inherit env default
      (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
@@ -89,7 +93,6 @@ let empty_keeper_profile_defaults =
     per_provider_timeout = None;
     always_approve = None;
     social_model = None;
-    model = None;
     models = None;
     max_turns_per_call = None;
     max_turns_per_call_scheduled_autonomous = None;

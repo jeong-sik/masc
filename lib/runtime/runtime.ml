@@ -43,7 +43,35 @@ let of_binding (cfg : config) (b : binding) : t option =
     fail-fast: [\[runtime\] default] 가 없거나 그 id 가 목록에 없으면 [Error].
     silent fallback 일절 없음 (runtime→Runtime 비전: TOML 에 default 없으면
     프로그램 실행 불가). *)
-let load_list ~(config_path : string) : (t list * t, string) result =
+(* RFC keeper→runtime assignment validation: every [[runtime.assignments]]
+   target must resolve to a configured runtime. An unknown id is an operator
+   error rejected at load (mirrors [runtime].default validation), NOT a silent
+   fallback to the default — that would mask a typo'd assignment
+   (Unknown→Permissive anti-pattern). A keeper *absent* from the table is the
+   intended designed fallback to the default and is handled at lookup time, not
+   here. *)
+let validate_keeper_assignments ~(config_path : string) (runtimes : t list)
+    (assignments : (string * string) list) : (unit, string) result =
+  let runtime_exists id =
+    List.exists (fun (r : t) -> String.equal r.id id) runtimes
+  in
+  match
+    List.find_opt (fun (_, runtime_id) -> not (runtime_exists runtime_id)) assignments
+  with
+  | None -> Ok ()
+  | Some (keeper_name, runtime_id) ->
+    Error
+      (Printf.sprintf
+         "%s: [runtime.assignments].%s = %S not found among %d runtimes"
+         config_path
+         keeper_name
+         runtime_id
+         (List.length runtimes))
+;;
+
+let load_list ~(config_path : string)
+  : (t list * t * (string * string) list, string) result
+  =
   match Runtime_toml.parse_file config_path with
   | Error errs ->
     Error
@@ -53,6 +81,7 @@ let load_list ~(config_path : string) : (t list * t, string) result =
          (List.length errs))
   | Ok cfg ->
     let runtimes = List.filter_map (of_binding cfg) cfg.bindings in
+    let assignments = cfg.keeper_assignments in
     (match cfg.default_runtime_id with
      | None ->
        Error
@@ -62,19 +91,28 @@ let load_list ~(config_path : string) : (t list * t, string) result =
             config_path)
      | Some did ->
        (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
-        | Some rt -> Ok (runtimes, rt)
         | None ->
           Error
             (Printf.sprintf
                "%s: [runtime].default = %S not found among %d runtimes"
                config_path
                did
-               (List.length runtimes))))
+               (List.length runtimes))
+        | Some rt ->
+          (match validate_keeper_assignments ~config_path runtimes assignments with
+           | Error _ as e -> e
+           | Ok () -> Ok (runtimes, rt, assignments))))
 
 (* ---- Lazy default runtime singleton ---- *)
 
 let default_runtime_ref : t option ref = ref None
 let runtimes_ref : t list ref = ref []
+
+(* keeper name → runtime id ["provider.model"], from [[runtime.assignments]].
+   Populated by [init_default]; read by [runtime_id_for_keeper]. Validated at
+   load (every target resolves to a runtime), so a hit here is always a
+   configured runtime. *)
+let keeper_assignments_ref : (string * string) list ref = ref []
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
@@ -102,9 +140,10 @@ let required_tool_runtime_ids runtimes =
 
 let init_default ~config_path =
   match load_list ~config_path with
-  | Ok (runtimes, rt) ->
+  | Ok (runtimes, rt, assignments) ->
     runtimes_ref := runtimes;
     default_runtime_ref := Some rt;
+    keeper_assignments_ref := assignments;
     Ok ()
   | Error _ as e -> e
 
@@ -112,6 +151,16 @@ let get_default_runtime () = !default_runtime_ref
 let get_runtimes () = !runtimes_ref
 let get_runtime_ids () = runtime_ids !runtimes_ref
 let get_required_tool_runtime_ids () = required_tool_runtime_ids !runtimes_ref
+
+(* RFC persona⊥{model,runtime}: keeper→runtime assignment is sourced from
+   [[runtime.assignments]] (runtime.toml SSOT), NOT from persona JSON or keeper
+   TOML. [None] = no explicit assignment; the caller falls back to
+   {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
+   only the OAS adapter resolves it to provider/model/spec). Reads
+   [keeper_assignments_ref], never a module-level eager binding. *)
+let runtime_id_for_keeper (keeper_name : string) : string option =
+  List.assoc_opt keeper_name !keeper_assignments_ref
+;;
 
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the *requested* runtime (a keeper's persona

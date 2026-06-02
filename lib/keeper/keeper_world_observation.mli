@@ -57,7 +57,7 @@ type world_observation = {
   context_ratio : float;
   (** Current context window utilization [0.0, 1.0]. *)
 
-  economic_pressure : Agent_economy.pressure_mode;
+  economic_pressure : Economy.pressure_mode;
   (** Agent economy mode: Normal, Frugal, or Hustle. *)
 
   unclaimed_task_count : int;

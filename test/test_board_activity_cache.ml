@@ -1,4 +1,4 @@
-(** Tests for the mtime-gated board-activity projection in [Agent_reputation].
+(** Tests for the mtime-gated board-activity projection in [Reputation].
 
     [count_board_activity_in_dir] backs contributor-quality on the board
     dashboard, where it is queried once per unique post author per render. The
@@ -39,7 +39,7 @@ let posts_path dir = Filename.concat dir "board_posts.jsonl"
 let comments_path dir = Filename.concat dir "board_comments.jsonl"
 
 let count dir author =
-  Agent_reputation.count_board_activity_in_dir ~board_dir:dir ~agent_name:author
+  Reputation.count_board_activity_in_dir ~board_dir:dir ~agent_name:author
 
 let test_counts_authored () =
   with_temp_dir (fun dir ->

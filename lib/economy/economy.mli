@@ -16,7 +16,7 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 module Random = Stdlib.Random
 
-(** Agent_economy — Currency/reward system for MASC agents
+(** Economy — Currency/reward system for MASC agents
 
     Agents earn credits by completing tasks, writing board posts,
     receiving upvotes, and responding to mentions.

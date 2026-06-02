@@ -213,7 +213,7 @@ let board_contributor_quality_band score =
   else "low"
 
 let board_contributor_quality_json
-    (rep : Agent_reputation.agent_reputation) : Yojson.Safe.t =
+    (rep : Reputation.agent_reputation) : Yojson.Safe.t =
   `Assoc
     [
       ("score", `Float rep.overall_score);
@@ -240,7 +240,7 @@ let board_contributor_quality_lookup ?config () =
             let value =
               try
                 let rep =
-                  Agent_reputation.compute_reputation config
+                  Reputation.compute_reputation config
                     ~agent_name:author
                 in
                 Some (board_contributor_quality_json rep)

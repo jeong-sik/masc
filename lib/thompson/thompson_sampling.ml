@@ -157,7 +157,7 @@ let trigger_bypasses_health = function
   | ContentAlert _ | Scheduled | Starved | Thompson -> false
 
 (* [is_healthy] is injected by the caller of [select_with_feedback]
-   (dependency inversion). Previously this called [Agent_health.is_healthy]
+   (dependency inversion). Previously this called [Health.is_healthy]
    directly, coupling this module to the masc_mcp mega-library root. The
    caller now supplies the health predicate so this module stays a clean
    leaf. Required (not optional) — a permissive default would silently make

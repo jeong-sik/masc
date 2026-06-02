@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # Guard against re-emergence of pre-RFC-0064 public tool names in the
-# descriptor-backed tool surface and keeper-facing prompt files.
+# descriptor-backed tool surface and keeper-facing prompt/persona files.
 #
 # After RFC-0202 tool name alignment, the active LLM-native public names are:
 #   Execute, Read, Edit, Write, Grep, WebSearch, WebFetch
 #
 # The retired names — Bash, ReadFile, WriteFile, EditFile, SearchFiles,
 # SearchWeb, FetchWeb — must not reappear as quoted string literals in active
-# tool-surface modules or as prompt-visible tool names in keeper prompts. This
-# script is intentionally narrow: it only scans files that declare/route public
-# tool names plus prompt files that tell keepers what to call. Identifiers and
-# code symbols (e.g. OCaml `Read` modules) are untouched.
+# tool-surface modules or as prompt-visible tool names in keeper prompts and
+# personas. This script is intentionally narrow: it only scans files that
+# declare/route public tool names plus prompt/persona files that tell keepers
+# what to call. Identifiers and code symbols (e.g. OCaml `Read` modules) are
+# untouched.
 #
 # Baseline = 0 occurrences. Allowlist is a debt ledger; entries are exact
 # `path:line:literal` keys that drift with line numbers, forcing same-PR
@@ -64,9 +65,12 @@ SCAN_GLOBS=(
 )
 
 PROMPT_SCAN_FILES=("docs/KEEPER-CAPABILITY-MATRIX.md")
-while IFS= read -r prompt_file; do
-  PROMPT_SCAN_FILES+=("$prompt_file")
-done < <(find config/prompts -type f | sort)
+for prompt_dir in config/prompts config/personas; do
+  [[ -d "$prompt_dir" ]] || continue
+  while IFS= read -r prompt_file; do
+    PROMPT_SCAN_FILES+=("$prompt_file")
+  done < <(find "$prompt_dir" -type f | sort)
+done
 
 LITERAL_PATTERN='"(Bash|ReadFile|WriteFile|EditFile|SearchFiles|SearchWeb|FetchWeb)"'
 PROMPT_TOKEN_PATTERN='\b(Bash|ReadFile|WriteFile|EditFile|SearchFiles|SearchWeb|FetchWeb)\b'

@@ -15,7 +15,7 @@
 type tried_source =
   | Dispatch_table              (** S1: Tool_dispatch.is_registered *)
   | Tool_name_variant           (** S2: Tool_name.of_string *)
-  | Public_descriptor           (** S3: Agent_tool_descriptor.find_public *)
+  | Public_descriptor           (** S3: Keeper_tool_descriptor.find_public *)
   | Alias_internal              (** S4: Keeper_tool_alias.is_known_internal *)
   | Alias_masc_to_internal      (** S5: Keeper_tool_alias.public_masc_to_internal *)
   | Registry_internal_candidate (** S6: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
@@ -58,11 +58,11 @@ let resolve name =
   else if Option.is_some (Tool_name.of_string normalized) then
     Resolved { canonical = normalized; via = Tool_name_variant; surface = None }
   else
-    match Agent_tool_descriptor.find_public normalized with
+    match Keeper_tool_descriptor.find_public normalized with
     | Some descriptor ->
         Alias_to
           { from_ = normalized
-          ; canonical = descriptor.Agent_tool_descriptor.internal_name
+          ; canonical = descriptor.Keeper_tool_descriptor.internal_name
           ; via = Public_descriptor
           }
     | None ->
@@ -137,7 +137,7 @@ let all_admitting_sources name =
     sources := Dispatch_table :: !sources;
   if Option.is_some (Tool_name.of_string normalized) then
     sources := Tool_name_variant :: !sources;
-  if Option.is_some (Agent_tool_descriptor.find_public normalized) then
+  if Option.is_some (Keeper_tool_descriptor.find_public normalized) then
     sources := Public_descriptor :: !sources;
   if Keeper_tool_alias.is_known_internal normalized then
     sources := Alias_internal :: !sources;
@@ -221,7 +221,7 @@ let canonical_tool_name_observed name =
 ;;
 
 let public_aliases_for_internal_name internal_name =
-  Agent_tool_descriptor_resolution.public_names_for_internal internal_name
+  Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
 ;;
 
 let public_alias_guidance_for_internal_call
@@ -230,7 +230,7 @@ let public_alias_guidance_for_internal_call
   : string option
   =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
-  match Agent_tool_descriptor.find_public stripped with
+  match Keeper_tool_descriptor.find_public stripped with
   | Some _ -> None
   | None ->
     let canonical = canonical_tool_name stripped in

@@ -62,7 +62,7 @@ let count_across_files ~files ~needle =
     0 files
 ;;
 
-let execute_consumer_files = [ "lib/keeper/agent_tool_execute_runtime.ml" ]
+let execute_consumer_files = [ "lib/keeper/keeper_tool_execute_runtime.ml" ]
 
 let zsh_consumer_files = []
 

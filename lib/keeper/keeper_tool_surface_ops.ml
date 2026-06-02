@@ -407,7 +407,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
     Log.Keeper.warn "create_from_persona rejected: server not ready (%.1fs)" elapsed;
     tool_result_error (startup_not_ready_error_json elapsed)
   end else
-  match Agent_tool_persona_runtime.resolved_keeper_args_from_persona args with
+  match Keeper_tool_persona_runtime.resolved_keeper_args_from_persona args with
   | Error e -> tool_result_error ("" ^ e)
   | Ok (persona, resolved_args) ->
       let dry_run = get_bool args "dry_run" false in
@@ -415,13 +415,13 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         let json =
           `Assoc
             [
-              ("persona", Agent_tool_persona_runtime.persona_summary_to_json persona); ("created", `Bool false);
+              ("persona", Keeper_tool_persona_runtime.persona_summary_to_json persona); ("created", `Bool false);
               ("resolved_args", resolved_args);
             ]
         in
         tool_result_ok (Yojson.Safe.to_string json)
       else
-        match Agent_tool_persona_runtime.render_keeper_toml_from_resolved_args resolved_args with
+        match Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args resolved_args with
         | Error e -> tool_result_error ("" ^ e)
         | Ok _ ->
         let result = with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args) in
@@ -429,7 +429,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           result
         else
           let body = tool_result_body result in
-          match Agent_tool_persona_runtime.persist_keeper_toml_from_resolved_args resolved_args with
+          match Keeper_tool_persona_runtime.persist_keeper_toml_from_resolved_args resolved_args with
           | Error e ->
               tool_result_error ("keeper created but durable config write failed: " ^ e)
           | Ok durable_config ->
@@ -439,7 +439,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           let json =
             `Assoc
               [
-                ("persona", Agent_tool_persona_runtime.persona_summary_to_json persona); ("created", `Bool true);
+                ("persona", Keeper_tool_persona_runtime.persona_summary_to_json persona); ("created", `Bool true);
                 ("durable_config", durable_config);
                 ("result", annotate_keeper_json ~runtime_class:"keeper" created_json);
                 ("resolved_args", resolved_args);

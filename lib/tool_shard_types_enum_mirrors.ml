@@ -11,13 +11,13 @@
       - [sort_order_enum_strings]
           mirrors [Board_dispatch.valid_sort_order_strings] (#8513)
       - [tool_search_files_op_enum_strings]
-          mirrors [Agent_tool_command_runtime.valid_shell_op_strings] (#8524)
+          mirrors [Keeper_tool_command_runtime.valid_shell_op_strings] (#8524)
       - [memory_search_source_enum_strings]
-          mirrors [Agent_tool_memory_runtime.valid_memory_search_source_strings] (#8484)
+          mirrors [Keeper_tool_memory_runtime.valid_memory_search_source_strings] (#8484)
       - [memory_kind_enum_strings]
           mirrors [Keeper_memory_policy.valid_memory_kind_strings] (#8527)
       - [fs_write_mode_enum_strings]
-          mirrors [Agent_tool_filesystem_runtime.valid_fs_write_mode_strings] (#8490)
+          mirrors [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings] (#8490)
       - [vote_direction_enum_strings]
           mirrors [Board_votes.valid_vote_direction_strings] (#8506)
 

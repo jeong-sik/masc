@@ -207,8 +207,8 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
-  test_agent_tool_execute_safety
-  test_agent_tool_execute_typed_input
+  test_keeper_tool_execute_safety
+  test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
   test_keeper_tool_affinity
@@ -216,9 +216,9 @@
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
   test_keeper_transition_audit
-  test_agent_tool_search_files_containment
+  test_keeper_tool_search_files_containment
   test_keeper_sandbox_docker_route
-  test_agent_tool_search_files_via_field
+  test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
   test_stay_silent_loop_detector
   test_heuristic_metrics_boot_wireup
@@ -248,12 +248,12 @@
   test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
-  test_agent_tool_execute_descriptor_variant
+  test_keeper_tool_execute_descriptor_variant
   test_tool_surface_ssot
   test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
-  test_agent_tool_descriptor_registry_integrity
+  test_keeper_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
@@ -475,8 +475,8 @@
   test_exec_core
   test_exec_dispatch
   test_shell_ir_risk
-  test_agent_tool_execute_safety
-  test_agent_tool_execute_typed_input
+  test_keeper_tool_execute_safety
+  test_keeper_tool_execute_typed_input
   test_hitl_approval
   test_keeper_discovered_tools
   test_keeper_tool_affinity
@@ -484,9 +484,9 @@
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
   test_keeper_transition_audit
-  test_agent_tool_search_files_containment
+  test_keeper_tool_search_files_containment
   test_keeper_sandbox_docker_route
-  test_agent_tool_search_files_via_field
+  test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
   test_stay_silent_loop_detector
   test_heuristic_metrics_boot_wireup
@@ -519,12 +519,12 @@
   test_keeper_prompt_constitution_fallback
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
-  test_agent_tool_execute_descriptor_variant
+  test_keeper_tool_execute_descriptor_variant
   test_tool_surface_ssot
   test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
-  test_agent_tool_descriptor_registry_integrity
+  test_keeper_tool_descriptor_registry_integrity
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
@@ -694,7 +694,7 @@
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
   test_keeper_tools_oas
-  test_agent_tool_execute_retry_deterministic_close
+  test_keeper_tool_execute_retry_deterministic_close
   test_keeper_tool_exposure
   test_keeper_runtime_denylist
   test_dashboard_render_timing_9766
@@ -885,7 +885,7 @@
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
   test_keeper_tools_oas
-  test_agent_tool_execute_retry_deterministic_close
+  test_keeper_tool_execute_retry_deterministic_close
   test_keeper_tool_exposure
   test_keeper_runtime_denylist
   test_dashboard_render_timing_9766
@@ -1431,9 +1431,9 @@
 
 (include stanzas/test_keeper_failure_policy.inc)
 
-(include stanzas/test_agent_tool_command_runtime_cwd_response.inc)
+(include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
 
-(include stanzas/test_agent_tool_dispatch_runtime.inc)
+(include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
 (include stanzas/test_keeper_fs.inc)
 

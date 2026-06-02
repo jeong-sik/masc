@@ -136,35 +136,35 @@
  server_mcp_transport_http_agui
  server_mcp_streaming_tools
  mcp_server_eio_tool_timeout
-  agent_tool_descriptor agent_tool_descriptor_resolution agent_tool_runtime keeper_tool_registry
+  keeper_tool_descriptor keeper_tool_descriptor_resolution keeper_tool_runtime keeper_tool_registry
   keeper_tool_resolution
   keeper_tool_policy_config
   keeper_discovered_tools
   keeper_tool_affinity
-  agent_tool_shared_runtime
+  keeper_tool_shared_runtime
    keeper_path_check_error
-   agent_tool_board_runtime
-   agent_tool_filesystem_runtime
-   agent_tool_remote_mcp_runtime
-   agent_tool_ide_runtime
+   keeper_tool_board_runtime
+   keeper_tool_filesystem_runtime
+   keeper_tool_remote_mcp_runtime
+   keeper_tool_ide_runtime
    keeper_sandbox_docker
-   keeper_workspace_op agent_tool_execute_timeout agent_tool_execute_runtime_paths agent_tool_execute_path
-   agent_tool_execute_readonly_policy agent_tool_execute_command_parse agent_tool_execute_command_words keeper_workspace_read_ops
-   agent_tool_execute_input
-   agent_tool_execute_runtime
+   keeper_workspace_op keeper_tool_execute_timeout keeper_tool_execute_runtime_paths keeper_tool_execute_path
+   keeper_tool_execute_readonly_policy keeper_tool_execute_command_parse keeper_tool_execute_command_words keeper_workspace_read_ops
+   keeper_tool_execute_input
+   keeper_tool_execute_runtime
    keeper_workspace_ops
-   agent_tool_command_runtime
+   keeper_tool_command_runtime
    keeper_activation_readiness
-   agent_tool_task_runtime
-   agent_tool_voice_runtime
-   agent_tool_dispatch_runtime
+   keeper_tool_task_runtime
+   keeper_tool_voice_runtime
+   keeper_tool_dispatch_runtime
   keeper_status_metrics
   keeper_status_runtime
   provider_tool_support
   voice_runtime_overlay
   keeper_status_detail_observability
   keeper_status_detail
-  agent_tool_persona_runtime
+  keeper_tool_persona_runtime
   keeper_model_labels
   keeper_fs
   keeper_identity

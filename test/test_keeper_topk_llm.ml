@@ -89,14 +89,14 @@ let deterministic_prefilter_for ~query_text ~selection_limit =
     ~search_index:(test_search_index ())
     ~query_text
     ~selection_limit
-    ~core:(Agent_tool_dispatch_runtime.effective_core_tools ())
+    ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
 
 let deterministic_prefilter_for_tools ~tools ~query_text ~selection_limit =
   Keeper_tool_selection.deterministic_prefilter_names
     ~search_index:(test_search_index_with_production_aliases tools)
     ~query_text
     ~selection_limit
-    ~core:(Agent_tool_dispatch_runtime.effective_core_tools ())
+    ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
 
 (* ── Tests ───────────────────────────────────────────────── *)
 
@@ -367,7 +367,7 @@ let test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request () 
   in
   let visible =
     Keeper_tool_selection.merge_tool_selection_boundary
-      ~core:(Agent_tool_dispatch_runtime.effective_core_tools ())
+      ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
       ~deterministic_prefilter:selected
       ~llm_selected:[]
       ~discovered:[]
@@ -423,7 +423,7 @@ let test_deterministic_prefilter_surfaces_execute_for_shell_request () =
   in
   let visible =
     Keeper_tool_selection.merge_tool_selection_boundary
-      ~core:(Agent_tool_dispatch_runtime.effective_core_tools ())
+      ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
       ~deterministic_prefilter:selected
       ~llm_selected:[]
       ~discovered:[]

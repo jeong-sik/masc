@@ -7,7 +7,7 @@
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Agent_tool_shared_runtime
+open Keeper_tool_shared_runtime
 
 include Keeper_workspace_ops_setup
 
@@ -49,7 +49,7 @@ let handle_tool_search_files
         ~base_path:root ~path:target
     in
     let cwd_target () =
-      match Agent_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
+      match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
       | Error _ as e -> e
       | Ok cwd ->
         (match containment_check cwd with
@@ -62,7 +62,7 @@ let handle_tool_search_files
     let path_error e =
       actionable_path_error ~op ~meta ~raw_path ~error:e
     in
-    (* TEL-OK: adapter delegates to Agent_tool_execute_shell_ir/Exec_dispatch; execution
+    (* TEL-OK: adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch; execution
        telemetry stays with the delegated runtime path. *)
     let dispatch_host_shell_ir
           ?(allowed_commands = Dev_exec_allowlist.readonly)
@@ -70,7 +70,7 @@ let handle_tool_search_files
           ~workdir
           ir
       =
-      Agent_tool_execute_shell_ir.dispatch ~allowed_commands ~keeper_id:meta.name
+      Keeper_tool_execute_shell_ir.dispatch ~allowed_commands ~keeper_id:meta.name
         ~base_path:root ~workdir ~sandbox:(Masc_exec.Sandbox_target.host ())
         ?timeout_sec ir
     in
@@ -135,7 +135,7 @@ let handle_tool_search_files
         | Error e -> path_error e
         | Ok cwd ->
           let host_ir =
-            Agent_tool_execute_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root
+            Keeper_tool_execute_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root
               Masc_exec.Exec_program.Git
               [ "--no-optional-locks"; "diff"; "--stat" ]
           in
@@ -143,7 +143,7 @@ let handle_tool_search_files
             ~command_argv:[ "git"; "--no-optional-locks"; "diff"; "--stat" ]
             ~host_ir ~host_allowed_commands:Dev_exec_allowlist.dev
             ~max_bytes:1_000_000
-            ~timeout_sec:Agent_tool_execute_timeout.read_timeout_sec ())
+            ~timeout_sec:Keeper_tool_execute_timeout.read_timeout_sec ())
      | _ ->
        Yojson.Safe.to_string
          (`Assoc

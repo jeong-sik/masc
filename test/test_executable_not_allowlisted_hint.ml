@@ -10,7 +10,7 @@
     - leave the existing shell/mode hints (gh, jq, bash, ...) intact *)
 
 open Masc_mcp
-module E = Agent_tool_execute_typed_input
+module E = Keeper_tool_execute_typed_input
 
 let pp_err err = Format.asprintf "%a" E.pp_validation_error err
 

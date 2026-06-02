@@ -509,7 +509,7 @@ let start_keeper_loops
         ]
   in
   let judge_masc_tools =
-    match Agent_tool_surfaces.local_worker_tool_schemas ~names:judge_tool_names () with
+    match Keeper_tool_surfaces.local_worker_tool_schemas ~names:judge_tool_names () with
     | Ok schemas -> schemas
     | Error e ->
       Log.Server.warn "judge tool schema resolution failed: %s" e;

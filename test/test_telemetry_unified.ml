@@ -189,10 +189,10 @@ let test_oas_event_source_and_scope_filter () =
     Alcotest.(check string) "event type preserved" "turn_completed" event_type
   | _ -> Alcotest.fail "expected Assoc"
 
-let test_agent_tool_called_scope_promoted_for_filters () =
+let test_keeper_tool_called_scope_promoted_for_filters () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_agent_tool_scope" in
+  let dir = tmpdir "telem_keeper_tool_scope" in
   let telemetry_dir = Filename.concat dir ".masc/telemetry" in
   Fs_compat.mkdir_p telemetry_dir;
   write_jsonl telemetry_dir
@@ -238,7 +238,7 @@ let test_agent_tool_called_scope_promoted_for_filters () =
       (json_string_field "worker_run_id" json)
   | _ -> Alcotest.fail "expected Assoc"
 
-let test_shadow_agent_tool_called_deduped_from_unified_view () =
+let test_shadow_keeper_tool_called_deduped_from_unified_view () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_shadow_tool_called" in
@@ -1234,9 +1234,9 @@ let () =
           Alcotest.test_case "oas events + scope filter" `Quick
             test_oas_event_source_and_scope_filter;
           Alcotest.test_case "agent tool_called scope promotion" `Quick
-            test_agent_tool_called_scope_promoted_for_filters;
+            test_keeper_tool_called_scope_promoted_for_filters;
           Alcotest.test_case "dedupe shadow agent tool_called" `Quick
-            test_shadow_agent_tool_called_deduped_from_unified_view;
+            test_shadow_keeper_tool_called_deduped_from_unified_view;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
           Alcotest.test_case "keeper metrics fast path keeps noisy top n" `Quick
             test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n;

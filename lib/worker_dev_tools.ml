@@ -402,7 +402,7 @@ let make_shell_exec_with_allowlist
                       (Masc_exec.Shell_ir_risk.undecided
                          context.Exec_shell_gate.ast)) ->
             (* RFC-0208: this worker shell surface authorizes by allowlist
-               only — unlike the keeper path (agent_tool_execute_runtime) it
+               only — unlike the keeper path (keeper_tool_execute_runtime) it
                has no risk pre-gate. find -delete is allowlisted because find
                is a read tool, but the risk classifier rates it
                Destructive_protected (the delete action, like rm, is on no

@@ -22,8 +22,8 @@ let read_internal_history_lines = Trace.read_internal_history_lines
 let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
 
 let keeper_tools_response_json (meta : Keeper_meta_contract.keeper_meta) =
-  let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let masc_count = List.length (Agent_tool_dispatch_runtime.keeper_masc_tool_names meta) in
+  let allowed = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let masc_count = List.length (Keeper_tool_dispatch_runtime.keeper_masc_tool_names meta) in
   `Assoc
     [
       ("ok", `Bool true);

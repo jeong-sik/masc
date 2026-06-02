@@ -4,7 +4,7 @@
    tools, but a single flag turns them destructive (find -delete/-exec) or
    write-capable (find -fprintf, sed -i, sort -o) while the command identity
    stays "allowlisted read". The keeper authorizes via the risk-envelope
-   pre-gate (agent_tool_execute_runtime: is_destructive blocks all keepers;
+   pre-gate (keeper_tool_execute_runtime: is_destructive blocks all keepers;
    is_r1/is_r2 blocks a non-write-enabled readonly keeper), so a
    misclassification to R0_Read let a readonly keeper delete and modify
    files past the gate.

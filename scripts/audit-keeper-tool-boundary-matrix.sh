@@ -31,7 +31,7 @@ repo_root = pathlib.Path(sys.argv[1])
 matrix_file = pathlib.Path(sys.argv[2])
 
 scope_re = re.compile(
-    r"^lib/keeper/(?:agent_tool_[^/]*_runtime|agent_tool_execute_[^/]*|keeper_(?:gh|hooks|sandbox|exec|shell|tool|tools)[^/]*)\.mli?$"
+    r"^lib/keeper/(?:keeper_tool_[^/]*_runtime|keeper_tool_execute_[^/]*|keeper_(?:gh|hooks|sandbox|exec|shell|tool|tools)[^/]*)\.mli?$"
 )
 manifest_re = re.compile(
     r"^\s*-\s+`(?P<path>lib/keeper/[^`]+)`\s+-\s+(?P<owner>[a-z][a-z0-9-]*)\s*$"

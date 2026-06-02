@@ -10,8 +10,8 @@
 
 open Alcotest
 
-module Task = Masc_mcp.Agent_tool_task_runtime
-module Dispatch = Masc_mcp.Agent_tool_dispatch_runtime
+module Task = Masc_mcp.Keeper_tool_task_runtime
+module Dispatch = Masc_mcp.Keeper_tool_dispatch_runtime
 module Boundary = Masc_mcp.Keeper_tools_oas_failure_boundary
 (* Tool_result lives in the leaf [masc_mcp_tool_types] lib (wrapped false), so
    it is referenced bare — not under [Masc_mcp.] — matching existing tests. *)

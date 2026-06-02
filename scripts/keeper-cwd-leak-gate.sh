@@ -65,7 +65,7 @@ if [ "${failures}" -gt 0 ]; then
   echo "Wire the response builder through Keeper_cwd_response.to_yojson_response." >&2
   echo "Reference: lib/keeper/keeper_cwd_response.mli (PR #11323), and the wiring patterns in" >&2
   echo "  lib/keeper/keeper_sandbox_docker.ml" >&2
-  echo "  lib/keeper/agent_tool_command_runtime.ml (PR #11349)" >&2
+  echo "  lib/keeper/keeper_tool_command_runtime.ml (PR #11349)" >&2
   exit 1
 fi
 

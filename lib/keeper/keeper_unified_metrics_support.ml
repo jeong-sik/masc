@@ -45,7 +45,7 @@ let scheduled_autonomous_outcome_of_result
    codec functions were extracted to [Turn_mode_codec] in lib/ so
    [Tool_agent_timeline] can parse keeper turn payloads without
    importing this module (which would form a Config-mediated dependency
-   cycle with [Agent_tool_in_process_runtime]). The local re-export
+   cycle with [Keeper_tool_in_process_runtime]). The local re-export
    keeps existing callers source-compatible. *)
 type turn_mode = Turn_mode_codec.turn_mode =
   | Tool_use

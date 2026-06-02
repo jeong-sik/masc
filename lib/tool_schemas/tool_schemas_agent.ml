@@ -3,7 +3,7 @@ open Masc_domain
 (** Issue #8501: hand-mirrored from
     [Tool_agent.valid_agent_card_action_strings]. masc_tool_schemas
     only depends on masc_types so it cannot derive directly. The sync
-    regression test [test_types.ml :: agent_tool_variants_ssot] catches
+    regression test [test_types.ml :: keeper_tool_variants_ssot] catches
     drift. Same shape as #8467/#8480/#8484/#8490/#8493 mirror+sync
     pattern. *)
 

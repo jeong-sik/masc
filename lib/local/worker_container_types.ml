@@ -294,7 +294,7 @@ let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
     ?(names : string list option = None) () :
     (Masc_domain.tool_schema list, string) result =
   ignore (_sw, auth_token, session_id);
-  Agent_tool_surfaces.local_worker_tool_schemas ?names ()
+  Keeper_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let tool_schema_of_name schemas tool_name =
   List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name tool_name) schemas

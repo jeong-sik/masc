@@ -21,13 +21,13 @@ type route =
   { internal_name : string
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; public_schema : Yojson.Safe.t option
-  ; descriptor : Agent_tool_descriptor.t
+  ; descriptor : Keeper_tool_descriptor.t
   }
 
 let routing_table : (string, route) Hashtbl.t =
   let t = Hashtbl.create 8 in
   List.iter
-    (fun (d : Agent_tool_descriptor.t) ->
+    (fun (d : Keeper_tool_descriptor.t) ->
        Hashtbl.replace
          t
          d.public_name
@@ -36,7 +36,7 @@ let routing_table : (string, route) Hashtbl.t =
          ; public_schema = Some d.input_schema
          ; descriptor = d
          })
-    Agent_tool_descriptor.public_descriptors;
+    Keeper_tool_descriptor.public_descriptors;
   t
 ;;
 
@@ -54,7 +54,7 @@ let known_internal_names_tbl : (string, unit) Hashtbl.t =
     (fun _ r ->
        List.iter
          (fun internal_name -> Hashtbl.replace t internal_name ())
-         (Agent_tool_descriptor.internal_names r.descriptor))
+         (Keeper_tool_descriptor.internal_names r.descriptor))
     routing_table;
   List.iter
     (fun public_mcp -> Hashtbl.replace t public_mcp ())
@@ -100,9 +100,9 @@ let route name =
 (** [public_names ()] returns all LLM-native public names in stable order.
     Used by callers that previously used [expand_universe] to add alias names
     to allowlists — they should now add these names directly. *)
-let public_names = Agent_tool_descriptor.public_names
+let public_names = Keeper_tool_descriptor.public_names
 
-let public_name_for_internal = Agent_tool_descriptor.public_name_for_internal
+let public_name_for_internal = Keeper_tool_descriptor.public_name_for_internal
 
 (* ── MCP surface routing (separate concern) ──────────────────────── *)
 
@@ -144,7 +144,7 @@ let canonical_internal_name name =
 (** [public_input_schema public_name] returns the LLM-facing JSON schema
     for a known public tool name. [None] means no tailored schema exists. *)
 let public_input_schema = function
-  | public -> Agent_tool_descriptor.public_input_schema public
+  | public -> Keeper_tool_descriptor.public_input_schema public
 ;;
 
 (** [translate_input ~public input] reshapes an LLM call payload from
@@ -153,5 +153,5 @@ let public_input_schema = function
 
     For unknown public names this is the identity. *)
 let translate_input ~public input =
-  Agent_tool_descriptor.translate_input ~public input
+  Keeper_tool_descriptor.translate_input ~public input
 ;;

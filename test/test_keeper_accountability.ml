@@ -504,7 +504,7 @@ let test_claim_tool_exposes_routing_warning_for_high_risk_keeper () =
            ]);
       ignore (Workspace.add_task config ~title:"Task to claim" ~priority:1 ~description:"desc");
       let result =
-        Agent_tool_dispatch_runtime.execute_keeper_tool_call
+        Keeper_tool_dispatch_runtime.execute_keeper_tool_call
           ~config ~meta ~ctx_work:(make_ctx_work ()) ~exec_cache:None
           ~name:"keeper_task_claim" ~input:(`Assoc []) ()
         |> Yojson.Safe.from_string
@@ -754,7 +754,7 @@ let test_attr_gate_invariants () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
+  ignore (Result.get_ok (Keeper_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run "Keeper_accountability"
     [
       ( "accountability",

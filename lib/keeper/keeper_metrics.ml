@@ -326,7 +326,7 @@ let to_string = function
   | ToolsOasDeterministicFailures ->
     "masc_keeper_tools_oas_deterministic_failures_total"
   | TurnUpUpdateFailures -> "masc_keeper_turn_up_update_failures_total"
-  | AgentToolDispatchRuntimeFailures -> "masc_agent_tool_dispatch_runtime_failures_total"
+  | AgentToolDispatchRuntimeFailures -> "masc_keeper_tool_dispatch_runtime_failures_total"
   | CircuitBreakerTrips -> "masc_keeper_circuit_breaker_trips_total"
   | PromptFailures -> "masc_keeper_prompt_failures_total"
   | RunContextFailures -> "masc_keeper_run_context_failures_total"
@@ -338,7 +338,7 @@ let to_string = function
   | OperatorBroadcastSuppressed -> "masc_keeper_operator_broadcast_suppressed_total"
   | LlmBridgeFailures -> "masc_keeper_llm_bridge_failures_total"
   | SessionCleanupFailures -> "masc_keeper_session_cleanup_failures_total"
-  | ToolExecuteFailures -> "masc_agent_tool_execute_runtime_failures_total"
+  | ToolExecuteFailures -> "masc_keeper_tool_execute_runtime_failures_total"
   | RolloverFailures -> "masc_keeper_rollover_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"
   | RecordingErrorDedup -> "masc_keeper_recording_error_dedup_total"

@@ -15,7 +15,7 @@
     - [masc_run_list]        — list all runs with status; no
       required params.
 
-    Concatenated by {!Agent_tool_surfaces} into the
+    Concatenated by {!Keeper_tool_surfaces} into the
     process-wide tool surface; list length and per-tool [name]
     strings are part of the public contract because the agent
     SDK's tool-routing tables grep them at startup. *)

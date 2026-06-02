@@ -16,7 +16,7 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 
 (** SSOT constants for tool schemas and runtime handlers that would
-    otherwise form a dependency cycle (Tool_shard ↔ Agent_tool_filesystem_runtime).
+    otherwise form a dependency cycle (Tool_shard ↔ Keeper_tool_filesystem_runtime).
 
     These integers live in a leaf module with no dependencies so both
     sides can import the same value. *)

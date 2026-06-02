@@ -86,3 +86,22 @@ taxonomy). Two acceptable resolutions, user's call:
   RFC-0084. Lower ceremony; the invariant is still enforced by CI.
 
 This PR takes neither stance in code — it cites RFC-0084 as the precedent and flags the gap.
+
+## 7. Follow-up axis: Runtime → Keeper (2026-06-02)
+
+After the Tool→Keeper ratchet reached baseline=0, a systematic cross-subsystem scan
+identified Runtime→Keeper as the next clear boundary violation.
+
+**PR #19801** (MERGED 2026-06-02):
+- `Keeper_oas_checkpoint` -> `Runtime_oas_checkpoint` (0 keeper callers — purely misnamed)
+- `Keeper_observation` -> `Runtime_observation` (shared 9+4, observation is runtime behavior)
+- `Keeper_observation_query_operation` -> `Runtime_observation_query_operation`
+
+Full audit: `docs/audit/2026-06-02-runtime-keeper-boundary-severance.md`
+
+### Ratchet scope gap discovered
+
+`lib/keeper/tool_visibility_projection.ml` matches the ratchet's `tool_*.ml` glob but is
+a keeper-purpose handler. The ratchet excludes `tool_keeper_*` by filename but not
+`lib/keeper/tool_*` by directory. This causes CI failures on the merge commit.
+Fix pending: exclude `lib/keeper/` in the ratchet or rename to `tool_keeper_*`.

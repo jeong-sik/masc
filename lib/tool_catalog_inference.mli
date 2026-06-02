@@ -11,13 +11,7 @@ type effect_domain =
   | Host_repo_write
 
 type tool_group =
-  | Board
-  | Knowledge
-  | Tasks
-  | Voice
-  | Filesystem
   | Masc_board
-  | Masc_keeper
   | Masc_plan
   | Masc_agent
   | Masc_core

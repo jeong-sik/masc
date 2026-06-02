@@ -322,7 +322,7 @@ let add_routes router =
                                              | Credential_materializer
                                                .F1_shared_with_operator ->
                                                  Prometheus.inc_counter
-                                                   "keeper_credential_provider_gate_warned_total"
+                                                   "credential_provider_gate_warned_total"
                                                    ~labels:
                                                      [
                                                        ( "credential_id",

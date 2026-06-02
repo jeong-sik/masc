@@ -96,14 +96,6 @@ let keeper_schemas : tool_schema list = [
           ("default", `Bool Persona_contract.default_generation_proactive_enabled);
           ("description", `String "Default keeper.proactive_enabled for the draft.");
         ]);
-        ("runtime_id", `Assoc [
-          ("type", `String "string");
-          (* No static [default]: the default runtime id is resolved at request
-             time by the persona-generate handler (after [Runtime.init_default]).
-             A module-level schema list cannot evaluate it without crashing boot
-             (RFC-0206 §2.1 fail-fast). Mirrors the keeper_create runtime_id schema. *)
-          ("description", `String "Runtime id used to draft the persona.");
-        ]);
         ("temperature", `Assoc [
           ("type", `String "number");
           ("default", `Float Persona_contract.default_temperature);
@@ -267,10 +259,6 @@ let keeper_schemas : tool_schema list = [
         ("long_goal", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: long-term goal horizon (default: goal).");
-        ]);
-        ("runtime_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: Runtime binding id for keeper execution. Replaces legacy models/allowed_models/active_model inputs.");
         ]);
         ("instructions", `Assoc [
           ("type", `String "string");

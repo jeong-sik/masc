@@ -302,7 +302,7 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
   match Board_dispatch.get_post_and_comments ~post_id with
   | Error (Board.Post_not_found _) ->
     (* Idempotent: post no longer exists (deleted/expired/TTL).
-       Return success so keeper tool metrics don't count this as failure.
+       Return success so agent tool metrics don't count this as failure.
        The LLM still sees a clear message that the post is gone. *)
     Tool_result.make_ok
       ~tool_name

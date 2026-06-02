@@ -18,7 +18,6 @@ type parsed_args =
   ; short_goal_opt : string option
   ; mid_goal_opt : string option
   ; long_goal_opt : string option
-  ; runtime_id_opt : string option
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option
   ; mention_targets_in : string list

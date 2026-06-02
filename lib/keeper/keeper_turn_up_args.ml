@@ -16,7 +16,6 @@ type parsed_args = {
   short_goal_opt : string option;
   mid_goal_opt : string option;
   long_goal_opt : string option;
-  runtime_id_opt : string option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
   mention_targets_in : string list;
@@ -95,23 +94,6 @@ let parse_present_string_list_opt args key =
         (Printf.sprintf "%s must be an array of strings (received %s)" key
            (Json_util.kind_name other))
 
-let parse_runtime_id_field_opt args key =
-  match get_string_opt args key with
-  | None -> Ok None
-  | Some raw ->
-      let normalized = String.trim raw in
-      if normalized = "" then Error (Printf.sprintf "%s must not be empty" key)
-      else
-        match
-          Provider_runtime_projection.default_execution_model_strings_result normalized
-        with
-        | Ok _ -> Ok (Some normalized)
-        | Error detail ->
-            Error (Printf.sprintf "invalid %s '%s': %s" key raw detail)
-
-let parse_runtime_id_opt args =
-  parse_runtime_id_field_opt args "runtime_id"
-
 let resolve_tool_name_list ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback
   |> Option.value ~default:[]
@@ -165,7 +147,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
     let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
-    let runtime_id_opt_res = parse_runtime_id_opt args in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let mention_targets_in = get_string_list args "mention_targets" in
     let max_context_override_opt =
@@ -218,9 +199,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in
     let desires_opt = parse_self_model_opt args "desires" in
-    match tool_denylist_opt_res, runtime_id_opt_res with
-    | Error msg, _ | _, Error msg -> Error (tool_result_error msg)
-    | Ok tool_denylist_opt, Ok runtime_id_opt ->
+    match tool_denylist_opt_res with
+    | Error msg -> Error (tool_result_error msg)
+    | Ok tool_denylist_opt ->
     Ok {
       name;
       compaction_profile_opt;
@@ -228,7 +209,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       short_goal_opt;
       mid_goal_opt;
       long_goal_opt;
-      runtime_id_opt;
       allowed_paths_opt;
       active_goal_ids_opt;
       autoboot_enabled_opt;

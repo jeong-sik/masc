@@ -447,7 +447,7 @@ let post_eval
     Returns (gate_decision, result option, post_eval option, duration_ms).
 
     If pre-check rejects, the execution function is never called.
-    This is the main integration point for tool_keeper.ml. *)
+    This is the main integration point for keeper_tool_surface.ml. *)
 let guarded_execute
     ~(config : gate_config)
     ~(accumulated_cost : float)

@@ -534,7 +534,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
   let ctx = make_test_ctx () in
-  let keeper_ctx : _ Tool_keeper.context =
+  let keeper_ctx : _ Keeper_tool_surface.context =
     {
       config = ctx.config;
       agent_name = "tester";
@@ -548,7 +548,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
       Keeper_keepalive.stop_keepalive "admin-keeper")
     (fun () ->
       match
-        Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
+        Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_up"
           ~args:
             (`Assoc
               [

@@ -324,12 +324,12 @@ let resolve_credential_mounts ~config ~meta ~git_creds_enabled =
   if not git_creds_enabled
   then Ok ([], [])
   else (
-    match Keeper_host_config_provider.resolve ~config ~identity:meta.name with
-    | Error err -> Error (Keeper_credential_provider.pp_error err)
+    match Credential_host_config_provider.resolve ~config ~identity:meta.name with
+    | Error err -> Error (Credential_provider.pp_error err)
     | Ok binding ->
       let mounts =
         List.concat_map
-          (fun (m : Keeper_credential_provider.ro_mount) ->
+          (fun (m : Credential_provider.ro_mount) ->
              [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
           binding.ro_mounts
       in

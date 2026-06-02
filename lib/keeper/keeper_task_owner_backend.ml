@@ -1,4 +1,4 @@
-(** Keeper-aware task helpers behind the task-tool boundary. *)
+(** Keeper-owned task owner hooks behind the tool/task boundary. *)
 
 let resolve_agent_name config agent_name ~log_context =
   try Workspace.resolve_agent_name config agent_name with
@@ -58,7 +58,7 @@ let sync_current_task_binding config ~agent_name =
 
 let agent_tool_names config ~agent_name =
   let resolved =
-    resolve_agent_name config agent_name ~log_context:"keeper tool surface"
+    resolve_agent_name config agent_name ~log_context:"owner tool surface"
   in
   [ agent_name; resolved ]
   |> List.filter_map Keeper_identity.canonical_keeper_name
@@ -70,7 +70,7 @@ let agent_tool_names config ~agent_name =
 ;;
 
 let meta_for_agent config ~agent_name =
-  let resolved = resolve_agent_name config agent_name ~log_context:"keeper policy" in
+  let resolved = resolve_agent_name config agent_name ~log_context:"owner policy" in
   [ agent_name; resolved ]
   |> List.filter_map Keeper_identity.canonical_keeper_name
   |> Json_util.dedupe_keep_order
@@ -106,7 +106,7 @@ let install_hooks () =
   let agent_tool_names_fn = agent_tool_names in
   let transition_action_denylist_fn = transition_action_denylist in
   let active_goal_phases_for_agent_fn = active_goal_phases_for_agent in
-  Tool_task_handlers.set_keeper_hooks
+  Tool_task_handlers.set_task_owner_hooks
     Tool_task_handlers.
       { is_registered_agent_alias =
           (fun config agent_name -> is_registered_agent_alias_fn config agent_name)

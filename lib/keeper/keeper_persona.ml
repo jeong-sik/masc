@@ -14,7 +14,7 @@ type tool_result = Keeper_types_profile.tool_result
    path.  Keeper_persona / Keeper_persona_authoring transitively touch
    Keeper_turn_driver, so static import from
    Agent_tool_in_process_runtime closes a cycle.  These [_handler]
-   entry points let Tool_keeper register the persona surface into
+   entry points let Keeper_tool_surface register the persona surface into
    Persona_dispatch_ref at module load. *)
 let persona_list_handler args : tool_result =
   let detailed = get_bool args "detailed" true in

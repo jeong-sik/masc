@@ -39,7 +39,6 @@ type parsed_keeper_policy =
   ; pp_auto_handoff : bool
   ; pp_handoff_threshold : float
   ; pp_handoff_cooldown_sec : int
-  ; pp_per_provider_timeout_s : float option
   ; pp_always_approve : bool option
   }
 

@@ -110,15 +110,15 @@ val runtime_mcp_policy_for_provider :
 (** Build the runtime MCP policy that exposes [tool_names] back to the
     provider's CLI.  Returns [None] when the tool set is not eligible for
     the runtime MCP lane (e.g. mixed surface, missing keeper identity for
-    keeper-internal tools, or empty input). *)
+    agent-internal tools, or empty input). *)
 val runtime_mcp_policy_of_tool_names :
   ?agent_name:string ->
-  ?allow_keeper_internal:bool ->
+  ?allow_agent_internal:bool ->
   string list ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 
 (** Public-only variant of {!runtime_mcp_policy_of_tool_names}.  Forwards
-    without [allow_keeper_internal]. *)
+    without [allow_agent_internal]. *)
 val public_mcp_runtime_policy_of_tool_names :
   ?agent_name:string ->
   string list ->

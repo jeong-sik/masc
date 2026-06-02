@@ -135,7 +135,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                  name)
       | Ok (Some _) -> ()
       (* Issue #8391 HIGH #1: split [Ok None] from [Error _] — boot itself
-         already succeeded via Tool_keeper.dispatch, so we don't change the
+         already succeeded via Keeper_tool_surface.dispatch, so we don't change the
          HTTP status. We make the failure observable instead. *)
       | Ok None ->
           Log.Keeper.warn
@@ -157,7 +157,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                      ("reason", "read_meta_error")]
             ()
     in
-    let keeper_ctx : _ Tool_keeper.context =
+    let keeper_ctx : _ Keeper_tool_surface.context =
       {
         config;
         agent_name;
@@ -242,7 +242,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 ])
              reqd
          | None ->
-           (match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
+           (match Keeper_tool_surface.dispatch keeper_ctx ~name:tool_name ~args with
             | Some result
               when Tool_result.is_success result
                    && (String.equal action "boot" || String.equal action "clear") ->

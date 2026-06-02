@@ -1,17 +1,17 @@
-(** Projection from internal keeper tool IDs to active model-facing names.
+(** Projection from internal tool IDs to active schema-visible names.
 
-    This module is the SSOT for model-facing tool name resolution. All
-    production code paths that produce model-visible text about tools must
-    go through this module, not call [Keeper_tool_alias] directly.
+    This module is the SSOT for schema-visible tool name resolution. All
+    production code paths that produce schema-visible text about tools must
+    go through this module, not call runtime alias tables directly.
 
     @since 2.187.0 — RFC-0064 two-surface model
     @since 2.210.0 — wired into MCP server error path (#17023) *)
 
 type context =
-  | Model_facing
+  | Schema_visible
   | Internal_audit
 
-type model_resolution =
+type schema_resolution =
   | Use_public_name of
       { public_name : string
       ; internal_name : string
@@ -37,7 +37,7 @@ let public_alias_for_internal internal_name =
   Agent_tool_descriptor_resolution.public_name_for_internal internal_name
 ;;
 
-let resolve_model_name ~(visible_tool_names : string list) (name : string) =
+let resolve_visible_name ~(visible_tool_names : string list) (name : string) =
   let visible = visible_set visible_tool_names in
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
   let internal_name =
@@ -57,8 +57,8 @@ let resolve_model_name ~(visible_tool_names : string list) (name : string) =
   | None -> Unknown_name name
 ;;
 
-let model_name ~visible_tool_names name =
-  match resolve_model_name ~visible_tool_names name with
+let visible_name ~visible_tool_names name =
+  match resolve_visible_name ~visible_tool_names name with
   | Use_public_name { public_name; _ } -> Some public_name
   | Use_internal_name { internal_name } -> Some internal_name
   | No_visible_name _ | Unknown_name _ -> None
@@ -67,8 +67,8 @@ let model_name ~visible_tool_names name =
 let render_reference ~context ~visible_tool_names name =
   match context with
   | Internal_audit -> name
-  | Model_facing ->
-    (match resolve_model_name ~visible_tool_names name with
+  | Schema_visible ->
+    (match resolve_visible_name ~visible_tool_names name with
      | Use_public_name { public_name; _ } -> public_name
      | Use_internal_name { internal_name } -> internal_name
      | No_visible_name { internal_name; public_names } ->
@@ -93,7 +93,7 @@ let render_reference ~context ~visible_tool_names name =
 ;;
 
 let blocker_guidance ~visible_tool_names internal_name =
-  match resolve_model_name ~visible_tool_names internal_name with
+  match resolve_visible_name ~visible_tool_names internal_name with
   | No_visible_name { internal_name; public_names } ->
     let alias_sentence =
       match public_names with
@@ -106,18 +106,18 @@ let blocker_guidance ~visible_tool_names internal_name =
     in
     Some
       (Printf.sprintf
-         "No model-facing tool for %s is visible in this turn; report the \
+         "No schema-visible tool for %s is visible in this turn; report the \
           blocker instead of inventing internal tool names.%s"
          internal_name
          alias_sentence)
   | Use_public_name _ | Use_internal_name _ | Unknown_name _ -> None
 ;;
 
-(** [filter_model_visible_suggestions names] replaces internal [keeper_*]
+(** [filter_schema_visible_suggestions names] replaces internal names
     names with their public aliases and removes any that have no mapping.
-    Used to sanitize "did you mean" suggestion lists so the model never
+    Used to sanitize "did you mean" suggestion lists so the caller never
     sees internal handler names. *)
-let filter_model_visible_suggestions names =
+let filter_schema_visible_suggestions names =
   names
   |> List.filter_map (fun name ->
     match public_alias_for_internal name with

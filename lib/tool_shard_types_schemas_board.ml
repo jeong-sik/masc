@@ -259,20 +259,13 @@ let board_tools : Masc_domain.tool_schema list =
         "Submit an AI curation snapshot for the current board window. Use after reading \
          recent board activity to publish a summary, recommended reading order, \
          highlights, tag suggestions, answer matches, health score, and rationale. This \
-         does not edit board posts/comments/votes; submitted_by is filled from your \
-         keeper identity."
+         does not edit board posts/comments/votes."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
           ; ( "properties"
             , `Assoc
-                [ ( "model"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String "Model or provider label used for the curation" )
-                      ] )
-                ; ( "summary"
+                [ ( "summary"
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
@@ -327,8 +320,7 @@ let board_tools : Masc_domain.tool_schema list =
                       [ "type", `String "object"
                       ; ( "description"
                         , `String
-                            "Audit metadata such as source window, prompt/run id, and \
-                             model params" )
+                            "Audit metadata such as source window and prompt/run id" )
                       ] )
                 ] )
           ; "required", `List [ `String "rationale" ]

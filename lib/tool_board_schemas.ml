@@ -99,9 +99,9 @@ let tool_post_create : Masc_domain.tool_schema =
                       , `String
                           "Optional post classification: 'direct' = \
                            caller is a human user; 'automation' = caller is an agent or \
-                           automated source. 'system' is reserved for internal surfaces \
-                           (keeper, operator) and will be rejected if sent by an \
-                           external caller. When omitted, inferred from author: \
+                           automated source. 'system' is reserved for platform/internal \
+                           surfaces and will be rejected if sent by an external caller. \
+                           When omitted, inferred from author: \
                            empty/anonymous → automation; registered agent → automation; \
                            otherwise human." )
                     ] )
@@ -124,9 +124,9 @@ let tool_post_create : Masc_domain.tool_schema =
                     ] )
               ] )
           (* No [required] — handler enforces: body|content must be non-empty,
-       and caller-aware dispatch wrappers auto-inject author for keepers/MCP clients.
+       and caller-aware dispatch wrappers auto-inject author for agent clients.
        Schema-level required=[content,author] rejected callers who used
-       {title,body} (keeper prompt default) before the handler could run. *)
+       {title,body} before the handler could run. *)
         ]
   }
 ;;

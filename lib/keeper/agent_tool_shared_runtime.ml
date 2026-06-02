@@ -502,61 +502,23 @@ let tag_dispatch_fn
 
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let names = Keeper_tool_policy.keeper_allowed_tool_names meta in
-  let categorize_keeper_tool = function
-    | Tool_name.Keeper.Board_comment
-    | Tool_name.Keeper.Board_comment_vote
-    | Tool_name.Keeper.Board_curation_read
-    | Tool_name.Keeper.Board_curation_submit
-    | Tool_name.Keeper.Board_get
-    | Tool_name.Keeper.Board_list
-    | Tool_name.Keeper.Board_post
-    | Tool_name.Keeper.Board_search
-    | Tool_name.Keeper.Board_stats
-    | Tool_name.Keeper.Board_sub_board_create
-    | Tool_name.Keeper.Board_sub_board_delete
-    | Tool_name.Keeper.Board_sub_board_get
-    | Tool_name.Keeper.Board_sub_board_list
-    | Tool_name.Keeper.Board_sub_board_update
-    | Tool_name.Keeper.Board_vote -> "board"
-    | Tool_name.Keeper.Voice_agent
-    | Tool_name.Keeper.Voice_listen
-    | Tool_name.Keeper.Voice_session_end
-    | Tool_name.Keeper.Voice_session_start
-    | Tool_name.Keeper.Voice_sessions
-    | Tool_name.Keeper.Voice_speak -> "voice"
-    | Tool_name.Keeper.Task_claim
-    | Tool_name.Keeper.Task_create
-    | Tool_name.Keeper.Task_done
-    | Tool_name.Keeper.Task_force_done
-    | Tool_name.Keeper.Task_force_release
-    | Tool_name.Keeper.Task_submit_for_verification
-    | Tool_name.Keeper.Tasks_audit
-    | Tool_name.Keeper.Tasks_list -> "workspace"
-    | Tool_name.Keeper.Execute -> "execute"
-    | Tool_name.Keeper.Search_files -> "search_files"
-    | Tool_name.Keeper.Fs_edit
-    | Tool_name.Keeper.Fs_read
-    | Tool_name.Keeper.Fs_write
-    | Tool_name.Keeper.Ide_annotate -> "fs"
-    | Tool_name.Keeper.Library_read
-    | Tool_name.Keeper.Library_search
-    | Tool_name.Keeper.Memory_search
-    | Tool_name.Keeper.Memory_write -> "memory"
-    | Tool_name.Keeper.Broadcast | Tool_name.Keeper.Handoff -> "workspace"
-    | Tool_name.Keeper.Context_status
-    | Tool_name.Keeper.Stay_silent
-    | Tool_name.Keeper.Time_now
-    | Tool_name.Keeper.Tool_search
-    | Tool_name.Keeper.Tools_list -> "meta"
-  in
+  let has_prefix prefix name = String.starts_with ~prefix name in
   let categorize n =
     match Tool_name.of_string n with
-    | Some (Tool_name.Keeper tool) -> categorize_keeper_tool tool
     | Some typed ->
       (match Tool_catalog.tool_group (Tool_name.to_string typed) with
        | Some group -> Tool_catalog.tool_group_to_string group
        | None -> "core")
-    | None -> "core"
+    | None ->
+      if has_prefix "keeper_board_" n || has_prefix "masc_board_" n then "board"
+      else if has_prefix "keeper_voice_" n then "voice"
+      else if has_prefix "keeper_task_" n || has_prefix "keeper_tasks_" n then "workspace"
+      else if String.equal n "tool_execute" then "execute"
+      else if String.equal n "tool_search_files" then "search_files"
+      else if has_prefix "tool_" n then "fs"
+      else if has_prefix "keeper_library_" n || has_prefix "keeper_memory_" n then "memory"
+      else if has_prefix "keeper_" n then "meta"
+      else "core"
   in
   let map =
     List.fold_left

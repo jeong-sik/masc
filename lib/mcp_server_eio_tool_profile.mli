@@ -66,17 +66,17 @@ val operator_remote_instructions : string
 
 val tool_schemas_for_profile :
   ?include_hidden:bool ->
-  ?include_keeper_internal:bool ->
+  ?include_agent_internal:bool ->
   Mcp_server.server_state ->
   tool_profile ->
   Masc_domain.tool_schema list
-(** [tool_schemas_for_profile ?include_hidden ?include_keeper_internal
+(** [tool_schemas_for_profile ?include_hidden ?include_agent_internal
       state profile] returns the schema
     list visible on [profile]:
 
     - [Full]: union of [Config.visible_tool_schemas] (gated by
-      [include_hidden]) plus optional keeper-internal tools when
-      [include_keeper_internal = true], deduped by name.
+      [include_hidden]) plus optional agent-internal tools when
+      [include_agent_internal = true], deduped by name.
     - [Managed_agent]: SDK tool contract +
       [managed_agent_passthrough_tool_names] subset.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].
@@ -95,7 +95,7 @@ val tool_allowed_in_profile :
       list-time {!tool_schemas_for_profile}):
 
     - [Full]: [tool_name] is in
-      [Config.visible_tool_schemas].  [Tool_catalog.Keeper_internal]
+      [Config.visible_tool_schemas].  [Tool_catalog.Agent_internal]
       tools are gated by [internal_keeper_runtime] (default
       [false]) — see #8699 for the exhaustive-match rationale.
     - [Managed_agent]: SDK binding by name, OR present in the

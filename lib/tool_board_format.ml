@@ -274,7 +274,7 @@ let sources_footer sources =
     the FIRST signal found; that name is logged so audits can see
     WHICH pattern triggered. New signals are added conservatively
     (#9777). Evidence: ani1999 p-c0494a2e body_len=467 trailing
-    backtick (Odd_inline_tick); keeper-qa-king-agent body_len=3575
+    backtick (Odd_inline_tick); automation-agent body_len=3575
     (Odd_fence). *)
 
 type truncation_signal =

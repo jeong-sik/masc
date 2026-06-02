@@ -3,7 +3,7 @@
     See [keeper_dispatch_ref.mli] for the rationale. *)
 
 (* TEL-OK: dependency-inversion ref module — telemetry lives in the
-   registered backing dispatch (Tool_keeper / Tool_keeper_ops handlers). *)
+   registered backing dispatch (Keeper_tool_surface / Keeper_tool_surface_ops handlers). *)
 let dispatch
   : (config:Workspace.config
      -> agent_name:string

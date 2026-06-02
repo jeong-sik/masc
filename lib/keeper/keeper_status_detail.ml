@@ -223,7 +223,6 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
       ("telemetry_feedback_enabled", opt_bool meta.telemetry_feedback_enabled);
       ( "telemetry_feedback_window_hours",
         opt_int meta.telemetry_feedback_window_hours );
-      ("per_provider_timeout_s", opt_float meta.per_provider_timeout_s);
       ("always_approve", opt_bool meta.always_approve);
       ("oas_env", cache_fingerprint_pairs meta.oas_env);
     ]

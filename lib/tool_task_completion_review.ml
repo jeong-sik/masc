@@ -27,9 +27,9 @@ let persisted_completion_contract ~(task_opt : Masc_domain.task option) =
       Some contract.completion_contract
   | Some _ | None -> None
 
-(* Concrete example handed to the keeper when the anti-rationalization
+(* Concrete example handed to the agent when the anti-rationalization
    gate rejects a completion. Prior form said only "describe actual
-   work"; small-LLM keepers retried the same perfunctory notes
+   work"; small runtimes retried the same perfunctory notes
    (37 Tool_task completion rejects observed on 2026-04-17/18 in
    <base-path>/.masc/tool_calls). The example shows the expected density:
    what changed, which files, what verification ran. See #8688. *)
@@ -61,7 +61,7 @@ let is_placeholder_evidence_ref value =
   value = "" || List.mem value placeholder_evidence_refs
 
 (* [pr_url_has_pull_ref] validates an explicit typed [pr_url] field
-   handed to [keeper_task_done] (see agent_tool_task_runtime.ml). The
+   handed to the task completion adapter (see agent_tool_task_runtime.ml). The
    substring shape match is a thin guard on a typed input — distinct
    from the retired transition-layer substring gate (RFC-0109 Phase E,
    2026-05-27). *)

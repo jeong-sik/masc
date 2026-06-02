@@ -26,7 +26,7 @@ let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
 
 let unavailable_tool_message name =
-  if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name
+  if Tool_catalog.is_on_surface Tool_catalog.Agent_internal name
   then (
     let replacement_hint =
       match (Tool_catalog.metadata name).Tool_catalog.replacement with
@@ -34,7 +34,7 @@ let unavailable_tool_message name =
       | None -> ""
     in
     Printf.sprintf
-      "Tool '%s' is keeper-internal and unavailable on this MCP endpoint.%s"
+      "Tool '%s' is agent-internal and unavailable on this MCP endpoint.%s"
       name
       replacement_hint)
   else Printf.sprintf "Tool '%s' is not available on this MCP endpoint." name
@@ -225,7 +225,7 @@ let handle_list_tools_eio
       ?names
       ?(include_hidden = false)
       ?(include_usage = false)
-      ?(include_keeper_internal = false)
+      ?(include_agent_internal = false)
       ?cursor
       ?agent_id
       state
@@ -243,7 +243,7 @@ let handle_list_tools_eio
   let tools =
     TP.tool_schemas_for_profile
       ~include_hidden
-      ~include_keeper_internal
+      ~include_agent_internal
       state
       profile
     |> (match names with
@@ -254,8 +254,8 @@ let handle_list_tools_eio
     |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
       let rank (schema : Masc_domain.tool_schema) =
         if
-          include_keeper_internal
-          && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name
+          include_agent_internal
+          && Tool_catalog.is_on_surface Tool_catalog.Agent_internal schema.name
         then 0
         else 1
       in
@@ -693,7 +693,7 @@ let handle_request
                      ?names
                      ~include_hidden
                      ~include_usage
-                     ~include_keeper_internal:internal_keeper_runtime
+                     ~include_agent_internal:internal_keeper_runtime
                      ?cursor
                      ?agent_id:auth_token
                      state

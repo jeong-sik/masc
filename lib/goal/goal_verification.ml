@@ -1,14 +1,14 @@
 type principal_kind =
   | Operator
-  | Keeper
+  | Agent
 
 let principal_kind_to_string = function
   | Operator -> "operator"
-  | Keeper -> "keeper"
+  | Agent -> "agent"
 
 let principal_kind_of_string = function
   | "operator" -> Some Operator
-  | "keeper" -> Some Keeper
+  | "agent" -> Some Agent
   | _ -> None
 
 let principal_kind_to_yojson kind =

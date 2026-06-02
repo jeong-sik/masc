@@ -58,7 +58,6 @@ let total_tokens = Keeper_context_core.total_tokens
 let log_keeper_exn = Keeper_context_core.log_keeper_exn
 let checkpoint_max_tokens = Keeper_context_core.checkpoint_max_tokens
 let context_of_oas_checkpoint = Keeper_context_core.context_of_oas_checkpoint
-let checkpoint_model_of_meta = Keeper_context_core.checkpoint_model_of_meta
 let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
 
@@ -196,7 +195,7 @@ let dispatch_keeper_phase_event
         ~error:(Printexc.to_string exn)
 
 (* #9988 Option B follow-up: centralize [Compaction_completed] dispatch
-   so both emit paths (manual recovery in [tool_keeper] and automatic
+   so both emit paths (manual recovery in [keeper_tool_surface] and automatic
    post-turn lifecycle) share the same outcome counter + warn log.
 
    [masc_keeper_compaction_outcome_total{keeper,outcome}] splits into
@@ -329,26 +328,33 @@ let dispatch_post_turn_lifecycle_events
 
 let generate_trace_id = Keeper_identity.generate_trace_id
 
-let keeper_board_write_tool_names = Tool_name.Keeper.board_write_tool_names
+let keeper_board_write_tool_names =
+  [ "keeper_board_post"
+  ; "keeper_board_comment"
+  ; "keeper_board_vote"
+  ; "keeper_board_curation_submit"
+  ]
+
+let canonical_tool_name name = Keeper_tool_resolution.canonical_tool_name name
 
 let keeper_tool_name_matches tool name =
-  match Tool_name.Keeper.of_string name with
-  | Some parsed -> parsed = tool
-  | None -> false
+  String.equal (canonical_tool_name name) tool
 
 let keeper_write_done tool_names =
   List.exists
     (fun name ->
-       match Tool_name.Keeper.of_string name with
-       | Some tool -> Tool_name.Keeper.is_board_write tool
-       | None -> false)
+       List.exists (fun tool -> keeper_tool_name_matches tool name)
+         keeper_board_write_tool_names)
     tool_names
 
 let keeper_action_kind_of_tool_names tool_names =
-  Tool_name.Keeper.board_write_tools
-  |> List.find_map (fun tool ->
-    if List.exists (keeper_tool_name_matches tool) tool_names then
-      Tool_name.Keeper.board_write_action_kind tool
+  [ "keeper_board_post", "post"
+  ; "keeper_board_comment", "comment"
+  ; "keeper_board_vote", "vote"
+  ; "keeper_board_curation_submit", "curation"
+  ]
+  |> List.find_map (fun (tool, action_kind) ->
+    if List.exists (keeper_tool_name_matches tool) tool_names then Some action_kind
     else None)
   |> Option.value ~default:"none"
 

@@ -2,8 +2,8 @@ module Workspace = Masc_mcp.Workspace
 module Store = Masc_mcp.Keeper_meta_store
 module Profile = Masc_mcp.Keeper_types_profile
 module Status_detail = Masc_mcp.Keeper_status_detail
-module Tool_keeper = Masc_mcp.Tool_keeper
-module Tool_keeper_ops = Masc_mcp.Tool_keeper_ops
+module Keeper_tool_surface = Masc_mcp.Keeper_tool_surface
+module Keeper_tool_surface_ops = Masc_mcp.Keeper_tool_surface_ops
 
 let temp_dir () =
   let path = Filename.temp_file "keeper-effective-meta-" "" in
@@ -242,7 +242,7 @@ goal = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc_mcp.Keeper_meta_contract.keeper_meta);
-  match Tool_keeper_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
+  match Keeper_tool_surface_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
   | None -> Alcotest.fail "expected error row for invalid effective meta"
   | Some row ->
       Alcotest.(check (option string))
@@ -272,7 +272,7 @@ goal = "missing sandbox profile"
   Fun.protect
     ~finally:Masc_mcp.Keeper_registry.clear
     (fun () ->
-      match Tool_keeper_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
+      match Keeper_tool_surface_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
       | None -> Alcotest.fail "expected error row for invalid effective meta"
       | Some row ->
           Alcotest.(check (option bool))
@@ -297,7 +297,7 @@ goal = "missing sandbox profile"
     (fun () ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
-      let ctx : _ Tool_keeper.context =
+      let ctx : _ Keeper_tool_surface.context =
         {
           config;
           agent_name = "test-agent";
@@ -308,7 +308,7 @@ goal = "missing sandbox profile"
         }
       in
       match
-        Tool_keeper.dispatch ctx ~name:"masc_keeper_sandbox_status" ~args:(`Assoc [])
+        Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_sandbox_status" ~args:(`Assoc [])
       with
       | None -> Alcotest.fail "sandbox status tool was not dispatched"
       | Some result ->

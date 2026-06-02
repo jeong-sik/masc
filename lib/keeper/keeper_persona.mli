@@ -15,7 +15,7 @@ val handle_persona_save :
   _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 (** RFC-0182 §3.1 — ctx-free entry points for the persona dispatch
-    ref.  [Tool_keeper] registers these into [Persona_dispatch_ref]
+    ref.  [Keeper_tool_surface] registers these into [Persona_dispatch_ref]
     at module load so [Agent_tool_in_process_runtime] (compiled
     early) can reach the persona surface without a static import that
     closes a cycle through [Keeper_turn_driver]. *)

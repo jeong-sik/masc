@@ -94,7 +94,7 @@ let list_posts_after_cursor (cursor_ts, cursor_post_id) =
     compare_cursor_token (cursor_token_of_post a) (cursor_token_of_post b))
 ;;
 
-let text (signal : Board_dispatch.keeper_board_signal) =
+let text (signal : Board_dispatch.board_signal) =
   String.concat
     "\n"
     (List.filter
@@ -110,7 +110,7 @@ let text (signal : Board_dispatch.keeper_board_signal) =
 let match_signal
       ~continuity_summary:(_ : string)
       ~(meta : keeper_meta)
-      ~(signal : Board_dispatch.keeper_board_signal)
+      ~(signal : Board_dispatch.board_signal)
   : match_result
   =
   let self_tokens = Message_scope.self_identity_tokens meta in
@@ -186,7 +186,7 @@ let check_self_comment_status ~self_tokens ~(post_id : string) : comment_status 
 
 type stigmergy_match_result = { overall_score : int }
 
-let stigmergy_match ~(meta : keeper_meta) ~(signal : Board_dispatch.keeper_board_signal)
+let stigmergy_match ~(meta : keeper_meta) ~(signal : Board_dispatch.board_signal)
   : stigmergy_match_result
   =
   let signal_text = String.lowercase_ascii (text signal) in
@@ -211,7 +211,7 @@ let stigmergy_match ~(meta : keeper_meta) ~(signal : Board_dispatch.keeper_board
 let wake_reason
       ~continuity_summary
       ~(meta : keeper_meta)
-      ~(signal : Board_dispatch.keeper_board_signal)
+      ~(signal : Board_dispatch.board_signal)
   : string option
   =
   let matched = match_signal ~continuity_summary ~meta ~signal in

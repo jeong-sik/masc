@@ -137,7 +137,7 @@ val keeper_safe_tool_names : string list
 val keeper_backend_tool_name : string -> string
 (** Resolve a keeper-facing tool alias to its [masc_*] backend
     name; identity for non-aliased tools. Pulls from
-    [Tool_catalog_surfaces.keeper_internal_replacement]. *)
+    runtime-owned aliases are resolved behind the runtime boundary. *)
 
 (** {1 Snapshot} *)
 

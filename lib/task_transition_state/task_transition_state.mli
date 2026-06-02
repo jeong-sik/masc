@@ -51,7 +51,7 @@
     client-side (cached [task_status] + valid_next_actions) before the
     transition is even attempted, so the same [(task, action, from)]
     tuple is not retried 5–7× per task. That change touches the
-    keeper tool-call loop and the agent SDK retry semantics and is
+    agent tool-call loop and the agent SDK retry semantics and is
     deferred to its own RFC.
 
     For now, the [`Threshold_silence] outcome gives the operator a

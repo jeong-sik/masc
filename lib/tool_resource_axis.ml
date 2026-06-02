@@ -26,19 +26,6 @@ let to_string = function
 ;;
 
 
-let public_masc_to_internal_tbl =
-  let t = Hashtbl.create 16 in
-  List.iter
-    (fun internal ->
-       match Tool_catalog_surfaces.keeper_internal_replacement internal with
-       | Some public -> Hashtbl.replace t public internal
-       | None -> ())
-    Tool_catalog_surfaces.keeper_internal_tools;
-  t
-;;
-
-let public_masc_to_internal name = Hashtbl.find_opt public_masc_to_internal_tbl name
-
 let translate_search_files_public_args args =
   match args with
   | `Assoc fields ->
@@ -77,12 +64,9 @@ let translate_public_alias_args ~public args =
 
 let normalize_call ~tool_name ~arguments =
   let stripped = Tool_name_alias_axis.strip_mcp_masc_prefix tool_name in
-  match public_masc_to_internal stripped with
-  | Some internal -> internal, arguments
-  | None ->
-    (match Tool_name_alias_axis.internal_name_of_public stripped with
-     | Some internal -> internal, translate_public_alias_args ~public:stripped arguments
-     | None -> stripped, arguments)
+  match Tool_name_alias_axis.internal_name_of_public stripped with
+  | Some internal -> internal, translate_public_alias_args ~public:stripped arguments
+  | None -> stripped, translate_public_alias_args ~public:stripped arguments
 ;;
 
 let json_string_list_opt key fields =
@@ -182,48 +166,6 @@ let classify_structured_shell_op args =
   | None -> Ungated
 ;;
 
-let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
-  let open Tool_name.Keeper in
-  match tool with
-  | Tool_name.Keeper.Execute -> typed_execute_args_class args
-  | Search_files -> classify_structured_shell_op args
-  | Fs_edit | Fs_write -> Filesystem_write
-  | Fs_read | Tool_search -> Filesystem_read
-  | Memory_write | Handoff -> Filesystem_write
-  | Memory_search | Library_read | Library_search -> Filesystem_read
-  | Board_post
-  | Board_comment
-  | Board_comment_vote
-  | Board_curation_submit
-  | Board_sub_board_create
-  | Board_sub_board_delete
-  | Board_sub_board_update
-  | Board_vote -> Board_write
-  | Task_claim
-  | Task_create
-  | Task_done
-  | Task_submit_for_verification
-  | Task_force_done
-  | Task_force_release -> Workspace_write
-  | Broadcast | Voice_agent | Voice_listen | Voice_session_start | Voice_speak -> Generic_write
-  | Board_curation_read
-  | Board_get
-  | Board_list
-  | Board_search
-  | Board_stats
-  | Board_sub_board_get
-  | Board_sub_board_list
-  | Context_status
-  | Ide_annotate
-  | Stay_silent
-  | Tasks_audit
-  | Tasks_list
-  | Time_now
-  | Tools_list
-  | Voice_session_end
-  | Voice_sessions -> Ungated
-;;
-
 let classify_masc_tool (tool : Tool_name.Masc.t) =
   let open Tool_name.Masc in
   match tool with
@@ -301,17 +243,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Tool_stats -> Ungated
 ;;
 
-let classify_masc_keeper_tool (tool : Tool_name.Masc_keeper.t) =
-  let open Tool_name.Masc_keeper in
-  match tool with
-  | Tool_name.Masc_keeper.Sandbox_start
-  | Sandbox_stop
-  | Sandbox_status -> Docker
-  | Clear | Compact | Create_from_persona | Down | Msg | Repair | Reset | Up ->
-    Workspace_write
-  | List | Msg_result | Persona_audit | Status -> Ungated
-;;
-
 let classify_non_catalog_tool ~tool_name =
   match tool_name with
   | "shell_exec" -> Some Shell
@@ -320,9 +251,7 @@ let classify_non_catalog_tool ~tool_name =
 
 let classify_normalized ~tool_name ~arguments ~is_read_only =
   match Tool_name.of_string tool_name with
-  | Some (Tool_name.Keeper tool) -> classify_keeper_tool tool arguments
   | Some (Tool_name.Masc tool) -> classify_masc_tool tool
-  | Some (Tool_name.Masc_keeper tool) -> classify_masc_keeper_tool tool
   | None ->
     (match classify_non_catalog_tool ~tool_name with
      | Some resource_class -> resource_class

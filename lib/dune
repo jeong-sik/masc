@@ -155,9 +155,9 @@
    keeper_workspace_ops
    agent_tool_command_runtime
    credential_bundle
-   keeper_credential_provider
-   keeper_host_config_provider
-   keeper_in_container_login_provider
+   credential_provider
+   credential_host_config_provider
+   credential_in_container_login_provider
    keeper_activation_readiness
    agent_tool_task_runtime
    agent_tool_voice_runtime
@@ -295,7 +295,7 @@
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
   tool_misc_admin
-  tool_keeper_persona_audit
+  keeper_tool_persona_audit
   enforcement_status
   tool_misc_web_search
   tool_misc_web_fetch

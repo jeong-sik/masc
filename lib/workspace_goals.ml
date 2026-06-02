@@ -82,7 +82,7 @@ let goal_transition_action_strings =
 ;;
 
 let goal_vote_decision_strings = [ "approve"; "reject" ]
-let goal_principal_kind_strings = [ "operator"; "keeper" ]
+let goal_principal_kind_strings = [ "operator"; "agent" ]
 
 let make_enum_field_error ~field ~allowed ~received =
   { field

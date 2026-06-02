@@ -19,13 +19,7 @@ type effect_domain =
   | Host_repo_write
 
 type tool_group =
-  | Board
-  | Knowledge
-  | Tasks
-  | Voice
-  | Filesystem
   | Masc_board
-  | Masc_keeper
   | Masc_plan
   | Masc_agent
   | Masc_core
@@ -37,72 +31,15 @@ let effect_domain_to_string = function
   | Host_repo_write -> "host_repo_write"
 
 let tool_group_to_string = function
-  | Board -> "board"
-  | Knowledge -> "knowledge"
-  | Tasks -> "tasks"
-  | Voice -> "voice"
-  | Filesystem -> "filesystem"
   | Masc_board -> "masc_board"
-  | Masc_keeper -> "masc_keeper"
   | Masc_plan -> "masc_plan"
   | Masc_agent -> "masc_agent"
   | Masc_core -> "masc_core"
 
 module TN = Tool_name
-module TK = Tool_name.Keeper
 module TM = Tool_name.Masc
-module TMK = Tool_name.Masc_keeper
 
 let inferred_effect_domain_of_typed_tool_name = function
-  | TN.Keeper TK.Execute | TN.Keeper TK.Search_files -> Some Host_repo_write
-  | TN.Keeper TK.Board_get
-  | TN.Keeper TK.Board_list
-  | TN.Keeper TK.Board_curation_read
-  | TN.Keeper TK.Board_search
-  | TN.Keeper TK.Board_stats
-  | TN.Keeper TK.Board_sub_board_get
-  | TN.Keeper TK.Board_sub_board_list
-  | TN.Keeper TK.Context_status
-  | TN.Keeper TK.Fs_read
-  | TN.Keeper TK.Library_read
-  | TN.Keeper TK.Library_search
-  | TN.Keeper TK.Memory_search
-  | TN.Keeper TK.Stay_silent
-  | TN.Keeper TK.Tasks_audit
-  | TN.Keeper TK.Tasks_list
-  | TN.Keeper TK.Time_now
-  | TN.Keeper TK.Tool_search
-  | TN.Keeper TK.Tools_list
-  | TN.Keeper TK.Voice_sessions ->
-      Some Read_only
-  | TN.Keeper (TK.Fs_edit | TK.Fs_write) -> Some Playground_write
-  | TN.Keeper TK.Memory_write ->
-      Some Masc_workspace
-  | TN.Keeper TK.Board_comment
-  | TN.Keeper TK.Board_comment_vote
-  | TN.Keeper TK.Board_curation_submit
-  | TN.Keeper TK.Board_post
-  | TN.Keeper TK.Board_sub_board_create
-  | TN.Keeper TK.Board_sub_board_delete
-  | TN.Keeper TK.Board_sub_board_update
-  | TN.Keeper TK.Board_vote
-  | TN.Keeper TK.Broadcast
-  | TN.Keeper TK.Handoff
-  | TN.Keeper TK.Ide_annotate
-  | TN.Keeper TK.Task_claim
-  | TN.Keeper TK.Task_create
-  | TN.Keeper TK.Task_done
-  | TN.Keeper TK.Task_force_done
-  | TN.Keeper TK.Task_force_release
-  (* [Memory_write] matched above in [access_of_tool_name] (merged from main);
-     removed duplicate that was in [tool_group_of_tool_name] arm. *)
-  | TN.Keeper TK.Task_submit_for_verification
-  | TN.Keeper TK.Voice_agent
-  | TN.Keeper TK.Voice_listen
-  | TN.Keeper TK.Voice_session_end
-  | TN.Keeper TK.Voice_session_start
-  | TN.Keeper TK.Voice_speak ->
-      Some Masc_workspace
   | TN.Masc TM.Deliver
   | TN.Masc TM.Operator_action
   | TN.Masc TM.Start ->
@@ -179,79 +116,12 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Transition
   | TN.Masc TM.Update_priority ->
       Some Masc_workspace
-  | TN.Masc_keeper TMK.List
-  | TN.Masc_keeper TMK.Persona_audit
-  | TN.Masc_keeper TMK.Sandbox_status
-  | TN.Masc_keeper TMK.Status ->
-      Some Read_only
-  | TN.Masc_keeper TMK.Clear
-  | TN.Masc_keeper TMK.Compact
-  | TN.Masc_keeper TMK.Create_from_persona
-  | TN.Masc_keeper TMK.Down
-  | TN.Masc_keeper TMK.Msg
-  | TN.Masc_keeper TMK.Msg_result
-  | TN.Masc_keeper TMK.Repair
-  | TN.Masc_keeper TMK.Reset
-  | TN.Masc_keeper TMK.Sandbox_start
-  | TN.Masc_keeper TMK.Sandbox_stop
-  | TN.Masc_keeper TMK.Up ->
-      Some Masc_workspace
-
 let inferred_effect_domain name =
   match Tool_name.of_string name with
   | Some typed_name -> inferred_effect_domain_of_typed_tool_name typed_name
   | None -> None
 
 let tool_group_of_typed_tool_name = function
-  | TN.Keeper
-      ( TK.Board_comment
-      | TK.Board_comment_vote
-      | TK.Board_curation_read
-      | TK.Board_curation_submit
-      | TK.Board_get
-      | TK.Board_list
-      | TK.Board_post
-      | TK.Board_search
-      | TK.Board_stats
-      | TK.Board_sub_board_create
-      | TK.Board_sub_board_delete
-      | TK.Board_sub_board_get
-      | TK.Board_sub_board_list
-      | TK.Board_sub_board_update
-      | TK.Board_vote ) ->
-      Some Board
-  | TN.Keeper (TK.Memory_search | TK.Memory_write | TK.Library_read | TK.Library_search) ->
-      Some Knowledge
-  | TN.Keeper
-      ( TK.Task_claim
-      | TK.Task_create
-      | TK.Task_done
-      | TK.Task_force_done
-      | TK.Task_force_release
-      | TK.Task_submit_for_verification
-      | TK.Tasks_audit
-      | TK.Tasks_list ) ->
-      Some Tasks
-  | TN.Keeper
-      ( TK.Voice_agent
-      | TK.Voice_listen
-      | TK.Voice_session_end
-      | TK.Voice_session_start
-      | TK.Voice_sessions
-      | TK.Voice_speak ) ->
-      Some Voice
-  | TN.Keeper
-      (TK.Execute | TK.Fs_edit | TK.Fs_write | TK.Fs_read | TK.Ide_annotate | TK.Search_files) ->
-      Some Filesystem
-  | TN.Keeper
-      ( TK.Broadcast
-      | TK.Context_status
-      | TK.Handoff
-      | TK.Stay_silent
-      | TK.Time_now
-      | TK.Tool_search
-      | TK.Tools_list ) ->
-      None
   | TN.Masc
       ( TM.Board_cleanup
       | TM.Board_comment
@@ -274,7 +144,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Board_sub_board_update
       | TM.Board_vote ) ->
       Some Masc_board
-  | TN.Masc_keeper _ -> Some Masc_keeper
   | TN.Masc
       ( TM.Plan_clear_task
       | TM.Plan_get

@@ -107,8 +107,7 @@ let tool_board_curation_submit : Masc_domain.tool_schema =
   ; description =
       "Submit an AI curation snapshot for the board. This records summary, recommended \
        ordering, highlights, tag suggestions, answer matches, health score, rationale, \
-       and provenance without mutating board posts/comments/votes. Keeper wrappers \
-       auto-fill submitted_by."
+       and provenance without mutating board posts/comments/votes."
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -118,13 +117,7 @@ let tool_board_curation_submit : Masc_domain.tool_schema =
                 , `Assoc
                     [ "type", `String "string"
                     ; ( "description"
-                      , `String "Submitting agent; keeper wrapper auto-fills this" )
-                    ] )
-              ; ( "model"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "description"
-                      , `String "Model or provider label used for the curation" )
+                      , `String "Submitting agent identifier" )
                     ] )
               ; ( "summary"
                 , `Assoc
@@ -181,8 +174,7 @@ let tool_board_curation_submit : Masc_domain.tool_schema =
                     [ "type", `String "object"
                     ; ( "description"
                       , `String
-                          "Audit metadata such as source window, prompt/run id, and \
-                           model params" )
+                          "Audit metadata such as source window and prompt/run id" )
                     ] )
               ] )
         ; "required", `List [ `String "submitted_by"; `String "rationale" ]

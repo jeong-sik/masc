@@ -22,89 +22,9 @@ module Float = Stdlib.Float
     hardcoded lists.
 
     This module is a leaf dependency — it depends only on string lists and
-    Env_config. Extracted from tool_catalog.ml to enable SCC cycle-breaking:
-    keeper modules can depend on this leaf module instead of the full
-    Tool_catalog.
+    Env_config. Extracted from tool_catalog.ml to enable SCC cycle-breaking.
 
     @since 2.188.0 — God file decomposition Phase 1 *)
-
-(* ================================================================ *)
-(* Keeper-internal tools                                            *)
-(* ================================================================ *)
-
-let keeper_internal_tools =
-  [ "keeper_stay_silent"
-  ; "tool_read_file"
-  ; "tool_edit_file"
-  ; "tool_write_file"
-  ; "keeper_ide_annotate"
-  ; "keeper_memory_search"
-  ; "keeper_memory_write"
-  ; "keeper_library_search"
-  ; "keeper_library_read"
-  ; "keeper_time_now"
-  ; "keeper_tools_list"
-  ; "keeper_context_status"
-  ; "keeper_tasks_list"
-  ; "keeper_tasks_audit"
-  ; "keeper_task_claim"
-  ; "keeper_task_create"
-  ; "keeper_task_done"
-  ; "keeper_task_submit_for_verification"
-  ; "keeper_task_force_release"
-  ; "keeper_task_force_done"
-  ; "keeper_broadcast"
-  ; "keeper_board_get"
-  ; "keeper_board_post"
-  ; "keeper_board_list"
-  ; "keeper_board_comment"
-  ; "keeper_board_vote"
-  ; "keeper_board_stats"
-  ; "keeper_board_search"
-  ; "keeper_board_curation_read"
-  ; "keeper_board_curation_submit"
-  ; "tool_search_files"
-  ; "tool_execute"
-  ; "keeper_voice_speak"
-  ; (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
-       counterpart on MCP surfaces. *)
-    "keeper_voice_listen"
-  ; "keeper_voice_agent"
-  ; "keeper_voice_sessions"
-  ; "keeper_voice_session_start"
-  ; "keeper_voice_session_end"
-  ; (* Tool discovery *)
-    "keeper_tool_search"
-    (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
-       a regular tool — does not need a keeper shard entry.
-       keeper_unified: runtime name, not a tool. *)
-  ]
-;;
-
-(** Immutable alias for keeper-internal tool name membership tests.
-    Replaced mutable Hashtbl with plain list — membership via List.mem
-    is O(n) but the list is <50 elements, so the overhead is negligible. *)
-let keeper_internal_set : string list = keeper_internal_tools
-
-let keeper_internal_replacement = function
-  | "keeper_board_get" -> Some "masc_board_get"
-  | "keeper_board_post" -> Some "masc_board_post"
-  | "keeper_board_list" -> Some "masc_board_list"
-  | "keeper_board_comment" -> Some "masc_board_comment"
-  | "keeper_board_vote" -> Some "masc_board_vote"
-  | "keeper_board_stats" -> Some "masc_board_stats"
-  | "keeper_board_search" -> Some "masc_board_search"
-  | "keeper_board_curation_read" -> Some "masc_board_curation_read"
-  | "keeper_board_curation_submit" -> Some "masc_board_curation_submit"
-  | "keeper_voice_speak"
-  | "keeper_voice_agent"
-  | "keeper_voice_sessions"
-  | "keeper_voice_session_start"
-  | "keeper_voice_session_end" -> None
-  | "keeper_tasks_list" -> Some "masc_tasks"
-  | "keeper_broadcast" -> Some "masc_broadcast"
-  | _ -> None
-;;
 
 (* ================================================================ *)
 (* Workspace mutation classification                                *)
@@ -126,8 +46,7 @@ type surface =
   | Local_worker
   | Session_min
   | Admin
-  | Keeper_internal
-  | Keeper_denied
+  | Agent_internal
   | System_internal
 
 let public_mcp_surface_tools =
@@ -154,29 +73,13 @@ let public_mcp_surface_tools =
   ; "masc_plan_update"
   ; (* Heartbeat *)
     "masc_heartbeat"
-  ; (* Keeper interaction *)
-    "masc_keeper_msg"
-  ; "masc_keeper_msg_result"
-  ; "masc_keeper_list"
-  ; "masc_keeper_status"
-  ; "masc_keeper_persona_audit"
-  ; "masc_keeper_sandbox_status"
-  ; "masc_keeper_sandbox_start"
-  ; "masc_keeper_sandbox_stop"
-  ; "masc_keeper_up"
-  ; "masc_keeper_repair"
-  ; "masc_keeper_reset"
-  ; "masc_keeper_down"
-  ; (* Persona authoring is operator-visible, but these materialization tools
-       remain on Keeper_denied so managed keepers never receive them. *)
+  ; (* Persona authoring is operator-visible. *)
     "masc_persona_list"
   ; "masc_persona_schema"
   ; "masc_persona_generate"
   ; "masc_persona_save"
-  ; "masc_keeper_create_from_persona"
   ; (* Board. [masc_board_reaction] is intentionally public: it is the
-       operator/client counterpart to existing board comment/vote actions,
-       while managed keepers continue to receive keeper_* board tools. *)
+       operator/client counterpart to existing board comment/vote actions. *)
     "masc_board_post"
   ; "masc_board_list"
   ; "masc_board_get"
@@ -310,44 +213,12 @@ let admin_surface_tools =
   ; (* Phase 2: surface SSOT *)
     "masc_persona_generate"
   ; "masc_persona_save"
-  ; "masc_keeper_create_from_persona"
-  ; "masc_keeper_reset"
-  ; "masc_keeper_compact"
-  ; "masc_keeper_clear"
   ; "masc_board_delete"
   ; "masc_pause"
   ; "masc_resume"
   ; "masc_runtime_verify"
   ; "masc_runtime_ollama_probe"
   ; "masc_tool_list"
-  ]
-;;
-
-let keeper_internal_surface_tools = keeper_internal_tools
-
-let keeper_denied_surface_tools =
-  [ "masc_reset"
-  ; (* Admin surface — [CanAdmin]-gated, keepers cannot execute these.
-       Log evidence (2026-04-16 /loop): ~49 Forbidden errors per ~3MB
-       window from keepers (ani1999, etc.) trying to call these. They
-       were already denied at dispatch, but the schemas still appeared
-       in keeper tool lists so the LLM kept hallucinating calls. Listing
-       them here filters schemas out at discovery time, so the model
-       never sees them.
-       Source: admin_surface_tools at tool_catalog_surfaces.ml:182. *)
-    "masc_tool_grant"
-  ; "masc_tool_revoke"
-  ; "masc_tool_admin_update"
-  ; "masc_tool_admin_snapshot"
-  ; "masc_config"
-  ; "masc_persona_generate"
-  ; "masc_persona_save"
-  ; "masc_keeper_create_from_persona"
-  ; (* NOTE: masc_keeper_reset is on public_mcp_surface_tools. Keepers don't
-       see the public_mcp surface at discovery, so no filter is needed here.
-       Admin permission still blocks execution. *)
-    "masc_pause"
-  ; "masc_resume"
   ]
 ;;
 
@@ -414,6 +285,8 @@ let execution_role_tools : string list =
   ]
 ;;
 
+let agent_internal_surface_tools : string list = []
+
 (* ================================================================ *)
 (* Surface query functions                                          *)
 (* ================================================================ *)
@@ -424,8 +297,7 @@ let tools_for_surface = function
   | Local_worker -> local_worker_surface_tools
   | Session_min -> session_min_surface_tools
   | Admin -> admin_surface_tools
-  | Keeper_internal -> keeper_internal_surface_tools
-  | Keeper_denied -> keeper_denied_surface_tools
+  | Agent_internal -> agent_internal_surface_tools
   | System_internal -> system_internal_surface_tools
 ;;
 
@@ -435,8 +307,7 @@ let all_surfaces =
   ; Local_worker
   ; Session_min
   ; Admin
-  ; Keeper_internal
-  ; Keeper_denied
+  ; Agent_internal
   ; System_internal
   ]
 ;;
@@ -456,8 +327,7 @@ let spawned_agent_set = build_surface_set spawned_agent_surface_tools
 let local_worker_set = build_surface_set local_worker_surface_tools
 let session_min_set = build_surface_set session_min_surface_tools
 let admin_set = build_surface_set admin_surface_tools
-let keeper_internal_set = build_surface_set keeper_internal_surface_tools
-let keeper_denied_set = build_surface_set keeper_denied_surface_tools
+let agent_internal_set = build_surface_set agent_internal_surface_tools
 let system_internal_set = build_surface_set system_internal_surface_tools
 
 let set_for_surface = function
@@ -466,8 +336,7 @@ let set_for_surface = function
   | Local_worker -> local_worker_set
   | Session_min -> session_min_set
   | Admin -> admin_set
-  | Keeper_internal -> keeper_internal_set
-  | Keeper_denied -> keeper_denied_set
+  | Agent_internal -> agent_internal_set
   | System_internal -> system_internal_set
 ;;
 
@@ -491,7 +360,6 @@ let surface_to_string = function
   | Local_worker -> "local_worker"
   | Session_min -> "session_min"
   | Admin -> "admin"
-  | Keeper_internal -> "keeper_internal"
-  | Keeper_denied -> "keeper_denied"
+  | Agent_internal -> "agent_internal"
   | System_internal -> "system_internal"
 ;;

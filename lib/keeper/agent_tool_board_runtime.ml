@@ -69,11 +69,7 @@ let ensure_keeper_board_post_args ~author ~source = function
   | other -> other
 ;;
 
-let dispatchable_keeper_board_tool_name name =
-  match Tool_name.Keeper.of_string name with
-  | Some tool when Tool_name.Keeper.is_board tool -> Some tool
-  | Some _ | None -> None
-;;
+let agent_board_post_source = "agent_board_post"
 
 let handle_keeper_board_tool
       ~(meta : keeper_meta)
@@ -87,10 +83,10 @@ let handle_keeper_board_tool
   let dispatch_board tool tool_args =
     dispatch (Tool_name.Masc.to_string tool) tool_args
   in
-  match dispatchable_keeper_board_tool_name name with
-  | Some Tool_name.Keeper.Board_post ->
+  match name with
+  | "keeper_board_post" ->
     let author = meta.name in
-    let keeper_source = Tool_name.Keeper.to_string Tool_name.Keeper.Board_post in
+    let keeper_source = name in
     Log.Keeper.debug
       "%s called by %s, raw args: %s"
       keeper_source
@@ -99,7 +95,7 @@ let handle_keeper_board_tool
     let board_args =
       ensure_keeper_board_post_args
         ~author
-        ~source:keeper_source
+        ~source:agent_board_post_source
         (assoc_override_string "author" author args)
     in
     Log.Keeper.debug "board_args: %s" (Yojson.Safe.pretty_to_string board_args);
@@ -115,37 +111,37 @@ let handle_keeper_board_tool
       ok
       (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
     tool_result_or_error result
-  | Some Tool_name.Keeper.Board_list -> dispatch_board Tool_name.Masc.Board_list args
-  | Some Tool_name.Keeper.Board_get -> dispatch_board Tool_name.Masc.Board_get args
-  | Some Tool_name.Keeper.Board_comment ->
+  | "keeper_board_list" -> dispatch_board Tool_name.Masc.Board_list args
+  | "keeper_board_get" -> dispatch_board Tool_name.Masc.Board_get args
+  | "keeper_board_comment" ->
     dispatch_board
       Tool_name.Masc.Board_comment
       (assoc_override_string "author" meta.name args)
-  | Some Tool_name.Keeper.Board_vote ->
+  | "keeper_board_vote" ->
     dispatch_board
       Tool_name.Masc.Board_vote
       (assoc_override_string "voter" meta.name args)
-  | Some Tool_name.Keeper.Board_comment_vote ->
+  | "keeper_board_comment_vote" ->
     dispatch_board
       Tool_name.Masc.Board_comment_vote
       (assoc_override_string "voter" meta.name args)
-  | Some Tool_name.Keeper.Board_stats -> dispatch_board Tool_name.Masc.Board_stats args
-  | Some Tool_name.Keeper.Board_search -> dispatch_board Tool_name.Masc.Board_search args
-  | Some Tool_name.Keeper.Board_curation_read ->
+  | "keeper_board_stats" -> dispatch_board Tool_name.Masc.Board_stats args
+  | "keeper_board_search" -> dispatch_board Tool_name.Masc.Board_search args
+  | "keeper_board_curation_read" ->
     dispatch_board Tool_name.Masc.Board_curation_read args
-  | Some Tool_name.Keeper.Board_curation_submit ->
+  | "keeper_board_curation_submit" ->
     dispatch_board
       Tool_name.Masc.Board_curation_submit
       (assoc_override_string "submitted_by" meta.name args)
-  | Some Tool_name.Keeper.Board_sub_board_create ->
+  | "keeper_board_sub_board_create" ->
     dispatch_board Tool_name.Masc.Board_sub_board_create args
-  | Some Tool_name.Keeper.Board_sub_board_list ->
+  | "keeper_board_sub_board_list" ->
     dispatch_board Tool_name.Masc.Board_sub_board_list args
-  | Some Tool_name.Keeper.Board_sub_board_get ->
+  | "keeper_board_sub_board_get" ->
     dispatch_board Tool_name.Masc.Board_sub_board_get args
-  | Some Tool_name.Keeper.Board_sub_board_update ->
+  | "keeper_board_sub_board_update" ->
     dispatch_board Tool_name.Masc.Board_sub_board_update args
-  | Some Tool_name.Keeper.Board_sub_board_delete ->
+  | "keeper_board_sub_board_delete" ->
     dispatch_board Tool_name.Masc.Board_sub_board_delete args
-  | Some _ | None -> error_json ~fields:[ "tool", `String name ] "unknown_board_tool"
+  | _ -> error_json ~fields:[ "tool", `String name ] "unknown_board_tool"
 ;;

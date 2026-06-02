@@ -1,12 +1,12 @@
 (** RFC-0182 §3.1 — keeper dispatch dependency inversion ref.
 
     Same pattern as [Workspace_dispatch_ref] and [Persona_dispatch_ref].
-    [Tool_keeper] lives in lib/ (late in module order) but is the
+    [Keeper_tool_surface] lives in lib/ (late in module order) but is the
     natural home of keeper workspace tools.  Importing it from
     [Agent_tool_in_process_runtime] (early in lib/keeper) would close
     a cycle.
 
-    Resolution: register ctx-free entry points from [Tool_keeper] into
+    Resolution: register ctx-free entry points from [Keeper_tool_surface] into
     the ref at module load.  [Agent_tool_in_process_runtime] reads the
     ref at dispatch time.
 

@@ -6,7 +6,7 @@ include Operator_control_action
 let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
 
-let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
+let tool_keeper_ctx (ctx : 'a context) : _ Keeper_tool_surface.context =
   {
     config = ctx.config;
     agent_name = ctx.agent_name;
@@ -17,7 +17,7 @@ let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
   }
 
 let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
-  match Tool_keeper.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
+  match Keeper_tool_surface.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
   | Some result when Tool_result.is_success result ->
     Ok (json_of_dispatch_output (Tool_result.message result))
   | Some result -> Error (Tool_result.message result)
@@ -259,7 +259,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
            | Some value -> [ ("timeout_sec", `Int value) ]
            | None -> [])
       in
-      let keeper_ctx : _ Tool_keeper.context =
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config = ctx.config;
           agent_name = ctx.agent_name;
@@ -270,7 +270,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         }
       in
       let* body =
-        match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
+        match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
         | Some result when Tool_result.is_success result -> Ok (Tool_result.message result)
         | Some result -> Error (Tool_result.message result)
         | None -> Error "masc_keeper_msg dispatch unavailable"

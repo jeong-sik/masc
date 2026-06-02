@@ -72,12 +72,12 @@ type backend_state =
   | Uninitialized
   | Active of board_backend * flusher_handle
 
-type keeper_board_signal_kind =
+type board_signal_kind =
   | Board_post_created
   | Board_comment_added
 
-type keeper_board_signal = {
-  kind : keeper_board_signal_kind;
+type board_signal = {
+  kind : board_signal_kind;
   post_id : string;
   author : string;
   title : string;
@@ -227,19 +227,19 @@ let ensure_flusher_actor store =
       loop flusher_start_cas_retries
 
 
-let keeper_board_signal_hook : (keeper_board_signal -> unit) option Atomic.t = Atomic.make None
+let board_signal_hook : (board_signal -> unit) option Atomic.t = Atomic.make None
 
-let set_keeper_board_signal_hook hook =
-  Atomic.set keeper_board_signal_hook (Some hook)
+let set_board_signal_hook hook =
+  Atomic.set board_signal_hook (Some hook)
 
-let emit_keeper_board_signal signal =
-  match Atomic.get keeper_board_signal_hook with
+let emit_board_signal signal =
+  match Atomic.get board_signal_hook with
   | Some hook ->
       (try hook signal
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           Log.BoardLog.error "Keeper board signal hook failed: %s"
+           Log.BoardLog.error "Board signal hook failed: %s"
              (Printexc.to_string exn))
   | None -> ()
 
@@ -276,7 +276,7 @@ let reset_for_test () =
      it now lives inside the variant. *)
   Atomic.set backend_state Uninitialized;
   Atomic.set forced_flusher_start_cas_conflicts_for_test 0;
-  Atomic.set keeper_board_signal_hook None;
+  Atomic.set board_signal_hook None;
   Atomic.set board_sse_hook None
 
 let jsonl_forced () =
@@ -368,7 +368,7 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
       | Ok (Board.Fresh_post post) ->
           let pid = Board.Post_id.to_string post.id in
           let auth = Board.Agent_id.to_string post.author in
-          emit_keeper_board_signal
+          emit_board_signal
             {
               kind = Board_post_created;
               post_id = pid;
@@ -480,7 +480,7 @@ let add_comment ~post_id ~author ~content ?parent_id
           let auth = Board.Agent_id.to_string comment.author in
           (match Board.get_post store ~post_id with
           | Ok post ->
-              emit_keeper_board_signal
+              emit_board_signal
                 {
                   kind = Board_comment_added;
                   post_id;
@@ -672,7 +672,7 @@ let validate_curation_health_score = function
     invalid_arg
       (Printf.sprintf "health_score must be in [0.0, 1.0], got %g" score)
 
-let submit_curation_snapshot ~submitted_by ?model ?summary ~ordering ~highlights
+let submit_curation_snapshot ~submitted_by ?summary ~ordering ~highlights
     ?(tag_suggestions = []) ?(answer_matches = []) ?health_score
     ?(health_components = []) ~rationale ?(provenance = `Assoc []) () =
   let health_score = validate_curation_health_score health_score in
@@ -680,7 +680,6 @@ let submit_curation_snapshot ~submitted_by ?model ?summary ~ordering ~highlights
     id = Board_curation.generate_id ();
     generated_at = Time_compat.now ();
     submitted_by;
-    model;
     summary;
     ordering;
     highlights;

@@ -49,7 +49,7 @@ val f1_gate_check :
 (** [f1_gate_check ~credential_id ~credential_bundle_dir] compares the bundle's
     [oauth_token] fingerprint against the operator ambient
     [gh auth token].  Emits
-    [keeper_credential_provider_gate_warned_total\{credential_id,scope=shared_with_operator\}]
+    [credential_provider_gate_warned_total\{credential_id,scope=shared_with_operator\}]
     Prometheus counter when they match.  RFC-0019 PR-C, permissive
     mode: the function never refuses materialisation; it only counts
     and surfaces the outcome. *)

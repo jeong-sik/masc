@@ -70,36 +70,36 @@ Prefer worktrees for parallel work. \
 Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
 
 let tool_schemas_for_profile ?(include_hidden = false)
-    ?(include_keeper_internal = false) _state
+    ?(include_agent_internal = false) _state
     profile =
   let schemas =
     match profile with
     | Full ->
         let show_all = include_hidden || Tool_catalog.full_surface_override () in
-        let keeper_internal_schemas =
-          if not include_keeper_internal then []
+        let agent_internal_schemas =
+          if not include_agent_internal then []
           else
             Tool_shard.all_keeper_tool_schemas
             |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-                   Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
+                   Tool_catalog.is_on_surface Tool_catalog.Agent_internal
                      schema.name
                    && Tool_catalog.is_visible ~include_hidden:true schema.name)
         in
         let all =
           Config.visible_tool_schemas
-            ~include_hidden:(show_all || include_keeper_internal)
+            ~include_hidden:(show_all || include_agent_internal)
             ()
-          @ keeper_internal_schemas
+          @ agent_internal_schemas
           |> dedupe_tool_schemas_by_name
         in
         let full_profile_tools =
           List.filter
             (fun (schema : Masc_domain.tool_schema) ->
-              let is_keeper_internal =
-                Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name
+              let is_agent_internal =
+                Tool_catalog.is_on_surface Tool_catalog.Agent_internal schema.name
               in
               (not (Tool_catalog.is_on_surface Tool_catalog.System_internal schema.name))
-              && (if is_keeper_internal then include_keeper_internal
+              && (if is_agent_internal then include_agent_internal
                   else show_all || Tool_catalog.is_public_mcp schema.name))
             all
         in
@@ -121,7 +121,7 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
     tool_name =
   match profile with
   | Full ->
-      if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name then
+      if Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool_name then
         internal_keeper_runtime
       else
         (* Equivalent to [List.mem tool_name (names from
@@ -263,18 +263,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_digest", "Operator Digest");
   ("masc_operator_action", "Operator Action");
   ("masc_operator_confirm", "Operator Confirm");
-  (* Keeper *)
-  ("masc_keeper_up", "Start Keeper");
-  ("masc_keeper_msg", "Send Keeper Message");
-  ("masc_keeper_repair", "Keeper Repair");
-  ("masc_keeper_status", "Keeper Status");
-  ("masc_keeper_sandbox_status", "Keeper Sandbox Status");
-  ("masc_keeper_sandbox_start", "Start Keeper Sandbox");
-  ("masc_keeper_sandbox_stop", "Stop Keeper Sandbox");
-  ("masc_keeper_down", "Stop Keeper");
-  ("masc_keeper_compact", "Compact Keeper Context");
-  ("masc_keeper_clear", "Clear Keeper Context");
-  ("masc_keeper_create_from_persona", "Create Keeper from Persona");
   (* SDK projections *)
   ("masc_claim_next", "Claim Next Task");
   (* Misc *)

@@ -29,7 +29,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
   let start_time = Eio.Time.now clock in
   let success, body =
     try
-      let keeper_ctx : _ Tool_keeper.context =
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config = state.Mcp_server.workspace_config;
           agent_name;
@@ -39,7 +39,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
           net = state.Mcp_server.net;
         }
       in
-      match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
+      match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
       | Some result -> Tool_result.is_success result, Tool_result.message result
       | None -> (false, "masc_keeper_msg dispatch unavailable")
     with
@@ -82,7 +82,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
            in
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
-             ~source:(Tool_registry.string_of_source Keeper_internal)
+             ~source:(Tool_registry.string_of_source Agent_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -91,7 +91,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
              (Printexc.to_string exn))
     | None -> ()
   );
-  Tool_registry.record_call_if_known ~source:Keeper_internal
+  Tool_registry.record_call_if_known ~source:Agent_internal
     ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
   (success, body)
 
@@ -251,7 +251,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
   let start_time = Eio.Time.now clock in
   let success, body =
     try
-      let keeper_ctx : _ Tool_keeper.context =
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config = state.Mcp_server.workspace_config;
           agent_name;
@@ -262,7 +262,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
         }
       in
       match
-        Tool_keeper.dispatch_stream ~on_text_delta keeper_ctx
+        Keeper_tool_surface.dispatch_stream ~on_text_delta keeper_ctx
           ~name:"masc_keeper_msg" ~args:arguments
       with
       | Some result -> Tool_result.is_success result, Tool_result.message result
@@ -307,7 +307,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
            in
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
-             ~duration_ms ~source:(Tool_registry.string_of_source Keeper_internal)
+             ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -315,7 +315,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
            Log.Misc.error "telemetry tracking failed: %s"
              (Printexc.to_string exn))
     | None -> ());
-  Tool_registry.record_call_if_known ~source:Keeper_internal
+  Tool_registry.record_call_if_known ~source:Agent_internal
     ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
   (success, body)
 

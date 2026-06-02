@@ -88,9 +88,6 @@ type automation_label =
 
 type system_actor =
   | Ecosystem
-  | Keeper
-  | Keeper_alert_bot
-  | Keeper_system
   | Operator
 
 type author_kind =
@@ -122,10 +119,9 @@ val legacy_migrate_post_kind :
     legacy posts that lack an explicit one.  Decision priority
     (first match wins):
 
-    + System author (one of \["ecosystem"; "keeper";
-      "keeper-alert-bot"; "keeper-system"; "operator"\]) ->
+    + System author (one of the platform/system aliases) ->
       [System_post].
-    + [meta_json.source = "keeper_board_post"] -> [Automation_post].
+    + Agent board-post provenance source -> [Automation_post].
     + Internal visibility + [expires_at > 0.0] + non-empty hearth
       starting with ["mdal"] or containing ["harness"] ->
       [Automation_post].
@@ -153,7 +149,7 @@ val post_classification_reason : post -> string
       (string-or-object).
     + Fallback templates per
       [(post_kind, meta_json.source)] pair (Human_post + dashboard
-      / Human_post + other / Automation_post + keeper_board_post /
+      / Human_post + other / Automation_post + agent board post /
       Automation_post + dashboard / Automation_post + legacy
       heuristic / System_post / etc.). *)
 

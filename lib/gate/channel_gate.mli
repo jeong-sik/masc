@@ -7,13 +7,13 @@
 
     Consumers talk to the gate via HTTP ([/api/v1/gate/*]).
     The gate dispatches to keepers through an injected [dispatch]
-    function, keeping it decoupled from [Tool_keeper] internals.
+    function, keeping it decoupled from [Keeper_tool_surface] internals.
 
     Wire types live in {!Gate_protocol}.
     Keeper dispatch adapter lives in {!Gate_keeper_backend}.
 
     @since 2.217.0
-    @modified 2.222.0 Decoupled from Agent_identity and Tool_keeper *)
+    @modified 2.222.0 Decoupled from Agent_identity and Keeper_tool_surface *)
 
 (** {1 Re-exported Wire Types} *)
 

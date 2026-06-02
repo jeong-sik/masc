@@ -147,7 +147,7 @@ let test_exact_duplicate_comment_returns_same_comment () =
   let post_id = Board.Post_id.to_string post.id in
   let keeper_comment_signals = ref 0 in
   let sse_comment_events = ref 0 in
-  Board_dispatch.set_keeper_board_signal_hook (fun signal ->
+  Board_dispatch.set_board_signal_hook (fun signal ->
     match signal.kind with
     | Board_dispatch.Board_comment_added -> incr keeper_comment_signals
     | Board_dispatch.Board_post_created -> ());

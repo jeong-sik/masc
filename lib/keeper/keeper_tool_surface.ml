@@ -1,5 +1,5 @@
 (* Keeper tool dispatch — ops + cache + start/stop + repair extracted to
-   [Tool_keeper_ops] (godfile decomp). *)
+   [Keeper_tool_surface_ops] (godfile decomp). *)
 
 open Tool_args
 open Keeper_types
@@ -8,10 +8,10 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_runtime
 
-include Tool_keeper_ops
+include Keeper_tool_surface_ops
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path.  Uses
-   [Workspace.config] only (no Eio fields), letting Tool_keeper register
+   [Workspace.config] only (no Eio fields), letting Keeper_tool_surface register
    masc_keeper_list with [Keeper_dispatch_ref] at module load. *)
 let keeper_list_body ~(config : Workspace.config) args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
@@ -452,7 +452,7 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
         tool_result_error (Printf.sprintf "keeper %s: meta unavailable for compaction" name)
       | Ok (Some (_resolved, meta)) ->
         let base_dir = Keeper_types_profile.session_base_dir config in
-        let model = Keeper_context_runtime.checkpoint_model_of_meta meta in
+        let checkpoint_label = "runtime" in
         let max_tokens = resolve_primary_max_context (Some meta) in
         Keeper_context_runtime.dispatch_keeper_phase_event
           ~config ~keeper_name:name
@@ -460,7 +460,7 @@ let keeper_compact_body ~(config : Workspace.config) args : tool_result =
           Keeper_state_machine.Compaction_started;
         match
           Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
-            ~base_dir ~meta ~model ~primary_model_max_tokens:max_tokens
+            ~base_dir ~meta ~model:checkpoint_label ~primary_model_max_tokens:max_tokens
         with
         | Some recovery ->
           Keeper_context_runtime.dispatch_compaction_completed
@@ -610,13 +610,11 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
           in
           (match meta_for_trace with
            | Some meta ->
-               let model = Keeper_context_runtime.checkpoint_model_of_meta meta in
                (match
                   Keeper_context_runtime.save_oas_checkpoint
                     ~max_checkpoint_messages
                     ~session
                     ~agent_name:meta.agent_name
-                    ~model
                     ~ctx:cleared_ctx
                     ~generation:(current_gen + 1)
                 with
@@ -817,7 +815,7 @@ let () =
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Tool_keeper_ops.keeper_msg_result_body ~config args))
+           (Keeper_tool_surface_ops.keeper_msg_result_body ~config args))
     | "masc_keeper_compact" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_compact_body ~config args))
     | "masc_keeper_clear" ->
@@ -834,20 +832,20 @@ let () =
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Tool_keeper_persona_audit.handle ~config args))
+           (Keeper_tool_persona_audit.handle ~config args))
     | "masc_keeper_status" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Tool_keeper_ops.keeper_status_body ~config ~agent_name args))
+           (Keeper_tool_surface_ops.keeper_status_body ~config ~agent_name args))
     | "masc_keeper_repair" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Tool_keeper_ops.keeper_repair_body ~config ~agent_name args))
+           (Keeper_tool_surface_ops.keeper_repair_body ~config ~agent_name args))
     | "masc_keeper_down" ->
-      Tool_keeper_ops.invalidate_keeper_list_cache ();
-      Tool_keeper_ops.invalidate_status_cache (Tool_args.get_string args "name" "");
+      Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
+      Keeper_tool_surface_ops.invalidate_status_cache (Tool_args.get_string args "name" "");
       Some
         (tool_result_with_tool_name
            ~tool_name:name
@@ -859,7 +857,7 @@ let () =
       (match sw, clock with
        | Some sw, Some clock ->
          Some
-           (Tool_keeper_ops.keeper_msg_body
+           (Keeper_tool_surface_ops.keeper_msg_body
               ~config
               ~agent_name
               ~sw
@@ -872,7 +870,7 @@ let () =
       (match sw, clock with
        | Some sw, Some clock ->
          Some
-           (Tool_keeper_ops.keeper_up_body
+           (Keeper_tool_surface_ops.keeper_up_body
               ~config
               ~agent_name
               ~sw

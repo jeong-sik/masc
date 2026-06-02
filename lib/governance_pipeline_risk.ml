@@ -143,22 +143,6 @@ let classify_name name =
    [baseline_risk] intercepts both before they reach these tables, since
    their risk is input-action dependent. Mirrors [Tool_resource_axis]. *)
 
-let risk_of_keeper (k : Tool_name.Keeper.t) : risk_level =
-  let open Tool_name.Keeper in
-  match k with
-  | Execute | Board_comment | Board_comment_vote | Board_curation_read
-  | Board_curation_submit | Board_get | Board_list | Board_post | Board_search
-  | Board_stats | Board_vote | Board_sub_board_get | Board_sub_board_list
-  | Broadcast | Context_status | Fs_read | Ide_annotate | Handoff
-  | Library_read | Library_search | Memory_search | Memory_write | Search_files
-  | Stay_silent | Task_done | Task_submit_for_verification | Tasks_audit
-  | Tasks_list | Time_now | Tool_search | Tools_list | Voice_agent
-  | Voice_listen | Voice_session_end | Voice_sessions | Voice_speak -> Low
-  | Task_claim | Task_create | Voice_session_start -> Medium
-  | Board_sub_board_create | Board_sub_board_update | Fs_edit | Fs_write -> High
-  | Board_sub_board_delete | Task_force_done | Task_force_release -> Critical
-;;
-
 let risk_of_masc (m : Tool_name.Masc.t) : risk_level =
   let open Tool_name.Masc in
   match m with
@@ -181,19 +165,8 @@ let risk_of_masc (m : Tool_name.Masc.t) : risk_level =
   | Board_delete | Board_sub_board_delete | Reset -> Critical
 ;;
 
-let risk_of_masc_keeper (mk : Tool_name.Masc_keeper.t) : risk_level =
-  let open Tool_name.Masc_keeper in
-  match mk with
-  | Clear | Compact | Down | List | Msg | Msg_result | Persona_audit | Repair
-  | Sandbox_status | Status | Up -> Low
-  | Reset | Sandbox_start | Sandbox_stop -> Medium
-  | Create_from_persona -> High
-;;
-
 let risk_of_typed : Tool_name.t -> risk_level = function
-  | Tool_name.Keeper k -> risk_of_keeper k
   | Tool_name.Masc m -> risk_of_masc m
-  | Tool_name.Masc_keeper mk -> risk_of_masc_keeper mk
 ;;
 
 (* Non-typed names absent from [Tool_name] keep an explicit override; the

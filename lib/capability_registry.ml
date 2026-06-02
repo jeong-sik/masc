@@ -175,12 +175,7 @@ let privileged_public_tool_names : string list = []
 let privileged_keeper_tool_names : string list =
   [ "tool_execute"; "tool_edit_file"; "tool_write_file" ]
 
-(* Derived from Tool_catalog_surfaces.keeper_internal_replacement (SSOT).
-   Returns the masc_* backend name for aliased tools, identity otherwise. *)
-let keeper_backend_tool_name name =
-  match Tool_catalog_surfaces.keeper_internal_replacement name with
-  | Some masc_name -> masc_name
-  | None -> name
+let keeper_backend_tool_name name = name
 
 let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =

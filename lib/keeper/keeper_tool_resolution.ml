@@ -97,7 +97,7 @@ let resolve name =
                   ; Tool_catalog_surfaces.Local_worker
                   ; Tool_catalog_surfaces.Session_min
                   ; Tool_catalog_surfaces.Admin
-                  ; Tool_catalog_surfaces.Keeper_internal
+                  ; Tool_catalog_surfaces.Agent_internal
                   ; Tool_catalog_surfaces.System_internal
                   ]
                 in
@@ -166,7 +166,7 @@ let all_admitting_sources name =
     ; Tool_catalog_surfaces.Local_worker
     ; Tool_catalog_surfaces.Session_min
     ; Tool_catalog_surfaces.Admin
-    ; Tool_catalog_surfaces.Keeper_internal
+    ; Tool_catalog_surfaces.Agent_internal
     ; Tool_catalog_surfaces.System_internal
     ]
   in
@@ -269,7 +269,7 @@ let public_alias_guidance_for_internal_call
        Some
          (Printf.sprintf
             "%s is an internal keeper implementation tool name, not a \
-             model-facing tool. %s"
+             schema-visible tool. %s"
             stripped
             correction))
 ;;

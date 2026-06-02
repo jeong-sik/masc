@@ -37,7 +37,7 @@ let tool_usage_json keeper_name : Yojson.Safe.t =
 ;;
 
 let record_keeper_internal_tool_call ~tool_name ~success ~duration_ms =
-  Tool_registry.record_call ~source:Keeper_internal ~tool_name ~success ~duration_ms ()
+  Tool_registry.record_call ~source:Agent_internal ~tool_name ~success ~duration_ms ()
 ;;
 
 let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =

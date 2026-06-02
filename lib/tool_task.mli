@@ -31,7 +31,7 @@ val schemas : Masc_domain.tool_schema list
 
 val completion_notes_example : string
 (** Concrete example of accepted completion notes. Referenced in the
-    rejection message so the keeper sees the expected density, not
+    rejection message so the agent sees the expected density, not
     just "describe actual work". See #8688. *)
 
 val completion_rejection_message : ?allow_force:bool -> string -> string
@@ -48,21 +48,21 @@ val completion_rejection_message : ?allow_force:bool -> string -> string
 val build_claim_observation_payload :
   now:float -> agent_name:string -> task_id:string -> Yojson.Safe.t
 
-(** [is_cross_model_verdict result] is [true] iff [result] has both
+(** [is_cross_runtime_verdict result] is [true] iff [result] has both
     [generator_runtime = Some g] and [evaluator_runtime] non-empty,
     and [g <> evaluator_runtime].
 
     Inclusion criteria align exactly with
     {!Eval_calibration.calibration_stats} so the live SSE event and
-    the aggregated [cross_model_rate] never disagree on whether a
+    the aggregated [cross_runtime_rate] never disagree on whether a
     given verdict counts. *)
-val is_cross_model_verdict : Anti_rationalization.review_result -> bool
+val is_cross_runtime_verdict : Anti_rationalization.review_result -> bool
 
 (** [build_verdict_sse_payload ~now ~task_id ~req ~result] builds the
     [verdict_recorded] SSE envelope for a finished review.
 
     Pure function — no IO, no broadcast, no logging. Exposed so that
-    the payload contract (field names, nullability, [cross_model]
+    the payload contract (field names, nullability, [cross_runtime]
     semantics) can be exercised by unit tests without touching
     Sse.broadcast or the review pipeline. *)
 val build_verdict_sse_payload :

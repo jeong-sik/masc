@@ -1,5 +1,5 @@
-(** Pin {!Keeper_credential_provider} type surface and
-    {!Keeper_host_config_provider} pure helpers.
+(** Pin {!Credential_provider} type surface and
+    {!Credential_host_config_provider} pure helpers.
 
     Integration coverage of [resolve] (which goes through
     [Credential_bundle.keeper_binding] + filesystem) is left to the
@@ -9,10 +9,10 @@
 
     What this file pins:
 
-    1. [Keeper_credential_provider.pp_error] formats every variant.  Mostly
+    1. [Credential_provider.pp_error] formats every variant.  Mostly
        a regression guard: if a future PR adds a fifth error case
        and forgets [pp_error], the [exhaustive] assertion catches it.
-    2. [Keeper_host_config_provider.For_testing.compose_ro_mounts_result]
+    2. [Credential_host_config_provider.For_testing.compose_ro_mounts_result]
        fails closed when the selected credential bundle mount is empty/missing.
        [mount_if_present] stays a pure optional-mount helper for
        sibling gitconfig/ssh paths.
@@ -26,8 +26,8 @@
 
 open Alcotest
 
-module CP = Masc_mcp.Keeper_credential_provider
-module HCP = Masc_mcp.Keeper_host_config_provider
+module CP = Masc_mcp.Credential_provider
+module HCP = Masc_mcp.Credential_host_config_provider
 module KRC = Masc_mcp.Credential_bundle
 open Repo_manager_types
 
@@ -440,9 +440,9 @@ let test_tear_down_idempotent () =
   HCP.tear_down b ~container_id:None;
   ()
 
-(* --- 5. F-1 security gate tests (Keeper_in_container_login_provider) --- *)
+(* --- 5. F-1 security gate tests (Credential_in_container_login_provider) --- *)
 
-module ICLP = Masc_mcp.Keeper_in_container_login_provider
+module ICLP = Masc_mcp.Credential_in_container_login_provider
 
 let test_f1_gate_matching_tokens_rejected () =
   match

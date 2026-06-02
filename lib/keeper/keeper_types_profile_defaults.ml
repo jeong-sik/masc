@@ -1,8 +1,3 @@
-type per_provider_timeout_state =
-  | Per_provider_timeout_unset
-  | Per_provider_timeout_invalid
-  | Per_provider_timeout_set
-
 type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
@@ -31,13 +26,8 @@ type keeper_profile_defaults = {
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  per_provider_timeout_state : per_provider_timeout_state;
-  (* Per-provider timeout for runtime fallback. None = use turn budget heuristic. *)
-  per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  model : string option;
-  models : string list option;
   (* Turn budget overrides. None = inherit env default
      (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
   max_turns_per_call : int option;
@@ -86,14 +76,10 @@ let empty_keeper_profile_defaults =
     active_goal_ids = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;
-    per_provider_timeout_state = Per_provider_timeout_unset;
-    per_provider_timeout = None;
     always_approve = None;
     social_model = None;
     max_turns_per_call = None;
     max_turns_per_call_scheduled_autonomous = None;
-    model = None;
-    models = None;
     unknown_toml_keys = [];
     oas_env = [];
   }

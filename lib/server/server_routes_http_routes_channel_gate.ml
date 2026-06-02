@@ -256,7 +256,7 @@ let handle_gate_connector_status _state request reqd =
 
 let gate_keeper_ctx ~sw ~clock state =
   {
-    Tool_keeper.config = state.Mcp_server.workspace_config;
+    Keeper_tool_surface.config = state.Mcp_server.workspace_config;
     agent_name = "gate:connector";
     sw;
     clock;
@@ -267,7 +267,7 @@ let gate_keeper_ctx ~sw ~clock state =
 let keeper_exists ~sw ~clock state keeper_name =
   let args = `Assoc [ ("name", `String keeper_name) ] in
   match
-    Tool_keeper.dispatch (gate_keeper_ctx ~sw ~clock state)
+    Keeper_tool_surface.dispatch (gate_keeper_ctx ~sw ~clock state)
       ~name:"masc_keeper_status" ~args
   with
   | Some result when Tool_result.is_success result -> Ok true
@@ -281,7 +281,7 @@ let keeper_exists ~sw ~clock state keeper_name =
 
 let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
   match
-    Tool_keeper.dispatch (gate_keeper_ctx ~sw ~clock state) ~name:tool_name ~args
+    Keeper_tool_surface.dispatch (gate_keeper_ctx ~sw ~clock state) ~name:tool_name ~args
   with
   | Some result when Tool_result.is_success result -> (
       let body = Tool_result.message result in

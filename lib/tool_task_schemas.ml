@@ -222,7 +222,7 @@ Call when you pick up, finish, or abandon a task. Supports CAS via expected_vers
 After %s or %s; pair with masc_deliver before action='done'. \
 Use submit_for_verification to request cross-agent review; approve/reject for verifier actions. \
 Use submit_pr_evidence to submit a merged PR as evidence for a todo task that requires tools \
-unavailable to you — this transitions the task directly to awaiting_verification so a keeper \
+unavailable to you — this transitions the task directly to awaiting_verification so an agent \
 with the required tools can verify and close it. For compatibility, \
 submit_for_verification with evidence on a todo task is treated as submit_pr_evidence. \
 Tasks created through %s normally route action='done' into awaiting_verification rather than final done."

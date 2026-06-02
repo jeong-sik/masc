@@ -1,27 +1,16 @@
-(** Tool scope classification — orchestrator MCP surface vs keeper-internal.
+(** Tool scope classification — external MCP surface vs internal agent runtime.
 
-    The masc-mcp tool catalog mixes two audiences:
-    - [Surface]: tools exposed to external MCP clients (supervisor agents,
-      humans via dashboard). These are the goal/board/task/broadcast +
-      admin lifecycle/observability primitives.
-    - [Keeper_internal]: tools that a keeper persona invokes during its
-      own work loop (code/web/worktree/plan/run/workspace/inline
-      helpers). These should not be reachable from the external MCP
-      surface — only via the keeper dispatch table.
-
-    This module supplies the classification *without* requiring every
-    tool record (codegen [tool_spec] + manual [Masc_domain.tool_schema])
-    to grow a new field. Classification is a name-keyed lookup; the
-    initial keeper-internal list is empty so all tools default to
-    [Surface] until subsequent PRs (PR-N1+) move them.
-
-    Plan: ~/me/planning/agent_llm_a-plans/polished-juggling-galaxy.md §2 Stage 2. *)
+    Tool scope is intentionally not tied to Keeper, Board, Goal, Task, Sandbox,
+    Provider, or Model domains. Concrete runtimes provide their own allowlists
+    behind their runtime boundary. *)
 
 type scope =
   | Surface
-  | Keeper_internal
+  | Agent_internal
 
 val classify : name:string -> scope
-(** [classify ~name] returns the scope for the named tool. Default
-    [Surface] unless [name] appears in the keeper-internal list. *)
+(** [classify ~name] returns the scope for the named tool. Default [Surface]. *)
 
+val scope_to_string : scope -> string
+
+val agent_internal_names : unit -> string list

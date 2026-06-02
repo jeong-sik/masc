@@ -116,7 +116,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       ("channel_session_key", `String channel_session_key);
     ]
   in
-  let keeper_ctx : _ Tool_keeper.context = {
+  let keeper_ctx : _ Keeper_tool_surface.context = {
     config;
     agent_name;
     sw;
@@ -126,9 +126,9 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
   } in
   let start_time = Unix.gettimeofday () in
   (* Channel gate needs the final keeper reply, not the async request ACK that
-     plain [Tool_keeper.dispatch] returns for masc_keeper_msg. *)
+     plain [Keeper_tool_surface.dispatch] returns for masc_keeper_msg. *)
   match
-    Tool_keeper.dispatch_stream ~on_text_delta:(fun _ -> ()) keeper_ctx
+    Keeper_tool_surface.dispatch_stream ~on_text_delta:(fun _ -> ()) keeper_ctx
       ~name:"masc_keeper_msg" ~args
   with
   | Some result when Tool_result.is_success result ->

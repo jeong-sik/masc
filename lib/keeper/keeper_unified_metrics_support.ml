@@ -373,7 +373,7 @@ let accountability_evidence_refs
     ~(result : Keeper_agent_run.run_result)
     ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
   let tool_refs =
-    let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
+    let stay_silent = "keeper_stay_silent" in
     result.tools_used
     |> List.filter_map (fun tool_name ->
            let trimmed = String.trim tool_name in

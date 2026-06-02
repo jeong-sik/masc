@@ -256,18 +256,6 @@ let ensure_keeper_meta config name =
     let target_tf_window =
       apply_default_opt defaults.telemetry_feedback_window_hours meta.telemetry_feedback_window_hours in
 
-    (* --- Per-Provider Timeout --- *)
-    let target_per_provider_timeout =
-      match defaults.per_provider_timeout_state with
-      | Keeper_types_profile.Per_provider_timeout_unset ->
-          normalize_per_provider_timeout_opt
-            ~source:(Printf.sprintf "keeper runtime %s" name)
-            meta.per_provider_timeout_s
-      | Keeper_types_profile.Per_provider_timeout_invalid -> None
-      | Keeper_types_profile.Per_provider_timeout_set ->
-          defaults.per_provider_timeout
-    in
-
     (* --- Always Approve --- *)
     let target_always_approve =
       apply_default_opt defaults.always_approve meta.always_approve
@@ -305,7 +293,6 @@ let ensure_keeper_meta config name =
         allowed_paths = target_allowed_paths;
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
-        per_provider_timeout_s = target_per_provider_timeout;
         always_approve = target_always_approve;
         oas_env = target_oas_env;
       }

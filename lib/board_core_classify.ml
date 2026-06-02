@@ -71,7 +71,7 @@ let take = List.take
 (** RFC-0089 §4-3 G2 — typed [author_kind] variant replaces the
     legacy [String.starts_with ~prefix:"auto-" / "qa-"] +
     substring(researcher/harness/smoke/probe) +
-    [List.mem ["ecosystem"; "keeper"; ...]] string classifiers.
+    legacy system-author string classifiers.
 
     Author strings still cross the *write boundary* as raw [string]
     (the persisted [post.author] field), so classification happens
@@ -89,9 +89,6 @@ type automation_label =
 
 type system_actor =
   | Ecosystem
-  | Keeper
-  | Keeper_alert_bot
-  | Keeper_system
   | Operator
 
 type author_kind =
@@ -101,9 +98,6 @@ type author_kind =
 
 let system_actor_of_string = function
   | "ecosystem" -> Some Ecosystem
-  | "keeper" -> Some Keeper
-  | "keeper-alert-bot" -> Some Keeper_alert_bot
-  | "keeper-system" -> Some Keeper_system
   | "operator" -> Some Operator
   | _ -> None
 
@@ -197,9 +191,9 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
     | Some value -> String.lowercase_ascii (String.trim value)
     | None -> ""
   in
-  let meta_is_keeper_board_post =
+  let meta_is_agent_board_post =
     match meta_source meta_json with
-    | Some "keeper_board_post" -> true
+    | Some "agent_board_post" -> true
     | Some _ | None -> false
   in
   let hearth_promotes_to_automation =
@@ -215,8 +209,8 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
   in
   match classify_author author with
   | System_author _ -> System_post
-  | Automation_author _ when meta_is_keeper_board_post -> Automation_post
-  | Human_author when meta_is_keeper_board_post -> Automation_post
+  | Automation_author _ when meta_is_agent_board_post -> Automation_post
+  | Human_author when meta_is_agent_board_post -> Automation_post
   | Automation_author _ when hearth_promotes_to_automation -> Automation_post
   | Human_author when hearth_promotes_to_automation -> Automation_post
   | Automation_author label ->
@@ -250,9 +244,9 @@ let post_classification_reason (p : post) =
             "Direct board post without automation override (source=%s)." source
       | Human_post, None ->
           "Direct board post without automation provenance."
-      | Automation_post, Some "keeper_board_post" ->
+      | Automation_post, Some "agent_board_post" ->
           Printf.sprintf
-            "Automation classification based on source=keeper_board_post, author=%s, and the automation post_kind contract."
+            "Automation classification based on board automation provenance, author=%s, and the automation post_kind contract."
             author
       | Automation_post, Some "dashboard_board_post" ->
           "Dashboard board post classified as automation for a bound agent author."

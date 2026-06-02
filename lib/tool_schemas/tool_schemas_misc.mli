@@ -38,13 +38,8 @@ val dashboard_scope_enum_strings : string list
 
 val config_category_enum_strings : string list
 (** Mirror of [Env_config_snapshot.valid_config_category_strings]
-    (issue #8493).  20 categories pinned: ["server"], ["auth"],
-    ["transport"], ["storage"], ["runtime"],
-    ["rate_limiting"], ["inference"], ["keeper"],
-    ["keeper_execution"], ["keeper_guardrails"], ["autonomy"],
-    ["level2"], ["dashboard"], ["economy"], ["governance"],
-    ["channel"], ["process"], ["worker"], ["web_search"],
-    ["session"].  Hand-mirrored because [Tool_schemas_misc]
+    (issue #8493) excluding runtime-owner-specific categories.
+    Hand-mirrored because [Tool_schemas_misc]
     depends only on [masc_types] — adding [masc_config] as a
     direct dep would reintroduce the cycle this split avoids.
     The [config_category_ssot] test keeps this aligned with

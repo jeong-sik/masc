@@ -1,9 +1,9 @@
 (** In-container login provider — Option B credential lifecycle.
 
-    @see {!Keeper_in_container_login_provider} for full documentation.
+    @see {!Credential_in_container_login_provider} for full documentation.
     @since 2.90.0 *)
 
-include Keeper_credential_provider.S
+include Credential_provider.S
 
 (** {1 F-1 Security Gate} *)
 
@@ -21,7 +21,7 @@ val provider_gate :
   keeper_token:string ->
   operator_token:string ->
   identity:string ->
-  (unit, Keeper_credential_provider.error) result
+  (unit, Credential_provider.error) result
 
 (**/**)
 
@@ -31,7 +31,7 @@ module For_testing : sig
     keeper_token:string ->
     operator_token:string ->
     identity:string ->
-    (unit, Keeper_credential_provider.error) result
+    (unit, Credential_provider.error) result
 
   val ct_hex_equal : string -> string -> bool
 end

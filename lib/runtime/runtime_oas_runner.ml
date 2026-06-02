@@ -76,18 +76,18 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool
     |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
       Tool_catalog.is_public_mcp tool.schema.name
       || (Option.is_some agent_name
-          && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool.schema.name))
+          && Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool.schema.name))
     |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
   in
-  let has_keeper_internal =
+  let has_agent_internal =
     List.exists
-      (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal)
+      (Tool_catalog.is_on_surface Tool_catalog.Agent_internal)
       runtime_tool_names
   in
   match
     ( Runtime_agent.runtime_mcp_policy_of_tool_names
         ?agent_name
-        ~allow_keeper_internal:has_keeper_internal
+        ~allow_agent_internal:has_agent_internal
         runtime_tool_names
     , agent_name )
   with
@@ -96,7 +96,7 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool
   | Some policy, None -> Some policy
   | None, _ -> None
 
-let keeper_internal_tool_names_for_runtime_surface
+let agent_internal_tool_names_for_runtime_surface
       ~(keeper_name : string)
       (tools : Agent_sdk.Tool.t list)
   =
@@ -105,15 +105,15 @@ let keeper_internal_tool_names_for_runtime_surface
   | Some _ ->
     tools
     |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
-      Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool.schema.name)
+      Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool.schema.name)
     |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
     |> List.sort_uniq String.compare
 
-let keeper_internal_tools_require_materialized_runtime_surface
+let agent_internal_tools_require_materialized_runtime_surface
       ~(keeper_name : string)
       (tools : Agent_sdk.Tool.t list)
   =
-  keeper_internal_tool_names_for_runtime_surface ~keeper_name tools <> []
+  agent_internal_tool_names_for_runtime_surface ~keeper_name tools <> []
 
 let runtime_mcp_policy_for_provider
       ~(keeper_name : string)

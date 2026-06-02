@@ -64,20 +64,12 @@ as the operator. Audit logs show the command, not the identity.
 
 ssh vector: BLOCKED (`ssh` not allowlisted). HTTPS vector: LIVE.
 
-## Workflow artifacts
+## Evidence provenance
 
-- env-site classification + reachability: `tasks/w60vd3uma.output`
-- server-boot-env gap closure: `tasks/a7045a0a01b435172.output`
-- exploit verdict: `tasks/wsk5mcygz.output`
-- purge boundary map: `tasks/wil7ohuug.output`
-(All under the session task dir; transient — facts transcribed above.)
-
-## Related docs
-
-- OSS credential-isolation patterns evidence record:
-  `~/me/memory/procedural-memory/2026-05-30-agent-git-credential-isolation-evidence-record.md`
-- Prior (2026-04-30) credential architecture synthesis, partially stale on
-  filenames: `~/me/knowledge/research/2026-04-30-keeper-credential-architecture-state.md`
+Transient session task outputs and operator-local notes are not cited because
+they are not reproducible for repository readers. The durable facts from those
+runs are transcribed in the sections above and in
+`RFC-0209-local-sandbox-credential-boundary.md`.
 
 ## Diagnosis confidence
 

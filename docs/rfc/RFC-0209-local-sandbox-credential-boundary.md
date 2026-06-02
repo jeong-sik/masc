@@ -78,8 +78,8 @@ primary deployment.
 ## 2. Root cause (typed)
 
 `resolve_host_env`'s `[] -> None` branch maps **"no explicit env"** to
-**"inherit the full ambient environment."** This is the *Unknown →
-Permissive Default* anti-pattern (`software-development.md` §AI-codegen #2):
+**"inherit the full ambient environment."** This is the same *Unknown →
+Permissive Default* anti-pattern captured in the in-repo diagnosis appendix:
 an `option` that should mean "fail / fall to a safe default" is read as
 "convenient pass-through." Every comparable OSS agent treats this as the
 canonical thing to forbid:
@@ -100,7 +100,7 @@ canonical thing to forbid:
   server; **global git identity set to a fail-safe invalid value** so it breaks
   rather than leaks.
 
-Evidence record: `~/me/memory/procedural-memory/2026-05-30-agent-git-credential-isolation-evidence-record.md`.
+Evidence record: `RFC-0209-EVIDENCE.md`.
 
 `Repo_cli_credentials` is masc-mcp's implementation of the universal layer-2
 pattern (per-keeper bundle). It is **standard, not redundant** — the defect is
@@ -194,8 +194,10 @@ profile (which already injects scoped credentials).
 - exec_policy.ml gh-rejection hint vs `bin_allowed` reconciliation (1.1) —
   tracked, fix in the Layer-1 PR or a follow-up; it is a confusing message, not
   the leak.
-- Scrub-list drift: `env_keeper_scrub.ml` is hand-copied from a TS reference
-  (`agent_llm_a-code subprocessEnv.ts:15-53`); a parity test is a follow-up.
+- Scrub-list drift: `env_keeper_scrub.ml` should gain an in-repo parity test
+  against a checked-in scrub-list fixture; the external TS reference used
+  during diagnosis is intentionally not cited here because it is not part of
+  this repository.
 
 ## 4. Purge (dead code removed with Layer 1)
 
@@ -247,8 +249,4 @@ stays fail-closed until then.
 - Docker-safe path: `lib/keeper/keeper_sandbox_docker.ml:311-327,384-385`
 - Operator config verified: `git config --show-origin` →
   `~/.gitconfig credential.helper`, `~/.config/gh/hosts.yml`
-- OSS patterns evidence record:
-  `~/me/memory/procedural-memory/2026-05-30-agent-git-credential-isolation-evidence-record.md`
-- Prior credential architecture synthesis (partially stale on filenames):
-  `~/me/knowledge/research/2026-04-30-keeper-credential-architecture-state.md`
 - Current-state diagnosis trace: `RFC-0209-EVIDENCE.md` (this directory)

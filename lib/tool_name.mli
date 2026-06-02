@@ -1,16 +1,29 @@
 (** Compile-time verified tool name identifiers.
 
     Use [of_string] at MCP/JSON parse boundaries only.
-    All internal code passes [t] values directly. *)
+    All internal code passes [t] values directly.
 
-module Masc : sig
+    PR-S1: domain tool *names* (Task/Board/Goal/Operator) are owned by the
+    submodules below; [Masc.t] composes them. Each submodule owns the complete
+    [masc_*] string for its operations. *)
+
+module Task_name : sig
   type t =
     | Add_task
-    | Agent_fitness
-    | Agent_update
-    | Agent_card
-    | Agents
     | Batch_add_tasks
+    | Claim_next
+    | Task_history
+    | Tasks
+    | Transition
+    | Update_priority
+
+  val to_string : t -> string
+  val of_string : string -> t option
+  val pp : Stdlib.Format.formatter -> t -> unit
+end
+
+module Board_name : sig
+  type t =
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -31,23 +44,54 @@ module Masc : sig
     | Board_sub_board_list
     | Board_sub_board_update
     | Board_vote
-    | Broadcast
-    | Check
-    | Claim_next
-    | Cleanup_zombies
-    | Dashboard
-    | Deliver
+
+  val to_string : t -> string
+  val of_string : string -> t option
+  val pp : Stdlib.Format.formatter -> t -> unit
+end
+
+module Goal_name : sig
+  type t =
     | Goal_list
     | Goal_transition
     | Goal_upsert
     | Goal_verify
-    | Heartbeat
-    | Messages
-    | Note_add
+
+  val to_string : t -> string
+  val of_string : string -> t option
+  val pp : Stdlib.Format.formatter -> t -> unit
+end
+
+module Operator_name : sig
+  type t =
     | Operator_action
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
+
+  val to_string : t -> string
+  val of_string : string -> t option
+  val pp : Stdlib.Format.formatter -> t -> unit
+end
+
+module Masc : sig
+  type t =
+    | Task of Task_name.t
+    | Board of Board_name.t
+    | Goal of Goal_name.t
+    | Operator of Operator_name.t
+    | Agent_fitness
+    | Agent_update
+    | Agent_card
+    | Agents
+    | Broadcast
+    | Check
+    | Cleanup_zombies
+    | Dashboard
+    | Deliver
+    | Heartbeat
+    | Messages
+    | Note_add
     | Plan_clear_task
     | Plan_get
     | Plan_get_task
@@ -56,14 +100,10 @@ module Masc : sig
     | Plan_update
     | Reset
     | Status
-    | Task_history
-    | Tasks
     | Tool_grant
     | Tool_help
     | Tool_list
     | Tool_revoke
-    | Transition
-    | Update_priority
     | Web_fetch
     | Web_search
     | Approval_pending

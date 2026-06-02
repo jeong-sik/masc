@@ -19,16 +19,53 @@ module Float = Stdlib.Float
 
     Replaces stringly-typed tool dispatch with exhaustive variant matching.
     Parse boundary: [of_string] at MCP/JSON ingress only.
-    Internal code uses [t] directly — typos become compile errors. *)
+    Internal code uses [t] directly — typos become compile errors.
 
-module Masc = struct
+    PR-S1 (tool-domain decouple): the Task/Board/Goal/Operator tool *names*
+    are owned by domain-scoped submodules ([Task_name], [Board_name],
+    [Goal_name], [Operator_name]) instead of being enumerated flat in
+    [Masc.t]. The substrate ([Tool_name], [tool_dispatch]) no longer
+    hard-codes those domain operation names in a god-enum + static routing
+    table. Every MCP tool-name STRING is preserved exactly — each domain
+    submodule owns the complete [masc_*] string and [Masc.to_string]/
+    [Masc.of_string] compose over the submodules. *)
+
+module Task_name = struct
   type t =
     | Add_task
-    | Agent_fitness
-    | Agent_update
-    | Agent_card
-    | Agents
     | Batch_add_tasks
+    | Claim_next
+    | Task_history
+    | Tasks
+    | Transition
+    | Update_priority
+
+  let to_string = function
+    | Add_task -> "masc_add_task"
+    | Batch_add_tasks -> "masc_batch_add_tasks"
+    | Claim_next -> "masc_claim_next"
+    | Task_history -> "masc_task_history"
+    | Tasks -> "masc_tasks"
+    | Transition -> "masc_transition"
+    | Update_priority -> "masc_update_priority"
+  ;;
+
+  let of_string = function
+    | "masc_add_task" -> Some Add_task
+    | "masc_batch_add_tasks" -> Some Batch_add_tasks
+    | "masc_claim_next" -> Some Claim_next
+    | "masc_task_history" -> Some Task_history
+    | "masc_tasks" -> Some Tasks
+    | "masc_transition" -> Some Transition
+    | "masc_update_priority" -> Some Update_priority
+    | _ -> None
+  ;;
+
+  let pp fmt t = Format.pp_print_string fmt (to_string t)
+end
+
+module Board_name = struct
+  type t =
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -49,61 +86,8 @@ module Masc = struct
     | Board_sub_board_list
     | Board_sub_board_update
     | Board_vote
-    | Broadcast
-    | Check
-    | Claim_next
-    | Cleanup_zombies
-    | Dashboard
-    | Deliver
-    | Goal_list
-    | Goal_transition
-    | Goal_upsert
-    | Goal_verify
-    | Heartbeat
-    | Messages
-    | Note_add
-    | Operator_action
-    | Operator_confirm
-    | Operator_digest
-    | Operator_snapshot
-    | Plan_clear_task
-    | Plan_get
-    | Plan_get_task
-    | Plan_init
-    | Plan_set_task
-    | Plan_update
-    | Reset
-    | Status
-    | Task_history
-    | Tasks
-    | Tool_grant
-    | Tool_help
-    | Tool_list
-    | Tool_revoke
-    | Transition
-    | Update_priority
-    | Web_fetch
-    | Web_search
-    | Approval_pending
-    | Approval_get
-    | Config
-    | Gc
-    | Get_metrics
-    | Mcp_session
-    | Pause
-    | Resume
-    | Start
-    | Tool_admin_snapshot
-    | Tool_admin_update
-    | Tool_stats
 
   let to_string = function
-    | Add_task -> "masc_add_task"
-    | Agent_fitness -> "masc_agent_fitness"
-    | Agent_update -> "masc_agent_update"
-    | Agent_card -> "masc_agent_card"
-    | Agents -> "masc_agents"
-    | Batch_add_tasks -> "masc_batch_add_tasks"
     | Board_cleanup -> "masc_board_cleanup"
     | Board_comment -> "masc_board_comment"
     | Board_comment_vote -> "masc_board_comment_vote"
@@ -124,62 +108,9 @@ module Masc = struct
     | Board_sub_board_list -> "masc_board_sub_board_list"
     | Board_sub_board_update -> "masc_board_sub_board_update"
     | Board_vote -> "masc_board_vote"
-    | Broadcast -> "masc_broadcast"
-    | Check -> "masc_check"
-    | Claim_next -> "masc_claim_next"
-    | Cleanup_zombies -> "masc_cleanup_zombies"
-    | Dashboard -> "masc_dashboard"
-    | Deliver -> "masc_deliver"
-    | Goal_list -> "masc_goal_list"
-    | Goal_transition -> "masc_goal_transition"
-    | Goal_upsert -> "masc_goal_upsert"
-    | Goal_verify -> "masc_goal_verify"
-    | Heartbeat -> "masc_heartbeat"
-    | Messages -> "masc_messages"
-    | Note_add -> "masc_note_add"
-    | Operator_action -> "masc_operator_action"
-    | Operator_confirm -> "masc_operator_confirm"
-    | Operator_digest -> "masc_operator_digest"
-    | Operator_snapshot -> "masc_operator_snapshot"
-    | Plan_clear_task -> "masc_plan_clear_task"
-    | Plan_get -> "masc_plan_get"
-    | Plan_get_task -> "masc_plan_get_task"
-    | Plan_init -> "masc_plan_init"
-    | Plan_set_task -> "masc_plan_set_task"
-    | Plan_update -> "masc_plan_update"
-    | Reset -> "masc_reset"
-    | Status -> "masc_status"
-    | Task_history -> "masc_task_history"
-    | Tasks -> "masc_tasks"
-    | Tool_grant -> "masc_tool_grant"
-    | Tool_help -> "masc_tool_help"
-    | Tool_list -> "masc_tool_list"
-    | Tool_revoke -> "masc_tool_revoke"
-    | Transition -> "masc_transition"
-    | Update_priority -> "masc_update_priority"
-    | Web_fetch -> "masc_web_fetch"
-    | Web_search -> "masc_web_search"
-    | Approval_pending -> "masc_approval_pending"
-    | Approval_get -> "masc_approval_get"
-    | Config -> "masc_config"
-    | Gc -> "masc_gc"
-    | Get_metrics -> "masc_get_metrics"
-    | Mcp_session -> "masc_mcp_session"
-    | Pause -> "masc_pause"
-    | Resume -> "masc_resume"
-    | Start -> "masc_start"
-    | Tool_admin_snapshot -> "masc_tool_admin_snapshot"
-    | Tool_admin_update -> "masc_tool_admin_update"
-    | Tool_stats -> "masc_tool_stats"
   ;;
 
   let of_string = function
-    | "masc_add_task" -> Some Add_task
-    | "masc_agent_fitness" -> Some Agent_fitness
-    | "masc_agent_update" -> Some Agent_update
-    | "masc_agent_card" -> Some Agent_card
-    | "masc_agents" -> Some Agents
-    | "masc_batch_add_tasks" -> Some Batch_add_tasks
     | "masc_board_cleanup" -> Some Board_cleanup
     | "masc_board_comment" -> Some Board_comment
     | "masc_board_comment_vote" -> Some Board_comment_vote
@@ -200,77 +131,216 @@ module Masc = struct
     | "masc_board_sub_board_get" -> Some Board_sub_board_get
     | "masc_board_sub_board_list" -> Some Board_sub_board_list
     | "masc_board_sub_board_update" -> Some Board_sub_board_update
-    | "masc_broadcast" -> Some Broadcast
-    | "masc_check" -> Some Check
-    | "masc_claim_next" -> Some Claim_next
-    | "masc_cleanup_zombies" -> Some Cleanup_zombies
-    | "masc_dashboard" -> Some Dashboard
-    | "masc_deliver" -> Some Deliver
+    | _ -> None
+  ;;
+
+  let pp fmt t = Format.pp_print_string fmt (to_string t)
+end
+
+module Goal_name = struct
+  type t =
+    | Goal_list
+    | Goal_transition
+    | Goal_upsert
+    | Goal_verify
+
+  let to_string = function
+    | Goal_list -> "masc_goal_list"
+    | Goal_transition -> "masc_goal_transition"
+    | Goal_upsert -> "masc_goal_upsert"
+    | Goal_verify -> "masc_goal_verify"
+  ;;
+
+  let of_string = function
     | "masc_goal_list" -> Some Goal_list
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
     | "masc_goal_verify" -> Some Goal_verify
-    | "masc_heartbeat" -> Some Heartbeat
-    | "masc_messages" -> Some Messages
-    | "masc_note_add" -> Some Note_add
+    | _ -> None
+  ;;
+
+  let pp fmt t = Format.pp_print_string fmt (to_string t)
+end
+
+module Operator_name = struct
+  type t =
+    | Operator_action
+    | Operator_confirm
+    | Operator_digest
+    | Operator_snapshot
+
+  let to_string = function
+    | Operator_action -> "masc_operator_action"
+    | Operator_confirm -> "masc_operator_confirm"
+    | Operator_digest -> "masc_operator_digest"
+    | Operator_snapshot -> "masc_operator_snapshot"
+  ;;
+
+  let of_string = function
     | "masc_operator_action" -> Some Operator_action
     | "masc_operator_confirm" -> Some Operator_confirm
     | "masc_operator_digest" -> Some Operator_digest
     | "masc_operator_snapshot" -> Some Operator_snapshot
-    | "masc_plan_clear_task" -> Some Plan_clear_task
-    | "masc_plan_get" -> Some Plan_get
-    | "masc_plan_get_task" -> Some Plan_get_task
-    | "masc_plan_init" -> Some Plan_init
-    | "masc_plan_set_task" -> Some Plan_set_task
-    | "masc_plan_update" -> Some Plan_update
-    | "masc_reset" -> Some Reset
-    | "masc_status" -> Some Status
-    | "masc_task_history" -> Some Task_history
-    | "masc_tasks" -> Some Tasks
-    | "masc_tool_grant" -> Some Tool_grant
-    | "masc_tool_help" -> Some Tool_help
-    | "masc_tool_list" -> Some Tool_list
-    | "masc_tool_revoke" -> Some Tool_revoke
-    | "masc_transition" -> Some Transition
-    | "masc_update_priority" -> Some Update_priority
-    | "masc_web_fetch" -> Some Web_fetch
-    | "masc_web_search" -> Some Web_search
-    | "masc_approval_pending" -> Some Approval_pending
-    | "masc_approval_get" -> Some Approval_get
-    | "masc_config" -> Some Config
-    | "masc_gc" -> Some Gc
-    | "masc_get_metrics" -> Some Get_metrics
-    | "masc_mcp_session" -> Some Mcp_session
-    | "masc_pause" -> Some Pause
-    | "masc_resume" -> Some Resume
-    | "masc_start" -> Some Start
-    | "masc_tool_admin_snapshot" -> Some Tool_admin_snapshot
-    | "masc_tool_admin_update" -> Some Tool_admin_update
-    | "masc_tool_stats" -> Some Tool_stats
     | _ -> None
   ;;
 
+  let pp fmt t = Format.pp_print_string fmt (to_string t)
+end
+
+module Masc = struct
+  (* Domain tool-NAME operations (Task/Board/Goal/Operator) are owned by the
+     domain submodules above; [Masc.t] composes them rather than enumerating
+     each operation flat. The remaining variants are admin/lifecycle/misc
+     tool names that have no domain owner yet and stay flat here. *)
+  type t =
+    | Task of Task_name.t
+    | Board of Board_name.t
+    | Goal of Goal_name.t
+    | Operator of Operator_name.t
+    | Agent_fitness
+    | Agent_update
+    | Agent_card
+    | Agents
+    | Broadcast
+    | Check
+    | Cleanup_zombies
+    | Dashboard
+    | Deliver
+    | Heartbeat
+    | Messages
+    | Note_add
+    | Plan_clear_task
+    | Plan_get
+    | Plan_get_task
+    | Plan_init
+    | Plan_set_task
+    | Plan_update
+    | Reset
+    | Status
+    | Tool_grant
+    | Tool_help
+    | Tool_list
+    | Tool_revoke
+    | Web_fetch
+    | Web_search
+    | Approval_pending
+    | Approval_get
+    | Config
+    | Gc
+    | Get_metrics
+    | Mcp_session
+    | Pause
+    | Resume
+    | Start
+    | Tool_admin_snapshot
+    | Tool_admin_update
+    | Tool_stats
+
+  let to_string = function
+    | Task t -> Task_name.to_string t
+    | Board b -> Board_name.to_string b
+    | Goal g -> Goal_name.to_string g
+    | Operator o -> Operator_name.to_string o
+    | Agent_fitness -> "masc_agent_fitness"
+    | Agent_update -> "masc_agent_update"
+    | Agent_card -> "masc_agent_card"
+    | Agents -> "masc_agents"
+    | Broadcast -> "masc_broadcast"
+    | Check -> "masc_check"
+    | Cleanup_zombies -> "masc_cleanup_zombies"
+    | Dashboard -> "masc_dashboard"
+    | Deliver -> "masc_deliver"
+    | Heartbeat -> "masc_heartbeat"
+    | Messages -> "masc_messages"
+    | Note_add -> "masc_note_add"
+    | Plan_clear_task -> "masc_plan_clear_task"
+    | Plan_get -> "masc_plan_get"
+    | Plan_get_task -> "masc_plan_get_task"
+    | Plan_init -> "masc_plan_init"
+    | Plan_set_task -> "masc_plan_set_task"
+    | Plan_update -> "masc_plan_update"
+    | Reset -> "masc_reset"
+    | Status -> "masc_status"
+    | Tool_grant -> "masc_tool_grant"
+    | Tool_help -> "masc_tool_help"
+    | Tool_list -> "masc_tool_list"
+    | Tool_revoke -> "masc_tool_revoke"
+    | Web_fetch -> "masc_web_fetch"
+    | Web_search -> "masc_web_search"
+    | Approval_pending -> "masc_approval_pending"
+    | Approval_get -> "masc_approval_get"
+    | Config -> "masc_config"
+    | Gc -> "masc_gc"
+    | Get_metrics -> "masc_get_metrics"
+    | Mcp_session -> "masc_mcp_session"
+    | Pause -> "masc_pause"
+    | Resume -> "masc_resume"
+    | Start -> "masc_start"
+    | Tool_admin_snapshot -> "masc_tool_admin_snapshot"
+    | Tool_admin_update -> "masc_tool_admin_update"
+    | Tool_stats -> "masc_tool_stats"
+  ;;
+
+  let of_string s =
+    (* Domain submodules are tried first; their [of_string] returns [None] for
+       non-domain names, so a flat fallthrough resolves the remainder. The
+       string namespaces are disjoint, so order is irrelevant for correctness. *)
+    match Task_name.of_string s with
+    | Some t -> Some (Task t)
+    | None ->
+      match Board_name.of_string s with
+      | Some b -> Some (Board b)
+      | None ->
+        match Goal_name.of_string s with
+        | Some g -> Some (Goal g)
+        | None ->
+          match Operator_name.of_string s with
+          | Some o -> Some (Operator o)
+          | None ->
+            match s with
+            | "masc_agent_fitness" -> Some Agent_fitness
+            | "masc_agent_update" -> Some Agent_update
+            | "masc_agent_card" -> Some Agent_card
+            | "masc_agents" -> Some Agents
+            | "masc_broadcast" -> Some Broadcast
+            | "masc_check" -> Some Check
+            | "masc_cleanup_zombies" -> Some Cleanup_zombies
+            | "masc_dashboard" -> Some Dashboard
+            | "masc_deliver" -> Some Deliver
+            | "masc_heartbeat" -> Some Heartbeat
+            | "masc_messages" -> Some Messages
+            | "masc_note_add" -> Some Note_add
+            | "masc_plan_clear_task" -> Some Plan_clear_task
+            | "masc_plan_get" -> Some Plan_get
+            | "masc_plan_get_task" -> Some Plan_get_task
+            | "masc_plan_init" -> Some Plan_init
+            | "masc_plan_set_task" -> Some Plan_set_task
+            | "masc_plan_update" -> Some Plan_update
+            | "masc_reset" -> Some Reset
+            | "masc_status" -> Some Status
+            | "masc_tool_grant" -> Some Tool_grant
+            | "masc_tool_help" -> Some Tool_help
+            | "masc_tool_list" -> Some Tool_list
+            | "masc_tool_revoke" -> Some Tool_revoke
+            | "masc_web_fetch" -> Some Web_fetch
+            | "masc_web_search" -> Some Web_search
+            | "masc_approval_pending" -> Some Approval_pending
+            | "masc_approval_get" -> Some Approval_get
+            | "masc_config" -> Some Config
+            | "masc_gc" -> Some Gc
+            | "masc_get_metrics" -> Some Get_metrics
+            | "masc_mcp_session" -> Some Mcp_session
+            | "masc_pause" -> Some Pause
+            | "masc_resume" -> Some Resume
+            | "masc_start" -> Some Start
+            | "masc_tool_admin_snapshot" -> Some Tool_admin_snapshot
+            | "masc_tool_admin_update" -> Some Tool_admin_update
+            | "masc_tool_stats" -> Some Tool_stats
+            | _ -> None
+  ;;
+
   let is_board = function
-    | Board_cleanup
-    | Board_comment
-    | Board_comment_vote
-    | Board_curation_read
-    | Board_curation_submit
-    | Board_delete
-    | Board_get
-    | Board_hearths
-    | Board_list
-    | Board_post
-    | Board_profile
-    | Board_reaction
-    | Board_search
-    | Board_stats
-    | Board_sub_board_create
-    | Board_sub_board_delete
-    | Board_sub_board_get
-    | Board_sub_board_list
-    | Board_sub_board_update
-    | Board_vote -> true
+    | Board _ -> true
     | _ -> false
   ;;
 

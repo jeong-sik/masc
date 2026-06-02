@@ -397,9 +397,8 @@ let summary_of_masc_internal_error = function
     let runtime_id = runtime_id_to_string runtime_id in
     Some
       (Printf.sprintf
-         "No tool-capable provider for runtime %s; required_tools=[%s]; rejected_candidate_count=%d; configured_candidate_count=%d"
+         "No tool-capable provider for runtime %s; rejected_candidate_count=%d; configured_candidate_count=%d"
          runtime_id
-         (summarize_list detail.required_tool_names)
          (List.length detail.provider_rejections)
          (List.length detail.configured_labels))
   | Runtime_exhausted _
@@ -560,9 +559,6 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
             let configured_labels =
               string_list_of_assoc "configured_labels" json
             in
-            let required_tool_names =
-              string_list_of_assoc "required_tool_names" json
-            in
             let rejections =
               match
                 provider_rejections_of_assoc "provider_rejections" json
@@ -574,7 +570,6 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
             in
             let detail : Keeper_meta_contract.no_tool_capable_detail =
               { configured_labels
-              ; required_tool_names
               ; provider_rejections =
                   List.map (fun r -> (r.provider_label, r.reason)) rejections
               }

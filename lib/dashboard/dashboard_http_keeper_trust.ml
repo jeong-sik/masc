@@ -45,15 +45,6 @@ let keeper_trust_json ?(include_receipt = false)
     | Some receipt -> Json_util.get_string_list receipt "requested_tools"
     | None -> []
   in
-  let required_tools, required_tool_candidates, missing_required_tools =
-    match latest_receipt with
-    | Some receipt ->
-        let surface = Option.value ~default:`Null (Json_util.assoc_member_opt "tool_surface" receipt) in
-        ( Json_util.get_string_list surface "required_tools",
-          Json_util.get_string_list surface "required_tool_candidates",
-          Json_util.get_string_list surface "missing_required_tools" )
-    | None -> ([], [], [])
-  in
   let tools_used =
     match latest_receipt with
     | Some receipt -> Json_util.get_string_list receipt "tools_used"
@@ -87,11 +78,6 @@ let keeper_trust_json ?(include_receipt = false)
         | Some receipt -> Option.value ~default:(`String "unknown") (Json_util.assoc_member_opt "tool_contract_result" receipt)
         | None -> `String "unknown" );
       ("requested_tool_count", `Int (List.length requested_tools));
-      ("required_tools", `List (List.map (fun value -> `String value) required_tools));
-      ( "required_tool_candidates",
-        `List (List.map (fun value -> `String value) required_tool_candidates) );
-      ( "missing_required_tools",
-        `List (List.map (fun value -> `String value) missing_required_tools) );
       ("tools_used", `List (List.map (fun value -> `String value) tools_used));
       ("unexpected_tools", `List (List.map (fun value -> `String value) unexpected_tools));
       ("unexpected_tool_count", `Int (List.length unexpected_tools));

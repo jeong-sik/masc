@@ -59,9 +59,6 @@ type tool_surface =
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
-  ; required_tools : string list
-  ; required_tool_candidates : string list
-  ; missing_required_tools : string list
   ; materialized_tools : string list
   }
 
@@ -338,8 +335,7 @@ let stop_reason_to_string = function
 (* Build an extended terminal_reason_code from a receipt whose
    terminal_reason_code is already set to the legacy
    "completion_contract_violation:<id>" form. Uses the receipt's
-   canonical_tools + observed_tools + tools_used as called_tools
-   and tool_surface.required_tools as satisfying_tools.
+   canonical_tools + observed_tools + tools_used as called_tools.
    Returns the original code unchanged if it is not a contract-violation
    code or is already enriched. *)
 let enrich_contract_violation_reason (receipt : t) : string =
@@ -358,10 +354,9 @@ let enrich_contract_violation_reason (receipt : t) : string =
         canonical_names
           (receipt.canonical_tools @ receipt.observed_tools @ receipt.tools_used)
       in
-      let satisfying = canonical_names receipt.tool_surface.required_tools in
       encode_contract_violation_reason
         ~called_tools:called
-        ~satisfying_tools:satisfying
+        ~satisfying_tools:[]
         _contract_id
 ;;
 

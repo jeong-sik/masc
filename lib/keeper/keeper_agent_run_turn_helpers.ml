@@ -84,7 +84,6 @@ let should_require_provider_tool_choice_support
   || actionable_observation_requires_tool_support
 
 let tool_contract_result_for_observed_tools
-    ~(required_tool_names : string list)
     ~(missing_visible_required : string list)
     ~(had_owned_active_task_at_turn_start : bool)
     ~(actual_keeper_tool_names : string list) :
@@ -93,23 +92,8 @@ let tool_contract_result_for_observed_tools
   let classes = List.map class_of actual_keeper_tool_names in
   let has_class wanted = List.exists (( = ) wanted) classes in
   let all_class wanted = classes <> [] && List.for_all (( = ) wanted) classes in
-  let all_required_used =
-    List.for_all
-      (fun name -> List.mem name actual_keeper_tool_names)
-      required_tool_names
-  in
   if missing_visible_required <> [] then
     Keeper_execution_receipt.Contract_tool_surface_mismatch
-  else if required_tool_names <> [] && not all_required_used then
-    if actual_keeper_tool_names = [] then
-      Keeper_execution_receipt.Contract_missing_required_tool_use
-    else if
-      all_class Keeper_tool_progress.Claim_context
-      && had_owned_active_task_at_turn_start
-    then Keeper_execution_receipt.Contract_claim_only_after_owned_task
-    else if all_class Keeper_tool_progress.Passive_status then
-      Keeper_execution_receipt.Contract_passive_only
-    else Keeper_execution_receipt.Contract_missing_required_tool_use
   else if actual_keeper_tool_names = [] then
     Keeper_execution_receipt.Contract_satisfied_completion
   else if

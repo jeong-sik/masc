@@ -48,9 +48,6 @@ val set_turn_context :
   ?approval_mode:string ->
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->
-  ?required_tools:string list ->
-  ?required_tool_candidates:string list ->
-  ?missing_required_tools:string list ->
   ?runtime_profile:string ->
   unit ->
   unit
@@ -153,9 +150,6 @@ val log_call :
   ?approval_mode:string ->
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->
-  ?required_tools:string list ->
-  ?required_tool_candidates:string list ->
-  ?missing_required_tools:string list ->
   ?runtime_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->

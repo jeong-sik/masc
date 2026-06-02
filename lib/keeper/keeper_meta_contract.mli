@@ -129,7 +129,6 @@ type usage_metrics = {
 
 type no_tool_capable_detail =
   { configured_labels : string list
-  ; required_tool_names : string list
   ; provider_rejections : (string * string) list
   }
 
@@ -381,6 +380,10 @@ val effective_meta_of_profile_defaults :
   Keeper_types_profile.keeper_profile_defaults ->
   keeper_meta ->
   (keeper_meta, string) result
+
+val runtime_id_of_meta : keeper_meta -> string
+(** Runtime id selected for keeper dispatch. Uses the keeper profile [model]
+    when present; otherwise falls back to the configured default runtime id. *)
 
 (** {1 Outcome <-> string} *)
 

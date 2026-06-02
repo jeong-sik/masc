@@ -90,7 +90,6 @@ type proactive_runtime =
     [runtime_exhaustion_reason]. *)
 type no_tool_capable_detail =
   { configured_labels : string list
-  ; required_tool_names : string list
   ; provider_rejections : (string * string) list
       (** [(provider_label, reason)] pairs *)
   }
@@ -295,7 +294,7 @@ let runtime_exhaustion_reason_to_json = function
     `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
   | Capacity_exhausted -> `String "capacity_exhausted"
   | No_tool_capable None -> `String "no_tool_capable"
-  | No_tool_capable (Some { configured_labels; required_tool_names; provider_rejections }) ->
+  | No_tool_capable (Some { configured_labels; provider_rejections }) ->
     let rejections_json =
       List.map
         (fun (label, reason) ->
@@ -305,7 +304,6 @@ let runtime_exhaustion_reason_to_json = function
     `Assoc
       [ "tag", `String "no_tool_capable"
       ; "configured_labels", Json_util.json_string_list configured_labels
-      ; "required_tool_names", Json_util.json_string_list required_tool_names
       ; "provider_rejections", `List rejections_json
       ]
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
@@ -336,11 +334,6 @@ let runtime_exhaustion_reason_of_json = function
          | Some (`List xs) -> List.filter_map (function `String s -> Some s | _ -> None) xs
          | _ -> []
        in
-       let required_tool_names =
-         match List.assoc_opt "required_tool_names" fields with
-         | Some (`List xs) -> List.filter_map (function `String s -> Some s | _ -> None) xs
-         | _ -> []
-       in
        let provider_rejections =
          match List.assoc_opt "provider_rejections" fields with
          | Some (`List xs) ->
@@ -354,7 +347,7 @@ let runtime_exhaustion_reason_of_json = function
              xs
          | _ -> []
        in
-       Some (No_tool_capable (Some { configured_labels; required_tool_names; provider_rejections }))
+       Some (No_tool_capable (Some { configured_labels; provider_rejections }))
      | _ -> None)
   | _ -> None
 ;;
@@ -640,6 +633,22 @@ let missing_required_sandbox_profile_error ~keeper_name
     keeper_name
     (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings)
     manifest_hint
+;;
+
+let runtime_id_of_profile_defaults
+    (defaults : Keeper_types_profile.keeper_profile_defaults) =
+  match defaults.model with
+  | Some runtime_id ->
+    let runtime_id = String.trim runtime_id in
+    if String.equal runtime_id "" then Keeper_config.default_runtime_id ()
+    else runtime_id
+  | None -> Keeper_config.default_runtime_id ()
+;;
+
+let runtime_id_of_meta (meta : keeper_meta) =
+  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
+  | Ok defaults -> runtime_id_of_profile_defaults defaults
+  | Error _ -> Keeper_config.default_runtime_id ()
 ;;
 
 let effective_meta_of_profile_defaults

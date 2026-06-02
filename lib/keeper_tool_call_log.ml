@@ -432,9 +432,6 @@ let log_call
       ?approval_mode
       ?tool_surface_class
       ?visible_tool_count
-      ?required_tools
-      ?required_tool_candidates
-      ?missing_required_tools
       ?runtime_profile
       ?result_bytes
       ?truncated_to
@@ -564,21 +561,6 @@ let log_call
         | Some _ -> visible_tool_count
         | None -> ctx.visible_tool_count
       in
-      let required_tools =
-        match required_tools with
-        | Some _ -> required_tools
-        | None -> ctx.required_tools
-      in
-      let required_tool_candidates =
-        match required_tool_candidates with
-        | Some _ -> required_tool_candidates
-        | None -> ctx.required_tool_candidates
-      in
-      let missing_required_tools =
-        match missing_required_tools with
-        | Some _ -> missing_required_tools
-        | None -> ctx.missing_required_tools
-      in
       let runtime_profile =
         match runtime_profile with
         | Some _ -> runtime_profile
@@ -703,9 +685,6 @@ let log_call
           ?approval_mode
           ?tool_surface_class
           ?visible_tool_count
-          ?required_tools
-          ?required_tool_candidates
-          ?missing_required_tools
           ?runtime_profile
           ()
       in

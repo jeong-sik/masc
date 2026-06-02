@@ -515,15 +515,6 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | Some receipt -> json_string_list_member "unexpected_tools" receipt
     | None -> []
   in
-  let required_tools, required_tool_candidates, missing_required_tools =
-    match latest_receipt with
-    | Some receipt ->
-        let surface = json_member "tool_surface" receipt in
-        ( json_string_list_member "required_tools" surface,
-          json_string_list_member "required_tool_candidates" surface,
-          json_string_list_member "missing_required_tools" surface )
-    | None -> [], [], []
-  in
   let runtime_json =
     match latest_receipt with
     | Some receipt -> json_member "runtime" receipt
@@ -562,9 +553,6 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
       ("tool_contract_result", Json_util.string_opt_to_json tool_contract_result);
       ( "runtime_proof_status",
         Json_util.string_opt_to_json tool_contract_result );
-      ("required_tools", Json_util.json_string_list required_tools);
-      ("required_tool_candidates", Json_util.json_string_list required_tool_candidates);
-      ("missing_required_tools", Json_util.json_string_list missing_required_tools);
       ("requested_tools", Json_util.json_string_list requested_tools);
       ("tools_used", Json_util.json_string_list tools_used);
       ("unexpected_tools", Json_util.json_string_list unexpected_tools);

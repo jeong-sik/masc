@@ -140,15 +140,13 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
     Some
       (Keeper_registry.Provider_runtime_error
          { code = "no_tool_capable_provider"
-         ; detail =
-             Printf.sprintf
-               "no tool-capable provider found (runtime=%s labels=[%s] \
-                required_tools=[%s]%s)"
+             ; detail =
+                 Printf.sprintf
+               "no tool-capable provider found (runtime=%s labels=[%s]%s)"
                (ntcp_runtime_id)
                (String.concat ", " detail.configured_labels)
-               (String.concat ", " detail.required_tool_names)
                rejection_summary
-         ; provider_id = None
+             ; provider_id = None
          ; http_status = None
          ; runtime_id = Some (ntcp_runtime_id)
          })

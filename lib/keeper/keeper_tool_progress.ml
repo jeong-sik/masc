@@ -181,34 +181,6 @@ let required_tool_satisfaction ?(satisfying_tools : string list = [])
              (String.concat "; " satisfying_tools)))
 ;;
 
-let required_tool_satisfaction_for_required_names
-      ?(satisfying_tools : string list = [])
-      ~(required_tool_names : string list)
-      (call : Agent_sdk.Completion_contract.tool_call)
-  : (unit, string) result
-  =
-  let required_tool_names =
-    required_tool_names
-    |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-  in
-  let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
-  if List.mem tool_name required_tool_names
-  then Ok ()
-  else required_tool_satisfaction ~satisfying_tools call
-;;
-
-let required_tool_satisfaction_for_turn
-      ?(satisfying_tools : string list = [])
-      ~(required_tool_names : string list)
-      (call : Agent_sdk.Completion_contract.tool_call)
-  : (unit, string) result
-  =
-  match required_tool_names with
-  | [] -> Ok ()
-  | _ -> required_tool_satisfaction_for_required_names ~satisfying_tools ~required_tool_names call
-;;
-
 let parse_tool_csv text =
   text
   |> String.split_on_char ','

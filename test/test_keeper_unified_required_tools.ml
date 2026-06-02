@@ -11,13 +11,6 @@ let satisfies_required_tool name input =
   Result.is_ok (KTP.required_tool_satisfaction (required_tool_call name input))
 ;;
 
-let satisfies_explicit_required_tool ~required_tool_names name input =
-  Result.is_ok
-    (KTP.required_tool_satisfaction_for_required_names
-       ~required_tool_names
-       (required_tool_call name input))
-;;
-
 let test_required_tool_satisfaction_rejects_passive_tools () =
   check bool "global masc_status remains passive" false
     (satisfies_required_tool "masc_status" (`Assoc []));
@@ -86,47 +79,6 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
        ~output_text:"Worktree already exists:\n  Path: /tmp/wt")
 ;;
 
-let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
-  check bool "generic masc_web_search remains passive" false
-    (satisfies_required_tool "masc_web_search" (`Assoc []));
-  check bool "explicit masc_web_search satisfies required contract" true
-    (satisfies_explicit_required_tool
-       ~required_tool_names:[ "masc_web_search" ]
-       "masc_web_search"
-       (`Assoc []));
-  check bool "explicit required list canonicalizes WebSearch alias" true
-    (satisfies_explicit_required_tool
-       ~required_tool_names:[ "masc_web_search" ]
-       "WebSearch"
-       (`Assoc []));
-  check bool "unlisted passive tool still rejected" false
-    (satisfies_explicit_required_tool
-       ~required_tool_names:[ "tool_execute" ]
-       "masc_web_search"
-       (`Assoc []))
-;;
-
-let test_turn_required_tool_satisfaction_keeps_generic_presence_separate () =
-  check bool "generic required-action predicate still rejects passive board read" false
-    (satisfies_required_tool "keeper_board_get" (`Assoc []));
-  check bool
-    "turn-level generic gate accepts passive tool presence for post-run classification" true
-    (Result.is_ok
-       (KTP.required_tool_satisfaction_for_turn
-          ~required_tool_names:[]
-          (required_tool_call "keeper_board_get" (`Assoc []))));
-  check bool "explicit required action still rejects unrelated passive tool" false
-    (Result.is_ok
-       (KTP.required_tool_satisfaction_for_turn
-          ~required_tool_names:[ "tool_execute" ]
-          (required_tool_call "keeper_board_get" (`Assoc []))));
-  check bool "explicit named passive tool remains allowed" true
-    (Result.is_ok
-       (KTP.required_tool_satisfaction_for_turn
-          ~required_tool_names:[ "keeper_board_get" ]
-          (required_tool_call "keeper_board_get" (`Assoc []))))
-;;
-
 let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
   let base_error =
     KTP.required_tool_satisfaction (required_tool_call "masc_status" (`Assoc []))
@@ -158,16 +110,15 @@ let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
     "tool 'keeper_tasks_list' is read-only/passive and cannot satisfy a required-tool \
      contract"
     (Result.get_error empty_hint_error);
-  let turn_hinted =
-    KTP.required_tool_satisfaction_for_turn
+  let hinted_passive =
+    KTP.required_tool_satisfaction
       ~satisfying_tools:[ "keeper_task_claim" ]
-      ~required_tool_names:[ "tool_execute" ]
       (required_tool_call "masc_status" (`Assoc []))
   in
-  check string "turn-level rejection forwards satisfying_tools hint"
+  check string "rejection forwards satisfying_tools hint"
     "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool \
      contract. Call one of these instead: [keeper_task_claim]"
-    (Result.get_error turn_hinted)
+    (Result.get_error hinted_passive)
 ;;
 
 let test_satisfying_tools_for_turn_computes_from_affordances () =
@@ -235,14 +186,6 @@ let () =
             "required tool predicate accepts mutating tools"
             `Quick
             test_required_tool_satisfaction_accepts_mutating_tools
-        ; test_case
-            "explicit required tool predicate accepts named passive tool"
-            `Quick
-            test_explicit_required_tool_satisfaction_accepts_named_passive_tool
-        ; test_case
-            "turn required tool predicate separates presence from progress"
-            `Quick
-            test_turn_required_tool_satisfaction_keeps_generic_presence_separate
         ; test_case
             "required tool satisfaction includes satisfying tools hint"
             `Quick

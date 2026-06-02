@@ -7,11 +7,6 @@ open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-let first_non_empty_string_list values =
-  match List.find_opt (fun values -> values <> []) values with
-  | Some values -> values
-  | None -> []
-
 let string_contains = String_util.string_contains_substring_ci
 
 let runtime_lens_tool_surface_parts scan =
@@ -31,40 +26,12 @@ let runtime_lens_tool_surface_parts scan =
   let requested_tools =
     Json_util.get_string_list lane_decision "requested_tool_names"
   in
-  let required_tools =
-    first_non_empty_string_list
-      [
-        Json_util.get_string_list lane_decision "required_tool_names";
-        Json_util.get_string_list tool_decision "required_tool_names";
-      ]
-  in
   let materialized_tools =
     Json_util.get_string_list lane_decision "materialized_tool_names"
   in
-  let missing_required_tools =
-    first_non_empty_string_list
-      [
-        Json_util.get_string_list lane_decision "missing_required_tool_names_after_lane";
-        Json_util.get_string_list tool_decision "missing_required_tool_names";
-      ]
-  in
-  ( tool_decision
-  , lane_decision
-  , requested_tools
-  , required_tools
-  , materialized_tools
-  , missing_required_tools )
+  ( tool_decision, lane_decision, requested_tools, materialized_tools )
 
 let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
-  let ( _
-      , _
-      , _
-      , required_tools
-      , materialized_tools
-      , missing_required_tools )
-    =
-    runtime_lens_tool_surface_parts scan
-  in
   let has_tool_surface =
     runtime_manifest_scan_event_count scan
       Keeper_runtime_manifest.Tool_surface_selected
@@ -166,23 +133,10 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            { code = "route_tool_capability_gap"
            ; severity = "bad"
            ; lane = "masc_policy_runtime"
-           ; detail = Some "pre-dispatch blocked because route cannot materialize required tools"
+           ; detail = Some "pre-dispatch blocked because route cannot materialize tool lane"
            }
            gaps
        | _ -> gaps)
-  |> (fun gaps ->
-       if missing_required_tools <> [] then
-         add
-           { code = "required_tool_not_materialized"
-           ; severity = "bad"
-           ; lane = "tool_runtime"
-           ; detail =
-               Some
-                 (Printf.sprintf "missing required tools: %s"
-                    (String.concat ", " missing_required_tools))
-           }
-           gaps
-       else gaps)
   |> (fun gaps ->
        if (has_tool_surface || scan.provider_started_count > 0)
           && not has_provider_lane
@@ -214,18 +168,6 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            ; severity = "warn"
            ; lane = "memory_context"
            ; detail = Some "memory was injected but no memory_flushed row was recorded"
-           }
-           gaps
-       else gaps)
-  |> (fun gaps ->
-       if required_tools <> [] && materialized_tools = []
-          && missing_required_tools = []
-       then
-         add
-           { code = "provider_lane_unresolved"
-           ; severity = "warn"
-           ; lane = "masc_policy_runtime"
-           ; detail = Some "required tools exist but provider lane materialization is unknown"
            }
            gaps
        else gaps)

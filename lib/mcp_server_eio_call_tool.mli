@@ -114,8 +114,6 @@ type keeper_runtime_mcp_log_context = {
   approval_mode : string option;
   tool_surface_class : string option;
   visible_tool_count : int option;
-  required_tools : string list option;
-  missing_required_tools : string list option;
   runtime_profile : string option;
 }
 (** Snapshot of the keeper-bound runtime-MCP context

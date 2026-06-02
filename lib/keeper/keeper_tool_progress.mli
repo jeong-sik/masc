@@ -71,26 +71,6 @@ val required_tool_satisfaction
   -> Agent_sdk.Completion_contract.tool_call
   -> (unit, string) result
 
-(** Variant of [required_tool_satisfaction] for an explicit [required_tools]
-    contract. A non-keeper read-only tool can satisfy the turn only when the
-    operator/task contract named that exact tool. *)
-val required_tool_satisfaction_for_required_names
-  :  ?satisfying_tools:string list
-  -> required_tool_names:string list
-  -> Agent_sdk.Completion_contract.tool_call
-  -> (unit, string) result
-
-(** OAS-level satisfaction callback for keeper turns.
-
-    Generic required-tool gates use OAS to enforce tool presence only; MASC
-    classifies passive-only / no-execution-progress calls after the run.
-    Explicit [required_tool_names] still require the named tool. *)
-val required_tool_satisfaction_for_turn
-  :  ?satisfying_tools:string list
-  -> required_tool_names:string list
-  -> Agent_sdk.Completion_contract.tool_call
-  -> (unit, string) result
-
 (** Extract OAS completion-contract satisfying-tool hints from an error reason.
     Returns [] when the reason has no hint or the hint is empty. *)
 val satisfying_tools_from_contract_violation_reason : string -> string list

@@ -7,12 +7,6 @@ type keeper_internal_error =
       ; affordances : string list
       ; fallback_used : bool
       }
-  | Keeper_tool_surface_mismatch of
-      { keeper_name : string
-      ; required_tools : string list
-      ; missing_required_tools : string list
-      ; visible_tools : string list
-      }
 
 let keeper_internal_error_prefix = "[keeper_internal_error] "
 
@@ -24,16 +18,6 @@ let keeper_internal_error_to_json = function
       ; "turn_lane", `String turn_lane
       ; "affordances", `List (List.map (fun value -> `String value) affordances)
       ; "fallback_used", `Bool fallback_used
-      ]
-  | Keeper_tool_surface_mismatch
-      { keeper_name; required_tools; missing_required_tools; visible_tools } ->
-    `Assoc
-      [ "kind", `String "tool_surface_mismatch"
-      ; "keeper_name", `String keeper_name
-      ; "required_tools", `List (List.map (fun value -> `String value) required_tools)
-      ; ( "missing_required_tools"
-        , `List (List.map (fun value -> `String value) missing_required_tools) )
-      ; "visible_tools", `List (List.map (fun value -> `String value) visible_tools)
       ]
 ;;
 

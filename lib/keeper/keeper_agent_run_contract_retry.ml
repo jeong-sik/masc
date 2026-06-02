@@ -11,7 +11,7 @@ let retry_feedback_message text : Agent_sdk.Types.message =
 
 let retry_feedback ~violation_reason =
   Printf.sprintf
-    "[CONTRACT VIOLATION] Your previous response was rejected: %s. Call a visible keeper tool. Do NOT respond with text only."
+    "[CONTRACT VIOLATION] Your previous response was rejected: %s. Retry this turn with the same goal, follow the current turn instructions, and do not repeat the rejected response."
     violation_reason
 ;;
 
@@ -39,10 +39,8 @@ let run_with_single_retry ~keeper_name ~acc
          (Agent_sdk.Error.CompletionContractViolation
             { reason = violation_reason; _ }))
     when acc.Keeper_run_tools.contract_violation_retries < 1 ->
-    (* Contract violation retry (max 1 per turn): the model did not call a
-       required tool. Re-run with feedback so the model sees why it was
-       rejected. The context builder in [Keeper_run_tools] injects extra
-       guidance because [contract_violation_retries > 0]. *)
+    (* Contract violation retry (max 1 per turn): re-run with provider feedback
+       so the model sees why its response mode was rejected. *)
     acc.contract_violation_retries <- acc.contract_violation_retries + 1;
     let retry_feedback = retry_feedback ~violation_reason in
     let retry_messages = history_messages @ [ retry_feedback_message retry_feedback ] in

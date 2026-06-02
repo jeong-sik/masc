@@ -76,7 +76,6 @@ type try_provider_ctx =
     event_bus : Agent_sdk.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
-  ; runtime_manifest_required_tool_names : string list
   ; turn_start : Mtime.t
   ; seq_ref : int ref
   }
@@ -237,12 +236,6 @@ let run_try_provider
           ~effective_tools
           ~runtime_mcp_policy
       in
-      let missing_required_tool_names =
-        Keeper_turn_driver_helpers.missing_required_tool_names_after_lane
-          ~required_tool_names:ctx.runtime_manifest_required_tool_names
-          ~effective_tools
-          ~runtime_mcp_policy
-      in
       let resolved_lane =
         Keeper_turn_driver_helpers.resolved_tool_lane_label ~effective_tools
           ~runtime_mcp_policy
@@ -256,25 +249,15 @@ let run_try_provider
           ctx.hooks
       in
       emit_runtime_manifest ctx
-        ~status:(if missing_required_tool_names = [] then "resolved" else "error")
+        ~status:"resolved"
         ~decision:
           (`Assoc
             [
               ( "requested_tool_names",
                 `List (List.map (fun name -> `String name) requested_tool_names) );
-              ( "required_tool_names",
-                `List
-                  (List.map
-                     (fun name -> `String name)
-                     ctx.runtime_manifest_required_tool_names) );
               ( "materialized_tool_names",
                 `List
                   (List.map (fun name -> `String name) materialized_tool_names) );
-              ( "missing_required_tool_names_after_lane",
-                `List
-                  (List.map
-                     (fun name -> `String name)
-                     missing_required_tool_names) );
               ("resolved_lane", `String resolved_lane);
               ("effective_tool_count", `Int (List.length effective_tools));
               ("runtime_mcp_policy_present", `Bool (Option.is_some runtime_mcp_policy));
@@ -285,19 +268,12 @@ let run_try_provider
                    else "optional") );
             ])
         Keeper_runtime_manifest.Provider_lane_resolved;
-      if missing_required_tool_names <> [] then
-        Error
-          (Keeper_turn_driver_helpers.required_tool_lane_unavailable_error
-             ~lane:resolved_lane
-             ~missing_required_tools:missing_required_tool_names
-             ~materialized_tools:materialized_tool_names)
-      else
-        Ok
-          { (Runtime_candidate.default_config
-               ~name:ctx.name
-               ~system_prompt:ctx.system_prompt
-               ~tools:effective_tools
-               candidate)
+      Ok
+        { (Runtime_candidate.default_config
+             ~name:ctx.name
+             ~system_prompt:ctx.system_prompt
+             ~tools:effective_tools
+             candidate)
             with
             priority = ctx.priority
           ; max_turns = ctx.max_turns

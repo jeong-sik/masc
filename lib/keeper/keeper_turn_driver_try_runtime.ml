@@ -16,7 +16,6 @@ type try_runtime_ctx =
   ; capture : Runtime_observation.runtime_metrics_capture
   ; runtime_strategy_name_ref : string option ref
   ; try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx
-  ; runtime_manifest_required_tool_names : string list
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; tools : Agent_sdk.Tool.t list
   ; require_tool_choice_support : bool
@@ -137,7 +136,6 @@ let run
     , ctx.configured_labels
     , ctx.error_selected_model_raw
     , ctx.capture
-    , ctx.runtime_manifest_required_tool_names
     , ctx.runtime_mcp_policy
     , ctx.tools
     , ctx.require_tool_choice_support

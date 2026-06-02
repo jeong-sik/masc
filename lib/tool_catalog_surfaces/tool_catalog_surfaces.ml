@@ -46,7 +46,6 @@ type surface =
   | Local_worker
   | Session_min
   | Admin
-  | System_internal
 
 let public_mcp_surface_tools =
   [ (* Workspace lifecycle *)
@@ -221,7 +220,12 @@ let admin_surface_tools =
   ]
 ;;
 
-let system_internal_surface_tools =
+(* System-internal tools: hidden from the public Full profile, callable
+   directly (allow_direct_call_when_hidden), and scoped for tool-usage logging.
+   This is a flat visibility list, not an actor surface — consumers project it
+   via [is_system_internal_hidden].  Formerly the [System_internal] surface
+   variant; de-variant-ized in the surface-cut refactor. *)
+let system_internal_hidden =
   [ (* MCP protocol internals *)
     "masc_mcp_session"
   ; (* Session lifecycle — auto-called *)
@@ -244,6 +248,14 @@ let system_internal_surface_tools =
   ; "masc_library_search"
   ]
 ;;
+
+let system_internal_hidden_set =
+  let tbl = Hashtbl.create (List.length system_internal_hidden) in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) system_internal_hidden;
+  tbl
+;;
+
+let is_system_internal_hidden name = Hashtbl.mem system_internal_hidden_set name
 
 (* ================================================================ *)
 (* Role catalogs — curated subsets for agent role assignment.        *)
@@ -294,7 +306,6 @@ let tools_for_surface = function
   | Local_worker -> local_worker_surface_tools
   | Session_min -> session_min_surface_tools
   | Admin -> admin_surface_tools
-  | System_internal -> system_internal_surface_tools
 ;;
 
 let all_surfaces =
@@ -303,7 +314,6 @@ let all_surfaces =
   ; Local_worker
   ; Session_min
   ; Admin
-  ; System_internal
   ]
 ;;
 
@@ -322,7 +332,6 @@ let spawned_agent_set = build_surface_set spawned_agent_surface_tools
 let local_worker_set = build_surface_set local_worker_surface_tools
 let session_min_set = build_surface_set session_min_surface_tools
 let admin_set = build_surface_set admin_surface_tools
-let system_internal_set = build_surface_set system_internal_surface_tools
 
 let set_for_surface = function
   | Public_mcp -> public_mcp_set
@@ -330,7 +339,6 @@ let set_for_surface = function
   | Local_worker -> local_worker_set
   | Session_min -> session_min_set
   | Admin -> admin_set
-  | System_internal -> system_internal_set
 ;;
 
 let surface_sets : (surface * (string, unit) Hashtbl.t) list =
@@ -353,5 +361,4 @@ let surface_to_string = function
   | Local_worker -> "local_worker"
   | Session_min -> "session_min"
   | Admin -> "admin"
-  | System_internal -> "system_internal"
 ;;

@@ -101,7 +101,7 @@ let execute_tool_eio
   (* Cache resolved agent_name for this session (Fix 4). *)
   record_mcp_session_agent agent_name;
   let is_system_internal_tool =
-    Tool_catalog.is_on_surface Tool_catalog.System_internal name
+    Tool_catalog_surfaces.is_system_internal_hidden name
   in
   let preview ?(max_len = 240) text =
     String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." text

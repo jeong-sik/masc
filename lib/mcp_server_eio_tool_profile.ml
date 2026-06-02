@@ -89,7 +89,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         let full_profile_tools =
           List.filter
             (fun (schema : Masc_domain.tool_schema) ->
-              (not (Tool_catalog.is_on_surface Tool_catalog.System_internal schema.name))
+              (not (Tool_catalog_surfaces.is_system_internal_hidden schema.name))
               && (show_all || Tool_catalog.is_public_mcp schema.name))
             all
         in

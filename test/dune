@@ -744,6 +744,7 @@
   test_tool_registry
   test_tool_dispatch
   test_tool_spec
+  test_tool_catalog_system_internal_hidden
   test_typed_tool_masc
   test_state_product
   test_tool_result
@@ -928,6 +929,7 @@
   test_tool_registry
   test_tool_dispatch
   test_tool_spec
+  test_tool_catalog_system_internal_hidden
   test_typed_tool_masc
   test_state_product
   test_tool_result

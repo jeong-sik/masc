@@ -64,7 +64,7 @@ end)
 include (Tool_catalog_surfaces : sig
   type surface = Tool_catalog_surfaces.surface =
     | Public_mcp | Spawned_agent | Local_worker | Session_min
-    | Admin | System_internal
+    | Admin
 end)
 
 type metadata = {
@@ -439,7 +439,7 @@ let metadata name =
      registry, help registry, governance risk, etc.  Cache
      surface-membership checks per call rather than re-querying. *)
   let is_system_internal =
-    Tool_catalog_surfaces.is_on_surface System_internal name
+    Tool_catalog_surfaces.is_system_internal_hidden name
   in
   let base =
     match Hashtbl.find_opt metadata_table name with
@@ -461,9 +461,10 @@ let metadata name =
   in
   let with_surface_visibility =
     if is_system_internal then
-    (* Surface membership is the canonical "hidden but callable" contract for
-       system-internal tools, even when a tool also carries explicit metadata
-       for semantic hints like readonly/destructive. *)
+    (* System-internal membership is the canonical "hidden but callable"
+       contract for these tools, even when a tool also carries explicit
+       metadata with Default visibility for semantic hints like
+       readonly/destructive — that Default is overridden to Hidden here. *)
       {
         base with
         visibility = Hidden;

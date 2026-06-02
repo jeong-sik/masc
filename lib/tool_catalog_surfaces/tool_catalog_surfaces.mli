@@ -19,9 +19,20 @@
 (** {1 Tool name lists (per surface)} *)
 
 val public_mcp_surface_tools : string list
-val system_internal_surface_tools : string list
 val workspace_role_tools : string list
 val execution_role_tools : string list
+
+(** {1 System-internal visibility list} *)
+
+val system_internal_hidden : string list
+(** Tools hidden from the public Full profile but callable directly and
+    scoped for tool-usage logging.  A flat visibility list, not an actor
+    surface; consumers project it via {!is_system_internal_hidden}.
+    Formerly the [System_internal] surface variant. *)
+
+val is_system_internal_hidden : string -> bool
+(** [is_system_internal_hidden name] is O(1) membership against
+    {!system_internal_hidden}. *)
 
 (** {1 Surface variant} *)
 
@@ -38,8 +49,6 @@ type surface =
       (** Minimum session surface (initialization tools only). *)
   | Admin
       (** Admin / operator dashboard surface. *)
-  | System_internal
-      (** System-internal surface (telemetry, fixtures). *)
 
 val tools_for_surface : surface -> string list
 (** [tools_for_surface s] returns the tool-name list registered for

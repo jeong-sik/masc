@@ -38,7 +38,7 @@ let with_temp_file contents f =
       close_out oc;
       f path)
 
-let make_meta ?(name = "analyst") ?(models = []) () =
+let make_meta ?(name = "analyst") () =
   let base_fields =
     [
       ("name", `String name);
@@ -50,14 +50,7 @@ let make_meta ?(name = "analyst") ?(models = []) () =
       ("network_mode", `String "none");
     ]
   in
-  let fields =
-    match models with
-    | [] -> base_fields
-    | _ ->
-        ("models", `List (List.map (fun value -> `String value) models))
-        :: base_fields
-  in
-  match Keeper_meta_json_parse.meta_of_json (`Assoc fields) with
+  match Keeper_meta_json_parse.meta_of_json (`Assoc base_fields) with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
@@ -178,15 +171,7 @@ let test_runtime_canary_prepends_recommended_model_only_without_explicit_models 
           KML.configured_model_labels_of_meta (make_meta ~name:"analyst" ())
         in
         check bool "bench recommendation is not a runtime dispatch override"
-          false (List.mem "test-provider:test-model" labels);
-        let explicit_meta =
-          { (make_meta ~name:"analyst" ()) with models = [ "explicit:model" ] }
-        in
-        let explicit_labels =
-          KML.configured_model_labels_of_meta explicit_meta
-        in
-        check bool "legacy explicit models are ignored by runtime labels"
-          false (List.mem "explicit:model" explicit_labels))))
+          false (List.mem "test-provider:test-model" labels))))
 
 let () =
   run "keeper_benchmark_canary"

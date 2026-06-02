@@ -470,7 +470,7 @@ let test_oas_wrapper_records_keeper_internal_tool_call () =
               let entry = List.assoc "keeper_stay_silent" stats in
               check int "call_count" 1 (Atomic.get entry.call_count);
               check int "success_count" 1 (Atomic.get entry.success_count);
-              check int "keeper_internal_count" 1 (Atomic.get entry.keeper_internal_count)))
+              check int "agent_internal_count" 1 (Atomic.get entry.agent_internal_count)))
 ;;
 
 let test_oas_tool_callbacks_respect_resource_gate () =

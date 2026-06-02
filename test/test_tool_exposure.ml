@@ -109,7 +109,7 @@ let () =
                   check bool (name ^ " direct call blocked") false
                     (Tool_catalog.allow_direct_call name);
                   check bool (name ^ " on keeper_internal surface") true
-                    (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name);
+                    (Tool_catalog.is_on_surface Tool_catalog.Agent_internal name);
                   check bool (name ^ " reason present") true
                     (Option.is_some meta.reason))
                 [ "keeper_time_now"; "keeper_board_post"; "tool_execute" ]);

@@ -266,6 +266,10 @@ let keeper_config_json (config : Workspace.config) (name : string)
           `String (runtime)
         | Error (`Unresolved _) -> `Null
       in
+      let profile_defaults =
+        Keeper_types_profile.load_keeper_profile_defaults name
+      in
+      let per_provider_timeout = profile_defaults.per_provider_timeout in
       let execution =
         `Assoc [
           ("selected_runtime_id", `String runtime_id);
@@ -278,10 +282,10 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("active_model_label", `Null);
           ("last_model_used_label", `Null);
           ( "per_provider_timeout_sec",
-            Json_util.float_opt_to_json m.per_provider_timeout_s );
+            Json_util.float_opt_to_json per_provider_timeout );
           ( "per_provider_timeout_mode",
             `String
-              (match m.per_provider_timeout_s with
+              (match per_provider_timeout with
                | Some _ -> "override"
                | None -> "turn_budget_heuristic") );
           ("verify", `Bool false);

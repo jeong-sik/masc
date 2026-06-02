@@ -286,16 +286,6 @@ let append_decision_record
                   ("tool_gate_enabled", `Bool r.tool_surface.tool_gate_enabled);
                   ( "tool_surface_fallback_used",
                     `Bool r.tool_surface.tool_surface_fallback_used );
-                  ( "required_tool_names",
-                    `List
-                      (List.map
-                         (fun name -> `String name)
-                         r.tool_surface.required_tool_names) );
-                  ( "missing_required_tool_names",
-                    `List
-                      (List.map
-                         (fun name -> `String name)
-                         r.tool_surface.missing_required_tool_names) );
                   ("config_root", `String r.tool_surface.config_root);
                   ( "runtime_config_path",
                     Json_util.string_opt_to_json r.tool_surface.runtime_config_path );

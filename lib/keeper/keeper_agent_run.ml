@@ -76,7 +76,6 @@ let run_turn
       ~(runtime_id : string)
       ?world_observation
       ?(turn_affordances = [])
-      ?(required_tool_names = [])
       ?provider_filter
       ~(generation : int)
       ?(max_turns : int = Keeper_runtime_resolved.reactive_max_turns_per_call ())
@@ -332,7 +331,6 @@ let run_turn
       ~runtime_id
       ~is_retry
       ~turn_affordances
-      ~required_tool_names
       ~config_root
       ~runtime_config_path
       ~gemini_mcp_disabled
@@ -381,21 +379,6 @@ let run_turn
             ("tool_gate_enabled", `Bool acc.tool_surface.tool_gate_enabled);
             ( "tool_surface_fallback_used",
               `Bool acc.tool_surface.tool_surface_fallback_used );
-            ( "required_tool_names",
-              `List
-                (List.map
-                   (fun name -> `String name)
-                   acc.tool_surface.required_tool_names) );
-            ( "required_tool_candidate_names",
-              `List
-                (List.map
-                   (fun name -> `String name)
-                   acc.tool_surface.required_tool_candidate_names) );
-            ( "missing_required_tool_names",
-              `List
-                (List.map
-                   (fun name -> `String name)
-                   acc.tool_surface.missing_required_tool_names) );
             ("config_root", `String acc.tool_surface.config_root);
           ])
       Keeper_runtime_manifest.Tool_surface_selected;
@@ -564,8 +547,7 @@ let run_turn
                           ~site:"runtime_runtime"
                           config
                           manifest)
-                   ~runtime_manifest_required_tool_names:
-                     acc.tool_surface.required_tool_names
+                   ~runtime_manifest_required_tool_names:[]
                       (* Keepers use turn-level retry for transient errors but benefit
               from OAS per-call retry for validation errors (malformed tool
               args). retry_on_validation_error=true lets OAS re-prompt the
@@ -579,11 +561,6 @@ let run_turn
                       ; feedback_style =
                           Agent_sdk.Tool_retry_policy.Structured_tool_result
                       }
-                    ~required_tool_satisfaction:(fun call ->
-                      Keeper_tool_progress
-                      .required_tool_satisfaction_for_turn
-                        ~required_tool_names:acc.tool_surface.required_tool_names
-                        call)
                     ~max_turns
                     ~max_idle_turns
                     ?stream_idle_timeout_s
@@ -625,9 +602,6 @@ let run_turn
                  Keeper_agent_run_contract_retry.run_with_single_retry
                    ~keeper_name:meta.name
                    ~acc
-                   ~has_current_task:
-                     (Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta))
-                   ~turn_affordances
                    ~history_messages
                    ~call_run_named
                with
@@ -685,10 +659,10 @@ let run_turn
                     boundary — it emits exactly one
                     [masc_keeper_tool_call_total] sample per observed
                     name with bounded labels. Set-logic call sites
-                    (required-tool canonicalisation, surface composition)
-                    use the pure [canonical_tool_name] variant so a
-                    single observed call does not produce multiple
-                    counter samples (PR #14585 review #3). *)
+                    (surface composition, provider routing) use the pure
+                    [canonical_tool_name] variant so a single observed call
+                    does not produce multiple counter samples (PR #14585
+                    review #3). *)
                  let canonical_tool_names =
                    tool_observation.canonical_tool_names
                  in
@@ -790,28 +764,14 @@ let run_turn
                    let tool_contract_status ()
                        : Keeper_execution_receipt.tool_contract_result =
                      Contract_helpers.observed_tool_contract_status
-                       ~required_tool_names:acc.tool_surface.required_tool_names
-                       ~missing_visible_required:
-                         acc.tool_surface.missing_required_tool_names
+                       ~required_tool_names:[]
+                       ~missing_visible_required:[]
                        ~had_owned_active_task_at_turn_start
                        ~actual_keeper_tool_names:progress_keeper_tool_names
                    in
-                   (* Required-tool turns are filtered onto providers that declare
-            tool support plus tool_choice support. If a text-only response
-            still reaches this point, treat it as a contract failure. *)
                    let text_result =
-                     let effective_completion_contract =
-                       Keeper_tool_completion_contract.run_completion_contract
-                         ~turn_contract:acc.completion_contract
-                         ~required_tool_use_seen:acc.required_tool_use_seen
-                     in
-                     match
-                       ( Keeper_tool_completion_contract.validate_completion_contract_presence
-                           ~contract:effective_completion_contract
-                           ~tool_present:acc.keeper_surface_tool_used
-                       , actionable_tool_contract_violation_reason )
-                     with
-                     | Ok (), Some reason ->
+                     match actionable_tool_contract_violation_reason with
+                     | Some reason ->
                        let contract_status
                            : Keeper_execution_receipt.tool_contract_result =
                          Contract_helpers.passive_violation_contract_status
@@ -830,28 +790,9 @@ let run_turn
                          ~reason;
                        Error
                          (Contract_helpers.completion_contract_violation_error reason)
-                     | Ok (), None ->
+                     | None ->
                        acc.receipt_tool_contract_result <- tool_contract_status ();
                        Ok (`Provider_text text)
-                     | Error reason, _ ->
-                       let contract_status
-                           : Keeper_execution_receipt.tool_contract_result =
-                         Contract_helpers.text_only_violation_contract_status
-                           ~actual_keeper_tool_names
-                           ~fallback:tool_contract_status
-                       in
-                       acc.receipt_tool_contract_result <- contract_status;
-                       Keeper_agent_run_contract_violation_log.record_text_only
-                         ~keeper_name:meta.name
-                         ~has_current_task:(keeper_has_owned_active_task ())
-                         ~contract_status
-                         ~effective_completion_contract
-                         ~actionable_signal_kind
-                         ~turns:result.turns
-                         ~actual_keeper_tool_names
-                         ~reason;
-                       Error
-                         (Contract_helpers.completion_contract_violation_error reason)
                    in
                    match text_result with
                    | Error e -> Error e

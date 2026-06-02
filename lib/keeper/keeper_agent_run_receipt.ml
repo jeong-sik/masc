@@ -190,10 +190,9 @@ let finalize
         ; visible_tool_count = acc.tool_surface.visible_tool_count
         ; tool_gate_enabled = acc.tool_surface.tool_gate_enabled
         ; tool_surface_fallback_used = acc.tool_surface.tool_surface_fallback_used
-        ; required_tools = acc.tool_surface.required_tool_names
-        ; required_tool_candidates =
-            acc.tool_surface.required_tool_candidate_names
-        ; missing_required_tools = acc.tool_surface.missing_required_tool_names
+        ; required_tools = []
+        ; required_tool_candidates = []
+        ; missing_required_tools = []
         ; materialized_tools = !materialized_tool_names_ref
         }
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta

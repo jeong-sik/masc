@@ -93,9 +93,6 @@ type tool_surface_metrics =
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
-  ; required_tool_names : string list
-  ; required_tool_candidate_names : string list
-  ; missing_required_tool_names : string list
   ; config_root : string
   ; runtime_config_path : string option
   ; gemini_mcp_disabled : bool
@@ -122,10 +119,8 @@ type computed_tool_surface =
   ; tool_surface_class : tool_surface_class
   ; tool_requirement : tool_requirement
   ; tool_gate_requested : bool
+  ; claim_context_allowed : bool
   ; tool_surface_fallback_used : bool
-  ; required_tool_names : string list
-  ; required_tool_candidate_names : string list
-  ; missing_required_tool_names : string list
   ; lane : turn_lane
   ; query_text : string
   }
@@ -153,8 +148,7 @@ val tools_for_gated_affordance : turn_affordance -> string list
 
 (** Compute the satisfying tools for a set of turn affordances,
     intersected with [allowed_tool_names] and deduplicated.
-    Used to provide actionable alternatives in required-tool contract
-    violation messages. *)
+    Used to provide actionable alternatives in retry messages. *)
 val satisfying_tools_for_turn :
   turn_affordances:string list -> allowed_tool_names:string list -> string list
 
@@ -164,32 +158,24 @@ val preferred_tool_names_for_turn_affordances : string list -> string list
 
 (** Like [turn_affordances_require_tool_gate] but only fires when at
     least one of the gating affordance's tools is in
-    [allowed_tool_names] and can satisfy the required-tool contract.
-    Passive read/status tools may still be visible, but they cannot be
-    the sole reason to force [Require_tool_use]. *)
+    [allowed_tool_names] and can satisfy the current claim-context.
+    Claim/context tools only satisfy the gate while claim context is
+    allowed; owned-task turns require owned-task progress tools. Passive
+    read/status tools may still be visible, but they cannot be the sole
+    reason to force [Require_tool_use]. *)
 val turn_affordances_require_tool_gate_with_allowed :
      ?record_suppression_metric:bool
+  -> claim_context_allowed:bool
   -> allowed_tool_names:string list
   -> string list
   -> bool
 
-(** On a required-action turn, trim the visible surface to tools that can make
-    progress when such tools exist. Passive status/read tools remain visible on
-    optional turns and on surfaces that have no actionable alternative.
-
-    When [has_current_task] is true, claim/context tools are not treated as
-    actionable alternatives because the keeper already owns active work.
-
-    Explicit [required_tool_names] are preserved even when they are read-only:
-    operator/harness calls such as [masc_keeper_msg.required_tools =
-    ["masc_web_search"]] are a direct evidence contract, not a generic
-    actionable-world-signal gate. *)
-val tool_names_for_required_gate_surface :
-  ?has_current_task:bool ->
-  tool_gate_requested:bool ->
-  required_tool_names:string list ->
-  string list ->
-  string list
+(** On an actionable-tool-gated turn, trim the visible surface to tools that can
+    make progress when such tools exist. Passive status/read tools remain
+    visible on optional turns and on surfaces that have no actionable
+    alternative. *)
+val tool_names_for_actionable_gate_surface :
+  tool_gate_requested:bool -> string list -> string list
 
 (** Whether the very first turn of a multi-turn slot should require
     a tool call. *)
@@ -200,47 +186,35 @@ val has_turn_affordance : turn_affordance -> string list -> bool
 
 val has_task_claim_affordance : string list -> bool
 
-(** Ordered executable candidates for generic required-tool gates.
-    Claim/context tools are excluded when the keeper already owns active work,
-    and passive status/read tools are never recommended. *)
-val generic_required_actionable_tool_names :
-  has_current_task:bool ->
+(** Ordered executable tools for actionable gates, filtered by the current claim
+    context. Passive status/read tools and stay_silent are never recommended.
+    Preferred affordance tools are returned first; if none are visible, tools
+    fall back to other visible tools that can satisfy the gated affordance. *)
+val actionable_gate_tool_names :
+  claim_context_allowed:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string list
 
-(** Pick the schema-visible [tool_choice] when the gate fires. *)
-val preferred_tool_choice_for_required_turn :
-  has_current_task:bool ->
+(** Pick the schema-visible [tool_choice] when the actionable gate fires. *)
+val preferred_tool_choice_for_actionable_gate :
+  claim_context_allowed:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   Agent_sdk.Types.tool_choice
 
-(** Human-readable instruction for generic affordance-driven required-tool
-    turns, where no explicit [required_tool_names] exist but the runtime still
-    requires a keeper tool call. *)
-val generic_required_tool_gate_guidance :
-  has_current_task:bool ->
+(** Human-readable instruction for affordance-driven actionable-tool gates. *)
+val actionable_tool_gate_guidance :
+  claim_context_allowed:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string
 
-(** Candidate tools a generic required-tool gate can recommend. This is
-    distinct from explicit [required_tool_names]: callers may satisfy a
-    generic gate with any execution-progress tool, while this list explains
-    the preferred candidates exposed to the model/operator. *)
-val generic_required_tool_candidate_names :
-  has_current_task:bool ->
-  turn_affordances:string list ->
-  allowed_tool_names:string list ->
-  string list
-
-(** Whether an owned active task plus an actionable world signal should promote
-    the turn to the same generic required-tool gate that post-run validation
-    already enforces. *)
-val actionable_signal_requires_active_task_tool_gate :
+(** Whether an actionable world signal should promote the turn to the same
+    actionable-tool gate that post-run validation already checks. *)
+val actionable_signal_requires_tool_gate :
   actionable_signal:bool ->
-  has_current_task:bool ->
+  claim_context_allowed:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   bool

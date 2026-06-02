@@ -28,7 +28,6 @@ let prepare_agent_setup
       ~(runtime_id : string)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
-      ~(required_tool_names : string list)
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(gemini_mcp_disabled : bool)
@@ -87,9 +86,6 @@ let prepare_agent_setup
         ; visible_tool_count = 0
         ; tool_gate_enabled = false
         ; tool_surface_fallback_used = false
-        ; required_tool_names = []
-        ; required_tool_candidate_names = []
-        ; missing_required_tool_names = []
         ; config_root
         ; runtime_config_path
         ; gemini_mcp_disabled
@@ -489,7 +485,8 @@ let prepare_agent_setup
   let fallback_tool_surface ~turn =
     validate_allow_list ~turn fallback_floor_tool_names
   in
-  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn ~allowed_tool_names =
+  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
+      ~claim_context_allowed ~allowed_tool_names =
     let caller_requires_tools =
       (* Enumerate every [tool_choice] variant + [None] so a new constructor
          added to [Agent_sdk.Types.tool_choice] surfaces a Warning 8 here.
@@ -507,13 +504,9 @@ let prepare_agent_setup
     && (caller_requires_tools
         || turn_affordances_require_tool_gate_with_allowed
              ~record_suppression_metric:true
+             ~claim_context_allowed
              ~allowed_tool_names
              turn_affordances)
-  in
-  let satisfied_required_tool_names () =
-    acc.tool_calls
-    |> List.map (fun (detail : tool_call_detail) -> detail.tool_name, detail.outcome)
-    |> satisfied_required_tool_names_of_outcomes
   in
   let compute_tool_surface
         ~turn
@@ -664,27 +657,6 @@ let prepare_agent_setup
         ~llm_selected
         ~discovered
     in
-    let required_tool_names_raw =
-      required_tool_names_for_turn
-        ~current_task_required_tool_names:[]
-        ~per_call_required_tool_names:required_tool_names
-      |> List.map Keeper_tool_resolution.canonical_tool_name
-      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-    in
-    let required_tool_names =
-      outstanding_required_tool_names
-        ~required_tool_names:required_tool_names_raw
-        ~satisfied_tool_names:(satisfied_required_tool_names ())
-    in
-    let current_tool_choice =
-      match current_tool_choice with
-      | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _)
-        when required_tool_names_raw <> [] && required_tool_names = [] -> None
-      | _ -> current_tool_choice
-    in
-    let visible_required_tool_names =
-      required_tool_names |> validate_allow_list ~turn |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-    in
     let visible_affordance_tool_names =
       preferred_tool_names_for_turn_affordances turn_affordances
       |> filter_visible_policy_surface
@@ -692,7 +664,7 @@ let prepare_agent_setup
     in
     let merged =
       Keeper_types_profile_toml_normalizers.dedupe_keep_order
-        (merged @ visible_required_tool_names @ visible_affordance_tool_names)
+        (merged @ visible_affordance_tool_names)
     in
     let selection_mode : Keeper_agent_tool_surface.tool_selection_mode =
       if llm_rerank_enabled
@@ -721,6 +693,7 @@ let prepare_agent_setup
     let per_call_turn = turn - start_turn_count in
     let is_last_turn = per_call_turn >= max_turns in
     let is_warning_zone = per_call_turn >= max_turns - 1 in
+    let claim_context_allowed = not (keeper_has_owned_active_task ()) in
     let turn_visible_tool_names, tool_surface_fallback_used =
       if turn_visible_tool_names = []
       then (
@@ -741,7 +714,7 @@ let prepare_agent_setup
     in
     let safe_last_turn_tools = last_turn_safe @ descriptor_safe_public_names in
     let turn_visible_tool_names =
-      if is_last_turn && required_tool_names = []
+      if is_last_turn
       then
         Agent_sdk.Tool_op.apply
           (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
@@ -770,50 +743,26 @@ let prepare_agent_setup
         ~labels:[ "keeper", meta.name ]
         ()
     else ();
-    let has_current_task = keeper_has_owned_active_task () in
-    let active_task_actionable_tool_gate_requested =
+    let actionable_signal_tool_gate_requested =
       (not is_last_turn)
-      && actionable_signal_requires_active_task_tool_gate
+      && actionable_signal_requires_tool_gate
            ~actionable_signal
-           ~has_current_task
+           ~claim_context_allowed
            ~turn_affordances
            ~allowed_tool_names:turn_visible_tool_names
     in
     let tool_gate_requested =
-      required_tool_names <> []
-      || active_task_actionable_tool_gate_requested
+      actionable_signal_tool_gate_requested
       || tool_gate_requested_for_turn
            ~current_tool_choice
            ~is_last_turn
+           ~claim_context_allowed
            ~allowed_tool_names:turn_visible_tool_names
     in
     let turn_visible_tool_names =
-      tool_names_for_required_gate_surface
-        ~has_current_task
+      tool_names_for_actionable_gate_surface
         ~tool_gate_requested
-        ~required_tool_names
         turn_visible_tool_names
-    in
-    let visible_canonical_tool_names =
-      turn_visible_tool_names
-      |> List.map Keeper_tool_resolution.canonical_tool_name
-      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-    in
-    let missing_required_tool_names =
-      List.filter
-        (fun name ->
-           let canonical = Keeper_tool_resolution.canonical_tool_name name in
-           not (List.mem canonical visible_canonical_tool_names))
-        required_tool_names
-    in
-    let required_tool_candidate_names =
-      if tool_gate_requested && required_tool_names = []
-      then
-        generic_required_tool_candidate_names
-          ~has_current_task
-          ~turn_affordances
-          ~allowed_tool_names:turn_visible_tool_names
-      else []
     in
     let visible_tool_count = List.length turn_visible_tool_names in
     let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =
@@ -858,10 +807,8 @@ let prepare_agent_setup
     ; tool_surface_class
     ; tool_requirement
     ; tool_gate_requested
+    ; claim_context_allowed
     ; tool_surface_fallback_used
-    ; required_tool_names
-    ; required_tool_candidate_names
-    ; missing_required_tool_names
     ; lane
     ; query_text
     }
@@ -896,7 +843,7 @@ let prepare_agent_setup
     ~history_messages ~prompt_metrics ~shared_context
     ~start_turn_count ~generation ~max_turns
     ~runtime_id_string ~is_retry ~turn_affordances
-    ~required_tool_names ~config_root ~runtime_config_path
+    ~config_root ~runtime_config_path
     ~gemini_mcp_disabled ~approval_mode_effective
     ~approval_mode_derived ~actionable_signal
     ?max_cost_usd ~trajectory_acc

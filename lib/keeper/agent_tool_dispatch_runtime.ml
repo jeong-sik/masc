@@ -397,11 +397,11 @@ let execute_keeper_tool_call_with_outcome
        in
        let agent_tool_runtime_context =
          Agent_tool_runtime.
-	           { config
-	           ; meta
-	           ; ctx_work
-	           ; turn_sandbox_factory
-	           ; exec_cache
+                       { config
+                       ; meta
+                       ; ctx_work
+                       ; turn_sandbox_factory
+                       ; exec_cache
            ; search_fn = effective_search_fn
            ; (* RFC-0182 Phase 5 PR-A.2: Eio resources threaded from
                 caller via labeled ? params.  Callers without Eio
@@ -510,9 +510,9 @@ let execute_keeper_tool_call
     execute_keeper_tool_call_with_outcome
       ~config
       ~meta
-	      ~ctx_work
-	      ?turn_sandbox_factory
-	      ~exec_cache
+                  ~ctx_work
+                  ?turn_sandbox_factory
+                  ~exec_cache
       ?search_fn
       ~name
       ~input

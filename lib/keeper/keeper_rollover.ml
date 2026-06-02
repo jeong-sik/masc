@@ -279,7 +279,7 @@ let maybe_rollover_oas_handoff
                   ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
                   ~session:new_session
                   ~agent_name:base_meta.agent_name
-                  ~model ~ctx:save_ctx ~generation:next_generation with
+                  ~ctx:save_ctx ~generation:next_generation with
           | Error e ->
               Prometheus.inc_counter
                 Keeper_metrics.(to_string CheckpointFailures)

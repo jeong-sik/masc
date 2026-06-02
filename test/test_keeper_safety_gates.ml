@@ -40,7 +40,7 @@ let make_meta
 
 let full_tool_access () =
   Keeper_meta_tool_access.normalize_tool_access
-    (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+    (Capability_registry.privileged_keeper_tool_names
      @ Tool_catalog.tools_for_surface Tool_catalog.Public_mcp)
 
 let minimal_tool_access =

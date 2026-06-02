@@ -401,18 +401,9 @@ let test_tool_access_missing_defaults_standard_policy () =
 let test_typed_and_string_tool_access_rejections_match () =
   let module Access = Masc_mcp.Keeper_meta_contract in
   let check_rejection label json =
-    let string_error =
-      match Access.tool_access_of_meta_json json with
-      | Ok _ -> Alcotest.failf "string parser accepted %s" label
-      | Error e -> e
-    in
-    let typed_error =
-      match Access.tool_access_of_meta_json_typed json with
-      | Ok _ -> Alcotest.failf "typed parser accepted %s" label
-      | Error e -> e
-    in
-    Alcotest.(check string) (label ^ " typed/string rejection") string_error
-      typed_error
+    match Access.tool_access_of_meta_json json with
+    | Ok _ -> Alcotest.failf "tool_access parser accepted %s" label
+    | Error _ -> ()
   in
   check_rejection "missing" (`Assoc []);
   check_rejection "null" (`Assoc [ "tool_access", `Null ])
@@ -816,20 +807,6 @@ let test_schemas_match_names () =
         (List.mem s.name names))
     schemas
 
-let test_denied_tools_excluded_from_injection () =
-  prime_keeper_bridge ();
-  let meta = make_meta () in
-  let names = KET.keeper_masc_tool_names meta in
-  let denied =
-    Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
-  in
-  List.iter
-    (fun denied_name ->
-      Alcotest.(check bool)
-        (denied_name ^ " must not appear")
-        false (List.mem denied_name names))
-    denied
-
 let test_is_keeper_denied () =
   (* RFC-0182: keeper_denied surface is [masc_reset] after masc_spawn removal. *)
   Alcotest.(check bool) "masc_reset is denied" true
@@ -838,26 +815,6 @@ let test_is_keeper_denied () =
     (KET.is_keeper_denied "masc_status");
   Alcotest.(check bool) "keeper_time_now is not denied" false
     (KET.is_keeper_denied "keeper_time_now")
-
-let test_denied_excluded_from_allowed_names () =
-  prime_keeper_bridge ();
-  let meta =
-    make_meta ~tool_access:([ "keeper_time_now"; "masc_status" ]) ()
-  in
-  let names = KET.keeper_allowed_tool_names meta in
-  let denied =
-    Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
-  in
-  List.iter
-    (fun denied_name ->
-      Alcotest.(check bool)
-        (denied_name ^ " must not appear in allowed_names")
-        false (List.mem denied_name names))
-    denied;
-  Alcotest.(check bool) "keeper_time_now still present" true
-    (List.mem "keeper_time_now" names);
-  Alcotest.(check bool) "masc_status still present" true
-    (List.mem "masc_status" names)
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
@@ -943,11 +900,7 @@ let () =
         ] );
       ( "keeper_denied",
         [
-          Alcotest.test_case "denied tools excluded from injection" `Quick
-            test_denied_tools_excluded_from_injection;
           Alcotest.test_case "is_keeper_denied correctness" `Quick
             test_is_keeper_denied;
-          Alcotest.test_case "denied excluded from allowed_names" `Quick
-            test_denied_excluded_from_allowed_names;
         ] );
     ]

@@ -212,16 +212,13 @@ let nonempty_trimmed value =
 let selected_model_of_meta = function
   | None -> None
   | Some (meta : Keeper_meta_contract.keeper_meta) ->
-    (match nonempty_trimmed meta.runtime.usage.last_model_used with
-     | Some _ as selected_model -> selected_model
-     | None ->
-       (try
-          match Keeper_model_labels.configured_model_labels_of_meta meta with
-          | model :: _ -> nonempty_trimmed model
-          | [] -> None
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | Failure _ | Invalid_argument _ -> None))
+    (try
+       match Keeper_model_labels.configured_model_labels_of_meta meta with
+       | model :: _ -> nonempty_trimmed model
+       | [] -> None
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | Failure _ | Invalid_argument _ -> None)
 ;;
 
 let input_op_opt input =

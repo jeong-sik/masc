@@ -70,11 +70,6 @@ let test_admin_parity () =
   let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Admin) in
   check_set_equal "Admin" ~expected:legacy ~actual:ssot
 
-let test_keeper_denied_parity () =
-  let legacy = set_of Keeper_hooks_oas.keeper_denied_tools in
-  let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied) in
-  check_set_equal "Keeper_denied" ~expected:legacy ~actual:ssot
-
 (* {1 Structural Invariants — hold regardless of migration phase} *)
 
 let test_session_min_and_local_worker_share_core () =
@@ -93,86 +88,23 @@ let test_session_min_and_local_worker_share_core () =
       (String.concat ", " (SS.elements missing));
   Alcotest.(check bool) "shared core present" true (SS.is_empty missing)
 
-let public_keeper_denied_overlap_allowed =
-  set_of
-    [
-      "masc_persona_generate";
-      "masc_persona_save";
-      "masc_keeper_create_from_persona";
-    ]
-
-let test_keeper_denied_public_mcp_overlap_is_explicit () =
-  let denied = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied) in
-  let public = set_of (Tool_catalog.tools_for_surface Tool_catalog.Public_mcp) in
-  let overlap = SS.inter denied public in
-  let unexpected = SS.diff overlap public_keeper_denied_overlap_allowed in
-  let missing = SS.diff public_keeper_denied_overlap_allowed overlap in
-  if not (SS.is_empty unexpected) then
-    Alcotest.failf "Unexpected Keeper_denied/Public_mcp overlap: {%s}"
-      (String.concat ", " (SS.elements unexpected));
-  if not (SS.is_empty missing) then
-    Alcotest.failf "Expected Keeper_denied/Public_mcp overlap missing: {%s}"
-      (String.concat ", " (SS.elements missing));
-  Alcotest.(check bool) "Keeper_denied/Public_mcp overlap explicit" true
-    (SS.is_empty unexpected && SS.is_empty missing)
-
 let test_keeper_internal_disjoint_from_public_mcp () =
-  let internal = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal) in
-  let public = set_of (Tool_catalog.tools_for_surface Tool_catalog.Public_mcp) in
+  let internal = set_of Capability_registry.privileged_keeper_tool_names in
+  let public = set_of Tool_catalog_surfaces.public_mcp_surface_tools in
   let overlap = SS.inter internal public in
   if not (SS.is_empty overlap) then
-    Alcotest.failf "Keeper_internal overlaps with Public_mcp: {%s}"
+    Alcotest.failf "privileged keeper tools overlap with Public_mcp: {%s}"
       (String.concat ", " (SS.elements overlap));
-  Alcotest.(check bool) "Keeper_internal disjoint from Public_mcp" true
+  Alcotest.(check bool) "privileged keeper tools disjoint from Public_mcp" true
     (SS.is_empty overlap)
-
-let test_keeper_internal_contains_known_tools () =
-  let internal = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal) in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool) (name ^ " is internal") true (SS.mem name internal))
-    [
-      "keeper_time_now";
-      "keeper_board_post";
-      "tool_execute";
-      "keeper_memory_search";
-    ]
 
 let test_retired_pr_tools_are_not_active_schemas () =
   let retired_review_tool suffix = "keeper_" ^ "pr_" ^ "review_" ^ suffix in
   List.iter
     (fun name ->
       Alcotest.(check bool) (name ^ " removed from raw schema universe") false
-        (Option.is_some (raw_schema_by_name name));
-      Alcotest.(check bool) (name ^ " not keeper-internal surface") false
-        (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name))
+        (Option.is_some (raw_schema_by_name name)))
     [ retired_review_tool "read"; retired_review_tool "comment"; retired_review_tool "reply" ]
-
-let test_keeper_voice_replacement_contract () =
-  Alcotest.(check (option string))
-    "voice speak replacement removed"
-    None
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_speak");
-  Alcotest.(check (option string))
-    "voice agent replacement removed"
-    None
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_agent");
-  Alcotest.(check (option string))
-    "voice sessions replacement removed"
-    None
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_sessions");
-  Alcotest.(check (option string))
-    "voice session start replacement removed"
-    None
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_session_start");
-  Alcotest.(check (option string))
-    "voice session end replacement removed"
-    None
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_session_end");
-  Alcotest.(check (option string))
-    "voice listen remains keeper-only"
-    None
-    (Tool_catalog_surfaces.keeper_internal_replacement "keeper_voice_listen")
 
 let test_is_on_surface_consistent () =
   List.iter (fun surface ->
@@ -198,54 +130,6 @@ let test_destructive_check_tools_are_privileged () =
       Alcotest.(check bool) (name ^ " is privileged") true
         (List.mem name Capability_registry.privileged_keeper_tool_names)
   ) destructive_tools
-
-let test_privileged_keeper_tools_are_internal () =
-  (* Every privileged keeper tool (keeper_* prefixed) should be on the
-     Keeper_internal surface. *)
-  let internal = set_of (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal) in
-  List.iter (fun name ->
-    if String.starts_with ~prefix:"keeper_" name then
-      Alcotest.(check bool) (name ^ " in Keeper_internal") true
-        (SS.mem name internal)
-  ) Capability_registry.privileged_keeper_tool_names
-
-let test_replacement_targets_have_schemas () =
-  (* Every keeper_internal_replacement target should have a registered schema.
-     Not all need to be public — some are hidden but still callable. *)
-  let internal = Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal in
-  let all_schema_names =
-    List.map (fun (s : Masc_domain.tool_schema) -> s.name)
-      Config.raw_all_tool_schemas
-  in
-  List.iter (fun name ->
-    match Tool_catalog_surfaces.keeper_internal_replacement name with
-    | Some public_name ->
-      Alcotest.(check bool)
-        (Printf.sprintf "%s -> %s has schema" name public_name)
-        true (List.mem public_name all_schema_names)
-    | None -> ()
-  ) internal
-
-let test_keeper_internal_tools_have_schemas () =
-  (* Every tool in keeper_internal_tools should have a schema in the
-     keeper-facing schema SSOT. A name without a schema
-     means the LLM can never select it — a silent capability gap. *)
-  let standalone_schemas = [ Keeper_tool_dispatch_runtime.keeper_tool_search_schema ] in
-  let schema_names =
-    (Tool_shard.all_keeper_tool_schemas @ standalone_schemas)
-    |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
-    |> SS.of_list
-  in
-  let internal_names =
-    Tool_catalog_surfaces.keeper_internal_tools |> SS.of_list
-  in
-  let missing = SS.diff internal_names schema_names in
-  if not (SS.is_empty missing) then
-    Alcotest.failf
-      "keeper_internal_tools without schemas (LLM blind spots): {%s}"
-      (String.concat ", " (SS.elements missing));
-  Alcotest.(check bool) "all internal tools have schemas" true
-    (SS.is_empty missing)
 
 (* {1 SSOT Validation — active tools must be surfaced and routed} *)
 
@@ -354,62 +238,6 @@ let test_system_internal_not_visible () =
       (String.concat ", " visible);
   Alcotest.(check bool) "all system_internal hidden" true (visible = [])
 
-let test_keeper_internal_descriptions_no_cross_leak () =
-  (* Keeper-internal tool descriptions should not reference other internal
-     tool names.  The LLM sees these descriptions and will attempt to call
-     whatever name it finds — referencing [tool_search_files] in the [tool_execute]
-     description causes the LLM to emit [tool_search_files] calls that bypass
-     the alias routing layer (Keeper_tool_alias only routes public names
-     like [Execute], [Grep], etc.). *)
-  let contains_substring haystack needle =
-    let hlen = String.length haystack in
-    let nlen = String.length needle in
-    if nlen = 0 then true
-    else if nlen > hlen then false
-    else
-      let rec loop i =
-        i + nlen <= hlen
-        && (String.sub haystack i nlen = needle || loop (i + 1))
-      in
-      loop 0
-  in
-  let internal_names_to_check =
-    [ "tool_execute"; "tool_search_files"; "tool_edit_file"; "tool_read_file"
-    ; "keeper_memory_search"; "keeper_memory_write"; "keeper_board_post"
-    ; "keeper_board_list"; "tool_execute"; "shell_exec"; "worker_dev_tools"
-    ]
-  in
-  let internal_schemas =
-    Config.raw_all_tool_schemas
-    |> List.filter (fun (s : Masc_domain.tool_schema) ->
-           Tool_catalog.is_on_surface Tool_catalog.Keeper_internal s.name)
-  in
-  let violations = ref [] in
-  List.iter (fun (schema : Masc_domain.tool_schema) ->
-    List.iter (fun leaked_name ->
-      if String.length leaked_name > 0
-         && String.equal schema.name leaked_name = false
-         && contains_substring schema.description leaked_name
-      then
-        violations :=
-          (schema.name, leaked_name) :: !violations
-    ) internal_names_to_check
-  ) internal_schemas;
-  if !violations <> [] then begin
-    let msg =
-      !violations
-      |> List.map (fun (host, leak) ->
-             Printf.sprintf "  %s.description contains \"%s\"" host leak)
-      |> String.concat "\n"
-    in
-    Alcotest.failf
-      "Keeper-internal description cross-leak:\n%s\n\
-       Internal names should not appear in descriptions; use public-facing \
-       terms (Execute, Grep, Edit, Write, Read) instead." msg
-  end
-  else
-    Alcotest.(check bool) "no cross-leak" true (!violations = [])
-
 let test_system_internal_callable () =
   (* System_internal tools must be callable via tools/call. *)
   let system_tools = Tool_catalog.tools_for_surface Tool_catalog.System_internal in
@@ -422,15 +250,6 @@ let test_system_internal_callable () =
     Alcotest.failf "System_internal tools not callable: {%s}"
       (String.concat ", " uncallable);
   Alcotest.(check bool) "all system_internal callable" true (uncallable = [])
-
-let test_workspace_mutating_canonical_used () =
-  (* workspace_mutating_tool_names in tool_catalog_surfaces is the canonical list.
-     Verify no empty or phantom entries. *)
-  Alcotest.(check bool) "non-empty" true
-    (List.length Tool_catalog_surfaces.workspace_mutating_tool_names > 0);
-  List.iter (fun name ->
-    Alcotest.(check bool) (name ^ " non-empty") true (String.length name > 0)
-  ) Tool_catalog_surfaces.workspace_mutating_tool_names
 
 let test_role_catalogs_only_expose_available_tools () =
   let available =
@@ -467,22 +286,15 @@ let () =
             test_local_worker_public_tools_resolvable;
           Alcotest.test_case "Session_min parity" `Quick test_session_min_parity;
           Alcotest.test_case "Admin parity" `Quick test_admin_parity;
-          Alcotest.test_case "Keeper_denied parity" `Quick test_keeper_denied_parity;
         ] );
       ( "invariants",
         [
           Alcotest.test_case "Session_min ∩ Local_worker shared core" `Quick
             test_session_min_and_local_worker_share_core;
-          Alcotest.test_case "Keeper_denied/Public_mcp overlap is explicit" `Quick
-            test_keeper_denied_public_mcp_overlap_is_explicit;
-          Alcotest.test_case "Keeper_internal ∩ Public_mcp = ∅" `Quick
+          Alcotest.test_case "privileged keeper tools ∩ Public_mcp = ∅" `Quick
             test_keeper_internal_disjoint_from_public_mcp;
-          Alcotest.test_case "Keeper_internal contains known tools" `Quick
-            test_keeper_internal_contains_known_tools;
           Alcotest.test_case "retired PR review tools are not active schemas" `Quick
             test_retired_pr_tools_are_not_active_schemas;
-          Alcotest.test_case "Keeper voice replacement contract" `Quick
-            test_keeper_voice_replacement_contract;
           Alcotest.test_case "is_on_surface consistent" `Quick
             test_is_on_surface_consistent;
         ] );
@@ -490,14 +302,6 @@ let () =
         [
           Alcotest.test_case "destructive check tools are privileged" `Quick
             test_destructive_check_tools_are_privileged;
-          Alcotest.test_case "privileged keeper tools are internal" `Quick
-            test_privileged_keeper_tools_are_internal;
-          Alcotest.test_case "replacement targets have schemas" `Quick
-            test_replacement_targets_have_schemas;
-          Alcotest.test_case "keeper internal tools have schemas" `Quick
-            test_keeper_internal_tools_have_schemas;
-           Alcotest.test_case "workspace_mutating canonical used" `Quick
-             test_workspace_mutating_canonical_used;
            Alcotest.test_case "role catalogs use only available tools" `Quick
              test_role_catalogs_only_expose_available_tools;
            Alcotest.test_case "built role catalogs drop stale entries" `Quick
@@ -511,8 +315,6 @@ let () =
             test_active_surfaced_tools_are_routable_and_permissioned;
           Alcotest.test_case "Public_mcp count cap <= 80" `Quick
             test_public_mcp_count_cap;
-          Alcotest.test_case "Keeper_internal descriptions no cross-leak" `Quick
-            test_keeper_internal_descriptions_no_cross_leak;
           Alcotest.test_case "System_internal not visible" `Quick
             test_system_internal_not_visible;
           Alcotest.test_case "System_internal callable" `Quick

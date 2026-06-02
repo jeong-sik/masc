@@ -164,7 +164,6 @@
   test_keeper_tool_surface_guard
   test_keeper_benchmark_canary
   test_playground_paths
-  test_keeper_llama_only
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
   test_metrics_rotation
@@ -432,7 +431,6 @@
   test_keeper_tool_surface_guard
   test_keeper_benchmark_canary
   test_playground_paths
-  test_keeper_llama_only
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
   test_metrics_rotation
@@ -1631,6 +1629,12 @@
 
 (include stanzas/test_tool_name.inc)
 
+; ── Keeper_tool_name variant roundtrip (keeper side of #19797 boundary) ──
+(test
+ (name test_keeper_tool_name)
+ (modules test_keeper_tool_name)
+ (libraries masc_test_deps))
+
 (include stanzas/test_tool_task_args.inc)
 
 (include stanzas/test_tool_task_completion_example.inc)
@@ -1717,11 +1721,6 @@
 (test
  (name test_pool_metrics)
  (modules test_pool_metrics)
- (libraries masc_test_deps))
-
-(test
- (name test_tool_name_exhaustive)
- (modules test_tool_name_exhaustive)
  (libraries masc_test_deps))
 
 ; RFC-0084 PR-3 — Tool_telemetry.with_span + Tool_dispatch.guarded_dispatch

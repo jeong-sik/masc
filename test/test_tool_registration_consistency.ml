@@ -324,36 +324,6 @@ let test_board_read_only_metadata_registered () =
   Alcotest.(check bool) "board post stays mutable"
     false (Masc_mcp.Tool_capability.has Masc_mcp.Tool_capability.Read_only "masc_board_post")
 
-(* ── Test: keeper alias SSOT — capability_registry derives from surfaces ── *)
-
-let test_keeper_alias_ssot_consistency () =
-  let open Tool_catalog_surfaces in
-  (* Exhaustive: every keeper_internal_tools entry *)
-  List.iter (fun keeper_name ->
-    let from_surfaces = keeper_internal_replacement keeper_name in
-    let from_registry = Capability_registry.keeper_backend_tool_name keeper_name in
-    match from_surfaces with
-    | Some masc_name ->
-        Alcotest.(check string)
-          (Printf.sprintf "%s alias must match" keeper_name)
-          masc_name from_registry
-    | None ->
-        Alcotest.(check string)
-          (Printf.sprintf "%s (native) must be identity" keeper_name)
-          keeper_name from_registry
-  ) keeper_internal_tools;
-  (* Pin asymmetric mapping: keeper_tasks_list -> masc_tasks (not masc_tasks_list) *)
-  Alcotest.(check string) "keeper_tasks_list quirk"
-    "masc_tasks" (Capability_registry.keeper_backend_tool_name "keeper_tasks_list");
-  (* Privileged native tools must remain identity *)
-  Alcotest.(check string) "tool_execute identity"
-    "tool_execute" (Capability_registry.keeper_backend_tool_name "tool_execute");
-  Alcotest.(check string) "tool_edit_file identity"
-    "tool_edit_file" (Capability_registry.keeper_backend_tool_name "tool_edit_file");
-  (* Arbitrary unknown name must pass through *)
-  Alcotest.(check string) "unknown identity"
-    "foobar" (Capability_registry.keeper_backend_tool_name "foobar")
-
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -389,7 +359,5 @@ let () =
             "unsharded default tools not flagged as orphan_toml"
             `Quick
             test_unsharded_default_tools_not_orphaned;
-          Alcotest.test_case "keeper_backend_tool_name matches keeper_internal_replacement" `Quick
-            test_keeper_alias_ssot_consistency;
         ] );
     ]

@@ -273,25 +273,9 @@ let inspect
 let find_repo_url ~(config : Workspace.config) ~repo_name =
   Repo_store.find_url_by_id ~base_path:config.Workspace.base_path repo_name
 
-(** Resolve the keeper's mapped credential from [keeper_repo_mappings.toml]. *)
-let resolve_keeper_credential ~(config : Workspace.config) ~(meta : keeper_meta) =
-  match
-    Keeper_repo_mapping.credentials_for_keeper
-      ~base_path:config.Workspace.base_path ~keeper_id:meta.name
-  with
-  | Error reason ->
-    Error (Printf.sprintf "credential mapping error for keeper %s: %s" meta.name reason)
-  | Ok [] ->
-    Error
-      (Printf.sprintf
-         "keeper %s has no credential mapping; add [mapping.%s] to keeper_repo_mappings.toml"
-         meta.name meta.name)
-  | Ok (cred :: _) -> Ok cred
-
-(** Clone a sandbox repo using the keeper's mapped credential.
+(** Clone a sandbox repo from the configured URL.
     Constructs a minimal [repository] record and delegates to [Repo_git.clone]. *)
-let clone_sandbox_repo ~(config : Workspace.config) ~(meta : keeper_meta)
-    ~repo_name ~url ~clone_path ~(credential : Repo_manager_types.credential) =
+let clone_sandbox_repo ~(meta : keeper_meta) ~repo_name ~url ~clone_path =
   let open Repo_manager_types in
   let repo = {
     id = repo_name;
@@ -300,7 +284,6 @@ let clone_sandbox_repo ~(config : Workspace.config) ~(meta : keeper_meta)
     local_path = clone_path;
     aliases = [];
     default_branch = "main";
-    credential_id = credential.id;
     keepers = [ meta.name ];
     status = Active;
     auto_sync = false;
@@ -309,7 +292,7 @@ let clone_sandbox_repo ~(config : Workspace.config) ~(meta : keeper_meta)
     updated_at = 0L;
   }
   in
-  Repo_git.clone ~repository:repo ~credential
+  Repo_git.clone ~repository:repo
 
 (** [ensure_ready ~config ~meta ~repo_name ()] probes the sandbox repo
     via [inspect]. If the repo is [missing_clone] or [not_git_repo],
@@ -364,29 +347,23 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
                "repo %s not found in repositories.toml; cannot auto-clone"
                repo_name)
         | Some url -> (
-            match resolve_keeper_credential ~config ~meta with
-            | Error _ as err -> err
-            | Ok credential -> (
-                match
-                  clone_sandbox_repo ~config ~meta ~repo_name ~url
-                    ~clone_path:path ~credential
-                with
-                | Error msg ->
-                  Error (Printf.sprintf "auto-clone failed for %s: %s" repo_name msg)
-                | Ok () ->
-                  (* Verify post-clone state *)
-                  let post = inspect ~config ~meta ~repo_name () in
-                  let post_state =
-                    match Json_util.assoc_member_opt "state" post with
-                    | Some (`String s) -> s
-                    | _ -> "unknown"
-                  in
-                  if post_state = "ready" then Ok ()
-                  else
-                    Error
-                      (Printf.sprintf
-                         "auto-clone succeeded but post-clone state is %s"
-                         post_state))))
+            match clone_sandbox_repo ~meta ~repo_name ~url ~clone_path:path with
+            | Error msg ->
+              Error (Printf.sprintf "auto-clone failed for %s: %s" repo_name msg)
+            | Ok () ->
+              (* Verify post-clone state *)
+              let post = inspect ~config ~meta ~repo_name () in
+              let post_state =
+                match Json_util.assoc_member_opt "state" post with
+                | Some (`String s) -> s
+                | _ -> "unknown"
+              in
+              if post_state = "ready" then Ok ()
+              else
+                Error
+                  (Printf.sprintf
+                     "auto-clone succeeded but post-clone state is %s"
+                     post_state)))
     | other ->
       Error
         (Printf.sprintf
@@ -399,7 +376,7 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
     [auto_sync]/[sync_interval] are 0/false because the playground lane is
     advanced explicitly by [ensure_current], not by the [.masc/repos] periodic
     [repo_sync] fiber. *)
-let make_repo_record ~repo_name ~url ~clone_path ~default_branch ~credential_id
+let make_repo_record ~repo_name ~url ~clone_path ~default_branch
     ~keeper_name : Repo_manager_types.repository =
   let open Repo_manager_types in
   {
@@ -409,7 +386,6 @@ let make_repo_record ~repo_name ~url ~clone_path ~default_branch ~credential_id
     local_path = clone_path;
     aliases = [];
     default_branch;
-    credential_id;
     keepers = [ keeper_name ];
     status = Active;
     auto_sync = false;
@@ -475,18 +451,14 @@ let ensure_current ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name
     | "status_failed" ->
         Skipped (Printf.sprintf "repo not a ready clone (state=%s)" state)
     | _ -> (
-        match
-          find_repo_url ~config ~repo_name, resolve_keeper_credential ~config ~meta
-        with
-        | None, _ -> Skipped "repo not in repositories.toml"
-        | _, Error reason -> Skipped (Printf.sprintf "no credential: %s" reason)
-        | Some url, Ok credential -> (
+        match find_repo_url ~config ~repo_name with
+        | None -> Skipped "repo not in repositories.toml"
+        | Some url -> (
             let repo =
               make_repo_record ~repo_name ~url ~clone_path:cpath ~default_branch
-                ~credential_id:credential.Repo_manager_types.id
                 ~keeper_name:meta.name
             in
-            match Repo_git.fetch ~repository:repo ~credential with
+            match Repo_git.fetch ~repository:repo with
             | Error msg -> Skipped (Printf.sprintf "fetch failed: %s" msg)
             | Ok _ -> (
                 let target_ref = "origin/" ^ default_branch in

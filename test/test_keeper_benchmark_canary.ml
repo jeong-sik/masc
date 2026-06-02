@@ -178,15 +178,7 @@ let test_runtime_canary_prepends_recommended_model_only_without_explicit_models 
           KML.configured_model_labels_of_meta (make_meta ~name:"analyst" ())
         in
         check bool "bench recommendation is not a runtime dispatch override"
-          false (List.mem "test-provider:test-model" labels);
-        let explicit_meta =
-          { (make_meta ~name:"analyst" ()) with models = [ "explicit:model" ] }
-        in
-        let explicit_labels =
-          KML.configured_model_labels_of_meta explicit_meta
-        in
-        check bool "legacy explicit models are ignored by runtime labels"
-          false (List.mem "explicit:model" explicit_labels))))
+          false (List.mem "test-provider:test-model" labels))))
 
 let () =
   run "keeper_benchmark_canary"

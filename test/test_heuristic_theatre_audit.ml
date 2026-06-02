@@ -5,7 +5,7 @@
    flagged in handoff tick #18 now surface as proper
    Prometheus counters.
 
-   - [Board_core_classify.legacy_migrate_post_kind_metric]:
+   - [Board_prometheus_hooks.metric_legacy_migrate_post_kind]:
      [author] label for author-heuristic automation migration.
    - [Thompson_sampling.priority_trigger_selected_metric]:
      [agent, trigger] labels for priority-trigger selection.
@@ -21,7 +21,7 @@
    label set each counter consumes.  A dashboard-breaking
    rename or label reshape fails here before it reaches CI. *)
 
-module BC = Masc_mcp.Board_core_classify
+module BPH = Masc_mcp.Board_prometheus_hooks
 (* Thompson_sampling carved into the masc_thompson leaf (Health/Prometheus
    edges inverted); the metric-name constant is still exported. Reference the
    bare module (re-exported via masc_test_deps) instead of Masc_mcp.*. *)
@@ -35,7 +35,7 @@ let test_board_metric_name_stable () =
   Alcotest.(check string)
     "board legacy migrate counter canonical name"
     "masc_board_legacy_migrate_post_kind_total"
-    BC.legacy_migrate_post_kind_metric
+    BPH.metric_legacy_migrate_post_kind
 
 let test_board_counter_accepts_author_label () =
   (* Baseline read for a synthetic author — exercising the
@@ -46,7 +46,7 @@ let test_board_counter_accepts_author_label () =
   let labels = [ ("author", "unused-test-9919-board") ] in
   Alcotest.(check (float 0.0001))
     "unused-author baseline is 0" 0.0
-    (counter_value BC.legacy_migrate_post_kind_metric ~labels)
+    (counter_value BPH.metric_legacy_migrate_post_kind ~labels)
 
 let test_thompson_metric_name_stable () =
   Alcotest.(check string)

@@ -277,13 +277,8 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("active_model", `Null);
           ("active_model_label", `Null);
           ("last_model_used_label", `Null);
-          ( "per_provider_timeout_sec",
-            Json_util.float_opt_to_json m.per_provider_timeout_s );
-          ( "per_provider_timeout_mode",
-            `String
-              (match m.per_provider_timeout_s with
-               | Some _ -> "override"
-               | None -> "turn_budget_heuristic") );
+          ("per_provider_timeout_sec", `Null);
+          ("per_provider_timeout_mode", `String "turn_budget_heuristic");
           ("verify", `Bool false);
         ]
       in

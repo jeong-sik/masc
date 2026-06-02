@@ -17,7 +17,6 @@ let test_submit_and_retrieve () =
     id           = "cu-test-001";
     generated_at = 1_735_689_600.0;
     submitted_by = "agent-test";
-    model        = Some "model-d";
     summary      = None;
     ordering     = [ "p-aaa"; "p-bbb" ];
     highlights   = [ "p-aaa" ];
@@ -34,7 +33,6 @@ let test_submit_and_retrieve () =
   let s = Option.get got in
   Alcotest.(check string) "id"           "cu-test-001"             s.id;
   Alcotest.(check string) "submitted_by" "agent-test"              s.submitted_by;
-  Alcotest.(check (option string)) "model" (Some "model-d")         s.model;
   Alcotest.(check (list string)) "ordering" [ "p-aaa"; "p-bbb" ]  s.ordering;
   Alcotest.(check string) "rationale"    "Test rationale"          s.rationale
 
@@ -44,7 +42,6 @@ let test_reset_clears () =
     id           = "cu-test-002";
     generated_at = 1_735_689_600.0;
     submitted_by = "agent-test";
-    model        = None;
     summary      = None;
     ordering     = [];
     highlights   = [];
@@ -65,7 +62,7 @@ let test_submit_replaces () =
   Board_curation.reset_for_test ();
   let make id rationale : Board_curation.curation_snapshot = {
     id; generated_at = 1_735_689_600.0; submitted_by = "a";
-    model = None; summary = None; ordering = []; highlights = [];
+    summary = None; ordering = []; highlights = [];
     tag_suggestions = []; answer_matches = []; health_score = None;
     health_components = []; rationale; provenance = `Assoc [];
   } in
@@ -83,7 +80,6 @@ let test_to_yojson_round_trip () =
     id           = "cu-json-01";
     generated_at = 1_748_779_200.0;
     submitted_by = "model-agent";
-    model        = Some "agent_llm_a-3";
     summary      = Some "Two active questions need routing.";
     ordering     = [ "p-1"; "p-2"; "p-3" ];
     highlights   = [ "p-2" ];
@@ -105,7 +101,6 @@ let test_to_yojson_round_trip () =
    | `Assoc kvs ->
      let get k = List.assoc_opt k kvs in
      Alcotest.(check (option pass)) "id present"    (Some (`String "cu-json-01"))    (get "id");
-     Alcotest.(check (option pass)) "model present" (Some (`String "agent_llm_a-3"))      (get "model");
      Alcotest.(check (option pass)) "summary present"
        (Some (`String "Two active questions need routing.")) (get "summary");
      Alcotest.(check bool) "ordering is list"

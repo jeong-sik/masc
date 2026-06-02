@@ -256,17 +256,29 @@ let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
     ]
 ;;
 
-(** Warm up registry from telemetry summary.
+(** Structural warm-up input — the per-tool fields the registry needs to
+    seed its counters. Decoupled from [Telemetry_eio.tool_usage_stats] so the
+    Tool dispatch substrate (lib/tool/) does not code-depend on the telemetry
+    persistence layer. The composition root projects the persisted summary
+    into this shape — see [Server_runtime_bootstrap]. *)
+type warm_up_stats = {
+  count : int;
+  success_count : int;
+  failure_count : int;
+  last_used_at : float option;
+}
+
+(** Warm up registry from persisted per-tool stats.
     Called once at server startup to restore persistent metrics.
 
     [Eio_guard.with_mutex] degrades to a direct call before the Eio
     runtime is up, so this stays safe when [warm_up] runs during early
     bootstrap. *)
-let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
+let warm_up (stats_by_tool : (string * warm_up_stats) list) : int =
   let count = ref 0 in
   with_registry_rw (fun () ->
-    Hashtbl.iter
-      (fun tool_name (stats : Telemetry_eio.tool_usage_stats) ->
+    List.iter
+      (fun (tool_name, (stats : warm_up_stats)) ->
          if not (Hashtbl.mem registry tool_name)
          then (
            Hashtbl.replace
@@ -287,7 +299,7 @@ let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
              ; last_assignment_id = Atomic.make None
              };
            Stdlib.incr count))
-      summary.stats_by_tool);
+      stats_by_tool);
   !count
 ;;
 

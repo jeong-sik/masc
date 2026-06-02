@@ -118,11 +118,46 @@ let apply_result_transformer (r : Tool_result.result) : Tool_result.result =
   | Some t -> t r
 ;;
 
+(** Dispatch span wrapper surface.
+
+    The OTel/Prometheus 4-tuple emission ([Tool_telemetry.with_span]) is
+    {e injected} rather than referenced inline, so this library does not
+    code-depend on [Tool_telemetry] / [Otel_spans] / [Prometheus]. That keeps
+    the Tool dispatch substrate (lib/tool/, [masc_tool_dispatch]) free of the
+    telemetry stack — the compiler enforces "Tool is just Tool".
+
+    The wrapper has the shape of [Tool_telemetry.with_span]: it receives a
+    trace-id thunk and the dispatch body returning [(result, outcome_label)],
+    and returns the same pair. The default is the identity wrapper (no span,
+    no metric) so [guarded_dispatch] is correct even before the composition
+    root registers the real telemetry — it just emits nothing.
+
+    Registered once at server startup via [set_span_wrapper Tool_telemetry.with_span]
+    (see [Server_bootstrap_maintenance.start_background_maintenance]). Monomorphic
+    in [Tool_result.result option] because [guarded_dispatch] is the only caller. *)
+type trace_id = string
+
+type span_wrapper =
+  tool_name:string
+  -> ((unit -> trace_id option) -> Tool_result.result option * string)
+  -> Tool_result.result option * string
+
+let identity_span_wrapper : span_wrapper =
+  fun ~tool_name:_ body -> body (fun () -> None)
+;;
+
+let span_wrapper_ref : span_wrapper ref = ref identity_span_wrapper
+
+let set_span_wrapper (w : span_wrapper) =
+  with_dispatch_rw (fun () -> span_wrapper_ref := w)
+;;
+
 let clear_hooks () =
   with_dispatch_rw (fun () ->
     pre_hooks := [];
     dispatch_observers := [];
-    result_transformer_ref := None)
+    result_transformer_ref := None;
+    span_wrapper_ref := identity_span_wrapper)
 
 (** Run pre-hooks in order, threading coerced args through the chain.
     First [Reject] wins (short-circuit). [Proceed] replaces args for
@@ -155,7 +190,8 @@ let run_dispatch_observers
     ([dispatch] -> [dispatch_structured] -> [guarded_dispatch]) into
     one function so the lifecycle reads top-to-bottom:
 
-      1. [Tool_telemetry.with_span]   (4-tuple emission wrapper)
+      1. injected span wrapper         (4-tuple emission; identity by default,
+                                         [Tool_telemetry.with_span] at runtime)
       2. pre-hook chain                (reject / coerce-args)
       3. registry lookup + handler     (handler exception capture)
       4. result transformer            ([apply_result_transformer])
@@ -167,7 +203,10 @@ let run_dispatch_observers
     was pure overhead. *)
 let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result option =
   let result, _outcome =
-    Tool_telemetry.with_span ~tool_name:token.name (fun _trace_id_thunk ->
+    (* Injected telemetry span wrapper (default identity). The composition
+       root registers [Tool_telemetry.with_span] so this lib stays free of
+       the Otel/Prometheus stack. *)
+    !span_wrapper_ref ~tool_name:token.name (fun _trace_id_thunk ->
       let name = token.name in
       let r =
         match run_pre_hooks ~name ~args with

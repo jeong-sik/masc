@@ -1,7 +1,7 @@
 # Runtime → Keeper Boundary Severance — Audit
 
 **Date**: 2026-06-02
-**PR**: #19801 (MERGED)
+**PR**: #19801
 **Goal**: Runtime (infrastructure layer) should not depend on Keeper (application layer). The correct dependency direction is Keeper -> Runtime.
 
 ## 1. Discovery

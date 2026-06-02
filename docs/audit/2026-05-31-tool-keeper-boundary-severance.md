@@ -92,7 +92,7 @@ This PR takes neither stance in code — it cites RFC-0084 as the precedent and 
 After the Tool→Keeper ratchet reached baseline=0, a systematic cross-subsystem scan
 identified Runtime→Keeper as the next clear boundary violation.
 
-**PR #19801** (MERGED 2026-06-02):
+**PR #19801** (2026-06-02):
 - `Keeper_oas_checkpoint` -> `Runtime_oas_checkpoint` (0 keeper callers — purely misnamed)
 - `Keeper_observation` -> `Runtime_observation` (shared 9+4, observation is runtime behavior)
 - `Keeper_observation_query_operation` -> `Runtime_observation_query_operation`

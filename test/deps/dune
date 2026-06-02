@@ -104,6 +104,9 @@
    (re_export masc_mcp.masc_exec_command_gate)
    (re_export masc_mcp.masc_exec_bash_parser)
    (re_export masc_workspace)
+   ;; Goal domain extracted to lib/goal/ (masc_goal). Re-export so test code
+   ;; using bare Goal_store.X / Goal_phase.X resolves after decoupling.
+   (re_export masc_goal)
    (re_export masc_types)
    (re_export mirage-crypto)
    (re_export mirage-crypto-rng)

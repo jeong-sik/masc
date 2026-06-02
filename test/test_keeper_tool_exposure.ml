@@ -62,6 +62,16 @@ let make_minimal_meta () = make_meta ~tool_access:minimal_tool_access ()
 
 let has_tool name tools = List.mem name tools
 
+let check_tool_choice_any label = function
+  | Agent_sdk.Types.Any -> ()
+  | other ->
+    fail
+      (Printf.sprintf
+         "%s: expected Any, got %s"
+         label
+         (Yojson.Safe.to_string (Agent_sdk.Types.tool_choice_to_json other)))
+;;
+
 let has_any_prefix prefix tools =
   List.exists
     (fun n ->
@@ -484,6 +494,27 @@ let test_verifier_identity_uses_verdict_only_task_surface () =
   in
   assert_verifier_surface "verifier";
   assert_verifier_surface "keeper-verifier-agent"
+;;
+
+let test_task_audit_tool_choice_allows_cleanup_followup () =
+  let allowed_tool_names =
+    [ "keeper_tasks_audit"; "keeper_task_force_release"; "keeper_tasks_list" ]
+  in
+  let preferred =
+    Keeper_agent_tool_surface.preferred_tool_names_for_turn_affordances [ "task_audit" ]
+  in
+  check
+    bool
+    "task_audit force-includes force_release"
+    true
+    (has_tool "keeper_task_force_release" preferred);
+  let choice =
+    Keeper_agent_tool_surface.preferred_tool_choice_for_required_turn
+      ~has_current_task:false
+      ~turn_affordances:[ "task_audit" ]
+      ~allowed_tool_names
+  in
+  check_tool_choice_any "task_audit cleanup follow-up" choice
 ;;
 
 (* Governance tool schemas are no longer registered. *)
@@ -1351,6 +1382,10 @@ let () =
             "verifier identity uses verdict-only task surface"
             `Quick
             test_verifier_identity_uses_verdict_only_task_surface
+        ; test_case
+            "task audit tool choice allows cleanup follow-up"
+            `Quick
+            test_task_audit_tool_choice_allows_cleanup_followup
         ; test_case
             "explicit access legacy governance tools removed"
             `Quick

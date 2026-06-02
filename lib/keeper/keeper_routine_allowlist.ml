@@ -215,6 +215,26 @@ let sandboxed_code_write_rule_label
          then Some "keeper_routine.sandbox_worktree_code_write"
          else None))
 
+let orphan_force_release_rule_label ~(config : Workspace.config) ~tool_name ~input
+    ~risk_level =
+  let canonical_tool = Keeper_tool_resolution.canonical_tool_name tool_name in
+  if (not (String.equal canonical_tool "keeper_task_force_release"))
+     || risk_level <> RL.Critical
+  then None
+  else (
+    match
+      ( first_nonempty_string_field [ "task_id" ] input
+      , first_nonempty_string_field [ "reason" ] input )
+    with
+    | Some task_id, Some _reason ->
+      let is_current_orphan =
+        Workspace.audit_orphan_tasks config
+        |> List.exists (fun ((task : Masc_domain.task), _) ->
+          String.equal task.id task_id)
+      in
+      if is_current_orphan then Some "keeper_routine.orphan_force_release" else None
+    | _ -> None)
+
 (* ── Observability ────────────────────────────────────────── *)
 
 let rule_to_yojson (rule : rule) : Yojson.Safe.t =

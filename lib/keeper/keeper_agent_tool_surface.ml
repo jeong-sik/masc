@@ -222,7 +222,7 @@ let tools_for_gated_affordance = function
   | Task_claim ->
     [ "keeper_task_claim"; "masc_claim_next" ]
   | Task_audit ->
-    [ "keeper_tasks_audit"; "keeper_tasks_list"; "masc_tasks" ]
+    [ "keeper_tasks_audit"; "keeper_task_force_release"; "keeper_tasks_list"; "masc_tasks" ]
   | Task_verify ->
     [ "keeper_tasks_list"; "keeper_tasks_audit";
       "keeper_task_done"; "keeper_task_submit_for_verification";
@@ -260,7 +260,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
        | Task_claim ->
          [ "keeper_task_claim"; "masc_claim_next" ]
        | Task_audit ->
-         [ "keeper_tasks_audit" ]
+         [ "keeper_tasks_audit"; "keeper_task_force_release" ]
        | Task_verify ->
          [ "keeper_task_submit_for_verification"; "keeper_task_done";
            "masc_transition" ]
@@ -438,7 +438,16 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
                [ "keeper_board_comment"; "keeper_board_post"; "masc_broadcast" ]
   then Agent_sdk.Types.Any
   else if has_turn_affordance Task_audit turn_affordances
-          && progress_tool_available "keeper_tasks_audit"
+          && progress_tool_available "keeper_task_force_release"
+  then
+    (* The audit tool can discover work that must be resolved by
+       [keeper_task_force_release].  Exact-forcing another audit call after
+       discovery traps keepers in "audit and narrate" loops, so keep the
+       turn tool-required but let the model choose the cleanup tool once it
+       has the task id. *)
+    Agent_sdk.Types.Any
+  else if has_turn_affordance Task_audit turn_affordances
+          && List.mem "keeper_tasks_audit" allowed_tool_names
   then Agent_sdk.Types.Tool "keeper_tasks_audit"
   else if has_turn_affordance Task_verify turn_affordances
           && progress_tool_available "masc_transition"

@@ -13,15 +13,16 @@
     [Governance_pipeline.to_oas_approval_callback] before the soft
     destructive tool/op substring gate, but hard blockers still win, so:
 
-    - Critical risk still gates
+    - Critical risk still gates, except audited orphan force-release where
+      the live task board proves the task is assigned to an offline agent
     - runtime_auto_approval_blocked (runtime_exhausted etc.) still gates
     - shell or git tool names still gate unless an exact routine rule
       matches the tool plus op/action
     - High-risk code write/edit tools auto-approve only when a keeper has a
       current task and the target resolves inside that keeper's sandbox
       repo worktree lane
-    - force_* actions still gate (classified as Critical via "force"
-      pattern in {!Governance_pipeline_risk.classify_name})
+    - force_done still gates; force_release is auto-approved only by the
+      task-board-aware orphan rule below
 
     The allowlist is intentionally narrow:
     - [masc_transition]: only claim, start, heartbeat, done, release.
@@ -76,6 +77,19 @@ val rule_label :
 val sandboxed_code_write_rule_label :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  risk_level:Keeper_approval_queue.risk_level ->
+  string option
+
+(** Task-board-aware exception for orphan cleanup.
+
+    Returns a routine label only for [keeper_task_force_release] calls whose
+    [task_id] currently appears in {!Workspace.audit_orphan_tasks} and whose
+    input includes a non-empty [reason]. This is intentionally narrower than
+    generic [force_*] approval and does not cover [keeper_task_force_done]. *)
+val orphan_force_release_rule_label :
+  config:Workspace.config ->
   tool_name:string ->
   input:Yojson.Safe.t ->
   risk_level:Keeper_approval_queue.risk_level ->

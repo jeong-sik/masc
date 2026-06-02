@@ -1,14 +1,11 @@
 (* Keeper-owned MCP tool-name vocabulary.
 
-   Moved out of the central [Tool_name] module (was the nested [Tool_name.Keeper])
-   so the tool dispatch substrate stays keeper-agnostic: the substrate routes
+   This lives outside the central [Tool_name] module so the tool dispatch
+   substrate stays keeper-agnostic: the substrate routes
    opaque tool names and the keeper subsystem owns the typed vocabulary of its
    own tools. Dependency direction is keeper -> tool, never the reverse.
 
-   History: [Tool_name.Keeper] was deleted by #19797 (hard cut keeper/tool
-   coupling) without a typed replacement, which regressed keeper tool names to
-   bare strings scattered across keeper code. This restores the single source of
-   truth on the keeper side of the Tool/Keeper boundary. *)
+   The SSOT is on the keeper side of the Tool/Keeper boundary. *)
 
 type t =
   | Execute

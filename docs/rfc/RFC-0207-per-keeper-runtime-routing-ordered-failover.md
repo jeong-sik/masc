@@ -7,7 +7,11 @@ updated: 2026-06-01
 author: jeong-sik
 supersedes: []
 superseded_by: null
-related: ["0001", "0206"]
+superseded_sections:
+  - section: "§2"
+    by: "0211"
+    note: "Surface choice (persona model field as the single surface) is superseded by RFC-0211 (runtime.toml keeper-assignment SSOT). Part A routing mechanism stands."
+related: ["0001", "0206", "0211"]
 implementation_prs: []
 ---
 

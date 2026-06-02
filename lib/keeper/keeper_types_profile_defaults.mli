@@ -38,7 +38,6 @@ type keeper_profile_defaults = {
   social_model : string option;
   (* No per-keeper [model]/[runtime_id] field: keeper→runtime assignment lives
      solely in runtime.toml [[runtime.assignments]] (persona⊥{model,runtime}). *)
-  models : string list option;
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;
   oas_env : (string * string) list;

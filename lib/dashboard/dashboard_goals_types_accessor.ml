@@ -45,7 +45,9 @@ type attainment_unit =
   | Unknown
 
 let task_is_linked_to_goal (task : Masc_domain.task) goal_id =
-  Convergence.task_matches_goal ~goal_id task
+  match task.goal_id with
+  | Some task_goal_id -> String.equal task_goal_id goal_id
+  | None -> false
 
 let task_linkage_source_opt (task : Masc_domain.task) goal_id =
   match task.goal_id with

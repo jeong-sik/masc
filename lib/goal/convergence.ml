@@ -9,6 +9,12 @@ type convergence_signal =
   | AllSubTasksDone of { completed : int; total : int }
   | StagnationDetected of { iterations_without_progress : int }
 
+type task_progress = {
+  goal_id : string option;
+  is_terminal : bool;
+  is_completed : bool;
+}
+
 let convergence_signal_to_yojson = function
   | MetricMet { metric; value; threshold } ->
       `Assoc
@@ -32,28 +38,23 @@ let convergence_signal_to_yojson = function
           ("iterations_without_progress", `Int iterations_without_progress);
         ]
 
-let task_has_goal_id ~goal_id (task : Masc_domain.task) =
-  match task.goal_id with
+let progress_matches_goal ~goal_id progress =
+  match progress.goal_id with
   | Some linked_goal_id -> String.equal linked_goal_id goal_id
   | None -> false
 
-let task_matches_goal ~goal_id (task : Masc_domain.task) =
-  task_has_goal_id ~goal_id task
-
-let is_terminal (task : Masc_domain.task) =
-  Masc_domain.task_status_is_terminal task.task_status
-
-let is_completed (task : Masc_domain.task) =
-  Masc_domain.task_status_is_done task.task_status
-
 let check_convergence ~goal_id ~tasks ?(stagnation_threshold = 5)
     ~iterations_without_progress () =
-  let goal_tasks = List.filter (task_matches_goal ~goal_id) tasks in
+  let goal_tasks = List.filter (progress_matches_goal ~goal_id) tasks in
   let total = List.length goal_tasks in
   if total = 0 then None
   else
-    let completed = List_util.count_if is_completed goal_tasks in
-    let all_terminal = List.for_all is_terminal goal_tasks in
+    let completed =
+      List_util.count_if (fun progress -> progress.is_completed) goal_tasks
+    in
+    let all_terminal =
+      List.for_all (fun progress -> progress.is_terminal) goal_tasks
+    in
     if all_terminal && completed = total then
       Some (AllSubTasksDone { completed; total })
     else if iterations_without_progress >= stagnation_threshold then

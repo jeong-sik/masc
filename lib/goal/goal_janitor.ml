@@ -5,7 +5,8 @@
     2. Stagnate: mark Active goals with no update for [stagnant_days] as Dropped.
     3. Orphan: invoke registered owner hooks to remove goal bindings
        that reference non-existent goals in the Goal Store.
-    4. Escalate: report stale unclaimed tasks that have no goal linkage.
+    4. Escalate: invoke task-owner hooks for stale unclaimed tasks that have
+       no goal linkage.
 
     @since 2.236.0 *)
 
@@ -104,64 +105,6 @@ let sweep_goals ~(config : sweep_config) (goals : Goal_store.goal list)
   (result, { purged = !purged; stagnated = !stagnated; orphans = 0;
              orphan_tasks = 0 })
 
-let task_age_seconds ?(now = Unix.gettimeofday ()) (task : Masc_domain.task) =
-  match parse_iso_ts task.created_at with
-  | None -> None
-  | Some created_at -> Some (int_of_float (max 0.0 (now -. created_at)))
-
-let task_has_current_goal_link ~valid_goal_ids (task : Masc_domain.task) =
-  match task.goal_id with
-  | Some goal_id -> List.mem goal_id valid_goal_ids
-  | None -> false
-
-let audit_unclaimed_goal_orphan_tasks ?(now = Unix.gettimeofday ())
-    ~valid_goal_ids ~min_age_seconds (tasks : Masc_domain.task list) =
-  tasks
-  |> List.filter_map (fun (task : Masc_domain.task) ->
-    match task.task_status, task.goal_id, task_age_seconds ~now task with
-    | Masc_domain.Todo, None, Some age_seconds
-      when age_seconds >= min_age_seconds
-           && not (task_has_current_goal_link ~valid_goal_ids task) ->
-        Some (task, age_seconds)
-    | _ -> None)
-
-let emit_orphan_task_escalation workspace_config ~threshold_seconds orphan_tasks =
-  match orphan_tasks with
-  | [] -> ()
-  | _ ->
-      let task_ids =
-        List.map
-          (fun ((task, _) : Masc_domain.task * int) -> `String task.id)
-          orphan_tasks
-      in
-      let task_items =
-        List.map
-          (fun ((task, age_seconds) : Masc_domain.task * int) ->
-             `Assoc
-               [ ("task_id", `String task.id)
-               ; ("title", `String task.title)
-               ; ("created_at", `String task.created_at)
-               ; ("age_seconds", `Int age_seconds)
-               ; ("created_by", Json_util.string_opt_to_json task.created_by)
-               ])
-          orphan_tasks
-      in
-      Workspace_utils.log_event workspace_config
-        (`Assoc
-           [ ("type", `String "goal_orphan_task_escalation")
-           ; ("subsystem", `String "goal_janitor")
-           ; ("threshold_seconds", `Int threshold_seconds)
-           ; ("orphan_task_count", `Int (List.length orphan_tasks))
-           ; ("task_ids", `List task_ids)
-           ; ("tasks", `List task_items)
-           ; ( "action",
-               `String "link_task_goal_id_or_cancel_stale_unclaimed_task" )
-           ; ("ts", `String (Masc_domain.now_iso ()))
-           ]);
-      Log.Misc.warn
-        "[GoalJanitor] escalated %d stale unclaimed task(s) without goal linkage"
-        (List.length orphan_tasks)
-
 (** Clean orphaned goal binding IDs.
     Returns the pruned list and count of removed IDs. *)
 let prune_active_goal_ids ~(valid_goal_ids : string list)
@@ -193,6 +136,29 @@ let prune_orphan_goal_bindings workspace_config ~valid_goal_ids =
   let hooks = Atomic.get orphan_goal_binding_hooks in
   hooks.prune_orphan_goal_bindings workspace_config ~valid_goal_ids
 
+type orphan_task_escalation_hooks =
+  { escalate_orphan_tasks :
+      Workspace_utils.config ->
+      valid_goal_ids:string list ->
+      min_age_seconds:int ->
+      int
+  }
+
+let default_orphan_task_escalation_hooks =
+  { escalate_orphan_tasks =
+      (fun _ ~valid_goal_ids:_ ~min_age_seconds:_ -> 0)
+  }
+
+let orphan_task_escalation_hooks =
+  Atomic.make default_orphan_task_escalation_hooks
+
+let set_orphan_task_escalation_hooks hooks =
+  Atomic.set orphan_task_escalation_hooks hooks
+
+let escalate_orphan_tasks workspace_config ~valid_goal_ids ~min_age_seconds =
+  let hooks = Atomic.get orphan_task_escalation_hooks in
+  hooks.escalate_orphan_tasks workspace_config ~valid_goal_ids ~min_age_seconds
+
 (** Run a full sweep: goals + owner-managed goal bindings.
     Writes updated state to disk. *)
 let run ?(config = default_config) (workspace_config : Workspace_utils.config) : sweep_result =
@@ -208,16 +174,13 @@ let run ?(config = default_config) (workspace_config : Workspace_utils.config) :
   let total_orphans =
     prune_orphan_goal_bindings workspace_config ~valid_goal_ids:valid_ids
   in
-  let orphan_task_rows =
-    Workspace_query.get_tasks_safe workspace_config
-    |> audit_unclaimed_goal_orphan_tasks ~valid_goal_ids:valid_ids
-         ~min_age_seconds:config.orphan_task_escalation_age_seconds
+  let orphan_task_count =
+    escalate_orphan_tasks workspace_config
+      ~valid_goal_ids:valid_ids
+      ~min_age_seconds:config.orphan_task_escalation_age_seconds
   in
-  emit_orphan_task_escalation workspace_config
-    ~threshold_seconds:config.orphan_task_escalation_age_seconds
-    orphan_task_rows;
   let result = { partial with orphans = total_orphans;
-                              orphan_tasks = List.length orphan_task_rows } in
+                              orphan_tasks = orphan_task_count } in
   if result.purged > 0 || result.stagnated > 0 || result.orphans > 0
      || result.orphan_tasks > 0 then
     Log.Misc.info

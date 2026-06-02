@@ -2,15 +2,10 @@
 
 ;; Goal domain — pure goal logic (store / phase / verification / convergence /
 ;; janitor). Decoupled from the masc_mcp mega-library: persistence goes through
-;; the already-separate masc_workspace library (Workspace_utils / Workspace_query),
-;; never the mega-lib Workspace facade. Dependency direction is one-way:
-;; consumers (workspace_goals adapter, dashboards) depend on masc_goal; masc_goal
-;; depends only on neutral libraries below.
-;;
-;; Known leak to flag (not a build blocker): goal_janitor uses
-;; Workspace_query.get_tasks_safe — Goal reaching into Task state. That is a
-;; semantic Goal<->Task boundary error to sever later (janitor is really an
-;; adapter, not pure Goal domain).
+;; the already-separate masc_workspace library (Workspace_utils), never the
+;; mega-lib Workspace facade. Dependency direction is one-way: consumers
+;; (workspace_goals adapter, dashboards) depend on masc_goal; masc_goal depends
+;; only on neutral libraries below.
 (library
  (name masc_goal)
  (public_name masc_mcp.masc_goal)

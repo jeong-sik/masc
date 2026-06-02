@@ -176,6 +176,7 @@ let test_escalate_stale_unclaimed_tasks_without_goal_linkage () =
   set_task_created_at config ~title:"Stale unlinked task" ~created_at:stale;
   set_task_created_at config ~title:"Title marker only [goal:g1]" ~created_at:stale;
   set_task_created_at config ~title:"Explicit linked task" ~created_at:stale;
+  Workspace_goal_janitor_backend.install_hooks ();
   let result = Goal_janitor.run config in
   check int "two stale unlinked tasks escalated" 2 result.orphan_tasks;
   let events = event_lines_containing config "goal_orphan_task_escalation" in

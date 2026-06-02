@@ -73,7 +73,7 @@ let resolve_owner_keeper_identity config owner_name =
 
 let resolve_initial_agent_name ~identity ~cached_resolved_agent ~explicit_agent_name =
   let identity_session_prefix =
-    let len = min 8 (String.length identity.Agent_identity.session_key) in
+    let len = min 8 (String.length identity.Client_identity.session_key) in
     if len = 0 then
       "anon"
     else
@@ -88,8 +88,8 @@ let resolve_initial_agent_name ~identity ~cached_resolved_agent ~explicit_agent_
       match cached_resolved_agent with
       | Some cached -> cached
       | None ->
-          if identity.Agent_identity.agent_name <> "" then
-            identity.Agent_identity.agent_name
+          if identity.Client_identity.agent_name <> "" then
+            identity.Client_identity.agent_name
           else
             generated_fallback_agent_name)
 
@@ -99,7 +99,7 @@ let resolve_auth_fallback_agent_name
     agent_name =
   match token with
   | Some t
-    when (not has_explicit_agent_name) && Agent_name_kind.is_transient agent_name
+    when (not has_explicit_agent_name) && Client_name_kind.is_transient agent_name
     -> (
       match Auth.resolve_agent_from_token config.base_path ~token:t with
       | Ok resolved -> resolved

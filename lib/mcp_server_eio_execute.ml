@@ -76,14 +76,14 @@ let execute_tool_eio
      On 2nd+ call in the same MCP session, the cached name preserves the
      nickname selected by the prior session binding without relying on sidecar files. *)
   let cached_resolved_agent =
-    Option.bind mcp_session_id Agent_registry_eio.get_resolved_name
+    Option.bind mcp_session_id Client_registry_eio.get_resolved_name
   in
-  let identity = Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments in
-  Log.Mcp.debug "[Identity] %s" (Agent_identity.to_display_string identity);
+  let identity = Client_registry_eio.get_or_create_identity ?mcp_session_id arguments in
+  Log.Mcp.debug "[Identity] %s" (Client_identity.to_display_string identity);
   let record_mcp_session_agent agent_name =
     match mcp_session_id with
     | None -> ()
-    | Some sid -> Agent_registry_eio.set_resolved_name sid agent_name
+    | Some sid -> Client_registry_eio.set_resolved_name sid agent_name
   in
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments

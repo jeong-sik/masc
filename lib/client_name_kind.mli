@@ -1,4 +1,4 @@
-(** Agent_name_kind — classifies agent name strings by origin. *)
+(** Client_name_kind — classifies agent name strings by origin. *)
 
 (** [is_ephemeral name] is [true] when [name] starts with ["agent-"],
     indicating a system-generated, non-stable identity. *)

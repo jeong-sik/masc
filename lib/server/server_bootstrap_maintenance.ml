@@ -153,7 +153,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          if rl_reaped > 0
          then Log.Server.info "Reaped %d stale rate-limit buckets" rl_reaped;
          (* Agent registry: remove resolved-name cache for dead sessions *)
-         let ar_reaped = Agent_registry_eio.cleanup_stale_sessions () in
+         let ar_reaped = Client_registry_eio.cleanup_stale_sessions () in
          if ar_reaped > 0
          then Log.Server.info "Reaped %d stale agent registry sessions" ar_reaped;
          (* Keeper sandbox: remove stale Docker containers when owner_pid is

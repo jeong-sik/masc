@@ -4,7 +4,7 @@ open Alcotest
 
     The old `/tmp/.masc_agent[_mcp]_<sid>` bridge was first moved behind
     [Host_config.agent_runtime_root], then removed once
-    [Agent_registry_eio] owned MCP-session identity continuity.  This
+    [Client_registry_eio] owned MCP-session identity continuity.  This
     ratchet keeps the old sidecar file surface from coming back in the
     dispatcher modules. *)
 

@@ -8,7 +8,7 @@
     - Circuit_breaker (state transitions under contention)
     - Prometheus (metric increments under contention)
     - Streamable_http.Session (session CRUD under contention)
-    - Agent_registry_eio (identity resolution under contention)
+    - Client_registry_eio (identity resolution under contention)
 *)
 
 open Alcotest

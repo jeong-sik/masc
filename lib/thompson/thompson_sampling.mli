@@ -90,7 +90,7 @@ val init_agent : string -> unit
       caller supplies the agent-health check so this module stays a leaf and
       does not depend on the masc_mcp mega-library root. Required: a default
       would silently make every agent eligible. Production callers pass
-      [Agent_health.is_healthy].
+      [Client_health.is_healthy].
     @param on_priority_selected Injected observability hook fired once per
       priority-trigger selection (Mentioned/ContentAlert), with the agent
       name and trigger label ("mentioned" | "content_alert"). Defaults to a

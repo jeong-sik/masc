@@ -16,7 +16,7 @@ val resolve :
   config:Workspace_utils_backend_setup.config ->
   tool_name:string ->
   arguments:Yojson.Safe.t ->
-  identity:Agent_identity.t ->
+  identity:Client_identity.t ->
   cached_resolved_agent:string option ->
   auth_token:string option ->
   internal_keeper_runtime:bool ->

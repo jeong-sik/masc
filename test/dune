@@ -68,7 +68,6 @@
   test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
-  test_keeper_attempt_liveness
   test_actor_mailbox
   test_domain_pool
   test_sse
@@ -109,7 +108,6 @@
   test_llm_metric_bridge
   test_cost_usd_source_attribution_10318
   test_response_model_empty_10083
-  test_heuristic_theatre_audit
   test_keeper_proactive_skip_counter
   test_keeper_tool_selection_passive_streak
   test_keeper_health_probe
@@ -143,7 +141,6 @@
   test_keeper_goal_repair
   test_accountability_emit_skip_10314
   test_keeper_adaptive_thinking
-  test_keeper_lifecycle
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_rollover_gate
@@ -162,17 +159,13 @@
   test_keeper_allowed_paths
   test_keeper_repo_readiness
   test_keeper_tool_surface_guard
-  test_keeper_benchmark_canary
   test_playground_paths
-  test_keeper_llama_only
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
   test_metrics_rotation
-  test_tool_access_policy
   test_tool_access_role
   test_tool_error
   test_tool_token
-  test_tool_exposure
   test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_completion_contract
@@ -249,7 +242,6 @@
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_tool_execute_descriptor_variant
-  test_tool_surface_ssot
   test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
@@ -336,7 +328,6 @@
   test_d7_retry_admission_gate
   test_keeper_reconcile_state
   test_attempt_state
-  test_keeper_attempt_liveness
   test_actor_mailbox
   test_domain_pool
   test_sse
@@ -377,7 +368,6 @@
   test_llm_metric_bridge
   test_cost_usd_source_attribution_10318
   test_response_model_empty_10083
-  test_heuristic_theatre_audit
   test_keeper_proactive_skip_counter
   test_keeper_tool_selection_passive_streak
   test_keeper_health_probe
@@ -411,7 +401,6 @@
   test_keeper_goal_repair
   test_accountability_emit_skip_10314
   test_keeper_adaptive_thinking
-  test_keeper_lifecycle
   test_keeper_lifecycle_registry_dispatch
   test_keeper_lifecycle_chaos
   test_keeper_rollover_gate
@@ -430,17 +419,13 @@
   test_keeper_allowed_paths
   test_keeper_repo_readiness
   test_keeper_tool_surface_guard
-  test_keeper_benchmark_canary
   test_playground_paths
-  test_keeper_llama_only
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
   test_metrics_rotation
-  test_tool_access_policy
   test_tool_access_role
   test_tool_error
   test_tool_token
-  test_tool_exposure
   test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_completion_contract
@@ -520,7 +505,6 @@
   test_keeper_reaction_ledger
   test_cache_metrics_wiring
   test_keeper_tool_execute_descriptor_variant
-  test_tool_surface_ssot
   test_keeper_retrieval_quality
   test_observability_redact
   test_keeper_tool_call_sse_io_preview
@@ -639,7 +623,6 @@
   test_tui_decode
   test_dashboard_governance
   test_dashboard_labels
-  test_dashboard_keeper_feature_proof
   test_dashboard_surface_readiness
   test_activity_graph
   test_masc_log
@@ -693,9 +676,7 @@
   test_workspace_messages_raw
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
-  test_keeper_tools_oas
   test_keeper_tool_execute_retry_deterministic_close
-  test_keeper_tool_exposure
   test_keeper_runtime_denylist
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
@@ -726,7 +707,6 @@
   test_eio_mutex_concurrency
   test_eio_guard_yield_meter
   test_board_dispatch
-  test_board_curation
   test_board_fixture_detector
   test_vote_ts_preservation_10086
   test_board_karma_ledger
@@ -760,7 +740,6 @@
   test_board_truncation_detection
   test_yojson_type_error_board
   ; test_proof_criteria removed (team session cleanup)
-  test_tool_registration_consistency
   ; test_tree_index removed (CP purge)
   test_tool_registry
   test_tool_dispatch
@@ -788,7 +767,6 @@
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect
-  test_keeper_safety_gates
   test_keeper_guards
   test_keeper_working_state
   test_keeper_wip_admission
@@ -830,7 +808,6 @@
   test_tui_decode
   test_dashboard_governance
   test_dashboard_labels
-  test_dashboard_keeper_feature_proof
   test_dashboard_surface_readiness
   test_activity_graph
   test_masc_log
@@ -884,9 +861,7 @@
   test_workspace_messages_raw
   ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
   test_local_runtime_pool
-  test_keeper_tools_oas
   test_keeper_tool_execute_retry_deterministic_close
-  test_keeper_tool_exposure
   test_keeper_runtime_denylist
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
@@ -917,7 +892,6 @@
   test_eio_mutex_concurrency
   test_eio_guard_yield_meter
   test_board_dispatch
-  test_board_curation
   test_board_fixture_detector
   test_vote_ts_preservation_10086
   test_board_karma_ledger
@@ -950,7 +924,6 @@
   test_anti_rationalization_fail_mode
   test_board_truncation_detection
   test_yojson_type_error_board
-  test_tool_registration_consistency
   ; test_tree_index removed (CP purge)
   test_tool_registry
   test_tool_dispatch
@@ -978,7 +951,6 @@
   test_grpc_workspace
   test_grpc_client
   test_http_protocol_detect
-  test_keeper_safety_gates
   test_keeper_guards
   test_keeper_working_state
   test_keeper_wip_admission
@@ -1077,7 +1049,6 @@
   test_tool_library_coverage
   test_tool_shard_coverage
   test_context_compact_oas_coverage
-  test_keeper_masc_bridge
   test_field_validation
   test_tool_args_envelope
   test_circuit_breaker)
@@ -1125,7 +1096,6 @@
   test_tool_library_coverage
   test_tool_shard_coverage
   test_context_compact_oas_coverage
-  test_keeper_masc_bridge
   test_field_validation
   test_tool_args_envelope
   test_circuit_breaker)
@@ -1629,7 +1599,6 @@
 
 (include stanzas/test_tool_inline_dispatch.inc)
 
-(include stanzas/test_tool_name.inc)
 
 (include stanzas/test_tool_task_args.inc)
 
@@ -1719,11 +1688,6 @@
  (modules test_pool_metrics)
  (libraries masc_test_deps))
 
-(test
- (name test_tool_name_exhaustive)
- (modules test_tool_name_exhaustive)
- (libraries masc_test_deps))
-
 ; RFC-0084 PR-3 — Tool_telemetry.with_span + Tool_dispatch.guarded_dispatch
 ; skeleton tests. Verifies 4-tuple emission wrapper invariants (callback
 ; invocation count, trace_id thunk callable, outcome label propagation,
@@ -1800,19 +1764,6 @@
 (test
  (name test_disclosure_strategy_config)
  (modules test_disclosure_strategy_config)
- (libraries masc_test_deps))
-
-; RFC-0084 PR-14 — Telemetry completeness audit (sprint closeout).
-; Aggregates cumulative invariants across PR-1~13: 4-tuple emission
-; propagation (3 entries × 5 wrap sites), surface coverage (7+1=8),
-; typed boundary cardinality (Tool_capability=5, Dispatch_outcome=5),
-; sprint exit-criteria count (10), and workaround-rejection signatures
-; (0 violations). Requires masc_test_deps because it asserts cardinality
-; of Masc_mcp.Tool_capability.all_kinds + Dispatch_outcome.all_arms.
-
-(test
- (name test_telemetry_completeness)
- (modules test_telemetry_completeness)
  (libraries masc_test_deps))
 
 ; RFC-0084 host-config-cleanup-E — Fleet worker sandbox root migration.

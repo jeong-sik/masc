@@ -1,4 +1,4 @@
-(** RFC-0196 P0 §1 acceptance: typed lookup against [Tool_name.Keeper] /
+(** RFC-0196 P0 §1 acceptance: typed lookup against [Keeper_tool_name] /
     [Tool_name.Masc] for the "executable not in allowlist" hint. Verified
     indirectly through [pp_validation_error] so the private helper stays
     private (no test-backdoor mli widening).

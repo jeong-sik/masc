@@ -216,12 +216,12 @@ val runtime_metrics_json : unit -> Yojson.Safe.t
     waits on the resulting promise.  Returns the
     aggregated runtime-counter JSON snapshot for the
     operator dashboard.  Pinned because
-    [lib/oas_worker.mli] re-exposes it via the
-    [include Runtime_observation] runtime. *)
+    [Runtime_agent] re-exposes it via the
+    [include Runtime_observation] module. *)
 
 val runtime_observation_to_json :
   runtime_observation -> Yojson.Safe.t
 (** Wire encoder for {!runtime_observation} — flattens
     [attempts] / [fallback_events] / outcome metadata
     into a single [`Assoc].  Pinned because the runtime-
-    include consumer ([oas_worker.mli]) re-exposes it. *)
+    include consumer ([Runtime_agent]) re-exposes it. *)

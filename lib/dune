@@ -205,6 +205,7 @@
   provider_runtime_projection
   voice_bridge_transport
   runtime_oas_checkpoint
+  runtime_observation_query_operation
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
   keeper_turn_driver_helpers

@@ -449,7 +449,7 @@ let test_board_dashboard_json_embeds_contributor_quality () =
   in
   let rep =
     {
-      (Agent_reputation.default_reputation ~agent_name:"quality-author") with
+      (Reputation.default_reputation ~agent_name:"quality-author") with
       overall_score = 0.72;
       completion_rate = 0.8;
       response_rate = 0.6;

@@ -35,7 +35,7 @@ type world_observation =
   ; active_goals : string list
   ; continuity_summary : string
   ; context_ratio : float
-  ; economic_pressure : Agent_economy.pressure_mode
+  ; economic_pressure : Economy.pressure_mode
   ; unclaimed_task_count : int
   ; claimable_task_count : int
   ; provider_capacity_blocked_task_count : int
@@ -451,7 +451,7 @@ let observe
   let context_ratio = read_context_ratio ~config ~meta in
   let continuity_summary = read_continuity_summary ~config ~meta in
   let economic_pressure =
-    Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
+    Economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
   in
   let pending_board_events =
     match pending_board_events with
@@ -505,7 +505,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; continuity_summary = read_continuity_summary ~config ~meta
   ; context_ratio = read_context_ratio ~config ~meta
   ; economic_pressure =
-      Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
+      Economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
   ; unclaimed_task_count
   ; claimable_task_count
   ; provider_capacity_blocked_task_count

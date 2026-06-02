@@ -106,7 +106,7 @@ let rewrite_vote_log store =
   save_vote_log_jsonl (vote_log_jsonl store)
 
 (* [vote_outcome] carries the information needed to run the post-lock
-   [Agent_economy.earn] call.  [earn_upvote_for] is [Some author] only
+   [Economy.earn] call.  [earn_upvote_for] is [Some author] only
    on the fresh peer-upvote path — a self-upvote is not reputation, a
    vote flip does not earn credits (prevents down/up alternation abuse),
    and a downvote does not earn at all. *)
@@ -214,14 +214,14 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                        vote_author_name = author_name })
       in
       (* Agent Economy: earn credits for an upvote received.  Moved
-         OUTSIDE the store lock — [Agent_economy.earn] writes its own
+         OUTSIDE the store lock — [Economy.earn] writes its own
          ledger file on an unrelated path and modifies no board state,
          so holding [store.mutex] across its disk I/O was gratuitous
          contention with every other reader/writer. *)
       (match board_result with
        | Ok ({ delta; earn_upvote_for = Some author_name } as outcome) ->
            record_vote_side_effect store outcome;
-           (match Agent_economy.earn
+           (match Economy.earn
               ~base_path:(board_base_path ()) ~agent_name:author_name
               ~kind:Earn_upvote ~reason:"upvote on post" () with
             | Ok _ -> ()

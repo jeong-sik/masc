@@ -13,7 +13,7 @@ module Types = Masc_domain
 *)
 
 open Masc_mcp
-(* Agent_economy moved to the masc_agent_economy leaf lib (wrapped false);
+(* Economy moved to the masc_agent_economy leaf lib (wrapped false);
    the bare module resolves via masc_test_deps, no mega-lib alias needed. *)
 
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -159,12 +159,12 @@ let with_env key value f =
 ;;
 
 let with_task_economy_enabled f =
-  Agent_economy.reset_cache ();
+  Economy.reset_cache ();
   with_env "MASC_ECONOMY_ENABLED" "true" (fun () ->
     with_env "MASC_ECONOMY_INITIAL_BALANCE" "5.0" (fun () ->
       with_env "MASC_ECONOMY_REWARD_TASK_DONE" "10.0" (fun () ->
         with_env "MASC_ECONOMY_REPUTATION_MULTIPLIER" "false" (fun () ->
-          Fun.protect ~finally:Agent_economy.reset_cache f))))
+          Fun.protect ~finally:Economy.reset_cache f))))
 ;;
 
 let latest_ring_seq () =
@@ -1159,7 +1159,7 @@ let test_transition_done_awards_task_reward_once () =
       let agent_llm_a = find_agent_name_by_prefix config "agent_llm_a" in
       let _ = Workspace.add_task config ~title:"Rewarded task" ~priority:1 ~description:"" in
       let balance_before =
-        Agent_economy.get_balance ~base_path:config.base_path ~agent_name:agent_llm_a
+        Economy.get_balance ~base_path:config.base_path ~agent_name:agent_llm_a
       in
       Alcotest.(check (float 0.01)) "initial balance" 5.0 balance_before;
       (match Workspace.claim_task_r config ~agent_name:agent_llm_a ~task_id:"task-001" () with
@@ -1188,7 +1188,7 @@ let test_transition_done_awards_task_reward_once () =
            "transition_task_r done failed: %s"
            (Masc_domain.show_masc_error err));
       let balance_after_done =
-        Agent_economy.get_balance ~base_path:config.base_path ~agent_name:agent_llm_a
+        Economy.get_balance ~base_path:config.base_path ~agent_name:agent_llm_a
       in
       Alcotest.(check (float 0.01)) "done reward applied once" 15.0 balance_after_done;
       (match
@@ -1199,7 +1199,7 @@ let test_transition_done_awards_task_reward_once () =
        | Error err ->
          Alcotest.failf "repeat done failed: %s" (Masc_domain.show_masc_error err));
       let balance_after_repeat =
-        Agent_economy.get_balance ~base_path:config.base_path ~agent_name:agent_llm_a
+        Economy.get_balance ~base_path:config.base_path ~agent_name:agent_llm_a
       in
       Alcotest.(check (float 0.01))
         "repeat done does not double pay"

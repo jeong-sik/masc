@@ -624,7 +624,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
        (Printf.sprintf "- Previous turn budget: %d/%d used\n" used total)
    | _ -> ());
   (match observation.economic_pressure with
-   | Agent_economy.Normal -> ()
+   | Economy.Normal -> ()
    | Frugal ->
        Buffer.add_string ubuf "- Economy: Frugal (reduce token usage)\n"
    | Hustle ->

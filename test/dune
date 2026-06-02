@@ -98,7 +98,7 @@
   test_heartbeat_qw
   test_sse_qw
   test_sse_stream
-  test_agent_health
+  test_health
   test_post_verifier
   test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard
@@ -366,7 +366,7 @@
   test_heartbeat_qw
   test_sse_qw
   test_sse_stream
-  test_agent_health
+  test_health
   test_post_verifier
   test_reward_advice_artifact
   test_masc_oas_bridge_timeout_guard
@@ -782,7 +782,7 @@
   test_keeper_tool_call_log
   test_tool_unified
   test_build_identity
-  test_agent_economy
+  test_economy
   test_lifecycle
   test_auto_recall_activity_coverage
   test_grpc_workspace
@@ -972,7 +972,7 @@
   test_tool_unified
   test_keeper_tool_call_log
   test_build_identity
-  test_agent_economy
+  test_economy
   test_lifecycle
   test_auto_recall_activity_coverage
   test_grpc_workspace

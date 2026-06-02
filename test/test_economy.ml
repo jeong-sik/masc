@@ -5,7 +5,7 @@
     JSONL ledger persistence, and feature flag gating.
 *)
 
-(* Agent_economy is now a separate leaf library (masc_agent_economy, wrapped
+(* Economy is now a separate leaf library (masc_agent_economy, wrapped
    false), re-exported via masc_test_deps — bare module resolves directly. *)
 
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -53,26 +53,26 @@ let with_economy_enabled f =
 
 (** Reset balance cache between tests *)
 let reset_cache () =
-  Agent_economy.reset_cache ()
+  Economy.reset_cache ()
 
 (** {1 Configuration Tests} *)
 
 let test_feature_flag_default () =
   with_env "MASC_ECONOMY_ENABLED" "false" (fun () ->
-    Alcotest.(check bool) "default disabled" false (Agent_economy.enabled ()))
+    Alcotest.(check bool) "default disabled" false (Economy.enabled ()))
 
 let test_feature_flag_enabled () =
   with_env "MASC_ECONOMY_ENABLED" "true" (fun () ->
-    Alcotest.(check bool) "enabled" true (Agent_economy.enabled ()))
+    Alcotest.(check bool) "enabled" true (Economy.enabled ()))
 
 let test_initial_balance_default () =
   with_env "MASC_ECONOMY_INITIAL_BALANCE" "5.0" (fun () ->
-    let b = Agent_economy.initial_balance () in
+    let b = Economy.initial_balance () in
     Alcotest.(check (float 0.01)) "default 5.0" 5.0 b)
 
 let test_initial_balance_custom () =
   with_env "MASC_ECONOMY_INITIAL_BALANCE" "42.0" (fun () ->
-    let b = Agent_economy.initial_balance () in
+    let b = Economy.initial_balance () in
     Alcotest.(check (float 0.01)) "custom 42.0" 42.0 b)
 
 (** {1 Pressure Mode Tests} *)
@@ -83,10 +83,10 @@ let test_pressure_normal () =
   with_economy_enabled (fun () ->
     with_env "MASC_ECONOMY_INITIAL_BALANCE" "10.0" (fun () ->
       with_env "MASC_ECONOMY_FRUGAL_THRESHOLD" "5.0" (fun () ->
-        let mode = Agent_economy.economic_pressure
+        let mode = Economy.economic_pressure
           ~base_path:dir ~agent_name:"rich-agent" in
         Alcotest.(check string) "normal mode"
-          "normal" (Agent_economy.pressure_mode_to_string mode))));
+          "normal" (Economy.pressure_mode_to_string mode))));
   rm_rf dir
 
 let test_pressure_frugal () =
@@ -96,10 +96,10 @@ let test_pressure_frugal () =
     with_env "MASC_ECONOMY_INITIAL_BALANCE" "3.0" (fun () ->
       with_env "MASC_ECONOMY_FRUGAL_THRESHOLD" "5.0" (fun () ->
         with_env "MASC_ECONOMY_HUSTLE_THRESHOLD" "0.0" (fun () ->
-          let mode = Agent_economy.economic_pressure
+          let mode = Economy.economic_pressure
             ~base_path:dir ~agent_name:"careful-agent" in
           Alcotest.(check string) "frugal mode"
-            "frugal" (Agent_economy.pressure_mode_to_string mode)))));
+            "frugal" (Economy.pressure_mode_to_string mode)))));
   rm_rf dir
 
 let test_pressure_hustle () =
@@ -108,20 +108,20 @@ let test_pressure_hustle () =
   with_economy_enabled (fun () ->
     with_env "MASC_ECONOMY_INITIAL_BALANCE" "-1.0" (fun () ->
       with_env "MASC_ECONOMY_HUSTLE_THRESHOLD" "0.0" (fun () ->
-        let mode = Agent_economy.economic_pressure
+        let mode = Economy.economic_pressure
           ~base_path:dir ~agent_name:"broke-agent" in
         Alcotest.(check string) "hustle mode"
-          "hustle" (Agent_economy.pressure_mode_to_string mode))));
+          "hustle" (Economy.pressure_mode_to_string mode))));
   rm_rf dir
 
 let test_pressure_disabled () =
   let dir = fresh_tmpdir () in
   reset_cache ();
   with_env "MASC_ECONOMY_ENABLED" "false" (fun () ->
-    let mode = Agent_economy.economic_pressure
+    let mode = Economy.economic_pressure
       ~base_path:dir ~agent_name:"any-agent" in
     Alcotest.(check string) "always normal when disabled"
-      "normal" (Agent_economy.pressure_mode_to_string mode));
+      "normal" (Economy.pressure_mode_to_string mode));
   rm_rf dir
 
 (** {1 Earn/Spend Tests} *)
@@ -133,7 +133,7 @@ let test_earn_task_done () =
     with_env "MASC_ECONOMY_INITIAL_BALANCE" "5.0" (fun () ->
       with_env "MASC_ECONOMY_REWARD_TASK_DONE" "10.0" (fun () ->
         with_env "MASC_ECONOMY_REPUTATION_MULTIPLIER" "false" (fun () ->
-          match Agent_economy.earn
+          match Economy.earn
             ~base_path:dir ~agent_name:"worker"
             ~kind:Earn_task_done ~reason:"completed task-001" () with
           | Error msg -> Alcotest.fail msg
@@ -146,7 +146,7 @@ let test_spend_model_call () =
   reset_cache ();
   with_economy_enabled (fun () ->
     with_env "MASC_ECONOMY_INITIAL_BALANCE" "10.0" (fun () ->
-      match Agent_economy.spend
+      match Economy.spend
         ~base_path:dir ~agent_name:"spender"
         ~amount:0.05 ~kind:Spend_model_call
         ~reason:"provider_k call" () with
@@ -160,7 +160,7 @@ let test_earn_when_disabled () =
   reset_cache ();
   with_env "MASC_ECONOMY_ENABLED" "false" (fun () ->
     with_env "MASC_ECONOMY_INITIAL_BALANCE" "5.0" (fun () ->
-      match Agent_economy.earn
+      match Economy.earn
         ~base_path:dir ~agent_name:"agent"
         ~kind:Earn_task_done ~reason:"should no-op" () with
       | Error msg -> Alcotest.fail msg
@@ -176,24 +176,24 @@ let test_multiple_transactions () =
       with_env "MASC_ECONOMY_REWARD_TASK_DONE" "10.0" (fun () ->
         with_env "MASC_ECONOMY_REPUTATION_MULTIPLIER" "false" (fun () ->
           (* Earn twice *)
-          (match Agent_economy.earn
+          (match Economy.earn
             ~base_path:dir ~agent_name:"multi"
             ~kind:Earn_task_done ~reason:"task-1" () with
            | Error msg -> Alcotest.fail msg
            | Ok b -> Alcotest.(check (float 0.01)) "first earn" 10.0 b);
-          (match Agent_economy.earn
+          (match Economy.earn
             ~base_path:dir ~agent_name:"multi"
             ~kind:Earn_task_done ~reason:"task-2" () with
            | Error msg -> Alcotest.fail msg
            | Ok b -> Alcotest.(check (float 0.01)) "second earn" 20.0 b);
           (* Spend *)
-          (match Agent_economy.spend
+          (match Economy.spend
             ~base_path:dir ~agent_name:"multi"
             ~amount:3.0 ~kind:Spend_model_call ~reason:"big call" () with
            | Error msg -> Alcotest.fail msg
            | Ok b -> Alcotest.(check (float 0.01)) "after spend" 17.0 b);
           (* Check balance *)
-          let bal = Agent_economy.get_balance ~base_path:dir ~agent_name:"multi" in
+          let bal = Economy.get_balance ~base_path:dir ~agent_name:"multi" in
           Alcotest.(check (float 0.01)) "final balance" 17.0 bal))));
   rm_rf dir
 
@@ -206,12 +206,12 @@ let test_ledger_persistence () =
     with_env "MASC_ECONOMY_INITIAL_BALANCE" "5.0" (fun () ->
       with_env "MASC_ECONOMY_REWARD_BOARD_POST" "1.0" (fun () ->
         with_env "MASC_ECONOMY_REPUTATION_MULTIPLIER" "false" (fun () ->
-          ignore (Agent_economy.earn
+          ignore (Economy.earn
             ~base_path:dir ~agent_name:"poster"
             ~kind:Earn_board_post ~reason:"wrote post" ());
           (* Reset cache to simulate restart *)
           reset_cache ();
-          let bal = Agent_economy.get_balance ~base_path:dir ~agent_name:"poster" in
+          let bal = Economy.get_balance ~base_path:dir ~agent_name:"poster" in
           Alcotest.(check (float 0.01)) "persisted after reload" 6.0 bal))));
   rm_rf dir
 
@@ -220,7 +220,7 @@ let test_ledger_file_created () =
   reset_cache ();
   with_economy_enabled (fun () ->
     with_env "MASC_ECONOMY_REPUTATION_MULTIPLIER" "false" (fun () ->
-      ignore (Agent_economy.earn
+      ignore (Economy.earn
         ~base_path:dir ~agent_name:"writer"
         ~kind:Earn_board_post ~reason:"test" ());
       let path = Filename.concat
@@ -234,15 +234,15 @@ let test_list_transactions () =
   reset_cache ();
   with_economy_enabled (fun () ->
     with_env "MASC_ECONOMY_REPUTATION_MULTIPLIER" "false" (fun () ->
-      ignore (Agent_economy.earn
+      ignore (Economy.earn
         ~base_path:dir ~agent_name:"reader"
         ~kind:Earn_task_done ~reason:"task done"
         ~metadata:(`Assoc [ ("goal_id", `String "goal-1") ])
         ());
-      ignore (Agent_economy.spend
+      ignore (Economy.spend
         ~base_path:dir ~agent_name:"reader"
         ~amount:0.25 ~kind:Spend_model_call ~reason:"model call" ());
-      let txns = Agent_economy.list_transactions ~base_path:dir in
+      let txns = Economy.list_transactions ~base_path:dir in
       Alcotest.(check int) "transaction count" 2 (List.length txns);
       let first = List.hd txns in
       let open Yojson.Safe.Util in
@@ -254,23 +254,23 @@ let test_list_transactions () =
 
 let test_reward_multiplier_range () =
   (* score=0.0 -> 0.5x, score=0.5 -> 1.0x, score=1.0 -> 1.5x *)
-  let m0 = Agent_economy.reward_multiplier ~overall_score:0.0 in
-  let m5 = Agent_economy.reward_multiplier ~overall_score:0.5 in
-  let m10 = Agent_economy.reward_multiplier ~overall_score:1.0 in
+  let m0 = Economy.reward_multiplier ~overall_score:0.0 in
+  let m5 = Economy.reward_multiplier ~overall_score:0.5 in
+  let m10 = Economy.reward_multiplier ~overall_score:1.0 in
   Alcotest.(check (float 0.01)) "score 0.0 -> 0.5x" 0.5 m0;
   Alcotest.(check (float 0.01)) "score 0.5 -> 1.0x" 1.0 m5;
   Alcotest.(check (float 0.01)) "score 1.0 -> 1.5x" 1.5 m10
 
 let test_reward_multiplier_clamped () =
-  let m_neg = Agent_economy.reward_multiplier ~overall_score:(-0.5) in
-  let m_over = Agent_economy.reward_multiplier ~overall_score:2.0 in
+  let m_neg = Economy.reward_multiplier ~overall_score:(-0.5) in
+  let m_over = Economy.reward_multiplier ~overall_score:2.0 in
   Alcotest.(check (float 0.01)) "negative clamped to 0.5x" 0.5 m_neg;
   Alcotest.(check (float 0.01)) "over 1.0 clamped to 1.5x" 1.5 m_over
 
 (** {1 Serialization Tests} *)
 
 let test_transaction_roundtrip () =
-  let txn : Agent_economy.transaction = {
+  let txn : Economy.transaction = {
     id = "txn-deadbeef";
     agent_name = "test-agent";
     kind = Earn_task_done;
@@ -281,8 +281,8 @@ let test_transaction_roundtrip () =
     metadata = `Null;
     timestamp = 1000.0;
   } in
-  let json = Agent_economy.transaction_to_json txn in
-  match Agent_economy.transaction_of_json json with
+  let json = Economy.transaction_to_json txn in
+  match Economy.transaction_of_json json with
   | None -> Alcotest.fail "roundtrip deserialization failed"
   | Some decoded ->
     Alcotest.(check string) "id" txn.id decoded.id;
@@ -292,7 +292,7 @@ let test_transaction_roundtrip () =
 
 let test_transaction_invalid_json () =
   let json = `Assoc [("id", `String "")] in
-  match Agent_economy.transaction_of_json json with
+  match Economy.transaction_of_json json with
   | None -> ()
   | Some _ -> Alcotest.fail "should reject empty id"
 
@@ -306,24 +306,24 @@ let test_pressure_transition_after_spend () =
       with_env "MASC_ECONOMY_FRUGAL_THRESHOLD" "5.0" (fun () ->
         with_env "MASC_ECONOMY_HUSTLE_THRESHOLD" "0.0" (fun () ->
           (* Start: 6.0 -> Normal *)
-          let m1 = Agent_economy.economic_pressure
+          let m1 = Economy.economic_pressure
             ~base_path:dir ~agent_name:"transitioning" in
           Alcotest.(check string) "starts normal" "normal"
-            (Agent_economy.pressure_mode_to_string m1);
+            (Economy.pressure_mode_to_string m1);
           (* Spend 3.0 -> 3.0 -> Frugal *)
-          ignore (Agent_economy.spend ~base_path:dir ~agent_name:"transitioning"
+          ignore (Economy.spend ~base_path:dir ~agent_name:"transitioning"
             ~amount:3.0 ~kind:Spend_model_call ~reason:"big call" ());
-          let m2 = Agent_economy.economic_pressure
+          let m2 = Economy.economic_pressure
             ~base_path:dir ~agent_name:"transitioning" in
           Alcotest.(check string) "now frugal" "frugal"
-            (Agent_economy.pressure_mode_to_string m2);
+            (Economy.pressure_mode_to_string m2);
           (* Spend 4.0 -> -1.0 -> Hustle *)
-          ignore (Agent_economy.spend ~base_path:dir ~agent_name:"transitioning"
+          ignore (Economy.spend ~base_path:dir ~agent_name:"transitioning"
             ~amount:4.0 ~kind:Spend_model_call ~reason:"huge call" ());
-          let m3 = Agent_economy.economic_pressure
+          let m3 = Economy.economic_pressure
             ~base_path:dir ~agent_name:"transitioning" in
           Alcotest.(check string) "now hustle" "hustle"
-            (Agent_economy.pressure_mode_to_string m3)))));
+            (Economy.pressure_mode_to_string m3)))));
   rm_rf dir
 
 (** {1 Test Suite} *)

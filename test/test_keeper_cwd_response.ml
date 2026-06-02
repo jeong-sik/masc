@@ -40,7 +40,7 @@ let mk_local_sandbox () : Keeper_sandbox.t =
   ; root_arg = "."
   ; mind_arg = "mind"
   ; repos_arg = "repos"
-  ; task_overlay_pattern = "repos/<repo>/.worktrees/<keeper>-<task_id>"
+  ; task_overlay_pattern = "repos/<repo>"
   }
 
 let mk_docker_sandbox () : Keeper_sandbox.t =
@@ -56,7 +56,7 @@ let mk_docker_sandbox () : Keeper_sandbox.t =
   ; root_arg = "."
   ; mind_arg = "mind"
   ; repos_arg = "repos"
-  ; task_overlay_pattern = "repos/<repo>/.worktrees/<keeper>-<task_id>"
+  ; task_overlay_pattern = "repos/<repo>"
   }
 
 (* --- Local backend: passthrough semantics ------------------- *)

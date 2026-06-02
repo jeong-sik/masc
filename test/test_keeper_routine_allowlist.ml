@@ -3,9 +3,38 @@
 
 module RA = Masc_mcp.Keeper_routine_allowlist
 module RL = Masc_mcp.Keeper_approval_queue
+module Workspace = Masc_mcp.Workspace
 
 let transition_input action =
   `Assoc [ ("action", `String action); ("task_id", `String "task-1") ]
+
+let workspace_config tmp_dir =
+  Unix.putenv "MASC_BASE_PATH" tmp_dir;
+  Workspace.default_config tmp_dir
+
+let with_test_env f =
+  let prev_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmp_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc_routine_allowlist_%d_%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
+  Unix.mkdir tmp_dir 0o755;
+  let config = workspace_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
+  Fun.protect
+    ~finally:(fun () ->
+      let _ = Workspace.reset config in
+      Unix.rmdir tmp_dir;
+      match prev_base_path with
+      | Some value -> Unix.putenv "MASC_BASE_PATH" value
+      | None -> Unix.putenv "MASC_BASE_PATH" "")
+    (fun () -> f config)
 
 (* ── matches: masc_transition routine actions ──────────────── *)
 
@@ -157,6 +186,55 @@ let test_keeper_task_submit_for_verification_matches () =
     (RA.matches ~tool_name:"keeper_task_submit_for_verification"
        ~input:(`Assoc [])
        ~risk_level:RL.Low)
+
+let force_release_input ?(reason = "assignee offline >10 min") task_id =
+  `Assoc [ ("task_id", `String task_id); ("reason", `String reason) ]
+
+let test_orphan_force_release_has_semantic_label () =
+  with_test_env @@ fun config ->
+  let _ = Workspace.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
+  let _ = Workspace.bind_session config ~agent_name:"agent-test-alpha" ~capabilities:[] () in
+  let _ = Workspace.claim_task config ~agent_name:"agent-test-alpha" ~task_id:"task-001" in
+  let _ = Workspace.end_session config ~agent_name:"agent-test-alpha" in
+  let label =
+    RA.orphan_force_release_rule_label
+      ~config
+      ~tool_name:"keeper_task_force_release"
+      ~input:(force_release_input "task-001")
+      ~risk_level:RL.Critical
+  in
+  Alcotest.(check (option string)) "orphan force_release has label"
+    (Some "keeper_routine.orphan_force_release")
+    label
+
+let test_non_orphan_force_release_has_no_semantic_label () =
+  with_test_env @@ fun config ->
+  let _ = Workspace.add_task config ~title:"Active Candidate" ~priority:1 ~description:"" in
+  let _ = Workspace.bind_session config ~agent_name:"agent-test-alpha" ~capabilities:[] () in
+  let _ = Workspace.claim_task config ~agent_name:"agent-test-alpha" ~task_id:"task-001" in
+  let label =
+    RA.orphan_force_release_rule_label
+      ~config
+      ~tool_name:"keeper_task_force_release"
+      ~input:(force_release_input "task-001")
+      ~risk_level:RL.Critical
+  in
+  Alcotest.(check (option string)) "active task force_release has no label" None label
+
+let test_orphan_force_release_requires_reason () =
+  with_test_env @@ fun config ->
+  let _ = Workspace.add_task config ~title:"Orphan Candidate" ~priority:1 ~description:"" in
+  let _ = Workspace.bind_session config ~agent_name:"agent-test-alpha" ~capabilities:[] () in
+  let _ = Workspace.claim_task config ~agent_name:"agent-test-alpha" ~task_id:"task-001" in
+  let _ = Workspace.end_session config ~agent_name:"agent-test-alpha" in
+  let label =
+    RA.orphan_force_release_rule_label
+      ~config
+      ~tool_name:"keeper_task_force_release"
+      ~input:(force_release_input ~reason:"" "task-001")
+      ~risk_level:RL.Critical
+  in
+  Alcotest.(check (option string)) "missing reason has no label" None label
 
 (* ── matches: goal store routine surface ───────────────────── *)
 
@@ -409,6 +487,15 @@ let () =
             test_keeper_task_done_matches;
           Alcotest.test_case "keeper_task_submit_for_verification" `Quick
             test_keeper_task_submit_for_verification_matches;
+        ] );
+      ( "orphan_force_release",
+        [
+          Alcotest.test_case "orphan task has semantic label" `Quick
+            test_orphan_force_release_has_semantic_label;
+          Alcotest.test_case "active task has no semantic label" `Quick
+            test_non_orphan_force_release_has_no_semantic_label;
+          Alcotest.test_case "reason required" `Quick
+            test_orphan_force_release_requires_reason;
         ] );
       ( "goal_store_routine",
         [

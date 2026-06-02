@@ -549,14 +549,14 @@ let create_post_with_outcome
       | Ok (`Fresh post) ->
         with_persist_lock store (fun () -> append_post post);
         (match
-           Agent_economy.earn
+           Board_effect_hooks.earn
              ~base_path:(board_base_path ())
              ~agent_name:author
-             ~kind:Earn_board_post
+             ~kind:Board_post
              ~reason:"board post"
              ()
          with
-         | Ok _ -> ()
+         | Ok () -> ()
          | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
         Ok (Fresh_post post)
       | Ok (`Rolled_up (post, posts_jsonl)) ->

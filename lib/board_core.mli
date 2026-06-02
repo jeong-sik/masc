@@ -88,7 +88,7 @@ val record_comment_timestamp : author:string -> now:float -> unit
 (** [with_lock store f] runs [f ()] under
     [Eio.Mutex.use_rw ~protect:true store.mutex].  Callers
     should keep the critical section short and avoid I/O —
-    {!create_post} for instance does its [Agent_economy.earn]
+    {!create_post} for instance emits its side-effect hook
     {b outside} the lock so the ledger write does not block
     every other reader / writer. *)
 val with_lock : store -> (unit -> 'a) -> 'a
@@ -118,7 +118,7 @@ val sweep : store -> int * int
 
 (** Resolves the board base path from {!Env_config}.  Used by
     {!persist_path}, {!comments_path}, and the
-    [Agent_economy.earn] integration in {!create_post}. *)
+    side-effect hook integration in {!create_post}. *)
 val board_base_path : unit -> string
 
 (** Path to the board posts JSONL log under
@@ -243,7 +243,7 @@ val create_post_with_outcome
     posts are forced to {!Limits.automation_ttl_hours}).
     Errors on validation failure, capacity exhaustion
     ([Capacity_exceeded]), or content length overflow.  The
-    JSONL append and the [Agent_economy.earn] credit are intentionally
+    JSONL append and side-effect hooks are intentionally
     performed {b outside} the state lock to avoid blocking concurrent
     readers on filesystem writes. *)
 val create_post
@@ -310,9 +310,8 @@ val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
     return the existing comment without appending JSONL, incrementing
     [reply_count], or consuming thread capacity.
     Capacity guarded against {!Limits.max_comments_per_post}
-    and the global [Limits.max_comments] ceiling.  Awards
-    [Agent_economy.earn] credits outside the lock (same
-    rationale as {!create_post}). *)
+    and the global [Limits.max_comments] ceiling.  Post-lock side effects
+    follow the same rationale as {!create_post}. *)
 val add_comment_with_status
   :  store
   -> post_id:string

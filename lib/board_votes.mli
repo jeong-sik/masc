@@ -91,12 +91,9 @@ val vote :
 
     Vote flips swap up↔down without re-counting (and
     {b without} earning credits, to prevent down/up
-    alternation abuse).  Fresh peer upvotes earn the post
-    author a credit via [Agent_economy.earn] {b outside}
-    the lock so the ledger write does not block other
-    readers.  Every vote is broadcast to
-    {!Thompson_sampling.record_vote} outside the state lock
-    for posterior feedback. *)
+    alternation abuse).  Fresh peer upvotes and vote-feedback
+    observations are emitted through {!Board_effect_hooks}
+    outside the state lock. *)
 
 val current_vote_for_comment :
   store ->

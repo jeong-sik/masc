@@ -9,27 +9,9 @@ type resolution =
   | Custom_url of { model_id : string; base_url : string }
   | Unknown of string
 
-(* Reuse the same split semantics as Runtime_model_string.split_provider_model
-   so that both paths agree on what "provider:model" means. Duplicated
-   here (rather than imported) to avoid a circular dependency between
-   this module and Runtime_config, which delegates to us. *)
-let split_provider_model (s : string) : (string * string) option =
-  match String.index_opt s ':' with
-  | None -> None
-  | Some idx ->
-    if idx = 0 || idx >= String.length s - 1 then None
-    else
-      let provider_name =
-        String.sub s 0 idx |> String.trim |> String.lowercase_ascii
-      in
-      let model_id =
-        String.sub s (idx + 1) (String.length s - idx - 1) |> String.trim
-      in
-      if model_id = "" then None else Some (provider_name, model_id)
-
 let resolve (spec : string) : resolution =
   let s = String.trim spec in
-  match split_provider_model s with
+  match Runtime_model_id_split.split_provider_model s with
   | None ->
     Unknown
       (Printf.sprintf
@@ -78,6 +60,3 @@ let uses_anthropic_caching_for_kind kind =
 
 let uses_anthropic_caching_for_spec spec =
   kind_of_spec spec |> Option.map uses_anthropic_caching_for_kind
-
-let env_var_for_kind kind =
-  Llm_provider.Provider_kind.default_api_key_env kind

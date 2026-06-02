@@ -146,7 +146,7 @@ let emit_orphan_task_escalation workspace_config ~threshold_seconds orphan_tasks
                ])
           orphan_tasks
       in
-      Workspace.log_event workspace_config
+      Workspace_utils.log_event workspace_config
         (`Assoc
            [ ("type", `String "goal_orphan_task_escalation")
            ; ("subsystem", `String "goal_janitor")
@@ -177,7 +177,7 @@ let prune_active_goal_ids ~(valid_goal_ids : string list)
 
 type orphan_goal_binding_hooks =
   { prune_orphan_goal_bindings :
-      Workspace.config -> valid_goal_ids:string list -> int
+      Workspace_utils.config -> valid_goal_ids:string list -> int
   }
 
 let default_orphan_goal_binding_hooks =
@@ -195,7 +195,7 @@ let prune_orphan_goal_bindings workspace_config ~valid_goal_ids =
 
 (** Run a full sweep: goals + owner-managed goal bindings.
     Writes updated state to disk. *)
-let run ?(config = default_config) (workspace_config : Workspace.config) : sweep_result =
+let run ?(config = default_config) (workspace_config : Workspace_utils.config) : sweep_result =
   let st = Goal_store.read_state workspace_config in
   let goals', partial = sweep_goals ~config st.goals in
   let valid_ids = List.map (fun (g : Goal_store.goal) -> g.id) goals' in
@@ -209,7 +209,7 @@ let run ?(config = default_config) (workspace_config : Workspace.config) : sweep
     prune_orphan_goal_bindings workspace_config ~valid_goal_ids:valid_ids
   in
   let orphan_task_rows =
-    Workspace.get_tasks_safe workspace_config
+    Workspace_query.get_tasks_safe workspace_config
     |> audit_unclaimed_goal_orphan_tasks ~valid_goal_ids:valid_ids
          ~min_age_seconds:config.orphan_task_escalation_age_seconds
   in

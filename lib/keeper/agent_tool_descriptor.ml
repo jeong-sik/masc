@@ -70,7 +70,6 @@ type policy =
   ; approval : approval
   ; retryable : bool
   ; cwd_scope : string option
-  ; credential_profile : string option
   }
 
 type t =
@@ -154,8 +153,7 @@ let runtime_handler_to_string = function
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
-      ?effect_domain ?(approval = Policy_selected) ?cwd_scope ?credential_profile
-      ?(retryable = false) ()
+      ?effect_domain ?(approval = Policy_selected) ?cwd_scope ?(retryable = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -169,7 +167,6 @@ let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
   ; approval
   ; retryable
   ; cwd_scope
-  ; credential_profile
   }
 ;;
 
@@ -449,8 +446,9 @@ let public_descriptors =
       ~public_name:"Read"
       ~internal_name:"tool_read_file"
       ~description:
-        "Read one existing file from the keeper sandbox or an allowed path. Pass cwd \
-         explicitly for repo-relative reads; Read never inherits Execute cwd."
+        "Read one existing file from the keeper sandbox or an allowed path with no \
+         implicit cwd. Pass cwd explicitly for repo-relative reads. Read never \
+         inherits Execute cwd."
       ~input_schema:read_file_schema
       ~policy:
         (policy
@@ -1292,7 +1290,6 @@ let route_evidence_json d =
      ; "approval", `String (approval_to_string policy.approval)
      ; "retryable", `Bool policy.retryable
      ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
-     ; "credential_profile", Json_util.string_opt_to_json policy.credential_profile
      ]
      @ policy_fields)
 ;;

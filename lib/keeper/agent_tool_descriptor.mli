@@ -75,7 +75,6 @@ type policy =
   ; approval : approval
   ; retryable : bool
   ; cwd_scope : string option
-  ; credential_profile : string option
   }
 
 type t =

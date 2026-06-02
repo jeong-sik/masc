@@ -1,12 +1,11 @@
-(** Keeper_identity — Trace ID generation, git identity, and keeper-name
-    normalization for keeper operations. *)
+(** Keeper_identity — Trace ID generation and keeper-name normalization for
+    keeper operations. *)
 
 val generate_trace_id : ?now:float -> unit -> string
 (** Generate a unique trace ID from an epoch timestamp and monotonic counter.
     [~now] defaults to [Time_compat.now ()] — pass an explicit value in tests
     for deterministic output.  The counter guarantees uniqueness even when
     [now] is pinned to the same value across consecutive calls. *)
-
 val keeper_name_from_agent_name : string -> string option
 val is_keeper_agent_alias : string -> bool
 val canonical_keeper_name_from_agent_name : string -> string option
@@ -38,17 +37,11 @@ type name_bundle = {
   persona_name : string;
   keeper_name : string;
   agent_name : string;
-  credential_stem : string;
 }
 
 type validation_error =
   | Empty_input
   | Persona_not_found of {
-      input : string;
-      resolved : string;
-      searched : string;
-    }
-  | Credential_missing of {
       input : string;
       resolved : string;
       searched : string;
@@ -60,18 +53,16 @@ val normalize_all_names :
   input_agent_name:string ->
   ?base_path:string ->
   ?check_persona:bool ->
-  ?check_credential:bool ->
   unit ->
   (name_bundle, validation_error) result
-(** [normalize_all_names ~input_agent_name ?base_path ?check_persona
-    ?check_credential ()] resolves the four canonical name fields of a
+(** [normalize_all_names ~input_agent_name ?base_path ?check_persona ()]
+    resolves the canonical name fields of a
     keeper from any of its accepted input shapes (bare name, [keeper-X-agent]
     wrapper, generated nickname like [executor-warm-raven], or wrapper +
     nickname combination).
 
-    P1 default: [check_persona = false], [check_credential = false] —
-    pure normalization without filesystem lookups. P3 preflight enables
-    both.
+    P1 default: [check_persona = false] — pure normalization without
+    filesystem lookups. P3 preflight enables persona existence checks.
 
     [base_path] defaults to the empty string, which makes
     [Common.masc_dir_from_base_path] resolve relative to the current

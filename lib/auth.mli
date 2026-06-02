@@ -76,11 +76,8 @@ val load_credential_of :
     explicitly}.
 
     Caller is responsible for resolving the requested alias to a
-    [resolved_credential_stem] before calling — typically through
-    {!Keeper_identity.normalize_all_names} on the dispatch site.  This
-    keeps [Auth] free of any dependency on [Keeper_identity] (the
-    inverse direction is required by P3 preflight, so Auth → Keeper
-    would be a cycle).
+    [resolved_credential_stem] before calling. This keeps [Auth] free
+    of any dependency on [Keeper_identity].
 
     Branches (RFC §2.2, adjusted for the dependency direction):
     {ul

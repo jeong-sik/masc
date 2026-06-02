@@ -5,14 +5,9 @@ include Board_core
 let post_meta_json_persistence_surface = "board_post_meta_json"
 
 let record_post_meta_json_read_drop () =
-  Prometheus.inc_counter
-    Prometheus.metric_persistence_read_drops
-    ~labels:
-      [
-        ("surface", post_meta_json_persistence_surface);
-        ("reason", Safe_ops.persistence_read_drop_reason_invalid_payload);
-      ]
-    ()
+  Board_metrics_hooks.inc_persistence_read_drop
+    ~surface:post_meta_json_persistence_surface
+    ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
 ;;
 
 let visibility_of_string = Board_core_classify.visibility_of_string

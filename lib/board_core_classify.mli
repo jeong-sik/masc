@@ -26,17 +26,6 @@ include module type of struct
   include Board_types
 end
 
-(** {1 Prometheus counter (#9919)} *)
-
-val legacy_migrate_post_kind_metric : string
-(** Pinned literal: ["masc_board_legacy_migrate_post_kind_total"].
-
-    Replaces the prior degenerate
-    [Heuristic_metrics.record \[raw=1.0; threshold=0.5\]] emit at the
-    legacy author-heuristic migration site.  Labelled by [author] so
-    operators can see which legacy authors still drive the migration
-    path.  See {!legacy_migrate_post_kind} for the call site. *)
-
 (** {1 List utility (include runtime)} *)
 
 val take : int -> 'a list -> 'a list
@@ -127,9 +116,8 @@ val legacy_migrate_post_kind :
       [Automation_post].
     + Author matches the legacy automation heuristic (prefixes
       ["auto-"] / ["qa-"], or contains ["researcher"] / ["harness"] /
-      ["smoke"] / ["probe"]) -> [Automation_post] +
-      {!legacy_migrate_post_kind_metric} counter increment with the
-      [author] label.
+      ["smoke"] / ["probe"]) -> [Automation_post] and emits the
+      legacy-migration metric through [Board_metrics_hooks].
     + Otherwise -> [Human_post]. *)
 
 (** {1 Classification accessors} *)

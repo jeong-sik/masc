@@ -62,6 +62,8 @@
  dashboard_keeper_feature_catalog
  dashboard_keeper_feature_proof
  dashboard_keeper_tool_failure_proof
+ board_metrics_hooks
+ board_prometheus_hooks
  board_core_json
  board_core
  board_curation

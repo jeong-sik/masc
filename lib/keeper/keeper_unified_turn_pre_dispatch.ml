@@ -33,12 +33,12 @@ let build_runtime_execution
   let model_labels =
     Keeper_context_runtime.effective_model_labels_for_turn meta
   in
-  let model_labels_detail =
-    match model_labels with
-    | [] -> "none"
-    | labels -> String.concat "," labels
-  in
   let log_pre_dispatch_error ~site detail =
+    let model_labels_detail =
+      match model_labels with
+      | [] -> "none"
+      | labels -> String.concat "," labels
+    in
     Log.Keeper.error
       "%s: pre_dispatch: %s failed for runtime_id=%s model_labels=[%s]: %s"
       meta.name

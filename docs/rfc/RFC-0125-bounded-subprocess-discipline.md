@@ -101,9 +101,9 @@ RFC 초안의 진단이 **부분 부정확**했다. P0 머지 직전 audit 으�
 
 - `lib/process/process_eio.ml` 의 `spawn_and_drain_{stdout,both}` 는 **private** (`process_eio.mli` 미노출).
 - 모든 public 진입점 (`run_argv`, `run_argv_with_status`, `run_argv_with_status_split`, stdin/split 변형) 은 **이미 `Eio.Time.with_timeout_exn clk timeout_sec (fun () -> Eio.Switch.run (fun sw -> spawn_and_drain_* ~sw ...))` 으로 wrap** (line 521-523, 557-559, 605-609, 674-678). 즉 inner Switch.run scope + outer timeout 가 *이미 매번 fresh*.
-- `lib/keeper/keeper_docker_client_real.ml` 의 `gated_argv_with_status_split` 도 4 hot site 중 2개 (line 243 `~timeout_sec:(session_exec_timeout_sec ())`, line 273 `~timeout_sec`) 는 명시 전파, 2개 (line 278 `docker rm`, line 309 `docker info`) 는 `default_timeout_sec ()` (60s) 적용. 즉 *unbounded 아님*.
+- 2026-05-17 audit 당시의 retired executor-track Docker client 도 hot site 들이 명시 `timeout_sec` 또는 `default_timeout_sec ()` 를 적용해 *unbounded 아님* 으로 판정됐다. 해당 executor track 은 RFC-0070 의 2026-06-02 removal 로 삭제됐고, 현재 live Docker subprocess path 는 `lib/keeper/keeper_sandbox_*.ml` + `Masc_exec.Exec_gate`/`Process_eio` 조합이다.
 
-따라서 process_eio + keeper_docker_client_real 차원에서는 *bounded scope 가 이미 보장*된다.
+따라서 process_eio + live keeper sandbox subprocess caller 차원에서는 *bounded scope 가 이미 보장*된다.
 
 ### 3.2 진짜 root (남은 layer)
 
@@ -194,7 +194,7 @@ let with_bounded_run ~clock ~process_mgr ~cwd ?env ?stdin_source
 
 ### 4.2 Migration plan (phased, 사이트별 PR)
 
-§3.1 audit 결과 P1 의 정의가 narrow 됐다. process_eio 와 keeper_docker_client_real 은 *이미 bounded*. 따라서 P1+ 는 **새 spawn site 의 ratchet** + **socket-level layer (RFC-0107 synchronized)** 만 다룬다.
+§3.1 audit 결과 P1 의 정의가 narrow 됐다. process_eio 와 live keeper sandbox subprocess caller 는 *이미 bounded*. 따라서 P1+ 는 **새 spawn site 의 ratchet** + **socket-level layer (RFC-0107 synchronized)** 만 다룬다.
 
 | Phase | 범위 | 산출 | PR 크기 |
 |---|---|---|---|

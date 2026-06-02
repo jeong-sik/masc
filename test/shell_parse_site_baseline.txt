@@ -21,9 +21,6 @@ lib/graphql_client.ml:87  # argv_subsystem
 lib/keeper/keeper_alerting.ml:311  # argv_keeper
 lib/keeper/keeper_alerting.ml:361  # argv_keeper
 lib/keeper/keeper_alerting.ml:453  # argv_keeper
-lib/keeper/keeper_docker_client_real.ml:122  # argv_keeper
-lib/keeper/keeper_docker_client_real.ml:145  # argv_keeper
-lib/keeper/keeper_docker_client_real.ml:183  # argv_keeper
 lib/keeper/keeper_repo_readiness.ml:24  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:217  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:318  # argv_keeper

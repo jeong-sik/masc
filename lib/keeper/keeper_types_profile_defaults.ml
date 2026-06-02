@@ -1,3 +1,8 @@
+type per_provider_timeout_state =
+  | Per_provider_timeout_unset
+  | Per_provider_timeout_invalid
+  | Per_provider_timeout_set
+
 type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;

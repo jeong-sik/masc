@@ -3,7 +3,7 @@ rfc: "0070"
 title: "Keeper Sandbox Runtime — Pure/Edge Separation"
 status: Active
 created: 2026-05-12
-updated: 2026-05-21
+updated: 2026-06-02
 author: yousleepwhen
 supersedes: []
 superseded_by: null

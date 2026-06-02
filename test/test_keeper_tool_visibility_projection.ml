@@ -1,6 +1,6 @@
 open Alcotest
 
-module Projection = Masc_mcp.Tool_visibility_projection
+module Projection = Masc_mcp.Keeper_tool_visibility_projection
 
 let contains needle haystack =
   let nlen = String.length needle in
@@ -135,7 +135,7 @@ let test_public_alias_for_internal () =
 
 let () =
   run
-    "tool_visibility_projection"
+    "keeper_tool_visibility_projection"
     [ ( "projection"
       , [ test_case "visible public alias wins" `Quick test_visible_public_alias_wins
         ; test_case "hidden alias reports blocker" `Quick test_hidden_alias_reports_blocker

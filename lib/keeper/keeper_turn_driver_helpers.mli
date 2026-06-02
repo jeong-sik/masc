@@ -3,11 +3,6 @@
     See [.ml] for rationale. No behavior change from pre-RFC-0048 inline
     definitions. *)
 
-val required_tool_names_for_no_tool_error :
-  runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  tools:Agent_sdk.Tool.t list ->
-  string list
-
 val materialized_tool_names_after_lane :
   effective_tools:Agent_sdk.Tool.t list ->
   runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
@@ -28,27 +23,6 @@ val missing_required_tool_names_after_lane_by_name :
   required_tool_names:string list ->
   materialized_tool_names:string list ->
   string list
-
-val required_tool_lane_unavailable_error :
-  lane:string ->
-  missing_required_tools:string list ->
-  materialized_tools:string list ->
-  Agent_sdk.Error.sdk_error
-
-val provider_rejection_for_required_tool_unsupported :
-  provider_label:string ->
-  missing_required_tools:string list ->
-  Keeper_internal_error.provider_rejection
-
-val no_tool_capable_provider_of_pre_dispatch_rejections :
-  runtime_id:string ->
-  configured_labels:string list ->
-  runtime_manifest_required_tool_names:string list ->
-  runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  tools:Agent_sdk.Tool.t list ->
-  required_lane_provider_rejections:Keeper_internal_error.provider_rejection list ->
-  pre_dispatch_provider_rejections:Keeper_internal_error.provider_rejection list ->
-  Keeper_internal_error.masc_internal_error option
 
 type empty_candidate_classification =
   | Tool_capability_empty

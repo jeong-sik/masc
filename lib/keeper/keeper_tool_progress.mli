@@ -63,34 +63,6 @@ val is_completion_tool_name : string -> bool
     passive keeper observation tools remain [false]. *)
 val tool_name_can_satisfy_required_contract : string -> bool
 
-(** Validate an observed generic [Require_tool_use] call. This accepts mutating
-    tools and completion tools. Keeper-local observation/discovery tools and
-    LLM-native read/search aliases remain passive. *)
-val required_tool_satisfaction
-  :  ?satisfying_tools:string list
-  -> Agent_sdk.Completion_contract.tool_call
-  -> (unit, string) result
-
-(** Variant of [required_tool_satisfaction] for an explicit [required_tools]
-    contract. A non-keeper read-only tool can satisfy the turn only when the
-    operator/task contract named that exact tool. *)
-val required_tool_satisfaction_for_required_names
-  :  ?satisfying_tools:string list
-  -> required_tool_names:string list
-  -> Agent_sdk.Completion_contract.tool_call
-  -> (unit, string) result
-
-(** OAS-level satisfaction callback for keeper turns.
-
-    Generic required-tool gates use OAS to enforce tool presence only; MASC
-    classifies passive-only / no-execution-progress calls after the run.
-    Explicit [required_tool_names] still require the named tool. *)
-val required_tool_satisfaction_for_turn
-  :  ?satisfying_tools:string list
-  -> required_tool_names:string list
-  -> Agent_sdk.Completion_contract.tool_call
-  -> (unit, string) result
-
 (** Extract OAS completion-contract satisfying-tool hints from an error reason.
     Returns [] when the reason has no hint or the hint is empty. *)
 val satisfying_tools_from_contract_violation_reason : string -> string list

@@ -219,37 +219,6 @@ val actionable_signal_requires_tool_gate :
   allowed_tool_names:string list ->
   bool
 
-(** Per-call [masc_keeper_msg.required_tools] is an explicit operator/harness
-    contract for this turn. When present, it takes precedence over the keeper's
-    active task contract so stale task-specific required tools cannot hijack the
-    message. *)
-val required_tool_names_for_turn :
-  current_task_required_tool_names:string list ->
-  per_call_required_tool_names:string list ->
-  string list
-
-(** Remove required tools that have already been satisfied in the current
-    Agent.run. This keeps a multi-turn keeper message from forcing the same
-    specific tool again after the successful tool call has already happened. *)
-val outstanding_required_tool_names :
-  required_tool_names:string list -> satisfied_tool_names:string list -> string list
-
-(** Extract successfully satisfied required-contract tools from observed
-    [(tool_name, outcome)] pairs. Failed calls and no-progress successes stay
-    outstanding. Explicit per-call requirements may include read-only tools, so
-    an [ok] outcome is enough to latch the named tool as satisfied. *)
-val satisfied_required_tool_names_of_outcomes :
-  (string * string) list -> string list
-
-(** Pick the schema-visible [tool_choice] for an explicit required-tool list.
-    Visible required tools use [Any] so OAS enforces tool use without
-    exact-name matching before MASC canonicalizes MCP-prefixed tool names. The
-    specific required names are checked after execution. *)
-val preferred_tool_choice_for_required_tool_names :
-  required_tool_names:string list ->
-  allowed_tool_names:string list ->
-  Agent_sdk.Types.tool_choice
-
 (** Find the active task ID a keeper currently owns. *)
 val owned_active_task_id_for_meta :
   config:Workspace.config ->

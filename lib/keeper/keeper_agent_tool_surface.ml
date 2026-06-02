@@ -488,32 +488,6 @@ let actionable_tool_gate_guidance
       preview
       suffix
 
-let required_tool_names_for_turn ~(current_task_required_tool_names : string list)
-    ~(per_call_required_tool_names : string list) =
-  match per_call_required_tool_names with
-  | [] -> current_task_required_tool_names
-  | _ :: _ -> per_call_required_tool_names
-
-let outstanding_required_tool_names ~(required_tool_names : string list)
-    ~(satisfied_tool_names : string list) =
-  let satisfied =
-    satisfied_tool_names
-    |> List.map Keeper_tool_resolution.canonical_tool_name
-    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-  in
-  required_tool_names
-  |> List.filter (fun name ->
-    let canonical = Keeper_tool_resolution.canonical_tool_name name in
-    not (List.mem canonical satisfied))
-  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-
-let satisfied_required_tool_names_of_outcomes
-    (calls : (string * string) list) =
-  calls
-  |> List.filter_map (fun (tool_name, outcome) ->
-    if String.equal outcome "ok" then Some tool_name else None)
-  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-
 let preferred_tool_choice_for_required_tool_names
     ~(required_tool_names : string list) ~(allowed_tool_names : string list) =
   let add_visible_required acc canonical visible_name via_public_alias =

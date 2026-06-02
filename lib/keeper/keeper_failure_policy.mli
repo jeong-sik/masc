@@ -91,7 +91,6 @@ type operator_action =
   | Fix_invocation
   | Inspect_provider_stream
   | Reroute_or_tune_provider
-  | Inspect_required_tool_contract
   | Reconcile_partial_commit
   | Inspect_keeper_liveness
   | Fix_runtime_environment

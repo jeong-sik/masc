@@ -763,7 +763,7 @@ let run_turn
                    in
                    let tool_contract_status ()
                        : Keeper_execution_receipt.tool_contract_result =
-                     Contract_helpers.observed_tool_contract_status
+                     Keeper_agent_run_turn_helpers.tool_contract_result_for_observed_tools
                        ~required_tool_names:[]
                        ~missing_visible_required:[]
                        ~had_owned_active_task_at_turn_start

@@ -184,7 +184,6 @@ type operator_action =
   | Fix_invocation
   | Inspect_provider_stream
   | Reroute_or_tune_provider
-  | Inspect_required_tool_contract
   | Reconcile_partial_commit
   | Inspect_keeper_liveness
   | Fix_runtime_environment
@@ -227,7 +226,6 @@ let operator_action_to_label = function
   | Fix_invocation -> "fix_invocation"
   | Inspect_provider_stream -> "inspect_provider_stream"
   | Reroute_or_tune_provider -> "reroute_or_tune_provider"
-  | Inspect_required_tool_contract -> "inspect_required_tool_contract"
   | Reconcile_partial_commit -> "reconcile_partial_commit"
   | Inspect_keeper_liveness -> "inspect_keeper_liveness"
   | Fix_runtime_environment -> "fix_runtime_environment"
@@ -366,7 +364,7 @@ let decide = function
       ~failure_scope:Turn_scope
       ~lifecycle_effect:Pause_current_work
       ~circuit_effect:Skip_circuit
-      ~operator_action:Inspect_required_tool_contract
+      ~operator_action:Fix_invocation
       ~keeper_death_allowed:false
       ~reason:"required_tool_contract_violation"
   | Fatal_environment { detail } ->

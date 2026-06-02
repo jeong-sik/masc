@@ -105,11 +105,10 @@ let save_vote_log_jsonl content =
 let rewrite_vote_log store =
   save_vote_log_jsonl (vote_log_jsonl store)
 
-(* [vote_outcome] carries the information needed to run the post-lock
-   [Economy.earn] call.  [earn_upvote_for] is [Some author] only
-   on the fresh peer-upvote path — a self-upvote is not reputation, a
-   vote flip does not earn credits (prevents down/up alternation abuse),
-   and a downvote does not earn at all. *)
+(* [vote_outcome] carries the information needed to run post-lock vote hooks.
+   [earn_upvote_for] is [Some author] only on the fresh peer-upvote path — a
+   self-upvote is not reputation, a vote flip does not earn credits (prevents
+   down/up alternation abuse), and a downvote does not earn at all. *)
 type vote_outcome = {
   delta : int;
   earn_upvote_for : string option;
@@ -128,9 +127,11 @@ let record_vote_side_effect store outcome =
         ~direction:outcome.vote_direction
         ~ts:outcome.vote_ts);
   let vote_dir =
-    match outcome.vote_direction with Up -> `Up | Down -> `Down
+    match outcome.vote_direction with
+    | Up -> Board_effect_hooks.Up
+    | Down -> Board_effect_hooks.Down
   in
-  Thompson_sampling.record_vote
+  Board_effect_hooks.record_vote
     ~agent_name:outcome.vote_author_name
     ~direction:vote_dir
 
@@ -213,18 +214,17 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                        vote_ts = now;
                        vote_author_name = author_name })
       in
-      (* Agent Economy: earn credits for an upvote received.  Moved
-         OUTSIDE the store lock — [Economy.earn] writes its own
-         ledger file on an unrelated path and modifies no board state,
-         so holding [store.mutex] across its disk I/O was gratuitous
+      (* Side-effect hooks run outside the store lock. Credit and selection
+         observers write their own state on unrelated paths and modify no board
+         state, so holding [store.mutex] across their I/O would be gratuitous
          contention with every other reader/writer. *)
       (match board_result with
        | Ok ({ delta; earn_upvote_for = Some author_name } as outcome) ->
            record_vote_side_effect store outcome;
-           (match Economy.earn
+           (match Board_effect_hooks.earn
               ~base_path:(board_base_path ()) ~agent_name:author_name
-              ~kind:Earn_upvote ~reason:"upvote on post" () with
-            | Ok _ -> ()
+              ~kind:Upvote ~reason:"upvote on post" () with
+            | Ok () -> ()
             | Error e ->
                 Log.BoardLog.warn "board_votes: economy earn failed for %s: %s" author_name e);
            Ok delta

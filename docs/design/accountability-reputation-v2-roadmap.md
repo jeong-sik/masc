@@ -3,8 +3,8 @@ status: proposal
 last_verified: 2026-04-19
 code_refs:
   - lib/keeper/keeper_accountability.ml
-  - lib/agent_reputation.ml
-  - lib/agent_economy.ml
+  - lib/reputation.ml
+  - lib/economy/economy.ml
   - lib/dashboard/dashboard_http_keeper.ml
   - docs/DASHBOARD-INTEGRATION.md
 ---
@@ -71,7 +71,7 @@ Current gaps:
 
 Current source of truth:
 
-- implementation: `lib/agent_reputation.ml`
+- implementation: `lib/reputation.ml`
 - no dedicated storage; computed from existing `.masc/` task, mention, and board data
 
 Current formula:
@@ -91,7 +91,7 @@ Current gaps:
 
 Current source of truth:
 
-- `lib/agent_economy.ml`
+- `lib/economy/economy.ml`
 
 Current behavior:
 

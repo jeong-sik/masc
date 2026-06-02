@@ -1,7 +1,7 @@
 # Keeper Tool Boundary Matrix
 
 Status: P0 ratchet source for keeper agent tool boundaries.
-Last updated: 2026-05-25.
+Last updated: 2026-06-03.
 
 This matrix freezes the owner map for keeper modules that participate in the
 agent tool path. A new file in scope must be added here with exactly one owner
@@ -34,30 +34,32 @@ Scope:
 
 Each path below must appear exactly once and use one owner from the table above.
 
-- `lib/keeper/agent_tool_board_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_board_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_filesystem_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_filesystem_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_ide_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_ide_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_in_process_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_in_process_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_memory_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_memory_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_persona_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_persona_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_remote_mcp_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_remote_mcp_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_shared_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_shared_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_command_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_command_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_task_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_task_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_voice_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_voice_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_dispatch_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_dispatch_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_board_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_board_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_filesystem_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_filesystem_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_ide_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_ide_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_in_process_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_in_process_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_memory_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_memory_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_persona_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_persona_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_remote_mcp_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_remote_mcp_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_shared_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_shared_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_command_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_command_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_task_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_task_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_voice_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_voice_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_dispatch_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_dispatch_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_types.ml` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_types.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_failure_site.ml` - execution-dispatch
@@ -114,32 +116,32 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_shell_ir_target.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox.mli` - sandbox-runtime
-- `lib/keeper/agent_tool_execute_input.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_input.mli` - shell-surface
-- `lib/keeper/agent_tool_execute_runtime.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_runtime.mli` - shell-surface
-- `lib/keeper/agent_tool_execute_command_parse.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_command_parse.mli` - shell-surface
-- `lib/keeper/agent_tool_execute_command_semantics.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_command_semantics.mli` - shell-surface
-- `lib/keeper/agent_tool_execute_command_words.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_command_words.mli` - shell-surface
-- `lib/keeper/agent_tool_execute_shell_ir.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_shell_ir.mli` - shell-surface
-- `lib/keeper/agent_tool_execute_path.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_path.mli` - shell-surface
-- `lib/keeper/agent_tool_execute_readonly_policy.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_readonly_policy.mli` - shell-surface
-- `lib/keeper/agent_tool_execute_runtime_paths.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_runtime_paths.mli` - shell-surface
-- `lib/keeper/agent_tool_execute_timeout.ml` - shell-surface
-- `lib/keeper/agent_tool_execute_timeout.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_input.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_input.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_runtime.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_runtime.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_parse.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_parse.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_semantics.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_semantics.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_words.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_command_words.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_shell_ir.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_shell_ir.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_path.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_path.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_readonly_policy.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_readonly_policy.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_runtime_paths.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_runtime_paths.mli` - shell-surface
+- `lib/keeper/keeper_tool_execute_timeout.ml` - shell-surface
+- `lib/keeper/keeper_tool_execute_timeout.mli` - shell-surface
 - `lib/keeper/keeper_tool_affinity.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_affinity.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_alias.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_alias.mli` - tool-surface-policy
-- `lib/keeper/agent_tool_execute_typed_input.ml` - tool-surface-policy
-- `lib/keeper/agent_tool_execute_typed_input.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_execute_typed_input.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_execute_typed_input.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_capability_axis.ml` - tool-surface-policy
@@ -148,6 +150,12 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_deterministic_error.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_completion_contract.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_completion_contract.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_descriptor.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_descriptor.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_descriptor_resolution.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_descriptor_resolution.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_name.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_name.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_query.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_query.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_selection.ml` - tool-surface-policy

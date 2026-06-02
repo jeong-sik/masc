@@ -415,13 +415,13 @@ let attach_inferred_effect_domain name (meta : metadata) =
   | None -> { meta with effect_domain = inferred_effect_domain name }
 
 let attach_static_capabilities name (meta : metadata) =
+  let static_mcp_context_required_tool_names =
+    [ "masc_start"; "masc_broadcast"; "masc_messages"; "masc_approval_get"; "masc_mcp_session" ]
+  in
   {
     meta with
     mcp_context_required =
-      force_true_if_member
-        name
-        [ "masc_start"; "masc_broadcast"; "masc_messages"; "masc_approval_get"; "masc_mcp_session" ]
-        meta.mcp_context_required;
+      force_true_if_member name static_mcp_context_required_tool_names meta.mcp_context_required;
     destructive =
       force_true_if_member name static_destructive_tool_names meta.destructive;
   }

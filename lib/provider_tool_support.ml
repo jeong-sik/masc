@@ -476,5 +476,3 @@ let apply_required_tool_use_filter
         runtime_mcp_http_headers);
     kept)
 ;;
-
-;;

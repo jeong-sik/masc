@@ -497,6 +497,7 @@ type usage_metrics =
   ; total_output_tokens : int
   ; total_tokens : int
   ; total_cost_usd : float
+  ; last_model_used : string
   ; last_turn_ts : float
   ; last_input_tokens : int
   ; last_output_tokens : int
@@ -832,6 +833,7 @@ let zero_usage : usage_metrics =
   ; total_output_tokens = 0
   ; total_tokens = 0
   ; total_cost_usd = 0.0
+  ; last_model_used = ""
   ; last_turn_ts = 0.0
   ; last_input_tokens = 0
   ; last_output_tokens = 0

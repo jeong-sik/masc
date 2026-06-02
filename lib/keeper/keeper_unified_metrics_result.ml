@@ -103,6 +103,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     updated_at = now_iso ();
     runtime = { rt with
       usage = {
+        rt.usage with
         total_turns = rt.usage.total_turns + 1;
         total_input_tokens = rt.usage.total_input_tokens + trusted_input_tokens;
         total_output_tokens =

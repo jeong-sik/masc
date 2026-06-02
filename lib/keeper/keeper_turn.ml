@@ -67,9 +67,10 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     runtime =
       {
         meta.runtime with
-        usage =
-          {
-            total_turns = meta.runtime.usage.total_turns + 1;
+          usage =
+            {
+              meta.runtime.usage with
+              total_turns = meta.runtime.usage.total_turns + 1;
             total_input_tokens =
               meta.runtime.usage.total_input_tokens + trusted_input_tokens;
             total_output_tokens =

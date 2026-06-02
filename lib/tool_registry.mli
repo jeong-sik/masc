@@ -21,6 +21,7 @@ type call_stats = {
   total_duration_ms : int Atomic.t;
   external_mcp_count : int Atomic.t;
   agent_internal_count : int Atomic.t;
+  keeper_internal_count : int Atomic.t;
   inline_dispatch_count : int Atomic.t;
   last_assignment_id : string option Atomic.t;
 }

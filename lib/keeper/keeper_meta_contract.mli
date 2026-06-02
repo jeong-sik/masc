@@ -118,6 +118,7 @@ type usage_metrics = {
   total_output_tokens : int;
   total_tokens : int;
   total_cost_usd : float;
+  last_model_used : string;
   last_turn_ts : float;
   last_input_tokens : int;
   last_output_tokens : int;

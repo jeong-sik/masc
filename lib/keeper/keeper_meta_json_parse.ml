@@ -275,6 +275,7 @@ let parse_usage_metrics (json : Yojson.Safe.t) : usage_metrics =
   ; total_output_tokens = Safe_ops.json_int ~default:0 "total_output_tokens" json
   ; total_tokens = Safe_ops.json_int ~default:0 "total_tokens" json
   ; total_cost_usd = Safe_ops.json_float ~default:0.0 "total_cost_usd" json
+  ; last_model_used = Safe_ops.json_string ~default:"" "last_model_used" json
   ; last_turn_ts = Safe_ops.json_float ~default:0.0 "last_turn_ts" json
   ; last_input_tokens = Safe_ops.json_int ~default:0 "last_input_tokens" json
   ; last_output_tokens = Safe_ops.json_int ~default:0 "last_output_tokens" json

@@ -197,7 +197,6 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
     | None -> ""
   in
   let opt_int = Option.fold ~none:"" ~some:string_of_int in
-  let opt_float = Option.fold ~none:"" ~some:(Printf.sprintf "%.6f") in
   let fields =
     [
       ("goal", meta.goal);

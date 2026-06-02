@@ -422,6 +422,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             total_output_tokens = 0;
             total_tokens = 0;
             total_cost_usd = 0.0;
+            last_model_used = "";
             last_turn_ts = 0.0;
             last_input_tokens = 0;
             last_output_tokens = 0;

@@ -49,6 +49,7 @@ type call_stats =
   ; total_duration_ms : int Atomic.t
   ; external_mcp_count : int Atomic.t
   ; agent_internal_count : int Atomic.t
+  ; keeper_internal_count : int Atomic.t
   ; inline_dispatch_count : int Atomic.t
   ; last_assignment_id : string option Atomic.t
   }
@@ -112,6 +113,7 @@ let get_or_create_stats tool_name =
           ; total_duration_ms = Atomic.make 0
           ; external_mcp_count = Atomic.make 0
           ; agent_internal_count = Atomic.make 0
+          ; keeper_internal_count = Atomic.make 0
           ; inline_dispatch_count = Atomic.make 0
           ; last_assignment_id = Atomic.make None
           }
@@ -132,7 +134,9 @@ let record_call
   Atomic.incr stats.call_count;
   (match source with
    | External_mcp -> Atomic.incr stats.external_mcp_count
-   | Agent_internal -> Atomic.incr stats.agent_internal_count
+   | Agent_internal ->
+     Atomic.incr stats.agent_internal_count;
+     Atomic.incr stats.keeper_internal_count
    | Inline_dispatch -> Atomic.incr stats.inline_dispatch_count);
   if success then Atomic.incr stats.success_count else Atomic.incr stats.failure_count;
   Atomic.set stats.last_called_at (Time_compat.now ());
@@ -230,6 +234,7 @@ let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
       , `Assoc
           [ "external_mcp", `Int (Atomic.get stats.external_mcp_count)
           ; "agent_internal", `Int (Atomic.get stats.agent_internal_count)
+          ; "keeper_internal", `Int (Atomic.get stats.keeper_internal_count)
           ; "inline_dispatch", `Int (Atomic.get stats.inline_dispatch_count)
           ] )
     ]
@@ -283,6 +288,7 @@ let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
              ; total_duration_ms = Atomic.make 0
              ; external_mcp_count = Atomic.make 0
              ; agent_internal_count = Atomic.make 0
+             ; keeper_internal_count = Atomic.make 0
              ; inline_dispatch_count = Atomic.make 0
              ; last_assignment_id = Atomic.make None
              };

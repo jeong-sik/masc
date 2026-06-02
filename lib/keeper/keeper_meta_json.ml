@@ -27,6 +27,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "total_output_tokens", `Int rt.usage.total_output_tokens
     ; "total_tokens", `Int rt.usage.total_tokens
     ; "total_cost_usd", `Float rt.usage.total_cost_usd
+    ; "last_model_used", `String ""
     ; "last_turn_ts", `Float rt.usage.last_turn_ts
     ; "last_input_tokens", `Int rt.usage.last_input_tokens
     ; "last_output_tokens", `Int rt.usage.last_output_tokens
@@ -113,6 +114,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "total_output_tokens"
   ; "total_tokens"
   ; "total_cost_usd"
+  ; "last_model_used"
   ; "last_turn_ts"
   ; "last_input_tokens"
   ; "last_output_tokens"

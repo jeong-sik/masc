@@ -21,6 +21,192 @@ module Float = Stdlib.Float
     Parse boundary: [of_string] at MCP/JSON ingress only.
     Internal code uses [t] directly — typos become compile errors. *)
 
+module Keeper = struct
+  type t =
+    | Execute
+    | Board_comment
+    | Board_comment_vote
+    | Board_curation_read
+    | Board_curation_submit
+    | Board_get
+    | Board_list
+    | Board_post
+    | Board_search
+    | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
+    | Board_vote
+    | Broadcast
+    | Context_status
+    | Fs_edit
+    | Fs_write
+    | Fs_read
+    | Ide_annotate
+    | Handoff
+    | Library_read
+    | Library_search
+    | Memory_search
+    | Memory_write
+    | Search_files
+    | Stay_silent
+    | Task_claim
+    | Task_create
+    | Task_done
+    | Task_submit_for_verification
+    | Task_force_done
+    | Task_force_release
+    | Tasks_audit
+    | Tasks_list
+    | Time_now
+    | Tool_search
+    | Tools_list
+    | Voice_agent
+    | Voice_listen
+    | Voice_session_end
+    | Voice_session_start
+    | Voice_sessions
+    | Voice_speak
+
+  let to_string = function
+    | Execute -> "tool_execute"
+    | Board_comment -> "keeper_board_comment"
+    | Board_comment_vote -> "keeper_board_comment_vote"
+    | Board_curation_read -> "keeper_board_curation_read"
+    | Board_curation_submit -> "keeper_board_curation_submit"
+    | Board_get -> "keeper_board_get"
+    | Board_list -> "keeper_board_list"
+    | Board_post -> "keeper_board_post"
+    | Board_search -> "keeper_board_search"
+    | Board_stats -> "keeper_board_stats"
+    | Board_sub_board_create -> "keeper_board_sub_board_create"
+    | Board_sub_board_delete -> "keeper_board_sub_board_delete"
+    | Board_sub_board_get -> "keeper_board_sub_board_get"
+    | Board_sub_board_list -> "keeper_board_sub_board_list"
+    | Board_sub_board_update -> "keeper_board_sub_board_update"
+    | Board_vote -> "keeper_board_vote"
+    | Broadcast -> "keeper_broadcast"
+    | Context_status -> "keeper_context_status"
+    | Fs_edit -> "tool_edit_file"
+    | Fs_write -> "tool_write_file"
+    | Fs_read -> "tool_read_file"
+    | Ide_annotate -> "keeper_ide_annotate"
+    | Handoff -> "keeper_handoff"
+    | Library_read -> "keeper_library_read"
+    | Library_search -> "keeper_library_search"
+    | Memory_search -> "keeper_memory_search"
+    | Memory_write -> "keeper_memory_write"
+    | Search_files -> "tool_search_files"
+    | Stay_silent -> "keeper_stay_silent"
+    | Task_claim -> "keeper_task_claim"
+    | Task_create -> "keeper_task_create"
+    | Task_done -> "keeper_task_done"
+    | Task_submit_for_verification -> "keeper_task_submit_for_verification"
+    | Task_force_done -> "keeper_task_force_done"
+    | Task_force_release -> "keeper_task_force_release"
+    | Tasks_audit -> "keeper_tasks_audit"
+    | Tasks_list -> "keeper_tasks_list"
+    | Time_now -> "keeper_time_now"
+    | Tool_search -> "keeper_tool_search"
+    | Tools_list -> "keeper_tools_list"
+    | Voice_agent -> "keeper_voice_agent"
+    | Voice_listen -> "keeper_voice_listen"
+    | Voice_session_end -> "keeper_voice_session_end"
+    | Voice_session_start -> "keeper_voice_session_start"
+    | Voice_sessions -> "keeper_voice_sessions"
+    | Voice_speak -> "keeper_voice_speak"
+  ;;
+
+  let of_string = function
+    | "tool_execute" -> Some Execute
+    | "keeper_board_comment" -> Some Board_comment
+    | "keeper_board_comment_vote" -> Some Board_comment_vote
+    | "keeper_board_curation_read" -> Some Board_curation_read
+    | "keeper_board_curation_submit" -> Some Board_curation_submit
+    | "keeper_board_get" -> Some Board_get
+    | "keeper_board_list" -> Some Board_list
+    | "keeper_board_post" -> Some Board_post
+    | "keeper_board_search" -> Some Board_search
+    | "keeper_board_stats" -> Some Board_stats
+    | "keeper_board_vote" -> Some Board_vote
+    | "keeper_board_sub_board_create" -> Some Board_sub_board_create
+    | "keeper_board_sub_board_delete" -> Some Board_sub_board_delete
+    | "keeper_board_sub_board_get" -> Some Board_sub_board_get
+    | "keeper_board_sub_board_list" -> Some Board_sub_board_list
+    | "keeper_board_sub_board_update" -> Some Board_sub_board_update
+    | "keeper_broadcast" -> Some Broadcast
+    | "keeper_context_status" -> Some Context_status
+    | "tool_edit_file" -> Some Fs_edit
+    | "tool_write_file" -> Some Fs_write
+    | "tool_read_file" -> Some Fs_read
+    | "keeper_ide_annotate" -> Some Ide_annotate
+    | "keeper_handoff" -> Some Handoff
+    | "keeper_library_read" -> Some Library_read
+    | "keeper_library_search" -> Some Library_search
+    | "keeper_memory_search" -> Some Memory_search
+    | "keeper_memory_write" -> Some Memory_write
+    | "tool_search_files" -> Some Search_files
+    | "keeper_stay_silent" -> Some Stay_silent
+    | "keeper_task_claim" -> Some Task_claim
+    | "keeper_task_create" -> Some Task_create
+    | "keeper_task_done" -> Some Task_done
+    | "keeper_task_submit_for_verification" -> Some Task_submit_for_verification
+    | "keeper_task_force_done" -> Some Task_force_done
+    | "keeper_task_force_release" -> Some Task_force_release
+    | "keeper_tasks_audit" -> Some Tasks_audit
+    | "keeper_tasks_list" -> Some Tasks_list
+    | "keeper_time_now" -> Some Time_now
+    | "keeper_tool_search" -> Some Tool_search
+    | "keeper_tools_list" -> Some Tools_list
+    | "keeper_voice_agent" -> Some Voice_agent
+    | "keeper_voice_listen" -> Some Voice_listen
+    | "keeper_voice_session_end" -> Some Voice_session_end
+    | "keeper_voice_session_start" -> Some Voice_session_start
+    | "keeper_voice_sessions" -> Some Voice_sessions
+    | "keeper_voice_speak" -> Some Voice_speak
+    | _ -> None
+  ;;
+
+  let board_write_tools = [ Board_post; Board_comment; Board_vote; Board_curation_submit ]
+  let board_write_tool_names = List.map to_string board_write_tools
+
+  let is_board = function
+    | Board_comment
+    | Board_comment_vote
+    | Board_curation_read
+    | Board_curation_submit
+    | Board_get
+    | Board_list
+    | Board_post
+    | Board_search
+    | Board_stats
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
+    | Board_vote -> true
+    | _ -> false
+  ;;
+
+  let is_board_write = function
+    | Board_post | Board_comment | Board_vote | Board_curation_submit -> true
+    | _ -> false
+  ;;
+
+  let board_write_action_kind = function
+    | Board_post -> Some "post"
+    | Board_comment -> Some "comment"
+    | Board_vote -> Some "vote"
+    | Board_curation_submit -> Some "curation"
+    | _ -> None
+  ;;
+
+  let pp fmt t = Format.pp_print_string fmt (to_string t)
+end
+
 module Masc = struct
   type t =
     | Add_task
@@ -277,25 +463,116 @@ module Masc = struct
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 
+module Masc_keeper = struct
+  type t =
+    | Clear
+    | Compact
+    | Create_from_persona
+    | Down
+    | List
+    | Msg
+    | Msg_result
+    | Persona_audit
+    | Repair
+    | Reset
+    | Sandbox_start
+    | Sandbox_status
+    | Sandbox_stop
+    | Status
+    | Up
+
+  let to_string = function
+    | Clear -> "masc_keeper_clear"
+    | Compact -> "masc_keeper_compact"
+    | Create_from_persona -> "masc_keeper_create_from_persona"
+    | Down -> "masc_keeper_down"
+    | List -> "masc_keeper_list"
+    | Msg -> "masc_keeper_msg"
+    | Msg_result -> "masc_keeper_msg_result"
+    | Persona_audit -> "masc_keeper_persona_audit"
+    | Repair -> "masc_keeper_repair"
+    | Reset -> "masc_keeper_reset"
+    | Sandbox_start -> "masc_keeper_sandbox_start"
+    | Sandbox_status -> "masc_keeper_sandbox_status"
+    | Sandbox_stop -> "masc_keeper_sandbox_stop"
+    | Status -> "masc_keeper_status"
+    | Up -> "masc_keeper_up"
+  ;;
+
+  let of_string = function
+    | "masc_keeper_clear" -> Some Clear
+    | "masc_keeper_compact" -> Some Compact
+    | "masc_keeper_create_from_persona" -> Some Create_from_persona
+    | "masc_keeper_down" -> Some Down
+    | "masc_keeper_list" -> Some List
+    | "masc_keeper_msg" -> Some Msg
+    | "masc_keeper_msg_result" -> Some Msg_result
+    | "masc_keeper_persona_audit" -> Some Persona_audit
+    | "masc_keeper_repair" -> Some Repair
+    | "masc_keeper_reset" -> Some Reset
+    | "masc_keeper_sandbox_start" -> Some Sandbox_start
+    | "masc_keeper_sandbox_status" -> Some Sandbox_status
+    | "masc_keeper_sandbox_stop" -> Some Sandbox_stop
+    | "masc_keeper_status" -> Some Status
+    | "masc_keeper_up" -> Some Up
+    | _ -> None
+  ;;
+
+  let pp fmt t = Format.pp_print_string fmt (to_string t)
+end
+
 type t =
+  | Keeper of Keeper.t
   | Masc of Masc.t
+  | Masc_keeper of Masc_keeper.t
 
 let to_string = function
+  | Keeper k -> Keeper.to_string k
   | Masc m -> Masc.to_string m
+  | Masc_keeper mk -> Masc_keeper.to_string mk
 ;;
 
 let of_string s =
-  match Masc.of_string s with
-  | Some m -> Some (Masc m)
-  | None -> None
+  match Keeper.of_string s with
+  | Some k -> Some (Keeper k)
+  | None ->
+    (match Masc_keeper.of_string s with
+     | Some mk -> Some (Masc_keeper mk)
+     | None ->
+       (match Masc.of_string s with
+        | Some m -> Some (Masc m)
+        | None -> None))
 ;;
 
 let pp fmt t = Format.pp_print_string fmt (to_string t)
 
+(* Enumerate every [t] constructor in each sibling predicate so the
+   compiler flags any new variant added to [t]. If a future variant
+   (say [External of ...]) joins the sum, the previous [_ -> false]
+   catch-alls would silently classify it as not-keeper / not-masc /
+   not-masc_keeper without any review point; with explicit
+   enumeration the new variant must be deliberately mapped on each
+   predicate. Mirrors the [is_board] convention below and the fix
+   shape in PR #14842 (Resilience_outcome predicates). Same FSM
+   Sparse Match anti-pattern as PRs #14716, #14790, #14806, #14810,
+   #14816, #14823, #14829. *)
+let is_keeper = function
+  | Keeper _ -> true
+  | Masc _ | Masc_keeper _ -> false
+;;
+
 let is_masc = function
   | Masc _ -> true
+  | Keeper _ | Masc_keeper _ -> false
+;;
+
+let is_masc_keeper = function
+  | Masc_keeper _ -> true
+  | Keeper _ | Masc _ -> false
 ;;
 
 let is_board = function
+  | Keeper k -> Keeper.is_board k
   | Masc m -> Masc.is_board m
+  | Masc_keeper _ -> false
 ;;

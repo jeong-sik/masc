@@ -103,7 +103,8 @@ let test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:final_tools)
+       ~tool_names:final_tools
+       ())
 ;;
 
 let test_requested_tool_names_seen_preserves_prior_turn_surface () =

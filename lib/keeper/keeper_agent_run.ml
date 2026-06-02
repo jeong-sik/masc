@@ -753,6 +753,7 @@ let run_turn
                        ~no_progress_success_tool_names
                        ~claim_context_allowed:
                          (not had_owned_active_task_at_turn_start)
+                       ~tool_calls:acc.tool_calls
                    in
                    let actionable_signal_kind =
                      actionable_contract.actionable_signal_kind

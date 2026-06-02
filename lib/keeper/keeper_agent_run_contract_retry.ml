@@ -11,7 +11,7 @@ let retry_feedback_message text : Agent_sdk.Types.message =
 
 let retry_feedback ~violation_reason =
   Printf.sprintf
-    "[CONTRACT VIOLATION] Your previous response was rejected: %s. Retry this turn with the same goal, follow the current turn instructions, and do not repeat the rejected response."
+    "[CONTRACT VIOLATION] Your previous response was rejected: %s. Retry this turn with the same goal, follow the current turn instructions, and do not repeat the rejected response. Respond by calling an appropriate keeper tool that advances the turn; do not reply with text only."
     violation_reason
 ;;
 

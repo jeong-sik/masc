@@ -1,11 +1,11 @@
 (** Path / working-dir validation helpers for keeper repair flows.
 
-    Verbatim extract from [Tool_keeper]. Used by
+    Verbatim extract from [Keeper_tool_surface]. Used by
     [handle_keeper_repair] to enforce that target files and working
     directories stay inside the calling keeper's own playground.
 
     Pure helpers (modulo [Unix.realpath]); no parent-local state.
-    All callers are internal to [Tool_keeper]. *)
+    All callers are internal to [Keeper_tool_surface]. *)
 
 let is_safe_subpath ~parent ~child =
   if String.equal child parent then true

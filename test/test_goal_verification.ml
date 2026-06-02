@@ -33,12 +33,12 @@ let with_workspace f =
 let operator ?display_name id : Goal_verification.goal_principal =
   { kind = Goal_verification.Operator; id; display_name }
 
-let keeper ?display_name id : Goal_verification.goal_principal =
-  { kind = Goal_verification.Keeper; id; display_name }
+let agent ?display_name id : Goal_verification.goal_principal =
+  { kind = Goal_verification.Agent; id; display_name }
 
 let request_snapshot ~requested_by =
   let reviewer = operator "reviewer-1" in
-  let verifier = keeper "keeper-a" in
+  let verifier = agent "agent-a" in
   let principals = [ requested_by; reviewer; verifier ] in
   {
     Goal_verification.principals;

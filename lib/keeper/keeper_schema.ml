@@ -3,17 +3,8 @@
 open Masc_domain
 module Persona_contract = Keeper_persona_authoring_contract
 
-(** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
-    [network_mode]. Same cycle constraint as other schema mirrors —
-    Keeper_schema cannot depend on
-    Keeper_types_profile directly because the latter [include]s
-    Keeper_config and is otherwise downstream. The test
-    [test_types.ml :: keeper_profile_enum_ssot] asserts these mirrors
-    stay in sync with [valid_*_strings] so adding a constructor in
-    Keeper_types_profile fails the test instead of silently dropping
-    from the JSON Schema. *)
-let sandbox_profile_enum_strings =
-  [ "local"; "docker" ]
+(** Network mode strings exposed only by explicit sandbox-management tools.
+    Keeper creation/update no longer accepts sandbox posture knobs. *)
 let network_mode_enum_strings =
   [ "none"; "inherit" ]
 (** Issue #8486: hand-mirrored from
@@ -104,14 +95,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "boolean");
           ("default", `Bool Persona_contract.default_generation_proactive_enabled);
           ("description", `String "Default keeper.proactive_enabled for the draft.");
-        ]);
-        ("runtime_id", `Assoc [
-          ("type", `String "string");
-          (* No static [default]: the default runtime id is resolved at request
-             time by the persona-generate handler (after [Runtime.init_default]).
-             A module-level schema list cannot evaluate it without crashing boot
-             (RFC-0206 §2.1 fail-fast). Mirrors the keeper_create runtime_id schema. *)
-          ("description", `String "Runtime id used to draft the persona.");
         ]);
         ("temperature", `Assoc [
           ("type", `String "number");
@@ -277,10 +260,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "Optional: long-term goal horizon (default: goal).");
         ]);
-        ("runtime_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: Runtime binding id for keeper execution. Replaces legacy models/allowed_models/active_model inputs.");
-        ]);
         ("instructions", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: additional system instructions (kept across compaction/handoff).");
@@ -358,16 +337,6 @@ let keeper_schemas : tool_schema list = [
         ("handoff_cooldown_sec", `Assoc [
           ("type", `String "integer");
           ("description", `String "Minimum seconds between handoffs (default: 300).");
-        ]);
-        ("sandbox_profile", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) sandbox_profile_enum_strings));
-          ("description", `String "Filesystem/process sandbox profile. 'local' runs on the host process with filesystem scoped to the keeper playground. 'docker' runs shell commands in an ephemeral hardened Docker container; the internal git/gh dispatcher upgrades network+credential mounts per-command.");
-        ]);
-        ("network_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
-          ("description", `String "Network policy associated with the sandbox profile. 'none' is valid only with sandbox_profile='docker'.");
         ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");

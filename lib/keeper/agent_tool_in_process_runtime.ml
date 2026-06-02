@@ -224,14 +224,14 @@ let handle_masc_surface_audit ~args =
   Yojson.Safe.to_string (Dashboard_surface_readiness.json ?surface_id ())
 ;;
 
-(* RFC-0182 §3.1 — masc_keeper cluster.  [Tool_keeper] lives in lib/
+(* RFC-0182 §3.1 — masc_keeper cluster.  [Keeper_tool_surface] lives in lib/
    (late) but exposes keeper workspace tools.  A direct import here
    closes a cycle, so we dispatch through [Keeper_dispatch_ref].  Today
    only [masc_keeper_list] is registered; remaining keeper tools depend
    on the Eio context and await Phase 5 Eio plumbing.
 
    TEL-OK: descriptor projection — telemetry lives in the underlying
-   [Tool_keeper] / [Tool_keeper_ops] / [Keeper_status_detail] handlers
+   [Keeper_tool_surface] / [Keeper_tool_surface_ops] / [Keeper_status_detail] handlers
    that the registered ref delegates to. *)
 let handle_masc_keeper
       ?sw
@@ -264,7 +264,7 @@ let handle_masc_keeper
 (* RFC-0182 §3.1 — masc_persona cluster.  [Keeper_persona] /
    [Keeper_persona_authoring] transitively pull in [Keeper_turn_driver],
    which closes a cycle if imported here.  Resolution: dispatch
-   through [Persona_dispatch_ref].  Tool_keeper (lib/, late) registers
+   through [Persona_dispatch_ref].  Keeper_tool_surface (lib/, late) registers
    the ctx-free entry points at module load.
 
    TEL-OK: descriptor projection — telemetry lives in [Keeper_persona] /

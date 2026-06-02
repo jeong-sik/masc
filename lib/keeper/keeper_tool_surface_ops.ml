@@ -5,7 +5,7 @@ module String = Stdlib.String
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_keeper facade.  MCP entrypoints stay stable while keeper internals live in dedicated keeper modules. Tool_keeper owns only runtime wrappers and dispatch. *)
+(** Keeper_tool_surface facade.  MCP entrypoints stay stable while keeper internals live in dedicated keeper modules. Keeper_tool_surface owns only runtime wrappers and dispatch. *)
 open Tool_args
 open Keeper_types
 open Keeper_meta_contract
@@ -15,7 +15,7 @@ open Keeper_runtime
 module Turn = Keeper_turn
 module Status = Keeper_status
 module Persona = Keeper_persona
-module Persona_audit = Tool_keeper_persona_audit
+module Persona_audit = Keeper_tool_persona_audit
 type 'a context = 'a Keeper_types_profile.context = {
   config : Workspace.config;
   agent_name : string;
@@ -280,7 +280,7 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
       | Ok lines -> lines
       | Error exn_class ->
           Keeper_memory.record_memory_recall_read_error
-            ~site:"tool_keeper_ops_skill_route_metrics" metrics_path exn_class;
+            ~site:"keeper_tool_surface_ops_skill_route_metrics" metrics_path exn_class;
           []
   in
   let rec find_latest = function
@@ -664,10 +664,10 @@ let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
             ]
           @ fields))
   | _ -> body
-let is_safe_subpath = Tool_keeper_path_validation.is_safe_subpath
-let validate_target_file = Tool_keeper_path_validation.validate_target_file
+let is_safe_subpath = Keeper_tool_path_validation.is_safe_subpath
+let validate_target_file = Keeper_tool_path_validation.validate_target_file
 let resolve_playground_working_dir =
-  Tool_keeper_path_validation.resolve_playground_working_dir
+  Keeper_tool_path_validation.resolve_playground_working_dir
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path.
    masc_keeper_repair is currently a stub (returns a typed
    "unsupported" response after validating inputs) so no Eio fields are

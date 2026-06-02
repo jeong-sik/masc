@@ -139,7 +139,7 @@ let get_turn_context ~keeper_name () =
   , ctx.approval_mode )
 ;;
 
-let runtime_contract_json_for_call ~keeper_name () =
+let runtime_observability_contract_json_for_call ~keeper_name () =
   let ctx = get_turn_context_record ~keeper_name () in
   Keeper_runtime_contract.runtime_observability_contract_json_from_fields
     ~keeper_name

@@ -153,7 +153,6 @@ val save_oas_checkpoint :
   max_checkpoint_messages:int ->
   session:session_context ->
   agent_name:string ->
-  model:string ->
   ctx:working_context ->
   generation:int ->
   (Agent_sdk.Checkpoint.t, string) result
@@ -226,11 +225,6 @@ val checkpoint_text_cap_marker : string
     sanitizer truncates it (newline followed by the [capped] marker).
     Tests assert against this literal so the marker is part of the
     public contract. *)
-
-(** Pick the keeper's preferred model for checkpointing —
-    canonical runtime name first, then a fallback list of
-    provider-default labels. *)
-val checkpoint_model_of_meta : Keeper_meta_contract.keeper_meta -> string
 
 (** Project an OAS checkpoint to a working_context. Optionally
     repair orphan tool results and cap the message tail. *)

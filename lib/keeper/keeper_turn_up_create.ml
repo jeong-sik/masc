@@ -48,15 +48,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Some ids -> ids
     | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
   in
-  let selected_runtime_id =
-    (* RFC-0206: [runtime_id] is the canonical selector.  The profile record
-       still stores that parsed value in [model] until the internal field is
-       renamed. *)
-    match p.runtime_id_opt, p.profile_defaults.model with
-    | Some name, _ -> name
-    | None, Some name -> name
-    | None, None -> Keeper_config.default_runtime_id ()
-  in
   let active_goal_ids_error =
     match p.active_goal_ids_opt with
     | None -> None
@@ -73,13 +64,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                (String.concat ", " missing))
   in
   let sandbox_profile =
-    resolve_sandbox_profile
-      ~preferred:p.sandbox_profile_opt
-      ~fallback:p.profile_defaults.sandbox_profile
+    resolve_sandbox_profile ~fallback:p.profile_defaults.sandbox_profile
   in
   let network_mode =
     resolve_network_mode
-      ~preferred:p.network_mode_opt
+      ~sandbox_profile
       ~fallback:p.profile_defaults.network_mode
   in
   let mention_targets =
@@ -266,34 +255,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   ~fallback_message:env_message_gate
                   ~fallback_token:env_token_gate
               in
-              let runtime_models =
-                Provider_runtime_projection.default_execution_model_strings
-                  selected_runtime_id
-              in
-              (match
-                 Keeper_turn_helpers.ensure_local_discovery_ready
-                   runtime_models
-               with
-               | Ok () -> ()
-               | Error msg ->
-                   Log.Keeper.warn
-                     "create_keeper local discovery refresh incomplete for \
-                      name=%s: %s"
-                     p.name
-                     msg;
-                   Prometheus.inc_counter
-                     Keeper_metrics.(to_string LocalDiscoveryFailures)
-                     ~labels:
-                       [
-                         ("keeper", p.name);
-                         ("site", "create_local_discovery_refresh");
-                       ]
-                     ());
               let primary_max_context =
                 match p.max_context_override_opt with
                 | Some v -> v
-                (* RFC-0206 single-binding: context budget = default runtime's
-                   model window (runtime label scan removed). *)
+                (* Boundary: Keeper consumes an opaque context budget, not a
+                   provider/model identity. *)
                 | None -> Runtime.default_max_context ()
               in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
@@ -397,7 +363,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         long_goal;
 
         social_model;
-        models = [];
         will;
         needs;
         desires;
@@ -449,7 +414,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         current_task_id = None;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
-        per_provider_timeout_s = p.profile_defaults.per_provider_timeout;
         always_approve = p.profile_defaults.always_approve;
         runtime = {
           usage = {
@@ -459,7 +423,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             total_tokens = 0;
             total_cost_usd = 0.0;
             last_turn_ts = 0.0;
-            last_model_used = "";
             last_input_tokens = 0;
             last_output_tokens = 0;
             last_total_tokens = 0;
@@ -517,7 +480,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
             ~session
             ~agent_name:meta.agent_name
-            ~model:(Keeper_context_runtime.checkpoint_model_of_meta meta)
             ~ctx:ctx0
             ~generation:0
         with
@@ -549,18 +511,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       | Ok () ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-        (* Auto-generate credential file if missing (#A10) *)
-        let agent_name = Keeper_identity.keeper_agent_name p.name in
-        (match Auth.ensure_keeper_credential ctx.config.base_path ~agent_name with
-         | Ok _ ->
-             Log.Keeper.debug "create_keeper: credential ensured for %s" agent_name
-         | Error err ->
-             Prometheus.inc_counter
-               Keeper_metrics.(to_string LifecycleDispatchRejections)
-               ~labels:[("keeper", agent_name); ("event", "create_credential_ensure")]
-               ();
-             Log.Keeper.warn "create_keeper: credential ensure failed for %s: %s"
-               agent_name (Masc_domain.show_masc_error err));
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
         start_keepalive ctx meta;
@@ -586,7 +536,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("needs", `String meta.needs);
           ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
-          ("runtime_id", `String (runtime_id_of_meta meta));
           ("social_model", `String meta.social_model);
           ("tool_access", tool_access_to_json meta.tool_access);
           ("tool_denylist",

@@ -119,7 +119,6 @@ type usage_metrics = {
   total_tokens : int;
   total_cost_usd : float;
   last_turn_ts : float;
-  last_model_used : string;
   last_input_tokens : int;
   last_output_tokens : int;
   last_total_tokens : int;
@@ -324,7 +323,6 @@ type keeper_meta = {
   mid_goal : string;
   long_goal : string;
   social_model : string;
-  models : string list;
   will : string;
   needs : string;
   desires : string;
@@ -363,7 +361,6 @@ type keeper_meta = {
           trajectory accumulator for per-task cost tracking. *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  per_provider_timeout_s : float option;
   always_approve : bool option;
   (* Agent runtime state *)
   runtime : agent_runtime_state;
@@ -384,13 +381,6 @@ val effective_meta_of_profile_defaults :
   Keeper_types_profile.keeper_profile_defaults ->
   keeper_meta ->
   (keeper_meta, string) result
-
-(** {1 Runtime id derivation} *)
-
-val runtime_id_of_meta : keeper_meta -> string
-(** [runtime_id_of_meta m] returns the default runtime id.
-    Ignores [m] because keeper-level provider/model selection has been
-    collapsed to the single default Runtime binding. *)
 
 (** {1 Outcome <-> string} *)
 
@@ -454,7 +444,8 @@ val map_proactive_rt :
 
 val removed_keeper_model_arg_names : string list
 (** Names of removed keeper-creation tool arguments that have
-    been retired in favour of the [runtime_id] field
+    been retired because runtime/provider/model selection is not part
+    of the keeper contract
     (["models"], ["allowed_models"], ["active_model"]).
     Consumed by {!reject_removed_model_args} which
     surfaces operator-readable rejection messages instead of

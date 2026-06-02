@@ -354,27 +354,6 @@ let synonyms : (string * string list) list =
   ; (* masc web search + fetch *)
     "masc_web_search", [ "web search"; "search internet"; "search online"; "google" ]
   ; "masc_web_fetch", [ "web fetch"; "fetch page"; "read url"; "download page" ]
-  ; (* masc keeper management — tools available via BM25 but missing from TF-IDF *)
-    "masc_keeper_up", [ "start keeper"; "launch keeper"; "spawn keeper"; "keeper create" ]
-  ; ( "masc_keeper_down"
-    , [ "stop keeper"; "shutdown keeper"; "kill keeper"; "keeper terminate" ] )
-  ; ( "masc_keeper_list"
-    , [ "list keepers"; "show keepers"; "keeper status all"; "active keepers" ] )
-  ; ( "masc_keeper_persona_audit"
-    , [ "keeper persona audit"
-      ; "persona keeper check"
-      ; "keeper toml persona"
-      ; "autoboot keepalive audit"
-      ] )
-  ; ( "masc_keeper_msg"
-    , [ "send keeper message"; "talk to keeper"; "message keeper"; "keeper chat" ] )
-  ; ( "masc_keeper_status"
-    , [ "keeper health"; "keeper state"; "keeper check"; "keeper info" ] )
-  ; ( "masc_keeper_compact"
-    , [ "compact keeper"; "shrink context"; "reduce context"; "context overflow fix" ] )
-  ; ( "masc_keeper_clear"
-    , [ "clear keeper"; "reset keeper context"; "wipe keeper history"; "emergency clear" ]
-    )
   ]
 ;;
 

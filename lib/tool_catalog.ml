@@ -23,7 +23,7 @@ module Float = Stdlib.Float
     - Surface: Canonical per-surface tool name membership SSOT
 
     Sub-modules (private):
-    - Tool_catalog_surfaces: surface type, canonical tool lists, keeper-internal
+    - Tool_catalog_surfaces: surface type and canonical tool lists
     - Tool_catalog_inference: typed-name -> effect_domain / tool_group
 
     @since 2.188.0 — Decomposed from monolithic tool_catalog.ml *)
@@ -55,13 +55,7 @@ include (Tool_catalog_inference : sig
     | Host_repo_write
 
   type tool_group = Tool_catalog_inference.tool_group =
-    | Board
-    | Knowledge
-    | Tasks
-    | Voice
-    | Filesystem
     | Masc_board
-    | Masc_keeper
     | Masc_plan
     | Masc_agent
     | Masc_core
@@ -70,7 +64,7 @@ end)
 include (Tool_catalog_surfaces : sig
   type surface = Tool_catalog_surfaces.surface =
     | Public_mcp | Spawned_agent | Local_worker | Session_min
-    | Admin | Keeper_internal | Keeper_denied | System_internal
+    | Admin | Agent_internal | System_internal
 end)
 
 type metadata = {
@@ -233,7 +227,7 @@ let explicit_metadata : (string * metadata) list =
   [
     ( "masc_operator_judgment_write",
       hidden_active
-        "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and keeper automation." );
+        "Internal operator-judge write path hidden from the default tool list; use for operator judgment experiments and automation." );
     (* Physically removed: masc_interrupt, masc_approve, masc_reject,
        masc_pending_interrupts, masc_branch (masc-checkpoint CLI removed,
        #4709/#4734), operator_judgment_latest, hat_wear, hat_status,
@@ -251,9 +245,6 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_board_curation_submit",
       actor_broadcast_tool );
     ("masc_tool_help", read_state_tool);
-    ("masc_keeper_list", read_state_tool);
-    ("masc_keeper_status", read_state_tool);
-    ("masc_keeper_persona_audit", read_state_tool);
     ("masc_plan_get", read_state_tool);
     ("masc_claim_next", claim_task_tool);
     ("masc_transition", complete_task_tool);
@@ -285,11 +276,6 @@ let explicit_metadata : (string * metadata) list =
       } );
     ("masc_tool_grant", admin_tool);
     ("masc_tool_revoke", admin_tool);
-    ("masc_keeper_reset", broadcast_tool);
-    ("masc_keeper_compact", broadcast_tool);
-    ( "masc_keeper_clear",
-      with_semantic_flags ~destructive:true
-        broadcast_tool );
     (* Catalog-owned permissions for split/lazily registered tool modules. *)
     ("masc_reset", reset_tool);
     ("masc_start", broadcast_tool);
@@ -327,15 +313,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_persona_schema", read_state_tool);
     ("masc_persona_generate", broadcast_tool);
     ("masc_persona_save", broadcast_tool);
-    ("masc_keeper_create_from_persona", broadcast_tool);
-    ("masc_keeper_up", broadcast_tool);
-    ("masc_keeper_down", broadcast_tool);
-    ("masc_keeper_msg", broadcast_tool);
-    ("masc_keeper_msg_result", broadcast_tool);
-    ("masc_keeper_repair", broadcast_tool);
-    ("masc_keeper_sandbox_status", read_state_tool);
-    ("masc_keeper_sandbox_start", broadcast_tool);
-    ("masc_keeper_sandbox_stop", broadcast_tool);
     ("masc_runtime_verify", read_state_tool);
     ("masc_runtime_ollama_probe", read_state_tool);
     ("masc_cleanup_zombies", broadcast_tool);
@@ -393,30 +370,7 @@ let registered_metadata name =
 (* ================================================================ *)
 
 (* Delegate to surfaces sub-module *)
-let keeper_internal_replacement = Tool_catalog_surfaces.keeper_internal_replacement
-
 let public_mcp_tools = Tool_catalog_surfaces.public_mcp_surface_tools
-
-let keeper_internal_metadata name =
-  let replacement = keeper_internal_replacement name in
-  let implementation_status =
-    match replacement with
-    | Some _ -> Adapter
-    | None -> Real
-  in
-  let meta =
-    hidden_active
-    ?canonical_name:replacement
-    ?replacement
-    ~allow_direct_call_when_hidden:false
-    ~implementation_status
-    "Keeper-internal tool. Use the keeper runtime or the public MASC equivalent when available."
-  in
-  {
-    meta with
-    required_permission = Some Masc_domain.CanBroadcast;
-    requires_actor_binding = Some true;
-  }
 
 let public_mcp_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 64 in
@@ -482,7 +436,7 @@ let attach_static_capabilities name (meta : metadata) =
 
 let metadata name =
   (* Hot path: called from MCP execute, tool list, OAS bridge, capability
-     registry, keeper guards, help registry, governance risk, etc.  Cache
+     registry, help registry, governance risk, etc.  Cache
      surface-membership checks per call rather than re-querying. *)
   let is_system_internal =
     Tool_catalog_surfaces.is_on_surface System_internal name
@@ -492,8 +446,6 @@ let metadata name =
     | Some meta -> meta
     | None ->
       if is_public_mcp name then default_metadata
-      else if Tool_catalog_surfaces.is_on_surface Keeper_internal name then
-        keeper_internal_metadata name
       else if is_system_internal then
         { default_metadata with
           visibility = Hidden;

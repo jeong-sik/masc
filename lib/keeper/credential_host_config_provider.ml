@@ -1,4 +1,4 @@
-(** See {!Keeper_host_config_provider} interface. *)
+(** See {!Credential_host_config_provider} interface. *)
 
 (* RFC-0084 host-config-cleanup-A — credential root migration.
    Was: ad-hoc literal string for the credential root.  Now delegates
@@ -11,7 +11,7 @@ let cred_root = (Host_config.host ()).cred_root
 let explicit_ssh_key_container_path =
   Filename.concat (Filename.concat cred_root ".ssh") "id_credential"
 
-let mount_if_present ~host ~container : Keeper_credential_provider.ro_mount list =
+let mount_if_present ~host ~container : Credential_provider.ro_mount list =
   if host = "" then []
   else if not (Sys.file_exists host) then []
   else [ { host; container } ]
@@ -107,7 +107,7 @@ let compose_env ?ssh_key_container () =
 
 let required_mount_result (attempt : mount_attempt) ~container =
   match attempt.status with
-  | `Mounted -> Ok Keeper_credential_provider.{ host = attempt.host; container }
+  | `Mounted -> Ok Credential_provider.{ host = attempt.host; container }
   | `Empty ->
       Error
         (Printf.sprintf
@@ -168,7 +168,7 @@ let metadata_of_binding (kb : Credential_bundle.keeper_binding) =
    fields. *)
 let count_resolve_outcome ~keeper_name ~source ~reason =
   Prometheus.inc_counter
-    "keeper_credential_provider_resolve_total"
+    "credential_provider_resolve_total"
     ~labels:
       [ ("keeper", keeper_name); ("source", source); ("reason", reason) ]
     ()
@@ -184,7 +184,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
   match compose_ro_mounts_result ~keeper_name kb with
   | Error reason ->
       Error
-        (Keeper_credential_provider.Missing_bundle
+        (Credential_provider.Missing_bundle
            { identity = keeper_name; path = reason })
   | Ok bundle_mounts ->
     let ro_mounts =
@@ -194,7 +194,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
       | None -> []
       | Some host ->
           [
-            Keeper_credential_provider.
+            Credential_provider.
               { host; container = explicit_ssh_key_container_path };
           ]
     in
@@ -214,7 +214,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
      | Some _ ->
          let metadata = metadata_of_binding kb @ extra_metadata in
          Ok
-           Keeper_credential_provider.
+           Credential_provider.
              {
                identity = kb.credential_identity;
                env;
@@ -224,7 +224,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
              }
      | None ->
         Error
-          (Keeper_credential_provider.Missing_bundle
+          (Credential_provider.Missing_bundle
              { identity = keeper_name
              ; path =
                  Printf.sprintf
@@ -275,7 +275,7 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
   match binding_of_credential cred with
   | Error reason ->
       Error
-        (Keeper_credential_provider.Missing_bundle
+        (Credential_provider.Missing_bundle
            { identity = keeper_name; path = reason })
   | Ok kb ->
       let ssh_key_path =
@@ -288,7 +288,7 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
       (match ssh_key_path with
       | Some path when not (Sys.file_exists path) ->
           Error
-            (Keeper_credential_provider.Missing_bundle
+            (Credential_provider.Missing_bundle
                { identity = keeper_name
                ; path =
                    Printf.sprintf
@@ -297,7 +297,7 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
                })
       | Some path when Sys.is_directory path ->
           Error
-            (Keeper_credential_provider.Missing_bundle
+            (Credential_provider.Missing_bundle
                { identity = keeper_name
                ; path =
                    Printf.sprintf
@@ -324,7 +324,7 @@ let resolve ~config ~identity:keeper_name =
       count_resolve_outcome ~keeper_name ~source:"credential_store"
         ~reason:"mapping_load_error";
       Error
-        (Keeper_credential_provider.Missing_bundle
+        (Credential_provider.Missing_bundle
            { identity = keeper_name
            ; path =
                Printf.sprintf
@@ -337,7 +337,7 @@ let resolve ~config ~identity:keeper_name =
       count_resolve_outcome ~keeper_name ~source:"credential_store"
         ~reason:"missing_mapping";
       Error
-        (Keeper_credential_provider.Missing_bundle
+        (Credential_provider.Missing_bundle
            { identity = keeper_name
            ; path =
                Printf.sprintf
@@ -360,7 +360,7 @@ let resolve ~config ~identity:keeper_name =
         List.map (fun (c : Repo_manager_types.credential) -> c.id) many
       in
       Error
-        (Keeper_credential_provider.Missing_bundle
+        (Credential_provider.Missing_bundle
            { identity = keeper_name
            ; path =
                Printf.sprintf
@@ -371,12 +371,12 @@ let resolve ~config ~identity:keeper_name =
                  keeper_name (List.length many) (String.concat ", " ids)
            })
 
-let finalize (_b : Keeper_credential_provider.binding) ~container_id:_ =
+let finalize (_b : Credential_provider.binding) ~container_id:_ =
   (* PR-1: noop.  PR-3 will rewrite hosts.yml:user inside the
      container after `gh auth login --with-token` runs. *)
   Ok ()
 
-let tear_down (_b : Keeper_credential_provider.binding) ~container_id:_ =
+let tear_down (_b : Credential_provider.binding) ~container_id:_ =
   (* PR-1: noop.  The RO mount lifetime equals the `docker run`
      lifetime; nothing to unmount. *)
   ()

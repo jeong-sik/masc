@@ -78,7 +78,6 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
               meta.runtime.usage.total_tokens + trusted_total_tokens;
             total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
             last_turn_ts = now_ts;
-            last_model_used = "";
             last_input_tokens = trusted_input_tokens;
             last_output_tokens = trusted_output_tokens;
             last_total_tokens = trusted_total_tokens;
@@ -635,14 +634,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     |> List.exists (fun tool_name ->
                            let trimmed = String.trim tool_name in
                            trimmed <> ""
-                           && not (String.equal trimmed (Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent)))
+                           && not (String.equal trimmed "keeper_stay_silent"))
                   in
                   let tool_refs =
                     result.tools_used
                     |> List.filter_map (fun tool_name ->
                            let trimmed = String.trim tool_name in
                            if trimmed = ""
-                              || String.equal trimmed (Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent)
+                              || String.equal trimmed "keeper_stay_silent"
                            then None
                            else Some ("tool:" ^ trimmed))
                   in

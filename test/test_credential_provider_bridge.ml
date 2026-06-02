@@ -2,7 +2,7 @@
     {!Keeper_repo_mapping.credentials_for_keeper}.
 
     This is the load-bearing helper consumed by
-    {!Keeper_host_config_provider.resolve} when deciding whether to route a
+    {!Credential_host_config_provider.resolve} when deciding whether to route a
     keeper through the {!Credential_store}.
 
     Pinned scenarios:
@@ -26,7 +26,7 @@
     7. Direct keeper credential mapping → returns that credential even
        when repo-derived credentials are ambiguous or missing.
 
-    Integration of [Keeper_host_config_provider.resolve] itself with
+    Integration of [Credential_host_config_provider.resolve] itself with
     [Workspace.config] + filesystem bundles is exercised by
     [test_keeper_sandbox_docker_route]; this file stays pure to avoid
     re-staging that fixture. *)

@@ -13,7 +13,7 @@ module Types = Masc_domain
 open Masc_mcp
 
 (** Build a default keeper_meta via JSON deserialization (same helper as
-    test_tool_keeper.ml). Only name and defaults are needed. *)
+    test_keeper_tool_surface.ml). Only name and defaults are needed. *)
 let make_meta () =
   let json = `Assoc [
     ("name", `String "eval-keeper");

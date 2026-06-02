@@ -21,7 +21,7 @@ let get_post store ~post_id : (post, board_error) Result.t =
    [store.mutex] twice with [maybe_sweep] dispatching to the flusher
    actor between releases. That race window surfaces as
    [Mutex.lock: Resource deadlock avoided] under contended
-   keeper_board_get traffic (e.g. ramarama keeper polling). Coalescing
+   repeated agent board-read traffic. Coalescing
    keeps the read atomic, removes one [maybe_sweep] dispatch, and
    eliminates the inter-call lock churn. *)
 let get_post_and_comments store ~post_id : (post * comment list, board_error) Result.t =

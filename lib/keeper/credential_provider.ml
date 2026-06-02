@@ -1,4 +1,4 @@
-(** See {!Keeper_credential_provider} interface. *)
+(** See {!Credential_provider} interface. *)
 
 type ro_mount = {
   host : string;

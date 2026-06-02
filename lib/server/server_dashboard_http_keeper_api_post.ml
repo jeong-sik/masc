@@ -384,7 +384,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                  let args_with_name =
                    `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
                  in
-                 let keeper_ctx : _ Tool_keeper.context =
+                 let keeper_ctx : _ Keeper_tool_surface.context =
                    {
                      config;
                      agent_name;

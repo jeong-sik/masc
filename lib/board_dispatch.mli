@@ -3,14 +3,14 @@
 
     Wraps the JSONL-backed {!Board} store with: lazy initialisation,
     a fiber-protected flusher actor, sort-order projections, and two
-    out-bound hook channels (keeper board signals + board SSE
+    out-bound hook channels (board signals + board SSE
     events).
 
     Internal state and helpers ([backend_state] Atomic carrying the
     flusher-started flag inside the [Active] variant since Tier D D-7,
     [start_flusher_actor], [ensure_flusher_actor],
-    [keeper_board_signal_hook] / [board_sse_hook] Atomics,
-    [emit_keeper_board_signal], [backend], [sort_posts_in_memory],
+    [board_signal_hook] / [board_sse_hook] Atomics,
+    [emit_board_signal], [backend], [sort_posts_in_memory],
     [normalize_author_filter], [agent_matches_author_filter],
     [matching_post_ids_for_comment_author_filter], the
     [all_sort_orders] convenience list, [is_initialized],
@@ -33,12 +33,12 @@ val valid_sort_order_strings : string list
 
 (** {1 Hook events} *)
 
-type keeper_board_signal_kind =
+type board_signal_kind =
   | Board_post_created
   | Board_comment_added
 
-type keeper_board_signal = {
-  kind : keeper_board_signal_kind;
+type board_signal = {
+  kind : board_signal_kind;
   post_id : string;
   author : string;
   title : string;
@@ -79,10 +79,9 @@ type board_sse_event =
       reacted : bool;
     }
 
-val set_keeper_board_signal_hook : (keeper_board_signal -> unit) -> unit
+val set_board_signal_hook : (board_signal -> unit) -> unit
 (** Replace the in-process hook invoked from {!create_post} and
-    {!add_comment}. Used by [Keeper_board_listener] to bridge into
-    the keeper signal bus. *)
+    {!add_comment}. *)
 
 val set_board_sse_hook : (board_sse_event -> unit) -> unit
 (** Replace the in-process SSE hook invoked from every mutating
@@ -286,7 +285,6 @@ val flush : unit -> unit
 
 val submit_curation_snapshot :
   submitted_by:string ->
-  ?model:string ->
   ?summary:string ->
   ordering:string list ->
   highlights:string list ->

@@ -135,7 +135,7 @@ val metric_tool_bind_required_guard : string
     No labels. *)
 val metric_keeper_tool_call_log_queue_dropped : string
 
-(** Counter for [tool_keeper.cached_text_by_key] Atomic CAS retry events.
+(** Counter for [keeper_tool_surface.cached_text_by_key] Atomic CAS retry events.
     Each increment corresponds to one extra [compute ()] call. No labels. *)
 val metric_tool_keeper_cache_cas_conflicts : string
 
@@ -155,7 +155,7 @@ val metric_file_lock_table_cas_retries : string
     for V15. *)
 val metric_memory_jsonl_parse_drops : string
 
-(** Counter for [tool_keeper.cache_ttl_seconds] env-var parse fallback events.
+(** Counter for [keeper_tool_surface.cache_ttl_seconds] env-var parse fallback events.
     Increments when the operator-supplied env var is present but unparseable
     or out-of-range, and the helper falls back to its default. Labels:
     [env_var, reason] with reason in [invalid_float | negative_or_nan]. *)

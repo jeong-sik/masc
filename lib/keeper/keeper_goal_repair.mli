@@ -49,7 +49,7 @@ type repair_result = {
             ["already has active_"] (that classifies as
             {!field-skipped}). *)
 }
-(** Concrete record because {!Tool_keeper} field-accesses the lists
+(** Concrete record because {!Keeper_tool_surface} field-accesses the lists
     when projecting to the dashboard JSON.  Lists are returned in
     keeper-name order (stable scan order from the [.json] directory
     listing reversed back). *)

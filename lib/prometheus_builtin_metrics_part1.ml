@@ -228,7 +228,7 @@ let register
     `Counter;
   add
     metric_tool_keeper_cache_cas_conflicts
-    "Total tool_keeper.cached_text_by_key Atomic CAS retry events. Each \
+    "Total keeper_tool_surface.cached_text_by_key Atomic CAS retry events. Each \
      increment corresponds to one extra compute() call. No labels."
     `Counter;
   add
@@ -244,7 +244,7 @@ let register
     `Counter;
   add
     metric_tool_keeper_cache_ttl_parse_failures
-    "Total tool_keeper.cache_ttl_seconds env-var parse fallback events. \
+    "Total keeper_tool_surface.cache_ttl_seconds env-var parse fallback events. \
      Labels: env_var, reason in {invalid_float | negative_or_nan}."
     `Counter;
   add
@@ -390,7 +390,7 @@ let register
     "Whether an allowed keeper tool is unused or below the diversity threshold (1=yes, \
      0=no; labels: keeper, tool)"
     `Gauge;
-  (* Operator-initiated overflow recovery — emitted by tool_keeper.ml.
+  (* Operator-initiated overflow recovery — emitted by keeper_tool_surface.ml.
      [result] label is bound by [Keeper_operator_compact_result.t]; adding a
      new value requires extending the closed sum and re-running every
      emit site through the compiler. *)

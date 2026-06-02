@@ -1,6 +1,6 @@
 open Alcotest
 
-module Projection = Masc_mcp.Keeper_tool_name_projection
+module Projection = Masc_mcp.Tool_visibility_projection
 
 let contains needle haystack =
   let nlen = String.length needle in
@@ -23,14 +23,14 @@ let test_visible_public_alias_wins () =
     (option string)
     "tool_execute projects to visible Execute"
     (Some "Execute")
-    (Projection.model_name ~visible_tool_names:[ "Execute" ] "tool_execute");
+    (Projection.visible_name ~visible_tool_names:[ "Execute" ] "tool_execute");
   check
     (option string)
     "mcp-prefixed public Execute remains visible"
     (Some "Execute")
-    (Projection.model_name ~visible_tool_names:[ "Execute" ] "mcp__masc__Execute");
+    (Projection.visible_name ~visible_tool_names:[ "Execute" ] "mcp__masc__Execute");
   match
-    Projection.resolve_model_name ~visible_tool_names:[ "tool_execute"; "Execute" ]
+    Projection.resolve_visible_name ~visible_tool_names:[ "tool_execute"; "Execute" ]
       "tool_execute"
   with
   | Use_public_name { public_name; internal_name } ->
@@ -44,10 +44,10 @@ let test_hidden_alias_reports_blocker () =
     (option string)
     "hidden tool_execute has no model-callable name"
     None
-    (Projection.model_name ~visible_tool_names:[ "Read" ] "tool_execute");
+    (Projection.visible_name ~visible_tool_names:[ "Read" ] "tool_execute");
   let text =
     Projection.render_reference
-      ~context:Model_facing
+      ~context:Schema_visible
       ~visible_tool_names:[ "Read" ]
       "tool_execute"
   in
@@ -59,11 +59,11 @@ let test_hidden_alias_reports_blocker () =
 let test_internal_audit_context_is_explicit () =
   let model_text =
     Projection.render_reference
-      ~context:Model_facing
+      ~context:Schema_visible
       ~visible_tool_names:[ "Execute" ]
       "tool_execute"
   in
-  check string "model-facing context uses public alias" "Execute" model_text;
+  check string "schema-visible context uses public alias" "Execute" model_text;
   let audit_text =
     Projection.render_reference
       ~context:Internal_audit
@@ -76,7 +76,7 @@ let test_internal_audit_context_is_explicit () =
 let test_unknown_name_does_not_gain_alias () =
   let text =
     Projection.render_reference
-      ~context:Model_facing
+      ~context:Schema_visible
       ~visible_tool_names:[ "Execute" ]
       "keeper_not_real"
   in
@@ -97,9 +97,9 @@ let test_blocker_guidance_only_when_hidden () =
     check_contains "blocker lists public alias" "Execute" text
 ;;
 
-let test_filter_model_visible_suggestions () =
+let test_filter_schema_visible_suggestions () =
   let result =
-    Projection.filter_model_visible_suggestions
+    Projection.filter_schema_visible_suggestions
       [ "masc_status"
       ; "tool_execute"
       ; "Execute"
@@ -135,7 +135,7 @@ let test_public_alias_for_internal () =
 
 let () =
   run
-    "keeper_tool_name_projection"
+    "tool_visibility_projection"
     [ ( "projection"
       , [ test_case "visible public alias wins" `Quick test_visible_public_alias_wins
         ; test_case "hidden alias reports blocker" `Quick test_hidden_alias_reports_blocker
@@ -146,7 +146,7 @@ let () =
         ; test_case "blocker guidance only when hidden" `Quick
             test_blocker_guidance_only_when_hidden
         ; test_case "filter suggestions removes internal names" `Quick
-            test_filter_model_visible_suggestions
+            test_filter_schema_visible_suggestions
         ; test_case "public alias for internal" `Quick
             test_public_alias_for_internal
         ] )

@@ -3,8 +3,8 @@
     Four sweep rules:
     1. Purge: delete Dropped goals older than [dropped_ttl_days].
     2. Stagnate: mark Active goals with no update for [stagnant_days] as Dropped.
-    3. Orphan: remove active_goal_ids from keeper_meta that reference
-       non-existent goals in the Goal Store.
+    3. Orphan: invoke registered owner hooks to remove goal bindings
+       that reference non-existent goals in the Goal Store.
     4. Escalate: report stale unclaimed tasks that have no goal linkage.
 
     @since 2.236.0 *)
@@ -15,7 +15,7 @@ type sweep_config = {
   auto_stagnant_days : int;
       (** Drop auto-generated Active goals (title suffix " (auto)") with no
           update after this many days. Default 7 — closes auto-goal accretion
-          from Keeper_goal_repair leftovers. *)
+      from automation-repair leftovers. *)
   orphan_task_escalation_age_seconds : int;
       (** Report unclaimed tasks without goal linkage after this age. Default 30 min. *)
 }
@@ -33,9 +33,7 @@ let runtime_config () =
       Env_config_runtime.Goal_janitor.auto_stagnant_days ();
   }
 
-(** Suffix produced by [Keeper_goal_repair.goal_title_of_purpose]: short
-    purpose ends in [" (auto)"], truncated purpose ends in [{e …}] +
-    [" (auto)"]. We accept both. *)
+(** Auto-generated goals end in [" (auto)"]. *)
 let is_auto_generated_goal (g : Goal_store.goal) =
   let ends_with ~suffix s =
     let n = String.length s and m = String.length suffix in
@@ -164,7 +162,7 @@ let emit_orphan_task_escalation workspace_config ~threshold_seconds orphan_tasks
         "[GoalJanitor] escalated %d stale unclaimed task(s) without goal linkage"
         (List.length orphan_tasks)
 
-(** Clean orphaned active_goal_ids from keeper meta.
+(** Clean orphaned goal binding IDs.
     Returns the pruned list and count of removed IDs. *)
 let prune_active_goal_ids ~(valid_goal_ids : string list)
     (active_ids : string list) : string list * int =
@@ -177,7 +175,25 @@ let prune_active_goal_ids ~(valid_goal_ids : string list)
     Log.Misc.info "[GoalJanitor] pruned %d orphaned active_goal_ids" removed;
   (pruned, removed)
 
-(** Run a full sweep: goals + keeper active_goal_ids.
+type orphan_goal_binding_hooks =
+  { prune_orphan_goal_bindings :
+      Workspace.config -> valid_goal_ids:string list -> int
+  }
+
+let default_orphan_goal_binding_hooks =
+  { prune_orphan_goal_bindings = (fun _ ~valid_goal_ids:_ -> 0) }
+
+let orphan_goal_binding_hooks =
+  Atomic.make default_orphan_goal_binding_hooks
+
+let set_orphan_goal_binding_hooks hooks =
+  Atomic.set orphan_goal_binding_hooks hooks
+
+let prune_orphan_goal_bindings workspace_config ~valid_goal_ids =
+  let hooks = Atomic.get orphan_goal_binding_hooks in
+  hooks.prune_orphan_goal_bindings workspace_config ~valid_goal_ids
+
+(** Run a full sweep: goals + owner-managed goal bindings.
     Writes updated state to disk. *)
 let run ?(config = default_config) (workspace_config : Workspace.config) : sweep_result =
   let st = Goal_store.read_state workspace_config in
@@ -189,34 +205,9 @@ let run ?(config = default_config) (workspace_config : Workspace.config) : sweep
     (* See Goal_store.update_state return contract: janitor only needs the persisted side effect. *)
     ignore (Goal_store.update_state workspace_config (fun _state ->
       { goals = goals'; version = st.version + 1; updated_at = Masc_domain.now_iso () }));
-  (* Prune active_goal_ids from all keeper metas *)
-  let total_orphans = ref 0 in
-  let keeper_dir =
-    Filename.concat (Workspace.masc_dir workspace_config) "keepers"
+  let total_orphans =
+    prune_orphan_goal_bindings workspace_config ~valid_goal_ids:valid_ids
   in
-  if Sys.file_exists keeper_dir && Sys.is_directory keeper_dir then
-    Sys.readdir keeper_dir
-    |> Array.iter (fun entry ->
-      if Filename.check_suffix entry ".json" then begin
-        let name = Filename.chop_suffix entry ".json" in
-        match Keeper_meta_store.read_meta workspace_config name with
-        | Ok (Some meta) when meta.active_goal_ids <> [] ->
-          let pruned_ids, removed =
-            prune_active_goal_ids ~valid_goal_ids:valid_ids meta.active_goal_ids
-          in
-          if removed > 0 then begin
-            let updated = { meta with active_goal_ids = pruned_ids } in
-            match Keeper_meta_store.write_meta workspace_config updated with
-            | Ok () ->
-                total_orphans := !total_orphans + removed
-            | Error e ->
-                Log.Misc.warn
-                  "[GoalJanitor] failed to persist orphan-pruned meta for \
-                   keeper=%s removed=%d: %s"
-                  name removed e
-          end
-        | Ok None | Ok (Some _) | Error _ -> ()
-      end);
   let orphan_task_rows =
     Workspace.get_tasks_safe workspace_config
     |> audit_unclaimed_goal_orphan_tasks ~valid_goal_ids:valid_ids
@@ -225,7 +216,7 @@ let run ?(config = default_config) (workspace_config : Workspace.config) : sweep
   emit_orphan_task_escalation workspace_config
     ~threshold_seconds:config.orphan_task_escalation_age_seconds
     orphan_task_rows;
-  let result = { partial with orphans = !total_orphans;
+  let result = { partial with orphans = total_orphans;
                               orphan_tasks = List.length orphan_task_rows } in
   if result.purged > 0 || result.stagnated > 0 || result.orphans > 0
      || result.orphan_tasks > 0 then

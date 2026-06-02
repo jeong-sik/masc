@@ -8,7 +8,7 @@
     [Agent_tool_in_process_runtime] is compiled early, so a direct
     static import closes a cycle.
 
-    Resolution: register from a late module ([Tool_keeper]) into the
+    Resolution: register from a late module ([Keeper_tool_surface]) into the
     ref at module load.  [Agent_tool_in_process_runtime] reads the
     ref at dispatch time. *)
 

@@ -425,7 +425,9 @@ let create_post_with_outcome
     else (
       let board_result =
         with_lock store (fun () ->
-(* Content dedup: reject identical (author, hearth, thread, body) within a short window.  Keeper turns sometimes emit the same board post N times (observed 6x at 0s gap).  The dedup key includes heart... *)
+(* Content dedup: reject identical (author, hearth, thread, body) within a short window.
+   Agent automation can emit the same board post repeatedly under retry; the dedup key
+   includes hearth/thread so unrelated posts from the same author still pass. *)
           let author_str = Agent_id.to_string author_id in
           let hearth_part = Option.value ~default:"" hearth in
           let thread_part = Option.value ~default:"" thread_id in
@@ -597,4 +599,3 @@ let create_post
   | Ok outcome -> Ok (post_of_create_post_outcome outcome)
   | Error _ as err -> err
 ;;
-

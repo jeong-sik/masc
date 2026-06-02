@@ -1,6 +1,6 @@
 (** Boundary for calling keeper tools from non-keeper entrypoints.
 
-    This module owns conversion into {!Tool_keeper.context} so server/tool
+    This module owns conversion into {!Keeper_tool_surface.context} so server/tool
     dispatch code does not need to know keeper runtime context internals. *)
 
 type 'a context = {

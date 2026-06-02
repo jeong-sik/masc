@@ -209,7 +209,7 @@ val generic_required_actionable_tool_names :
   allowed_tool_names:string list ->
   string list
 
-(** Pick the model-facing [tool_choice] when the gate fires. *)
+(** Pick the schema-visible [tool_choice] when the gate fires. *)
 val preferred_tool_choice_for_required_turn :
   has_current_task:bool ->
   turn_affordances:string list ->
@@ -267,7 +267,7 @@ val outstanding_required_tool_names :
 val satisfied_required_tool_names_of_outcomes :
   (string * string) list -> string list
 
-(** Pick the model-facing [tool_choice] for an explicit required-tool list.
+(** Pick the schema-visible [tool_choice] for an explicit required-tool list.
     Visible required tools use [Any] so OAS enforces tool use without
     exact-name matching before MASC canonicalizes MCP-prefixed tool names. The
     specific required names are checked after execution. *)

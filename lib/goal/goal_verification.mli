@@ -1,7 +1,7 @@
 (** Goal_verification — quorum-style verifier sign-off
     persisted alongside the goal store.
 
-    Holds the data model + persistence + workflow for "this
+    Holds the data contract + persistence + workflow for "this
     goal needs N approvals from these principals before it
     can move to [Goal_phase.Completed]".  The state file
     lives at {!requests_path} under [Workspace.masc_dir]; an
@@ -20,7 +20,7 @@
     ([lib/goal/goal_store.ml], [lib/workspace_goals.ml],
     [lib/tool_goal_*]) pattern-match on the variants
     ([Approve] / [Reject] / [Open] / [Approved] / [Rejected]
-    / [Cancelled] / [Operator] / [Keeper] / [Extend] /
+    / [Cancelled] / [Operator] / [Agent] / [Extend] /
     [Replace] / [Pending] / [Passed] / [Failed]) and access
     record fields ([principal.kind], [policy.principals],
     [request.goal_id], …) directly. *)
@@ -29,10 +29,10 @@
 
 type principal_kind =
   | Operator
-  | Keeper
+  | Agent
   (** Who's signing off.  [Operator] = a human-tier reviewer
-      acting through the operator surface.  [Keeper] = an
-      autonomous agent submitting a verdict. *)
+      acting through the operator surface.  [Agent] = an autonomous
+      agent submitting a verdict. *)
 
 type goal_principal = {
   kind : principal_kind;
@@ -40,7 +40,7 @@ type goal_principal = {
   display_name : string option;
 }
 (** Identity of a principal eligible to vote on a request.
-    [id] is the canonical name (operator login or keeper
+    [id] is the canonical reviewer name (operator login or agent
     name); [display_name] is the human-readable label
     surfaced in events and dashboards. *)
 
@@ -48,7 +48,7 @@ val principal_kind_to_yojson : principal_kind -> Yojson.Safe.t
 val principal_kind_of_yojson :
   Yojson.Safe.t -> (principal_kind, string) result
 (** Lower-cased string round-trip
-    (["operator"] / ["keeper"]).  Whitespace and case are
+    (["operator"] / ["agent"]).  Whitespace and case are
     normalised on read. *)
 
 val goal_principal_to_yojson : goal_principal -> Yojson.Safe.t

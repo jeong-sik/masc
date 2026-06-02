@@ -37,8 +37,8 @@ let consume_truncation_info ~keeper_name () =
 let set_turn_context = Keeper_tool_call_log_context.set_turn_context
 let get_turn_context = Keeper_tool_call_log_context.get_turn_context
 
-let runtime_contract_json_for_call =
-  Keeper_tool_call_log_context.runtime_contract_json_for_call
+let runtime_observability_contract_json_for_call =
+  Keeper_tool_call_log_context.runtime_observability_contract_json_for_call
 ;;
 
 let action_radius_json_for_call =

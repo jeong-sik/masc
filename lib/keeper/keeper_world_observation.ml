@@ -144,7 +144,7 @@ let pending_board_event_of_board_signal
       ~continuity_summary
       ~(meta : keeper_meta)
       ~(arrived_at : float)
-      (signal : Board_dispatch.keeper_board_signal)
+      (signal : Board_dispatch.board_signal)
   : pending_board_event
   =
   let self_tokens = self_identity_tokens meta in
@@ -275,7 +275,7 @@ let collect_board_events_with_cursor_policy
              post_id;
            consume_posts remaining (Some next_cursor) acc rest
          | `Never ->
-           let signal : Board_dispatch.keeper_board_signal =
+           let signal : Board_dispatch.board_signal =
              { kind = Board_dispatch.Board_post_created
              ; post_id
              ; author = Board.Agent_id.to_string p.author
@@ -319,7 +319,7 @@ let collect_board_events_with_cursor_policy
            if remaining <= 0
            then List.rev acc, last_cursor
            else (
-             let signal : Board_dispatch.keeper_board_signal =
+             let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
                ; post_id
                ; author = Board.Agent_id.to_string p.author

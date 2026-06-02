@@ -228,14 +228,12 @@ type module_tag =
   | Mod_compact
   | Mod_agent | Mod_task | Mod_state
   | Mod_control | Mod_agent_timeline | Mod_misc
-  | Mod_library | Mod_keeper
+  | Mod_library
   | Mod_inline
   | Mod_shard
 
 let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
   match tool with
-  | Tool_name.Keeper _ -> Some Mod_shard
-  | Tool_name.Masc_keeper _ -> Some Mod_keeper
   | Tool_name.Masc m ->
     let open Tool_name.Masc in
     match m with

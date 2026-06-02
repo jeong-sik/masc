@@ -1,10 +1,5 @@
 (** Keeper profile default records and derived OAS context. *)
 
-type per_provider_timeout_state =
-  | Per_provider_timeout_unset
-  | Per_provider_timeout_invalid
-  | Per_provider_timeout_set
-
 type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
@@ -32,12 +27,8 @@ type keeper_profile_defaults = {
   active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  per_provider_timeout_state : per_provider_timeout_state;
-  per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  model : string option;
-  models : string list option;
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;
   oas_env : (string * string) list;

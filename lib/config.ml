@@ -115,7 +115,7 @@ let surface_tool_schemas ?(include_hidden = false) () :
   |> List.filter (fun (s : Masc_domain.tool_schema) ->
        Tool_scope.classify ~name:s.name = Tool_scope.Surface)
 
-let keeper_internal_tool_schemas () : Masc_domain.tool_schema list =
+let agent_internal_tool_schemas () : Masc_domain.tool_schema list =
   visible_tool_schemas ~include_hidden:true ()
   |> List.filter (fun (s : Masc_domain.tool_schema) ->
-       Tool_scope.classify ~name:s.name = Tool_scope.Keeper_internal)
+       Tool_scope.classify ~name:s.name = Tool_scope.Agent_internal)

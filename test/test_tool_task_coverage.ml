@@ -5,7 +5,7 @@ module Types = Masc_domain
 open Masc_mcp
 
 let () = Random.self_init ()
-let () = Task_keeper_backend.install_hooks ()
+let () = Keeper_task_owner_backend.install_hooks ()
 
 let test_runtime_toml =
   {|
@@ -391,7 +391,7 @@ let () = test "handle_done_records_approved_calibration_verdict" (fun () ->
 let () = test "handle_transition_respects_completion_contract_and_records_custom_evaluator" (fun () ->
   (* Legacy substring gate (Gate 2.5). Issue #7598 redirects
      Done → Submit_for_verification when MASC_VERIFICATION_FSM_ENABLED
-     is true (default) so a cross-agent verifier keeper can measure
+     is true (default) so a cross-agent verifier can measure
      the contract. That path requires Eio net scaffolding and does
      not produce a "contract" calibration verdict. Pin the flag to
      [false] here to exercise the legacy substring fallback this
@@ -680,7 +680,7 @@ let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun ()
      empty/missing handoff_context.summary while the caller still supplied a
      non-empty top-level [notes] or [reason]. Auto-synthesize the summary from
      those siblings so the release transition succeeds instead of forcing the
-     keeper LLM to retry the exact same payload shape. *)
+     agent runtime to retry the exact same payload shape. *)
   let ctx = make_test_ctx () in
   let _ =
     Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -843,7 +843,7 @@ let () = test "handle_transition_release_empty_summary_error_includes_example" (
   in
   let _ = Tool_task.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("task_id", `String "task-001") ]) in
   (* Empty-string summary must also fail, and error must include a payload example
-     so the keeper LLM can self-correct instead of retrying the same partial payload. *)
+     so the agent runtime can self-correct instead of retrying the same partial payload. *)
   let result_empty =
     Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
@@ -2045,7 +2045,7 @@ let () = test "get_int_opt_missing" (fun () ->
 (*                                                                   *)
 (* The payload is built by Tool_task.build_verdict_sse_payload —     *)
 (* a pure helper — so dashboard subscribers depend on a stable       *)
-(* JSON shape. The cross_model bool must match Eval_calibration's    *)
+(* JSON shape. The cross_runtime bool must match Eval_calibration's    *)
 (* inclusion rule (both runtimes non-empty AND distinct).            *)
 (* ================================================================ *)
 
@@ -2072,7 +2072,7 @@ let payload_member key (json : Yojson.Safe.t) : Yojson.Safe.t =
       | _ -> failwith "payload is not an object")
   | _ -> failwith "top-level is not an object"
 
-let () = test "build_verdict_sse_payload: distinct runtimes = cross_model true" (fun () ->
+let () = test "build_verdict_sse_payload: distinct runtimes = cross_runtime true" (fun () ->
   let req = make_review_request () in
   let result =
     make_review_result
@@ -2081,14 +2081,14 @@ let () = test "build_verdict_sse_payload: distinct runtimes = cross_model true" 
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t1" ~req ~result in
-  assert (payload_member "cross_model" json = `Bool true);
+  assert (payload_member "cross_runtime" json = `Bool true);
   assert (payload_member "generator_runtime" json
           = `String Masc_mcp.(Keeper_config.default_runtime_id ()));
   assert (payload_member "evaluator_runtime" json = `String "verifier");
   assert (payload_member "task_id" json = `String "t1")
 )
 
-let () = test "build_verdict_sse_payload: same runtime = cross_model false" (fun () ->
+let () = test "build_verdict_sse_payload: same runtime = cross_runtime false" (fun () ->
   let req = make_review_request () in
   let result =
     make_review_result
@@ -2097,21 +2097,21 @@ let () = test "build_verdict_sse_payload: same runtime = cross_model false" (fun
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t2" ~req ~result in
-  assert (payload_member "cross_model" json = `Bool false);
+  assert (payload_member "cross_runtime" json = `Bool false);
   assert (payload_member "generator_runtime" json = `String "verifier")
 )
 
-let () = test "build_verdict_sse_payload: no generator = cross_model false + null" (fun () ->
+let () = test "build_verdict_sse_payload: no generator = cross_runtime false + null" (fun () ->
   let req = make_review_request () in
   let result =
     make_review_result ~evaluator_runtime:"verifier" () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t3" ~req ~result in
-  assert (payload_member "cross_model" json = `Bool false);
+  assert (payload_member "cross_runtime" json = `Bool false);
   assert (payload_member "generator_runtime" json = `Null)
 )
 
-let () = test "build_verdict_sse_payload: empty generator string = cross_model false" (fun () ->
+let () = test "build_verdict_sse_payload: empty generator string = cross_runtime false" (fun () ->
   (* Defensive: align with Eval_calibration which excludes empty
      strings from the denominator. Without this guard SSE and stats
      would disagree when a runtime is empty. *)
@@ -2123,11 +2123,11 @@ let () = test "build_verdict_sse_payload: empty generator string = cross_model f
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t4" ~req ~result in
-  assert (payload_member "cross_model" json = `Bool false);
+  assert (payload_member "cross_runtime" json = `Bool false);
   assert (payload_member "generator_runtime" json = `String "")
 )
 
-let () = test "build_verdict_sse_payload: empty evaluator string = cross_model false" (fun () ->
+let () = test "build_verdict_sse_payload: empty evaluator string = cross_runtime false" (fun () ->
   let req = make_review_request () in
   let result =
     make_review_result
@@ -2136,7 +2136,7 @@ let () = test "build_verdict_sse_payload: empty evaluator string = cross_model f
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t5" ~req ~result in
-  assert (payload_member "cross_model" json = `Bool false)
+  assert (payload_member "cross_runtime" json = `Bool false)
 )
 
 let () = test "build_verdict_sse_payload: fallback_reason serialized" (fun () ->

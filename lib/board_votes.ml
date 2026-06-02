@@ -371,7 +371,7 @@ let recalculate_reply_counts store =
 
     Pattern set is deliberately narrow and is applied only to the
     voter segment of the persisted target. Known production patterns
-    are [keeper-*], [<name>-keeper-agent], bare agent IDs — none of
+    are automation-agent IDs — none of
     which collide with the fixture patterns below.
 
     Env var: [MASC_BOARD_VOTE_QUARANTINE=1] promotes detection from

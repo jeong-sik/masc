@@ -29,7 +29,7 @@ let caller_agent_name_from_arguments arguments =
   | None -> None
 
 let direct_call_block_message name =
-  if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name then (
+  if Tool_catalog.is_on_surface Tool_catalog.Agent_internal name then (
     let replacement_hint =
       match (Tool_catalog.metadata name).Tool_catalog.replacement with
       | Some replacement -> Printf.sprintf " Try `%s` instead." replacement
@@ -178,7 +178,7 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
   in
   let internal_keeper_runtime_tool =
     verified_internal_keeper_runtime
-    && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name
+    && Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool_name
   in
   let owner_keeper_identity =
     match token with

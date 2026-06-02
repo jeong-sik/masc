@@ -23,7 +23,7 @@ let dedupe_tool_names names =
 (* ── Runtime-resolved tool names ─────────────────────────────── *)
 
 let keeper_internal_candidate_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+  Tool_catalog.tools_for_surface Tool_catalog.Agent_internal
 ;;
 
 let keeper_voice_tool_schemas =

@@ -127,12 +127,12 @@ let resolve_tool_lane_for_oas_tools
   let public_tools = public_mcp_tools_of_oas_tools tools in
   let public_tool_names = public_mcp_tool_names_of_oas_tools public_tools in
   let requested_agent_name = Option.bind agent_name String_util.trim_nonempty in
-  let keeper_internal_tool_names =
+  let agent_internal_tool_names =
     match requested_agent_name with
     | Some agent_name when Option.is_some (keeper_name_of_agent_name agent_name) ->
       tools
       |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
-        Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool.schema.name)
+        Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool.schema.name)
       |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
       |> dedupe_preserve_order
     | _ -> []
@@ -158,7 +158,7 @@ let resolve_tool_lane_for_oas_tools
            && not provider_can_auth_keeper_bound_actor_tools ->
       List.filter
         runtime_mcp_tool_requires_bound_actor
-        (public_tool_names @ keeper_internal_tool_names)
+        (public_tool_names @ agent_internal_tool_names)
     | _ -> []
   in
   (* RFC-0167: previously routed [omitted_keeper_bound_actor_tools] through
@@ -186,16 +186,16 @@ let resolve_tool_lane_for_oas_tools
           (fun tool_name -> not (public_mcp_tool_requires_bound_actor tool_name))
           public_tool_names
     in
-    let keeper_internal_tool_names =
+    let agent_internal_tool_names =
       if omitted_keeper_bound_actor_tools = []
-      then keeper_internal_tool_names
+      then agent_internal_tool_names
       else
         List.filter
           (fun tool_name -> not (runtime_mcp_tool_requires_bound_actor tool_name))
-          keeper_internal_tool_names
+          agent_internal_tool_names
     in
     let runtime_tool_names =
-      dedupe_preserve_order (public_tool_names @ keeper_internal_tool_names)
+      dedupe_preserve_order (public_tool_names @ agent_internal_tool_names)
     in
     (* RFC-0167 (was #12676): When all tools were bound-actor and got
        stripped on an optional turn, runtime_tool_names is empty. The
@@ -241,7 +241,7 @@ let resolve_tool_lane_for_oas_tools
       else
         runtime_mcp_policy_of_tool_names
           ?agent_name:requested_agent_name
-          ~allow_keeper_internal:(keeper_internal_tool_names <> [])
+          ~allow_agent_internal:(agent_internal_tool_names <> [])
           runtime_tool_names
         |> runtime_mcp_policy_for_provider
              ~provider_cfg

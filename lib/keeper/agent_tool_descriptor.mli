@@ -1,6 +1,6 @@
 (** Agent-facing tool descriptor spine.
 
-    This module owns the model-facing capability names and their projection to
+    This module owns the schema-visible capability names and their projection to
     internal keeper handlers.  Domain modules such as shell, GitHub, and
     filesystem remain implementation details behind the descriptor-selected
     executor/backend/sandbox route. *)

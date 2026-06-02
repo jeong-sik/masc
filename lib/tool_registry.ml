@@ -28,15 +28,15 @@ module Float = Stdlib.Float
 *)
 
 (** Call source for source-aware telemetry.
-    Distinguishes external MCP calls from keeper-internal dispatch. *)
+    Distinguishes external MCP calls from internal agent dispatch. *)
 type call_source =
   | External_mcp
-  | Keeper_internal
+  | Agent_internal
   | Inline_dispatch
 
 let string_of_source = function
   | External_mcp -> "external_mcp"
-  | Keeper_internal -> "keeper_internal"
+  | Agent_internal -> "agent_internal"
   | Inline_dispatch -> "inline_dispatch"
 ;;
 
@@ -48,7 +48,7 @@ type call_stats =
   ; last_called_at : float Atomic.t (** Unix timestamp, 0.0 = never *)
   ; total_duration_ms : int Atomic.t
   ; external_mcp_count : int Atomic.t
-  ; keeper_internal_count : int Atomic.t
+  ; agent_internal_count : int Atomic.t
   ; inline_dispatch_count : int Atomic.t
   ; last_assignment_id : string option Atomic.t
   }
@@ -111,7 +111,7 @@ let get_or_create_stats tool_name =
           ; last_called_at = Atomic.make 0.0
           ; total_duration_ms = Atomic.make 0
           ; external_mcp_count = Atomic.make 0
-          ; keeper_internal_count = Atomic.make 0
+          ; agent_internal_count = Atomic.make 0
           ; inline_dispatch_count = Atomic.make 0
           ; last_assignment_id = Atomic.make None
           }
@@ -132,7 +132,7 @@ let record_call
   Atomic.incr stats.call_count;
   (match source with
    | External_mcp -> Atomic.incr stats.external_mcp_count
-   | Keeper_internal -> Atomic.incr stats.keeper_internal_count
+   | Agent_internal -> Atomic.incr stats.agent_internal_count
    | Inline_dispatch -> Atomic.incr stats.inline_dispatch_count);
   if success then Atomic.incr stats.success_count else Atomic.incr stats.failure_count;
   Atomic.set stats.last_called_at (Time_compat.now ());
@@ -229,7 +229,7 @@ let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
     ; ( "by_source"
       , `Assoc
           [ "external_mcp", `Int (Atomic.get stats.external_mcp_count)
-          ; "keeper_internal", `Int (Atomic.get stats.keeper_internal_count)
+          ; "agent_internal", `Int (Atomic.get stats.agent_internal_count)
           ; "inline_dispatch", `Int (Atomic.get stats.inline_dispatch_count)
           ] )
     ]
@@ -282,7 +282,7 @@ let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
                     | None -> 0.0)
              ; total_duration_ms = Atomic.make 0
              ; external_mcp_count = Atomic.make 0
-             ; keeper_internal_count = Atomic.make 0
+             ; agent_internal_count = Atomic.make 0
              ; inline_dispatch_count = Atomic.make 0
              ; last_assignment_id = Atomic.make None
              };

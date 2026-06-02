@@ -16,7 +16,7 @@ let suggest_alternatives ~(allowed_tools : string list)
   allowed_tools
   |> List.filter (fun t ->
        not (SS.mem t repeated_set)
-       && t <> Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent)
+       && t <> "keeper_stay_silent")
   |> fun candidates ->
      let len = List.length candidates in
      if len <= max_suggestions then candidates
@@ -112,4 +112,3 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
        | _ -> count)
   in
   loop 0 (List.rev entries)
-

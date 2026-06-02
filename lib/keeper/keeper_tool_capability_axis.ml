@@ -10,16 +10,8 @@ type t =
   | Board_activity
   | Shell_command_input
 
-let keeper_name (tool : Tool_name.Keeper.t) =
-  Tool_name.to_string (Tool_name.Keeper tool)
-;;
-
 let masc_name (tool : Tool_name.Masc.t) =
   Tool_name.to_string (Tool_name.Masc tool)
-;;
-
-let masc_keeper_name (tool : Tool_name.Masc_keeper.t) =
-  Tool_name.to_string (Tool_name.Masc_keeper tool)
 ;;
 
 let canonical_tool_name name =
@@ -36,19 +28,19 @@ let candidate_names name =
 ;;
 
 let claim_task_tool_names =
-  [ keeper_name Tool_name.Keeper.Task_claim; masc_name Tool_name.Masc.Claim_next ]
+  [ "keeper_task_claim"; masc_name Tool_name.Masc.Claim_next ]
 ;;
 
 let board_activity_tool_names =
-  [ keeper_name Tool_name.Keeper.Board_post
-  ; keeper_name Tool_name.Keeper.Board_comment
+  [ "keeper_board_post"
+  ; "keeper_board_comment"
   ; masc_name Tool_name.Masc.Broadcast
-  ; masc_keeper_name Tool_name.Masc_keeper.Msg
+  ; "masc_keeper_msg"
   ]
 ;;
 
 let shell_command_input_tool_names =
-  [ keeper_name Tool_name.Keeper.Execute ]
+  [ "tool_execute" ]
 ;;
 
 let tool_names = function

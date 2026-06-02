@@ -34,7 +34,7 @@ let unknown_args ~valid_keys args =
   | _ -> []
 
 (* Synthesize a summary from sibling [notes] / [reason] transition args
-   when [handoff_context.summary] is empty. Keeper LLMs frequently send
+   when [handoff_context.summary] is empty. Agent runtimes frequently send
    a non-empty [reason] or [notes] but forget the nested summary field —
    rejecting the call in that case burned 76/132 masc_transition calls
    on 2026-04-17/18 (see memory/handoff-2026-04-18-masc-tool-failure-
@@ -66,7 +66,7 @@ let synthesize_summary_from_siblings args =
       | None -> None
 
 (* A transition's [handoff_context.summary] is only meaningful when the
-   action represents a *work-state exit* — the keeper is reporting the
+   action represents a *work-state exit* — the agent is reporting the
    outcome of work it did. Pure ownership transitions (Claim, Start)
    have no outcome to summarize yet, so requiring a summary just makes
    the LLM either invent one (degrading audit signal) or fail the call

@@ -15,7 +15,7 @@
     - Projection-only surface: snapshots may be submitted, but board posts,
       comments, and votes are not mutated.
     - Operator-auditable: [provenance] is a free-form JSON blob that
-      callers populate with model name, parameters, run metadata etc.
+      callers populate with source window, run metadata etc.
     - Crypto IDs: snapshot IDs carry a ["cu-"] prefix and are
       generated via {!Mirage_crypto_rng}.
     - No persistent storage in this module: snapshots are ephemeral
@@ -32,9 +32,7 @@ type curation_snapshot = {
   generated_at : float;
   (** Unix timestamp of when the curation was produced. *)
   submitted_by : string;
-  (** Agent or keeper name that submitted the snapshot. *)
-  model : string option;
-  (** AI model used to produce the curation, if known. *)
+  (** Agent identifier that submitted the snapshot. *)
   summary : string option;
   (** Optional TL;DR summary of the current board window. *)
   ordering : string list;
@@ -52,8 +50,8 @@ type curation_snapshot = {
   rationale : string;
   (** Human-readable explanation of the curation decisions. *)
   provenance : Yojson.Safe.t;
-  (** Operator-auditable provenance blob (model params, run metadata,
-      etc.).  Opaque to this module; callers control the schema. *)
+  (** Operator-auditable provenance blob.  Opaque to this module;
+      callers control the schema. *)
 }
 
 and curation_tag_suggestion = {
@@ -85,8 +83,7 @@ val generate_id : unit -> string
 (** {1 JSON serialisation} *)
 
 val snapshot_to_yojson : curation_snapshot -> Yojson.Safe.t
-(** Wire encoder.  Emits all fields; [model] is ["null"] when absent;
-    [provenance] is inlined as-is. *)
+(** Wire encoder.  Emits all fields; [provenance] is inlined as-is. *)
 
 (** {1 In-memory store} *)
 

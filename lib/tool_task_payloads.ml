@@ -2,7 +2,7 @@
     helpers for task tools.
 
     No [context], no IO, no broadcast. Extracted from {!Tool_task} so
-    the payload contracts (field names, nullability, cross-model
+    the payload contracts (field names, nullability, cross-runtime
     semantics) can be exercised by unit tests without touching the
     full task dispatch pipeline.
 
@@ -92,7 +92,7 @@ let build_claim_observation_payload ~(now : float) ~(agent_name : string)
         `Assoc
           [
             ("kind", `String "todo_claim");
-            ("provider", `String "masc.workspace");
+            ("source", `String "masc.workspace");
             ("workspace_id", `Null);
           ] );
       ( "actor",
@@ -127,9 +127,9 @@ let verdict_to_string (result : Anti_rationalization.review_result) =
 
     Must match {!Eval_calibration.calibration_stats} inclusion criteria
     exactly (both [not (String.equal evaluator_runtime "")] and [not (String.equal generator_runtime "")])
-    so that a real-time SSE event and the aggregated cross_model_rate
-    agree on which verdicts count as cross-model. *)
-let is_cross_model_verdict (result : Anti_rationalization.review_result) : bool =
+    so that a real-time SSE event and the aggregated cross_runtime_rate
+    agree on which verdicts count as cross-runtime. *)
+let is_cross_runtime_verdict (result : Anti_rationalization.review_result) : bool =
   match result.generator_runtime with
   | None -> false
   | Some g ->
@@ -160,7 +160,7 @@ let build_verdict_sse_payload
             ("verdict", `String (verdict_to_string result));
             ("evaluator_runtime", `String result.evaluator_runtime);
             ( "generator_runtime", Json_util.string_opt_to_json result.generator_runtime );
-            ("cross_model", `Bool (is_cross_model_verdict result));
+            ("cross_runtime", `Bool (is_cross_runtime_verdict result));
             ( "fallback_reason", Json_util.string_opt_to_json result.fallback_reason );
           ] );
     ]

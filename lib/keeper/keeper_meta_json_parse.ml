@@ -37,7 +37,6 @@ type parsed_keeper_policy =
   ; pp_auto_handoff : bool
   ; pp_handoff_threshold : float
   ; pp_handoff_cooldown_sec : int
-  ; pp_per_provider_timeout_s : float option
   ; pp_always_approve : bool option
   }
 
@@ -223,12 +222,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_handoff_cooldown_sec =
       Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json
     in
-    let pp_per_provider_timeout_s =
-      normalize_per_provider_timeout_json_field
-        ~source:(Printf.sprintf "keeper meta %s" keeper_name)
-        ~field:"per_provider_timeout_s"
-        json
-    in
     let pp_always_approve = Safe_ops.json_bool_opt "always_approve" json in
     Ok
       { pp_sandbox_profile
@@ -272,7 +265,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_auto_handoff
       ; pp_handoff_threshold
       ; pp_handoff_cooldown_sec
-      ; pp_per_provider_timeout_s
       ; pp_always_approve
       })
 ;;
@@ -284,7 +276,6 @@ let parse_usage_metrics (json : Yojson.Safe.t) : usage_metrics =
   ; total_tokens = Safe_ops.json_int ~default:0 "total_tokens" json
   ; total_cost_usd = Safe_ops.json_float ~default:0.0 "total_cost_usd" json
   ; last_turn_ts = Safe_ops.json_float ~default:0.0 "last_turn_ts" json
-  ; last_model_used = Safe_ops.json_string ~default:"" "last_model_used" json
   ; last_input_tokens = Safe_ops.json_int ~default:0 "last_input_tokens" json
   ; last_output_tokens = Safe_ops.json_int ~default:0 "last_output_tokens" json
   ; last_total_tokens = Safe_ops.json_int ~default:0 "last_total_tokens" json
@@ -557,7 +548,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; mid_goal = identity.pk_mid_goal
                    ; long_goal = identity.pk_long_goal
                    ; social_model = identity.pk_social_model
-                   ; models = []
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs
                    ; desires = identity.pk_desires
@@ -574,7 +564,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; auto_handoff = policy.pp_auto_handoff
                    ; handoff_threshold = policy.pp_handoff_threshold
                    ; handoff_cooldown_sec = policy.pp_handoff_cooldown_sec
-                   ; per_provider_timeout_s = policy.pp_per_provider_timeout_s
                    ; always_approve = policy.pp_always_approve
                    ; created_at =
                        (if state.ps_created_at_raw = ""

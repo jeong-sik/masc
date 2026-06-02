@@ -5,13 +5,11 @@
        [dropped_ttl_days] (default 7).
     2. Stagnate: mark [Active] goals with no update after
        [stagnant_days] (default 30) as [Dropped].  Auto-generated
-       goals (title suffix [" (auto)"] or ["… (auto)"], produced by
-       {!Keeper_goal_repair}) use the shorter [auto_stagnant_days]
-       threshold (default 7) so the keeper-repair leftovers do not
-       accumulate.
-    3. Orphan: remove [active_goal_ids] entries from each
-       [keeper_meta] that reference non-existent goals in the Goal
-       Store.
+       goals (title suffix [" (auto)"] or ["… (auto)"]) use the
+       shorter [auto_stagnant_days] threshold (default 7) so repair
+       leftovers do not accumulate.
+    3. Orphan: invoke registered owner hooks to remove goal-binding
+       entries that reference non-existent goals in the Goal Store.
     4. Escalate: report stale unclaimed tasks without goal linkage.
 
     @since 2.236.0 *)
@@ -23,9 +21,8 @@ type sweep_config = {
   stagnant_days : int;     (** Drop Active goals with no update after this many days. *)
   auto_stagnant_days : int;
       (** Drop {b auto-generated} Active goals with no update after this many
-          days.  Auto-generated = title suffix [" (auto)"] or [{e … (auto)}]
-          (the {!Keeper_goal_repair.goal_title_of_purpose} contract).
-          Default 7 — short enough to keep keeper-repair leftovers from
+          days.  Auto-generated = title suffix [" (auto)"] or [{e … (auto)}].
+          Default 7 — short enough to keep repair leftovers from
           accreting, long enough to survive a transient operator pause. *)
   orphan_task_escalation_age_seconds : int;
       (** Report unclaimed tasks without goal linkage after this age. *)
@@ -44,8 +41,7 @@ val runtime_config : unit -> sweep_config
 val is_auto_generated_goal : Goal_store.goal -> bool
 (** [is_auto_generated_goal g] returns [true] when [g.title] carries
     the [" (auto)"] or [{e … (auto)}] suffix produced by
-    {!Keeper_goal_repair.goal_title_of_purpose}.  Exposed for unit
-    tests of the auto-stagnate branch. *)
+    automation repair.  Exposed for unit tests of the auto-stagnate branch. *)
 
 (** {1 Result} *)
 
@@ -68,6 +64,15 @@ val prune_active_goal_ids :
   string list ->
   string list * int
 
+type orphan_goal_binding_hooks =
+  { prune_orphan_goal_bindings :
+      Workspace.config -> valid_goal_ids:string list -> int
+  }
+
+val set_orphan_goal_binding_hooks : orphan_goal_binding_hooks -> unit
+(** Register owner-specific goal-binding cleanup. Goal_janitor owns
+    goal liveness; binding owners own their storage. *)
+
 (** [audit_unclaimed_goal_orphan_tasks ~valid_goal_ids
     ~min_age_seconds tasks] returns stale [Todo] tasks with no structured
     [goal_id] linkage. *)
@@ -80,6 +85,6 @@ val audit_unclaimed_goal_orphan_tasks :
 
 (** {1 Entry point} *)
 
-(** Run a full sweep: goal purge / stagnate, then keeper
-    [active_goal_ids] prune. Writes updated state to disk. *)
+(** Run a full sweep: goal purge / stagnate, then owner goal-binding
+    prune. Writes updated state to disk. *)
 val run : ?config:sweep_config -> Workspace.config -> sweep_result

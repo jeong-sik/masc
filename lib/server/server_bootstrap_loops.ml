@@ -362,7 +362,7 @@ let start_keeper_loops
     loop ());
   (* Inject Event_bus into keeper keepalive runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
-  Board_dispatch.set_keeper_board_signal_hook (fun signal ->
+  Board_dispatch.set_board_signal_hook (fun signal ->
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
       ~config:state.workspace_config
       signal);
@@ -899,7 +899,7 @@ let start_keeper_loops
       (* #10125: start the supervisor sweep here, after autoboot
          completes.  Without this call the sweep would only fire
          on the first [masc_keeper_msg] tool dispatch (the single
-         caller of [start_existing_keepalives] in [tool_keeper.ml]
+         caller of [start_existing_keepalives] in [keeper_tool_surface.ml]
          — see #10125 timeline 2026-04-24, where 14 keepers ran
          under autoboot but the sweep never came up because no
          operator [masc_keeper_msg] arrived after the restart;

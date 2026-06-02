@@ -5,15 +5,15 @@
       pinned to the local [masc] HTTP server. Resolves
       [Authorization]/internal-keeper headers via:
       1. [MASC_INTERNAL_MCP_TOKEN] env + keeper-name when a
-         [Keeper_internal] surface tool is requested, OR
+         [Agent_internal] surface tool is requested, OR
       2. [MASC_MCP_TOKEN] env, falling back to the per-keeper raw
          token at [<base_path>/.masc/auth/<agent_name>.token]
          (Phase A F1: CLI-spawned subprocesses without parent env).
       Returns [None] when the tools aren't runtime-MCP-eligible, or
-      when a Keeper_internal tool was requested without
+      when a Agent_internal tool was requested without
       keeper_name/internal_keeper_token.
     - [public_mcp_runtime_policy_of_tool_names] — public-only
-      forwarder (no [allow_keeper_internal] knob). *)
+      forwarder (no [allow_agent_internal] knob). *)
 
 module Mcp_policy_helpers = Runtime_transport_mcp_policy_helpers
 module Authorization = Runtime_transport_authorization
@@ -39,15 +39,15 @@ let dedupe_preserve_order (items : string list) =
 
 let runtime_mcp_policy_of_tool_names
       ?agent_name
-      ?(allow_keeper_internal = false)
+      ?(allow_agent_internal = false)
       (tool_names : string list)
   : Llm_provider.Llm_transport.runtime_mcp_policy option
   =
   let tool_names = dedupe_preserve_order tool_names in
-  let has_keeper_internal =
-    List.exists (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal) tool_names
+  let has_agent_internal =
+    List.exists (Tool_catalog.is_on_surface Tool_catalog.Agent_internal) tool_names
   in
-  if not (Mcp_tool_classifier.tool_names_are_runtime_mcp ~allow_keeper_internal tool_names)
+  if not (Mcp_tool_classifier.tool_names_are_runtime_mcp ~allow_agent_internal tool_names)
   then None
   else (
     let agent_name = Option.bind agent_name String_util.trim_nonempty in
@@ -56,7 +56,7 @@ let runtime_mcp_policy_of_tool_names
       Mcp_policy_helpers.first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ]
     in
     if
-      has_keeper_internal
+      has_agent_internal
       && (Option.is_none keeper_name || Option.is_none internal_keeper_token)
     then None
     else (

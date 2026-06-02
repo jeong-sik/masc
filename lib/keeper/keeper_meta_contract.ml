@@ -505,7 +505,6 @@ type usage_metrics =
   ; total_tokens : int
   ; total_cost_usd : float
   ; last_turn_ts : float
-  ; last_model_used : string
   ; last_input_tokens : int
   ; last_output_tokens : int
   ; last_total_tokens : int
@@ -557,7 +556,6 @@ type keeper_meta =
   ; mid_goal : string
   ; long_goal : string
   ; social_model : string
-  ; models : string list
   ; will : string
   ; needs : string
   ; desires : string
@@ -599,7 +597,6 @@ type keeper_meta =
       Propagated to trajectory accumulator for per-task cost tracking. *)
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
-  ; per_provider_timeout_s : float option
   ; always_approve : bool option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
@@ -673,15 +670,6 @@ let effective_meta_of_profile_defaults
         | Some tools -> normalize_tool_names tools
         | None -> meta.tool_access
       in
-      let per_provider_timeout_s =
-        match defaults.per_provider_timeout_state with
-        | Per_provider_timeout_unset ->
-            normalize_per_provider_timeout_opt
-              ~source:(Printf.sprintf "keeper effective meta %s" meta.name)
-              meta.per_provider_timeout_s
-        | Per_provider_timeout_invalid -> None
-        | Per_provider_timeout_set -> defaults.per_provider_timeout
-      in
       Ok
         { meta with
           proactive =
@@ -733,7 +721,6 @@ let effective_meta_of_profile_defaults
           telemetry_feedback_window_hours =
             apply_profile_default_opt defaults.telemetry_feedback_window_hours
               meta.telemetry_feedback_window_hours;
-          per_provider_timeout_s;
           always_approve =
             apply_profile_default_opt defaults.always_approve
               meta.always_approve;
@@ -750,27 +737,6 @@ let effective_meta_result (meta : keeper_meta) : (keeper_meta, string) result =
       Error (invalid_profile_defaults_error ~keeper_name:meta.name detail)
   | Ok defaults -> effective_meta_of_profile_defaults defaults meta
 ;;
-
-let runtime_id_of_meta (m : keeper_meta) : string =
-  (* RFC-0207: a keeper's per-keeper runtime is its persona [model] selection
-     (keepers/<name>.toml [model = "provider.model"], cached by
-     {!Keeper_types_profile.load_keeper_profile_defaults}); absent that, the
-     documented global default ([[runtime].default]) — NOT a silent
-     substitution.  The prior [_m] discarded the keeper entirely, so the persona
-     selection never reached the wire (the driver also hardcoded the default —
-     both points fixed).  Reads the SAME [defaults.model] source as
-     {!Keeper_runtime.effective_declarative_runtime_id} (declare/status path), so
-     the dispatcher and the reconcile change-detector never disagree (one
-     surface — no split-brain, no re-sync storm).  An id that does not resolve to
-     a materialized runtime fails fast at dispatch in the turn driver. *)
-  let defaults : Keeper_types_profile.keeper_profile_defaults =
-    Keeper_types_profile.load_keeper_profile_defaults m.name
-  in
-  match defaults.model with
-  | Some runtime_id -> String.trim runtime_id
-  | None -> Runtime.get_default_runtime_id ()
-;;
-
 
 let proactive_cycle_outcome_to_string = function
   | Proactive_never_started -> "never_started"
@@ -850,7 +816,6 @@ let zero_usage : usage_metrics =
   ; total_tokens = 0
   ; total_cost_usd = 0.0
   ; last_turn_ts = 0.0
-  ; last_model_used = ""
   ; last_input_tokens = 0
   ; last_output_tokens = 0
   ; last_total_tokens = 0

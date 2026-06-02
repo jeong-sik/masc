@@ -25,7 +25,7 @@ export const TELEMETRY_SOURCE_META: Record<TelemetrySourceKey, TelemetrySourceMe
   agent_event: { label: 'Agent 이벤트', sublabel: 'tool_called 다수, join/leave/task 포함', color: 'text-emerald-400', icon: 'A' },
   tool_call_io: { label: 'Keeper Tool I/O', sublabel: 'keeper->tool 입출력 전체 기록', color: 'text-amber-400', icon: 'T' },
   trajectory_tool_call: { label: 'Trajectory Tool', sublabel: 'tool-stats durable rows', color: 'text-lime-400', icon: 'R' },
-  tool_usage: { label: 'Keeper 내부 호출', sublabel: 'keeper_internal caller 기록', color: 'text-purple-400', icon: 'U' },
+  tool_usage: { label: 'Agent 내부 호출', sublabel: 'agent_internal caller 기록', color: 'text-purple-400', icon: 'U' },
   oas_event: { label: 'OAS 이벤트', sublabel: 'native/custom event bus durable relay', color: 'text-rose-400', icon: 'O' },
   execution_receipt: { label: 'Execution Receipt', sublabel: 'keeper turn terminal receipts', color: 'text-orange-400', icon: 'E' },
   goal_event: { label: 'Goal FSM 이벤트', sublabel: 'goal lifecycle and verification events', color: 'text-sky-400', icon: 'G' },

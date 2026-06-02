@@ -29,24 +29,26 @@ type context = {
   sw: Eio.Switch.t option;
 }
 
-type keeper_hooks =
+type task_owner_hooks =
   { is_registered_agent_alias : Workspace.config -> string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
+  ; agent_tool_names : Workspace.config -> agent_name:string -> string list option
   ; transition_action_denylist : Workspace.config -> agent_name:string -> string list
   ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
 
-let default_keeper_hooks =
+let default_task_owner_hooks =
   { is_registered_agent_alias = (fun _ _ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
+  ; agent_tool_names = (fun _ ~agent_name:_ -> None)
   ; transition_action_denylist = (fun _ ~agent_name:_ -> [])
   ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
 ;;
 
-let keeper_hooks = Atomic.make default_keeper_hooks
-let set_keeper_hooks hooks = Atomic.set keeper_hooks hooks
-let current_keeper_hooks () = Atomic.get keeper_hooks
+let task_owner_hooks = Atomic.make default_task_owner_hooks
+let set_task_owner_hooks hooks = Atomic.set task_owner_hooks hooks
+let current_task_owner_hooks () = Atomic.get task_owner_hooks
 
 open Tool_args
 
@@ -92,8 +94,8 @@ let client_side_transition_gate_error ~task_opt ~action ~action_s =
 
 include Tool_task_payloads
 
-let is_registered_keeper_agent_alias_name config agent_name =
-  (current_keeper_hooks ()).is_registered_agent_alias config agent_name
+let is_registered_owner_agent_alias_name config agent_name =
+  (current_task_owner_hooks ()).is_registered_agent_alias config agent_name
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
   let actual_name =
@@ -111,8 +113,8 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
         ctx.agent_name
   in
   if
-    is_registered_keeper_agent_alias_name ctx.config ctx.agent_name
-    || is_registered_keeper_agent_alias_name ctx.config actual_name
+    is_registered_owner_agent_alias_name ctx.config ctx.agent_name
+    || is_registered_owner_agent_alias_name ctx.config actual_name
   then ()
   else
     let matches_you assignee =
@@ -140,13 +142,16 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
                task_id msg)
     | None -> Planning_eio.clear_current_task ctx.config
 
-let sync_keeper_current_task_binding (ctx : context) =
-  (current_keeper_hooks ()).sync_current_task_binding
+let sync_owner_current_task_binding (ctx : context) =
+  (current_task_owner_hooks ()).sync_current_task_binding
     ctx.config
     ~agent_name:ctx.agent_name
 
-let keeper_transition_action_denylist (ctx : context) =
-  (current_keeper_hooks ()).transition_action_denylist
+let agent_allowed_tool_names (ctx : context) =
+  (current_task_owner_hooks ()).agent_tool_names ctx.config ~agent_name:ctx.agent_name
+
+let owner_transition_action_denylist (ctx : context) =
+  (current_task_owner_hooks ()).transition_action_denylist
     ctx.config
     ~agent_name:ctx.agent_name
 
@@ -350,10 +355,10 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
       ~created_by:ctx.agent_name ctx.config tasks)
 
 let handle_claim ~tool_name ~start_time ctx args =
-  (* #18965 — removed [is_agent_session_bound] hard gate.  Keeper-internal tag
+  (* #18965 — removed [is_agent_session_bound] hard gate.  Agent-internal tag
      dispatch path bypasses MCP entry session binding, so this gate produced
-     false-negative rejects for every keeper turn (fleet evidence:
-     <base-path>/.masc/agents/ empty while keepers run normally; only
+     false-negative rejects for every agent turn (fleet evidence:
+     <base-path>/.masc/agents/ empty while agents run normally; only
      masc_claim/masc_claim_next failed).  Workspace.claim_task_r works on
      agent_name alone; gate added no real authorization. *)
   if Option.is_some (Json_util.assoc_member_opt "agent_role" args) then
@@ -371,10 +376,10 @@ let handle_claim ~tool_name ~start_time ctx args =
   in
   (match result with
    | Ok outcome ->
-       sync_keeper_current_task_binding ctx;
+       sync_owner_current_task_binding ctx;
        sync_planning_current_task_with_owned_task ctx;
        (* Issue #18839: surface auto-released task IDs to subscribers so an
-          MCP operator (or LLM keeper consuming the event stream) can react
+          MCP operator (or agent consuming the event stream) can react
           to an implicit hot-potato instead of substring-parsing
           ["… (auto-released X, Y)"] out of the response message. Empty
           list when the claim did not displace any prior holding. *)
@@ -403,7 +408,7 @@ let handle_claim ~tool_name ~start_time ctx args =
    from the bare excluded_count. See PR body for the velvet-hammer
    misdiagnosis that motivated this surface. *)
 let active_goal_phases_for_agent ctx =
-  (current_keeper_hooks ()).active_goal_phases_for_agent
+  (current_task_owner_hooks ()).active_goal_phases_for_agent
     ctx.config
     ~agent_name:ctx.agent_name
 
@@ -430,7 +435,7 @@ let format_no_eligible
       Printf.sprintf
         "No eligible tasks available (blocked/excluded: %d). This agent has no \
          active_goal_ids — every open task is out of scope. Operator should \
-         set active_goal_ids via masc_keeper_up. %s"
+         configure active_goal_ids via the owner runtime. %s"
         excluded_count
         diagnostics
   | phases ->
@@ -452,7 +457,7 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
   let result = Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
   match result with
   | Workspace.Claim_next_claimed { message; task_id; _ } ->
-    sync_keeper_current_task_binding ctx;
+    sync_owner_current_task_binding ctx;
     sync_planning_current_task_with_owned_task ctx;
     append_claim_observation message ~now:(Time_compat.now ())
       ~agent_name:ctx.agent_name ~task_id
@@ -538,7 +543,7 @@ let handle_release ~tool_name ~start_time ctx args =
          in
          (match result with
           | Ok _ ->
-            sync_keeper_current_task_binding ctx;
+            sync_owner_current_task_binding ctx;
             sync_planning_current_task_with_owned_task ctx
           | Error _ -> ());
          result_to_response ~tool_name ~start_time result)

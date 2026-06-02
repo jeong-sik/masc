@@ -113,7 +113,7 @@ let docker_log_has_container_execution log =
 let credential_bundle_mount_spec credential_bundle_dir =
   credential_bundle_dir
   ^ ":"
-  ^ Filename.concat Masc_mcp.Keeper_host_config_provider.cred_root ".config/gh"
+  ^ Filename.concat Masc_mcp.Credential_host_config_provider.cred_root ".config/gh"
   ^ ":ro"
 
 let rec ensure_dir path =
@@ -1797,7 +1797,7 @@ let test_git_creds_skips_missing_ssh_auth_sock () =
   Alcotest.(check bool) "missing ssh-agent env is not forwarded" false
     (contains_substring line
        ("SSH_AUTH_SOCK="
-        ^ Filename.concat Masc_mcp.Keeper_host_config_provider.cred_root
+        ^ Filename.concat Masc_mcp.Credential_host_config_provider.cred_root
             "ssh-agent.sock"))
 
 let test_git_creds_inherit_network_omits_invalid_network_flag () =

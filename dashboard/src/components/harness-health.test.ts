@@ -235,6 +235,8 @@ describe('HarnessHealth', () => {
         gate: 'fallback',
         verdict: 'reject:vague notes',
         evaluator_runtime: 'cross_verifier',
+        generator_runtime: 'generator_runtime',
+        cross_runtime: true,
         fallback_reason: 'judge timeout',
       },
     }

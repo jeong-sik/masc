@@ -1089,8 +1089,8 @@ let test_board_curation_submit_roundtrips_to_read () =
   let submitted = Yojson.Safe.from_string body in
   Alcotest.(check string) "submitted_by persisted" "curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
-  Alcotest.(check string) "model trimmed" "test-model"
-    Yojson.Safe.Util.(submitted |> member "model" |> to_string);
+  Alcotest.(check bool) "model omitted from board curation contract" true
+    Yojson.Safe.Util.(submitted |> member "model" = `Null);
   Alcotest.(check string) "summary persisted"
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(submitted |> member "summary" |> to_string);

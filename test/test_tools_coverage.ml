@@ -42,6 +42,16 @@ let get_json_assoc key obj =
        | _ -> None)
   | _ -> None
 
+let contains_substring ~needle value =
+  let needle_len = String.length needle in
+  let value_len = String.length value in
+  let rec loop index =
+    if index + needle_len > value_len then false
+    else if String.sub value index needle_len = needle then true
+    else loop (index + 1)
+  in
+  needle_len = 0 || loop 0
+
 (* ============================================================ *)
 (* 1. Schema Structure Tests                                     *)
 (* ============================================================ *)
@@ -552,9 +562,9 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "mid_goal" props);
           Alcotest.(check bool) "has long_goal" true
             (List.mem_assoc "long_goal" props);
-          Alcotest.(check bool) "has sandbox_profile" true
+          Alcotest.(check bool) "omits sandbox_profile" false
             (List.mem_assoc "sandbox_profile" props);
-          Alcotest.(check bool) "has network_mode" true
+          Alcotest.(check bool) "omits network_mode" false
             (List.mem_assoc "network_mode" props);
           Alcotest.(check bool) "omits social_model" false
             (List.mem_assoc "social_model" props);
@@ -569,6 +579,26 @@ let test_masc_keeper_up_schema () =
           Alcotest.(check bool) "omits active_model" false
             (List.mem_assoc "active_model" props)
       | None -> Alcotest.fail "masc_keeper_up missing properties"
+
+let test_keeper_sandbox_args_rejected () =
+  let args =
+    `Assoc [ "sandbox_profile", `String "docker"; "network_mode", `String "none" ]
+  in
+  match
+    Masc_mcp.Keeper_config.reject_removed_keeper_input_keys
+      ~tool_name:"masc_keeper_up"
+      args
+  with
+  | Ok () -> Alcotest.fail "sandbox posture args should be rejected"
+  | Error msg ->
+      Alcotest.(check bool)
+        "sandbox_profile mentioned"
+        true
+        (contains_substring ~needle:"sandbox_profile" msg);
+      Alcotest.(check bool)
+        "network_mode mentioned"
+        true
+        (contains_substring ~needle:"network_mode" msg)
 
 let test_masc_keeper_msg_schema () =
   match find_registered_tool "masc_keeper_msg" with
@@ -830,6 +860,8 @@ let () =
         test_masc_keeper_create_from_persona_schema;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
+      Alcotest.test_case "keeper-sandbox-args-rejected" `Quick
+        test_keeper_sandbox_args_rejected;
       Alcotest.test_case "keeper-msg" `Quick
         test_masc_keeper_msg_schema;
       Alcotest.test_case "keeper-repair" `Quick

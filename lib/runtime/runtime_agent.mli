@@ -170,7 +170,7 @@ val public_mcp_runtime_policy_of_tool_names :
   Llm_provider.Llm_transport.runtime_mcp_policy option
 val runtime_mcp_policy_of_tool_names :
   ?agent_name:string ->
-  ?allow_keeper_internal:bool ->
+  ?allow_agent_internal:bool ->
   string list ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 val resolve_tool_lane_for_oas_tools :

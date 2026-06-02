@@ -536,20 +536,10 @@ let context_of_oas_checkpoint
   sync_oas_context
     { checkpoint; max_tokens }
 
-let checkpoint_model_of_meta (meta : keeper_meta) =
-  let candidates =
-    meta.runtime.usage.last_model_used
-    :: Keeper_model_labels.configured_model_labels_of_meta meta
-  in
-  match List.find_opt (fun value -> String.trim value <> "") candidates with
-  | Some value -> value
-  | None -> Runtime_provider_binding.default_local_runtime_label ()
-
 let save_oas_checkpoint
     ~(max_checkpoint_messages : int)
     ~(session : session_context)
     ~(agent_name : string)
-    ~(model : string)
     ~(ctx : working_context)
     ~(generation : int)
   : (Agent_sdk.Checkpoint.t, string) result =
@@ -562,7 +552,7 @@ let save_oas_checkpoint
       version = Agent_sdk.Checkpoint.checkpoint_version;
       session_id = session.session_id;
       agent_name;
-      model;
+      model = "runtime";
       system_prompt = Some (system_prompt_of_context ctx);
       messages = capped_checkpoint_messages_of_context ~max_checkpoint_messages ctx;
       created_at = Time_compat.now ();

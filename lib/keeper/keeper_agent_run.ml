@@ -482,14 +482,7 @@ let run_turn
          | Some value -> value
          | None -> Keeper_runtime_resolved.oas_call_timeout_sec ()
        in
-       let per_provider_timeout_s =
-         per_provider_timeout_for_turn
-           ~meta
-           ?oas_timeout_s
-           ~oas_timeout_is_explicit
-           ~timeout_s
-           ()
-       in
+       let per_provider_timeout_s = None in
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
        (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
        successful line, so this is gap detection, not total run cap.

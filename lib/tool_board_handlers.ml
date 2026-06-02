@@ -54,7 +54,7 @@ let resolve_board_post_kind ~author (raw_kind : string option)
   | Some raw ->
     (match Board.post_kind_of_string (String.lowercase_ascii (String.trim raw)) with
      | Some Board.System_post ->
-       Error "system posts are reserved for internal surfaces (keeper, operator)"
+       Error "system posts are reserved for platform/internal surfaces"
      | Some kind -> Ok kind
      | None -> Error (Printf.sprintf "unknown post_kind: %s" raw))
   | None ->

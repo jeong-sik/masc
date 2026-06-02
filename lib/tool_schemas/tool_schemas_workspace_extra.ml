@@ -29,7 +29,7 @@ let goal_transition_action_enum =
   ]
 
 let goal_vote_decision_enum = [ "approve"; "reject" ]
-let goal_principal_kind_enum = [ "operator"; "keeper" ]
+let goal_principal_kind_enum = [ "operator"; "agent" ]
 let goal_inherit_mode_enum = [ "extend"; "replace" ]
 
 let enum_schema ?description values =
@@ -155,7 +155,7 @@ The actor field records who initiated the transition.";
       name = "masc_goal_verify";
       description =
         "Submit one verifier vote on an open goal verification request. \
-Supports mixed operator and keeper principals, one vote per principal, and N-of-M quorum resolution.";
+Supports mixed operator and agent principals, one vote per principal, and N-of-M quorum resolution.";
       input_schema =
         `Assoc
           [

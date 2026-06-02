@@ -231,12 +231,6 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
                 append_present_string_list_field fields "allowed_paths" json
               in
               let fields =
-                append_optional_string_field fields "sandbox_profile" json
-              in
-              let fields =
-                append_optional_string_field fields "network_mode" json
-              in
-              let fields =
                 append_present_string_list_field fields "active_goal_ids" json
               in
               (match tool_access_toml_section json with

@@ -9,6 +9,6 @@ val runtime_mcp_tool_requires_bound_actor : string -> bool
 val public_mcp_tool_requires_bound_actor : string -> bool
 
 val tool_names_are_runtime_mcp
-  :  ?allow_keeper_internal:bool
+  :  ?allow_agent_internal:bool
   -> string list
   -> bool

@@ -300,13 +300,13 @@ let start_container (t : t) ~(timeout_sec : float) =
            then [], []
            else (
              match
-               Keeper_host_config_provider.resolve
+               Credential_host_config_provider.resolve
                  ~config:t.config ~identity:t.meta.name
              with
              | Ok binding ->
                let mounts =
                  List.concat_map
-                   (fun (m : Keeper_credential_provider.ro_mount) ->
+                   (fun (m : Credential_provider.ro_mount) ->
                       [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
                    binding.ro_mounts
                in
@@ -317,7 +317,7 @@ let start_container (t : t) ~(timeout_sec : float) =
              | Error err ->
                Log.Keeper.warn
                  "%s: credential resolution failed — container will start without git/gh credentials: %s"
-                 t.meta.name (Keeper_credential_provider.pp_error err);
+                 t.meta.name (Credential_provider.pp_error err);
                [], [])
          in
          let argv =

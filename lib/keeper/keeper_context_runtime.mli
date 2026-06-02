@@ -71,13 +71,10 @@ val context_of_oas_checkpoint
   -> primary_model_max_tokens:int
   -> working_context
 
-val checkpoint_model_of_meta : keeper_meta -> string
-
 val save_oas_checkpoint
   :  max_checkpoint_messages:int
   -> session:session_context
   -> agent_name:string
-  -> model:string
   -> ctx:working_context
   -> generation:int
   -> (Agent_sdk.Checkpoint.t, string) result
@@ -245,7 +242,7 @@ val record_compaction_outcome
     [context_overflow] set in this case, so operators need the signal
     to escalate profile / alert.
 
-    Two emit paths exist ([tool_keeper] manual compact recovery and
+    Two emit paths exist ([keeper_tool_surface] manual compact recovery and
     [dispatch_post_turn_lifecycle_events] automatic compact); both
     funnel through this helper to keep observability coherent. *)
 val dispatch_compaction_completed

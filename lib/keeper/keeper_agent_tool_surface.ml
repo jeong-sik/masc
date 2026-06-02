@@ -306,9 +306,7 @@ let tool_names_for_required_gate_surface
     ~(required_tool_names : string list)
     (tool_names : string list) : string list =
   let is_stay_silent name =
-    match Tool_name.of_string name with
-    | Some (Tool_name.Keeper Tool_name.Keeper.Stay_silent) -> true
-    | _ -> false
+    String.equal (Keeper_tool_resolution.canonical_tool_name name) "keeper_stay_silent"
   in
   let canonical_required_tool_names =
     required_tool_names
@@ -591,7 +589,7 @@ let preferred_tool_choice_for_required_tool_names
             else if List.mem name allowed_tool_names
             then add_visible_required acc canonical name false
             else (
-              match Keeper_tool_name_projection.public_alias_for_internal canonical with
+              match Tool_visibility_projection.public_alias_for_internal canonical with
               | Some public when List.mem public allowed_tool_names ->
                 add_visible_required acc canonical public true
               | _ -> acc))

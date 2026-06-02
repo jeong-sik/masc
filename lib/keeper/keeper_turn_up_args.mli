@@ -18,11 +18,8 @@ type parsed_args =
   ; short_goal_opt : string option
   ; mid_goal_opt : string option
   ; long_goal_opt : string option
-  ; runtime_id_opt : string option
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option
-  ; sandbox_profile_opt : sandbox_profile option
-  ; network_mode_opt : network_mode option
   ; mention_targets_in : string list
   ; active_goal_ids_opt : string list option
   ; max_context_override_opt : int option
@@ -64,15 +61,6 @@ val parse_present_tool_name_list_opt :
 val parse_present_string_list_opt :
   Yojson.Safe.t -> string -> (string list option, string) result
 
-(** Parse an optional enum-string field at [key], with [of_string]
-    decoding and [allowed_values] surfaced in the error message. *)
-val parse_enum_string_opt :
-  Yojson.Safe.t ->
-  string ->
-  (string -> 'a option) ->
-  allowed_values:string ->
-  ('a option, string) result
-
 (** Resolve a tool-name list with [preferred] taking priority over
     [fallback], then normalize. *)
 val resolve_tool_name_list :
@@ -97,12 +85,11 @@ val resolve_mention_targets :
   string list
 
 val resolve_sandbox_profile :
-  preferred:sandbox_profile option ->
   fallback:sandbox_profile option ->
   sandbox_profile
 
 val resolve_network_mode :
-  preferred:network_mode option ->
+  sandbox_profile:sandbox_profile ->
   fallback:network_mode option ->
   network_mode
 

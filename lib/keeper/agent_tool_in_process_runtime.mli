@@ -205,7 +205,7 @@ val handle_masc_approval
 (** RFC-0182 §3.1 — [handle_masc_persona] is the descriptor-projection
     cluster handler for [masc_persona_list] / [masc_persona_schema] /
     [masc_persona_save].  Dispatches via [Persona_dispatch_ref] —
-    [Tool_keeper] registers the ctx-free persona handlers at module
+    [Keeper_tool_surface] registers the ctx-free persona handlers at module
     load to avoid a static cycle through [Keeper_turn_driver]. *)
 val handle_masc_persona
   :  name:string
@@ -214,7 +214,7 @@ val handle_masc_persona
 
 (** RFC-0182 §3.1 — [handle_masc_keeper] is the descriptor-projection
     cluster handler for the [masc_keeper_*] ctx-free tool surface.
-    Dispatches via [Keeper_dispatch_ref] registered by [Tool_keeper] at
+    Dispatches via [Keeper_dispatch_ref] registered by [Keeper_tool_surface] at
     module load.  Receives [meta] so callers like [masc_keeper_status]
     can resolve the "self" target when the [name] argument is empty. *)
 val handle_masc_keeper

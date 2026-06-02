@@ -373,9 +373,9 @@ let test_goal_transition_verification_to_completion () =
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
     ; principals =
-        [ { kind = Goal_verification.Keeper
-          ; id = "keeper-alpha"
-          ; display_name = Some "keeper-alpha"
+        [ { kind = Goal_verification.Agent
+          ; id = "agent-alpha"
+          ; display_name = Some "agent-alpha"
           }
         ]
     ; required_verdicts = Some 1
@@ -429,12 +429,12 @@ let test_goal_transition_verification_to_completion () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~kind:"keeper" ~id:"keeper-alpha"
+            ; "principal", principal_json ~kind:"agent" ~id:"agent-alpha"
             ; "decision", `String "approve"
             ; "note", `String "checked receipt and tests"
             ; ( "evidence_refs"
               , `List
-                  [ `String "receipt:keeper-alpha:turn-7"
+                  [ `String "receipt:agent-alpha:turn-7"
                   ; `String "test:test_goal_tools"
                   ] )
             ])
@@ -489,7 +489,7 @@ let test_goal_transition_verification_to_completion () =
   check
     (list string)
     "vote evidence refs retained"
-    [ "receipt:keeper-alpha:turn-7"; "test:test_goal_tools" ]
+    [ "receipt:agent-alpha:turn-7"; "test:test_goal_tools" ]
     (get_string_list_field vote "evidence_refs")
 ;;
 
@@ -499,9 +499,9 @@ let test_goal_transition_rejected_verification_retains_evidence () =
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
     ; principals =
-        [ { kind = Goal_verification.Keeper
-          ; id = "keeper-alpha"
-          ; display_name = Some "keeper-alpha"
+        [ { kind = Goal_verification.Agent
+          ; id = "agent-alpha"
+          ; display_name = Some "agent-alpha"
           }
         ]
     ; required_verdicts = Some 1
@@ -542,10 +542,10 @@ let test_goal_transition_rejected_verification_retains_evidence () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~kind:"keeper" ~id:"keeper-alpha"
+            ; "principal", principal_json ~kind:"agent" ~id:"agent-alpha"
             ; "decision", `String "reject"
             ; "note", `String "receipt did not prove completion"
-            ; "evidence_refs", `List [ `String "receipt:keeper-alpha:turn-7" ]
+            ; "evidence_refs", `List [ `String "receipt:agent-alpha:turn-7" ]
             ])
   in
   let rejected_json =
@@ -593,7 +593,7 @@ let test_goal_transition_rejected_verification_retains_evidence () =
   check
     (list string)
     "reject evidence retained"
-    [ "receipt:keeper-alpha:turn-7" ]
+    [ "receipt:agent-alpha:turn-7" ]
     (get_string_list_field vote "evidence_refs")
 ;;
 
@@ -603,9 +603,9 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
     ; principals =
-        [ { kind = Goal_verification.Keeper
-          ; id = "keeper-alpha"
-          ; display_name = Some "keeper-alpha"
+        [ { kind = Goal_verification.Agent
+          ; id = "agent-alpha"
+          ; display_name = Some "agent-alpha"
           }
         ]
     ; required_verdicts = Some 1
@@ -688,9 +688,9 @@ let test_goal_transition_approval_gate () =
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
     ; principals =
-        [ { kind = Goal_verification.Keeper
-          ; id = "keeper-alpha"
-          ; display_name = Some "keeper-alpha"
+        [ { kind = Goal_verification.Agent
+          ; id = "agent-alpha"
+          ; display_name = Some "agent-alpha"
           }
         ]
     ; required_verdicts = Some 1
@@ -738,7 +738,7 @@ let test_goal_transition_approval_gate () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~kind:"keeper" ~id:"keeper-alpha"
+            ; "principal", principal_json ~kind:"agent" ~id:"agent-alpha"
             ; "decision", `String "approve"
             ])
   in
@@ -907,13 +907,13 @@ let test_operator_actions_require_operator_principal () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "operator_block"
-            ; "actor", principal_json ~kind:"keeper" ~id:"keeper-alpha"
+            ; "actor", principal_json ~kind:"agent" ~id:"agent-alpha"
             ])
   in
   let error_json = expect_error blocked in
   check
     string
-    "keeper blocked by validation"
+    "agent blocked by validation"
     "validation_error"
     (get_string_field error_json "error_code");
   let saved_goal =
@@ -946,13 +946,13 @@ let test_completion_approval_requires_operator_principal () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "approve_completion"
-            ; "actor", principal_json ~kind:"keeper" ~id:"keeper-alpha"
+            ; "actor", principal_json ~kind:"agent" ~id:"agent-alpha"
             ])
   in
   let error_json = expect_error approved in
   check
     string
-    "keeper approval blocked by validation"
+    "agent approval blocked by validation"
     "validation_error"
     (get_string_field error_json "error_code");
   let saved_goal =

@@ -88,7 +88,6 @@ let handle_board_curation_submit ~tool_name ~start_time args : Tool_result.resul
       ~start_time
       "rationale required"
   else (
-    let model = Tool_board_format.string_opt_arg args "model" in
     let summary = Tool_board_format.string_opt_arg args "summary" in
     let ordering = Tool_board_format.string_list_arg args "ordering" in
     let highlights = Tool_board_format.string_list_arg args "highlights" in
@@ -108,7 +107,6 @@ let handle_board_curation_submit ~tool_name ~start_time args : Tool_result.resul
          let snap =
            Board_dispatch.submit_curation_snapshot
              ~submitted_by
-             ?model
              ?summary
              ~ordering
              ~highlights

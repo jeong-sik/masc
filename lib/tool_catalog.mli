@@ -23,13 +23,7 @@ type effect_domain =
   | Host_repo_write
 
 type tool_group =
-  | Board
-  | Knowledge
-  | Tasks
-  | Voice
-  | Filesystem
   | Masc_board
-  | Masc_keeper
   | Masc_plan
   | Masc_agent
   | Masc_core
@@ -125,8 +119,7 @@ type surface =
   | Local_worker
   | Session_min
   | Admin
-  | Keeper_internal
-  | Keeper_denied
+  | Agent_internal
   | System_internal
 
 val tools_for_surface : surface -> string list

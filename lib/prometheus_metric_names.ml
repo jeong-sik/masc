@@ -169,7 +169,7 @@ let metric_tool_bind_required_guard =
 let metric_keeper_tool_call_log_queue_dropped =
   "masc_keeper_tool_call_log_queue_dropped_total"
 
-(* tool_keeper.cached_text_by_key CAS conflicts.
+(* keeper_tool_surface.cached_text_by_key CAS conflicts.
    Incremented once per recursive retry caused by an
    [Atomic.compare_and_set cache_ref] failure in the helper.  Each
    conflict triggers a second [compute ()] call, so sustained non-zero
@@ -195,7 +195,7 @@ let metric_file_lock_table_cas_retries =
 let metric_memory_jsonl_parse_drops =
   "masc_memory_jsonl_parse_drops_total"
 
-(* tool_keeper.cache_ttl_seconds env-var parse fallback observability.
+(* keeper_tool_surface.cache_ttl_seconds env-var parse fallback observability.
    Operator-supplied env var (e.g. MASC_KEEPER_LIST_CACHE_TTL_S) is
    present but the value cannot be parsed as a non-negative float; the
    helper silently coalesces to the per-caller default. Without this
@@ -230,7 +230,7 @@ let metric_tool_keeper_cache_ttl_parse_failures =
 
 let metric_timeout_policy_overshoot = "masc_timeout_policy_overshoot_total"
 
-(* Keeper compaction (keeper_compact_policy.ml, tool_keeper.ml). *)
+(* Keeper compaction (keeper_compact_policy.ml, keeper_tool_surface.ml). *)
 
 (* #9943: per-keeper counter of "compaction triggered but
    resulted in no token reduction".  2026-04-24 audit found

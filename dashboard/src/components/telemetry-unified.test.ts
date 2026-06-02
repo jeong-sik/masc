@@ -482,7 +482,7 @@ describe('TelemetryUnified', () => {
           source: 'tool_usage',
           ts: 1_775_709_299,
           session_id: 'sess-1',
-          caller: 'keeper_internal',
+          caller: 'agent_internal',
           tool_name: 'masc_status',
         },
         {
@@ -965,7 +965,7 @@ describe('TelemetryUnified', () => {
           source: 'tool_usage',
           ts: 1_775_709_299,
           session_id: 'sess-2',
-          caller: 'keeper_internal',
+          caller: 'agent_internal',
           tool_name: 'masc_status',
         },
         {
@@ -1021,7 +1021,7 @@ describe('TelemetryUnified', () => {
       {
         source: 'tool_usage',
         session_id: 'sess-a',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
       {
@@ -1031,7 +1031,7 @@ describe('TelemetryUnified', () => {
       {
         source: 'tool_usage',
         session_id: 'sess-a',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
     ])
@@ -1054,14 +1054,14 @@ describe('TelemetryUnified', () => {
       {
         source: 'tool_usage',
         session_id: 'sess-z',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
       {
         source: 'tool_usage',
         ts: 1_775_709_111,
         session_id: 'sess-z',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
     ])
@@ -1368,7 +1368,7 @@ describe('filterTelemetryDisplayItems', () => {
         source: 'tool_usage' as const,
         ts: 1_775_709_299,
         session_id: 'sess-noisy',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
       {

@@ -267,7 +267,7 @@ val get_post : store -> post_id:string -> (post, board_error) Result.t
     {!with_lock} block to avoid the two-call lock churn
     that previously surfaced as
     [Mutex.lock: Resource deadlock avoided] under contended
-    keeper polling. *)
+    repeated agent polling. *)
 val get_post_and_comments
   :  store
   -> post_id:string

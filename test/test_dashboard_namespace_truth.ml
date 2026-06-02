@@ -115,7 +115,7 @@ let expire_execution_warmup () =
   surface.last_attempt_at <- Some "stale_attempt_for_test"
 
 let create_keeper env sw config name =
-  let ctx : _ Lib.Tool_keeper.context =
+  let ctx : _ Lib.Keeper_tool_surface.context =
     {
       config;
       agent_name = "tester";
@@ -125,7 +125,7 @@ let create_keeper env sw config name =
     }
   in
   match
-    Lib.Tool_keeper.dispatch ctx ~name:"masc_keeper_up"
+    Lib.Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_up"
       ~args:
         (`Assoc
           [

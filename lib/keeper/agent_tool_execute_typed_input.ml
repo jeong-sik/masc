@@ -541,16 +541,13 @@ let pp_mode ppf = function
 ;;
 
 let executable_not_allowlisted_hint ~name ~mode =
-  (* RFC-0196 P0 §1 acceptance: typed lookup against the actual
-     [Tool_name.Keeper] / [Tool_name.Masc] variant set instead of a
-     ["keeper_"]/["masc_"] substring match. The closed-sum [of_string]
-     returns [Some] only for names that exist as MASC tools, so a free
-     misspelling such as [keeper_foo_xyz] no longer collects the
-     "not a shell program" hint — that hint is reserved for genuine
-     MASC tool names mis-dispatched into Execute. New tool variants
-     become eligible automatically when added to [tool_name.mli]. *)
+  (* A routed structured tool name is not a shell executable. Keep this check
+     descriptor/registry-backed so Keeper does not own the concrete tool-name
+     universe. *)
   let is_masc_structured_tool =
-    Option.is_some (Tool_name.Keeper.of_string name)
+    Keeper_tool_alias.is_known_internal name
+    || Option.is_some (Keeper_tool_alias.public_masc_to_internal name)
+    || Option.is_some (Agent_tool_descriptor.find_public name)
     || Option.is_some (Tool_name.Masc.of_string name)
   in
   if is_masc_structured_tool

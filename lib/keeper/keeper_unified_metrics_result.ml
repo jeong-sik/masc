@@ -111,7 +111,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
           rt.usage.total_tokens + trusted_total_tokens;
         total_cost_usd = rt.usage.total_cost_usd +. turn_cost;
         last_turn_ts = now_ts;
-        last_model_used = "";
         last_input_tokens = trusted_input_tokens;
         last_output_tokens = trusted_output_tokens;
         last_total_tokens = trusted_total_tokens;

@@ -35,7 +35,7 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
   (* Record failed metric on cancellation *)
   (match result with
    | Ok _ ->
-       sync_keeper_current_task_binding ctx;
+       sync_owner_current_task_binding ctx;
        sync_planning_current_task_with_owned_task ctx;
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
@@ -86,7 +86,7 @@ and handle_transition ~tool_name ~start_time ctx args =
          downstream task-handoff schema then had to recover via
          sibling synthesis or substring scanning. There is no
          in-repo reader of that [notes] blob — pr_url consumers
-         (keeper_tool_call_log, keeper_hooks_oas, audit_keeper_...)
+         (tool_call_log, owner_hooks, audit_...)
          already read pr_url as a typed field elsewhere — so the
          legacy blob is dead-on-write.
 
@@ -173,7 +173,7 @@ and handle_transition ~tool_name ~start_time ctx args =
   | Ok action ->
   let requested_action = action in
   let action_s = Masc_domain.task_action_to_string action in
-  let transition_action_denylist = keeper_transition_action_denylist ctx in
+  let transition_action_denylist = owner_transition_action_denylist ctx in
   if
     transition_action_denied_by_denylist
       ~tool_denylist:transition_action_denylist
@@ -331,7 +331,7 @@ and handle_transition ~tool_name ~start_time ctx args =
   | None ->
   (* Verifier gate: if the task has a completion_contract and the
      verification FSM is enabled, redirect Done → Submit_for_verification
-     so a cross-agent verifier keeper can independently validate the
+     so a cross-agent verifier can independently validate the
      quantitative criteria. Gates 1-3 (length, excuse, LLM) still run
      above; this replaces Gate 2.5 (substring match) with real
      measurement by the verifier. See issue #7598. *)
@@ -528,7 +528,7 @@ and handle_transition ~tool_name ~start_time ctx args =
   let result = try_transition 0 in
   (match result with
    | Ok _ ->
-     sync_keeper_current_task_binding ctx;
+     sync_owner_current_task_binding ctx;
      sync_planning_current_task_with_owned_task ctx
    | Error _ -> ());
   (* Notify A2A subscribers on successful transition *)

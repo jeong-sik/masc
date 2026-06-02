@@ -228,7 +228,7 @@ let board_signal_kind_to_string = function
   | Board_dispatch.Board_comment_added -> "comment_added"
 ;;
 
-let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.keeper_board_signal) =
+let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.board_signal) =
   let payload =
     `Assoc
       [ "source", `String "board_signal"
@@ -294,7 +294,7 @@ let board_signal_wake_paused_keeper
 let board_signal_wake_keeper
       ~(config : Workspace.config)
       ~(reason : string)
-      ~(signal : Board_dispatch.keeper_board_signal)
+      ~(signal : Board_dispatch.board_signal)
       (meta : keeper_meta)
   =
   let stimulus = board_signal_stimulus ~reason signal in
@@ -307,7 +307,7 @@ let board_signal_wake_keeper
 
 let wakeup_relevant_keeper_for_board_signal
       ~(config : Workspace.config)
-      (signal : Board_dispatch.keeper_board_signal)
+      (signal : Board_dispatch.board_signal)
   =
   let registry_entries =
     Keeper_registry.all ~base_path:config.base_path ()

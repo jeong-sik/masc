@@ -432,7 +432,7 @@ let prepare_agent_setup
     then name
     else (
       let canonical = Keeper_tool_resolution.canonical_tool_name name in
-      match Keeper_tool_name_projection.public_alias_for_internal canonical with
+      match Tool_visibility_projection.public_alias_for_internal canonical with
       | Some public
         when Keeper_tool_policy.StringSet.mem public universe_set
              && Keeper_tool_policy.StringSet.mem public policy_allowed_tool_set ->

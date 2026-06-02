@@ -6,7 +6,7 @@
     {!Keeper_sandbox_docker} no longer reaches into multiple SSOTs
     inline.  Concrete implementations:
 
-    - {!Keeper_host_config_provider}: selected credential bundle
+    - {!Credential_host_config_provider}: selected credential bundle
       mounted RO.
 
     Lifecycle (in caller order):
@@ -63,9 +63,9 @@ val pp_error : error -> string
 (** Human-readable rendering for log lines. *)
 
 (** Module signature implemented by each concrete provider.  RFC-0008
-    §3 spelled this as [include module type of Keeper_credential_provider];
+    §3 spelled this as [include module type of Credential_provider];
     in OCaml the idiomatic equivalent is a named [module type S] that
-    callers can refer to as [Keeper_credential_provider.S]. *)
+    callers can refer to as [Credential_provider.S]. *)
 module type S = sig
   val resolve :
     config:Workspace.config -> identity:string -> (binding, error) result

@@ -3,7 +3,7 @@
 
     Each {!surface} variant maps to a curated string list of tool
     names visible at that surface.  Cross-cutting consumers (auth
-    gate, dashboard catalog, telemetry, keeper tool registry, OAS
+    gate, dashboard catalog, telemetry, OAS
     hooks) read membership through {!tools_for_surface} or
     {!is_on_surface}.
 
@@ -18,43 +18,9 @@
 
 (** {1 Tool name lists (per surface)} *)
 
-val keeper_internal_tools : string list
-(** Tools that only the keeper-bound dispatcher should accept.
-    Exposing them on the public MCP surface would let unauthenticated
-    clients invoke keeper-only operations. *)
-
-val keeper_internal_set : (string, unit) Hashtbl.t
-(** Hashtbl membership view of {!keeper_internal_tools} (#14728).
-    [set_for_surface Keeper_internal] returns the same handle so
-    callers performing membership queries hit an O(1) lookup
-    rather than O(n) [List.mem]. *)
-
-val workspace_mutating_tool_names : string list
-(** Subset of tools that mutate workspace state — used by the
-    surface-SSOT test ([test/test_tool_surface_ssot.ml]) to assert
-    these tools are excluded from read-only surfaces. *)
-
 val public_mcp_surface_tools : string list
-val spawned_agent_surface_tools : string list
-val local_worker_surface_tools : string list
-val session_min_surface_tools : string list
-val admin_surface_tools : string list
-val keeper_internal_surface_tools : string list
-val keeper_denied_surface_tools : string list
 val system_internal_surface_tools : string list
 val workspace_role_tools : string list
-val execution_role_tools : string list
-
-(** {1 Replacement table} *)
-
-val keeper_internal_replacement : string -> string option
-(** [keeper_internal_replacement old_name] returns the canonical
-    public-facing replacement for an old keeper-internal tool name
-    when one exists (e.g. [keeper_board_get] -> [masc_board_get]).
-    Returns [None] when no replacement is registered.
-
-    Used only for keeper-internal alias routing; it is not an MCP
-    deprecation or descriptor-retention mechanism. *)
 
 (** {1 Surface variant} *)
 
@@ -71,10 +37,9 @@ type surface =
       (** Minimum session surface (initialization tools only). *)
   | Admin
       (** Admin / operator dashboard surface. *)
-  | Keeper_internal
-      (** Tools accepted by keeper-bound dispatchers. *)
-  | Keeper_denied
-      (** Tools explicitly denied at the keeper boundary. *)
+  | Agent_internal
+      (** Agent-internal surface. Concrete agent runtimes install their own
+          allowed tools behind their runtime boundary. *)
   | System_internal
       (** System-internal surface (telemetry, fixtures). *)
 

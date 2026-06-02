@@ -175,7 +175,6 @@ let prepare_run_context
           ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
           ~session
           ~agent_name:meta.agent_name
-          ~model:(Keeper_context_runtime.checkpoint_model_of_meta meta)
           ~ctx:compacted_ctx
           ~generation)
       ctx_work

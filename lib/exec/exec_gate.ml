@@ -205,7 +205,8 @@ let run : Verdict.t -> (Verdict.Trusted_argv.t, error) result = function
 (* Default subprocess timeout.  Callers should prefer passing
    [~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:... ())]
    so that operators can override via per-caller env vars.  See
-   {!Env_config_exec_timeout} and [keeper_docker_client_real.ml:104]. *)
+   {!Env_config_exec_timeout}; live keeper sandbox callers pass
+   caller-scoped values through this gate. *)
 let default_exec_timeout_sec = 60.0
 
 let run_argv ~actor ~raw_source ~summary ?(timeout_sec = default_exec_timeout_sec) ?env argv =

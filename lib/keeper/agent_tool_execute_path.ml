@@ -18,8 +18,11 @@ let currency_last_sync : (string, float) Hashtbl.t = Hashtbl.create 64
 let currency_min_interval_sec = 30.0
 
 (* Keep the keeper's sandbox clone current with origin/<default_branch> before
-   code work. Best-effort: never raises, never blocks the turn; the advance is
-   fast-forward-only and work-preserving (see [Keeper_repo_readiness]). *)
+   code work. Best-effort: a failed advance never fails the turn, but
+   [Eio.Cancel.Cancelled] is re-raised so turn cancellation is preserved. The
+   advance is fast-forward-only and work-preserving (see [Keeper_repo_readiness]).
+   The typed outcome is logged rather than dropped: a [Skipped] sync is the very
+   "repo silently frozen" failure this exists to fix, so it stays visible. *)
 let sync_repo_currency_best_effort ~config ~meta ~repo_name =
   let cpath = Keeper_repo_readiness.clone_path ~config ~meta ~repo_name in
   let now = Unix.gettimeofday () in
@@ -30,9 +33,24 @@ let sync_repo_currency_best_effort ~config ~meta ~repo_name =
   in
   if due then begin
     Hashtbl.replace currency_last_sync cpath now;
-    (try
-       ignore (Keeper_repo_readiness.ensure_current ~config ~meta ~repo_name ())
-     with _ -> ())
+    try
+      match Keeper_repo_readiness.ensure_current ~config ~meta ~repo_name () with
+      | Keeper_repo_readiness.Up_to_date -> ()
+      | Advanced commits ->
+        Log.Keeper.info "currency: advanced sandbox repo %s by %d commit(s)"
+          repo_name commits
+      | Preserved reason ->
+        (* Local/divergent work kept; expected when a keeper has uncommitted or
+           branched changes. Debug so it does not drown the actionable case. *)
+        Log.Keeper.debug "currency: preserved sandbox repo %s (%s)" repo_name reason
+      | Skipped reason ->
+        (* Currency could not be established (missing/corrupt clone, no
+           credential, or fetch failure). Visible by default so a recurring
+           failure does not re-freeze the repo invisibly. *)
+        Log.Keeper.info "currency: skipped sandbox repo %s (%s)" repo_name reason
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> ()
   end
 
 let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =

@@ -45,7 +45,7 @@ let provider_context_json ~(meta : keeper_meta)
         ]
 
 let redacted_runtime_attempt_to_json
-    (attempt : Keeper_observation.runtime_attempt) : Yojson.Safe.t =
+    (attempt : Runtime_observation.runtime_attempt) : Yojson.Safe.t =
   `Assoc
     [ "attempt_index", `Int attempt.attempt_index
     ; ( "latency_ms", Json_util.int_opt_to_json attempt.latency_ms )
@@ -54,12 +54,12 @@ let redacted_runtime_attempt_to_json
 ;;
 
 let redacted_runtime_fallback_event_to_json
-    (event : Keeper_observation.runtime_fallback_event) : Yojson.Safe.t =
+    (event : Runtime_observation.runtime_fallback_event) : Yojson.Safe.t =
   `Assoc [ "reason", `String event.reason ]
 ;;
 
 let redacted_runtime_observation_to_json
-    (obs : Keeper_observation.runtime_observation) : Yojson.Safe.t =
+    (obs : Runtime_observation.runtime_observation) : Yojson.Safe.t =
   let runtime_id =
     obs.runtime_id
   in

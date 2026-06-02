@@ -380,7 +380,7 @@ let collect_board_events_with_cursor_policy
         then (
           Prometheus.inc_counter
             Keeper_metrics.(to_string ObservationQueryFailures)
-            ~labels:[ ("operation", Keeper_observation_query_operation.(to_label Cursor_stale)) ]
+            ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Cursor_stale)) ]
             ();
           Log.Keeper.warn
             "board cursor not updated for %s despite %d events processed"
@@ -392,7 +392,7 @@ let collect_board_events_with_cursor_policy
   | exn ->
     Prometheus.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
-      ~labels:[ ("operation", Keeper_observation_query_operation.(to_label Board_events)) ]
+      ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
       ();
     Log.Keeper.warn "board event collection failed: %s" (Printexc.to_string exn);
     [], 0, 0
@@ -828,7 +828,7 @@ let keeper_cycle_decision
               Prometheus.inc_counter
                 Keeper_metrics.(to_string ObservationQueryFailures)
                 ~labels:
-                  [ ("operation", Keeper_observation_query_operation.(to_label Empty_run_reasons))
+                  [ ("operation", Runtime_observation_query_operation.(to_label Empty_run_reasons))
                   ]
                 ();
               Log.Keeper.warn "unreachable: should_run=true but run_reasons is empty";

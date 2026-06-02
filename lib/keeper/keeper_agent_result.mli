@@ -16,7 +16,7 @@ type run_result =
   ; model_used : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; ctx_composition : Keeper_agent_prompt_metrics.ctx_composition_metrics
-  ; runtime_observation : Keeper_observation.runtime_observation option
+  ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
   ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage

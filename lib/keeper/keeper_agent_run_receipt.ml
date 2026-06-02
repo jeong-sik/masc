@@ -145,7 +145,7 @@ let finalize
       Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err
       |> Keeper_turn_terminal_code.to_wire
   in
-  let runtime_observation : Keeper_observation.runtime_observation option =
+  let runtime_observation : Runtime_observation.runtime_observation option =
     !receipt_runtime_observation_ref
   in
   let ( extra_system_context_digest

@@ -94,7 +94,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
     Prometheus.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
-        [ ("operation", Keeper_observation_query_operation.(to_label Read_backlog_counts)) ]
+        [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
       ();
     Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
     0, 0, 0, 0, false
@@ -108,7 +108,7 @@ let count_active_agents ~(config : Workspace.config) : int =
     Prometheus.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
-        [ ("operation", Keeper_observation_query_operation.(to_label Count_active_agents)) ]
+        [ ("operation", Runtime_observation_query_operation.(to_label Count_active_agents)) ]
       ();
     Log.Keeper.warn "count_active_agents failed: %s" (Printexc.to_string ex);
     0

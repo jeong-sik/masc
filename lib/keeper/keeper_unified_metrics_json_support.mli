@@ -12,7 +12,7 @@ val provider_context_json :
   Yojson.Safe.t
 
 val redacted_runtime_observation_to_json :
-  Keeper_observation.runtime_observation -> Yojson.Safe.t
+  Runtime_observation.runtime_observation -> Yojson.Safe.t
 
 val tool_contract_json :
   tool_call_count:int ->

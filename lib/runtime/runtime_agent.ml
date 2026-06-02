@@ -2,7 +2,7 @@
 
     Contains the [config] type, [build], [run], and [run_with_masc_tools]
     functions. All model-selection and runtime logic lives in
-    {!Keeper_observation} and {!Keeper_turn_driver}.
+    {!Runtime_observation} and {!Keeper_turn_driver}.
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
@@ -79,7 +79,7 @@ type run_result = {
   turns : int;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
-  runtime_observation : Keeper_observation.runtime_observation option;
+  runtime_observation : Runtime_observation.runtime_observation option;
   stop_reason : stop_reason;
 }
 
@@ -274,15 +274,15 @@ let runtime_observation_for_completed_config ~total_duration_ms
     (config : config) =
   let latency_ms = Some (int_of_float total_duration_ms) in
   let capture, _metrics =
-    Keeper_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+    Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
   in
-  Keeper_observation.record_attempt_terminal capture ~model_id:config.model_id
+  Runtime_observation.record_attempt_terminal capture ~model_id:config.model_id
     ~latency_ms ~error:None;
-  Keeper_observation.runtime_observation_with_metrics
+  Runtime_observation.runtime_observation_with_metrics
     ~runtime_id:(runtime_id_of_config config)
     ~strategy:"single_provider_runtime"
     ~configured_labels:
-      [ Keeper_observation.model_label_of_config config.provider_cfg ]
+      [ Runtime_observation.model_label_of_config config.provider_cfg ]
     ~candidate_count:1
     ~selected_model_raw:(Some config.model_id)
     ~capture
@@ -304,7 +304,7 @@ end
 (* ================================================================ *)
 
 let publish_lifecycle =
-  Keeper_oas_checkpoint.publish_lifecycle
+  Runtime_oas_checkpoint.publish_lifecycle
 
 let provider_lifecycle_attrs (config : config) =
   let provider_cfg = config.provider_cfg in
@@ -337,13 +337,13 @@ let provider_lifecycle_attrs (config : config) =
 (* ================================================================ *)
 
 let persist_checkpoint =
-  Keeper_oas_checkpoint.persist_checkpoint
+  Runtime_oas_checkpoint.persist_checkpoint
 
 let build_checkpoint =
-  Keeper_oas_checkpoint.build_checkpoint
+  Runtime_oas_checkpoint.build_checkpoint
 
 let partial_response_of_stop =
-  Keeper_oas_checkpoint.partial_response_of_stop
+  Runtime_oas_checkpoint.partial_response_of_stop
 
 (* ================================================================ *)
 (* Build                                                             *)
@@ -380,7 +380,7 @@ let build
     Exposed at module level so it can be unit-tested independently of
     the network-bound [run] function. *)
 let enrich_idle_detail =
-  Keeper_oas_checkpoint.enrich_idle_detail
+  Runtime_oas_checkpoint.enrich_idle_detail
 
 let run_duration_ms_since started_at =
   Float.max 0.0 ((Unix.gettimeofday () -. started_at) *. 1000.0)

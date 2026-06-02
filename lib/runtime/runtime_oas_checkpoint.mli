@@ -1,4 +1,4 @@
-(** Keeper_oas_checkpoint — lifecycle, checkpoint, and
+(** Runtime_oas_checkpoint — lifecycle, checkpoint, and
     idle-detail helpers extracted from {!Runtime_runner}.
 
     Keeps side-effecting run helpers separate from the main

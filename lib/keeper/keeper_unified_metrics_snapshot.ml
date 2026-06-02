@@ -81,7 +81,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
   let runtime_profile =
     match result.runtime_observation with
     | Some observation ->
-        observation.Keeper_observation.runtime_id
+        observation.Runtime_observation.runtime_id
     | None -> (runtime_id_of_meta meta)
   in
   (* #9933: same latency bucket, split by provider/model/runtime.

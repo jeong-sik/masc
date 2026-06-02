@@ -7,48 +7,6 @@ let generate_trace_id ?(now = Time_compat.now ()) () : string =
   let seq = Atomic.fetch_and_add trace_counter 1 land 0xFFFFF in
   Printf.sprintf "trace-%d-%05x" ts seq
 
-let sanitize_name (name : string) : string =
-  String.map
-    (fun c ->
-      if
-        (c >= 'A' && c <= 'Z')
-        || (c >= 'a' && c <= 'z')
-        || (c >= '0' && c <= '9')
-        || c = '-'
-        || c = '_'
-        || c = '.'
-      then c
-      else '_')
-    name
-
-let keeper_git_author ~(keeper_name : string) : string =
-  let safe = sanitize_name keeper_name in
-  Printf.sprintf "%s (MASC Keeper)" safe
-
-let keeper_git_email ~(keeper_name : string) : string =
-  let safe = sanitize_name keeper_name in
-  Printf.sprintf "%s@masc.local" safe
-
-let git_env_for_keeper ~(keeper_name : string) : string array =
-  let author = keeper_git_author ~keeper_name in
-  let email = keeper_git_email ~keeper_name in
-  let base_env = Unix.environment () in
-  let filtered =
-    Array.to_list base_env
-    |> List.filter (fun s ->
-           not (String.starts_with ~prefix:"GIT_AUTHOR_" s)
-           && not (String.starts_with ~prefix:"GIT_COMMITTER_" s))
-  in
-  let overrides =
-    [
-      "GIT_AUTHOR_NAME=" ^ author;
-      "GIT_AUTHOR_EMAIL=" ^ email;
-      "GIT_COMMITTER_NAME=" ^ author;
-      "GIT_COMMITTER_EMAIL=" ^ email;
-    ]
-  in
-  Array.of_list (filtered @ overrides)
-
 let parse_keeper_agent_name ~prefix ~suffix agent_name =
   let plen = String.length prefix and slen = String.length suffix in
   let alen = String.length agent_name in

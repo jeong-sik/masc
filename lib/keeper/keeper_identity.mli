@@ -6,9 +6,6 @@ val generate_trace_id : ?now:float -> unit -> string
     [~now] defaults to [Time_compat.now ()] — pass an explicit value in tests
     for deterministic output.  The counter guarantees uniqueness even when
     [now] is pinned to the same value across consecutive calls. *)
-val keeper_git_author : keeper_name:string -> string
-val keeper_git_email : keeper_name:string -> string
-val git_env_for_keeper : keeper_name:string -> string array
 
 val keeper_name_from_agent_name : string -> string option
 val is_keeper_agent_alias : string -> bool

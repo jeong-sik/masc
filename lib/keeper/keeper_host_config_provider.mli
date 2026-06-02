@@ -26,7 +26,6 @@ val cred_root : string
 module For_testing : sig
   val compose_env :
     ?ssh_key_container:string ->
-    git_author_name:string -> git_author_email:string ->
     unit -> (string * string) list
 
   val mount_if_present :

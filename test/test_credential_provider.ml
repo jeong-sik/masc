@@ -271,11 +271,6 @@ let expected_env_keys =
 	    "GIT_CONFIG_VALUE_2";
 	    "GIT_CONFIG_KEY_3";
 	    "GIT_CONFIG_VALUE_3";
-    (* git author / committer *)
-    "GIT_AUTHOR_NAME";
-    "GIT_AUTHOR_EMAIL";
-    "GIT_COMMITTER_NAME";
-    "GIT_COMMITTER_EMAIL";
     (* Env_git_noninteractive *)
     "GIT_TERMINAL_PROMPT";
     "GIT_ASKPASS";
@@ -284,11 +279,7 @@ let expected_env_keys =
   ]
 
 let test_compose_env_key_set () =
-  let env =
-    HCP.For_testing.compose_env
-      ~git_author_name:"keeper-A"
-      ~git_author_email:"keeper-A@example.invalid" ()
-  in
+  let env = HCP.For_testing.compose_env () in
   let actual_keys = List.sort compare (List.map fst env) in
   let expected_keys = List.sort compare expected_env_keys in
   check (list string)
@@ -296,10 +287,7 @@ let test_compose_env_key_set () =
     expected_keys actual_keys
 
 let test_compose_env_path_values_anchored_to_cred_root () =
-  let env =
-    HCP.For_testing.compose_env
-      ~git_author_name:"k" ~git_author_email:"k@e" ()
-  in
+  let env = HCP.For_testing.compose_env () in
   let lookup k = List.assoc k env in
   check string "HOME" HCP.cred_root (lookup "HOME");
   check string "GH_CONFIG_DIR"
@@ -320,23 +308,10 @@ let test_compose_env_path_values_anchored_to_cred_root () =
 	    "!gh auth git-credential"
 	    (lookup "GIT_CONFIG_VALUE_2")
 
-let test_compose_env_git_identity_threaded () =
-  let env =
-    HCP.For_testing.compose_env
-      ~git_author_name:"NAME-X"
-      ~git_author_email:"EMAIL-X" ()
-  in
-  let lookup k = List.assoc k env in
-  check string "GIT_AUTHOR_NAME" "NAME-X" (lookup "GIT_AUTHOR_NAME");
-  check string "GIT_AUTHOR_EMAIL" "EMAIL-X" (lookup "GIT_AUTHOR_EMAIL");
-  check string "GIT_COMMITTER_NAME" "NAME-X" (lookup "GIT_COMMITTER_NAME");
-  check string "GIT_COMMITTER_EMAIL" "EMAIL-X" (lookup "GIT_COMMITTER_EMAIL")
-
 let test_compose_env_explicit_ssh_key () =
   let env =
     HCP.For_testing.compose_env
-      ~ssh_key_container:"/tmp/keeper-creds/.ssh/id_credential"
-      ~git_author_name:"k" ~git_author_email:"k@e" ()
+      ~ssh_key_container:"/tmp/keeper-creds/.ssh/id_credential" ()
   in
   let cmd = List.assoc "GIT_SSH_COMMAND" env in
   check bool "ssh command points at mounted key" true
@@ -628,8 +603,6 @@ let () =
           test_case "key set" `Quick test_compose_env_key_set;
           test_case "paths anchored to cred_root" `Quick
             test_compose_env_path_values_anchored_to_cred_root;
-          test_case "identity threaded" `Quick
-            test_compose_env_git_identity_threaded;
           test_case "explicit ssh key" `Quick
             test_compose_env_explicit_ssh_key;
         ] );

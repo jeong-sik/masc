@@ -84,7 +84,7 @@ let warn_mount_skips_if_any ~keeper_name (attempts : mount_attempt list) =
    credential dispatch container.  Ambient operator credential env is
    scrubbed before callers reach this provider; this block exposes only
    container-local GH/Git paths plus non-interactive git guards. *)
-let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
+let compose_env ?ssh_key_container () =
   let ssh_env =
     match ssh_key_container with
     | None -> []
@@ -100,10 +100,6 @@ let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
     "HOME", cred_root;
     "GH_CONFIG_DIR", Filename.concat cred_root ".config/gh";
     "GIT_CONFIG_GLOBAL", Filename.concat cred_root ".gitconfig";
-    "GIT_AUTHOR_NAME", git_author_name;
-    "GIT_AUTHOR_EMAIL", git_author_email;
-    "GIT_COMMITTER_NAME", git_author_name;
-    "GIT_COMMITTER_EMAIL", git_author_email;
   ]
   @ Credential_bundle.git_config_env_pairs
   @ ssh_env
@@ -156,11 +152,6 @@ let compose_ro_mounts_result ?keeper_name
             @ mount_if_present ~host:ssh_dir
                 ~container:(Filename.concat cred_root ".ssh")))
 
-let resolve_git_identity (kb : Credential_bundle.keeper_binding) ~keeper_name =
-  ignore keeper_name;
-  ( kb.credential_identity,
-    kb.credential_identity ^ "@users.noreply.github.com" )
-
 let metadata_of_binding (kb : Credential_bundle.keeper_binding) =
   [ "source", "host_config";
     "credential_identity", kb.credential_identity;
@@ -184,14 +175,11 @@ let count_resolve_outcome ~keeper_name ~source ~reason =
 
 let bind_from_keeper_binding ?ssh_key_path ~keeper_name
     (kb : Credential_bundle.keeper_binding) ~extra_metadata =
-  let git_author_name, git_author_email =
-    resolve_git_identity kb ~keeper_name
-  in
   let ssh_key_container =
     Option.map (fun _ -> explicit_ssh_key_container_path) ssh_key_path
   in
   let env =
-    compose_env ?ssh_key_container ~git_author_name ~git_author_email ()
+    compose_env ?ssh_key_container ()
   in
   match compose_ro_mounts_result ~keeper_name kb with
   | Error reason ->
@@ -394,8 +382,8 @@ let tear_down (_b : Keeper_credential_provider.binding) ~container_id:_ =
   ()
 
 module For_testing = struct
-  let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
-    compose_env ?ssh_key_container ~git_author_name ~git_author_email ()
+  let compose_env ?ssh_key_container () =
+    compose_env ?ssh_key_container ()
 
   let mount_if_present = mount_if_present
   let compose_ro_mounts_result = compose_ro_mounts_result

@@ -3,7 +3,6 @@
 val run_with_single_retry :
   keeper_name:string ->
   acc:Keeper_run_tools.hook_accumulator ->
-  turn_affordances:string list ->
   history_messages:Agent_sdk.Types.message list ->
   call_run_named:
     (initial_messages:Agent_sdk.Types.message list ->

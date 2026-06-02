@@ -7,6 +7,34 @@ let normalize_repo_cwd_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
+(* Currency-sync fetch-rate cache. [Keeper_repo_readiness.ensure_current]
+   fetches origin before deciding whether to fast-forward, so calling it on
+   every repo-targeting tool call would refetch many times per turn. This is a
+   per-clone-path rate cache for an *idempotent* operation (not a failure
+   cooldown): the fetch+advance runs at most once per [currency_min_interval_sec]
+   per clone, which bounds the cost to roughly once per keeper turn. *)
+let currency_last_sync : (string, float) Hashtbl.t = Hashtbl.create 64
+
+let currency_min_interval_sec = 30.0
+
+(* Keep the keeper's sandbox clone current with origin/<default_branch> before
+   code work. Best-effort: never raises, never blocks the turn; the advance is
+   fast-forward-only and work-preserving (see [Keeper_repo_readiness]). *)
+let sync_repo_currency_best_effort ~config ~meta ~repo_name =
+  let cpath = Keeper_repo_readiness.clone_path ~config ~meta ~repo_name in
+  let now = Unix.gettimeofday () in
+  let due =
+    match Hashtbl.find_opt currency_last_sync cpath with
+    | Some last -> now -. last >= currency_min_interval_sec
+    | None -> true
+  in
+  if due then begin
+    Hashtbl.replace currency_last_sync cpath now;
+    (try
+       ignore (Keeper_repo_readiness.ensure_current ~config ~meta ~repo_name ())
+     with _ -> ())
+  end
+
 let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
   let playground =
     keeper_playground_root ~config ~meta
@@ -163,6 +191,7 @@ let validate_repo_path_ready
   match repo_path_context ~config ~meta cwd with
   | None -> Ok ()
   | Some (repo_name, _repo_root, path_root, accepted_toplevels) ->
+    sync_repo_currency_best_effort ~config ~meta ~repo_name;
     let check_probe () =
       if not (safe_is_dir probe_path) then
         Error

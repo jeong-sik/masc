@@ -10,6 +10,13 @@ val fetch :
 (** [fetch ~repository ~credential] fetches all remotes and returns the list of
     remote branch names. *)
 
+val fast_forward :
+  repository:repository -> target_ref:string -> (unit, string) result
+(** [fast_forward ~repository ~target_ref] advances the current branch to
+    [target_ref] with [git merge --ff-only]. Returns [Error] (without mutating
+    history) when the move is not a pure fast-forward, so a divergent working
+    tree is never overwritten. The target ref must already be fetched. *)
+
 val get_branches :
   repository:repository -> (string list, string) result
 (** [get_branches ~repository] returns all local and remote branch names. *)

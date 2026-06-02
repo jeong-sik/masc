@@ -323,6 +323,73 @@ let test_decision_to_string () =
     (Sup.decision_to_string (Sup.Noop Sup.Noop_reason.Capacity_at_target))
 ;;
 
+(* §4. Execution boundary — Spawn decisions invoke bounded keeper starts. *)
+
+let test_execute_spawn_attempts_bounded_names () =
+  let calls = ref [] in
+  let decision =
+    Sup.Spawn
+      { reason = Sup.Spawn_reason.Below_target_reaction_capacity
+      ; suggested_keeper_count = 2
+      }
+  in
+  let result =
+    Sup.execute
+      ~spawn_keeper:(fun name ->
+        calls := name :: !calls;
+        if String.equal name "keeper-b" then Error "boom" else Ok ())
+      ~suggested_keeper_names:[ "keeper-a"; "keeper-b"; "keeper-c" ]
+      decision
+  in
+  check
+    (list string)
+    "requested names are bounded by suggested count"
+    [ "keeper-a"; "keeper-b" ]
+    result.requested_keeper_names;
+  check (list string) "started names preserve order" [ "keeper-a" ] result.started_keeper_names;
+  check int "records one failure" 1 (List.length result.failed_keeper_names);
+  check (list string) "does not call extra names" [ "keeper-b"; "keeper-a" ] !calls
+;;
+
+let test_execute_noop_does_not_call_spawn () =
+  let calls = ref 0 in
+  let result =
+    Sup.execute
+      ~spawn_keeper:(fun _name ->
+        incr calls;
+        Ok ())
+      ~suggested_keeper_names:[ "keeper-a" ]
+      (Sup.Noop Sup.Noop_reason.Capacity_at_target)
+  in
+  check int "spawn callback not called" 0 !calls;
+  check (list string) "no requested keepers" [] result.requested_keeper_names
+;;
+
+let test_execute_shortfall_reaches_target () =
+  let running = ref [ "running-a"; "running-b"; "running-c" ] in
+  let missing =
+    List.init 10 (fun idx -> Printf.sprintf "missing-%02d" (idx + 1))
+  in
+  let obs =
+    { base_obs with
+      running_keeper_fiber_count = 3
+    ; target_reaction_capacity_count = 13
+    ; minimum_running_fibers = 2
+    ; reaction_capacity_shortfall_count = 10
+    }
+  in
+  let result =
+    Sup.execute
+      ~spawn_keeper:(fun name ->
+        running := name :: !running;
+        Ok ())
+      ~suggested_keeper_names:missing
+      (Sup.tick obs)
+  in
+  check int "starts exactly the shortfall" 10 (List.length result.started_keeper_names);
+  check int "running reaches target after one tick and execute" 13 (List.length !running)
+;;
+
 let () =
   run
     "fleet_capacity_supervisor"
@@ -345,5 +412,10 @@ let () =
         ; test_case "tick is total" `Quick test_prop_totality
         ] )
     ; "formatting", [ test_case "decision_to_string" `Quick test_decision_to_string ]
+    ; ( "execute"
+      , [ test_case "spawn attempts bounded names" `Quick test_execute_spawn_attempts_bounded_names
+        ; test_case "noop does not call spawn" `Quick test_execute_noop_does_not_call_spawn
+        ; test_case "shortfall reaches target" `Quick test_execute_shortfall_reaches_target
+        ] )
     ]
 ;;

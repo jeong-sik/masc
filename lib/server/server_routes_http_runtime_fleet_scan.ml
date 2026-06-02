@@ -426,13 +426,24 @@ let take_at_most count values =
   in
   loop count [] values
 
-let supervisor_decision_json
+type fleet_capacity_supervisor_tick =
+  { observation : Keeper_fleet_capacity_supervisor.observation
+  ; decision : Keeper_fleet_capacity_supervisor.decision
+  ; missing_autoboot_names : string list
+  ; suggested_keeper_names : string list
+  }
+
+let fleet_capacity_supervisor_tick
     ~running_names
     ~autoboot_names
     ~running_keeper_fiber_count
     ~target_reaction_capacity_count
     ~minimum_running_fibers
-    ~reaction_capacity_shortfall_count =
+    ~reaction_capacity_shortfall_count
+    ~now
+    ~last_action_at
+    ~cooldown_seconds
+    () =
   let observation : Keeper_fleet_capacity_supervisor.observation =
     { running_keeper_fiber_count
     ; target_reaction_capacity_count
@@ -443,9 +454,9 @@ let supervisor_decision_json
     ; disk_pressure_active = false
     ; fd_pressure_active = false
     ; cold_start_in_progress = false
-    ; now = 0.0
-    ; last_action_at = None
-    ; cooldown_seconds = 0.0
+    ; now
+    ; last_action_at
+    ; cooldown_seconds
     }
   in
   let running_name_set =
@@ -456,18 +467,45 @@ let supervisor_decision_json
   let missing_autoboot_names =
     autoboot_names |> List.filter (fun name -> not (String_set.mem name running_name_set))
   in
-  match Keeper_fleet_capacity_supervisor.tick observation with
-  | Spawn { reason; suggested_keeper_count } ->
-    let suggested_keeper_names =
+  let decision = Keeper_fleet_capacity_supervisor.tick observation in
+  let suggested_keeper_names =
+    match decision with
+    | Spawn { suggested_keeper_count; _ } ->
       take_at_most suggested_keeper_count missing_autoboot_names
-    in
+    | Backpressure _ | Noop _ -> []
+  in
+  { observation; decision; missing_autoboot_names; suggested_keeper_names }
+
+let supervisor_decision_json
+    ~running_names
+    ~autoboot_names
+    ~running_keeper_fiber_count
+    ~target_reaction_capacity_count
+    ~minimum_running_fibers
+    ~reaction_capacity_shortfall_count =
+  let supervisor_tick =
+    fleet_capacity_supervisor_tick
+      ~running_names
+      ~autoboot_names
+      ~running_keeper_fiber_count
+      ~target_reaction_capacity_count
+      ~minimum_running_fibers
+      ~reaction_capacity_shortfall_count
+      ~now:0.0
+      ~last_action_at:None
+      ~cooldown_seconds:0.0
+      ()
+  in
+  match supervisor_tick.decision with
+  | Spawn { reason; suggested_keeper_count } ->
     `Assoc
       [ "variant", `String "spawn"
       ; ( "reason"
         , `String (Keeper_fleet_capacity_supervisor.Spawn_reason.to_string reason) )
       ; "suggested_keeper_count", `Int suggested_keeper_count
       ; ( "suggested_keeper_names"
-        , `List (List.map (fun name -> `String name) suggested_keeper_names) )
+        , `List
+            (List.map (fun name -> `String name) supervisor_tick.suggested_keeper_names) )
       ]
   | Backpressure reason ->
     `Assoc

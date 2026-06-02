@@ -62,6 +62,13 @@ type decision =
   | Backpressure of Backpressure_reason.t
   | Noop of Noop_reason.t
 
+type execution_result =
+  { decision : decision
+  ; requested_keeper_names : string list
+  ; started_keeper_names : string list
+  ; failed_keeper_names : (string * string) list
+  }
+
 let decision_to_string = function
   | Spawn { reason; suggested_keeper_count } ->
     Printf.sprintf
@@ -71,6 +78,45 @@ let decision_to_string = function
   | Backpressure reason ->
     Printf.sprintf "backpressure(%s)" (Backpressure_reason.to_string reason)
   | Noop reason -> Printf.sprintf "noop(%s)" (Noop_reason.to_string reason)
+;;
+
+let take_at_most count values =
+  let rec loop remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | value :: rest -> loop (remaining - 1) (value :: acc) rest
+  in
+  loop count [] values
+;;
+
+(* TEL-OK: pure executor returns requested/started/failed names; caller owns
+   spawn telemetry after binding this result to its concrete boot path. *)
+let execute ~spawn_keeper ~suggested_keeper_names decision =
+  match decision with
+  | Spawn { suggested_keeper_count; _ } ->
+    let requested_keeper_names =
+      take_at_most suggested_keeper_count suggested_keeper_names
+    in
+    let started_keeper_names, failed_keeper_names =
+      List.fold_left
+        (fun (started, failed) keeper_name ->
+           match spawn_keeper keeper_name with
+           | Ok () -> (keeper_name :: started, failed)
+           | Error error -> (started, (keeper_name, error) :: failed))
+        ([], [])
+        requested_keeper_names
+    in
+    { decision
+    ; requested_keeper_names
+    ; started_keeper_names = List.rev started_keeper_names
+    ; failed_keeper_names = List.rev failed_keeper_names
+    }
+  | Backpressure _ | Noop _ ->
+    { decision
+    ; requested_keeper_names = []
+    ; started_keeper_names = []
+    ; failed_keeper_names = []
+    }
 ;;
 
 let cooldown_elapsed ~now ~last_action_at ~cooldown_seconds =

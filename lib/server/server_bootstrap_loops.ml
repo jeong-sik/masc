@@ -774,18 +774,19 @@ let start_keeper_loops
       let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
       let stagger_window = Keeper_config.keeper_bootstrap_stagger_step_sec () in
       (* Attempt to boot a single keeper. Returns true if started. *)
-      let try_boot_one _idx name =
+      let try_boot_one ?(log_prefix = "autoboot") _idx name =
         try
-          Log.Keeper.info "autoboot: loading meta for %s" name;
+          Log.Keeper.info "%s: loading meta for %s" log_prefix name;
           match Keeper_runtime.load_or_materialize_boot_meta keeper_boot_ctx name with
           | Error e ->
-            Log.Keeper.error "autoboot: failed to load meta for %s: %s" name e;
+            Log.Keeper.error "%s: failed to load meta for %s: %s" log_prefix name e;
             false
           | Ok { meta = m; materialized } ->
             if Keeper_registry.is_running ~base_path:config.base_path m.name
             then (
               Log.Keeper.info
-                "autoboot: %s already running%s"
+                "%s: %s already running%s"
+                log_prefix
                 m.name
                 (if materialized then " (materialized from TOML)" else "");
               true)
@@ -797,7 +798,8 @@ let start_keeper_loops
                   ~keeper_name:name
               in
               Log.Keeper.info
-                "autoboot: calling start_keepalive for %s (warmup=%ds)"
+                "%s: calling start_keepalive for %s (warmup=%ds)"
+                log_prefix
                 name
                 warmup;
               let ctx : _ Keeper_types_profile.context =
@@ -824,16 +826,21 @@ let start_keeper_loops
                 Keeper_registry.is_registered ~base_path:config.base_path m.name
               in
               if registered
-              then Log.Keeper.info "autoboot: started keepalive for %s" m.name
+              then Log.Keeper.info "%s: started keepalive for %s" log_prefix m.name
               else
                 Log.Keeper.warn
-                  "autoboot: start_keepalive returned but %s not registered"
+                  "%s: start_keepalive returned but %s not registered"
+                  log_prefix
                   m.name;
               registered)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-          Log.Keeper.error "autoboot: exception for %s: %s" name (Printexc.to_string exn);
+          Log.Keeper.error
+            "%s: exception for %s: %s"
+            log_prefix
+            name
+            (Printexc.to_string exn);
           false
       in
       (* Initial boot pass *)
@@ -903,12 +910,114 @@ let start_keeper_loops
          [supervisor_sweep_running] guard makes a second call a
          noop, so this stays correct if [masc_keeper_msg] later
          races into [start_existing_keepalives] anyway. *)
-      try Keeper_runtime.start_supervisor_sweep keeper_boot_ctx with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Log.Keeper.error
-          "autoboot: supervisor sweep failed to start: %s"
-          (Printexc.to_string exn)));
+      (try Keeper_runtime.start_supervisor_sweep keeper_boot_ctx with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Keeper.error
+           "autoboot: supervisor sweep failed to start: %s"
+           (Printexc.to_string exn));
+      let start_fleet_capacity_supervisor_loop () =
+        if not Env_config.KeeperSupervisor.fleet_capacity_tick_enabled
+        then
+          Log.Keeper.info
+            "fleet_capacity_supervisor: disabled via \
+             MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED=false"
+        else (
+          let tick_interval =
+            Env_config.KeeperSupervisor.fleet_capacity_tick_interval_sec
+          in
+          let cooldown_seconds = Float.min 120.0 (tick_interval *. 2.0) in
+          let last_action_at = ref None in
+          let execute_once () =
+            let now = Eio.Time.now clock in
+            let phase_snapshot =
+              Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot
+                ~base_path:config.base_path
+                ()
+            in
+            let bootable_names = Keeper_runtime.bootable_keeper_names config in
+            let registered_names =
+              Keeper_registry.all ~base_path:config.base_path ()
+              |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+              |> Server_routes_http_runtime_fleet_scan.sorted_unique_strings
+            in
+            let target_count = List.length bootable_names in
+            let minimum_running_fibers =
+              if target_count <= 1 then target_count else 2
+            in
+            let reaction_capacity_shortfall_count =
+              max
+                0
+                (target_count
+                 - phase_snapshot.counts.running
+                 - phase_snapshot.counts.recovering)
+            in
+            let supervisor_tick =
+              Server_routes_http_runtime_fleet_scan.fleet_capacity_supervisor_tick
+                ~running_names:registered_names
+                ~autoboot_names:bootable_names
+                ~running_keeper_fiber_count:phase_snapshot.counts.running
+                ~target_reaction_capacity_count:target_count
+                ~minimum_running_fibers
+                ~reaction_capacity_shortfall_count
+                ~now
+                ~last_action_at:!last_action_at
+                ~cooldown_seconds
+                ()
+            in
+            match supervisor_tick.decision with
+            | Keeper_fleet_capacity_supervisor.Spawn _ ->
+              let result =
+                Keeper_fleet_capacity_supervisor.execute
+                  ~spawn_keeper:(fun keeper_name ->
+                    if try_boot_one ~log_prefix:"fleet_capacity_supervisor" 0 keeper_name
+                    then Ok ()
+                    else Error "keeper boot did not register")
+                  ~suggested_keeper_names:supervisor_tick.suggested_keeper_names
+                  supervisor_tick.decision
+              in
+              if result.started_keeper_names <> [] then last_action_at := Some now;
+              if result.requested_keeper_names <> []
+              then
+                Log.Keeper.info
+                  "fleet_capacity_supervisor: decision=%s requested=[%s] \
+                   started=[%s] failed=%d"
+                  (Keeper_fleet_capacity_supervisor.decision_to_string
+                     result.decision)
+                  (String.concat ", " result.requested_keeper_names)
+                  (String.concat ", " result.started_keeper_names)
+                  (List.length result.failed_keeper_names);
+              if result.failed_keeper_names <> []
+              then
+                Log.Keeper.warn
+                  "fleet_capacity_supervisor: failed keepers [%s]"
+                  (result.failed_keeper_names
+                   |> List.map (fun (name, error) -> name ^ "=" ^ error)
+                   |> String.concat ", ")
+            | Keeper_fleet_capacity_supervisor.Backpressure reason ->
+              Log.Keeper.warn
+                "fleet_capacity_supervisor: backpressure=%s"
+                (Keeper_fleet_capacity_supervisor.Backpressure_reason.to_string
+                   reason)
+            | Keeper_fleet_capacity_supervisor.Noop _ -> ()
+          in
+          Log.Keeper.info
+            "fleet_capacity_supervisor: enabled interval=%.0fs cooldown=%.0fs"
+            tick_interval
+            cooldown_seconds;
+          let rec loop () =
+            (try execute_once () with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Keeper.warn
+                 "fleet_capacity_supervisor: tick failed: %s"
+                 (Printexc.to_string exn));
+            Eio.Time.sleep clock tick_interval;
+            loop ()
+          in
+          loop ())
+      in
+      start_fleet_capacity_supervisor_loop ()));
   (* Phase 5: unified startup subsystem summary *)
   Log.info ~ctx:"startup" "subsystems: keeper loops started"
 ;;

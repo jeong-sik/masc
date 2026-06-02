@@ -381,9 +381,9 @@ val effective_meta_of_profile_defaults :
   keeper_meta ->
   (keeper_meta, string) result
 
-val runtime_id_of_meta : keeper_meta -> string
 (** Runtime id selected for keeper dispatch. Uses the keeper profile [model]
     when present; otherwise falls back to the configured default runtime id. *)
+val runtime_id_of_meta : keeper_meta -> string
 
 (** {1 Outcome <-> string} *)
 

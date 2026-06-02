@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/keeper/
-  - lib/tool_dispatch.ml
+  - lib/tool/tool_dispatch.ml
   - lib/server/
 ---
 
@@ -207,7 +207,7 @@ ls .masc/keepers/ | wc -l
 
 ```bash
 # tool_dispatch.ml에서 config 도구 검색 (2026-03-29)
-grep -n "masc_config" lib/tool_dispatch.ml
+grep -n "masc_config" lib/tool/tool_dispatch.ml
 # 결과: 0건
 
 # 직렬화 레이어는 존재
@@ -238,7 +238,7 @@ grep -n "to_json" lib/config/env_config.ml | head -3
 
 ```bash
 # dispatch 등록 확인 (2026-03-29)
-grep "masc_tempo\|masc_encryption\|masc_notification\|masc_generate_key" lib/tool_dispatch.ml
+grep "masc_tempo\|masc_encryption\|masc_notification\|masc_generate_key" lib/tool/tool_dispatch.ml
 # 결과: 0건
 
 # historical snapshot (2026-03-29): 당시 handler 파일은 잔존
@@ -570,7 +570,7 @@ Wave 2 완료 조건: `find .masc/keepers -name "memory.jsonl" | wc -l` > 0 + co
 | `lib/tool_tempo.ml` | H1 | dead handler (PR #4750에서 제거) |
 | `lib/tool_encryption.ml` | H1 | dead handler (PR #4750에서 제거) |
 | `lib/tool_notifications.ml` | H1 | dead handler (삭제 대상) |
-| `lib/tool_dispatch.ml` | H1, C2 | 도구 등록 중앙 |
+| `lib/tool/tool_dispatch.ml` | H1, C2 | 도구 등록 중앙 |
 | `dune-project` | H4 | 버전 SSOT |
 | `ROADMAP.md` | H4 | 버전 drift |
 | `PRODUCT-OPERATING-PLAN.md` | H4 | 버전 drift |
@@ -593,7 +593,7 @@ done
 find .masc/keepers -name "memory.jsonl" -o -name "memory_bank.jsonl" | wc -l
 
 # C2: config 도구 등록 확인
-grep -c "masc_config" lib/tool_dispatch.ml
+grep -c "masc_config" lib/tool/tool_dispatch.ml
 
 # M1: phantom tool 정리 확인
 grep "masc_config_set\|masc_workspace_delete\|masc_admin_reset\|masc_spawn\|masc_execute\b\|masc_neo4j_query\|masc_pg_query" \

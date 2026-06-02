@@ -936,11 +936,6 @@ let start_keeper_loops
                 ()
             in
             let bootable_names = Keeper_runtime.bootable_keeper_names config in
-            let registered_names =
-              Keeper_registry.all ~base_path:config.base_path ()
-              |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
-              |> Server_routes_http_runtime_fleet_scan.sorted_unique_strings
-            in
             let target_count = List.length bootable_names in
             let minimum_running_fibers =
               if target_count <= 1 then target_count else 2
@@ -954,7 +949,7 @@ let start_keeper_loops
             in
             let supervisor_tick =
               Server_routes_http_runtime_fleet_scan.fleet_capacity_supervisor_tick
-                ~running_names:registered_names
+                ~running_names:phase_snapshot.running_names
                 ~autoboot_names:bootable_names
                 ~running_keeper_fiber_count:phase_snapshot.counts.running
                 ~target_reaction_capacity_count:target_count

@@ -100,7 +100,11 @@ let execute ~spawn_keeper ~suggested_keeper_names decision =
     let started_keeper_names, failed_keeper_names =
       List.fold_left
         (fun (started, failed) keeper_name ->
-           match spawn_keeper keeper_name with
+           match
+             try spawn_keeper keeper_name with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn -> Error (Printexc.to_string exn)
+           with
            | Ok () -> (keeper_name :: started, failed)
            | Error error -> (started, (keeper_name, error) :: failed))
         ([], [])

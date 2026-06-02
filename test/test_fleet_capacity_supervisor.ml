@@ -365,6 +365,29 @@ let test_execute_noop_does_not_call_spawn () =
   check (list string) "no requested keepers" [] result.requested_keeper_names
 ;;
 
+let test_execute_records_spawn_exceptions () =
+  let decision =
+    Sup.Spawn
+      { reason = Sup.Spawn_reason.Below_target_reaction_capacity
+      ; suggested_keeper_count = 2
+      }
+  in
+  let result =
+    Sup.execute
+      ~spawn_keeper:(fun name ->
+        if String.equal name "keeper-b" then invalid_arg "spawn failed" else Ok ())
+      ~suggested_keeper_names:[ "keeper-a"; "keeper-b" ]
+      decision
+  in
+  check (list string) "started keeper-a" [ "keeper-a" ] result.started_keeper_names;
+  check int "records one exception failure" 1 (List.length result.failed_keeper_names);
+  match result.failed_keeper_names with
+  | [ name, error ] ->
+    check string "failed keeper name" "keeper-b" name;
+    check bool "records exception text" true (String.length error > 0)
+  | _ -> fail "expected one failed keeper"
+;;
+
 let test_execute_shortfall_reaches_target () =
   let running = ref [ "running-a"; "running-b"; "running-c" ] in
   let missing =
@@ -415,6 +438,7 @@ let () =
     ; ( "execute"
       , [ test_case "spawn attempts bounded names" `Quick test_execute_spawn_attempts_bounded_names
         ; test_case "noop does not call spawn" `Quick test_execute_noop_does_not_call_spawn
+        ; test_case "records spawn exceptions" `Quick test_execute_records_spawn_exceptions
         ; test_case "shortfall reaches target" `Quick test_execute_shortfall_reaches_target
         ] )
     ]

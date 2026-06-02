@@ -29,7 +29,7 @@ let fleet_capacity_tick_enabled =
 let fleet_capacity_tick_interval_sec =
   Float.max
     10.0
-    (get_float ~default:30.0 "MASC_FLEET_CAPACITY_SUPERVISOR_TICK_SEC")
+    (get_float_nonneg ~default:30.0 "MASC_FLEET_CAPACITY_SUPERVISOR_TICK_SEC")
 ;;
 
 (** Maximum restart attempts before declaring a keeper dead.

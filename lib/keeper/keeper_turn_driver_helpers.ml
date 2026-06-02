@@ -77,21 +77,6 @@ let missing_required_tool_names_after_lane ~required_tool_names ~effective_tools
   missing_required_tool_names_after_lane_by_name ~required_tool_names
     ~materialized_tool_names
 
-let required_tool_lane_unavailable_error ~lane ~missing_required_tools
-    ~materialized_tools =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig
-       {
-         field = "tool_support";
-         detail =
-           Printf.sprintf
-             "required_tool_lane_unavailable: lane=%s missing_required_tools=[%s] \
-              materialized_tools=[%s]"
-             lane
-             (String.concat ", " missing_required_tools)
-             (String.concat ", " materialized_tools);
-       })
-
 type empty_candidate_classification =
   | Tool_capability_empty
   | Provider_unavailable

@@ -287,10 +287,18 @@ let run_try_provider
         Keeper_runtime_manifest.Provider_lane_resolved;
       if missing_required_tool_names <> [] then
         Error
-          (Keeper_turn_driver_helpers.required_tool_lane_unavailable_error
-             ~lane:resolved_lane
-             ~missing_required_tools:missing_required_tool_names
-             ~materialized_tools:materialized_tool_names)
+          (Agent_sdk.Error.Config
+             (Agent_sdk.Error.InvalidConfig
+                {
+                  field = "tool_support";
+                  detail =
+                    Printf.sprintf
+                      "required_tool_lane_unavailable: lane=%s \
+                       missing_required_tools=[%s] materialized_tools=[%s]"
+                      resolved_lane
+                      (String.concat ", " missing_required_tool_names)
+                      (String.concat ", " materialized_tool_names);
+                }))
       else
         Ok
           { (Runtime_candidate.default_config

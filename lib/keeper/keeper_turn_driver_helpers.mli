@@ -24,12 +24,6 @@ val missing_required_tool_names_after_lane_by_name :
   materialized_tool_names:string list ->
   string list
 
-val required_tool_lane_unavailable_error :
-  lane:string ->
-  missing_required_tools:string list ->
-  materialized_tools:string list ->
-  Agent_sdk.Error.sdk_error
-
 type empty_candidate_classification =
   | Tool_capability_empty
   | Provider_unavailable

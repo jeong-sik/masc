@@ -332,8 +332,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   let key_paused_keepers = "paused_keepers" in
   let path_diagnostics = health_path_diagnostics () in
   let base_path = runtime_base_path_opt () in
-  let phase_counts = keeper_phase_counts ?base_path () in
-  let running_names = running_keeper_names ?base_path () in
+  let phase_snapshot = keeper_phase_snapshot ?base_path () in
+  let phase_counts = phase_snapshot.counts in
+  let running_names = phase_snapshot.running_names in
   let keeper_fibers = phase_counts.running in
   (* Single-pass fleet meta scan: reads each keeper meta file once,
      shared by paused-keepers and fleet-safety sections. *)

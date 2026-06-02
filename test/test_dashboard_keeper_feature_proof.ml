@@ -93,7 +93,6 @@ let persist_keeper_with_proactive
               base.runtime.usage with
               total_turns;
               last_turn_ts = now;
-              last_model_used = "openai:gpt-5.4";
             };
           proactive_rt =
             {

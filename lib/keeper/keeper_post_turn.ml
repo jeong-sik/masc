@@ -600,7 +600,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
                ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
                ~session
                ~agent_name:base_meta.agent_name
-               ~model ~ctx:compacted_ctx ~generation:current_generation
+               ~ctx:compacted_ctx ~generation:current_generation
           with
           | Ok saved_cp -> (true, None, compacted_ctx, Some saved_cp)
           | Error e ->
@@ -872,7 +872,7 @@ let recover_latest_checkpoint_for_overflow_retry
               ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
               ~session
               ~agent_name:retry_meta.agent_name
-              ~model ~ctx:compacted_ctx ~generation:turn_generation
+              ~ctx:compacted_ctx ~generation:turn_generation
           with
           | Ok checkpoint ->
               Some { checkpoint; compaction; turn_generation }

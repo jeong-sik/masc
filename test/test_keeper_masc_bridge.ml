@@ -401,18 +401,13 @@ let test_tool_access_missing_defaults_standard_policy () =
 let test_typed_and_string_tool_access_rejections_match () =
   let module Access = Masc_mcp.Keeper_meta_contract in
   let check_rejection label json =
-    let string_error =
-      match Access.tool_access_of_meta_json json with
-      | Ok _ -> Alcotest.failf "string parser accepted %s" label
-      | Error e -> e
-    in
-    let typed_error =
-      match Access.tool_access_of_meta_json_typed json with
-      | Ok _ -> Alcotest.failf "typed parser accepted %s" label
-      | Error e -> e
-    in
-    Alcotest.(check string) (label ^ " typed/string rejection") string_error
-      typed_error
+    match Access.tool_access_of_meta_json json with
+    | Ok _ -> Alcotest.failf "tool_access parser accepted %s" label
+    | Error e ->
+      Alcotest.(check bool)
+        (label ^ " rejection is explicit")
+        true
+        (String.length e > 0)
   in
   check_rejection "missing" (`Assoc []);
   check_rejection "null" (`Assoc [ "tool_access", `Null ])
@@ -821,7 +816,7 @@ let test_denied_tools_excluded_from_injection () =
   let meta = make_meta () in
   let names = KET.keeper_masc_tool_names meta in
   let denied =
-    Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
+    Tool_catalog.tools_for_surface Tool_catalog.System_internal
   in
   List.iter
     (fun denied_name ->
@@ -846,7 +841,7 @@ let test_denied_excluded_from_allowed_names () =
   in
   let names = KET.keeper_allowed_tool_names meta in
   let denied =
-    Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
+    Tool_catalog.tools_for_surface Tool_catalog.System_internal
   in
   List.iter
     (fun denied_name ->

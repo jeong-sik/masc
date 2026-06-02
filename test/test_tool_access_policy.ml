@@ -216,10 +216,10 @@ let test_surface_resolution_respects_candidates () =
     (List.mem "totally_unknown" resolved)
 
 let test_keeper_denied_surface_blocks_tools () =
-  let denied_tools = Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied in
+  let denied_tools = Tool_catalog.tools_for_surface Tool_catalog.System_internal in
   let policy = {
     Tool_access_policy.allow = All;
-    deny = Surface Tool_catalog.Keeper_denied;
+    deny = Surface Tool_catalog.System_internal;
   } in
   check bool "keeper_denied surface has tools" true
     (List.length denied_tools > 0);

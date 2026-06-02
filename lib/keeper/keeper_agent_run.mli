@@ -43,8 +43,7 @@ module For_testing : sig
 end
 
 val per_provider_timeout_for_turn
-  :  meta:Keeper_meta_contract.keeper_meta
-  -> ?oas_timeout_s:float
+  :  ?oas_timeout_s:float
   -> ?oas_timeout_is_explicit:bool
   -> timeout_s:float
   -> unit

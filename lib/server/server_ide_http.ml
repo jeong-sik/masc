@@ -417,4 +417,57 @@ let add_routes router =
          | _ -> Httpun.Body.Writer.close writer)
       request
       reqd)
+  |> Http.Router.get "/api/v1/ide/memory" (fun request reqd ->
+    with_public_read
+      (fun state _req inner_reqd ->
+         let uri = Uri.of_string request.target in
+         let base = base_path_of_state state in
+         let keeper_id =
+           match Uri.get_query_param uri "keeper_id" with
+           | Some k when k <> "" -> Some k
+           | _ -> None
+         in
+         let limit =
+           match Uri.get_query_param uri "limit" with
+           | Some s -> (try int_of_string s with _ -> 50)
+           | None -> 50
+         in
+         (* Memory tiers: retrospective, episode, semantic.
+            Currently returns annotation-based memory entries.
+            Future: integrate with Neo4j/pgvector for semantic search. *)
+         let filter : Ide_annotation_types.annotation_filter =
+           { file_path = None; keeper_id; goal_id = None; task_id = None }
+         in
+         let annotations = Ide_annotations.list ~base_dir:base ~filter () in
+         let entries =
+           List.map (fun (a : Ide_annotation_types.annotation) ->
+             `Assoc [
+               ("id", `String a.id);
+               ("kind", `String (Ide_annotation_types.annotation_kind_to_string a.kind));
+               ("content", `String a.content);
+               ("file_path", `String a.file_path);
+               ("line_start", `Int a.line_start);
+               ("line_end", `Int a.line_end);
+               ("keeper_id", `String a.keeper_id);
+               ("created_at_ms", `Int (Int64.to_int a.created_at_ms));
+               ("goal_id", (match a.goal_id with Some g -> `String g | None -> `Null));
+               ("task_id", (match a.task_id with Some t -> `String t | None -> `Null));
+             ])
+           (List.filteri (fun i _ -> i < limit) annotations)
+         in
+         let result = `Assoc [
+           ("entries", `List entries);
+           ("total", `Int (List.length annotations));
+           ("limit", `Int limit);
+         ] in
+         let origin = get_origin request in
+         let headers =
+           Httpun.Headers.of_list
+             (("content-type", "application/json") :: cors_headers origin)
+         in
+         let body = Yojson.Safe.to_string result in
+         let response = Httpun.Response.create ~headers `OK in
+         Httpun.Reqd.respond_with_string inner_reqd response body)
+      request
+      reqd)
 ;;

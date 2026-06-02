@@ -41,7 +41,7 @@ let make_meta
 
 let full_tool_access () =
   Keeper_meta_tool_access.normalize_tool_access
-    (Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+    (Tool_catalog.tools_for_surface Tool_catalog.Agent_internal
      @ Tool_catalog.tools_for_surface Tool_catalog.Public_mcp)
 ;;
 

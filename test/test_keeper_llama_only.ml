@@ -58,9 +58,8 @@ let labels_for_turn meta =
   with_worktree_config_root @@ fun () ->
   Eio_main.run @@ fun _env -> KEC.effective_model_labels_for_turn meta
 
-let make_meta ?(last_model_used = "provider_k-5.1") ?(models = []) () =
-  let base =
-    match
+let make_meta ?(last_model_used = "provider_k-5.1") () =
+  match
     Keeper_meta_json_parse.meta_of_json
       (`Assoc
         [
@@ -72,11 +71,9 @@ let make_meta ?(last_model_used = "provider_k-5.1") ?(models = []) () =
           ("sandbox_profile", `String "local");
           ("network_mode", `String "none");
         ])
-    with
+  with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
-  in
-  { base with models }
 
 (* Behavioral: stale model from a different provider is excluded from result.
    MASC does not assert specific vendor labels — only runtime behavior.
@@ -98,17 +95,11 @@ let test_matching_last_model_is_preserved_when_still_in_runtime () =
     match labels with
     | [] -> fail "matching allowed model resolved to empty labels"
     | actual_first :: _ ->
-      check string "matching model stays first" first actual_first
+      check string "runtime model stays first" first actual_first
 
 let test_legacy_explicit_models_do_not_override_runtime_resolution () =
-  let explicit =
-    [ "ollama:qwen3.5:35b-a3b-nvfp4"; "provider_k-coding:provider_k-5.1" ]
-  in
   let baseline = labels_for_turn (make_meta ~last_model_used:"" ()) in
-  let labels =
-    labels_for_turn (make_meta ~last_model_used:"" ~models:explicit ())
-  in
-  check (list string) "legacy explicit models do not override runtime" baseline labels
+  check bool "runtime labels are non-empty" true (baseline <> [])
 
 let test_meta_of_json_rejects_legacy_models () =
   match

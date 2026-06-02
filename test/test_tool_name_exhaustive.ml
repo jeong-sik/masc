@@ -1,118 +1,46 @@
 open Alcotest
 
-(** RFC-0084 §3.1 Tool_name.t exhaustiveness closure.
+(** Tool_name no longer has a [Masc_keeper] branch. Keeper lifecycle/tool
+    execution names are outside the public MASC tool-name sum, so old
+    [masc_keeper_*] strings must fail closed instead of re-entering typed
+    dispatch through a compatibility branch. *)
 
-    PR-2 adds 4 missing variants to [Tool_name.Masc_keeper.t] so that all
-    dispatched [masc_keeper_*] tool names round-trip through the typed
-    sum without falling back to the runtime tag-registry path in
-    [keeper_tag_dispatch.ml].
-
-    Reference: agent #1 spot-trace (RFC-0084 §1.1) identified that
-    [masc_keeper_sandbox_status/start/stop] and [masc_keeper_msg_result]
-    were dispatched but missing from the typed variant, forcing routes
-    through [static_tag_of_tool_name] to return [None] and fall through
-    to runtime tag-registry. *)
-
-let all_masc_keeper_variants : Tool_name.Masc_keeper.t list =
-  [ Clear
-  ; Compact
-  ; Create_from_persona
-  ; Down
-  ; List
-  ; Msg
-  ; Msg_result
-  ; Persona_audit
-  ; Repair
-  ; Reset
-  ; Sandbox_start
-  ; Sandbox_status
-  ; Sandbox_stop
-  ; Status
-  ; Up
+let removed_masc_keeper_names =
+  [ "masc_keeper_clear"
+  ; "masc_keeper_compact"
+  ; "masc_keeper_create_from_persona"
+  ; "masc_keeper_msg"
+  ; "masc_keeper_msg_result"
+  ; "masc_keeper_persona_audit"
+  ; "masc_keeper_repair"
+  ; "masc_keeper_sandbox_start"
+  ; "masc_keeper_sandbox_status"
+  ; "masc_keeper_sandbox_stop"
+  ; "masc_keeper_status"
   ]
 
-let test_round_trip_all_masc_keeper_variants () =
-  (* Every Masc_keeper.t variant must round-trip through to_string/of_string. *)
+let test_removed_masc_keeper_names_fail_closed () =
   List.iter
-    (fun v ->
-      let s = Tool_name.Masc_keeper.to_string v in
-      match Tool_name.Masc_keeper.of_string s with
-      | Some v' when v = v' -> ()
-      | Some _ ->
-        failf "round-trip mismatch for %s (different variant)" s
-      | None ->
-        failf "round-trip miss: of_string %S returned None" s)
-    all_masc_keeper_variants
+    (fun name ->
+      check (option string)
+        (Printf.sprintf "%s no longer parses through Tool_name" name)
+        None
+        (Option.map Tool_name.to_string (Tool_name.of_string name)))
+    removed_masc_keeper_names
 
-let test_msg_result_typed () =
-  (* RFC-0084 §3.1: masc_keeper_msg_result must resolve to typed variant. *)
-  (check (option string))
-    "masc_keeper_msg_result of_string returns Some Msg_result"
-    (Some "masc_keeper_msg_result")
-    (Option.map
-       Tool_name.Masc_keeper.to_string
-       (Tool_name.Masc_keeper.of_string "masc_keeper_msg_result"))
-
-let test_sandbox_start_typed () =
-  (check (option string))
-    "masc_keeper_sandbox_start of_string returns Some Sandbox_start"
-    (Some "masc_keeper_sandbox_start")
-    (Option.map
-       Tool_name.Masc_keeper.to_string
-       (Tool_name.Masc_keeper.of_string "masc_keeper_sandbox_start"))
-
-let test_sandbox_status_typed () =
-  (check (option string))
-    "masc_keeper_sandbox_status of_string returns Some Sandbox_status"
-    (Some "masc_keeper_sandbox_status")
-    (Option.map
-       Tool_name.Masc_keeper.to_string
-       (Tool_name.Masc_keeper.of_string "masc_keeper_sandbox_status"))
-
-let test_sandbox_stop_typed () =
-  (check (option string))
-    "masc_keeper_sandbox_stop of_string returns Some Sandbox_stop"
-    (Some "masc_keeper_sandbox_stop")
-    (Option.map
-       Tool_name.Masc_keeper.to_string
-       (Tool_name.Masc_keeper.of_string "masc_keeper_sandbox_stop"))
-
-let test_unknown_returns_none () =
-  (check (option string))
-    "unknown masc_keeper_* name returns None"
-    None
-    (Option.map
-       Tool_name.Masc_keeper.to_string
-       (Tool_name.Masc_keeper.of_string "masc_keeper_nonexistent"))
-
-let test_variant_count () =
-  (* Pin the variant count so future additions are caught by this assertion. *)
-  (check int)
-    "Masc_keeper.t variant count (RFC-0084 §3.1; update when adding variants)"
-    15
-    (List.length all_masc_keeper_variants)
-
-let test_top_level_of_string_via_masc_keeper () =
-  (* Top-level Tool_name.of_string routes masc_keeper_* through Masc_keeper. *)
-  match Tool_name.of_string "masc_keeper_sandbox_start" with
-  | Some (Tool_name.Masc_keeper Sandbox_start) -> ()
-  | Some other ->
-    failf
-      "expected Masc_keeper Sandbox_start, got %s"
-      (Tool_name.to_string other)
-  | None -> failf "Tool_name.of_string returned None for masc_keeper_sandbox_start"
+let test_current_masc_name_still_round_trips () =
+  match Tool_name.of_string "masc_status" with
+  | Some tool ->
+    check string "masc_status roundtrip" "masc_status" (Tool_name.to_string tool)
+  | None -> failf "masc_status should still parse"
 
 let () =
   Alcotest.run
-    "RFC-0084 Tool_name.t exhaustive closure"
-    [ ( "masc-keeper-variants"
-      , [ test_case "round-trip-all-variants" `Quick test_round_trip_all_masc_keeper_variants
-        ; test_case "msg-result-typed" `Quick test_msg_result_typed
-        ; test_case "sandbox-start-typed" `Quick test_sandbox_start_typed
-        ; test_case "sandbox-status-typed" `Quick test_sandbox_status_typed
-        ; test_case "sandbox-stop-typed" `Quick test_sandbox_stop_typed
-        ; test_case "unknown-returns-none" `Quick test_unknown_returns_none
-        ; test_case "variant-count-pin" `Quick test_variant_count
-        ; test_case "top-level-of-string" `Quick test_top_level_of_string_via_masc_keeper
+    "Tool_name removed keeper closure"
+    [ ( "removed-masc-keeper"
+      , [ test_case "removed names fail closed" `Quick
+            test_removed_masc_keeper_names_fail_closed
+        ; test_case "current masc name roundtrips" `Quick
+            test_current_masc_name_still_round_trips
         ] )
     ]

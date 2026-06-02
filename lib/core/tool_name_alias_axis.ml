@@ -47,9 +47,3 @@ let strip_mcp_masc_prefix name =
   else name
 ;;
 
-let canonical_required_tool_name name =
-  let stripped = strip_mcp_masc_prefix name in
-  match internal_name_of_public stripped with
-  | Some internal -> internal
-  | None -> stripped
-;;

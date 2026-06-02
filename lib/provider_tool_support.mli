@@ -257,14 +257,3 @@ val apply_required_tool_use_filter
   -> Llm_provider.Provider_config.t list
   -> Llm_provider.Provider_config.t list
 
-(** [apply_required_tool_use_filter_with_overrides] is like
-    {!apply_required_tool_use_filter} but takes per-provider override
-    pairs so declarative capability cutover can supply a distinct
-    override for each provider in the list. *)
-val apply_required_tool_use_filter_with_overrides
-  :  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
-  -> require_tool_choice_support:bool
-  -> require_tool_support:bool
-  -> label:string
-  -> (Llm_provider.Provider_config.t * runtime_capabilities_override option) list
-  -> (Llm_provider.Provider_config.t * runtime_capabilities_override option) list

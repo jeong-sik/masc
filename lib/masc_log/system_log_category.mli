@@ -15,7 +15,6 @@ type t =
   | Keeper_stale_watchdog_lifecycle
   | Provider_timeout
   | Provider_runtime_exhaustion
-  | Required_tool_contract_mismatch
   | Task_state_probe_misuse
   | Verifier_action_guard
   | Network_error_other

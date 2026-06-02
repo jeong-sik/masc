@@ -19,6 +19,7 @@ type caller =
 type reject_reason =
   | Command_not_in_allowlist of { bin : string }
   | Pipeline_segment_disallowed of { stage : int; bin : string }
+  | Wrapper_unreducible of { stage : int; wrapper : string; detail : string }
   | Pipes_not_allowed of { stages : int }
   | Redirect_disallowed_in_caller of { stage : int }
   | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }
@@ -282,16 +283,121 @@ let bin_allowed ~(allowed_commands : string list) (bin : string) =
   List.exists (String.equal bin) allowed_commands
 ;;
 
-(* Returns the (1-indexed stage, bin) of the first stage whose binary
-   name is outside the allowlist, [None] if every stage passes. *)
-let first_disallowed_stage ~allowed_commands stage_bins =
+(* `env [OPT]... [NAME=VALUE]... CMD [ARG]...` runs CMD with a modified
+   environment. The allowlist must authorize CMD, not `env`: `env` is
+   allowlisted so a command may set vars (e.g. `env FOO=bar npm test`), but
+   it must not be a hole through which a non-allowlisted command
+   (`env rm -rf /`) is smuggled past the gate. [effective_bin_of_stage]
+   resolves the command a stage really runs.
+
+   Secure default: any env form we cannot statically reduce to a literal
+   inner command — the [-S]/[--split-string] mode, an unmodeled flag, or a
+   non-literal command token — yields [Unreducible], which the gate denies.
+   It never silently allows `env`. Erring on a modeled value-flag (so
+   [env -u PATH cat x] keeps [cat] as the command) is a false-reject, which
+   is safe; a false-allow is not. *)
+type effective_bin =
+  | Bin of string
+  | Unreducible of string
+
+(* env options that consume the following token as their value. *)
+let env_value_flags = [ "-u"; "--unset"; "-C"; "--chdir" ]
+
+(* env boolean options (consume no value). *)
+let env_bool_flags =
+  [ "-i"; "--ignore-environment"; "-0"; "--null"; "-v"; "--debug" ]
+;;
+
+let is_env_assignment tok =
+  match String.index_opt tok '=' with
+  | None | Some 0 -> false
+  | Some idx ->
+    let name = String.sub tok 0 idx in
+    String.length name > 0
+    && (match name.[0] with
+        | 'A' .. 'Z' | 'a' .. 'z' | '_' -> true
+        | _ -> false)
+    && String.for_all
+         (function
+           | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
+           | _ -> false)
+         name
+;;
+
+let is_eq_form_value_flag tok =
+  List.exists
+    (fun f -> String.starts_with ~prefix:(f ^ "=") tok)
+    [ "--unset"; "--chdir" ]
+;;
+
+let is_split_string_flag tok =
+  tok = "-S"
+  || tok = "--split-string"
+  || (String.length tok >= 2 && tok.[0] = '-' && tok.[1] = 'S')
+  || String.starts_with ~prefix:"--split-string" tok
+;;
+
+(* Peel `env`'s own options and assignments to the first literal token that
+   names the command it execs. Recurses through a leading `env env ...`. *)
+let rec effective_bin_of_args (args : SI.arg list) : effective_bin =
+  match args with
+  | [] -> Bin "env" (* bare `env` after flags/assignments: prints env, a read *)
+  | arg :: rest ->
+    (match arg_literal arg with
+     | None -> Unreducible "non-literal token in env command position"
+     | Some "" -> Unreducible "empty token after env"
+     | Some "--" ->
+       (match rest with
+        | [] -> Bin "env"
+        | cmd :: _ ->
+          (match arg_literal cmd with
+           | Some "env" -> effective_bin_of_args rest
+           | Some c -> Bin c
+           | None -> Unreducible "non-literal command after env --"))
+     | Some tok when is_split_string_flag tok ->
+       Unreducible "env -S/--split-string is not statically reducible"
+     | Some tok when List.mem tok env_bool_flags -> effective_bin_of_args rest
+     | Some tok when is_eq_form_value_flag tok -> effective_bin_of_args rest
+     | Some tok when List.mem tok env_value_flags ->
+       (match rest with
+        | _value :: rest' -> effective_bin_of_args rest'
+        | [] -> Unreducible "env value flag is missing its value")
+     | Some tok when is_env_assignment tok -> effective_bin_of_args rest
+     | Some tok when String.length tok > 0 && tok.[0] = '-' ->
+       Unreducible (Printf.sprintf "unmodeled env flag %s" tok)
+     | Some "env" -> effective_bin_of_args rest (* env env CMD ... *)
+     | Some cmd -> Bin cmd)
+;;
+
+let effective_bin_of_stage (s : SI.simple) : effective_bin =
+  let bin = BIN.to_string s.SI.bin in
+  if bin <> "env" then Bin bin else effective_bin_of_args s.SI.args
+;;
+
+(* The first stage the gate blocks: either its effective command is outside
+   the allowlist, or it is a wrapper the gate cannot statically authorize.
+   [None] if every stage passes. *)
+type stage_block =
+  | Stage_not_allowed of { stage : int; bin : string }
+  | Stage_unreducible of { stage : int; wrapper : string; detail : string }
+
+let first_blocked_stage ~allowed_commands (stages : SI.simple list)
+  : stage_block option
+  =
   let rec scan idx = function
     | [] -> None
-    | bin :: rest ->
-      if bin_allowed ~allowed_commands bin then scan (idx + 1) rest
-      else Some (idx, bin)
+    | s :: rest ->
+      (match effective_bin_of_stage s with
+       | Unreducible detail ->
+         Some
+           (Stage_unreducible
+              { stage = idx; wrapper = BIN.to_string s.SI.bin; detail })
+       | Bin bin ->
+         if bin_allowed ~allowed_commands bin
+         then scan (idx + 1) rest
+         else Some (Stage_not_allowed { stage = idx; bin }))
   in
-  scan 1 stage_bins
+  scan 1 stages
 ;;
 
 let stage_has_redirect (simple : SI.simple) : bool =
@@ -378,11 +484,9 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
         }
     else
       (match
-         first_disallowed_stage
-           ~allowed_commands:allowlist.allowed_commands
-           context.stage_bins
+         first_blocked_stage ~allowed_commands:allowlist.allowed_commands stages
        with
-       | Some (stage_idx, bin) ->
+       | Some (Stage_not_allowed { stage = stage_idx; bin }) ->
          let reason, diagnostic =
            if stage_n = 1 then
              ( Command_not_in_allowlist { bin }
@@ -395,6 +499,17 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
                  bin )
          in
          Reject { context; reason; diagnostic }
+       | Some (Stage_unreducible { stage = stage_idx; wrapper; detail }) ->
+         Reject
+           { context
+           ; reason = Wrapper_unreducible { stage = stage_idx; wrapper; detail }
+           ; diagnostic =
+               Printf.sprintf
+                 "stage %d: %s wrapper cannot be statically authorized (%s)"
+                 stage_idx
+                 wrapper
+                 detail
+           }
        | None ->
          (match first_path_failure ~path_policy stages with
           | Some (stage_idx, raw_path, diagnostic) ->
@@ -479,6 +594,7 @@ let verdict_tag = function
 let reject_reason_tag = function
   | Command_not_in_allowlist _ -> "command_not_in_allowlist"
   | Pipeline_segment_disallowed _ -> "pipeline_segment_disallowed"
+  | Wrapper_unreducible _ -> "wrapper_unreducible"
   | Pipes_not_allowed _ -> "pipes_not_allowed"
   | Redirect_disallowed_in_caller _ -> "redirect_disallowed_in_caller"
   | Path_outside_policy _ -> "path_outside_policy"

@@ -50,6 +50,12 @@ type caller =
 type reject_reason =
   | Command_not_in_allowlist of { bin : string }
   | Pipeline_segment_disallowed of { stage : int; bin : string }
+  | Wrapper_unreducible of { stage : int; wrapper : string; detail : string }
+      (** A wrapper command (e.g. [env]) whose effective inner command the
+          gate cannot statically authorize — the [-S]/[--split-string]
+          mode, an unmodeled flag, or a non-literal command token. Denied
+          by secure default so the wrapper cannot smuggle a non-allowlisted
+          command past the gate. *)
   | Pipes_not_allowed of { stages : int }
   | Redirect_disallowed_in_caller of { stage : int }
   | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }

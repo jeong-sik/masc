@@ -206,7 +206,9 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   in
   let audit = tool_audit_snapshot agent_name in
   let agent = member_assoc "agent" keeper in
-  let status = string_field ~default:"<missing status>" "status" keeper in
+  let status =
+    string_field ~default:Briefing_json_helpers.missing_status "status" keeper
+  in
   let context_ratio =
     match member_assoc "context_ratio" keeper with
     | `Float value -> Some value

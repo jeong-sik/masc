@@ -435,6 +435,35 @@ describe('fetchDashboardTools', () => {
     expect(tools[2]).toMatchObject({ name: 'tool_c', category: 'uncategorized', tier: 'essential' })
   })
 
+  it('totalizes a missing surfaces field to an empty array', async () => {
+    // Tool-layer decoupling groundwork: the OCaml tool layer is shedding the
+    // `surfaces` classification. Once the endpoint stops emitting it, the
+    // normalizer must still hand consumers an array, not undefined.
+    const rawResponse = {
+      tool_inventory: {
+        tools: [
+          { name: 'tool_no_surfaces' },
+          { name: 'tool_with_surfaces', surfaces: ['public_mcp'] },
+        ],
+      },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 2 },
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardTools()
+
+    const tools = result.tool_inventory.tools
+    expect(tools[0]).toMatchObject({ name: 'tool_no_surfaces', surfaces: [] })
+    expect(tools[1]).toMatchObject({ name: 'tool_with_surfaces', surfaces: ['public_mcp'] })
+  })
+
   it('returns a new object without mutating the raw response', async () => {
     const tools = [{ name: 'tool_x' }]
     const rawResponse = {

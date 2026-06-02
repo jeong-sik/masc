@@ -332,7 +332,7 @@ let operator_disposition (receipt : t)
        idle watchdog before producing a verdict. This is auto-recoverable
        (the supervisor resumes from the checkpoint), NOT a tool-contract
        failure. Without this branch the turn falls through to the generic
-       [required_tool_contract_unsatisfied] check below, which — because a
+       [tool_gate_unsatisfied] check below, which — because a
        cut-off turn has [tools_used = []] on a [tool_requirement = Required]
        lane — returned [Disp_pause_human, Reason_tool_required_unsatisfied],
        falsely paging an operator while the keeper silently auto-resumed.
@@ -349,29 +349,19 @@ let operator_disposition (receipt : t)
       canonical_names
         (receipt.canonical_tools @ receipt.observed_tools @ receipt.tools_used)
     in
-    let required_tool_names = canonical_names receipt.tool_surface.required_tools in
-    let required_tools_satisfied =
-      required_tool_names <> []
-      && receipt.tool_surface.missing_required_tools = []
-      && List.for_all
-           (fun required -> List.mem required used_tool_names)
-           required_tool_names
-    in
     let generic_claim_context_progress =
-      (* Generic require_tool_use has no named required-tool set. A successful
-         claim-only turn still made scheduling progress; the next turn must
-         execute, but this receipt should not be reclassified as a human pause. *)
-      required_tool_names = []
-      && receipt.tool_surface.missing_required_tools = []
-      && List.exists Keeper_tool_progress.is_claim_context_tool_name used_tool_names
+      (* A successful claim-only turn still made scheduling progress; the next
+         turn must execute, but this receipt should not be reclassified as a
+         human pause. *)
+      List.exists Keeper_tool_progress.is_claim_context_tool_name used_tool_names
     in
     let ok_followup_progress =
       receipt.outcome = `Ok
       && receipt.runtime_outcome = Runtime_completed
       && receipt.tool_contract_result = Contract_needs_execution_progress
-      && (required_tools_satisfied || generic_claim_context_progress)
+      && generic_claim_context_progress
     in
-    let required_tool_contract_unsatisfied =
+    let tool_gate_unsatisfied =
       receipt.tool_surface.tool_requirement = Required
       && (List.mem
             receipt.tool_contract_result
@@ -392,7 +382,7 @@ let operator_disposition (receipt : t)
         receipt.tool_contract_result
         [ Contract_tool_surface_mismatch; Contract_no_tool_capable_provider ]
     in
-    if required_tool_contract_unsatisfied && required_tool_route_failure
+    if tool_gate_unsatisfied && required_tool_route_failure
     then
       if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
       then Disp_fail_open_next_runtime, Reason_tool_route_recoverable_failure
@@ -401,7 +391,7 @@ let operator_disposition (receipt : t)
         || receipt.runtime_outcome = Runtime_passed_to_next_model
       then Disp_pass_next_model, Reason_tool_route_recoverable_failure
       else Disp_pause_human, Reason_tool_route_recoverable_failure
-    else if required_tool_contract_unsatisfied
+    else if tool_gate_unsatisfied
     then (
       if receipt.tool_contract_result = Contract_missing_required_tool_use
       then
@@ -510,9 +500,6 @@ let to_json (receipt : t) =
         (Keeper_agent_tool_surface.tool_surface_class_to_string
            receipt.tool_surface.tool_surface_class)
       ~visible_tool_count:receipt.tool_surface.visible_tool_count
-      ~required_tools:receipt.tool_surface.required_tools
-      ~required_tool_candidates:receipt.tool_surface.required_tool_candidates
-      ~missing_required_tools:receipt.tool_surface.missing_required_tools
       ~runtime_profile:(receipt.runtime_id)
       ()
   in
@@ -577,11 +564,6 @@ let to_json (receipt : t) =
           ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
           ; ( "tool_surface_fallback_used"
             , `Bool receipt.tool_surface.tool_surface_fallback_used )
-          ; "required_tools", list_json receipt.tool_surface.required_tools
-          ; ( "required_tool_candidates"
-            , list_json receipt.tool_surface.required_tool_candidates )
-          ; ( "missing_required_tools"
-            , list_json receipt.tool_surface.missing_required_tools )
           ; ( "materialized_tools"
             , list_json receipt.tool_surface.materialized_tools )
           ] )
@@ -781,11 +763,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
       , `Assoc
           [ ( "result"
             , `String (tool_contract_result_to_string receipt.tool_contract_result) )
-          ; "required_tools", list_json receipt.tool_surface.required_tools
-          ; ( "required_tool_candidates"
-            , list_json receipt.tool_surface.required_tool_candidates )
-          ; ( "missing_required_tools"
-            , list_json receipt.tool_surface.missing_required_tools )
           ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
           ; ( "tool_requirement"
             , Keeper_agent_tool_surface.tool_requirement_to_yojson

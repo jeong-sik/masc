@@ -22,6 +22,12 @@ val no_progress_success_tool_names_for_contract :
 val completion_contract_violation_error :
   string -> Agent_sdk.Error.sdk_error
 
+val observed_tool_contract_status :
+  missing_visible_required:string list ->
+  had_owned_active_task_at_turn_start:bool ->
+  actual_keeper_tool_names:string list ->
+  Keeper_execution_receipt.tool_contract_result
+
 val passive_violation_contract_status :
   actual_keeper_tool_names:string list ->
   progress_keeper_tool_names:string list ->

@@ -87,9 +87,6 @@ type tool_surface =
   ; visible_tool_count : int
   ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
-  ; required_tools : string list
-  ; required_tool_candidates : string list
-  ; missing_required_tools : string list
   ; materialized_tools : string list
   }
 
@@ -247,8 +244,7 @@ val sandbox_kind_of_meta : Keeper_meta_contract.keeper_meta -> Keeper_types_prof
 val to_json : t -> Yojson.Safe.t
 
 (** Enrich a receipt's terminal_reason_code from legacy to extended format.
-    Uses [canonical_tools + observed_tools + tools_used] as called and
-    [tool_surface.required_tools] as satisfying. Returns the original
+    Uses [canonical_tools + observed_tools + tools_used] as called. Returns the original
     code unchanged if it is not a contract-violation code or already
     contains tool data. *)
 val enrich_contract_violation_reason : t -> string

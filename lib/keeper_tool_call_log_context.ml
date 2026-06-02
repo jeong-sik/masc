@@ -21,9 +21,6 @@ type turn_context =
   ; approval_mode : string option
   ; tool_surface_class : string option
   ; visible_tool_count : int option
-  ; required_tools : string list option
-  ; required_tool_candidates : string list option
-  ; missing_required_tools : string list option
   ; runtime_profile : string option
   }
 
@@ -48,9 +45,6 @@ let empty_turn_context =
   ; approval_mode = None
   ; tool_surface_class = None
   ; visible_tool_count = None
-  ; required_tools = None
-  ; required_tool_candidates = None
-  ; missing_required_tools = None
   ; runtime_profile = None
   }
 ;;
@@ -79,9 +73,6 @@ let set_turn_context
       ?approval_mode
       ?tool_surface_class
       ?visible_tool_count
-      ?required_tools
-      ?required_tool_candidates
-      ?missing_required_tools
       ?runtime_profile
       ()
   =
@@ -108,9 +99,6 @@ let set_turn_context
     ; approval_mode
     ; tool_surface_class
     ; visible_tool_count
-    ; required_tools
-    ; required_tool_candidates
-    ; missing_required_tools
     ; runtime_profile
     }
 ;;
@@ -157,9 +145,6 @@ let runtime_observability_contract_json_for_call ~keeper_name () =
     ?approval_mode:ctx.approval_mode
     ?tool_surface_class:ctx.tool_surface_class
     ?visible_tool_count:ctx.visible_tool_count
-    ?required_tools:ctx.required_tools
-    ?required_tool_candidates:ctx.required_tool_candidates
-    ?missing_required_tools:ctx.missing_required_tools
     ?runtime_profile:ctx.runtime_profile
     ()
 ;;

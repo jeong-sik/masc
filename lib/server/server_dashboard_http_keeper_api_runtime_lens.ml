@@ -12,9 +12,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
   let ( tool_decision
       , lane_decision
       , requested_tools
-      , required_tools
-      , materialized_tools
-      , missing_required_tools )
+      , materialized_tools )
     =
     Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_tool_surface_parts
       scan
@@ -67,8 +65,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
       scan.latest_provider_lane_row
   in
   let tool_runtime_status =
-    if missing_required_tools <> [] then "missing_required_tool"
-    else if
+    if
       runtime_lens_event_count scan
         Keeper_runtime_manifest.Tool_surface_selected
       > 0
@@ -147,10 +144,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
               `Assoc
                 [
                   ("requested_tools", Json_util.json_string_list requested_tools);
-                  ("required_tools", Json_util.json_string_list required_tools);
                   ("materialized_tools", Json_util.json_string_list materialized_tools);
-                  ( "missing_required_tools",
-                    Json_util.json_string_list missing_required_tools );
                   ( "turn_lane",
                     Json_util.string_opt_to_json
                       (Json_util.get_string tool_decision "turn_lane") );
@@ -197,10 +191,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ( "runtime_mcp_policy_present",
                     Json_util.bool_opt_to_json
                       (Json_util.get_bool lane_decision "runtime_mcp_policy_present") );
-                  ("required_tools", Json_util.json_string_list required_tools);
                   ("materialized_tools", Json_util.json_string_list materialized_tools);
-                  ( "missing_required_tools",
-                    Json_util.json_string_list missing_required_tools );
                 ] );
             ( "tool_lineage",
               `Assoc

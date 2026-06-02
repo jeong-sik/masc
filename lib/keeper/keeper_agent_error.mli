@@ -7,12 +7,6 @@ type keeper_internal_error =
       ; affordances : string list
       ; fallback_used : bool
       }
-  | Keeper_tool_surface_mismatch of
-      { keeper_name : string
-      ; required_tools : string list
-      ; missing_required_tools : string list
-      ; visible_tools : string list
-      }
 
 (** Prefix prepended to the JSON-encoded internal-error message. *)
 val keeper_internal_error_prefix : string

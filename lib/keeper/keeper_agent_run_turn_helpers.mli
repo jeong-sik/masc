@@ -27,7 +27,6 @@ val should_require_provider_tool_choice_support :
   bool
 
 val tool_contract_result_for_observed_tools :
-  required_tool_names:string list ->
   missing_visible_required:string list ->
   had_owned_active_task_at_turn_start:bool ->
   actual_keeper_tool_names:string list ->

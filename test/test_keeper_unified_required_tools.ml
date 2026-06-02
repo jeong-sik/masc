@@ -3,27 +3,72 @@ open Alcotest
 module KTO = Masc_mcp.Keeper_tool_observation
 module KTP = Masc_mcp.Keeper_tool_progress
 
-let test_passive_tool_classification () =
+let required_tool_call name input : Agent_sdk.Completion_contract.tool_call =
+  { name; input; tool = None }
+;;
+
+let satisfies_required_tool name input =
+  Result.is_ok (KTP.required_tool_satisfaction (required_tool_call name input))
+;;
+
+let test_required_tool_satisfaction_rejects_passive_tools () =
+  check bool "global masc_status remains passive" false
+    (satisfies_required_tool "masc_status" (`Assoc []));
+  check bool "keeper_tasks_list cannot satisfy required-action contract" false
+    (satisfies_required_tool "keeper_tasks_list" (`Assoc []));
+  check bool "keeper_context_status cannot satisfy required-action contract" false
+    (satisfies_required_tool "keeper_context_status" (`Assoc []));
+  check bool "keeper_memory_search cannot satisfy required-action contract" false
+    (satisfies_required_tool "keeper_memory_search" (`Assoc []));
+  check bool "keeper_tool_search cannot satisfy required-action contract" false
+    (satisfies_required_tool "keeper_tool_search" (`Assoc []));
+  check bool "keeper_board_get cannot satisfy required-action contract" false
+    (satisfies_required_tool "keeper_board_get" (`Assoc []));
+  check bool "keeper_board_list cannot satisfy required-action contract" false
+    (satisfies_required_tool "keeper_board_list" (`Assoc []));
+  check bool "keeper_time_now cannot satisfy required-action contract" false
+    (satisfies_required_tool "keeper_time_now" (`Assoc []));
   check bool "keeper_memory_search remains passive progress" true
     (KTP.is_passive_status_tool_name "keeper_memory_search");
   check bool "keeper_memory_search is not execution progress" false
     (KTP.is_execution_progress_tool_name "keeper_memory_search");
+  check bool "keeper_stay_silent satisfies as completion" true
+    (satisfies_required_tool "keeper_stay_silent" (`Assoc []));
+  check bool "Read alias cannot satisfy required-action contract" false
+    (satisfies_required_tool "Read" (`Assoc []));
+  check bool "Grep alias cannot satisfy required-action contract" false
+    (satisfies_required_tool "Grep" (`Assoc []));
+  check bool "mcp-prefixed Grep remains passive" false
+    (satisfies_required_tool "mcp__masc__Grep" (`Assoc []));
+  check bool "WebSearch alias cannot satisfy required-action contract" false
+    (satisfies_required_tool "WebSearch" (`Assoc []));
   check bool "Read alias remains passive progress" true
     (KTP.is_passive_status_tool_name "Read");
   check bool "Grep alias remains passive progress" true
     (KTP.is_passive_status_tool_name "Grep");
   check bool "WebSearch alias remains passive progress" true
-    (KTP.is_passive_status_tool_name "WebSearch")
+    (KTP.is_passive_status_tool_name "WebSearch");
+  check bool "tool_search_files gh op does not satisfy required-action contract" false
+    (satisfies_required_tool
+       "tool_search_files"
+       (`Assoc [ "op", `String "gh"; "cmd", `String "pr view 123" ]))
 ;;
 
-let test_mutating_tool_classification () =
+let test_required_tool_satisfaction_accepts_mutating_tools () =
+  check bool "keeper_task_claim mutates" true
+    (satisfies_required_tool "keeper_task_claim" (`Assoc []));
+  check bool "Write alias mutates" true
+    (satisfies_required_tool "Write" (`Assoc []));
+  check bool "mcp-prefixed Write alias mutates" true
+    (satisfies_required_tool "mcp__masc__Write" (`Assoc []));
   check bool "Write alias is execution progress" true
     (KTP.is_execution_progress_tool_name "Write");
   check bool "mcp-prefixed Write alias is execution progress" true
-    (KTP.is_execution_progress_tool_name "mcp__masc__Write")
-;;
-
-let test_material_progress_detection () =
+    (KTP.is_execution_progress_tool_name "mcp__masc__Write");
+  check bool "mutating gh bash satisfies" true
+    (satisfies_required_tool
+       "tool_execute"
+       (`Assoc [ "cmd", `String "gh pr comment 123 --body ok" ]));
   check bool "fresh worktree create result is material progress" true
     (KTO.tool_result_has_material_progress
        ~tool_name:"tool_execute"
@@ -32,6 +77,48 @@ let test_material_progress_detection () =
     (KTO.tool_result_has_material_progress
        ~tool_name:"tool_execute"
        ~output_text:"Worktree already exists:\n  Path: /tmp/wt")
+;;
+
+let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
+  let base_error =
+    KTP.required_tool_satisfaction (required_tool_call "masc_status" (`Assoc []))
+  in
+  check string "base rejection has no suggestion suffix"
+    "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool contract"
+    (Result.get_error base_error);
+  let hinted_error =
+    KTP.required_tool_satisfaction
+      ~satisfying_tools:[ "keeper_board_post"; "keeper_board_comment" ]
+      (required_tool_call "masc_status" (`Assoc []))
+  in
+  check string "hinted rejection includes satisfying tools"
+    "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool \
+     contract. Call one of these instead: [keeper_board_post; keeper_board_comment]"
+    (Result.get_error hinted_error);
+  check bool "mutating tool still satisfies regardless of satisfying_tools" true
+    (Result.is_ok
+       (KTP.required_tool_satisfaction
+          ~satisfying_tools:[ "keeper_board_post" ]
+          (required_tool_call "tool_execute"
+             (`Assoc [ "op", `String "echo"; "cmd", `String "hello" ]))));
+  let empty_hint_error =
+    KTP.required_tool_satisfaction
+      ~satisfying_tools:[]
+      (required_tool_call "keeper_tasks_list" (`Assoc []))
+  in
+  check string "empty satisfying_tools uses base message"
+    "tool 'keeper_tasks_list' is read-only/passive and cannot satisfy a required-tool \
+     contract"
+    (Result.get_error empty_hint_error);
+  let hinted_passive =
+    KTP.required_tool_satisfaction
+      ~satisfying_tools:[ "keeper_task_claim" ]
+      (required_tool_call "masc_status" (`Assoc []))
+  in
+  check string "rejection forwards satisfying_tools hint"
+    "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool \
+     contract. Call one of these instead: [keeper_task_claim]"
+    (Result.get_error hinted_passive)
 ;;
 
 let test_satisfying_tools_for_turn_computes_from_affordances () =
@@ -61,26 +148,56 @@ let test_satisfying_tools_for_turn_computes_from_affordances () =
   check (list string) "unknown affordance yields empty" [] empty
 ;;
 
+let test_contract_violation_reason_extracts_oas_satisfying_tools () =
+  let reason =
+    "required tool contract unsatisfied: model called [masc_status], but no call \
+     satisfied the required-tool predicate\n\
+     Satisfying tools for this contract: [keeper_board_post, masc_broadcast]"
+  in
+  check
+    (list string)
+    "extract OAS satisfying tools"
+    [ "keeper_board_post"; "masc_broadcast" ]
+    (KTP.satisfying_tools_from_contract_violation_reason reason);
+  check
+    (list string)
+    "dedupe and trim"
+    [ "keeper_board_post"; "masc_broadcast" ]
+    (KTP.satisfying_tools_from_contract_violation_reason
+       "Satisfying tools for this contract: [ keeper_board_post, masc_broadcast, \
+        keeper_board_post ]");
+  check
+    (list string)
+    "missing hint"
+    []
+    (KTP.satisfying_tools_from_contract_violation_reason
+       "required tool contract unsatisfied: model called []")
+;;
+
 let () =
   run
     "keeper_unified_required_tools"
     [ ( "required_tools"
       , [ test_case
-            "passive tool classification"
+            "required tool predicate handles passive tools"
             `Quick
-            test_passive_tool_classification
+            test_required_tool_satisfaction_rejects_passive_tools
         ; test_case
-            "mutating tool classification"
+            "required tool predicate accepts mutating tools"
             `Quick
-            test_mutating_tool_classification
+            test_required_tool_satisfaction_accepts_mutating_tools
         ; test_case
-            "material progress detection"
+            "required tool satisfaction includes satisfying tools hint"
             `Quick
-            test_material_progress_detection
+            test_required_tool_satisfaction_includes_satisfying_tools_hint
         ; test_case
             "satisfying_tools_for_turn computes from affordances"
             `Quick
             test_satisfying_tools_for_turn_computes_from_affordances
+        ; test_case
+            "contract violation reason extracts OAS satisfying tools"
+            `Quick
+            test_contract_violation_reason_extracts_oas_satisfying_tools
         ] )
     ]
 ;;

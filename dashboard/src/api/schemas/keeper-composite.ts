@@ -169,8 +169,11 @@ const KeeperCompositeExecutionSchema = object({
       visible_tool_count: optional(nullable(number())),
       tool_gate_enabled: nullable(boolean()),
       tool_surface_fallback_used: optional(nullable(boolean())),
-      missing_required_tools: array(string()),
-      required_tools: array(string()),
+      // Tool-task coupling purged server-side (#19806): these fields may be
+      // absent from newer runtimes. Kept optional for backward tolerance while
+      // the dashboard UI render paths are migrated in a follow-up.
+      missing_required_tools: optional(array(string())),
+      required_tools: optional(array(string())),
       unexpected_tools: optional(array(string())),
       unexpected_tool_count: optional(number()),
     }),

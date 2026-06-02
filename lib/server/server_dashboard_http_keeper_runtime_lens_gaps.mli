@@ -6,8 +6,6 @@ val runtime_lens_tool_surface_parts :
   * Yojson.Safe.t
   * string list
   * string list
-  * string list
-  * string list
 
 val runtime_lens_gaps :
   terminal_event_present:bool ->

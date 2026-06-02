@@ -39,44 +39,6 @@ let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   | false, false, Some _ -> "runtime_mcp_connect_only"
   | false, false, None -> "none"
 
-let canonical_tool_name_for_lane_check name =
-  match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
-  | Some internal -> internal
-  | None -> name
-
-let canonical_tool_names_for_lane_check names =
-  names |> List.map canonical_tool_name_for_lane_check |> Json_util.dedupe_keep_order
-
-let dedupe_required_tool_names_for_lane_check names =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | name :: rest ->
-      let canonical = canonical_tool_name_for_lane_check name in
-      if List.mem canonical seen
-      then loop seen acc rest
-      else loop (canonical :: seen) (name :: acc) rest
-  in
-  loop [] [] names
-
-let missing_required_tool_names_after_lane_by_name ~required_tool_names
-    ~materialized_tool_names =
-  let materialized_tool_names =
-    canonical_tool_names_for_lane_check materialized_tool_names
-  in
-  required_tool_names
-  |> dedupe_required_tool_names_for_lane_check
-  |> List.filter (fun name ->
-       let canonical = canonical_tool_name_for_lane_check name in
-       not (List.mem canonical materialized_tool_names))
-
-let missing_required_tool_names_after_lane ~required_tool_names ~effective_tools
-    ~runtime_mcp_policy =
-  let materialized_tool_names =
-    materialized_tool_names_after_lane ~effective_tools ~runtime_mcp_policy
-  in
-  missing_required_tool_names_after_lane_by_name ~required_tool_names
-    ~materialized_tool_names
-
 type empty_candidate_classification =
   | Tool_capability_empty
   | Provider_unavailable

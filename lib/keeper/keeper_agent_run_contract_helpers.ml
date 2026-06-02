@@ -63,6 +63,15 @@ let completion_contract_violation_error reason =
        })
 ;;
 
+let observed_tool_contract_status ~missing_visible_required
+      ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
+  : Keeper_execution_receipt.tool_contract_result
+  =
+  Keeper_agent_run_turn_helpers.tool_contract_result_for_observed_tools
+    ~missing_visible_required ~had_owned_active_task_at_turn_start
+    ~actual_keeper_tool_names
+;;
+
 let passive_violation_contract_status ~actual_keeper_tool_names
       ~progress_keeper_tool_names ~fallback
   : Keeper_execution_receipt.tool_contract_result

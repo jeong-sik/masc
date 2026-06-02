@@ -58,9 +58,8 @@ let test_claim_tool_classification_covers_supported_claim_tools () =
 ;;
 
 let test_claim_contract_result_counts_initial_claim_as_execution () =
-  let result ?(had_owned_active_task_at_turn_start = false) ?(required = []) tools =
+  let result ?(had_owned_active_task_at_turn_start = false) tools =
     KAR.tool_contract_result_for_observed_tools
-      ~required_tool_names:required
       ~missing_visible_required:[]
       ~had_owned_active_task_at_turn_start
       ~actual_keeper_tool_names:tools
@@ -81,11 +80,7 @@ let test_claim_contract_result_counts_initial_claim_as_execution () =
     "claim after already owning task stays diagnostic"
     "claim_only_after_owned_task"
     (result ~had_owned_active_task_at_turn_start:true [ "keeper_task_claim" ]);
-  check
-    string
-    "claim does not satisfy unrelated explicit required tool"
-    "missing_required_tool_use"
-    (result ~required:[ "keeper_task_done" ] [ "keeper_task_claim" ])
+  ()
 ;;
 
 let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
@@ -149,19 +144,14 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_board_comment" ]);
-  (match
-     KTP.actionable_tool_contract_violation_reason
+  check
+    (option string)
+    "owned task board activity counts as workspace progress"
+    None
+    (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]
-   with
-   | Some reason ->
-     check
-       bool
-       "owned task board-only turn requires execution progress"
-       true
-       (contains_substring reason "without execution progress")
-   | None -> fail "expected owned task board-only turn to violate contract");
+       ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]);
   check
     (option string)
     "worktree creation satisfies owned task progress"

@@ -408,45 +408,6 @@ let assemble_hooks
                          computed_surface.per_call_max_turns)
                   else ctx
                 in
-                (* Retry feedback: if a previous attempt ignored an actionable
-                   gate, name the visible progress tools for this turn without
-                   storing a separate tool-contract surface. *)
-                let ctx =
-                  if acc.contract_violation_retries > 0
-                  then
-                    let satisfying_tools =
-                      actionable_gate_tool_names
-                        ~claim_context_allowed:
-                          computed_surface.claim_context_allowed
-                        ~turn_affordances
-                        ~allowed_tool_names:
-                          computed_surface.turn_visible_tool_names
-                    in
-                    let preview =
-                      satisfying_tools
-                      |> List.filteri (fun i _ -> i < 8)
-                      |> String.concat ", "
-                    in
-                    let retry_action =
-                      if preview = ""
-                      then
-                        "No currently visible keeper tool can advance this gate; \
-                         emit a concise blocker instead."
-                      else
-                        Printf.sprintf
-                          "You MUST call one of these tools NOW: %s."
-                          preview
-                    in
-                    append_ctx
-                      ctx
-                      (Printf.sprintf
-                         "[TOOL CONTRACT RETRY] Your previous Agent.run \
-                          attempt was rejected for returning text without \
-                          calling a required keeper tool. %s Do NOT respond with text only, do NOT substitute \
-                          status or read-only tools."
-                         retry_action)
-                  else ctx
-                in
                 if computed_surface.is_warning_zone
                 then
                   Log.Keeper.info

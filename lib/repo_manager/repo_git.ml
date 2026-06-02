@@ -94,6 +94,20 @@ let fetch ~repository ~credential : (string list, string) result =
       | Ok lines -> Ok lines
       | Error msg -> Error msg)
 
+(* [fast_forward ~repository ~target_ref] advances the current branch to
+   [target_ref] with `git merge --ff-only`. git refuses (non-zero exit) unless
+   the move is a pure fast-forward: it never creates a merge commit, rebases, or
+   rewrites history, so it cannot drop, reorder, or overwrite commits. A
+   non-fast-forward (divergent tree) is returned as [Error] and the caller must
+   preserve the tree rather than force the move. No credential is needed (the
+   merge is local; the ref must already be fetched). *)
+let fast_forward ~repository ~target_ref : (unit, string) result =
+  match
+    run_git ~cwd:repository.local_path [ "merge"; "--ff-only"; target_ref ]
+  with
+  | Ok _ -> Ok ()
+  | Error msg -> Error msg
+
 let get_branches ~repository =
   match
     run_git ~cwd:repository.local_path

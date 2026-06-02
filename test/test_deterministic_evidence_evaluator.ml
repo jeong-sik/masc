@@ -123,6 +123,15 @@ let test_ci_failing_is_partial () =
   let claims = [ E.CI_pass { repo = "o/r"; pr_number = 1 } ] in
   assert_partial ~expected_missing:1 (DEE.evaluate ~deps ~claims)
 
+let test_ci_not_found_is_hard () =
+  let deps =
+    { stub_all_pass with
+      gh_ci_check = (fun ~repo:_ ~pr_number:_ -> `Not_found)
+    }
+  in
+  let claims = [ E.CI_pass { repo = "o/r"; pr_number = 1 } ] in
+  assert_hard ~contains:"not found" (DEE.evaluate ~deps ~claims)
+
 (* ── Tests_pass ────────────────────────────────────────────────────── *)
 let test_tests_exit_mismatch_is_partial () =
   let deps =
@@ -141,6 +150,16 @@ let test_tests_timeout_is_transient () =
   in
   let claims = [ E.Tests_pass { command = "dune test"; expected_exit = 0 } ] in
   assert_transient ~contains:"timed out" (DEE.evaluate ~deps ~claims)
+
+let test_tests_spawn_error_is_hard () =
+  let deps =
+    { stub_all_pass with
+      exec_command =
+        (fun ~command:_ ~timeout_sec:_ -> `Spawn_error "permission denied")
+    }
+  in
+  let claims = [ E.Tests_pass { command = "dune test"; expected_exit = 0 } ] in
+  assert_hard ~contains:"spawn failed" (DEE.evaluate ~deps ~claims)
 
 (* ── Artifact_exists ──────────────────────────────────────────────── *)
 let test_artifact_missing_is_partial () =
@@ -170,6 +189,24 @@ let test_custom_unknown_id_is_hard () =
     [ E.Custom_check { id = "no_such_check"; payload = `Null } ]
   in
   assert_hard ~contains:"allowlist" (DEE.evaluate ~deps ~claims)
+
+let test_custom_unsatisfied_is_partial () =
+  let deps =
+    { stub_all_pass with
+      custom_check = (fun ~id:_ ~payload:_ -> `Unsatisfied "not clean")
+    }
+  in
+  let claim = E.Custom_check { id = "lint_clean"; payload = `Null } in
+  match DEE.evaluate ~deps ~claims:[ claim ] with
+  | DEE.Partial { missing = [ E.Custom_check { id; _ } ]; _ } ->
+    check string "missing custom id" "lint_clean" id
+  | DEE.Partial { missing; _ } ->
+    fail
+      (Printf.sprintf
+         "expected one missing custom claim, got %d"
+         (List.length missing))
+  | DEE.All_satisfied -> fail "expected Partial, got All_satisfied"
+  | DEE.Inconclusive _ -> fail "expected Partial, got Inconclusive"
 
 (* ── Aggregation: transient > hard > partial ──────────────────────── *)
 let test_transient_wins_over_partial () =
@@ -202,6 +239,25 @@ let test_hard_wins_over_partial () =
   in
   assert_hard ~contains:"not found" (DEE.evaluate ~deps ~claims)
 
+let test_transient_short_circuits_slow_deps () =
+  let file_stat_called = ref false in
+  let deps =
+    { stub_all_pass with
+      gh_pr_check = (fun ~repo:_ ~pr_number:_ -> `Open)
+    ; file_stat =
+        (fun ~path:_ ->
+          file_stat_called := true;
+          `Missing)
+    }
+  in
+  let claims =
+    [ E.PR_merged { repo = "o/r"; pr_number = 1 }
+    ; E.Artifact_exists { path = "/x"; min_bytes = None }
+    ]
+  in
+  assert_transient ~contains:"is open" (DEE.evaluate ~deps ~claims);
+  check bool "slow dep not called after transient" false !file_stat_called
+
 let () =
   Alcotest.run
     "deterministic_evidence_evaluator"
@@ -221,11 +277,14 @@ let () =
       , [ test_case "In_progress → transient" `Quick
             test_ci_in_progress_is_transient
         ; test_case "Any_fail → partial" `Quick test_ci_failing_is_partial
+        ; test_case "Not_found → hard" `Quick test_ci_not_found_is_hard
         ] )
     ; ( "tests_pass"
       , [ test_case "exit mismatch → partial" `Quick
             test_tests_exit_mismatch_is_partial
         ; test_case "Timeout → transient" `Quick test_tests_timeout_is_transient
+        ; test_case "Spawn_error → hard" `Quick
+            test_tests_spawn_error_is_hard
         ] )
     ; ( "artifact_exists"
       , [ test_case "Missing → partial" `Quick test_artifact_missing_is_partial
@@ -234,11 +293,15 @@ let () =
         ] )
     ; ( "custom_check"
       , [ test_case "Unknown_id → hard" `Quick test_custom_unknown_id_is_hard
+        ; test_case "Unsatisfied → partial" `Quick
+            test_custom_unsatisfied_is_partial
         ] )
     ; ( "aggregation"
       , [ test_case "transient wins over partial" `Quick
             test_transient_wins_over_partial
         ; test_case "hard wins over partial" `Quick test_hard_wins_over_partial
+        ; test_case "transient short-circuits slow deps" `Quick
+            test_transient_short_circuits_slow_deps
         ] )
     ]
 ;;

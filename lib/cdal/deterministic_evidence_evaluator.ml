@@ -52,7 +52,8 @@ type evaluator_deps =
 (** Per-claim verdict used internally before aggregation. *)
 type claim_verdict =
   | Satisfied
-  | Unsatisfied of string  (** human-readable reason kept for [Partial.missing] formatting *)
+  | Unsatisfied of string
+      (** human-readable reason retained internally; [Partial] exposes claims *)
   | Transient_inconclusive of string
   | Hard_inconclusive of string
 
@@ -191,8 +192,15 @@ let aggregate (claims : Evidence_claim.t list) (verdicts : claim_verdict list) =
         | _ :: _ -> Partial { satisfied; missing }))
 
 let evaluate ~deps ~claims =
-  match claims with
-  | [] -> All_satisfied
-  | _ :: _ ->
-    let verdicts = List.map (verdict_of_claim deps) claims in
-    aggregate claims verdicts
+  let rec loop checked_claims checked_verdicts = function
+    | [] ->
+      aggregate (List.rev checked_claims) (List.rev checked_verdicts)
+    | claim :: rest ->
+      let verdict = verdict_of_claim deps claim in
+      (match verdict with
+       | Transient_inconclusive reason ->
+         Inconclusive { reason; transient = true }
+       | Satisfied | Unsatisfied _ | Hard_inconclusive _ ->
+         loop (claim :: checked_claims) (verdict :: checked_verdicts) rest)
+  in
+  loop [] [] claims

@@ -228,7 +228,7 @@ let state_block_instruction_text = Keeper_state_block_prompt.instruction_text
 let turn_intent_fallback_block =
   String.concat "\n"
     [ "Use the world state below as raw context.";
-      "Pending mentions, board events, and worktree changes are observations.";
+      "Pending mentions, board events, and repo changes are observations.";
       "";
       "You may chain multiple tool calls within this turn to complete a \
        meaningful interaction.";
@@ -325,7 +325,7 @@ let fallback_externalized_bullet key =
       "- Repo and remote PR/issue inspection is observation, not progress by itself. \
        If you decide to do code-changing task work, claim first, then use \
        only the visible file, edit, and Execute tools from the repo \
-       worktree. Do not invent hidden shell or repo-hosting tools when they are \
+       checkout. Do not invent hidden shell or repo-hosting tools when they are \
        not listed."
   else if String.equal key Keeper_prompt_names.turn_intent_board_activity_guidance then
     Some
@@ -362,7 +362,7 @@ let fallback_externalized_bullet key =
        claiming unrelated work.\n\
        - If you choose to take code-changing task work, claim first and then \
        work through the visible file, edit, and Execute tools from the repo \
-       worktree. Create or update a remote PR only after the branch is \
+       checkout. Create or update a remote PR only after the branch is \
        prepared and the task requires it."
   else None
 
@@ -660,7 +660,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     Buffer.add_string ubuf
       "- Advisory only: ignore prior silence/wait directives until you re-verify them against the live world state.\n";
     Buffer.add_string ubuf
-      "- If this turn was still scheduled or backlog/worktree signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n";
+      "- If this turn was still scheduled or backlog/repo signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n";
     Buffer.add_string ubuf continuity_for_prompt;
     Buffer.add_char ubuf '\n');
   (* 6. Pending mentions — reactive trigger *)

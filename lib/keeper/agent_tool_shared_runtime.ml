@@ -70,8 +70,7 @@ let actionable_path_action_for_class
         playground
     | Cwd_not_directory ->
       "The cwd is not a directory. Omit cwd to use your default playground root, or \
-       create/repair the repo worktree first and then retry with a valid \
-       repos/<repo>/.worktrees/<task> cwd."
+       create/repair the repo checkout first and then retry with cwd=repos/<repo>."
     | Shell_exit_nonzero | Other ->
       Printf.sprintf "Check the path. Your playground: %s" playground)
 ;;

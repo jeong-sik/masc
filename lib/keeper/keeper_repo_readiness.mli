@@ -89,3 +89,28 @@ val ensure_ready :
   repo_name:string ->
   unit ->
   (unit, string) result
+
+(** Outcome of an [ensure_current] pass. Every non-[Advanced] case leaves the
+    working tree byte-for-byte untouched. *)
+type currency_outcome =
+  | Up_to_date
+  | Advanced of int  (** fast-forwarded; payload = commits gained *)
+  | Preserved of string
+      (** dirty / detached / task branch / diverged — tree untouched, reason *)
+  | Skipped of string
+      (** not a ready clone / no credential or url / fetch failed — reason *)
+
+(** [ensure_current ~config ~meta ~repo_name ()] fetches [origin] and
+    fast-forwards the sandbox clone to [origin/<default_branch>] only when it is
+    clean, on [default_branch], and a pure fast-forward. Dirty / detached /
+    task-branch / diverged clones are left untouched ([Preserved]); uncommitted
+    or unpushed work is never overwritten. Missing/corrupt clones return
+    [Skipped] (repair is [ensure_ready]'s responsibility). [default_branch]
+    defaults to ["main"]. *)
+val ensure_current :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  repo_name:string ->
+  ?default_branch:string ->
+  unit ->
+  currency_outcome

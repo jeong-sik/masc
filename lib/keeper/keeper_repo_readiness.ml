@@ -208,6 +208,22 @@ let inspect
         run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "remote"; "get-url"; "origin" ]
       in
       let has_origin = origin.ok && String.trim origin.output <> "" in
+      (* Currency against [origin/<default_branch>] explicitly, independent of
+         [@{upstream}]. The FETCH_HEAD-provisioned playground repos set no
+         upstream, so an upstream-only check reports [behind=None] and the state
+         falls through to "ready" even when the clone is hundreds of commits
+         behind main. This is read-only -- it reflects the last fetch, not a
+         fresh one; the fetch + fast-forward happens in [ensure_current]. *)
+      let behind_default =
+        let counts =
+          run_git
+            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
+            ~clone_path
+            [ "rev-list"; "--count"; "HEAD..origin/" ^ default_branch ]
+        in
+        if counts.ok then int_of_string_opt (String.trim counts.output) else None
+      in
+      let current = behind_default = Some 0 in
       let state, ok, next_action =
         if not status.ok then
           "status_failed", false,
@@ -223,7 +239,15 @@ let inspect
           | Some n when n > 0 ->
               "behind_upstream", false,
               "Fetch/rebase the sandbox clone or create a new worktree from the fetched origin branch."
-          | _ -> "ready", true, "Create a task worktree from the fetched origin branch before editing."
+          | _ -> (
+              match behind_default with
+              | Some n when n > 0 ->
+                  "behind_upstream", false,
+                  Printf.sprintf
+                    "Local branch is %d commit(s) behind origin/%s; fast-forward \
+                     or recut your task worktree from it before editing."
+                    n default_branch
+              | _ -> "ready", true, "Create a task worktree from the fetched origin branch before editing.")
       in
       common_fields state ok next_action
         ([
@@ -239,7 +263,9 @@ let inspect
         @ string_opt_field "head" head
         @ string_opt_field "upstream" upstream_name
         @ int_opt_field "ahead" ahead
-        @ int_opt_field "behind" behind)
+        @ int_opt_field "behind" behind
+        @ int_opt_field "behind_default" behind_default
+        @ [ "current", `Bool current ])
 
 (* ── Sandbox repo auto-repair ─────────────────────────────────── *)
 
@@ -309,13 +335,26 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
         let path = clone_path ~config ~meta ~repo_name in
         (* Remove corrupt directory if present *)
         if state = "not_git_repo" && safe_is_dir path then (
+          (* Quarantine (move) instead of [rm -rf]. The [not_git_repo]
+             classifier only checks the git toplevel, not whether the directory
+             holds work -- a dirty clone with a corrupt/.git or worktree
+             confusion can trip it while still carrying uncommitted or unpushed
+             keeper work. Moving it aside preserves any salvageable work for
+             recovery and lets the reclone proceed into a clean path; [rm -rf]
+             would destroy it irreversibly with no commit/stash first. *)
+          let quarantine =
+            Printf.sprintf "%s.corrupt-%d-%d" path (Unix.getpid ())
+              (int_of_float (Unix.gettimeofday () *. 1000.))
+          in
           let _ =
             Masc_exec.Exec_gate.run_argv_with_status
               ~actor:`Workspace_git
-              ~raw_source:(Printf.sprintf "rm -rf %s" (Filename.quote path))
-              ~summary:"remove corrupt sandbox repo before reclone"
+              ~raw_source:
+                (Printf.sprintf "mv %s %s" (Filename.quote path)
+                   (Filename.quote quarantine))
+              ~summary:"quarantine corrupt sandbox repo before reclone"
               ~timeout_sec:read_only_probe_timeout_sec
-              [ "rm"; "-rf"; path ]
+              [ "mv"; path; quarantine ]
           in
           ());
         match find_repo_url ~config ~repo_name with
@@ -353,3 +392,144 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
         (Printf.sprintf
            "repo %s is in state %s; auto-repair not applicable"
            repo_name other)
+
+(* ── Sandbox repo currency (fetch + work-preserving fast-forward) ──── *)
+
+(** Build a minimal [repository] record for the sandbox clone lane.
+    [auto_sync]/[sync_interval] are 0/false because the playground lane is
+    advanced explicitly by [ensure_current], not by the [.masc/repos] periodic
+    [repo_sync] fiber. *)
+let make_repo_record ~repo_name ~url ~clone_path ~default_branch ~credential_id
+    ~keeper_name : Repo_manager_types.repository =
+  let open Repo_manager_types in
+  {
+    id = repo_name;
+    name = repo_name;
+    url;
+    local_path = clone_path;
+    aliases = [];
+    default_branch;
+    credential_id;
+    keepers = [ keeper_name ];
+    status = Active;
+    auto_sync = false;
+    sync_interval = 0;
+    created_at = 0L;
+    updated_at = 0L;
+  }
+
+(** Outcome of a currency pass. Every non-[Advanced] case leaves the working
+    tree byte-for-byte untouched. *)
+type currency_outcome =
+  | Up_to_date
+  | Advanced of int
+      (** fast-forwarded; payload is the number of commits gained *)
+  | Preserved of string
+      (** not advanced (dirty / detached / task branch / diverged); the
+          working tree is left untouched. payload is the reason *)
+  | Skipped of string
+      (** not applicable (not a ready clone / no credential or url / fetch
+          failed); payload is the reason *)
+
+let count_behind ~clone_path ~target_ref =
+  let r =
+    run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+      [ "rev-list"; "--count"; "HEAD.." ^ target_ref ]
+  in
+  if r.ok then int_of_string_opt (String.trim r.output) else None
+
+(** [Some true] iff [ancestor] is an ancestor of [descendant] (a fast-forward
+    from [ancestor] to [descendant] is possible); [Some false] iff not; [None]
+    on probe error. [git merge-base --is-ancestor] exits 0 = yes, 1 = no. *)
+let is_ancestor ~clone_path ~ancestor ~descendant =
+  let r =
+    run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path
+      [ "merge-base"; "--is-ancestor"; ancestor; descendant ]
+  in
+  match r.status with
+  | Unix.WEXITED 0 -> Some true
+  | Unix.WEXITED 1 -> Some false
+  | _ -> None
+
+(** [ensure_current ~config ~meta ~repo_name ()] fetches [origin] and, when the
+    sandbox clone is clean, on [default_branch], and a pure fast-forward behind
+    [origin/<default_branch>], advances it with [Repo_git.fast_forward]. Any
+    other state (dirty / detached / on a task branch / diverged) is left
+    untouched and reported as [Preserved] -- uncommitted and unpushed work is
+    never overwritten. Missing/corrupt clones are out of scope here (that is
+    [ensure_ready]'s repair path) and return [Skipped]. *)
+let ensure_current ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name
+    ?(default_branch = "main") () : currency_outcome =
+  if not (safe_repo_component repo_name) then
+    Skipped (Printf.sprintf "invalid repo_name: %s" repo_name)
+  else
+    let cpath = clone_path ~config ~meta ~repo_name in
+    let probe = inspect ~config ~meta ~repo_name ~default_branch () in
+    let state =
+      match Json_util.assoc_member_opt "state" probe with
+      | Some (`String s) -> s
+      | _ -> "unknown"
+    in
+    match state with
+    | "invalid_repo_name" | "missing_clone" | "not_git_repo" | "missing_origin"
+    | "status_failed" ->
+        Skipped (Printf.sprintf "repo not a ready clone (state=%s)" state)
+    | _ -> (
+        match
+          find_repo_url ~config ~repo_name, resolve_keeper_credential ~config ~meta
+        with
+        | None, _ -> Skipped "repo not in repositories.toml"
+        | _, Error reason -> Skipped (Printf.sprintf "no credential: %s" reason)
+        | Some url, Ok credential -> (
+            let repo =
+              make_repo_record ~repo_name ~url ~clone_path:cpath ~default_branch
+                ~credential_id:credential.Repo_manager_types.id
+                ~keeper_name:meta.name
+            in
+            match Repo_git.fetch ~repository:repo ~credential with
+            | Error msg -> Skipped (Printf.sprintf "fetch failed: %s" msg)
+            | Ok _ -> (
+                let target_ref = "origin/" ^ default_branch in
+                let behind = count_behind ~clone_path:cpath ~target_ref in
+                let dirty =
+                  let s =
+                    run_git ~timeout_sec:read_only_probe_timeout_sec
+                      ~clone_path:cpath [ "status"; "--porcelain" ]
+                  in
+                  s.ok && String.trim s.output <> ""
+                in
+                let branch =
+                  run_git ~timeout_sec:read_only_probe_timeout_sec
+                    ~clone_path:cpath [ "branch"; "--show-current" ]
+                  |> fun r -> if r.ok then first_line_opt r.output else None
+                in
+                match behind with
+                | Some 0 -> Up_to_date
+                | _ when dirty ->
+                    Preserved "uncommitted changes in the working tree"
+                | _ -> (
+                    match branch with
+                    | None -> Preserved "detached HEAD"
+                    | Some b when not (String.equal b default_branch) ->
+                        Preserved
+                          (Printf.sprintf "on task branch %s (not %s)" b
+                             default_branch)
+                    | Some _ -> (
+                        match
+                          is_ancestor ~clone_path:cpath ~ancestor:"HEAD"
+                            ~descendant:target_ref
+                        with
+                        | Some true -> (
+                            match
+                              Repo_git.fast_forward ~repository:repo ~target_ref
+                            with
+                            | Ok () -> Advanced (Option.value ~default:0 behind)
+                            | Error msg ->
+                                Preserved
+                                  (Printf.sprintf "fast-forward refused: %s" msg))
+                        | Some false ->
+                            Preserved
+                              "local branch has commits not on origin (diverged)"
+                        | None ->
+                            Preserved
+                              "could not determine fast-forward eligibility")))))

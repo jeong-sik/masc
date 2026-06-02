@@ -1,0 +1,29 @@
+(include_subdirs no)
+
+;; Agent_economy — pure agent token-ledger domain (earn / spend / balance,
+;; JSONL persistence). Carved out of the masc_mcp mega-library so the Board
+;; domain can call Agent_economy.earn without forcing a Board<->mega-lib cycle.
+;; Dependency direction is one-way: consumers (board_core_persist, board_votes)
+;; depend on masc_agent_economy; this lib depends only on the neutral libraries
+;; below. (wrapped false) keeps the bare `Agent_economy` module name so call
+;; sites stay `Agent_economy.earn`.
+;;
+;; NOTE: Thompson_sampling was NOT moved alongside Agent_economy. It is NOT a
+;; clean leaf — it calls Agent_health.is_healthy (lib/agent_health.ml, mega-lib
+;; root) and Prometheus.inc_counter (lib/prometheus.ml, mega-lib root). Board
+;; also calls Thompson_sampling.record_vote, so Board remains blocked until
+;; those two edges are inverted (callback injection). Tracked in PR-AE report.
+(library
+ (name masc_agent_economy)
+ (public_name masc_mcp.masc_agent_economy)
+ (wrapped false)
+ (libraries
+  masc_core
+  masc_config
+  masc_log
+  masc_workspace
+  masc_random_id
+  fs_compat
+  yojson
+  eio
+  unix))

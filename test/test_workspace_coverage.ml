@@ -13,7 +13,8 @@ module Types = Masc_domain
 *)
 
 open Masc_mcp
-module Agent_economy = Masc_mcp__Agent_economy
+(* Agent_economy moved to the masc_agent_economy leaf lib (wrapped false);
+   the bare module resolves via masc_test_deps, no mega-lib alias needed. *)
 
 let () = Mirage_crypto_rng_unix.use_default ()
 

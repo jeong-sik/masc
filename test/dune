@@ -1940,7 +1940,7 @@
 (test
  (name test_tool_dispatch_emit)
  (modules test_tool_dispatch_emit)
- (libraries alcotest masc_mcp masc_mcp.tool_types unix))
+ (libraries alcotest masc_mcp masc_mcp.masc_tool_dispatch masc_mcp.tool_types unix))
 
 ; RFC-0085 PR-8 — config_dir_resolver env-derived path reads routed through
 ; Host_config.from_env; Env_config_core config_dir_opt + personas_dir_opt

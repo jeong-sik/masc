@@ -50,5 +50,18 @@ val stats_report : top_n:int -> all_tool_names:string list -> Yojson.Safe.t
 
 (** {1 Lifecycle} *)
 
-val warm_up : Telemetry_eio.tool_usage_summary -> int
+type warm_up_stats = {
+  count : int;
+  success_count : int;
+  failure_count : int;
+  last_used_at : float option;
+}
+(** Per-tool seed stats for {!warm_up}. The composition root projects
+    persisted [Telemetry_eio.tool_usage_stats] into this neutral shape so the
+    Tool dispatch substrate stays free of the telemetry persistence layer. *)
+
+val warm_up : (string * warm_up_stats) list -> int
+(** Seed registry counters from persisted per-tool stats (skips tools already
+    present). Returns the number of tools seeded. *)
+
 val reset : unit -> unit

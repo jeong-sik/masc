@@ -1,6 +1,6 @@
 (** Tests for Tool_registry — in-memory call counters *)
 
-module Tool_registry = Masc_mcp.Tool_registry
+module Tool_registry = Tool_registry
 
 let () =
   Eio_main.run

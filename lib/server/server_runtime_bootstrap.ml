@@ -285,7 +285,24 @@ let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
        Telemetry_eio.summarize_tool_usage state.workspace_config
      in
      if summary.telemetry_available then
-       let n = Tool_registry.warm_up summary in
+       (* PR-S3: project the persisted Telemetry_eio summary into the registry's
+          neutral [warm_up_stats] shape at the composition root, so
+          [Tool_registry] (lib/tool/, masc_tool_dispatch) does not code-depend
+          on the telemetry persistence layer. *)
+       let stats_by_tool =
+         Hashtbl.fold
+           (fun tool_name (stats : Telemetry_eio.tool_usage_stats) acc ->
+              ( tool_name
+              , { Tool_registry.count = stats.count
+                ; success_count = stats.success_count
+                ; failure_count = stats.failure_count
+                ; last_used_at = stats.last_used_at
+                } )
+              :: acc)
+           summary.stats_by_tool
+           []
+       in
+       let n = Tool_registry.warm_up stats_by_tool in
        Log.Misc.info "tool registry: warmed up %d tools (%d calls) from telemetry"
          n summary.total_calls
    with

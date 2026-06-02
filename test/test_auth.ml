@@ -6,7 +6,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 open Alcotest
 module Auth = Masc_mcp.Auth
 module Tool_spec = Masc_mcp.Tool_spec
-module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_dispatch = Tool_dispatch
 module Types = Masc_domain
 
 (* Setup a temp directory for testing *)

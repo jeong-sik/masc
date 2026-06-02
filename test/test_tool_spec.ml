@@ -3,8 +3,8 @@ module Types = Masc_domain
 (** Tests for Tool_spec — unified tool specification and registration. *)
 
 module Tool_spec = Masc_mcp.Tool_spec
-module Tool_dispatch = Masc_mcp.Tool_dispatch
-module Tool_catalog = Masc_mcp.Tool_catalog
+module Tool_dispatch = Tool_dispatch
+module Tool_catalog = Tool_catalog
 module Tool_capability = Masc_mcp.Tool_capability
 
 (** Helper: minimal input_schema for test tools. *)

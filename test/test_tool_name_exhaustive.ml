@@ -13,7 +13,7 @@ open Alcotest
     through [static_tag_of_tool_name] to return [None] and fall through
     to runtime tag-registry. *)
 
-let all_masc_keeper_variants : Masc_mcp.Tool_name.Masc_keeper.t list =
+let all_masc_keeper_variants : Tool_name.Masc_keeper.t list =
   [ Clear
   ; Compact
   ; Create_from_persona
@@ -35,8 +35,8 @@ let test_round_trip_all_masc_keeper_variants () =
   (* Every Masc_keeper.t variant must round-trip through to_string/of_string. *)
   List.iter
     (fun v ->
-      let s = Masc_mcp.Tool_name.Masc_keeper.to_string v in
-      match Masc_mcp.Tool_name.Masc_keeper.of_string s with
+      let s = Tool_name.Masc_keeper.to_string v in
+      match Tool_name.Masc_keeper.of_string s with
       | Some v' when v = v' -> ()
       | Some _ ->
         failf "round-trip mismatch for %s (different variant)" s
@@ -50,40 +50,40 @@ let test_msg_result_typed () =
     "masc_keeper_msg_result of_string returns Some Msg_result"
     (Some "masc_keeper_msg_result")
     (Option.map
-       Masc_mcp.Tool_name.Masc_keeper.to_string
-       (Masc_mcp.Tool_name.Masc_keeper.of_string "masc_keeper_msg_result"))
+       Tool_name.Masc_keeper.to_string
+       (Tool_name.Masc_keeper.of_string "masc_keeper_msg_result"))
 
 let test_sandbox_start_typed () =
   (check (option string))
     "masc_keeper_sandbox_start of_string returns Some Sandbox_start"
     (Some "masc_keeper_sandbox_start")
     (Option.map
-       Masc_mcp.Tool_name.Masc_keeper.to_string
-       (Masc_mcp.Tool_name.Masc_keeper.of_string "masc_keeper_sandbox_start"))
+       Tool_name.Masc_keeper.to_string
+       (Tool_name.Masc_keeper.of_string "masc_keeper_sandbox_start"))
 
 let test_sandbox_status_typed () =
   (check (option string))
     "masc_keeper_sandbox_status of_string returns Some Sandbox_status"
     (Some "masc_keeper_sandbox_status")
     (Option.map
-       Masc_mcp.Tool_name.Masc_keeper.to_string
-       (Masc_mcp.Tool_name.Masc_keeper.of_string "masc_keeper_sandbox_status"))
+       Tool_name.Masc_keeper.to_string
+       (Tool_name.Masc_keeper.of_string "masc_keeper_sandbox_status"))
 
 let test_sandbox_stop_typed () =
   (check (option string))
     "masc_keeper_sandbox_stop of_string returns Some Sandbox_stop"
     (Some "masc_keeper_sandbox_stop")
     (Option.map
-       Masc_mcp.Tool_name.Masc_keeper.to_string
-       (Masc_mcp.Tool_name.Masc_keeper.of_string "masc_keeper_sandbox_stop"))
+       Tool_name.Masc_keeper.to_string
+       (Tool_name.Masc_keeper.of_string "masc_keeper_sandbox_stop"))
 
 let test_unknown_returns_none () =
   (check (option string))
     "unknown masc_keeper_* name returns None"
     None
     (Option.map
-       Masc_mcp.Tool_name.Masc_keeper.to_string
-       (Masc_mcp.Tool_name.Masc_keeper.of_string "masc_keeper_nonexistent"))
+       Tool_name.Masc_keeper.to_string
+       (Tool_name.Masc_keeper.of_string "masc_keeper_nonexistent"))
 
 let test_variant_count () =
   (* Pin the variant count so future additions are caught by this assertion. *)
@@ -94,12 +94,12 @@ let test_variant_count () =
 
 let test_top_level_of_string_via_masc_keeper () =
   (* Top-level Tool_name.of_string routes masc_keeper_* through Masc_keeper. *)
-  match Masc_mcp.Tool_name.of_string "masc_keeper_sandbox_start" with
-  | Some (Masc_mcp.Tool_name.Masc_keeper Sandbox_start) -> ()
+  match Tool_name.of_string "masc_keeper_sandbox_start" with
+  | Some (Tool_name.Masc_keeper Sandbox_start) -> ()
   | Some other ->
     failf
       "expected Masc_keeper Sandbox_start, got %s"
-      (Masc_mcp.Tool_name.to_string other)
+      (Tool_name.to_string other)
   | None -> failf "Tool_name.of_string returned None for masc_keeper_sandbox_start"
 
 let () =

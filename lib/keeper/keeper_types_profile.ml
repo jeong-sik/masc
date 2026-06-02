@@ -260,7 +260,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                             path raw;
                           None
                       | None -> None));
-                models = None;
                 (* oas_env lives only in keeper TOML, not persona JSON —
                    persona profiles are a design-time artifact whereas
                    transport env is an ops-time toggle. *)

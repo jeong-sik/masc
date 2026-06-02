@@ -102,5 +102,5 @@ val checkpoint_persistence_error
     ([Runtime_passed_to_next_model] / [Runtime_completed] /
     [Runtime_not_observed]). *)
 val runtime_outcome_of_observation
-  :  Keeper_observation.runtime_observation option
+  :  Runtime_observation.runtime_observation option
   -> Keeper_execution_receipt.runtime_outcome

@@ -66,7 +66,7 @@ let reconcile_keepalive_keepers
           Prometheus.inc_counter
             Keeper_metrics.(to_string ObservationQueryFailures)
             ~labels:
-              [ ("operation", Keeper_observation_query_operation.(to_label Reconcile_read_meta))
+              [ ("operation", Runtime_observation_query_operation.(to_label Reconcile_read_meta))
               ]
             ();
           Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err);

@@ -1,4 +1,4 @@
-(** Keeper_observation — Runtime metrics types, observation building, and recording.
+(** Runtime_observation — Runtime metrics types, observation building, and recording.
 
     Tracks per-runtime call counts, model selection distribution, fallback
     hops, and per-attempt latency/error detail. Aggregate counters stay

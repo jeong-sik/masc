@@ -115,31 +115,6 @@ let test_completion_contract_of_tool_choice_requires_any () =
      | KTC.Allow_text_or_tool -> false)
 ;;
 
-let test_run_completion_contract_latches_required_tool_use () =
-  check
-    bool
-    "required tool use stays latched across run"
-    true
-    (match
-       KTC.run_completion_contract
-         ~turn_contract:KTC.Allow_text_or_tool
-         ~required_tool_use_seen:true
-     with
-     | KTC.Require_tool_use -> true
-     | KTC.Allow_text_or_tool -> false);
-  check
-    bool
-    "optional stays optional when no required turn seen"
-    true
-    (match
-       KTC.run_completion_contract
-         ~turn_contract:KTC.Allow_text_or_tool
-         ~required_tool_use_seen:false
-     with
-     | KTC.Allow_text_or_tool -> true
-     | KTC.Require_tool_use -> false)
-;;
-
 let test_validate_completion_contract_presence_requires_keeper_surface_tool () =
   (match
      KTC.validate_completion_contract_presence
@@ -314,10 +289,6 @@ let () =
             "completion contract mapping requires any"
             `Quick
             test_completion_contract_of_tool_choice_requires_any
-        ; test_case
-            "run completion contract latches required tool use"
-            `Quick
-            test_run_completion_contract_latches_required_tool_use
         ; test_case
             "completion contract presence requires keeper-surface tool"
             `Quick

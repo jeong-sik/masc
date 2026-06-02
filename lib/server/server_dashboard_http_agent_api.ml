@@ -42,7 +42,7 @@ let add_agent_api_routes router =
        with_public_read (fun _state req reqd ->
          let json =
            Tool_unified.summary_report
-             ~runtime_metrics:Keeper_observation.runtime_metrics_json
+             ~runtime_metrics:Runtime_observation.runtime_metrics_json
              ()
          in
          Http.Response.json_value ~compress:true ~request:req json reqd

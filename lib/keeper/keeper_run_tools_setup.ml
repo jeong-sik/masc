@@ -406,7 +406,7 @@ let prepare_agent_setup
     ref None
   in
   let receipt_runtime_observation_ref
-    : Keeper_observation.runtime_observation option ref
+    : Runtime_observation.runtime_observation option ref
     =
     ref None
   in

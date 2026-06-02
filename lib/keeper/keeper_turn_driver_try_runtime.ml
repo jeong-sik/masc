@@ -13,7 +13,7 @@ type try_runtime_ctx =
   ; candidate_count : int
   ; configured_labels : string list
   ; error_selected_model_raw : string option
-  ; capture : Keeper_observation.runtime_metrics_capture
+  ; capture : Runtime_observation.runtime_metrics_capture
   ; runtime_strategy_name_ref : string option ref
   ; try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx
   ; runtime_manifest_required_tool_names : string list

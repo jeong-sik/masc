@@ -3,14 +3,14 @@
 
     Thin facade over {!Runtime_agent_context},
     {!Runtime_transport}, and
-    {!Keeper_oas_checkpoint}.  External callers reach
+    {!Runtime_oas_checkpoint}.  External callers reach
     the run/config entry points via [Runtime_agent.X];
     provider transport internals (CLI / MCP wire formats,
     runtime policy projections, and transport-local
     diagnostics) are owned by {!Runtime_transport}.
 
     All model-selection and runtime logic lives in
-    {!Keeper_observation} and {!Keeper_turn_driver}.
+    {!Runtime_observation} and {!Keeper_turn_driver}.
 
     Internal helpers stay private at this boundary
     ([invalid_runtime_config],
@@ -112,7 +112,7 @@ type run_result = {
   turns : int;
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
-  runtime_observation : Keeper_observation.runtime_observation option;
+  runtime_observation : Runtime_observation.runtime_observation option;
   stop_reason : stop_reason;
 }
 
@@ -196,7 +196,7 @@ module For_testing : sig
   val runtime_id_of_config : config -> string
 
   val runtime_observation_for_completed_config :
-    total_duration_ms:float -> config -> Keeper_observation.runtime_observation
+    total_duration_ms:float -> config -> Runtime_observation.runtime_observation
 end
 
 (** {1 Lifecycle / checkpoint helpers (re-exported)} *)

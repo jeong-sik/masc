@@ -320,7 +320,13 @@ let execute_tool_eio
                      { Tool_library.agent_name }
                      ~name
                      ~args:coerced_args
-                 | Mod_keeper ->
+                 | Mod_external ->
+                   (* Composition root wires the server boundary to the keeper
+                      subsystem: [Mod_external] tools (keeper-management tools)
+                      dispatch through [Keeper_tool_boundary] with the
+                      per-request context built above. The [Tool_dispatch] tag
+                      stays subsystem-agnostic; this is where the concrete
+                      handler is bound. *)
                    Keeper_tool_boundary.dispatch
                      (make_keeper_tool_ctx ())
                      ~name

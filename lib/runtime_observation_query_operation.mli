@@ -1,4 +1,4 @@
-(** Keeper_observation_query_operation — closed sum for the [operation] label on
+(** Runtime_observation_query_operation — closed sum for the [operation] label on
     [metric_keeper_observation_query_failures].
 
     Replaces 5 hardcoded literals in [keeper_world_observation.ml].

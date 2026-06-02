@@ -1,4 +1,4 @@
-(** Keeper_observation — runtime observation, metrics
+(** Runtime_observation — runtime observation, metrics
     capture, and a single-actor runtime-counter store.
 
     The .ml splits into two concerns:
@@ -14,7 +14,7 @@
       callers do not contend on the in-memory counter
       maps.
 
-    Dotted callers ({!Keeper_observation.X}) and the
+    Dotted callers ({!Runtime_observation.X}) and the
     runtime-include consumer rely on the surface pinned here.
 
     Internal helpers stay private at this boundary
@@ -216,12 +216,12 @@ val runtime_metrics_json : unit -> Yojson.Safe.t
     waits on the resulting promise.  Returns the
     aggregated runtime-counter JSON snapshot for the
     operator dashboard.  Pinned because
-    [lib/oas_worker.mli] re-exposes it via the
-    [include Keeper_observation] runtime. *)
+    [Runtime_agent] re-exposes it via the
+    [include Runtime_observation] module. *)
 
 val runtime_observation_to_json :
   runtime_observation -> Yojson.Safe.t
 (** Wire encoder for {!runtime_observation} — flattens
     [attempts] / [fallback_events] / outcome metadata
     into a single [`Assoc].  Pinned because the runtime-
-    include consumer ([oas_worker.mli]) re-exposes it. *)
+    include consumer ([Runtime_agent]) re-exposes it. *)

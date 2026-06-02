@@ -362,6 +362,61 @@ let is_destructive_bash_operation (words : string list) =
   | _ -> false
 ;;
 
+(* --- Action-flag danger (allowlisted read tools, dangerous flags) ---
+
+   find/sed/sort are legitimate read tools (on the readonly + dev
+   allowlists), but a single flag turns them destructive or write-capable
+   while the command identity stays "allowlisted read". The command-level
+   allowlist and [is_write_operation]/[classify_write_detail] (head-token
+   keyed) therefore never see the danger. The Find/Sort typed GADT does
+   not model these flags either — like [gh], the risk is string-borne — so
+   [classify_words] owns it as the floor. ([Sed.in_place] IS modeled, so
+   [risk_of_typed] escalates it on the typed path too; the floor stays
+   redundant there.)
+
+   Mapping rationale: [-exec]/[-execdir]/[-ok]/[-okdir] run an arbitrary
+   command (rm/sh are on no keeper allowlist) and [-delete] removes files —
+   the intent is "nobody destroys", so [Destructive_protected] blocks all
+   keepers (dev included). The file-writing primaries ([-fprintf]/[-fls]/
+   [-fprint]/[-fprint0], [sed -i], [sort -o]) are ordinary writes: [R1]
+   (readonly keeper blocked, dev keeper allowed — the split a flat
+   allowlist denylist could not express). *)
+
+let find_destructive_primaries = [ "-delete"; "-exec"; "-execdir"; "-ok"; "-okdir" ]
+let find_write_primaries = [ "-fprintf"; "-fls"; "-fprint"; "-fprint0" ]
+
+(* sed [-i]/[-i.bak]/[-Ei]/[--in-place]/[--in-place=.bak]. No other sed
+   short option carries 'i', so a bundled short flag containing 'i' is
+   in-place edit. *)
+let sed_is_in_place arg =
+  has_short_flag 'i' arg
+  || String.equal arg "--in-place"
+  || String.starts_with ~prefix:"--in-place=" arg
+;;
+
+(* sort [-o FILE]/[-ro FILE]/[--output FILE]/[--output=FILE]. 'o' is the
+   only sort short option, so any short flag containing 'o' writes a file. *)
+let sort_writes_file arg =
+  has_short_flag 'o' arg
+  || String.equal arg "--output"
+  || String.starts_with ~prefix:"--output=" arg
+;;
+
+let action_flag_risk (words : string list) : risk_class =
+  match words with
+  | "find" :: rest ->
+    if List.exists (fun a -> List.mem a find_destructive_primaries) rest
+    then Destructive_protected
+    else if List.exists (fun a -> List.mem a find_write_primaries) rest
+    then R1_Reversible_mutation
+    else R0_Read
+  | "sed" :: rest ->
+    if List.exists sed_is_in_place rest then R1_Reversible_mutation else R0_Read
+  | "sort" :: rest ->
+    if List.exists sort_writes_file rest then R1_Reversible_mutation else R0_Read
+  | _ -> R0_Read
+;;
+
 (* --- Word-list decision (pre-typed-GADT path) -----------------------
 
    Retained for the [Generic] escape hatch (env/redirect/$VAR/unknown
@@ -370,14 +425,21 @@ let is_destructive_bash_operation (words : string list) =
 
 let classify_words (words : string list) : risk_class =
   if is_destructive_bash_operation words then Destructive_protected
-  else if is_write_operation words then
-    (match classify_write_detail words with
-     | Some r -> r
-     | None -> R2_Irreversible)
   else
-    (match words with
-     | "gh" :: _ -> classify_repo_hosting_cli words
-     | _ -> R0_Read)
+    (* find/sed/sort action-flags are checked before the write/gh/R0
+       fall-through; these heads do not overlap [is_write_operation] or
+       [classify_write_detail], so an early escalation here is the max. *)
+    match action_flag_risk words with
+    | (Destructive_protected | R1_Reversible_mutation | R2_Irreversible) as r -> r
+    | R0_Read ->
+      if is_write_operation words then
+        (match classify_write_detail words with
+         | Some r -> r
+         | None -> R2_Irreversible)
+      else
+        (match words with
+         | "gh" :: _ -> classify_repo_hosting_cli words
+         | _ -> R0_Read)
 ;;
 
 (* --- Typed-GADT decision substrate (RFC-0160 §S1 completion) ----------
@@ -419,6 +481,9 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Ls _) -> R0_Read
   | W (Cat _) -> R0_Read
   | W (Rg _) -> R0_Read
+  (* find -delete / -exec / -fprintf carry their danger in action-flags the
+     Find GADT does not model, so (like gh) the risk is string-borne and
+     classify_words owns it as the floor. The typed shape alone is R0. *)
   | W (Find _) -> R0_Read
   | W (Head _) -> R0_Read
   | W (Tail _) -> R0_Read
@@ -427,6 +492,8 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Pwd _) -> R0_Read
   | W (Echo _) -> R0_Read
   | W (Which _) -> R0_Read
+  (* sort -o FILE writes a file; the Sort GADT does not model [-o], so
+     classify_words owns it as the floor (string-borne, like find). R0 here. *)
   | W (Sort _) -> R0_Read
   | W (Cut _) -> R0_Read
   | W (Tr _) -> R0_Read
@@ -479,7 +546,11 @@ let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
   | W (Ssh _) -> R0_Read
   | W (Scp _) -> R0_Read
   | W (Tar _) -> R0_Read
-  | W (Sed _) -> R0_Read
+  (* sed -i / --in-place edits files in place (R1). The GADT models
+     [in_place], so the typed path escalates it; classify_words owns the
+     word-list floor for parity. Non-in-place sed is a read filter (R0). *)
+  | W (Sed { in_place; _ }) ->
+    if in_place then R1_Reversible_mutation else R0_Read
   | W (Rsync _) -> R0_Read
   (* interpreters / build tools the word-list leaves at R0 *)
   | W (Node _) -> R0_Read

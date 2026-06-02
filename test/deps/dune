@@ -110,6 +110,9 @@
    ;; Pure Turn FSM extracted to lib/turn_fsm/ (masc_turn). Re-export so test
    ;; code using bare Turn_fsm.X resolves after the FSM carve.
    (re_export masc_turn)
+   ;; Agent token-ledger extracted to lib/agent_economy/ (masc_agent_economy).
+   ;; Re-export so test code using bare Agent_economy.X resolves after the carve.
+   (re_export masc_agent_economy)
    (re_export masc_types)
    (re_export mirage-crypto)
    (re_export mirage-crypto-rng)

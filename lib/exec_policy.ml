@@ -276,6 +276,7 @@ let block_reason_of_exec_reject : Exec_shell_gate.reject_reason -> block_reason 
   function
   | Command_not_in_allowlist { bin } -> Command_not_allowed bin
   | Pipeline_segment_disallowed { bin; _ } -> Command_not_allowed bin
+  | Wrapper_unreducible _ -> Injection
   | Pipes_not_allowed _ -> Pipes_not_allowed
   | Redirect_disallowed_in_caller _
   | Path_outside_policy _ -> Unsafe_redirect

@@ -562,6 +562,12 @@ let load_keeper_profile_defaults_result name :
     Stdlib.Mutex.unlock profile_defaults_mu;
     result
 
+let invalidate_keeper_profile_defaults_cache name =
+  let key = profile_defaults_cache_key name in
+  Stdlib.Mutex.lock profile_defaults_mu;
+  Hashtbl.remove profile_defaults_cache key;
+  Stdlib.Mutex.unlock profile_defaults_mu
+
 let load_keeper_profile_defaults name : keeper_profile_defaults =
   match load_keeper_profile_defaults_result name with
   | Ok defaults -> defaults

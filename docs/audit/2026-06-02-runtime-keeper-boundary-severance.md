@@ -68,8 +68,12 @@ not keeper-specific logic. The `Keeper_` prefix was misleading.
 PR #19801 severed `Keeper_observation` and `Keeper_oas_checkpoint`. Two modules remain:
 - `runtime_oas_runner.ml`: `Keeper_identity.keeper_agent_name`, `Keeper_identity.keeper_name_from_agent_name` (2 calls)
 - `runtime_inference.ml`: `Keeper_internal_error.Max_tokens_ceiling_violation` (1 call)
+- `runtime_inference.mli:21`: public signature still returns `Keeper_internal_error.masc_internal_error`
+  — the interface exposes a Keeper type even once the `.ml` constructor is extracted, so a
+  follow-up must sever the `.mli` signature dependency too (not just the `.ml` reference).
 These require separate severance: `Keeper_identity` is shared with 14 non-keeper callers,
-`Keeper_internal_error` needs a generic error type extraction.
+`Keeper_internal_error` needs a generic error type extraction (covering both the `.ml`
+constructor use and the `.mli` return-type dependency).
 
 ### Next boundary candidates
 - `Keeper_identity` (14 non-keeper callers) — widely shared utility module

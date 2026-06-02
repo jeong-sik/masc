@@ -4,22 +4,15 @@
     invocations to the selected credential bundle instead of
     the operator's ambient credentials. *)
 
-type credential_scope =
-  | Keeper_identity
-  | Root_fallback
-
 type keeper_binding = {
   credential_identity : string;
       (** Identity whose bundle will actually be used. *)
-  credential_scope : credential_scope;
   bundle_root : string;
   credential_bundle_dir : string;
 }
 
 (** Reserved default credential bundle id. *)
 val root_credential_identity : string
-
-val credential_scope_to_string : credential_scope -> string
 
 (** [bundle_root config ~credential_identity] is the on-disk root of the
     credential bundle: [$base_path/.masc/credentials/<id>]. *)

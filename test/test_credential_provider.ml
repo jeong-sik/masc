@@ -129,7 +129,6 @@ let make_repo ~id ~credential_id : repository =
 let make_keeper_binding ~bundle_root ~credential_bundle_dir : KRC.keeper_binding =
   {
     KRC.credential_identity = "test-gh";
-    credential_scope = KRC.Keeper_identity;
     bundle_root;
     credential_bundle_dir;
   }

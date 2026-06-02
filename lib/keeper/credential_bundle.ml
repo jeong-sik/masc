@@ -10,19 +10,10 @@
     to it
     causes dune interface mismatch errors in the test suite). *)
 
-type credential_scope =
-  | Keeper_identity
-  | Root_fallback
-
 let root_credential_identity = "root"
-
-let credential_scope_to_string = function
-  | Keeper_identity -> "keeper_identity"
-  | Root_fallback -> "root_fallback"
 
 type keeper_binding = {
   credential_identity : string;
-  credential_scope : credential_scope;
   bundle_root : string;
   credential_bundle_dir : string;
 }
@@ -68,14 +59,12 @@ let git_config_env_pairs =
 let credential_bundle_dir_exists dir =
   Sys.file_exists dir && Sys.is_directory dir
 
-let binding_of_credential_identity
+let binding_of_credential_bundle
     ~(credential_identity : string)
-    ~(credential_scope : credential_scope)
     ~(bundle_root : string)
     ~(credential_bundle_dir : string) =
   {
     credential_identity;
-    credential_scope;
     bundle_root;
     credential_bundle_dir;
   }
@@ -103,9 +92,8 @@ let binding_of_mapped_credential
              cred.id keeper_name credential_bundle_dir)
       else
         Ok
-          (binding_of_credential_identity
+          (binding_of_credential_bundle
              ~credential_identity:cred.username
-             ~credential_scope:Keeper_identity
              ~bundle_root:(Filename.dirname credential_bundle_dir)
              ~credential_bundle_dir)
 

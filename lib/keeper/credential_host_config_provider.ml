@@ -155,8 +155,6 @@ let compose_ro_mounts_result ?keeper_name
 let metadata_of_binding (kb : Credential_bundle.keeper_binding) =
   [ "source", "host_config";
     "credential_identity", kb.credential_identity;
-    "credential_scope",
-    Credential_bundle.credential_scope_to_string kb.credential_scope;
     "bundle_root", kb.bundle_root;
   ]
 
@@ -264,7 +262,6 @@ let binding_of_credential (cred : Repo_manager_types.credential)
         Credential_bundle.
           {
             credential_identity = cred.username;
-            credential_scope = Keeper_identity;
             bundle_root = synth_bundle_root;
             credential_bundle_dir;
           }

@@ -44,7 +44,7 @@ type binding = {
           host-mounted bundles). *)
   metadata : (string * string) list;
       (** Audit pairs such as [source], [credential_identity],
-          [credential_scope], and [bundle_root]. *)
+          and [bundle_root]. *)
 }
 
 (** Provider error variants.  [Missing_bundle] covers a selected

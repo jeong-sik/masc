@@ -490,11 +490,6 @@ let test_rfc0121_data_dir () =
     "/x/data"
     (Config_dir_resolver.data_dir ~base_path:"/x")
 
-let test_rfc0121_credentials_toml () =
-  check string "credentials.toml under .masc/config"
-    "/x/.masc/config/credentials.toml"
-    (Config_dir_resolver.credentials_toml_path ~base_path:"/x")
-
 let test_rfc0121_repositories_toml () =
   check string "repositories.toml under .masc/config"
     "/x/.masc/config/repositories.toml"
@@ -582,8 +577,6 @@ let () =
           test_case "tmp_dir" `Quick test_rfc0121_tmp_dir;
           test_case "locks_dir" `Quick test_rfc0121_locks_dir;
           test_case "data_dir sibling of .masc" `Quick test_rfc0121_data_dir;
-          test_case "credentials_toml under config" `Quick
-            test_rfc0121_credentials_toml;
           test_case "repositories_toml under config" `Quick
             test_rfc0121_repositories_toml;
           test_case "keeper_repo_mappings_toml under config" `Quick

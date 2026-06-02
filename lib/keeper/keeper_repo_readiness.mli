@@ -72,17 +72,11 @@ val inspect :
 val find_repo_url :
   config:Workspace.config -> repo_name:string -> string option
 
-(** Resolve the keeper's mapped credential from [keeper_repo_mappings.toml]. *)
-val resolve_keeper_credential :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  (Repo_manager_types.credential, string) result
-
 (** [ensure_ready ~config ~meta ~repo_name ()] probes the sandbox repo
     via [inspect]. If the repo is [missing_clone] or [not_git_repo],
-    attempts to clone it from the configured repository URL using the
-    keeper's mapped credential. Returns [Ok ()] when the repo is ready,
-    or [Error msg] if repair failed or was not possible. *)
+    attempts to clone it from the configured repository URL. Returns [Ok ()]
+    when the repo is ready, or [Error msg] if repair failed or was not
+    possible. *)
 val ensure_ready :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

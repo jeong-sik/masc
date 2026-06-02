@@ -11,7 +11,6 @@ export interface Repository {
   status: RepoStatus
   auto_sync: boolean
   sync_interval: number
-  credential_id: string | null
   created_at: string | number | null
   updated_at: string | number | null
 }
@@ -56,7 +55,6 @@ export function normalizeRepository(raw: unknown): Repository | null {
     status: normalizeRepoStatus(typeof r.status === 'string' ? r.status : undefined),
     auto_sync: r.auto_sync === true,
     sync_interval: typeof r.sync_interval === 'number' ? r.sync_interval : 300,
-    credential_id: typeof r.credential_id === 'string' ? r.credential_id : null,
     created_at: typeof r.created_at === 'string' || typeof r.created_at === 'number' ? r.created_at : null,
     updated_at: typeof r.updated_at === 'string' || typeof r.updated_at === 'number' ? r.updated_at : null,
   }

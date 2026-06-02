@@ -16,7 +16,6 @@ function repo(
     status: 'active',
     auto_sync: false,
     sync_interval: 300,
-    credential_id: null,
     created_at: null,
     updated_at: null,
   }

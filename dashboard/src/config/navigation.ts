@@ -275,7 +275,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'repositories',
       label: 'Repositories',
-      description: 'Registered repos, Git graph, branches, credentials, and keeper access scope.',
+      description: 'Registered repos, Git graph, branches, and keeper access scope.',
       params: { section: 'repositories' },
     },
     {

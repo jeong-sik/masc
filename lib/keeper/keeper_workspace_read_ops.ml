@@ -152,7 +152,7 @@ let try_handle
   let render_sandbox_process_result ~cwd ~cmd ~backend_cmd ~timeout_sec =
     match
       Keeper_sandbox_runner.run_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
-        ~cmd:backend_cmd ~git_creds_enabled:false ~network_mode:Network_none
+        ~cmd:backend_cmd ~network_mode:Network_none
     with
     | Error msg -> error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
     | Ok result ->

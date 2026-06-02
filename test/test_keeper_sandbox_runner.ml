@@ -76,19 +76,14 @@ module Fake_backend = struct
     }
 
   let run_shell_command_with_status ~config:_ ~meta:_ ~cwd ~timeout_sec:_ ~cmd
-      ~git_creds_enabled ~network_mode =
-    record (Printf.sprintf "shell:%s:%b" cmd git_creds_enabled);
+      ~network_mode =
+    record ("shell:" ^ cmd);
     Ok (result ~status:3 ~output:("shell:" ^ cmd) ~network_mode ~cwd)
 
   let run_trusted_shell_command_with_status ~config:_ ~meta:_ ~cwd
-      ~timeout_sec:_ ~cmd ~git_creds_enabled ~network_mode =
-    record (Printf.sprintf "trusted:%s:%b" cmd git_creds_enabled);
+      ~timeout_sec:_ ~cmd ~network_mode =
+    record ("trusted:" ^ cmd);
     Ok (result ~status:0 ~output:("trusted:" ^ cmd) ~network_mode ~cwd)
-
-  let run_credentialed_bash ~turn_sandbox_runtime:_ ~config:_ ~meta:_ ~cwd:_
-      ~timeout_sec:_ ~cmd () =
-    record ("credentialed:" ^ cmd);
-    "credentialed:" ^ cmd
 
   let run_bash ~turn_sandbox_runtime:_ ~config:_ ~meta:_ ~cwd:_ ~timeout_sec:_
       ~cmd ~network_mode:_ =
@@ -112,7 +107,7 @@ let test_functor_delegates_user_shell () =
   with_fixture (fun ~config ~meta ->
       match
         Runner.run_shell_command_with_status ~config ~meta ~cwd:"/work"
-          ~timeout_sec:5.0 ~cmd:"git status" ~git_creds_enabled:false
+          ~timeout_sec:5.0 ~cmd:"git status"
           ~network_mode:Keeper_types_profile_sandbox.Network_none
       with
       | Error e -> Alcotest.fail e
@@ -121,7 +116,7 @@ let test_functor_delegates_user_shell () =
           (match result.status with Unix.WEXITED n -> n | _ -> -1);
         check string "output" "shell:git status" result.output;
         check (list string) "calls"
-          [ "shell:git status:false" ]
+          [ "shell:git status" ]
           (List.rev !Fake_backend.calls))
 
 let test_functor_delegates_trusted_tool () =
@@ -129,7 +124,7 @@ let test_functor_delegates_trusted_tool () =
   with_fixture (fun ~config ~meta ->
       match
         Runner.run_trusted_shell_command_with_status ~config ~meta ~cwd:"/work"
-          ~timeout_sec:5.0 ~cmd:"gh pr view" ~git_creds_enabled:true
+          ~timeout_sec:5.0 ~cmd:"gh pr view"
           ~network_mode:Keeper_types_profile_sandbox.Network_inherit
       with
       | Error e -> Alcotest.fail e
@@ -139,7 +134,7 @@ let test_functor_delegates_trusted_tool () =
         check string "output" "trusted:gh pr view" result.output;
         check string "network label" "inherit" result.network_label;
         check (list string) "calls"
-          [ "trusted:gh pr view:true" ]
+          [ "trusted:gh pr view" ]
           (List.rev !Fake_backend.calls))
 
 let test_uses_backend_respects_profile () =
@@ -216,7 +211,6 @@ let test_local_route_does_not_force_backend_cwd () =
              { route_cwd = cwd
              ; cwd = (fun () -> failwith "backend cwd evaluated on host route")
              ; command_text = "true"
-             ; git_creds_enabled = false
              ; network_mode = Keeper_types_profile_sandbox.Network_none
              ; trust = Keeper_sandbox_runner.User_shell
              }

@@ -43,7 +43,6 @@ let sample_repo id =
     local_path = "repos/" ^ id;
     aliases = [];
     default_branch = "main";
-    credential_id = "cred-1";
     keepers = [ "keeper-a"; "keeper-b" ];
     status = Active;
     auto_sync = true;
@@ -237,7 +236,6 @@ let test_load_minimal_toml_defaults () =
           Alcotest.(check string) "id" "demo" repo.id;
           Alcotest.(check string) "local_path default" ".masc/repos/demo" repo.local_path;
           Alcotest.(check string) "default branch" "main" repo.default_branch;
-          Alcotest.(check string) "credential" "default" repo.credential_id;
           Alcotest.(check bool) "auto_sync default" false repo.auto_sync;
           Alcotest.(check int) "interval default" 300 repo.sync_interval
       | Ok repos ->

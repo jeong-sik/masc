@@ -76,7 +76,6 @@ let resolve_typed_git_cwd_of_stages ~config ~meta ~cwd ~cmd stages =
 
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
-      ~(turn_sandbox_factory_git : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -135,16 +134,7 @@ let handle_tool_execute_typed
               match docker_local_fallback_target ~meta ~timeout_sec with
               | Some fallback when in_playground -> Ok fallback
               | Some _ | None ->
-                let effective_factory =
-                  if
-                    Agent_tool_execute_command_semantics.stages_target_repo_commands
-                      effective_stages
-                  then (match turn_sandbox_factory_git with
-                    | Some _ as f -> f
-                    | None -> turn_sandbox_factory)
-                  else turn_sandbox_factory
-                in
-                docker_sandbox_target ~turn_sandbox_factory:effective_factory ~meta ~cwd ~timeout_sec
+                docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd ~timeout_sec
                 |> Result.map (fun target ->
                   ( target
                   , [ "requested_sandbox", `String "docker"
@@ -366,7 +356,6 @@ let handle_tool_execute_typed
 
 let handle_tool_execute
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
-      ~turn_sandbox_factory_git
       ~exec_cache:_
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -388,7 +377,6 @@ let handle_tool_execute
   then
     handle_tool_execute_typed
       ~turn_sandbox_factory
-      ~turn_sandbox_factory_git
       ~config
       ~meta
       ~args

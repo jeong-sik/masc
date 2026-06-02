@@ -25,7 +25,7 @@ implementation_prs:
   # PR-14 (this closeout PR) will be appended on merge.
 follow_up_prs:
   # Deferred items per delegation-not-absorption pattern (PR body §"Plan adjustment"):
-  - "host-config-cleanup-A: credential (host_config_provider.ml:3, 4 refs)"
+  - "host-config-cleanup-A: repo-auth temp root retired"
   - "host-config-cleanup-B: shell (/bin/bash + /bin/zsh, 7 sites)"
   - "host-config-cleanup-C: coreutils (/bin/ls /usr/bin/head etc., 6 sites)"
   - "host-config-cleanup-D: agent-runtime (/tmp/.masc_agent_* 7 sites)"
@@ -164,7 +164,7 @@ keeper→tool 실행이 *macOS 운영자 workstation의 특정 디렉토리 layo
 
 | 코드 | 사이클 단계 | binding |
 |---|---|---|
-| `lib/keeper/host_config_provider.ml:3` | guard (cred env) | `let cred_root = "/tmp/keeper-creds"` (4× references) |
+| `Host_config.cred_root` | guard (repo-auth temp root; retired) | temp keeper-cred root no longer feeds repo auth mounts |
 | `lib/keeper/agent_tool_execute_runtime.ml:745, 802` | dispatch (Execute family) | `[ "/bin/bash"; "-lc"; cmd ]` |
 | `lib/keeper/keeper_runtime_resilience.ml:24-43` | scheduling guard | runtime resilience check before autonomous fan-out |
 | `agent_tool_execute_command_parse.ml:217` | dispatch (gh family) | `[ "/bin/zsh"; "-lc"; ... ]` remaining gh command-parse site |
@@ -489,7 +489,7 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 - `lib/keeper/capability_registry.ml:358-362` — "Internal dispatch unrestricted" 코멘트
 - `lib/mcp_server_eio_execute.ml:817, 999` — manual `run_pre_hooks` + `dispatch`
 - `lib/keeper/keeper_tag_dispatch.ml` — Entry 3 fallback
-- `lib/keeper/host_config_provider.ml:3` — `/tmp/keeper-creds`
+- `Host_config.cred_root` — retired repo-auth temp root
 - `lib/keeper/agent_tool_execute_runtime.ml:745, 802` — `/bin/bash`
 - `lib/tool_inline_dispatch_workspace.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191-570` — `/tmp/.masc_agent[_mcp]_<sid>` 7 sites
 - `lib/worker_oas.ml` (886 lines) — disclosure activation 대상

@@ -200,10 +200,7 @@
   test_chronicle_types
   test_chronicle_ingest
   test_chronicle_validate
-  test_credential_store
-  test_credential_materializer
   test_keeper_repo_mapping
-  test_credential_provider_bridge
   test_repo_sync
   test_repo_git
   test_repo_e2e
@@ -471,10 +468,7 @@
   test_chronicle_types
   test_chronicle_ingest
   test_chronicle_validate
-  test_credential_store
-  test_credential_materializer
   test_keeper_repo_mapping
-  test_credential_provider_bridge
   test_repo_sync
   test_repo_git
   test_repo_e2e
@@ -711,7 +705,6 @@
   test_task_cache_invariant_13397
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
-  test_credential_provider
   test_dashboard_k2_feeds
   test_keeper_profile_normalize_10552
   test_personality_field_diff_10269
@@ -903,7 +896,6 @@
   test_task_cache_invariant_13397
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
-  test_credential_provider
   test_dashboard_k2_feeds
   test_keeper_profile_normalize_10552
   test_personality_field_diff_10269
@@ -1311,8 +1303,6 @@
 
 (include stanzas/test_workspace_bootstrap.inc)
 (include stanzas/test_workspace_base_path_cache.inc)
-
-(include stanzas/test_credential_materializer_waitpid_eintr.inc)
 
 (include stanzas/test_dashboard_feature_health.inc)
 
@@ -1861,17 +1851,6 @@
  (modules test_pr_g_disclosure_activation)
  (libraries masc_test_deps))
 
-
-; RFC-0084 host-config-cleanup-A — credential root migration.
-; Pins literal "/tmp/keeper-creds" count at 0 in
-; lib/keeper/host_config_provider.ml and verifies
-; Host_config.host is invoked.  Cross-checks that
-; Keeper_host_config_provider.cred_root equals the typed surface field.
-
-(test
- (name test_pr_a_cred_root_migration)
- (modules test_pr_a_cred_root_migration)
- (libraries masc_test_deps))
 
 ; RFC-0084 host-config-cleanup-C — coreutils path migration.
 ; Pins 0 occurrences of the 6 absolute coreutils literals in

@@ -166,7 +166,6 @@ val execute_keeper_tool_call_with_outcome
   -> meta:keeper_meta
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?turn_sandbox_factory_git:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?sw:Eio.Switch.t
@@ -184,7 +183,6 @@ val execute_keeper_tool_call
   -> meta:keeper_meta
   -> ctx_work:working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?turn_sandbox_factory_git:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> name:string

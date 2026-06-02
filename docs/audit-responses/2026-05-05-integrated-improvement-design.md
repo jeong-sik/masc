@@ -108,12 +108,13 @@ fetch 또는 in-memory aggregation. **별도 RFC 필요** (RFC-0029 후보).
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| 현재 14개 모두 `PR-3b1 starvation`으로 archived | `rg "PR-3b1\|starvation"` zero hits in `lib/keeper/credential*`. 단일 `lib/keeper/credential_provider.ml` 존재 | **D** (출처 misread) |
+| 현재 14개 모두 `PR-3b1 starvation`으로 archived | 해당 keeper repo-auth provider surface는 retired. starvation claim은 전제부터 미확인 | **D** (출처 misread) |
 | 36개 starvation → boot 불가 | 전제 자체가 미확인 | **D** |
 
-해당 axis에서 active 작업: **#13088 (EINTR-safe waitpid in credential_materializer,
-2026-05-05)** + **#13068 (R)** — credential rotation/reissue 트랙은 별도로
-진행. audit이 본 "archived" 상태가 어떤 snapshot인지 출처 미명시.
+해당 axis의 과거 작업은 현재 repo-manager credential deletion으로 retired.
+credential rotation/reissue 트랙은 auth-token 운영 문제로만 남고, repository
+GitHub identity materialization은 현재 설계 대상이 아니다. audit이 본
+"archived" 상태가 어떤 snapshot인지 출처 미명시.
 
 ### §1-4 Config 파일: O(K) 파일 증가
 

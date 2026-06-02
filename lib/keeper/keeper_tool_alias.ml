@@ -45,11 +45,9 @@ let routing_table : (string, route) Hashtbl.t =
 (** [is_known_public name] is [true] when [name] has a routing entry. *)
 let is_known_public name = Hashtbl.mem routing_table name
 
-(** Known internal handler names — the [internal_name] values that
-    [routing_table] entries map onto, plus the [masc_*] surface that
-    [public_masc_to_internal] resolves. Used to bound the [routed_to]
-    Prometheus label so that unrecognised strings never become a new
-    time series. *)
+(** Known internal handler names — descriptor [internal_name] values plus the
+    public [masc_*] surface. Used to bound the [routed_to] Prometheus label so
+    unrecognised strings never become a new time series. *)
 let known_internal_names_tbl : (string, unit) Hashtbl.t =
   let t = Hashtbl.create 128 in
   Hashtbl.iter
@@ -58,16 +56,6 @@ let known_internal_names_tbl : (string, unit) Hashtbl.t =
          (fun internal_name -> Hashtbl.replace t internal_name ())
          (Agent_tool_descriptor.internal_names r.descriptor))
     routing_table;
-  List.iter
-    (fun internal ->
-       Hashtbl.replace t internal ();
-       (* Also admit the public MCP counterpart (e.g. [masc_board_post])
-          so successful MCP routes do not collapse to [tool="unknown"]
-          (PR #14585 review). *)
-       match Tool_catalog_surfaces.keeper_internal_replacement internal with
-       | Some public -> Hashtbl.replace t public ()
-       | None -> ())
-    Tool_catalog_surfaces.keeper_internal_tools;
   List.iter
     (fun public_mcp -> Hashtbl.replace t public_mcp ())
     Tool_catalog_surfaces.public_mcp_surface_tools;
@@ -118,18 +106,7 @@ let public_name_for_internal = Agent_tool_descriptor.public_name_for_internal
 
 (* ── MCP surface routing (separate concern) ──────────────────────── *)
 
-let public_masc_to_internal_tbl =
-  let t = Hashtbl.create 16 in
-  List.iter
-    (fun internal ->
-       match Tool_catalog_surfaces.keeper_internal_replacement internal with
-       | Some public -> Hashtbl.replace t public internal
-       | None -> ())
-    Tool_catalog_surfaces.keeper_internal_tools;
-  t
-;;
-
-let public_masc_to_internal name = Hashtbl.find_opt public_masc_to_internal_tbl name
+let public_masc_to_internal _name = None
 
 let strip_mcp_masc_prefix name =
   if String.starts_with ~prefix:"mcp__masc__" name

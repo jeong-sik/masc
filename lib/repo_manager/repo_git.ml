@@ -21,24 +21,13 @@ let merge_env overrides =
 let git_terminal_prompt_key = "GIT_" ^ "TERMINAL_PROMPT"
 let git_askpass_key = "GIT_" ^ "ASKPASS"
 
-let env_of_credential credential =
-  let non_interactive =
-    [
-      (git_terminal_prompt_key, "0");
-      (git_askpass_key, "");
-      ("SSH_ASKPASS", "");
-      ("GCM_INTERACTIVE", "Never");
-    ]
-  in
-  match credential.cred_type with
-  | Github | Gitlab -> (
-      match credential.credential_bundle_dir with
-      | Some dir -> ("GH_CONFIG_DIR", dir) :: non_interactive
-      | None -> non_interactive)
-  | Local -> (
-      match credential.ssh_key_path with
-      | Some key -> ("GIT_SSH_COMMAND", Printf.sprintf "ssh -i %S" key) :: non_interactive
-      | None -> non_interactive)
+let non_interactive_git_env =
+  [
+    (git_terminal_prompt_key, "0");
+    (git_askpass_key, "");
+    ("SSH_ASKPASS", "");
+    ("GCM_INTERACTIVE", "Never");
+  ]
 
 let split_lines text =
   if text = "" then []
@@ -71,8 +60,8 @@ let run_git ~cwd ?(env = []) args : (string list, string) result =
       in
       Error (Printf.sprintf "git %s failed: %s" (String.concat " " args) detail)
 
-let clone ~repository ~credential =
-  let env = env_of_credential credential in
+let clone ~repository =
+  let env = non_interactive_git_env in
   let parent_dir = Filename.dirname repository.local_path in
   Fs_compat.mkdir_p parent_dir;
   match
@@ -82,8 +71,8 @@ let clone ~repository ~credential =
   | Ok _ -> Ok ()
   | Error msg -> Error msg
 
-let fetch ~repository ~credential : (string list, string) result =
-  let env = env_of_credential credential in
+let fetch ~repository : (string list, string) result =
+  let env = non_interactive_git_env in
   match run_git ~env ~cwd:repository.local_path ["fetch"; "--all"] with
   | Error msg -> Error msg
   | Ok _ -> (

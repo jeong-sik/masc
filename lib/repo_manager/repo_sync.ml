@@ -2,17 +2,17 @@ open Repo_manager_types
 
 let ( let* ) = Result.bind
 
-let sync_repository ~base_path repo credential : (unit, string) result =
+let sync_repository ~base_path repo : (unit, string) result =
   let local_path = Repo_store.local_path ~base_path repo in
   let repo_with_path = { repo with local_path } in
   let* () = Repo_store.update_status ~base_path repo.id Cloning in
   let sync_result =
     if Sys.file_exists local_path then
-      Repo_git.fetch ~repository:repo_with_path ~credential
+      Repo_git.fetch ~repository:repo_with_path
     else
-      match Repo_git.clone ~repository:repo_with_path ~credential with
+      match Repo_git.clone ~repository:repo_with_path with
       | Error msg -> Error msg
-      | Ok () -> Repo_git.fetch ~repository:repo_with_path ~credential
+      | Ok () -> Repo_git.fetch ~repository:repo_with_path
   in
   match sync_result with
   | Error msg ->
@@ -34,11 +34,8 @@ let sync_all ~base_path ~now : (repository list, string) result =
   let rec loop synced = function
     | [] -> Ok (List.rev synced)
     | repo :: rest -> (
-        match Credential_store.find ~base_path repo.credential_id with
-        | Error msg -> loop synced rest
-        | Ok credential -> (
-            match sync_repository ~base_path repo credential with
-            | Error _ -> loop synced rest
-            | Ok () -> loop (repo :: synced) rest))
+        match sync_repository ~base_path repo with
+        | Error _ -> loop synced rest
+        | Ok () -> loop (repo :: synced) rest)
   in
   loop [] due

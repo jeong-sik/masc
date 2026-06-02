@@ -9,8 +9,6 @@
    repo_store_lookup
    repo_store
    repo_git
-   credential_materializer
-   credential_store
    keeper_repo_mapping
    repo_sync)
  (wrapped false)

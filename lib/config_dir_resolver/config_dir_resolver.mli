@@ -120,19 +120,15 @@ val data_dir : base_path:string -> string
 
 (** {2 Config-rooted file accessors} *)
 
-val credentials_toml_path : base_path:string -> string
-(** [<base_path>/.masc/config/credentials.toml]. Backwards-compatible
+val repositories_toml_path : base_path:string -> string
+(** [<base_path>/.masc/config/repositories.toml]. Backwards-compatible
     direct derivation from [base_path]. A future RFC may extend this to
     honour [MASC_CONFIG_DIR] override; until then the location matches
     pre-RFC-0121 caller behaviour. *)
 
-val repositories_toml_path : base_path:string -> string
-(** [<base_path>/.masc/config/repositories.toml]. Same caveat as
-    [credentials_toml_path]. *)
-
 val keeper_repo_mappings_toml_path : base_path:string -> string
 (** [<base_path>/.masc/config/keeper_repo_mappings.toml]. Same caveat as
-    [credentials_toml_path]. *)
+    [repositories_toml_path]. *)
 
 val config_signature_exists : string -> bool
 (** [config_signature_exists dir] checks whether [dir] looks like a valid

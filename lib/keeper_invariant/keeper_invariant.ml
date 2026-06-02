@@ -3,11 +3,6 @@ module StringSet = Set.Make (String)
 type turn_id = string
 type sandbox_path = string
 
-type credential_scope =
-  { keeper_id : string
-  ; github_account : string
-  }
-
 type tool_name = string
 
 let normalize_path path =
@@ -64,31 +59,6 @@ let sandbox_isolation ~sandbox_roots ~sandbox_paths =
     | None -> Ok ())
 ;;
 
-let credential_isolation ~keeper:_ ~credential ~other_keepers =
-  (* Cross-persona credential isolation: a GitHub account used by one keeper
-     must not appear under a different keeper_id. The [~keeper] parameter is
-     retained for API stability; the authoritative identity is
-     [credential.keeper_id], so a divergent [~keeper] cannot mask a real
-     conflict. Same-keeper entries (e.g., a keeper holding multiple github
-     accounts, or repeated self-entries) are not violations. *)
-  match
-    List.find_opt
-      (fun other ->
-         (not (String.equal other.keeper_id credential.keeper_id))
-         && String.equal other.github_account credential.github_account)
-      other_keepers
-  with
-  | Some conflicting ->
-    Error
-      (Printf.sprintf
-         "Credential isolation violation: keeper %s shares GitHub account %s with keeper \
-          %s"
-         credential.keeper_id
-         credential.github_account
-         conflicting.keeper_id)
-  | None -> Ok ()
-;;
-
 let tool_surface_monotonicity ~before ~after =
   let before_set = StringSet.of_list before in
   let after_set = StringSet.of_list after in
@@ -107,19 +77,13 @@ let tool_surface_monotonicity ~before ~after =
 let check_all
       ~sandbox_roots
       ~sandbox_paths
-      ~keeper
-      ~credential
-      ~other_keepers
       ~before_tools
       ~after_tools
   =
   match sandbox_isolation ~sandbox_roots ~sandbox_paths with
   | Error _ as e -> e
   | Ok () ->
-    (match credential_isolation ~keeper ~credential ~other_keepers with
+    (match tool_surface_monotonicity ~before:before_tools ~after:after_tools with
      | Error _ as e -> e
-     | Ok () ->
-       (match tool_surface_monotonicity ~before:before_tools ~after:after_tools with
-        | Error _ as e -> e
-        | Ok () -> Ok ()))
+     | Ok () -> Ok ())
 ;;

@@ -404,7 +404,7 @@ let test_route_evidence_stored_for_git_push () =
                `String "repos/masc-mcp-keeper-direct-proof-20260506-1039" );
            ])
       ~output_text:
-        {|{"ok":true,"via":"docker","cwd":"repos/masc-mcp-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+        {|{"ok":true,"via":"docker","cwd":"repos/masc-mcp-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
       ~success:true
       ~duration_ms:42.0
       ();
@@ -437,8 +437,6 @@ let test_route_evidence_stored_for_git_push () =
       Alcotest.(check (option string)) "sandbox profile captured"
         (Some "docker")
         (Safe_ops.json_string_opt "sandbox_profile" evidence);
-      Alcotest.(check bool) "git creds captured" true
-        (Safe_ops.json_bool ~default:false "git_creds_enabled" evidence);
       Alcotest.(check (option string)) "network mode captured"
         (Some "bridge")
         (Safe_ops.json_string_opt "network_mode" evidence);
@@ -457,7 +455,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
           bytes = 8192;
           mime = "application/json";
           preview =
-            {|{"ok":true,"via":"docker","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|};
+            {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|};
         })
     in
     Keeper_tool_call_log.log_call
@@ -484,8 +482,6 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
       Alcotest.(check (option string)) "network mode captured"
         (Some "bridge")
         (Safe_ops.json_string_opt "network_mode" evidence);
-      Alcotest.(check bool) "git creds captured" true
-        (Safe_ops.json_bool ~default:false "git_creds_enabled" evidence);
       let status = Yojson.Safe.Util.member "status" evidence in
       Alcotest.(check (option string)) "status label captured"
         (Some "success")

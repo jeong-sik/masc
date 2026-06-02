@@ -13,27 +13,9 @@ let fail msg = failwith msg
 let assert_true msg b = if not b then fail msg
 let assert_false msg b = if b then fail msg
 
-let assert_list_eq ~msg expected got =
-  if List.length expected <> List.length got
-     || List.exists2 (fun a b -> a <> b) expected got
-  then
-    fail
-      (Printf.sprintf "%s: expected=[%s] got=[%s]" msg
-         (String.concat ";" expected) (String.concat ";" got))
-
 let assert_contains ~msg xs needle =
   if not (List.mem needle xs) then
     fail (Printf.sprintf "%s: %s not in list" msg needle)
-
-let with_env key value f =
-  let prior = Sys.getenv_opt key in
-  Unix.putenv key value;
-  Fun.protect
-    ~finally:(fun () ->
-      match prior with
-      | Some v -> Unix.putenv key v
-      | None -> Unix.putenv key "")
-    f
 
 let test_env_has_required_keys () =
   let keys = List.map fst Env_git_noninteractive.env in
@@ -165,53 +147,6 @@ let test_filter_environment () =
   assert_false "GIT_CONFIG_COUNT stripped"
     (List.exists (fun e -> String.starts_with ~prefix:"GIT_CONFIG_COUNT=" e) out_list)
 
-let test_compose_base_with_credential_bundle_rehomes_git_config () =
-  with_env "HOME" "/operator/home" @@ fun () ->
-  with_env "GH_CONFIG_DIR" "/operator/gh" @@ fun () ->
-  with_env "GIT_CONFIG_GLOBAL" "/operator/.gitconfig" @@ fun () ->
-  with_env "GIT_CONFIG_COUNT" "9" @@ fun () ->
-  with_env "GIT_CONFIG_KEY_3" "credential.helper" @@ fun () ->
-  with_env "GIT_CONFIG_VALUE_3" "osxkeychain" @@ fun () ->
-  let dir = "/tmp/masc-root/gh" in
-  let bundle_root = Filename.dirname dir in
-  let out =
-    Credential_bundle.compose_base_with_credential_bundle ~dir |> Array.to_list
-  in
-  assert_contains ~msg:"HOME rehomed to bundle root"
-    out ("HOME=" ^ bundle_root);
-  assert_contains ~msg:"GH_CONFIG_DIR rehomed to selected bundle"
-    out ("GH_CONFIG_DIR=" ^ dir);
-  assert_contains ~msg:"GIT_CONFIG_GLOBAL rehomed to bundle gitconfig"
-    out ("GIT_CONFIG_GLOBAL=" ^ Filename.concat bundle_root "gitconfig");
-	  assert_contains ~msg:"git config count pinned"
-	    out "GIT_CONFIG_COUNT=4";
-	  assert_contains ~msg:"safe.directory key pinned"
-	    out "GIT_CONFIG_KEY_0=safe.directory";
-	  assert_contains ~msg:"safe.directory value pinned"
-	    out "GIT_CONFIG_VALUE_0=*";
-	  assert_contains ~msg:"ambient credential helper reset"
-	    out "GIT_CONFIG_KEY_1=credential.helper";
-	  assert_contains ~msg:"ambient credential helper reset value"
-	    out "GIT_CONFIG_VALUE_1=";
-	  assert_contains ~msg:"github helper key pinned"
-	    out "GIT_CONFIG_KEY_2=credential.https://github.com.helper";
-	  assert_contains ~msg:"github helper command pinned"
-	    out "GIT_CONFIG_VALUE_2=!gh auth git-credential";
-	  assert_contains ~msg:"useHttpPath key pinned"
-	    out "GIT_CONFIG_KEY_3=credential.useHttpPath";
-	  assert_contains ~msg:"useHttpPath value pinned"
-	    out "GIT_CONFIG_VALUE_3=true";
-  assert_false "operator HOME stripped"
-    (List.mem "HOME=/operator/home" out);
-  assert_false "operator GH_CONFIG_DIR stripped"
-    (List.mem "GH_CONFIG_DIR=/operator/gh" out);
-  assert_false "operator GIT_CONFIG_GLOBAL stripped"
-    (List.mem "GIT_CONFIG_GLOBAL=/operator/.gitconfig" out);
-	  assert_false "operator GIT_CONFIG_KEY_N stripped"
-	    (List.mem "GIT_CONFIG_KEY_3=credential.helper" out);
-	  assert_false "operator GIT_CONFIG_VALUE_N stripped"
-	    (List.mem "GIT_CONFIG_VALUE_3=osxkeychain" out)
-
 let test_no_forgotten_git_askpass_literals () =
   (* Enforcement grep: outside of the SSOT module itself, [lib/] must not
      contain inline "GIT_ASKPASS" / "GIT_TERMINAL_PROMPT" literals. If this
@@ -269,8 +204,5 @@ let () =
   test_scrub_exact_match_only ();
   test_scrub_and_pass_disjoint ();
   test_filter_environment ();
-  test_compose_base_with_credential_bundle_rehomes_git_config ();
   test_no_forgotten_git_askpass_literals ();
-  (* Silence unused-value warning if a helper is unused in a future edit. *)
-  let _ = assert_list_eq in
   print_endline "test_env_git_noninteractive: OK"

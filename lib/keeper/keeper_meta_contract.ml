@@ -747,6 +747,14 @@ let effective_meta_result (meta : keeper_meta) : (keeper_meta, string) result =
   | Ok defaults -> effective_meta_of_profile_defaults defaults meta
 ;;
 
+let runtime_id_of_meta (meta : keeper_meta) =
+  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
+  | Ok { Keeper_types_profile.model = Some runtime_id; _ }
+    when String.trim runtime_id <> "" ->
+    String.trim runtime_id
+  | Ok _ | Error _ -> Runtime.get_default_runtime_id ()
+;;
+
 let proactive_cycle_outcome_to_string = function
   | Proactive_never_started -> "never_started"
   | Proactive_unknown -> "unknown"

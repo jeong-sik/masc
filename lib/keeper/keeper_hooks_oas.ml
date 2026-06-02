@@ -23,12 +23,9 @@ include Keeper_hooks_oas_types
 
 open Keeper_hooks_oas_gate_attempt
 
-(** Keeper deny list — derived from Tool_catalog surface SSOT.
-    Administrative/destructive operations that should only be invoked
-    by operators or through controlled workflows.
-    Inspired by Trail of Bits' deny-rule pattern. *)
-let keeper_denied_tools =
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied
+(** Keeper deny list. The legacy must-deny surface is gone; keep the hook
+    argument explicit so callers still receive a stable field. *)
+let keeper_denied_tools = []
 
 (* label_* string constants moved to Keeper_hooks_oas_types
    (intra-library file split, 2026-05-16). *)

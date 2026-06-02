@@ -16,7 +16,6 @@ let route_candidate_has_fields json =
            name
            [ "via"
            ; "sandbox_profile"
-           ; "git_creds_enabled"
            ; "network_mode"
            ; "status"
            ])
@@ -84,11 +83,6 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
     | Some value -> (name, `String value) :: fields
     | None -> fields
   in
-  let add_bool name value fields =
-    match value with
-    | Some value -> (name, `Bool value) :: fields
-    | None -> fields
-  in
   let add_json name value fields =
     match value with
     | Some value -> (name, value) :: fields
@@ -108,7 +102,6 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
               (Observability_redact.preview_json_strings ~max_len:max_output_len)
               (Json_util.assoc_member_opt "status" output_json))
       |> add_string "network_mode" (Json_util.assoc_string_opt "network_mode" output_json)
-      |> add_bool "git_creds_enabled" (Json_util.assoc_bool_opt "git_creds_enabled" output_json)
       |> add_string "sandbox_profile" (Json_util.assoc_string_opt "sandbox_profile" output_json)
       |> add_string "via" (Json_util.assoc_string_opt "via" output_json)
       |> add_string "path" (safe_input_string (Json_util.assoc_string_opt "path" input))

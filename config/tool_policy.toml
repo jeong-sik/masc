@@ -139,11 +139,3 @@ tools = [
   "masc_goal_transition",
   "masc_goal_verify",
 ]
-
-# ── Keeper Identity ────────────────────────────────────────────────
-# Git author/committer identity for keeper operations.
-# {name} is replaced with the sanitized keeper name at runtime.
-
-[keeper_identity]
-author_pattern = "{name} (MASC Keeper)"
-email_pattern = "{name}@masc.local"

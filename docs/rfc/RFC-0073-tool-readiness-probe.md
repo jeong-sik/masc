@@ -3,11 +3,11 @@ rfc: "0073"
 title: "Tool Readiness Probe — Typed Precondition + Runtime Gap Disclosure"
 status: Implemented
 created: 2026-05-14
-updated: 2026-05-22
+updated: 2026-06-02
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0005", "0019", "0057", "0062", "0074", "0075", "0076"]
+related: ["0005", "0057", "0062", "0075", "0076"]
 implementation_prs: [15064]
 ---
 
@@ -15,12 +15,11 @@ implementation_prs: [15064]
 
 ## 1. Context
 
-`Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome` (lib/keeper/agent_tool_dispatch_runtime.ml:281-575) 의 5-gate dispatch 는 Stage 3 에서 policy allowlist 통과를 확인한다. 그러나 Stage 4 의 sandbox/credential precondition 은 *실행 시점에야* fail 한다. dashboard `/api/v1/keepers/:name/tools` (server_dashboard_http_keeper_api.ml:112-128) 의 `resolved_allowlist` 는 policy 통과 사실만 노출하므로, "허용되었으나 호출 불가" 도구를 turn 진입 전에 감지할 수 없다.
+`Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome` 의 dispatch 는 policy allowlist 통과를 확인한다. 그러나 sandbox precondition 은 *실행 시점에야* fail 한다. dashboard `/api/v1/keepers/:name/tools` 의 `resolved_allowlist` 는 policy 통과 사실만 노출하므로, "허용되었으나 호출 불가" 도구를 turn 진입 전에 감지할 수 없다.
 
 대표 케이스 (sangsu keeper, descriptor-projected tool set):
 - `keeper_fs_*`, `tool_execute*`, `SearchFiles` — `turn_sandbox_factory=None` 시 error (lines 430-456)
-- `tool_execute` git 하위 명령 — `turn_sandbox_factory_git` 추가 필요 (line 445)
-- credentialed typed `gh` execution — GitHub credential 미바인딩 시 fail (lines 480-497)
+- `tool_execute` git/gh 하위 명령 — 일반 turn sandbox factory만 사용한다.
 
 ## 2. Problem
 
@@ -45,15 +44,8 @@ type sandbox_kind =
   | Git_sandbox
   | No_sandbox_required
 
-type credential_kind =
-  | Github_token
-  | Slack_token
-  | Web_search_key
-  | No_credential_required
-
 type readiness_precondition = {
   sandbox: sandbox_kind list;        (* AND-list. 모두 충족 필요. *)
-  credentials: credential_kind list;
   config_keys: string list;          (* cdal config 의 키 존재 여부 *)
 }
 
@@ -63,7 +55,6 @@ type readiness_state =
 
 and readiness_reason =
   | Sandbox_missing of sandbox_kind
-  | Credential_missing of credential_kind
   | Config_invalid of string
   (* Empirically discovered (2026-05-14 fleet-tool-allocation-proof probe) — see §3.4 *)
   | Lane_unavailable of {
@@ -104,8 +95,8 @@ val probe :
     "blocked": [
       { "tool": "tool_execute",
         "state": "Blocked",
-        "reason_kind": "Credential_missing",
-        "reason_detail": "Github_token not bound to keeper context" }
+        "reason_kind": "Sandbox_missing",
+        "reason_detail": "Bash sandbox not bound to keeper context" }
     ]
   }
 }
@@ -166,7 +157,6 @@ val probe :
 ## 8. Related RFCs
 
 - RFC-0005 Typed Capability Substrate — sandbox 추상의 base layer
-- RFC-0019 Keeper Credential Unification — credential SSOT
 - RFC-0057 Tool Descriptor Codegen — 장기적으로 `[@@deriving tool]` PPX 로 precondition 도 자동 생성 가능
 - RFC-0062 Typed `Tool_result.t` — error channel 의 typed reason 과 통합
 - RFC-0074 Sandbox & Credential Auto-provision — Blocked 도구의 실행 보장 (이 RFC 가 *진단*, 0074 가 *치료*)

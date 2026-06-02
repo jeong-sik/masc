@@ -33,13 +33,31 @@ let build_runtime_execution
   let model_labels =
     Keeper_context_runtime.effective_model_labels_for_turn meta
   in
+  let log_pre_dispatch_error ~site detail =
+    let model_labels_detail =
+      match model_labels with
+      | [] -> "none"
+      | labels -> String.concat "," labels
+    in
+    Log.Keeper.error
+      "%s: pre_dispatch: %s failed for runtime_id=%s model_labels=[%s]: %s"
+      meta.name
+      site
+      runtime_id
+      model_labels_detail
+      detail
+  in
   match Keeper_types_support.ensure_api_keys_for_labels model_labels with
-  | Error e -> Error (Agent_sdk.Error.Internal e)
+  | Error e ->
+    log_pre_dispatch_error ~site:"ensure_api_keys_for_labels" e;
+    Error (Agent_sdk.Error.Internal e)
   | Ok () ->
     (match
        Keeper_turn_helpers.ensure_local_discovery_ready model_labels
      with
-     | Error e -> Error (Agent_sdk.Error.Internal e)
+     | Error e ->
+       log_pre_dispatch_error ~site:"ensure_local_discovery_ready" e;
+       Error (Agent_sdk.Error.Internal e)
      | Ok () ->
        let max_context_resolution =
          Keeper_context_runtime.resolve_max_context_resolution
@@ -74,6 +92,12 @@ let build_runtime_execution
             raw_max_tokens
         with
         | Error err ->
+          let detail =
+            Option.value
+              ~default:(Keeper_internal_error.kind_of_masc_internal_error err)
+              (Keeper_internal_error.summary_of_masc_internal_error err)
+          in
+          log_pre_dispatch_error ~site:"validate_max_tokens_within_ceiling" detail;
           Error
             (Keeper_internal_error.sdk_error_of_masc_internal_error err)
         | Ok max_tokens ->

@@ -59,6 +59,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; models = [ qwen_model ]
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -87,6 +88,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; models = [ qwen_model ]
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -116,6 +118,7 @@ let provider_cfg () =
     ; models = [ qwen_model ]
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with

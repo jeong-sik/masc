@@ -99,7 +99,7 @@ let with_runtime_config f =
 
 let load_runtimes path =
   match Runtime.load_list ~config_path:path with
-  | Ok (runtimes, _default_runtime) -> runtimes
+  | Ok (runtimes, _default_runtime, _assignments) -> runtimes
   | Error msg -> Alcotest.fail msg
 ;;
 

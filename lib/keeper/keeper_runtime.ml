@@ -138,18 +138,16 @@ let invalid_profile_defaults_error ~keeper_name detail =
     Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
 
 let effective_declarative_runtime_id
-    (defaults : Keeper_types_profile.keeper_profile_defaults)
+    (_defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  (* [runtime_id]/[model] is the persona's per-keeper runtime selection
-     ("provider.model").  RFC-0207: this resolves from the SAME [defaults.model]
-     source as {!Keeper_meta_contract.runtime_id_of_meta} (the dispatcher), so
-     the declare/status view and the wire never disagree.  Do NOT re-fork this
-     onto a different source — divergence makes the reconcile change-detector
-     flag [runtime] every sweep (perpetual re-sync storm, cf. #10061). *)
-  match defaults.model, defaults.manifest_path with
-  | Some runtime_id, _ -> String.trim runtime_id
-  | None, Some _ -> (Keeper_config.default_runtime_id ())
-  | None, None -> String.trim (runtime_id_of_meta meta)
+  (* persona⊥{model,runtime}: the keeper's runtime is assigned in runtime.toml,
+     not in [defaults].  Delegate to {!Keeper_meta_contract.runtime_id_of_meta}
+     (the dispatcher) so the declare/status view and the wire share ONE source
+     by construction — divergence is structurally impossible, not convention-
+     enforced (prevents the reconcile re-sync storm, cf. #10061).  [_defaults]
+     is retained in the signature for caller call-sites but no longer carries a
+     runtime selection. *)
+  runtime_id_of_meta meta
 
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)

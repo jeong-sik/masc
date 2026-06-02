@@ -1,8 +1,8 @@
-(** Task_stage — Typed coding_task stage gates.
+(** Task_stage — Typed task progress labels.
 
-    Canonical order: decompose → inspect → implement → verify → review.
-    Forward and same-stage transitions are allowed; backward transitions
-    are forbidden to prevent skipping verification. *)
+    Advisory order: decompose → inspect → implement → verify → review.
+    Labels are non-authoritative metadata; review and reclassification must
+    not be blocked by a previous label. *)
 
 type t =
   | Decompose
@@ -38,13 +38,8 @@ let of_yojson = function
 
 let all = [Decompose; Inspect; Implement; Verify; Review]
 
-let can_transition ~current ~target =
-  compare target current >= 0
+let can_transition ~current:_ ~target:_ = true
 
-let validate_transition ~current ~target =
-  if can_transition ~current ~target then Ok ()
-  else
-    Error (Printf.sprintf "cannot go backward from %s to %s"
-      (to_string current) (to_string target))
+let validate_transition ~current:_ ~target:_ = Ok ()
 
 let initial = Decompose

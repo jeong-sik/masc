@@ -150,7 +150,7 @@ type task =
   ; created_at : string
   ; created_by : string option [@default None]
   ; goal_id : string option [@default None]
-  ; stage : Task_stage.t option [@default None]
+  ; stage : Task_stage.t option [@default None]  (** Optional task progress label *)
   ; contract : task_contract option [@default None]
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]

@@ -16,7 +16,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 
 대상 workload 예:
 
-- 코드 수정/검증/리뷰용 `coding_task`
+- 코드 수정/검증/리뷰를 포함할 수 있는 `coding_task` label set
 - repo code + docs + tests를 함께 읽는 `repo_synthesis`
 - 최신 AI 연구/공식 발표/리뷰 수집
 - normalize / verify / curate / rank / audit 파이프라인
@@ -24,7 +24,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 ## 기준 원칙
 
 - 기본 delivery path는 supervised execution + Supervisor이고, 이 문서의 managed-operation lane은 benchmark/compatibility용이다
-- 기본 workload는 `coding_task`, `research_pipeline`은 explicit profile이다
+- 기본 workload label set은 `coding_task`, `research_pipeline`은 explicit profile이다
 - removed Command Plane search strategy harness는 benchmark 경로에 포함되지 않음
 - removed `masc_swarm_*` public tools는 benchmark 경로에 포함되지 않음
 - supervisor/session runtime은 별도 모드

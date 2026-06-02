@@ -53,7 +53,7 @@ code_refs:
 - [ ] provider prompt logic, tool-call formatting, fallback order를 MASC가 소유하지 않는다.
 - [ ] OAS evidence를 소비하지만 OAS session state를 직접 수정하지 않는다.
 - [ ] MASC는 contract를 통해 requested mode를 제안할 수 있지만, OAS runtime state를 직접 바꾸지 않는다.
-- [ ] stage gate는 MASC workflow policy로 유지되고 OAS 내부 run policy로 내려가지 않는다.
+- [ ] stage label은 MASC observability/progress metadata로 유지되고 OAS 내부 run policy나 review blocker로 내려가지 않는다.
 - [ ] fresh-context adversarial eval을 도입해도 README / design docs / workspace-task history를 주입하지 않는다.
 
 ### MCP Protocol SDK

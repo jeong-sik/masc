@@ -43,7 +43,7 @@ code_refs:
 - proof bundle을 self-contained blob이 아니라 manifest + refs로 정의
 - `result_status`를 execution termination state로 제한
 - MASC digest의 1차 계산 방식을 structural-first로 제한
-- `coding_task` gate를 structural checkpoint와 hard gate로 구분
+- `coding_task` progress label과 contract/checkpoint 기반 hard requirement를 구분
 - cross-repo shared surface를 shared package가 아니라 JSON schema + fixtures로 고정
 - async eval의 policy propagation latency를 명시적 risk로 추가
 

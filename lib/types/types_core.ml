@@ -518,7 +518,7 @@ type task = {
   created_at: string;
   created_by: string option; [@default None]
   goal_id: string option; [@default None]  (** Structured goal linkage SSOT *)
-  stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
+  stage: Task_stage.t option; [@default None]  (** Optional task progress label *)
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]

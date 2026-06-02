@@ -111,7 +111,7 @@ transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-b
 
 기본 운영 가정:
 
-- `coding_task` stage는 `decompose -> inspect -> implement -> verify -> review`를 canonical graph로 본다.
+- `coding_task` stage는 `decompose -> inspect -> implement -> verify -> review`를 advisory progress label로만 본다. 이 label은 review, 구현, 검증을 차단하는 gate authority가 아니다.
 - Operation/unit/detachment tool variants were removed (no implementation existed).
 
 1. `masc_operator_snapshot` / `masc_operator_digest`

@@ -42,20 +42,18 @@ let test_same_stage () =
   check bool "verify → verify" true
     (Task_stage.can_transition ~current:Verify ~target:Verify)
 
-let test_backward_forbidden () =
-  check bool "review → decompose" false
+let test_backward_transition_allowed () =
+  check bool "review → decompose" true
     (Task_stage.can_transition ~current:Review ~target:Decompose);
-  check bool "implement → inspect" false
+  check bool "implement → inspect" true
     (Task_stage.can_transition ~current:Implement ~target:Inspect);
-  check bool "verify → implement" false
+  check bool "verify → implement" true
     (Task_stage.can_transition ~current:Verify ~target:Implement)
 
-let test_validate_transition_error () =
+let test_validate_transition_allows_reclassification () =
   match Task_stage.validate_transition ~current:Review ~target:Decompose with
-  | Error msg ->
-    check bool "error mentions backward" true
-      (String.length msg > 0)
-  | Ok () -> fail "expected error for backward transition"
+  | Ok () -> ()
+  | Error msg -> fail msg
 
 let test_yojson_roundtrip () =
   List.iter (fun stage ->
@@ -110,8 +108,8 @@ let () =
       "canonical order", `Quick, test_canonical_order;
       "forward allowed", `Quick, test_forward_transition;
       "same stage idempotent", `Quick, test_same_stage;
-      "backward forbidden", `Quick, test_backward_forbidden;
-      "validate error message", `Quick, test_validate_transition_error;
+      "backward reclassification allowed", `Quick, test_backward_transition_allowed;
+      "validate allows reclassification", `Quick, test_validate_transition_allows_reclassification;
     ];
     "task_integration", [
       "task with stage", `Quick, test_task_with_stage;

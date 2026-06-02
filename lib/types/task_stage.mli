@@ -1,10 +1,11 @@
-(** Task_stage — Typed coding_task stage gates.
+(** Task_stage — Typed task progress labels.
 
-    Enforces the canonical stage order:
+    Advisory order for coding-oriented work:
     decompose → inspect → implement → verify → review
 
-    Each transition requires the previous stage to be completed.
-    Stages are optional — tasks without a stage bypass gating. *)
+    These labels are not gate authority. They help dashboards and reports
+    describe rough progress, but they must not prevent implementation,
+    verification, or review. *)
 
 type t =
   | Decompose
@@ -24,13 +25,12 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 val all : t list
 
 (** Can transition from [current] to [target]?
-    Implemented as [compare target current >= 0]: forward transitions
-    (target after current in canonical order) and same-stage re-entry
-    (idempotent) are allowed; backward transitions are forbidden. *)
+    Progress labels are advisory and never reject a transition. *)
 val can_transition : current:t -> target:t -> bool
 
-(** Validate a transition, returning Error with reason if forbidden. *)
+(** Validate a transition.
+    Compatibility helper for older call sites; always returns [Ok ()]. *)
 val validate_transition : current:t -> target:t -> (unit, string) result
 
-(** Initial stage for a new coding_task. *)
+(** Default label for a new coding-oriented task. *)
 val initial : t

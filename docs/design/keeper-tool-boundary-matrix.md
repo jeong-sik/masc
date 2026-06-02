@@ -96,8 +96,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_exec_failure.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_factory.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_factory.mli` - sandbox-runtime
-- `lib/keeper/keeper_sandbox_oneshot_plan.ml` - sandbox-runtime
-- `lib/keeper/keeper_sandbox_oneshot_plan.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_read_backend.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_read_backend.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_read_runner.ml` - sandbox-runtime
@@ -112,8 +110,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_runtime_setup_mount_failure.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_runtime.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_runtime.mli` - sandbox-runtime
-- `lib/keeper/keeper_sandbox_session_plan.ml` - sandbox-runtime
-- `lib/keeper/keeper_sandbox_session_plan.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_shell_ir_target.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_shell_ir_target.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox.ml` - sandbox-runtime
@@ -162,12 +158,14 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_emission_hook.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_guidance.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_guidance.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_name_projection.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_name_projection.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_observation.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_observation.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_outcome.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_outcome.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_path_validation.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_path_validation.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_persona_audit.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_persona_audit.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy_config.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy_config.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy_failure_site.ml` - tool-surface-policy
@@ -182,6 +180,11 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_response.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_resolution.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_resolution.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_surface.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_surface.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_surface_ops.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_visibility_projection.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_visibility_projection.mli` - tool-surface-policy
 - `lib/keeper/keeper_tools_oas_bundle.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_bundle.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_deterministic_error.ml` - oas-tool-bridge

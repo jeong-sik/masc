@@ -191,7 +191,7 @@
   test_runtime_required_tool_fallback
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
-  test_tool_visibility_projection
+  test_keeper_tool_visibility_projection
   test_keeper_tool_resolution
   test_tool_resolution_runtime_projection
   test_claim_post_provision_hook
@@ -462,7 +462,7 @@
   test_runtime_required_tool_fallback
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
-  test_tool_visibility_projection
+  test_keeper_tool_visibility_projection
   test_keeper_tool_resolution
   test_tool_resolution_runtime_projection
   test_claim_post_provision_hook

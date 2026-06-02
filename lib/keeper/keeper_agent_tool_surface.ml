@@ -589,7 +589,7 @@ let preferred_tool_choice_for_required_tool_names
             else if List.mem name allowed_tool_names
             then add_visible_required acc canonical name false
             else (
-              match Tool_visibility_projection.public_alias_for_internal canonical with
+              match Keeper_tool_visibility_projection.public_alias_for_internal canonical with
               | Some public when List.mem public allowed_tool_names ->
                 add_visible_required acc canonical public true
               | _ -> acc))

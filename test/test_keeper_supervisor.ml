@@ -163,6 +163,81 @@ let test_supervisor_policy_restarts_stale_turn () =
     (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
   check bool "keeper death allowed" true decision.keeper_death_allowed
 
+(* Typed runtime-exhaustion retryability bridge. The consumer now reads the
+   carried [Keeper_meta_contract.runtime_exhaustion_reason] instead of
+   reparsing the stringified [code]; this pins the polarity, including the
+   correction of transient/connectivity reasons from terminal to retryable. *)
+let provider_runtime_error_of_reason reason =
+  Reg.Provider_runtime_error
+    { code = "ignored_by_typed_path"
+    ; detail = "test"
+    ; provider_id = None
+    ; http_status = None
+    ; runtime_id = None
+    ; reason = Some reason
+    }
+
+let test_supervisor_policy_runtime_exhausted_retryable_reasons () =
+  let retryable_reasons =
+    [ Keeper_meta_contract.Candidates_filtered_after_cycles
+    ; Keeper_meta_contract.Max_turns_exceeded
+    ; Keeper_meta_contract.Capacity_exhausted
+    ; Keeper_meta_contract.Connection_refused
+    ; Keeper_meta_contract.Dns_failure
+    ; Keeper_meta_contract.No_providers_available
+    ; Keeper_meta_contract.All_providers_failed
+    ; Keeper_meta_contract.Structural_attempt_timeout { detail = "30" }
+    ]
+  in
+  List.iter
+    (fun reason ->
+       let decision =
+         policy_decision_exn (Some (provider_runtime_error_of_reason reason))
+       in
+       check string
+         ("retryable reason -> soft_fail_turn ("
+          ^ Keeper_meta_contract.runtime_exhaustion_summary reason ^ ")")
+         "soft_fail_turn"
+         (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+       check string "reason label" "runtime_exhausted_retryable" decision.reason)
+    retryable_reasons
+
+let test_supervisor_policy_runtime_exhausted_terminal_reasons () =
+  let terminal_reasons =
+    [ Keeper_meta_contract.No_tool_capable None
+    ; Keeper_meta_contract.Other_detail "opaque free-text"
+    ]
+  in
+  List.iter
+    (fun reason ->
+       let decision =
+         policy_decision_exn (Some (provider_runtime_error_of_reason reason))
+       in
+       check string
+         ("terminal reason -> pause_current_work ("
+          ^ Keeper_meta_contract.runtime_exhaustion_summary reason ^ ")")
+         "pause_current_work"
+         (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+       check string "reason label" "runtime_exhausted_terminal" decision.reason)
+    terminal_reasons
+
+let test_supervisor_policy_runtime_error_no_reason_falls_through () =
+  (* A [Provider_runtime_error] with [reason = None] (non-exhaustion
+     provider/runtime error) must not be classified as runtime-exhausted;
+     it falls through to [None], preserving pre-refactor behavior. *)
+  let r =
+    Reg.Provider_runtime_error
+      { code = "provider_error"
+      ; detail = "boom"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = None
+      ; reason = None
+      }
+  in
+  check bool "reason=None yields no runtime-exhausted decision" true
+    (Sup.failure_reason_policy_decision_for_test (Some r) = None)
+
 (* ── Pure tests: keep_last_n ────────────────────────────── *)
 
 let test_keep_last_n_under_limit () =
@@ -1998,6 +2073,12 @@ let () =
         test_supervisor_policy_pauses_stale_storm;
       test_case "stale turn restarts via policy" `Quick
         test_supervisor_policy_restarts_stale_turn;
+      test_case "runtime-exhausted transient/bounded reasons are retryable" `Quick
+        test_supervisor_policy_runtime_exhausted_retryable_reasons;
+      test_case "runtime-exhausted capability/unknown reasons are terminal" `Quick
+        test_supervisor_policy_runtime_exhausted_terminal_reasons;
+      test_case "provider error with reason=None falls through to no decision" `Quick
+        test_supervisor_policy_runtime_error_no_reason_falls_through;
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;

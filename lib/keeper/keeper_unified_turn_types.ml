@@ -137,6 +137,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
              ; provider_id = None
          ; http_status = None
          ; runtime_id = Some (ntcp_runtime_id)
+         ; reason = None
          })
   | Some
       (Keeper_internal_error.Runtime_exhausted
@@ -151,6 +152,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; runtime_id = Some (ntcp_runtime_id)
+         ; reason = None
          })
   (* Generic Runtime_exhausted catch-all — after No_tool_capable specifics *)
   | Some (Keeper_internal_error.Runtime_exhausted { reason; runtime_id }) ->
@@ -161,6 +163,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; runtime_id = Some (runtime_id)
+         ; reason = Some reason
          })
   | Some (Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
@@ -170,6 +173,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; runtime_id = None
+         ; reason = None
          })
   | Some
       ( Keeper_internal_error.Resumable_cli_session _
@@ -226,6 +230,7 @@ let registry_failure_reason_of_terminal_reason
          ; provider_id = None
          ; http_status = None
          ; runtime_id = None
+         ; reason = None
          })
   | Keeper_turn_disposition.Runtime_attempts_exhausted ->
     Some
@@ -235,6 +240,7 @@ let registry_failure_reason_of_terminal_reason
          ; provider_id = None
          ; http_status = None
          ; runtime_id = None
+         ; reason = None
          })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel

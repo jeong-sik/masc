@@ -48,14 +48,6 @@ let completion_contract_of_tool_choice (tool_choice : Agent_sdk.Types.tool_choic
   | None -> Allow_text_or_tool
 ;;
 
-let run_completion_contract
-      ~(turn_contract : completion_contract)
-      ~(required_tool_use_seen : bool)
-  : completion_contract
-  =
-  if required_tool_use_seen then Require_tool_use else turn_contract
-;;
-
 (* KeeperContractViolated.tla: the contract gate must never accept a
    required-tool turn that observed no keeper-surface tool. The honest
    violation path returns [Error _]; a future fail-open edit trips the

@@ -14,4 +14,3 @@ val public_names : unit -> string list
 val internal_name_of_public : string -> string option
 val public_name_for_internal : string -> string option
 val strip_mcp_masc_prefix : string -> string
-val canonical_required_tool_name : string -> string

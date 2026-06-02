@@ -37,10 +37,9 @@ let record_failure_and_maybe_escalate
     && not updated_meta.paused
   in
   let tool_contract_auto_paused =
-    Keeper_unified_turn_types.should_auto_pause_required_tool_contract_violation
-      ~paused:updated_meta.paused
-      ~consecutive_failures:count
-      err
+    EC.is_required_tool_contract_violation err
+    && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
+    && not updated_meta.paused
   in
   let auto_pause_succeeded =
     if runtime_auto_paused || tool_contract_auto_paused

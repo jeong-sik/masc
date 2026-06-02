@@ -8,7 +8,6 @@ type t =
   | Keeper_stale_watchdog_lifecycle
   | Provider_timeout
   | Provider_runtime_exhaustion
-  | Required_tool_contract_mismatch
   | Task_state_probe_misuse
   | Verifier_action_guard
   | Network_error_other
@@ -26,7 +25,6 @@ let to_string = function
   | Keeper_stale_watchdog_lifecycle -> "keeper_stale_watchdog_lifecycle"
   | Provider_timeout -> "provider_timeout"
   | Provider_runtime_exhaustion -> "provider_runtime_exhaustion"
-  | Required_tool_contract_mismatch -> "required_tool_contract_mismatch"
   | Task_state_probe_misuse -> "task_state_probe_misuse"
   | Verifier_action_guard -> "verifier_action_guard"
   | Network_error_other -> "network_error_other"
@@ -43,7 +41,6 @@ let all =
     Keeper_stale_watchdog_lifecycle;
     Provider_timeout;
     Provider_runtime_exhaustion;
-    Required_tool_contract_mismatch;
     Task_state_probe_misuse;
     Verifier_action_guard;
     Network_error_other;
@@ -62,7 +59,6 @@ let of_string_opt raw =
   | "keeper_stale_watchdog_lifecycle" -> Some Keeper_stale_watchdog_lifecycle
   | "provider_timeout" -> Some Provider_timeout
   | "provider_runtime_exhaustion" -> Some Provider_runtime_exhaustion
-  | "required_tool_contract_mismatch" -> Some Required_tool_contract_mismatch
   | "task_state_probe_misuse" -> Some Task_state_probe_misuse
   | "verifier_action_guard" -> Some Verifier_action_guard
   | "network_error_other" -> Some Network_error_other

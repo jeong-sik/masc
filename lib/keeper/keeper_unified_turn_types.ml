@@ -45,18 +45,6 @@ let turn_event_bus_manifest_decision
     ]
 ;;
 
-(* Pure predicate (Keeper_context_runtime + Keeper_behavioral_regime). *)
-let should_auto_pause_required_tool_contract_violation
-      ~(paused : bool)
-      ~(consecutive_failures : int)
-      (err : Agent_sdk.Error.sdk_error)
-  : bool
-  =
-  Keeper_error_classify.is_required_tool_contract_violation err
-  && consecutive_failures >= Keeper_behavioral_regime.turn_fail_streak_threshold
-  && not paused
-;;
-
 (* Pure constructor for the SDK retry-timeout error wire shape. *)
 let sdk_error_of_retry_slot_reacquire_timeout
       ~(keeper_name : string)

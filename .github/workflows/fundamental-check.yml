@@ -149,6 +149,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/tool-keeper-boundary-ratchet.sh --fail
 
+  masc-domain-boundary:
+    name: MASC domain ownership ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/masc-domain-boundary-ratchet.sh --fail
+
   no-tool-result-error-printexc:
     name: RFC-0148 backsliding guard (no Tool_result.error + Printexc.to_string)
     runs-on: ubuntu-latest

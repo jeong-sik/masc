@@ -153,6 +153,8 @@ jobs:
       oas_pin: ${{ steps.scope.outputs.oas_pin }}
       spec_refs: ${{ steps.scope.outputs.spec_refs }}
       nav_event_parity: ${{ steps.scope.outputs.nav_event_parity }}
+      shell_ir: ${{ steps.scope.outputs.shell_ir }}
+      keeper_cwd: ${{ steps.scope.outputs.keeper_cwd }}
 
     steps:
       - name: Checkout
@@ -172,7 +174,7 @@ jobs:
           set -euo pipefail
 
           emit_all_true() {
-            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla oas_pin spec_refs nav_event_parity; do
+            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla oas_pin spec_refs nav_event_parity shell_ir keeper_cwd; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
           }
@@ -224,6 +226,8 @@ jobs:
           oas_pin=false
           spec_refs=false
           nav_event_parity=false
+          shell_ir=false
+          keeper_cwd=false
 
           if has_match '^(\.github/workflows/ci\.yml|\.github/actions/)'; then
             ci_core=true
@@ -273,6 +277,14 @@ jobs:
             nav_event_parity=true
           fi
 
+          if has_match '^(lib/|scripts/audit-shell-ir-consumption\.sh$|scripts/shell-ir-consumption-baseline\.json$|\.github/workflows/ci\.yml$)'; then
+            shell_ir=true
+          fi
+
+          if has_match '^(lib/keeper/|scripts/keeper-cwd-leak-gate\.sh$|\.github/workflows/ci\.yml$)'; then
+            keeper_cwd=true
+          fi
+
           if [ "${ci_core}" = true ]; then
             build=true
             lint=true
@@ -281,6 +293,8 @@ jobs:
             lib_deps=true
             doc_truth=true
             oas_pin=true
+            shell_ir=true
+            keeper_cwd=true
             # Note: dashboard/spec_refs/tla stay path-scoped. Pure CI
             # workflow/action edits should still validate the core OCaml/repo
             # guard lanes and Health, but they should not fan out into every
@@ -298,9 +312,11 @@ jobs:
           echo "oas_pin=${oas_pin}" >> "$GITHUB_OUTPUT"
           echo "spec_refs=${spec_refs}" >> "$GITHUB_OUTPUT"
           echo "nav_event_parity=${nav_event_parity}" >> "$GITHUB_OUTPUT"
+          echo "shell_ir=${shell_ir}" >> "$GITHUB_OUTPUT"
+          echo "keeper_cwd=${keeper_cwd}" >> "$GITHUB_OUTPUT"
 
-          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s nav_event_parity=%s\n' \
-            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}" "${nav_event_parity}"
+          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s\n' \
+            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}"
 
   meta:
     name: Meta Guards
@@ -995,7 +1011,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') }}
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.keeper_cwd == 'true') }}
 
     steps:
       - name: Checkout
@@ -1005,26 +1021,35 @@ jobs:
         run: sudo apt-get install -y -qq ripgrep
 
       - name: Run OCaml structure ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/ocaml-structure-ratchet.sh
 
       - name: Run stringly boundary ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/stringly-boundary-ratchet.sh
 
       - name: Run OAS boundary ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/oas-boundary-ratchet.sh
 
       - name: Run keeper tool boundary matrix ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/audit-keeper-tool-boundary-matrix.sh
 
       - name: Run silent-failure ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/silent-failure-ratchet.sh
+
+      - name: Run keeper cwd leak gate
+        if: needs.changes.outputs.keeper_cwd == 'true'
+        run: scripts/keeper-cwd-leak-gate.sh
 
   shell-ir-ratchet:
     name: Shell IR Consumption Ratchet
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') }}
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.shell_ir == 'true' || needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') }}
 
     steps:
       - name: Checkout
@@ -1037,20 +1062,6 @@ jobs:
 
       - name: Run Shell IR consumption ratchet
         run: scripts/audit-shell-ir-consumption.sh --baseline scripts/shell-ir-consumption-baseline.json
-
-  keeper-cwd-leak-gate:
-    name: Keeper Cwd Leak Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [pr-live-gate]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Run keeper cwd leak gate
-        run: scripts/keeper-cwd-leak-gate.sh
 
   tla-specs:
     name: TLA+ Model Checking
@@ -1298,6 +1309,7 @@ jobs:
           DASHBOARD_RESULT: ${{ needs.dashboard.result }}
           HEALTH_RESULT: ${{ needs.health.result }}
           STRUCTURE_RATCHET_RESULT: ${{ needs.structure-ratchet.result }}
+          SHELL_IR_RATCHET_RESULT: ${{ needs.shell-ir-ratchet.result }}
           TLA_RESULT: ${{ needs.tla-specs.result }}
           BUILD_ADVISORY_STATUS: ${{ needs.build.outputs.advisory_status }}
         run: |
@@ -1350,5 +1362,6 @@ jobs:
           check "dashboard"       "$DASHBOARD_RESULT"
           check "health"          "$HEALTH_RESULT"
           check "structure-ratchet" "$STRUCTURE_RATCHET_RESULT"
+          check "shell-ir-ratchet" "$SHELL_IR_RATCHET_RESULT"
           check "tla-specs"       "$TLA_RESULT"
           [ "$fail" -eq 0 ]

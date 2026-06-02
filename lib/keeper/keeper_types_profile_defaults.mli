@@ -36,7 +36,8 @@ type keeper_profile_defaults = {
   per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  model : string option;
+  (* No per-keeper [model]/[runtime_id] field: keeper→runtime assignment lives
+     solely in runtime.toml [[runtime.assignments]] (persona⊥{model,runtime}). *)
   models : string list option;
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;

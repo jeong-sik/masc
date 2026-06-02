@@ -177,6 +177,20 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
               ~field:"per_provider_timeout"
               keeper_json
           in
+          (* persona⊥{model,runtime}: persona profiles do not own a
+             runtime/model selection — that lives in runtime.toml
+             ([[runtime.assignments]]), keyed by keeper name.  A [model] key in
+             persona JSON is ignored (mirrors the keeper TOML parser, which
+             rejects [keeper.model]).  Warn so an operator sees the stale key is
+             no longer honored. *)
+          (match Safe_ops.json_string_opt "model" keeper_json with
+           | Some raw ->
+               Log.Keeper.warn
+                 "persona profile %s has a [model] key (%s); ignored — \
+                  keeper->runtime assignment lives in \
+                  runtime.toml [[runtime.assignments]]"
+                 path raw
+           | None -> ());
           match keeper_json with
           | `Assoc _ ->
               {
@@ -246,22 +260,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                             path raw;
                           None
                       | None -> None));
-                (* persona⊥{model,runtime}: persona profiles do not own a
-                   runtime/model selection — that lives in runtime.toml
-                   ([[runtime.assignments]]), keyed by keeper name.  A [model]
-                   key in persona JSON is ignored (mirrors the keeper TOML
-                   parser, which rejects [keeper.model]).  Warn so an operator
-                   sees the stale key is no longer honored. *)
-                model =
-                  (match Safe_ops.json_string_opt "model" keeper_json with
-                   | Some raw ->
-                       Log.Keeper.warn
-                         "persona profile %s has a [model] key (%s); ignored — \
-                          keeper->runtime assignment lives in \
-                          runtime.toml [[runtime.assignments]]"
-                         path raw;
-                       None
-                   | None -> None);
                 models = None;
                 (* oas_env lives only in keeper TOML, not persona JSON —
                    persona profiles are a design-time artifact whereas

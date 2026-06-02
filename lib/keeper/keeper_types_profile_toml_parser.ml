@@ -88,17 +88,26 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
-  let runtime_id_result =
-    let trimmed key =
+  (* persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
+     selection.  keeper→runtime assignment is the sole responsibility of
+     runtime.toml [[runtime.assignments]] (keyed by keeper name), resolved via
+     {!Runtime.runtime_id_for_keeper}.  Both the legacy [keeper.model] and the
+     (now removed) [keeper.runtime_id] keys are rejected at load — fail loud
+     rather than silently discard, pointing the operator at the new SSOT.
+     BREAKING: a keeper TOML still carrying [runtime_id] fails to load; migrate
+     its value to runtime.toml [[runtime.assignments]]. *)
+  let runtime_assignment_result =
+    let present key =
       match str key with
-      | None -> None
-      | Some raw ->
-        let value = String.trim raw in
-        if value = "" then None else Some value
+      | None -> false
+      | Some raw -> String.trim raw <> ""
     in
-    match trimmed "model", trimmed "runtime_id" with
-    | Some _, _ -> Error "removed keeper.model key. Use keeper.runtime_id."
-    | None, runtime_id -> Ok runtime_id
+    match present "model", present "runtime_id" with
+    | true, _ | _, true ->
+      Error
+        "keeper.model / keeper.runtime_id are removed. Assign the keeper's \
+         runtime in runtime.toml [[runtime.assignments]] (keyed by keeper name)."
+    | false, false -> Ok ()
   in
   let result =
     Result.bind result (fun () ->
@@ -114,14 +123,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         | _ -> Ok ())
   in
   let result =
-    Result.bind result (fun () -> tool_access_defaults_result)
+    Result.bind result (fun () -> runtime_assignment_result)
   in
   let result =
-    Result.bind result (fun tool_access ->
-      Result.map (fun runtime_id_opt -> tool_access, runtime_id_opt) runtime_id_result)
+    Result.bind result (fun () -> tool_access_defaults_result)
   in
   Result.map
-    (fun (tool_access, runtime_id_opt) ->
+    (fun tool_access ->
       {
         id = None;
         manifest_path = None;
@@ -172,7 +180,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
         social_model = normalize_social_model_opt (str "social_model");
-        model = runtime_id_opt;
         models = None;
         oas_env = extract_oas_env_from_doc doc;
         unknown_toml_keys = [];
@@ -213,7 +220,6 @@ let parsed_field_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
-  ; "runtime_id"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -256,7 +262,6 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
-  ; "runtime_id"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]
@@ -395,7 +400,6 @@ let merge_keeper_profile_defaults
     per_provider_timeout;
     always_approve = prefer overlay.always_approve base.always_approve;
     social_model = prefer overlay.social_model base.social_model;
-    model = prefer overlay.model base.model;
     models = None;
     max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
     max_turns_per_call_scheduled_autonomous =

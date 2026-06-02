@@ -31,7 +31,6 @@ type backend_command =
   { route_cwd : string
   ; cwd : unit -> string
   ; command_text : string
-  ; git_creds_enabled : bool
   ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; trust : command_trust
   }
@@ -74,7 +73,6 @@ module type Backend = sig
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
     network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
 
@@ -84,19 +82,8 @@ module type Backend = sig
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
     network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
-
-  val run_credentialed_bash :
-    turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Workspace.config ->
-    meta:Keeper_meta_contract.keeper_meta ->
-    cwd:string ->
-    timeout_sec:float ->
-    cmd:string ->
-    unit ->
-    string
 
   val run_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
@@ -136,7 +123,6 @@ module Make (Backend : Backend) : sig
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
     network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
 
@@ -146,19 +132,8 @@ module Make (Backend : Backend) : sig
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
     network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
-
-  val run_credentialed_bash :
-    turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Workspace.config ->
-    meta:Keeper_meta_contract.keeper_meta ->
-    cwd:string ->
-    timeout_sec:float ->
-    cmd:string ->
-    unit ->
-    string
 
   val run_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
@@ -197,7 +172,6 @@ val run_shell_command_with_status :
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
-  git_creds_enabled:bool ->
   network_mode:Keeper_types_profile_sandbox.network_mode ->
   (command_result, string) result
 
@@ -207,19 +181,8 @@ val run_trusted_shell_command_with_status :
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
-  git_creds_enabled:bool ->
   network_mode:Keeper_types_profile_sandbox.network_mode ->
   (command_result, string) result
-
-val run_credentialed_bash :
-  turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  cwd:string ->
-  timeout_sec:float ->
-  cmd:string ->
-  unit ->
-  string
 
 val run_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->

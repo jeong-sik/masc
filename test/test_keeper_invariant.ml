@@ -45,38 +45,6 @@ let test_sandbox_isolation_root_slash () =
     (Inv.sandbox_isolation ~sandbox_roots:roots ~sandbox_paths:paths)
 
 (* ================================================================ *)
-(* credential_isolation tests                                         *)
-(* ================================================================ *)
-
-let test_credential_isolation_ok () =
-  let credential = { Inv.keeper_id = "keeper_a"; github_account = "gh_a" } in
-  let others = [{ Inv.keeper_id = "keeper_b"; github_account = "gh_b" }] in
-  require_ok "credential ok"
-    (Inv.credential_isolation ~keeper:"keeper_a" ~credential ~other_keepers:others)
-
-let test_credential_isolation_violation () =
-  let credential = { Inv.keeper_id = "keeper_a"; github_account = "gh_a" } in
-  (* Cross-persona reuse: keeper_b claims the github account already bound
-     to keeper_a. *)
-  let others = [{ Inv.keeper_id = "keeper_b"; github_account = "gh_a" }] in
-  require_error "credential violation"
-    (Inv.credential_isolation ~keeper:"keeper_a" ~credential ~other_keepers:others)
-
-let test_credential_isolation_self_duplicate_ok () =
-  let credential = { Inv.keeper_id = "keeper_a"; github_account = "gh_a" } in
-  (* A repeated self-entry (same keeper_id, same github_account) is not a
-     cross-persona conflict. *)
-  let others = [{ Inv.keeper_id = "keeper_a"; github_account = "gh_a" }] in
-  require_ok "self duplicate ok"
-    (Inv.credential_isolation ~keeper:"keeper_a" ~credential ~other_keepers:others)
-
-let test_credential_isolation_same_keeper_diff_account () =
-  let credential = { Inv.keeper_id = "keeper_a"; github_account = "gh_a" } in
-  let others = [{ Inv.keeper_id = "keeper_a"; github_account = "gh_b" }] in
-  require_ok "same keeper diff account"
-    (Inv.credential_isolation ~keeper:"keeper_a" ~credential ~other_keepers:others)
-
-(* ================================================================ *)
 (* tool_surface_monotonicity tests                                    *)
 (* ================================================================ *)
 
@@ -102,13 +70,11 @@ let test_tool_monotonicity_violation () =
 let test_check_all_ok () =
   let roots = ["/tmp/masc_sandbox_turn_1"] in
   let paths = ["/tmp/masc_sandbox_turn_1/foo.ml"] in
-  let credential = { Inv.keeper_id = "keeper_a"; github_account = "gh_a" } in
-  let others = [{ Inv.keeper_id = "keeper_b"; github_account = "gh_b" }] in
   let before_tools = ["tool_a"] in
   let after_tools = ["tool_a"] in
   require_ok "check_all ok"
-    (Inv.check_all ~sandbox_roots:roots ~sandbox_paths:paths ~keeper:"keeper_a"
-       ~credential ~other_keepers:others ~before_tools ~after_tools)
+    (Inv.check_all ~sandbox_roots:roots ~sandbox_paths:paths ~before_tools
+       ~after_tools)
 
 (* Sibling-prefix safety: /srv/.../alice-evil/ must NOT satisfy root
    /srv/.../alice/. This is what the trailing-slash trick on the root
@@ -134,13 +100,11 @@ let test_sandbox_isolation_path_traversal_rejected () =
 let test_check_all_first_error () =
   let roots = ["/tmp/masc_sandbox_turn_1"] in
   let paths = ["/etc/passwd"] in
-  let credential = { Inv.keeper_id = "keeper_a"; github_account = "gh_a" } in
-  let others = [] in
   let before_tools = ["tool_a"] in
   let after_tools = ["tool_a"] in
   let result =
-    Inv.check_all ~sandbox_roots:roots ~sandbox_paths:paths ~keeper:"keeper_a"
-      ~credential ~other_keepers:others ~before_tools ~after_tools
+    Inv.check_all ~sandbox_roots:roots ~sandbox_paths:paths ~before_tools
+      ~after_tools
   in
   match result with
   | Ok () -> failf "check_all first error: expected sandbox error"
@@ -162,15 +126,6 @@ let () =
           test_case "path_traversal_rejected" `Quick
             test_sandbox_isolation_path_traversal_rejected;
           test_case "root_slash" `Quick test_sandbox_isolation_root_slash;
-        ] );
-      ( "credential_isolation",
-        [
-          test_case "ok" `Quick test_credential_isolation_ok;
-          test_case "violation" `Quick test_credential_isolation_violation;
-          test_case "same_keeper_diff_account" `Quick
-            test_credential_isolation_same_keeper_diff_account;
-          test_case "self_duplicate_ok" `Quick
-            test_credential_isolation_self_duplicate_ok;
         ] );
       ( "tool_surface_monotonicity",
         [

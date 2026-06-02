@@ -14,7 +14,7 @@
 
     - the field is not present in the table (caller wants the default), and
     - the field is present but carries a wrong type (the [repositories.toml]
-      or [credentials.toml] is malformed, caller should propagate).
+      file is malformed, caller should propagate).
 
     [Field_resolution.t] keeps the two cases structurally distinct:
 
@@ -29,8 +29,7 @@
        caller can choose to propagate the schema violation as an
        error instead of substituting a (possibly inconsistent) default.}}
 
-    Two caller-side helpers cover the common shapes used by
-    [repo_store.ml] and [credential_store.ml]:
+    Two caller-side helpers cover the common shapes used by [repo_store.ml]:
 
     {ul
     {- [or_default ~default] substitutes [default] for [Missing]

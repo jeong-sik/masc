@@ -51,31 +51,6 @@ let docker_mount_preflight_details
     ]
 ;;
 
-let credential_preflight_failure_json ~keeper_name ~message =
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "ok", `Bool false
-       ; "error", `String "credential_bundle_blocked"
-       ; "failure_class", `String "workflow_rejection"
-       ; "retryable", `Bool false
-       ; "semantic_status", `String "blocked"
-       ; "blocker", `String "credential_bundle"
-       ; "keeper", `String keeper_name
-       ; "detail", `String message
-       ; ( "recovery_hint"
-         , `String
-             "The keeper GitHub credential bundle is unavailable or stale. \
-              Re-materialize the selected bundle via dashboard or CLI auth \
-              login into that bundle before retrying credentialed git/forge \
-              commands through the visible Execute tool." )
-       ])
-;;
-
-let is_credential_preflight_failure message =
-  String_util.contains_substring message "Missing_bundle"
-  || String_util.contains_substring message "Invalid_token"
-;;
-
 let egress_policy_path ~(config : Workspace.config) ~(meta : keeper_meta) =
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Filename.concat playground "egress.json"
@@ -320,25 +295,6 @@ let check_docker_mounts ~host_root ~cwd =
   else Ok ()
 ;;
 
-let resolve_credential_mounts ~config ~meta ~git_creds_enabled =
-  if not git_creds_enabled
-  then Ok ([], [])
-  else (
-    match Credential_host_config_provider.resolve ~config ~identity:meta.name with
-    | Error err -> Error (Credential_provider.pp_error err)
-    | Ok binding ->
-      let mounts =
-        List.concat_map
-          (fun (m : Credential_provider.ro_mount) ->
-             [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
-          binding.ro_mounts
-      in
-      let envs =
-        List.concat_map (fun (k, v) -> [ "-e"; k ^ "=" ^ v ]) binding.env
-      in
-      Ok (mounts, envs))
-;;
-
 let docker_run_argv
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -351,8 +307,6 @@ let docker_run_argv
       ~uid
       ~gid
       ~seccomp_args
-      ~cred_mounts
-      ~cred_envs
       ~identity_mounts
       ~image
       ~ttl_sec
@@ -393,8 +347,6 @@ let docker_run_argv
       ~base_path:config.base_path
       ~container_root
   @ network_args
-  @ cred_mounts
-  @ cred_envs
   @ identity_mounts
   @ [ image; "bash"; "-l"; "-s" ]
 ;;
@@ -415,13 +367,8 @@ let optional_ro_mount ~host ~container =
   else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
 ;;
 
-let nested_runtime_blocker ~git_creds_enabled =
-  if git_creds_enabled
-  then
-    "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket \
-     references"
-  else
-    "sandbox_profile=docker blocks nested container runtimes and host socket references"
+let nested_runtime_blocker =
+  "sandbox_profile=docker blocks nested container runtimes and host socket references"
 ;;
 
 let sandbox_error_json ~(config : Workspace.config) ~(meta : keeper_meta) message =
@@ -434,8 +381,7 @@ let sandbox_error ~(config : Workspace.config) ~(meta : keeper_meta) ?details me
   Error message
 ;;
 
-(** Shared by [run_docker_credentialed_bash], [run_docker_bash], and
-    [run_docker_shell_command_with_status_internal]:
+(** Shared by [run_docker_bash] and [run_docker_shell_command_with_status_internal]:
     parse cmd → resolve cwd → validate paths.  Returns [Ok (cwd, cmd_stages)]
     when every gate passes.
 
@@ -490,7 +436,6 @@ let run_docker_shell_command_with_status_internal
       ~(cwd : string)
       ~(timeout_sec : float)
       ~(cmd : string)
-      ~(git_creds_enabled : bool)
       ~(network_mode : network_mode)
   =
   let timeout_sec = max timeout_sec docker_run_min_timeout_sec in
@@ -501,7 +446,7 @@ let run_docker_shell_command_with_status_internal
   else (
     let cmd = rewrite_docker_command_paths ~config ~meta cmd in
     if command_uses_nested_container_runtime cmd
-    then sandbox_error (nested_runtime_blocker ~git_creds_enabled)
+    then sandbox_error nested_runtime_blocker
     else
       match
         validate_docker_dispatch_context
@@ -551,9 +496,7 @@ let run_docker_shell_command_with_status_internal
               let container_root = keeper_private_container_root meta in
               let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
               let network_args, network_label =
-                if git_creds_enabled
-                then [ "--network"; "bridge" ], "bridge"
-                else Keeper_sandbox_runtime.docker_network_args network_mode
+                Keeper_sandbox_runtime.docker_network_args network_mode
               in
               let mount_preflight_error ~reason ~detail_msg mount_path =
                 let details =
@@ -632,87 +575,80 @@ let run_docker_shell_command_with_status_internal
                      with
                      | Error err -> sandbox_error err
                      | Ok identity_mounts ->
-                       match
-                         resolve_credential_mounts ~config ~meta ~git_creds_enabled
-                       with
-                       | Error err -> sandbox_error err
-                       | Ok (cred_mounts, cred_envs) ->
-                          let argv =
-                            docker_run_argv
+                       let argv =
+                         docker_run_argv
+                           ~config
+                           ~meta
+                           ~container_name
+                           ~container_root
+                           ~container_cwd
+                           ~host_root
+                           ~network_label
+                           ~network_args
+                           ~uid
+                           ~gid
+                           ~seccomp_args
+                           ~identity_mounts
+                           ~image
+                           ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
+                       in
+                       (try
+                          let status, output =
+                            Eio_guard.protect
+                              ~finally:(fun () ->
+                                cleanup_oneshot_container ~container_name)
+                            @@ fun () ->
+                            Docker_spawn_throttle.with_slot (fun () ->
+                              Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+                                ~actor:`System_sandbox
+                                ~raw_source:(String.concat " " argv)
+                                ~summary:"keeper docker command"
+                                ~env:(Unix.environment ())
+                                ~cwd:(Sys.getcwd ())
+                                ~timeout_sec
+                                ~stdin_content:cmd
+                                argv)
+                          in
+                          let semantic_status =
+                            docker_command_semantic_status ~cmd ~status ~output
+                          in
+                          let semantic_ok = semantic_ok_of_status semantic_status in
+                          if not semantic_ok
+                          then
+                            Keeper_sandbox_exec_failure.record_docker_failure
                               ~config
                               ~meta
-                              ~container_name
-                              ~container_root
-                              ~container_cwd
-                              ~host_root
-                              ~network_label
-                              ~network_args
-                              ~uid
-                              ~gid
-                              ~seccomp_args
-                              ~cred_mounts
-                              ~cred_envs
-                              ~identity_mounts
                               ~image
-                              ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
-                          in
-                          (try
-                             let status, output =
-                               Eio_guard.protect
-                                 ~finally:(fun () ->
-                                   cleanup_oneshot_container ~container_name)
-                               @@ fun () ->
-                               Docker_spawn_throttle.with_slot (fun () ->
-                                 Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-                                   ~actor:`System_sandbox
-                                   ~raw_source:(String.concat " " argv)
-                                   ~summary:"keeper docker command"
-                                   ~env:(Unix.environment ())
-                                   ~cwd:(Sys.getcwd ())
-                                   ~timeout_sec
-                                   ~stdin_content:cmd
-                                   argv)
-                             in
-                             let semantic_status =
-                               docker_command_semantic_status ~cmd ~status ~output
-                             in
-                             let semantic_ok = semantic_ok_of_status semantic_status in
-                             if not semantic_ok
-                             then
-                               Keeper_sandbox_exec_failure.record_docker_failure
-                                 ~config
-                                 ~meta
-                                 ~image
-                                 ~container_kind:"oneshot"
-                                 ~network_label
-                                 ~status
-                                 ~output
-                             else
-                               Keeper_registry.clear_error
-                                 ~base_path:config.base_path
-                                 meta.name;
-                             Ok
-                               { status
-                               ; output
-                               ; image
-                               ; network_label
-                               ; cwd
-                               ; semantic_status = Some semantic_status
-                               ; semantic_ok
-                               }
-                           with
-                           | Eio.Cancel.Cancelled _ as exn -> raise exn
-                           | Failure err -> sandbox_error err
-                           | Sys_error err ->
-                             sandbox_error
-                               (Printf.sprintf "docker_shell_failed: sys_error: %s" err)
-                           | Unix.Unix_error (code, fn, arg) ->
-                             sandbox_error
-                               (Printf.sprintf
-                                  "docker_shell_failed: unix_error: %s: %s(%s)"
-                                  (Unix.error_message code)
-                                  fn
-                                  arg))))))))
+                              ~container_kind:"oneshot"
+                              ~network_label
+                              ~status
+                              ~output
+                          else
+                            Keeper_registry.clear_error
+                              ~base_path:config.base_path
+                              meta.name;
+                          Ok
+                            { status
+                            ; output
+                            ; image
+                            ; network_label
+                            ; cwd
+                            ; semantic_status = Some semantic_status
+                            ; semantic_ok
+                            }
+                        with
+                        | Eio.Cancel.Cancelled _ as exn -> raise exn
+                        | Failure err -> sandbox_error err
+                        | Sys_error err ->
+                          sandbox_error
+                            (Printf.sprintf "docker_shell_failed: sys_error: %s" err)
+                        | Unix.Unix_error (code, fn, arg) ->
+                          sandbox_error
+                            (Printf.sprintf
+                               "docker_shell_failed: unix_error: %s: %s(%s)"
+                               (Unix.error_message code)
+                               fn
+                               arg))))))))
 ;;
 
 let run_docker_shell_command_with_status =
@@ -723,32 +659,30 @@ let run_trusted_docker_shell_command_with_status =
   run_docker_shell_command_with_status_internal ~validate_command_paths:false
 ;;
 
-(** Preflight checks shared by [run_docker_credentialed_bash] and
-    [run_docker_bash]: image configured, nested runtime blocked.
+(** Preflight checks shared by [run_docker_bash]: image configured, nested runtime blocked.
     Returns [Some error_json] on failure, [None] when every gate passes. *)
-let docker_bash_preflight ~config ~meta ~cmd ~git_creds_enabled =
+let docker_bash_preflight ~config ~meta ~cmd =
   let image = resolve_sandbox_image meta in
   let sandbox_error_json = sandbox_error_json ~config ~meta in
   if String.trim image = ""
   then Some (sandbox_error_json "keeper sandbox docker image is not configured")
   else if command_uses_nested_container_runtime cmd
-  then Some (sandbox_error_json (nested_runtime_blocker ~git_creds_enabled))
+  then Some (sandbox_error_json nested_runtime_blocker)
   else None
 ;;
 
-let docker_bash_response ~ok ~git_creds_enabled ~network_label ~status ~output
+let docker_bash_response ~ok ~network_label ~status ~output
     ~cwd_response ~semantic_status
   =
   Yojson.Safe.to_string
     (`Assoc
-        ([ "ok", `Bool ok
-         ; "via", `String "docker"
-         ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
-         ; "sandbox_profile", `String "docker"
-         ; "git_creds_enabled", `Bool git_creds_enabled
-         ; "network_mode", `String network_label
-         ; "status", Keeper_alerting_path.process_status_to_json status
-         ]
+	       ([ "ok", `Bool ok
+	         ; "via", `String "docker"
+	         ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
+	         ; "sandbox_profile", `String "docker"
+	         ; "network_mode", `String network_label
+	         ; "status", Keeper_alerting_path.process_status_to_json status
+	         ]
          @ (match semantic_status with
             | None -> []
             | Some s -> [ "semantic_status", `String (Exec_core.string_of_semantic_status s) ])
@@ -756,7 +690,7 @@ let docker_bash_response ~ok ~git_creds_enabled ~network_label ~status ~output
 
 (** Convert a [docker_shell_result] into the JSON response string
     shared by container-backed bash paths. *)
-let docker_result_to_bash_response ~config ~meta ~git_creds_enabled result =
+let docker_result_to_bash_response ~config ~meta result =
   let cwd_response =
     Keeper_cwd_response.docker
       ~host_cwd:result.cwd
@@ -764,7 +698,6 @@ let docker_result_to_bash_response ~config ~meta ~git_creds_enabled result =
   in
   docker_bash_response
     ~ok:result.semantic_ok
-    ~git_creds_enabled
     ~network_label:result.network_label
     ~status:result.status
     ~output:result.output
@@ -774,47 +707,25 @@ let docker_result_to_bash_response ~config ~meta ~git_creds_enabled result =
 
 (** Shared container-backed bash execution: egress check →
     [run_docker_shell_command_with_status] → response JSON.
-    Used by [run_docker_credentialed_bash] and [run_docker_bash]. *)
+    Used by [run_docker_bash]. *)
 let run_docker_bash_via_container
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(cwd : string)
       ~(timeout_sec : float)
       ~(cmd : string)
-      ~git_creds_enabled
       ~(network_mode : network_mode)
   =
   match check_egress ~config ~meta ~cmd with
   | Some blocked_json -> blocked_json
   | None ->
     (match
-       run_docker_shell_command_with_status
-         ~config ~meta ~cwd ~timeout_sec ~cmd ~git_creds_enabled ~network_mode
+	 run_docker_shell_command_with_status
+	         ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
      with
-     | Error message when git_creds_enabled && is_credential_preflight_failure message ->
-       credential_preflight_failure_json ~keeper_name:meta.name ~message
      | Error message -> error_json message
      | Ok result ->
-       docker_result_to_bash_response ~config ~meta ~git_creds_enabled result)
-;;
-
-let run_docker_credentialed_bash
-      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(cwd : string)
-      ~(timeout_sec : float)
-      ~(cmd : string)
-      ()
-  =
-  let _ = turn_sandbox_runtime in
-  match docker_bash_preflight ~config ~meta ~cmd ~git_creds_enabled:true with
-  | Some err -> err
-  | None ->
-    run_docker_bash_via_container
-      ~config ~meta ~cwd ~timeout_sec ~cmd
-      ~git_creds_enabled:true
-      ~network_mode:Network_inherit
+       docker_result_to_bash_response ~config ~meta result)
 ;;
 
 let run_docker_bash
@@ -828,7 +739,7 @@ let run_docker_bash
   =
   let image = resolve_sandbox_image meta in
   let sandbox_error_json = sandbox_error_json ~config ~meta in
-  match docker_bash_preflight ~config ~meta ~cmd ~git_creds_enabled:false with
+  match docker_bash_preflight ~config ~meta ~cmd with
   | Some err -> err
   | None -> (
     match turn_sandbox_runtime, network_mode with
@@ -869,11 +780,10 @@ let run_docker_bash
                      runtime
                      ~host_cwd:cwd)
             in
-            docker_bash_response
-              ~ok:semantic_ok
-              ~git_creds_enabled:false
-              ~network_label:(network_mode_to_string network_mode)
-              ~status:st
+	     docker_bash_response
+	       ~ok:semantic_ok
+	      ~network_label:(network_mode_to_string network_mode)
+	      ~status:st
               ~output:out
               ~cwd_response
               ~semantic_status:(Some semantic_status)
@@ -886,8 +796,7 @@ let run_docker_bash
            ~labels:[ "keeper", meta.name; "reason", "network_mode_mismatch" ]
            ()
        | None -> ());
-      run_docker_bash_via_container
-        ~config ~meta ~cwd ~timeout_sec ~cmd
-        ~git_creds_enabled:false
-        ~network_mode)
+	     run_docker_bash_via_container
+	       ~config ~meta ~cwd ~timeout_sec ~cmd
+	      ~network_mode)
 ;;

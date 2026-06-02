@@ -64,14 +64,14 @@ let canonical_keeper_name_from_agent_name agent_name =
   | Some _ when Nickname.is_generated_nickname trimmed -> (
       match Nickname.extract_agent_type trimmed with
       | Some candidate when Keeper_config.validate_name candidate -> Some candidate
-      | _ -> None)
+      | Some _ | None -> None)
   | Some keeper_name -> Some keeper_name
   | None ->
       if Nickname.is_generated_nickname trimmed
       then
         match Nickname.extract_agent_type trimmed with
         | Some candidate when Keeper_config.validate_name candidate -> Some candidate
-        | _ -> None
+        | Some _ | None -> None
       else
         None
 

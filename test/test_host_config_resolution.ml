@@ -20,8 +20,7 @@ let test_host_field_values () =
     Filename.concat (Filename.get_temp_dir_name ()) "keeper-creds"
   in
   (check string)
-    "host.cred_root pins temp keeper-creds \
-     (host_config_provider.ml:3)"
+    "host.cred_root pins temp keeper-creds"
     temp_keeper_creds
     d.cred_root;
   (check string)

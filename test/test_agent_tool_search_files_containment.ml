@@ -414,7 +414,7 @@ let test_docker_other_container_root_stays_blocked () =
     Alcotest.(check bool) "outside project root" true
       (String_util.contains_substring e "path_outside_project_root")
 
-let test_docker_git_creds_contained () =
+let test_docker_second_keeper_contained () =
   setup ~keeper_name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "git_secret.txt" in
@@ -428,7 +428,7 @@ let test_docker_git_creds_contained () =
       ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
-  Alcotest.(check bool) "docker git-creds also contained" true
+  Alcotest.(check bool) "docker second keeper also contained" true
     (blocked_by_sandbox_boundary raw)
 
 let () =
@@ -462,7 +462,7 @@ let () =
             `Quick test_docker_container_file_path_maps_to_host_worktree;
           Alcotest.test_case "docker other container root stays blocked"
             `Quick test_docker_other_container_root_stays_blocked;
-          Alcotest.test_case "docker git-creds also contained" `Quick
-            test_docker_git_creds_contained;
+          Alcotest.test_case "docker second keeper also contained" `Quick
+            test_docker_second_keeper_contained;
         ] );
     ]

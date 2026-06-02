@@ -100,20 +100,21 @@ The cdal / trajectory / host_config etc. precedent uses
 `(wrapped false)`. Under that pattern, all .ml filenames become
 top-level modules — `keeper_X.ml` ⇒ `Keeper_X` (visible everywhere).
 
-Of 250 `.ml` files in `lib/keeper/`, **38 lack the `keeper_` prefix**:
+Of 250 `.ml` files in `lib/keeper/`, this RFC originally tracked a bulk
+non-prefix cleanup. Repo-auth provider files have since been retired and are
+omitted from the live inventory below.
 
 ```
 alert_persist_kind.ml                    chat_store_operation.ml
 approval_queue_failure_site.ml           checkpoint_failure_operation.ml
 bookkeeping_failure_kind.ml              checkpoint_store_failure_site.ml
 runtime_sync_failure_site.ml             compact_audit_failure_site.ml
-crash_persistence_failure_site.ml        credential_provider.ml
-docker_client.ml                         docker_client_mock.ml
-docker_client_real.ml                    docker_response.ml
+crash_persistence_failure_site.ml        docker_client.ml
+docker_client_mock.ml                     docker_client_real.ml
+docker_response.ml
 event_bus_drain_site.ml                  execution_receipt_failure_site.ml
 fs_failure_site.ml                       generation_lineage_failure_site.ml
-heartbeat_smart.ml                       host_config_provider.ml
-in_container_login_provider.ml           metric_emit_dropped_site.ml
+heartbeat_smart.ml                       metric_emit_dropped_site.ml
 metrics_sse_failure_kind.ml              oas_execution_error_phase.ml
 observation_query_operation.ml           operator_compact_result.ml
 paused_state_persist_phase.ml            post_turn_wirein_failure_site.ml
@@ -125,20 +126,18 @@ turn_up_update_failure_site.ml           write_meta_cycle_failure_site.ml
 ```
 
 These files generate top-level modules like `Docker_client`,
-`Credential_provider`, `Heartbeat_smart`, `Sandbox_executor`,
-`Tool_resolution`, `Host_config_provider` — names that **plausibly
-collide** with sibling sub-libraries (`Host_config` already exists as
-its own sub-lib per PR-0c). Dune docs §library.html quoted in Track A
+`Heartbeat_smart`, `Sandbox_executor`, and `Tool_resolution` — names that
+**plausibly collide** with sibling sub-libraries. Dune docs §library.html quoted in Track A
 say: "Never use `(wrapped false)` when library has filenames likely to
 collide (`Types`, `Utils`, `Error`, `Config`)."
 
-Sub-classification of the 38:
+Sub-classification of the remaining inventory:
 
 | Group | Count | Pattern | Mitigation |
 |---|---|---|---|
 | `*_failure_site.ml` / `*_failure_kind.ml` | ~15 | typed closed-sum errors (RFC-0042 lineage) | Rename to `keeper_*_failure_site.ml` OR move to dedicated typed-error sub-lib |
 | `docker_*.ml` (4 files) | 4 | Docker driver | Rename `keeper_docker_*` or move to `lib/keeper_sandbox_docker/` |
-| `sandbox_*.ml`, `credential_*.ml`, `host_config_*.ml`, `in_container_login_provider.ml` | 5 | runtime providers | Rename with `keeper_` prefix |
+| `sandbox_*.ml` | 2 | runtime providers | Rename with `keeper_` prefix |
 | `heartbeat_smart.ml`, `tool_resolution.ml`, `operator_compact_result.ml` | 3 | keeper-internal helpers | Rename |
 | `*_operation.ml`, `*_phase.ml` | ~5 | typed state/operation kinds | Rename |
 | residue | ~6 | misc | Rename |
@@ -177,8 +176,8 @@ library boundary.
 references unchanged (sub-lib internal cycles are dune-allowed; only
 *inter-library* cycles are forbidden).
 
-**Block 1 — Collision risk (38 files, §2.3)**: Top-level names like
-`Docker_client`, `Credential_provider`, `Sandbox_executor` would leak
+**Block 1 — Collision risk (§2.3)**: Top-level names like
+`Docker_client` and `Sandbox_executor` would leak
 into the global namespace. Dune build *might* succeed depending on
 whether any other library publishes those same module names today —
 but the safety margin is zero. New sibling libraries (future
@@ -312,7 +311,7 @@ root-fix for filename inconsistency. Phase 2.B builds on top.
 
 | # | Question | Resolution path |
 |---|---|---|
-| 1 | Are any of the 38 non-prefix files referenced from *outside* `lib/keeper/`? | Audit `rg -l 'Docker_client\\|Credential_provider\\|Sandbox_executor\\|…'  lib/ bin/ test/` per filename. If yes, that file becomes its own mini-PR (Phase 2.A.i, …) before bulk rename. |
+| 1 | Are any non-prefix files referenced from *outside* `lib/keeper/`? | Audit `rg -l 'Docker_client\\|Sandbox_executor\\|…'  lib/ bin/ test/` per filename. If yes, that file becomes its own mini-PR (Phase 2.A.i, …) before bulk rename. |
 | 2 | Are there internal cycles in `lib/keeper/` that *only* break under `(wrapped false)` sub-library boundary? | `dune build @check` is the oracle. If cycle, revert Phase 2.B and isolate the cyclic cluster as separate sub-lib (Track A §2 closure bundle). |
 | 3 | Should `*_failure_site.ml` / `*_failure_kind.ml` (~15 files) be moved to dedicated `lib/keeper_typed_errors/` sub-lib instead of renamed in place? | Defer to RFC-0042 follow-on. Phase 2.A renames them with `keeper_` prefix as the conservative move — future RFC can extract. |
 | 4 | Filename consistency invariant for new keeper_* files: enforce via lint? | Out of scope; consider in Wave D after `(wrapped true)` migration makes prefix redundant. |

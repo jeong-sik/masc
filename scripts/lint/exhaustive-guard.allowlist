@@ -363,7 +363,6 @@ lib/compaction_trigger/compaction_trigger.ml:60
 lib/compaction_trigger/compaction_trigger.ml:66
 lib/compaction_trigger/compaction_trigger.ml:72
 lib/compaction_trigger/compaction_trigger.ml:93
-lib/keeper/keeper_host_config_provider.ml:379
 lib/keeper/keeper_accountability.ml:68
 lib/keeper/keeper_accountability.ml:85
 lib/keeper/keeper_accountability.ml:173
@@ -440,7 +439,6 @@ lib/keeper/keeper_hooks_oas.ml:1649
 lib/keeper/keeper_hooks_oas.ml:1786
 lib/keeper/keeper_hooks_oas.ml:1859
 lib/keeper/keeper_id.ml:12
-lib/keeper/keeper_identity.ml:116
 lib/keeper/keeper_keepalive_signal.ml:307
 lib/keeper/keeper_keepalive.ml:453
 lib/keeper/keeper_lifecycle_hooks.ml:56
@@ -681,7 +679,6 @@ lib/process/process_eio.ml:113
 lib/process/process_eio.ml:809
 lib/prompt_registry/prompt_registry.ml:276
 lib/provider_kind_resolver.ml:40
-lib/repo_manager/credential_materializer.ml:52
 lib/repo_manager/keeper_repo_mapping.ml:428
 lib/reputation_autonomy.ml:23
 lib/reputation_ledger_v2.ml:176
@@ -773,7 +770,6 @@ lib/server/server_routes_http_keeper_stream.ml:200
 lib/server/server_routes_http_routes_attribution.ml:19
 lib/server/server_routes_http_routes_runtime.ml:17
 lib/server/server_routes_http_routes_channel_gate.ml:177
-lib/server/server_routes_http_routes_credentials.ml:236
 lib/server/server_routes_http_routes_dashboard.ml:70
 lib/server/server_routes_http_routes_provider_runs.ml:169
 lib/server/server_routes_http_routes_provider_runs.ml:199

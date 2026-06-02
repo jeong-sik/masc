@@ -114,10 +114,7 @@ let init_policy_config ~base_path =
 (* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
 
 let keeper_denied_set : (string, unit) Hashtbl.t =
-  let tbl = Hashtbl.create 32 in
-  List.iter (fun name -> Hashtbl.replace tbl name ())
-    (Tool_catalog.tools_for_surface Tool_catalog.Keeper_denied);
-  tbl
+  Hashtbl.create 0
 
 let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
   let seen = Hashtbl.create (max 16 (List.length schemas)) in

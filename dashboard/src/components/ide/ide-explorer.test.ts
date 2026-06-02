@@ -22,7 +22,6 @@ function repo(id: string, name = id): Repository {
     status: 'active',
     auto_sync: false,
     sync_interval: 0,
-    credential_id: null,
     created_at: null,
     updated_at: null,
   }

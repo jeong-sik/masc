@@ -50,7 +50,6 @@ name = "project-a"
 url = "https://github.com/myuser/project-a"
 local_path = ".masc/repos/project-a"
 default_branch = "main"
-credential_id = "default"
 keepers = []
 status = "Active"
 auto_sync = false
@@ -59,7 +58,6 @@ aliases = ["project"]
 ```
 
 Fields to review:
-- `credential_id`: Assign the correct credential for this remote
 - `keepers`: List keeper IDs that should access this repository
 - `local_path`: Change if you want to keep the existing worktree location
 - `aliases`: Optional repo-evidence terms used by keeper worktree inference when

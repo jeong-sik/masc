@@ -326,6 +326,17 @@ let test_generic_required_candidates_match_claim_context () =
        ~allowed_tool_names:[ "keeper_task_submit_for_verification" ])
 ;;
 
+let test_generic_required_candidates_fall_back_to_satisfying_tools () =
+  check
+    (list string)
+    "board post falls back to broadcast tool"
+    [ "masc_broadcast" ]
+    (Surface.generic_required_tool_candidate_names
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "board_post_or_comment" ]
+       ~allowed_tool_names:[ "masc_broadcast" ])
+;;
+
 let test_required_gate_surface_keeps_actionable_claim_context () =
   check
     (list string)
@@ -426,6 +437,10 @@ let () =
             "generic candidates match claim context"
             `Quick
             test_generic_required_candidates_match_claim_context
+        ; test_case
+            "generic candidates fall back to satisfying tools"
+            `Quick
+            test_generic_required_candidates_fall_back_to_satisfying_tools
         ; test_case
             "gate keeps actionable claim context"
             `Quick

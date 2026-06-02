@@ -202,7 +202,9 @@ val has_task_claim_affordance : string list -> bool
 
 (** Ordered executable candidates for generic required-tool gates,
     filtered by the current claim context. Passive status/read tools and
-    stay_silent are never recommended. *)
+    stay_silent are never recommended. Preferred affordance tools are returned
+    first; if none are visible, candidates fall back to other visible tools
+    that can satisfy the gated affordance. *)
 val generic_required_actionable_tool_names :
   claim_context_allowed:bool ->
   turn_affordances:string list ->

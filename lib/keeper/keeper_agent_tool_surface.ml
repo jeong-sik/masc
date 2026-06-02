@@ -374,9 +374,19 @@ let generic_required_actionable_tool_names
     && tool_name_can_satisfy_actionable_gate ~claim_context_allowed name
     && not (is_stay_silent name)
   in
-  preferred_tool_names_for_turn_affordances turn_affordances
-  |> List.filter can_recommend_tool
-  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+  let recommended =
+    preferred_tool_names_for_turn_affordances turn_affordances
+    |> List.filter can_recommend_tool
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+  in
+  match recommended with
+  | _ :: _ -> recommended
+  | [] ->
+    turn_affordances
+    |> List.filter_map turn_affordance_of_string
+    |> List.concat_map tools_for_gated_affordance
+    |> List.filter can_recommend_tool
+    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 let preferred_tool_choice_for_required_turn
     ~(claim_context_allowed : bool)

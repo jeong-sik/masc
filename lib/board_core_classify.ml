@@ -118,8 +118,8 @@ let classify_author (author : string) : author_kind =
        | Some label -> Automation_author label
        | None -> Human_author)
 
-(** Render the legacy author classification as a stable string token
-    for the Prometheus [author] label.  Kept narrow — *not* a parser
+(** Render the legacy author classification as a stable metric/log token.
+    Kept narrow — *not* a parser
     inverse (no [_of_string]); the typed variant flows in only one
     direction (boundary parse -> internal use -> string for log). *)
 let automation_label_token = function
@@ -208,9 +208,9 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
   | Automation_author _ when hearth_promotes_to_automation -> Automation_post
   | Human_author when hearth_promotes_to_automation -> Automation_post
   | Automation_author label ->
-      (* #9919 audit follow-up: a proper Prometheus counter labelled by
-         [author] so operators can see which legacy authors still drive
-         the migration path.  The typed [automation_label] flows through
+      (* #9919 audit follow-up: emit a labelled metric hook so operators can
+         see which legacy authors still drive the migration path.
+         The typed [automation_label] flows through
          [automation_label_token] to keep label cardinality bounded (6
          values) alongside the per-author label.  Both labels emitted so
          existing dashboards (keyed on raw [author]) keep working while

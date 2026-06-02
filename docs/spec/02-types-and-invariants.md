@@ -3,8 +3,8 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/types/
-  - lib/tool_dispatch.ml
-  - lib/agent_identity.ml
+  - lib/tool/tool_dispatch.ml
+  - lib/client_identity.ml
 ---
 
 # Types and Invariants
@@ -13,7 +13,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Foundation |
-| Maps to | `lib/types/`, `lib/tool_dispatch.ml`, `lib/agent_identity.ml` |
+| Maps to | `lib/types/`, `lib/tool/tool_dispatch.ml`, `lib/client_identity.ml` |
 | Dependencies | 00-glossary.md |
 
 ---
@@ -351,7 +351,7 @@ Result alias: `type 'a masc_result = ('a, masc_error) result`
 
 ## 4. Tool Dispatch Types
 
-**소스**: `lib/tool_dispatch.mli`
+**소스**: `lib/tool/tool_dispatch.mli`
 
 ### 4.1 Handler
 
@@ -396,7 +396,7 @@ type module_tag =
   | Mod_shard
 ```
 
-19개 variant (SSOT: `lib/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈 이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
+19개 variant (SSOT: `lib/tool/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈 이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
 
 ### 4.4 Tool_result.result (structured)
 
@@ -426,7 +426,7 @@ type result = (success_payload, failure_payload) Stdlib.Result.t
 
 ## 5. Agent Identity Types
 
-**소스**: `lib/agent_identity.mli`
+**소스**: `lib/client_identity.mli`
 
 ### 5.1 Channel
 
@@ -491,7 +491,7 @@ MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한
 
 ## 6. Agent Ecosystem Types (RETIRED)
 
-`lib/agent_ecosystem.mli`와 `agent_lifecycle`, `agent_profile`, `lineage`, `extended` 타입은 dead code sweep (#2848)에서 `lib/anti_fake`, `lib/agent_neo4j`와 함께 제거됐다 (-1368 LOC). 현재 agent identity는 `lib/agent_identity.ml` 하나로 정리됐고, 생명주기 추적은 `lib/workspace/workspace_lifecycle.ml` + `observe_agent_lifecycle` hook이 담당한다.
+`lib/agent_ecosystem.mli`와 `agent_lifecycle`, `agent_profile`, `lineage`, `extended` 타입은 dead code sweep (#2848)에서 `lib/anti_fake`, `lib/agent_neo4j`와 함께 제거됐다 (-1368 LOC). 현재 agent identity는 `lib/client_identity.ml` 하나로 정리됐고, 생명주기 추적은 `lib/workspace/workspace_lifecycle.ml` + `observe_agent_lifecycle` hook이 담당한다.
 
 ---
 

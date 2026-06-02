@@ -1,7 +1,10 @@
 open Alcotest
 
 module KAR = Masc_mcp.Keeper_agent_run
+module KARAC = Masc_mcp.Keeper_agent_run_actionable_contract
 module KCC = Masc_mcp.Keeper_contract_classifier
+module KIPR = Masc_mcp.Agent_tool_in_process_runtime
+module KTO = Masc_mcp.Keeper_tool_outcome
 module KTP = Masc_mcp.Keeper_tool_progress
 
 let unclaimed_task_context =
@@ -135,7 +138,8 @@ let test_actionable_tool_contract_allows_execution_tools () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "tool_execute"; "masc_status" ]);
+       ~tool_names:[ "tool_execute"; "masc_status" ]
+       ());
   check
     (option string)
     "board workspace can satisfy non-owned board signal"
@@ -143,7 +147,8 @@ let test_actionable_tool_contract_allows_execution_tools () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_board_comment" ]);
+       ~tool_names:[ "keeper_board_comment" ]
+       ());
   check
     (option string)
     "owned task board activity counts as workspace progress"
@@ -151,7 +156,8 @@ let test_actionable_tool_contract_allows_execution_tools () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]);
+       ~tool_names:[ "keeper_board_post"; "keeper_tasks_list" ]
+       ());
   check
     (option string)
     "worktree creation satisfies owned task progress"
@@ -159,7 +165,8 @@ let test_actionable_tool_contract_allows_execution_tools () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "tool_execute" ]);
+       ~tool_names:[ "tool_execute" ]
+       ());
   check
     (option string)
     "PR creation satisfies owned task progress"
@@ -167,7 +174,8 @@ let test_actionable_tool_contract_allows_execution_tools () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "tool_execute" ]);
+       ~tool_names:[ "tool_execute" ]
+       ());
   check
     (option string)
     "non-actionable no-op remains allowed"
@@ -175,7 +183,8 @@ let test_actionable_tool_contract_allows_execution_tools () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:no_actionable_context
-       ~tool_names:[])
+       ~tool_names:[]
+       ())
 ;;
 
 let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
@@ -194,6 +203,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]
+       ()
    with
    | Some reason ->
      check
@@ -209,7 +219,8 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_board_comment"; "keeper_stay_silent" ]);
+       ~tool_names:[ "keeper_board_comment"; "keeper_stay_silent" ]
+       ());
   check
     (option string)
     "owned-task progress plus stay_silent remains accepted"
@@ -217,7 +228,8 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "tool_execute"; "keeper_stay_silent" ]);
+       ~tool_names:[ "tool_execute"; "keeper_stay_silent" ]
+       ());
   check
     (option string)
     "non-actionable stay_silent remains allowed"
@@ -225,7 +237,8 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:no_actionable_context
-       ~tool_names:[ "keeper_stay_silent" ]);
+       ~tool_names:[ "keeper_stay_silent" ]
+       ());
   check
     bool
     "passive-only still violates"
@@ -234,7 +247,145 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
        (KTP.actionable_tool_contract_violation_reason
           ~claim_context_allowed:true
           ~actionable_signal_context:unclaimed_task_context
-          ~tool_names:[ "keeper_tasks_list"; "masc_status" ]))
+          ~tool_names:[ "keeper_tasks_list"; "masc_status" ]
+          ()))
+;;
+
+(* Typed no-work proof parsing (the constraint-trap escape carrier). The escape
+   only fires when the round-trip from the stay_silent [no_work_reason] arg to a
+   [No_progress] outcome holds, so guard both the accept and reject paths. *)
+let test_stay_silent_no_work_reason_parsing () =
+  List.iter
+    (fun reason ->
+       match KTO.no_work_reason_of_stay_silent_arg reason with
+       | Some (KTO.No_progress _) -> ()
+       | Some (KTO.Progress | KTO.Error _) | None ->
+         fail (reason ^ ": expected a No_progress proof"))
+    KTO.stay_silent_no_work_reasons;
+  check
+    bool
+    "unknown reason yields no proof"
+    true
+    (Option.is_none (KTO.no_work_reason_of_stay_silent_arg "unrecognized_reason"));
+  check
+    bool
+    "empty reason yields no proof"
+    true
+    (Option.is_none (KTO.no_work_reason_of_stay_silent_arg ""))
+;;
+
+(* The unit-level escape: with a typed proof present, a stay_silent-under-signal
+   turn is no longer a violation; without it, it still is. Path-1 (no signal) and
+   path-3 (work-ignoring silence still blocked) are covered alongside. *)
+let test_stay_silent_typed_proof_escapes_violation () =
+  check
+    (option string)
+    "stay_silent with typed no-work proof completes the turn under a signal"
+    None
+    (KTP.actionable_tool_contract_violation_reason
+       ~stay_silent_has_no_work_proof:true
+       ~claim_context_allowed:true
+       ~actionable_signal_context:unclaimed_task_context
+       ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]
+       ());
+  check
+    bool
+    "bare stay_silent without proof still violates under a signal"
+    true
+    (Option.is_some
+       (KTP.actionable_tool_contract_violation_reason
+          ~stay_silent_has_no_work_proof:false
+          ~claim_context_allowed:true
+          ~actionable_signal_context:unclaimed_task_context
+          ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]
+          ()));
+  check
+    (option string)
+    "stay_silent with proof but no signal stays valid"
+    None
+    (KTP.actionable_tool_contract_violation_reason
+       ~stay_silent_has_no_work_proof:true
+       ~claim_context_allowed:true
+       ~actionable_signal_context:no_actionable_context
+       ~tool_names:[ "keeper_stay_silent" ]
+       ());
+  check
+    bool
+    "passive-only without stay_silent ignores the proof flag (still violates)"
+    true
+    (Option.is_some
+       (KTP.actionable_tool_contract_violation_reason
+          ~stay_silent_has_no_work_proof:true
+          ~claim_context_allowed:true
+          ~actionable_signal_context:unclaimed_task_context
+          ~tool_names:[ "keeper_tasks_list"; "masc_status" ]
+          ()))
+;;
+
+(* Transport-shape: a [No_progress] typed_outcome embedded on the stay_silent
+   tool_call_detail (the value the PostToolUse hook threads from the handler) must
+   be read as proof present. A bare stay_silent, a stay_silent with a non-proof
+   outcome, or a No_progress outcome on a different tool must all read as absent.
+   This is the link the gate depends on; if it silently returns false the entire
+   escape no-ops (the of_json / transport-wrap failure mode). *)
+let test_stay_silent_no_work_proof_present_reads_typed_outcome () =
+  let with_outcome ?(tool_name = "keeper_stay_silent") outcome : KAR.tool_call_detail =
+    { (tool_call_detail tool_name) with typed_outcome = outcome }
+  in
+  let proof = KTO.no_work_reason_of_stay_silent_arg "no_actionable_fit" in
+  check
+    bool
+    "stay_silent with No_progress proof reads as present"
+    true
+    (KARAC.stay_silent_no_work_proof_present [ with_outcome proof ]);
+  check
+    bool
+    "bare stay_silent reads as absent"
+    false
+    (KARAC.stay_silent_no_work_proof_present [ tool_call_detail "keeper_stay_silent" ]);
+  check
+    bool
+    "stay_silent with Progress outcome reads as absent"
+    false
+    (KARAC.stay_silent_no_work_proof_present [ with_outcome (Some KTO.Progress) ]);
+  check
+    bool
+    "No_progress on a non-stay_silent tool does not count as stay_silent proof"
+    false
+    (KARAC.stay_silent_no_work_proof_present
+       [ with_outcome ~tool_name:"keeper_task_claim" proof ])
+;;
+
+(* The full transport seam: handler output string -> Keeper_tool_outcome.of_json,
+   the exact path the PostToolUse hook runs. of_json is a hand-written string match
+   (a missed/typo'd arm silently returns None), so assert the real round-trip, not
+   just the in-memory constructor. A bare call emits no proof field. *)
+let test_handle_stay_silent_round_trips_typed_outcome () =
+  let typed_outcome_of_handler args =
+    match Yojson.Safe.from_string (KIPR.handle_stay_silent ~args) with
+    | `Assoc fields ->
+      (match List.assoc_opt "typed_outcome" fields with
+       | Some nested -> KTO.of_json nested
+       | None -> None)
+    | _ -> None
+  in
+  (match
+     typed_outcome_of_handler (`Assoc [ "no_work_reason", `String "no_actionable_fit" ])
+   with
+   | Some (KTO.No_progress _) -> ()
+   | Some (KTO.Progress | KTO.Error _) | None ->
+     fail "handler with recognized reason must emit a No_progress typed_outcome");
+  check
+    bool
+    "bare stay_silent emits no typed_outcome"
+    true
+    (Option.is_none (typed_outcome_of_handler (`Assoc [])));
+  check
+    bool
+    "unknown reason emits no typed_outcome"
+    true
+    (Option.is_none
+       (typed_outcome_of_handler (`Assoc [ "no_work_reason", `String "bogus" ])))
 ;;
 
 let () =
@@ -261,6 +412,22 @@ let () =
             "stay_silent needs typed no-work proof on actionable signal"
             `Quick
             test_stay_silent_requires_typed_no_work_proof_on_actionable_signal
+        ; test_case
+            "stay_silent no_work_reason parsing accepts known, rejects unknown"
+            `Quick
+            test_stay_silent_no_work_reason_parsing
+        ; test_case
+            "typed no-work proof escapes the stay_silent violation"
+            `Quick
+            test_stay_silent_typed_proof_escapes_violation
+        ; test_case
+            "stay_silent proof presence is read from typed_outcome"
+            `Quick
+            test_stay_silent_no_work_proof_present_reads_typed_outcome
+        ; test_case
+            "handle_stay_silent round-trips typed_outcome through of_json"
+            `Quick
+            test_handle_stay_silent_round_trips_typed_outcome
         ] )
     ]
 ;;

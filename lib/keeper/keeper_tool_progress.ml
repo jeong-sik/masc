@@ -311,11 +311,25 @@ let actionable_signal_context_phrase = function
          (Keeper_contract_classifier.actionable_signal_label signal))
 ;;
 
+(* [stay_silent_has_no_work_proof] resolves the stay_silent split-brain
+   (constraint-trap escape, RFC-0211 / diagnostic w80pyf4eo):
+   [is_completion_tool_name keeper_stay_silent]
+   accepts the turn as satisfied (line ~142), yet under an actionable signal the
+   arm below re-rejected stay_silent demanding a "typed no-work proof" that the
+   empty-object schema made unconstructable. The proof is now a real, optional
+   typed signal: the keeper_stay_silent handler emits
+   [Keeper_tool_outcome.No_progress { reason = No_work_available }] when the model
+   supplies a recognized [no_work_reason], and the call site derives this bool
+   from the stay_silent call's typed_outcome. A bare stay_silent (no proof) is
+   still rejected, so reflexive silence under signal stays blocked while
+   deliberate "I looked, no fit" silence completes the turn. *)
 let actionable_tool_contract_violation_reason
+      ?(stay_silent_has_no_work_proof : bool = false)
       ~(claim_context_allowed : bool)
       ~(actionable_signal_context :
           Keeper_contract_classifier.actionable_signal_context)
       ~(tool_names : string list)
+      ()
   : string option
   =
   match actionable_signal_context_phrase actionable_signal_context with
@@ -342,12 +356,21 @@ let actionable_tool_contract_violation_reason
             context_phrase
             (String.concat ", " names))
      | names when List.exists is_stay_silent_tool_name names ->
-       Some
-         (Printf.sprintf
-            "%s was present, but the model used keeper_stay_silent without typed \
-             no-work proof: %s"
-            context_phrase
-            (String.concat ", " names))
+       (* Constructable escape: a stay_silent call carrying a typed no-work proof
+          completes the turn even under an actionable signal. Without the proof
+          the turn is still a contract violation (reflexive silence stays
+          blocked). Branch in-body rather than guarding the [when] so the
+          proof case is an explicit [None] and never falls through to the
+          passive/claim arms below. *)
+       if stay_silent_has_no_work_proof
+       then None
+       else
+         Some
+           (Printf.sprintf
+              "%s was present, but the model used keeper_stay_silent without typed \
+               no-work proof: %s"
+              context_phrase
+              (String.concat ", " names))
      | names
        when List.for_all
               (fun name -> not (tool_name_can_satisfy_required_contract name))

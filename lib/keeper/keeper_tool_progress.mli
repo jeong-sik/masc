@@ -58,6 +58,9 @@ val is_claim_tool_name : string -> bool
 val is_claim_context_tool_name : string -> bool
 val is_completion_tool_name : string -> bool
 
+(** [true] iff the canonicalized name is keeper_stay_silent. *)
+val is_stay_silent_tool_name : string -> bool
+
 (** [true] iff the tool name represents productive execution progress for a
     required-action gate. Completion tools are exempted even when read-only;
     passive keeper observation tools remain [false]. *)
@@ -92,9 +95,17 @@ val record_require_tool_use_violation
 
 (** Build an actionable contract-violation reason describing why the keeper
     failed [Require_tool_use], or [None] when the actionable signal context does
-    not apply. *)
+    not apply.
+
+    [stay_silent_has_no_work_proof] (default [false]) is the typed escape for the
+    stay_silent constraint-trap: when a [keeper_stay_silent] call carries a typed
+    no-work proof ([Keeper_tool_outcome.No_progress]), the turn is accepted even
+    under an actionable signal. A bare stay_silent without proof is still a
+    violation, so reflexive silence under an actionable signal stays blocked. *)
 val actionable_tool_contract_violation_reason
-  :  claim_context_allowed:bool
+  :  ?stay_silent_has_no_work_proof:bool
+  -> claim_context_allowed:bool
   -> actionable_signal_context:Keeper_contract_classifier.actionable_signal_context
   -> tool_names:string list
+  -> unit
   -> string option

@@ -942,9 +942,24 @@ let test_validation_error_alternatives () =
        { executable = "find"; index = 3; token = "foo\nbar" })
     [ "Pipeline" ];
   check_alts
-    ~name:"Executable_not_allowlisted has no alternatives"
+    ~name:"Executable_not_allowlisted rm has no alternatives"
     (Execute_input.Executable_not_allowlisted { name = "rm"; mode = Execute_input.Dev_full })
     [];
+  check_alts
+    ~name:"Executable_not_allowlisted mkdir alternatives"
+    (Execute_input.Executable_not_allowlisted
+       { name = "mkdir"; mode = Execute_input.Dev_full })
+    [ "tool_write_file"; "tool_edit_file"; "git" ];
+  check_alts
+    ~name:"Executable_not_allowlisted touch alternatives"
+    (Execute_input.Executable_not_allowlisted
+       { name = "touch"; mode = Execute_input.Dev_full })
+    [ "tool_write_file"; "tool_edit_file" ];
+  check_alts
+    ~name:"Executable_not_allowlisted test alternatives"
+    (Execute_input.Executable_not_allowlisted
+       { name = "test"; mode = Execute_input.Dev_full })
+    [ "stat"; "ls"; "tool_search_files"; "tool_read_file"; "keeper_tasks_list" ];
   check_alts
     ~name:"Empty_executable has no alternatives"
     (Execute_input.Empty_executable { argv = [ "ls" ] })

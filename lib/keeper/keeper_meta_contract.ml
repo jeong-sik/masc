@@ -731,12 +731,16 @@ let effective_meta_result (meta : keeper_meta) : (keeper_meta, string) result =
   | Ok defaults -> effective_meta_of_profile_defaults defaults meta
 ;;
 
+(* persona⊥{model,runtime}: a keeper's runtime is assigned in runtime.toml
+   ([[runtime.assignments]], the sole SSOT), keyed by keeper name — NOT read
+   from the persona profile [model] field. An unassigned keeper falls to the
+   default runtime (the designed fallback; RFC-0206 §2.1 fail-fast still applies
+   to the default itself). The id is opaque here; only the OAS adapter parses
+   it. *)
 let runtime_id_of_meta (meta : keeper_meta) =
-  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
-  | Ok { Keeper_types_profile.model = Some runtime_id; _ }
-    when String.trim runtime_id <> "" ->
-    String.trim runtime_id
-  | Ok _ | Error _ -> Runtime.get_default_runtime_id ()
+  match Runtime.runtime_id_for_keeper meta.name with
+  | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id
+  | Some _ | None -> Runtime.get_default_runtime_id ()
 ;;
 
 let proactive_cycle_outcome_to_string = function

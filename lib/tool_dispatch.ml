@@ -229,6 +229,11 @@ type module_tag =
   | Mod_agent | Mod_task | Mod_state
   | Mod_control | Mod_agent_timeline | Mod_misc
   | Mod_library
+  (* [Mod_external]: dispatched by a server-boundary handler in the
+     composition root (mcp_server_eio_execute.dispatch_by_tag), not by a
+     peer [Tool_*] module. The tool layer does not know which subsystem
+     handles these — that wiring lives at the boundary. *)
+  | Mod_external
   | Mod_inline
   | Mod_shard
 

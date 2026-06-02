@@ -90,7 +90,7 @@ let resolve ~base_path ~keeper_id ~provider_kind
                 (Api_key_env_unset { var_name = "MASC_INTERNAL_MCP_TOKEN" })
         else Error (Token_hash_missing { path = hash_path })
   else
-    match Provider_kind_resolver.env_var_for_kind provider_kind with
+    match Provider_kind_env.env_var_for_kind provider_kind with
     | None ->
         (* Providers requiring per-keeper bridging cannot accept the shared
            [MASC_MCP_TOKEN] fallback: their bound-actor runtime MCP tools need

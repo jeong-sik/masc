@@ -599,6 +599,15 @@ let executable_not_allowlisted_hint ~name ~mode =
     | _ -> None
 ;;
 
+let executable_not_allowlisted_alternatives ~name ~mode:_ =
+  match name with
+  | "mkdir" -> [ "tool_write_file"; "tool_edit_file"; "git" ]
+  | "touch" -> [ "tool_write_file"; "tool_edit_file" ]
+  | "test" ->
+    [ "stat"; "ls"; "tool_search_files"; "tool_read_file"; "keeper_tasks_list" ]
+  | _ -> []
+;;
+
 let pp_validation_error ppf = function
   | Executable_not_allowlisted { name; mode } ->
     (match executable_not_allowlisted_hint ~name ~mode with
@@ -667,6 +676,8 @@ let pp_validation_error ppf = function
 ;;
 
 let validation_error_alternatives : validation_error -> string list = function
+  | Executable_not_allowlisted { name; mode } ->
+    executable_not_allowlisted_alternatives ~name ~mode
   | Argv_contains_shell_metachar _ -> [ "Pipeline" ]
   | Argv_contains_shell_redirection _ ->
     [ "discard_stderr"; "discard_stdout"; "Pipeline" ]

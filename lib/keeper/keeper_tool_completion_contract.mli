@@ -13,11 +13,6 @@ val completion_contract_of_tool_choice
   :  Agent_sdk.Types.tool_choice option
   -> completion_contract
 
-val run_completion_contract
-  :  turn_contract:completion_contract
-  -> required_tool_use_seen:bool
-  -> completion_contract
-
 val validate_completion_contract_presence
   :  contract:completion_contract
   -> tool_present:bool

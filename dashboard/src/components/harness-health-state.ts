@@ -52,7 +52,7 @@ export interface HarnessVerdictItem {
   evaluator_runtime: string
   // Added by lib/tool_task.ml#build_verdict_sse_payload as part of #6565.
   generator_runtime?: string | null
-  cross_model?: boolean
+  cross_runtime?: boolean
   fallback_reason?: string | null
 }
 
@@ -168,6 +168,8 @@ function processHarnessEvent(evt: unknown): void {
       gate: asString(payload.gate, ''),
       verdict: asString(payload.verdict, ''),
       evaluator_runtime: asString(payload.evaluator_runtime, ''),
+      generator_runtime: asString(payload.generator_runtime) ?? null,
+      cross_runtime: payload.cross_runtime === true,
       fallback_reason: asString(payload.fallback_reason) ?? null,
     }
     updateHarnessData(data => ({

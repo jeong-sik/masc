@@ -77,7 +77,7 @@ let () =
         ; test_case "gated recording includes keeper-internal tools" `Quick (fun () ->
             Tool_registry.reset ();
             Tool_registry.record_call_if_known
-              ~source:Keeper_internal
+              ~source:Agent_internal
               ~tool_name:"keeper_stay_silent"
               ~success:true
               ~duration_ms:1
@@ -85,7 +85,7 @@ let () =
             let stats = Tool_registry.get_stats () in
             let s = List.assoc "keeper_stay_silent" stats in
             check int "call_count" 1 (Atomic.get s.call_count);
-            check int "keeper_internal_count" 1 (Atomic.get s.keeper_internal_count))
+            check int "agent_internal_count" 1 (Atomic.get s.agent_internal_count))
         ; test_case "tracks source attribution" `Quick (fun () ->
             Tool_registry.reset ();
             Tool_registry.record_call
@@ -95,13 +95,13 @@ let () =
               ~duration_ms:10
               ();
             Tool_registry.record_call
-              ~source:Keeper_internal
+              ~source:Agent_internal
               ~tool_name:"masc_status"
               ~success:true
               ~duration_ms:20
               ();
             Tool_registry.record_call
-              ~source:Keeper_internal
+              ~source:Agent_internal
               ~tool_name:"masc_status"
               ~success:false
               ~duration_ms:5
@@ -110,7 +110,7 @@ let () =
             let s = List.assoc "masc_status" stats in
             check int "call_count" 3 (Atomic.get s.call_count);
             check int "external_mcp_count" 1 (Atomic.get s.external_mcp_count);
-            check int "keeper_internal_count" 2 (Atomic.get s.keeper_internal_count))
+            check int "agent_internal_count" 2 (Atomic.get s.agent_internal_count))
         ] )
     ; ( "get_top_n"
       , [ test_case "returns top N by call count" `Quick (fun () ->

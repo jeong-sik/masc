@@ -136,7 +136,7 @@ let maybe_emit_resource_notifications ~success ~tool_name =
   if
     success
     && not
-         (Agent_tool_descriptor_resolution.capability_has
+         (Keeper_tool_descriptor_resolution.capability_has
             Tool_capability.Read_only
             tool_name)
   then (

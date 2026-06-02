@@ -11,7 +11,7 @@ module Types = Masc_domain
     6. Non-public tools remain callable via dispatch *)
 
 module Tool_catalog = Tool_catalog
-module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
+module Keeper_tool_surfaces = Masc_mcp.Keeper_tool_surfaces
 module Config = Masc_mcp.Config
 
 let () =
@@ -32,7 +32,7 @@ let () =
                   | Tool_catalog.Default -> None)
                 Tool_catalog.explicit_metadata
               in
-              let names = Agent_tool_surfaces.spawned_agent_public_tool_names in
+              let names = Keeper_tool_surfaces.spawned_agent_public_tool_names in
               let leaked =
                 List.filter (fun name -> List.mem name explicit_hidden) names
               in
@@ -52,7 +52,7 @@ let () =
                   all_schemas
               in
               let names =
-                Agent_tool_surfaces.spawned_agent_public_tool_names
+                Keeper_tool_surfaces.spawned_agent_public_tool_names
               in
               let dead =
                 List.filter
@@ -68,7 +68,7 @@ let () =
                   (String.concat ", " dead));
           test_case "agent passthrough omits operator and diagnostics" `Quick
             (fun () ->
-              let names = Agent_tool_surfaces.spawned_agent_public_tool_names in
+              let names = Keeper_tool_surfaces.spawned_agent_public_tool_names in
               let banned =
                 [
                   "masc_tool_stats";

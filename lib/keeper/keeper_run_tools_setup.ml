@@ -222,13 +222,13 @@ let prepare_agent_setup
   in
   (local_search_fn_ref
    := fun ~query ~max_results ->
-        let core = Agent_tool_dispatch_runtime.effective_core_tools () in
+        let core = Keeper_tool_dispatch_runtime.effective_core_tools () in
         let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
         let partition =
           Keeper_run_tools_search.partition_tool_search_hits
             ~core
             ~core_always:Keeper_tool_registry.core_always_tools
-            ~allowed:(Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta)
+            ~allowed:(Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta)
             ~retrieved
             ~max_results
         in
@@ -243,7 +243,7 @@ let prepare_agent_setup
           acc.discovered
           ~turn:acc.current_turn
           ~names:discovered_names;
-        let masc_schemas = Agent_tool_dispatch_runtime.masc_schemas_snapshot () in
+        let masc_schemas = Keeper_tool_dispatch_runtime.masc_schemas_snapshot () in
         let result_json ~already_visible (name, score) =
           let help_opt = Tool_help_registry.find_entry masc_schemas name in
           let desc =
@@ -343,7 +343,7 @@ let prepare_agent_setup
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let policy_allowed_tool_names =
-    Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta
+    Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta
   in
   (* Descriptor-backed public names are the LLM-visible names; internal
      counterparts are implementation details.
@@ -355,8 +355,8 @@ let prepare_agent_setup
      [descriptor_public_names] empty and drop "Execute"/"Read"/... from the
      visible surface. See PR #14596 review. *)
   let descriptor_internal_names =
-    Agent_tool_descriptor.public_descriptors
-    |> List.concat_map Agent_tool_descriptor.internal_names
+    Keeper_tool_descriptor.public_descriptors
+    |> List.concat_map Keeper_tool_descriptor.internal_names
     |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   (* Only include a public name when its descriptor internal target is
@@ -365,7 +365,7 @@ let prepare_agent_setup
      keeper tool_access has explicitly excluded — the descriptor would dispatch to
      a registered-but-disallowed tool. See PR #14574 review. *)
   let descriptor_public_names =
-    Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names
+    Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names
       policy_allowed_tool_names
   in
   (* Now strip the descriptor internal names from the LLM-visible surface,
@@ -388,7 +388,7 @@ let prepare_agent_setup
       (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
   in
   let allowed_public_name_for_internal internal_name =
-    Agent_tool_descriptor_resolution.public_names_for_internal internal_name
+    Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
     |> List.find_opt (fun public_name ->
       Keeper_tool_policy.StringSet.mem public_name universe_set
       && Keeper_tool_policy.StringSet.mem public_name policy_allowed_tool_set)
@@ -530,7 +530,7 @@ let prepare_agent_setup
       |> Keeper_tool_query.tool_query_text_of_user_message
     in
     let core =
-      Agent_tool_dispatch_runtime.effective_core_tools ()
+      Keeper_tool_dispatch_runtime.effective_core_tools ()
       |> List.filter (fun name ->
         Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set)
     in
@@ -685,7 +685,7 @@ let prepare_agent_setup
         all_tool_names
       |> validate_allow_list ~turn
     in
-    let core_count = List.length (Agent_tool_dispatch_runtime.effective_core_tools ()) in
+    let core_count = List.length (Keeper_tool_dispatch_runtime.effective_core_tools ()) in
     let discovered_count =
       List.length (Keeper_discovered_tools.active_names acc.discovered ~turn)
     in
@@ -708,7 +708,7 @@ let prepare_agent_setup
        last-turn-safe. Otherwise the public name could re-introduce a tool
        the policy explicitly excluded from the final turn. PR #14574. *)
     let descriptor_safe_public_names =
-      Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names
+      Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names
         last_turn_safe
     in
     let safe_last_turn_tools = last_turn_safe @ descriptor_safe_public_names in

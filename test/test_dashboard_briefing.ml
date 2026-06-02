@@ -434,7 +434,7 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
       Unix.mkdir dir_z 0o755;
       Masc_test_deps.init_keeper_tool_registry ();
       let policy_base_path = Masc_test_deps.find_project_root () in
-      ignore (Result.get_ok (Lib.Agent_tool_dispatch_runtime.init_policy_config ~base_path:policy_base_path));
+      ignore (Result.get_ok (Lib.Keeper_tool_dispatch_runtime.init_policy_config ~base_path:policy_base_path));
       let config_a = Workspace_utils.default_config dir_a in
       let config_z = Workspace_utils.default_config dir_z in
       ignore

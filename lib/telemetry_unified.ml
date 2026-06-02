@@ -292,7 +292,7 @@ let tool_called_event_detail json =
   | Some "agent_event", `Assoc fields -> tool_called_detail_from_fields fields
   | _ -> None
 
-let agent_tool_called_signature json =
+let keeper_tool_called_signature json =
   match tool_called_event_detail json with
   | None -> None
   | Some detail ->
@@ -312,7 +312,7 @@ let same_tool_call_signature left right =
    | Some _, None | None, Some _ -> false)
   && abs_float (left.ts -. right.ts) <= 5.0
 
-let suppress_shadow_agent_tool_events entries =
+let suppress_shadow_keeper_tool_events entries =
   let tool_call_io =
     List.filter_map tool_call_io_signature entries
   in
@@ -320,7 +320,7 @@ let suppress_shadow_agent_tool_events entries =
   else
     List.filter
       (fun json ->
-        match agent_tool_called_signature json with
+        match keeper_tool_called_signature json with
         | None -> true
         | Some signature ->
           not (List.exists (same_tool_call_signature signature) tool_call_io))
@@ -341,7 +341,7 @@ let promote_detail_field_if_absent name detail_fields fields =
         (name, value) :: fields
     | Some _ | None -> fields
 
-let promote_agent_tool_called_scope source fields =
+let promote_keeper_tool_called_scope source fields =
   match source, tool_called_detail_from_fields fields with
   | Agent_event, Some (`Assoc detail_fields) ->
       List.fold_left
@@ -361,7 +361,7 @@ let promote_agent_tool_called_scope source fields =
 let tag_entry source (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `Assoc fields ->
-    let fields = promote_agent_tool_called_scope source fields in
+    let fields = promote_keeper_tool_called_scope source fields in
     `Assoc (("source", `String (source_to_string source)) :: fields)
   | other ->
     `Assoc [("source", `String (source_to_string source)); ("data", other)]
@@ -685,7 +685,7 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   in
   let filtered =
     if List.mem Agent_event sources && List.mem Tool_call_io sources then
-      suppress_shadow_agent_tool_events filtered
+      suppress_shadow_keeper_tool_events filtered
     else filtered
   in
   (* Sort by timestamp descending (newest first) *)

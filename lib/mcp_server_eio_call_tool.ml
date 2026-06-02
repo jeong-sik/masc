@@ -510,7 +510,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         (Json_util.get_string params "name" |> Option.value ~default:"", Yojson.Safe.Util.member "arguments" params)
   in
   let is_read_only =
-    Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
+    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
   in
 
   (* Measure execution time for telemetry *)

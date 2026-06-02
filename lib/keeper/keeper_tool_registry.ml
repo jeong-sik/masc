@@ -17,8 +17,8 @@ let dedupe_tool_names names =
 ;;
 
 (* RFC-0160 S7: raw command parsing is centralized in
-   {!Agent_tool_execute_command_parse}; word extraction is owned by
-   {!Agent_tool_execute_command_words}. *)
+   {!Keeper_tool_execute_command_parse}; word extraction is owned by
+   {!Keeper_tool_execute_command_words}. *)
 
 (* ── Runtime-resolved tool names ─────────────────────────────── *)
 
@@ -93,7 +93,7 @@ let core_discovery_tools =
         ]
   (* RFC-0064/RFC-016x: public capability names replace internal names
      in the LLM-facing discovery surface. *)
-  @ Agent_tool_descriptor.public_names ()
+  @ Keeper_tool_descriptor.public_names ()
 ;;
 
 let effective_core_tools () = core_discovery_tools
@@ -111,7 +111,7 @@ let is_core_always_tool (name : string) : bool = Hashtbl.mem core_always_set nam
 (** Descriptor-projected read-only tools. This covers non-shard tools and
     descriptor-backed public/workspace tools without adding new string
     mirrors to the registry. *)
-let descriptor_read_only_tools = Agent_tool_descriptor.readonly_internal_names ()
+let descriptor_read_only_tools = Keeper_tool_descriptor.readonly_internal_names ()
 
 let keeper_read_only_tools =
   Tool_shard.all_read_only_keeper_tools () @ descriptor_read_only_tools
@@ -132,8 +132,8 @@ let is_effectively_read_only_tool (name : string) : bool =
   (* Keeper-local check first (bare Hashtbl, no mutex) before
      descriptor-aware capability lookup. *)
   is_keeper_read_only_tool name
-  || Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
-  || Agent_tool_descriptor_resolution.capability_has Tool_capability.Idempotent name
+  || Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
+  || Keeper_tool_descriptor_resolution.capability_has Tool_capability.Idempotent name
 ;;
 
 let has_mutating_side_effect (name : string) : bool =
@@ -146,16 +146,16 @@ let has_mutating_side_effect (name : string) : bool =
    such a contract. *)
 
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
-  match Agent_tool_descriptor_resolution.readonly_for_tool_call ~tool_name ~input with
+  match Keeper_tool_descriptor_resolution.readonly_for_tool_call ~tool_name ~input with
   | Some readonly -> readonly
   | None -> is_effectively_read_only_tool tool_name
 ;;
 
 let descriptor_boundary_exempt tool_name =
-  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  match Keeper_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
   | None -> None
   | Some descriptor ->
-    (match descriptor.Agent_tool_descriptor.policy.effect_domain with
+    (match descriptor.Keeper_tool_descriptor.policy.effect_domain with
      | Some Tool_catalog.Read_only
      | Some Tool_catalog.Masc_workspace
      | Some Tool_catalog.Playground_write -> Some true
@@ -176,7 +176,7 @@ let catalog_boundary_exempt tool_name =
   | Some _ as decision -> decision
   | None ->
     (match
-       Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name
+       Keeper_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name
      with
      | Some internal_name when not (String.equal internal_name tool_name) ->
        effect_domain_boundary_exempt (Tool_catalog.effect_domain internal_name)

@@ -85,10 +85,10 @@ let count_descriptors ~f descriptors =
 
 let descriptor_receipt_labels_json descriptors =
   descriptors
-  |> List.map (fun (descriptor : Agent_tool_descriptor.t) ->
+  |> List.map (fun (descriptor : Keeper_tool_descriptor.t) ->
     `Assoc
       [ "descriptor_id", `String descriptor.id
-      ; "labels", Agent_tool_descriptor.receipt_labels_json descriptor
+      ; "labels", Keeper_tool_descriptor.receipt_labels_json descriptor
       ])
   |> fun values -> `List values
 ;;
@@ -117,28 +117,28 @@ let tool_descriptor_summary_json receipt =
     @ receipt.canonical_tools
     @ receipt.tools_used
     @ receipt.reported_tools
-    |> Agent_tool_descriptor_resolution.descriptors_for_tool_names
+    |> Keeper_tool_descriptor_resolution.descriptors_for_tool_names
   in
   `Assoc
     [ "source", `String "receipt_tool_sets"
     ; ( "observed_descriptor_ids"
-      , list_json (List.map (fun (d : Agent_tool_descriptor.t) -> d.id) descriptors) )
+      , list_json (List.map (fun (d : Keeper_tool_descriptor.t) -> d.id) descriptors) )
     ; "descriptor_count", `Int (List.length descriptors)
     ; "receipt_labels_by_descriptor", descriptor_receipt_labels_json descriptors
     ; ( "executor_counts"
       , count_descriptors
-          ~f:(fun (d : Agent_tool_descriptor.t) ->
-            Agent_tool_descriptor.executor_to_string d.executor)
+          ~f:(fun (d : Keeper_tool_descriptor.t) ->
+            Keeper_tool_descriptor.executor_to_string d.executor)
           descriptors )
     ; ( "backend_counts"
       , count_descriptors
-          ~f:(fun (d : Agent_tool_descriptor.t) ->
-            Agent_tool_descriptor.backend_to_string d.backend)
+          ~f:(fun (d : Keeper_tool_descriptor.t) ->
+            Keeper_tool_descriptor.backend_to_string d.backend)
           descriptors )
     ; ( "sandbox_counts"
       , count_descriptors
-          ~f:(fun (d : Agent_tool_descriptor.t) ->
-            Agent_tool_descriptor.sandbox_to_string d.sandbox)
+          ~f:(fun (d : Keeper_tool_descriptor.t) ->
+            Keeper_tool_descriptor.sandbox_to_string d.sandbox)
           descriptors )
     ; ( "failed_policy_decision_count"
       , `Int (if policy_decision_failed receipt then 1 else 0) )

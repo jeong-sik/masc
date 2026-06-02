@@ -32,7 +32,7 @@ type context = {
 type task_owner_hooks =
   { is_registered_agent_alias : Workspace.config -> string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
-  ; agent_tool_names : Workspace.config -> agent_name:string -> string list option
+  ; keeper_tool_names : Workspace.config -> agent_name:string -> string list option
   ; transition_action_denylist : Workspace.config -> agent_name:string -> string list
   ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
@@ -40,7 +40,7 @@ type task_owner_hooks =
 let default_task_owner_hooks =
   { is_registered_agent_alias = (fun _ _ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
-  ; agent_tool_names = (fun _ ~agent_name:_ -> None)
+  ; keeper_tool_names = (fun _ ~agent_name:_ -> None)
   ; transition_action_denylist = (fun _ ~agent_name:_ -> [])
   ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
@@ -148,7 +148,7 @@ let sync_owner_current_task_binding (ctx : context) =
     ~agent_name:ctx.agent_name
 
 let agent_allowed_tool_names (ctx : context) =
-  (current_task_owner_hooks ()).agent_tool_names ctx.config ~agent_name:ctx.agent_name
+  (current_task_owner_hooks ()).keeper_tool_names ctx.config ~agent_name:ctx.agent_name
 
 let owner_transition_action_denylist (ctx : context) =
   (current_task_owner_hooks ()).transition_action_denylist

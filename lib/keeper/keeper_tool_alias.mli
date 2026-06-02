@@ -21,7 +21,7 @@ type route =
   { internal_name : string
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; public_schema : Yojson.Safe.t option
-  ; descriptor : Agent_tool_descriptor.t
+  ; descriptor : Keeper_tool_descriptor.t
   }
 
 (** [route public_name] returns routing info for a known LLM-native tool.

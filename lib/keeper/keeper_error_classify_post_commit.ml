@@ -17,7 +17,7 @@ let ambiguous_side_effect_error_prefix =
 let committed_mutating_tools tool_names =
   tool_names
   |> dedupe_keep_order
-  |> List.filter Agent_tool_dispatch_runtime.has_mutating_side_effect
+  |> List.filter Keeper_tool_dispatch_runtime.has_mutating_side_effect
 
 let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with

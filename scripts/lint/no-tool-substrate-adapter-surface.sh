@@ -42,13 +42,13 @@ done
 cd "$ROOT"
 
 EXECUTOR_SCAN_FILES=(
-  "lib/keeper/agent_tool_descriptor.ml"
-  "lib/keeper/agent_tool_descriptor.mli"
+  "lib/keeper/keeper_tool_descriptor.ml"
+  "lib/keeper/keeper_tool_descriptor.mli"
 )
 
 SURFACE_SCAN_FILES=(
-  "lib/keeper/agent_tool_descriptor.ml"
-  "lib/keeper/agent_tool_descriptor.mli"
+  "lib/keeper/keeper_tool_descriptor.ml"
+  "lib/keeper/keeper_tool_descriptor.mli"
   "lib/keeper/keeper_tool_alias.ml"
   "lib/keeper/keeper_tool_alias.mli"
   "lib/tool_catalog.ml"

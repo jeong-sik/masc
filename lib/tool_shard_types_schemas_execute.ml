@@ -106,7 +106,7 @@ let tool_execute_timeout_sec_field =
      ([oas:agent_tools] events ["fixed 1 field(s) fields=timeout_sec
      stages=coercion"] on the [Execute] tool, 60/141 = 43% of the
      5/29 correction load). The downstream handler
-     ([Agent_tool_execute_timeout.clamp_shell_timeout]) reads the field
+     ([Keeper_tool_execute_timeout.clamp_shell_timeout]) reads the field
      via [Safe_ops.json_float] which already coerces both shapes, so the
      coercion is a wire-format quirk, not a semantic one. Widening the
      advertised JSON Schema to accept either shape lets the LLM's typical

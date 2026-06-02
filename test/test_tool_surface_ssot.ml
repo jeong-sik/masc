@@ -42,7 +42,7 @@ let test_public_mcp_parity () =
   check_set_equal "Public_mcp" ~expected:legacy ~actual:ssot
 
 let test_spawned_agent_parity () =
-  let legacy = set_of Agent_tool_surfaces.spawned_agent_public_tool_names in
+  let legacy = set_of Keeper_tool_surfaces.spawned_agent_public_tool_names in
   let ssot = set_of (Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent) in
   check_set_equal "Spawned_agent" ~expected:legacy ~actual:ssot
 
@@ -51,7 +51,7 @@ let test_local_worker_public_tools_resolvable () =
     set_of (Tool_catalog.tools_for_surface Tool_catalog.Local_worker)
   in
   let resolvable_names =
-    set_of (Agent_tool_surfaces.local_worker_resolvable_tool_names ())
+    set_of (Keeper_tool_surfaces.local_worker_resolvable_tool_names ())
   in
   let missing = SS.diff public_names resolvable_names in
   if not (SS.is_empty missing) then
@@ -230,7 +230,7 @@ let test_keeper_internal_tools_have_schemas () =
   (* Every tool in keeper_internal_tools should have a schema in the
      keeper-facing schema SSOT. A name without a schema
      means the LLM can never select it — a silent capability gap. *)
-  let standalone_schemas = [ Agent_tool_dispatch_runtime.keeper_tool_search_schema ] in
+  let standalone_schemas = [ Keeper_tool_dispatch_runtime.keeper_tool_search_schema ] in
   let schema_names =
     (Tool_shard.all_keeper_tool_schemas @ standalone_schemas)
     |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
@@ -434,8 +434,8 @@ let test_workspace_mutating_canonical_used () =
 
 let test_role_catalogs_only_expose_available_tools () =
   let available =
-    Agent_tool_surfaces.spawned_agent_public_tool_names
-    @ Agent_tool_surfaces.local_worker_public_tool_names
+    Keeper_tool_surfaces.spawned_agent_public_tool_names
+    @ Keeper_tool_surfaces.local_worker_public_tool_names
     |> set_of
   in
   let check_all role tools =
@@ -445,12 +445,12 @@ let test_role_catalogs_only_expose_available_tools () =
         true (SS.mem name available)
     ) tools
   in
-  check_all "worker" Agent_tool_surfaces.execution_tool_names;
-  check_all "workspace_lead" Agent_tool_surfaces.workspace_tool_names
+  check_all "worker" Keeper_tool_surfaces.execution_tool_names;
+  check_all "workspace_lead" Keeper_tool_surfaces.workspace_tool_names
 
 let test_role_catalogs_drop_stale_entries_when_built () =
-  let worker_tools = Agent_tool_surfaces.build_tool_catalog ~role:"worker" () in
-  let workspace_lead_tools = Agent_tool_surfaces.build_tool_catalog ~role:"workspace_lead" () in
+  let worker_tools = Keeper_tool_surfaces.build_tool_catalog ~role:"worker" () in
+  let workspace_lead_tools = Keeper_tool_surfaces.build_tool_catalog ~role:"workspace_lead" () in
   Alcotest.(check bool) "worker role excludes portal_open" false
     (List.mem "masc_portal_open" worker_tools);
   Alcotest.(check bool) "workspace_lead role excludes portal_open" false

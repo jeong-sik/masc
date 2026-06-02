@@ -73,7 +73,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Patch every occurrence instead of exactly one"
                       ] )
                 ; (* Issue #8490: derive from local mirror that tracks
-           [Agent_tool_filesystem_runtime.valid_fs_write_mode_strings]. *)
+           [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings]. *)
                   ( "mode"
                   , `Assoc
                       [ "type", `String "string"

@@ -3,7 +3,7 @@ open Alcotest
 module KAR = Masc_mcp.Keeper_agent_run
 module KARAC = Masc_mcp.Keeper_agent_run_actionable_contract
 module KCC = Masc_mcp.Keeper_contract_classifier
-module KIPR = Masc_mcp.Agent_tool_in_process_runtime
+module KIPR = Masc_mcp.Keeper_tool_in_process_runtime
 module KTO = Masc_mcp.Keeper_tool_outcome
 module KTP = Masc_mcp.Keeper_tool_progress
 

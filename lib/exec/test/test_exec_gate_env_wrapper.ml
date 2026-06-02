@@ -24,7 +24,7 @@ let sandbox = { Gate.target = Sandbox_target.host () }
 
 let gate ~allowed ir =
   Gate.gate_typed
-    ~caller:Gate.Agent_tool_execute_shell_ir
+    ~caller:Gate.Keeper_tool_execute_shell_ir
     ~ir
     ~allowlist:(policy allowed)
     ~path_policy:Gate.allow_all_paths

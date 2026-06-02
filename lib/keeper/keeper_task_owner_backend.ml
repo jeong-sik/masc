@@ -56,7 +56,7 @@ let sync_current_task_binding config ~agent_name =
     ~agent_name
 ;;
 
-let agent_tool_names config ~agent_name =
+let keeper_tool_names config ~agent_name =
   let resolved =
     resolve_agent_name config agent_name ~log_context:"owner tool surface"
   in
@@ -103,7 +103,7 @@ let active_goal_phases_for_agent config ~agent_name =
 let install_hooks () =
   let is_registered_agent_alias_fn = is_registered_agent_alias in
   let sync_current_task_binding_fn = sync_current_task_binding in
-  let agent_tool_names_fn = agent_tool_names in
+  let keeper_tool_names_fn = keeper_tool_names in
   let transition_action_denylist_fn = transition_action_denylist in
   let active_goal_phases_for_agent_fn = active_goal_phases_for_agent in
   Tool_task_handlers.set_task_owner_hooks
@@ -112,7 +112,7 @@ let install_hooks () =
           (fun config agent_name -> is_registered_agent_alias_fn config agent_name)
       ; sync_current_task_binding =
           (fun config ~agent_name -> sync_current_task_binding_fn config ~agent_name)
-      ; agent_tool_names = (fun config ~agent_name -> agent_tool_names_fn config ~agent_name)
+      ; keeper_tool_names = (fun config ~agent_name -> keeper_tool_names_fn config ~agent_name)
       ; transition_action_denylist =
           (fun config ~agent_name -> transition_action_denylist_fn config ~agent_name)
       ; active_goal_phases_for_agent =

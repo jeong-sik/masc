@@ -117,7 +117,7 @@ g1_total_refs=$(count_code_refs "$g1_pattern")
 # ---- G1 allowed exceptions (named; any new file must be added here) ----
 # After comment-aware grep (S4 audit accuracy fix), only files with *real*
 # code-side `Bash.parse_string` references count. Files whose former
-# matches were docstring-only (`agent_tool_execute_command_semantics.mli`,
+# matches were docstring-only (`keeper_tool_execute_command_semantics.mli`,
 # the two `.mli` interfaces) have
 # been removed — re-add only if a future code-side call resurfaces.
 #
@@ -156,7 +156,7 @@ g2_ir_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) \(.*: Sh
 # which calls gate_typed once. Count keeper files that reference the dispatcher
 # (excluding the dispatcher itself) to measure keeper-op adoption.
 g3_gate_typed=$(rg -l 'Agent_tool_execute_shell_ir' lib/keeper/ 2>/dev/null \
-  | rg -v 'agent_tool_execute_shell_ir\.ml$' \
+  | rg -v 'keeper_tool_execute_shell_ir\.ml$' \
   | wc -l | tr -d ' ')
 
 # ---- G4: risk stamp existence ----

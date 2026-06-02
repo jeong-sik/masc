@@ -1,6 +1,6 @@
 (** Tests for the autonomy liberation refactoring (Phases 2-5). *)
 
-module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
+module Keeper_tool_surfaces = Masc_mcp.Keeper_tool_surfaces
 module Keeper_deliberation = Masc_mcp.Keeper_deliberation
 module Prometheus = Masc_mcp.Prometheus
 
@@ -24,7 +24,7 @@ let contains_s haystack needle =
 (* ── Phase 2: Tool Discovery ──────────────────────────────────── *)
 
 let test_build_tool_catalog_worker () =
-  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"worker" () in
+  let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"worker" () in
   Alcotest.(check bool) "non-empty" true (tools <> []);
   Alcotest.(check bool) "has heartbeat" true
     (List.mem "masc_heartbeat" tools);
@@ -32,17 +32,17 @@ let test_build_tool_catalog_worker () =
     (List.mem "masc_tool_admin_snapshot" tools)
 
 let test_build_tool_catalog_workspace_lead () =
-  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"workspace_lead" () in
+  let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"workspace_lead" () in
   Alcotest.(check bool) "non-empty" true (tools <> []);
   Alcotest.(check bool) "has broadcast" true
     (List.mem "masc_broadcast" tools)
 
 let test_build_tool_catalog_autonomous () =
-  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
+  let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
   Alcotest.(check bool) "non-empty" true (tools <> []);
   Alcotest.(check bool) "excludes admin" false
     (List.mem "masc_tool_admin_snapshot" tools);
-  let worker_tools = Agent_tool_surfaces.build_tool_catalog ~role:"worker" () in
+  let worker_tools = Keeper_tool_surfaces.build_tool_catalog ~role:"worker" () in
   Alcotest.(check bool) "more tools than worker" true
     (List.length tools >= List.length worker_tools)
 
@@ -188,10 +188,10 @@ let test_compose_available_tools () =
 (* ── Phase 2 Integration: End-to-End Wiring ─────────────────── *)
 
 let test_autonomous_tool_count () =
-  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
+  let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
   let count = List.length tools in
   Alcotest.(check bool) "at least 15 tools" true (count >= 15);
-  let prefixed = Agent_tool_surfaces.prefixed_tool_names tools in
+  let prefixed = Keeper_tool_surfaces.prefixed_tool_names tools in
   List.iter
     (fun name ->
       Alcotest.(check bool)
@@ -274,7 +274,7 @@ let test_team_context_build_renders_findings_without_goal () =
 let test_scope_default_unchanged () =
   (* Worker tools should remain a small focused set *)
   let worker_tools =
-    Agent_tool_surfaces.build_tool_catalog ~role:"worker" ()
+    Keeper_tool_surfaces.build_tool_catalog ~role:"worker" ()
   in
   Alcotest.(check bool) "worker tools < 20" true
     (List.length worker_tools < 20)

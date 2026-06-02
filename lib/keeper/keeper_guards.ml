@@ -662,7 +662,7 @@ let destructive_guard
       if not enabled then Agent_sdk.Hooks.Continue
       else if
         not
-          (Agent_tool_descriptor_resolution.capability_has
+          (Keeper_tool_descriptor_resolution.capability_has
              Tool_capability.Destructive
              tool_name)
       then

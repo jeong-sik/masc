@@ -353,7 +353,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let decision_pipeline_diagram =
         let phase = Option.value ~default:Keeper_state_machine.Offline current_phase in
         let stats = Thompson_sampling.get_stats m.agent_name in
-        let tool_count = List.length (Agent_tool_dispatch_runtime.keeper_allowed_tool_names m) in
+        let tool_count = List.length (Keeper_tool_dispatch_runtime.keeper_allowed_tool_names m) in
         let recovery_floor_count =
           List.length (Keeper_tool_policy.failing_minimum_tool_names ())
         in
@@ -375,9 +375,9 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ()
       in
       let tools_access =
-        let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names m in
+        let allowed = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names m in
         let masc_tool_count =
-          List.length (Agent_tool_dispatch_runtime.keeper_masc_tool_names m)
+          List.length (Keeper_tool_dispatch_runtime.keeper_masc_tool_names m)
         in
         `Assoc [
           ("tool_access", Keeper_meta_contract.tool_access_to_json m.tool_access);

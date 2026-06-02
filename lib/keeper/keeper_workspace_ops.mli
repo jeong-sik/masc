@@ -1,6 +1,6 @@
 (* Keeper_workspace_ops — structured shell op dispatch for Grep.
 
-   Private sub-module included by [Agent_tool_command_runtime]. Only exposes what the
+   Private sub-module included by [Keeper_tool_command_runtime]. Only exposes what the
    facade needs. *)
 
 val handle_tool_search_files :

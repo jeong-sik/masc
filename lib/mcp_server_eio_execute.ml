@@ -172,7 +172,7 @@ let execute_tool_eio
          (runtime_error_result (Masc_domain.masc_error_to_string err))
      | Ok () ->
           let is_read_only =
-            Agent_tool_descriptor_resolution.capability_has
+            Keeper_tool_descriptor_resolution.capability_has
               Tool_capability.Read_only
               name
           in
@@ -449,7 +449,7 @@ let execute_tool_eio
                    let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
                    let result =
                      run_with_cleanup_preserving_primary ~cleanup (fun () ->
-                       Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
+                       Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
                          ~config
                          ~meta
                                      ~ctx_work
@@ -465,7 +465,7 @@ let execute_tool_eio
                          ())
                    in
                    let success =
-                     match result.Agent_tool_dispatch_runtime.outcome with
+                     match result.Keeper_tool_dispatch_runtime.outcome with
                      | `Success -> true
                      | `Failure -> false
                    in
@@ -554,7 +554,7 @@ let execute_tool_eio
 ;;
 
 (* RFC-0182 §3.1 — register Tool_workspace.dispatch with the dependency
-   inversion ref so [Agent_tool_in_process_runtime.handle_masc_workspace]
+   inversion ref so [Keeper_tool_in_process_runtime.handle_masc_workspace]
    (compiled early) can dispatch workspace tools without statically
    importing [Tool_workspace] (compiled late). *)
 let () =

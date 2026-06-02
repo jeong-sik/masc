@@ -16,7 +16,7 @@ let masc_name (tool : Tool_name.Masc.t) =
 
 let canonical_tool_name name =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
-  match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
+  match Keeper_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
   | Some internal -> internal
   | None -> stripped
 ;;
@@ -86,14 +86,14 @@ let command_of_exec_stage ~executable ~argv =
 ;;
 
 let typed_execute_command_candidates input =
-  match Agent_tool_execute_typed_input.of_json input with
+  match Keeper_tool_execute_typed_input.of_json input with
   | Error _ -> []
-  | Ok (Agent_tool_execute_typed_input.Exec { executable; argv; _ }) ->
+  | Ok (Keeper_tool_execute_typed_input.Exec { executable; argv; _ }) ->
     command_of_exec_stage ~executable ~argv |> Option.to_list
-  | Ok (Agent_tool_execute_typed_input.Pipeline { stages; _ }) ->
+  | Ok (Keeper_tool_execute_typed_input.Pipeline { stages; _ }) ->
     let commands =
       stages
-      |> List.filter_map (fun { Agent_tool_execute_typed_input.executable; argv } ->
+      |> List.filter_map (fun { Keeper_tool_execute_typed_input.executable; argv } ->
            command_of_exec_stage ~executable ~argv)
     in
     (match commands with

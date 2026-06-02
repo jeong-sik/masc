@@ -118,7 +118,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
      rows remain visible while no new degenerate rows are emitted. *)
   Heuristic_metrics.init ~base_path;
   (* Load tool policy groups from config/tool_policy.toml *)
-  (match Agent_tool_dispatch_runtime.init_policy_config ~base_path with
+  (match Keeper_tool_dispatch_runtime.init_policy_config ~base_path with
    | Ok () -> ()
    | Error msg ->
        record_tool_policy_init_failure ~base_path msg;

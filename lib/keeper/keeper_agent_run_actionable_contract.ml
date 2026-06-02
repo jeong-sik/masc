@@ -6,7 +6,7 @@ type analysis =
 
 (* A stay_silent call carries a typed no-work proof when its tool_call_detail
    records a [No_progress] typed_outcome. The handler emits this only for a
-   recognized [no_work_reason] (Agent_tool_in_process_runtime.handle_stay_silent),
+   recognized [no_work_reason] (Keeper_tool_in_process_runtime.handle_stay_silent),
    and the PostToolUse hook threads it onto the detail. This is the typed escape
    from the stay_silent constraint-trap: bare silence still has no proof. *)
 let stay_silent_no_work_proof_present

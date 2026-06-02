@@ -85,6 +85,25 @@ let running_paused_keeper_names () =
        if e.meta.paused then Some e.name else None)
   |> sorted_unique_strings
 
+let running_keeper_names ?base_path () =
+  Keeper_registry.all ?base_path ()
+  |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
+       match e.phase with
+       | Keeper_state_machine.Running -> Some e.name
+       | Keeper_state_machine.Offline
+       | Keeper_state_machine.Overflowed
+       | Keeper_state_machine.Failing
+       | Keeper_state_machine.Compacting
+       | Keeper_state_machine.HandingOff
+       | Keeper_state_machine.Draining
+       | Keeper_state_machine.Paused
+       | Keeper_state_machine.Stopped
+       | Keeper_state_machine.Crashed
+       | Keeper_state_machine.Restarting
+       | Keeper_state_machine.Dead
+       | Keeper_state_machine.Zombie -> None)
+  |> sorted_unique_strings
+
 let durable_paused_keeper_scan ?(include_details = true) config =
   (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
   let now = Unix.gettimeofday () in
@@ -375,9 +394,75 @@ let keeper_phase_counts ?base_path () =
           | Keeper_state_machine.Zombie -> { acc with executable })
        { running = 0; failing = 0; recovering = 0; executable = 0 }
 
+let take_at_most count values =
+  let rec loop remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | value :: rest -> loop (remaining - 1) (value :: acc) rest
+  in
+  loop count [] values
+
+let supervisor_decision_json
+    ~running_names
+    ~autoboot_names
+    ~running_keeper_fiber_count
+    ~target_reaction_capacity_count
+    ~minimum_running_fibers
+    ~reaction_capacity_shortfall_count =
+  let observation : Keeper_fleet_capacity_supervisor.observation =
+    { running_keeper_fiber_count
+    ; target_reaction_capacity_count
+    ; minimum_running_fibers
+    ; reaction_capacity_shortfall_count
+    ; admission_blocked_count = 0
+    ; admission_queue_saturated_cap = max_int
+    ; disk_pressure_active = false
+    ; fd_pressure_active = false
+    ; cold_start_in_progress = false
+    ; now = 0.0
+    ; last_action_at = None
+    ; cooldown_seconds = 0.0
+    }
+  in
+  let missing_autoboot_names =
+    autoboot_names
+    |> List.filter (fun name -> not (List.exists (String.equal name) running_names))
+  in
+  match Keeper_fleet_capacity_supervisor.tick observation with
+  | Spawn { reason; suggested_keeper_count } ->
+    let suggested_keeper_names =
+      take_at_most suggested_keeper_count missing_autoboot_names
+    in
+    `Assoc
+      [ "variant", `String "spawn"
+      ; ( "reason"
+        , `String (Keeper_fleet_capacity_supervisor.Spawn_reason.to_string reason) )
+      ; "suggested_keeper_count", `Int suggested_keeper_count
+      ; ( "suggested_keeper_names"
+        , `List (List.map (fun name -> `String name) suggested_keeper_names) )
+      ]
+  | Backpressure reason ->
+    `Assoc
+      [ "variant", `String "backpressure"
+      ; ( "reason"
+        , `String
+            (Keeper_fleet_capacity_supervisor.Backpressure_reason.to_string reason) )
+      ; "suggested_keeper_count", `Int 0
+      ; "suggested_keeper_names", `List []
+      ]
+  | Noop reason ->
+    `Assoc
+      [ "variant", `String "noop"
+      ; ( "reason"
+        , `String (Keeper_fleet_capacity_supervisor.Noop_reason.to_string reason) )
+      ; "suggested_keeper_count", `Int 0
+      ; "suggested_keeper_names", `List []
+      ]
+
 let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
     ?autoboot_scan:autoboot_scan_override
+    ?running_keeper_names:running_keeper_names_override
     ~phase_counts
     ~paused_keepers_json
     () =
@@ -398,6 +483,15 @@ let keeper_fleet_safety_health_json
              (Printexc.to_string exn);
            ([], empty_autoboot_keeper_scan))
       | None -> ([], empty_autoboot_keeper_scan))
+  in
+  let running_names =
+    match running_keeper_names_override with
+    | Some names -> sorted_unique_strings names
+    | None -> (
+      match current_server_state_opt () with
+      | Some state ->
+        running_keeper_names ~base_path:state.Mcp_server.workspace_config.base_path ()
+      | None -> running_keeper_names ())
   in
   let bootable_count = List.length bootable_names in
   let target_count = List.length autoboot_scan.autoboot_names in
@@ -459,6 +553,15 @@ let keeper_fleet_safety_health_json
     else if paused_autoboot_count > 0 then Some "durable_paused_autoboot_enabled"
     else None
   in
+  let supervisor_decision =
+    supervisor_decision_json
+      ~running_names
+      ~autoboot_names:autoboot_scan.autoboot_names
+      ~running_keeper_fiber_count:phase_counts.running
+      ~target_reaction_capacity_count:target_count
+      ~minimum_running_fibers
+      ~reaction_capacity_shortfall_count
+  in
   `Assoc
     [ "status", `String status
     ; ("blocker", Json_util.string_opt_to_json blocker)
@@ -503,6 +606,7 @@ let keeper_fleet_safety_health_json
            || no_running_fibers
            || low_running_fiber_margin
            || reaction_capacity_below_target) )
+    ; "supervisor_decision", supervisor_decision
     ; "autoboot_throttle_limit"
     , `Int Keeper_keepalive.effective_turn_throttle_limit
     ; ( "autoboot_throttle_source"

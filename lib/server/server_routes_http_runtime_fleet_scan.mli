@@ -35,6 +35,7 @@ val paused_keepers_health_json :
   unit ->
   [> `Assoc of (string * [> `Int of int | `List of Yojson.Safe.t list ]) list
   ]
+val running_keeper_names : ?base_path:string -> unit -> String.t list
 type autoboot_keeper_scan = {
   autoboot_names : string list;
   read_errors : (string * string) list;
@@ -63,6 +64,7 @@ val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts
 val keeper_fleet_safety_health_json :
   ?bootable_names:string list ->
   ?autoboot_scan:autoboot_keeper_scan ->
+  ?running_keeper_names:string list ->
   phase_counts:keeper_phase_counts ->
   paused_keepers_json:Yojson.Safe.t ->
   unit ->

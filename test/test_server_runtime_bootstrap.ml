@@ -105,6 +105,11 @@ let make_config_root root =
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
+let fixture_runtime_id () =
+  match Runtime.get_default_runtime () with
+  | Some runtime -> Runtime.id_of_binding runtime.binding
+  | None -> "test.runtime"
+
 let write_basepath_keeper_toml base_path name =
   let keepers_dir =
     Filename.concat (Filename.concat (Filename.concat base_path Common.masc_dirname) "config")
@@ -900,7 +905,7 @@ let make_keeper_meta_json ?(name = "sangsu")
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
           ("goal", `String ("goal-" ^ name));
-          ("runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ()));
+          ("runtime_id", `String (fixture_runtime_id ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");
         ])
@@ -919,7 +924,7 @@ let make_keeper_meta ?(paused = false) ?(name = "sangsu")
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
           ("goal", `String ("goal-" ^ name));
-          ("runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ()));
+          ("runtime_id", `String (fixture_runtime_id ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");
         ])
@@ -1065,11 +1070,11 @@ let test_health_json_surfaces_durable_paused_keepers () =
             "running_process"
             (runtime_truth |> member "source" |> to_string);
           Alcotest.(check string) "runtime truth effective base path"
-            dir
-            (runtime_truth |> member "effective_base_path" |> to_string);
+            (canonical_path dir)
+            (runtime_truth |> member "effective_base_path" |> to_string |> canonical_path);
           Alcotest.(check string) "runtime truth effective masc root"
-            (Filename.concat dir ".masc")
-            (runtime_truth |> member "effective_masc_root" |> to_string);
+            (Filename.concat dir ".masc" |> canonical_path)
+            (runtime_truth |> member "effective_masc_root" |> to_string |> canonical_path);
           ignore (runtime_truth |> member "process_cwd" |> to_string);
           ignore (runtime_truth |> member "executable_path" |> to_string);
           ignore (runtime_truth |> member "executable_dir" |> to_string);
@@ -1120,7 +1125,13 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "operator_action_required" |> to_bool);
           Alcotest.(check int) "health exposes autoboot throttle limit" 32
             (fleet_safety |> member "autoboot_throttle_limit" |> to_int);
-          Alcotest.(check string) "health exposes autoboot throttle source" "default"
+          let expected_autoboot_throttle_source =
+            match Sys.getenv_opt "MASC_KEEPER_AUTOBOOT_MAX" with
+            | Some _ -> "env"
+            | None -> "default"
+          in
+          Alcotest.(check string) "health exposes autoboot throttle source"
+            expected_autoboot_throttle_source
             (fleet_safety |> member "autoboot_throttle_source" |> to_string);
           Alcotest.(check string) "health reaction ledger degraded"
             "degraded"
@@ -1248,7 +1259,25 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             "reaction_capacity_below_target"
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health fleet asks for operator action" true
-            (fleet_safety |> member "operator_action_required" |> to_bool))))
+            (fleet_safety |> member "operator_action_required" |> to_bool);
+          let supervisor_decision =
+            fleet_safety |> member "supervisor_decision"
+          in
+          Alcotest.(check string) "supervisor decision asks to spawn" "spawn"
+            (supervisor_decision |> member "variant" |> to_string);
+          Alcotest.(check string) "supervisor decision uses target-capacity reason"
+            "below_target_reaction_capacity"
+            (supervisor_decision |> member "reason" |> to_string);
+          Alcotest.(check int) "supervisor decision carries shortfall count" 2
+            (supervisor_decision |> member "suggested_keeper_count" |> to_int);
+          let suggested_keeper_names =
+            supervisor_decision
+            |> member "suggested_keeper_names"
+            |> to_list
+            |> List.map to_string
+          in
+          Alcotest.(check bool) "supervisor suggests paused missing keeper" true
+            (List.mem "capacity-paused" suggested_keeper_names))))
 
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->

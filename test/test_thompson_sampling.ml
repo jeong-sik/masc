@@ -4,10 +4,10 @@ open Alcotest
 open Masc_mcp
 
 (* Production health predicate, injected into [select_with_feedback] after the
-   masc_thompson leaf carve inverted the direct [Client_health.is_healthy] edge.
+   masc_thompson leaf carve inverted the direct [Agent_health.is_healthy] edge.
    Wiring the *real* predicate here keeps the health-gate tests below exercising
    identical behavior — the inversion changed plumbing, not the algorithm. *)
-let is_healthy = Client_health.is_healthy
+let is_healthy = Agent_health.is_healthy
 
 (** {1 Beta Distribution Sampling Tests} *)
 
@@ -239,7 +239,7 @@ let test_stronger_trigger_uses_winner_order () =
 (** {1 Quality Signal Tests (Phase 3)} *)
 
 module Pv = Post_verifier
-module Ah = Masc_mcp.Client_health
+module Ah = Masc_mcp.Agent_health
 
 let float_eq ?(eps = 0.001) a b = Float.abs (a -. b) < eps
 

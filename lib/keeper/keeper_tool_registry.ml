@@ -243,11 +243,11 @@ let reconcile_safe_tools =
   @ List.map
       Tool_name.to_string
       Tool_name.
-        [ Masc Board_post
-        ; Masc Board_comment
-        ; Masc Board_vote
-        ; Masc Board_comment_vote
-        ; Masc Board_curation_submit
+        [ Masc (Masc.Board Board_name.Board_post)
+        ; Masc (Masc.Board Board_name.Board_comment)
+        ; Masc (Masc.Board Board_name.Board_vote)
+        ; Masc (Masc.Board Board_name.Board_comment_vote)
+        ; Masc (Masc.Board Board_name.Board_curation_submit)
         ; Masc Broadcast
         ]
 ;;

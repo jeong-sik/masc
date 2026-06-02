@@ -80,8 +80,10 @@ let handle_keeper_board_tool
     tool_result_or_error
       (Tool_board.handle_tool tool_name tool_args)
   in
-  let dispatch_board tool tool_args =
-    dispatch (Tool_name.Masc.to_string tool) tool_args
+  (* PR-S1: the board runtime speaks the domain name type [Board_name.t]
+     directly rather than routing through the [Tool_name.Masc] god-enum. *)
+  let dispatch_board (tool : Tool_name.Board_name.t) tool_args =
+    dispatch (Tool_name.Board_name.to_string tool) tool_args
   in
   match name with
   | "keeper_board_post" ->
@@ -101,7 +103,7 @@ let handle_keeper_board_tool
     Log.Keeper.debug "board_args: %s" (Yojson.Safe.pretty_to_string board_args);
     let result =
       Tool_board.handle_tool
-        (Tool_name.Masc.to_string Tool_name.Masc.Board_post)
+        (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post)
         board_args
     in
     let ok = Tool_result.is_success result in
@@ -111,37 +113,37 @@ let handle_keeper_board_tool
       ok
       (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
     tool_result_or_error result
-  | "keeper_board_list" -> dispatch_board Tool_name.Masc.Board_list args
-  | "keeper_board_get" -> dispatch_board Tool_name.Masc.Board_get args
+  | "keeper_board_list" -> dispatch_board Tool_name.Board_name.Board_list args
+  | "keeper_board_get" -> dispatch_board Tool_name.Board_name.Board_get args
   | "keeper_board_comment" ->
     dispatch_board
-      Tool_name.Masc.Board_comment
+      Tool_name.Board_name.Board_comment
       (assoc_override_string "author" meta.name args)
   | "keeper_board_vote" ->
     dispatch_board
-      Tool_name.Masc.Board_vote
+      Tool_name.Board_name.Board_vote
       (assoc_override_string "voter" meta.name args)
   | "keeper_board_comment_vote" ->
     dispatch_board
-      Tool_name.Masc.Board_comment_vote
+      Tool_name.Board_name.Board_comment_vote
       (assoc_override_string "voter" meta.name args)
-  | "keeper_board_stats" -> dispatch_board Tool_name.Masc.Board_stats args
-  | "keeper_board_search" -> dispatch_board Tool_name.Masc.Board_search args
+  | "keeper_board_stats" -> dispatch_board Tool_name.Board_name.Board_stats args
+  | "keeper_board_search" -> dispatch_board Tool_name.Board_name.Board_search args
   | "keeper_board_curation_read" ->
-    dispatch_board Tool_name.Masc.Board_curation_read args
+    dispatch_board Tool_name.Board_name.Board_curation_read args
   | "keeper_board_curation_submit" ->
     dispatch_board
-      Tool_name.Masc.Board_curation_submit
+      Tool_name.Board_name.Board_curation_submit
       (assoc_override_string "submitted_by" meta.name args)
   | "keeper_board_sub_board_create" ->
-    dispatch_board Tool_name.Masc.Board_sub_board_create args
+    dispatch_board Tool_name.Board_name.Board_sub_board_create args
   | "keeper_board_sub_board_list" ->
-    dispatch_board Tool_name.Masc.Board_sub_board_list args
+    dispatch_board Tool_name.Board_name.Board_sub_board_list args
   | "keeper_board_sub_board_get" ->
-    dispatch_board Tool_name.Masc.Board_sub_board_get args
+    dispatch_board Tool_name.Board_name.Board_sub_board_get args
   | "keeper_board_sub_board_update" ->
-    dispatch_board Tool_name.Masc.Board_sub_board_update args
+    dispatch_board Tool_name.Board_name.Board_sub_board_update args
   | "keeper_board_sub_board_delete" ->
-    dispatch_board Tool_name.Masc.Board_sub_board_delete args
+    dispatch_board Tool_name.Board_name.Board_sub_board_delete args
   | _ -> error_json ~fields:[ "tool", `String name ] "unknown_board_tool"
 ;;

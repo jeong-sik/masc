@@ -17,26 +17,51 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Voice_agent; Voice_listen; Voice_session_end; Voice_session_start
   ; Voice_sessions; Voice_speak ]
 
+(* PR-S1: Task/Board/Goal/Operator tool names are owned by domain submodules
+   and wrapped into [Masc.t] via the [Task]/[Board]/[Goal]/[Operator]
+   constructors. The remaining names stay flat. *)
 let all_masc : Tool_name.Masc.t list =
-  [ Add_task; Agent_fitness; Agent_update; Agent_card; Agents
-  ; Batch_add_tasks; Board_cleanup; Board_comment; Board_comment_vote
-  ; Board_curation_read; Board_curation_submit
-  ; Board_delete; Board_get; Board_hearths; Board_list; Board_post
-  ; Board_profile; Board_reaction; Board_search
-  ; Board_stats; Board_sub_board_create; Board_sub_board_delete
-  ; Board_sub_board_get; Board_sub_board_list; Board_sub_board_update
-  ; Board_vote; Broadcast; Check; Claim_next
-  ; Cleanup_zombies; Dashboard; Deliver
-  ; Goal_list; Goal_transition; Goal_upsert; Goal_verify
-  ; Heartbeat; Messages; Note_add
-  ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
-  ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
-  ; Plan_update; Reset
-  ; Status; Task_history; Tasks; Tool_grant; Tool_help
-  ; Tool_list; Tool_revoke; Transition; Update_priority; Web_fetch; Web_search
-  ; Approval_pending; Approval_get; Config; Gc; Get_metrics; Mcp_session
-  ; Pause; Resume; Start; Tool_admin_snapshot; Tool_admin_update
-  ; Tool_stats ]
+  let open Tool_name in
+  [ Masc.Task Task_name.Add_task; Masc.Agent_fitness; Masc.Agent_update
+  ; Masc.Agent_card; Masc.Agents
+  ; Masc.Task Task_name.Batch_add_tasks
+  ; Masc.Board Board_name.Board_cleanup; Masc.Board Board_name.Board_comment
+  ; Masc.Board Board_name.Board_comment_vote
+  ; Masc.Board Board_name.Board_curation_read
+  ; Masc.Board Board_name.Board_curation_submit
+  ; Masc.Board Board_name.Board_delete; Masc.Board Board_name.Board_get
+  ; Masc.Board Board_name.Board_hearths; Masc.Board Board_name.Board_list
+  ; Masc.Board Board_name.Board_post
+  ; Masc.Board Board_name.Board_profile; Masc.Board Board_name.Board_reaction
+  ; Masc.Board Board_name.Board_search
+  ; Masc.Board Board_name.Board_stats
+  ; Masc.Board Board_name.Board_sub_board_create
+  ; Masc.Board Board_name.Board_sub_board_delete
+  ; Masc.Board Board_name.Board_sub_board_get
+  ; Masc.Board Board_name.Board_sub_board_list
+  ; Masc.Board Board_name.Board_sub_board_update
+  ; Masc.Board Board_name.Board_vote; Masc.Broadcast; Masc.Check
+  ; Masc.Task Task_name.Claim_next
+  ; Masc.Cleanup_zombies; Masc.Dashboard; Masc.Deliver
+  ; Masc.Goal Goal_name.Goal_list; Masc.Goal Goal_name.Goal_transition
+  ; Masc.Goal Goal_name.Goal_upsert; Masc.Goal Goal_name.Goal_verify
+  ; Masc.Heartbeat; Masc.Messages; Masc.Note_add
+  ; Masc.Operator Operator_name.Operator_action
+  ; Masc.Operator Operator_name.Operator_confirm
+  ; Masc.Operator Operator_name.Operator_digest
+  ; Masc.Operator Operator_name.Operator_snapshot
+  ; Masc.Plan_clear_task; Masc.Plan_get; Masc.Plan_get_task; Masc.Plan_init
+  ; Masc.Plan_set_task
+  ; Masc.Plan_update; Masc.Reset
+  ; Masc.Status; Masc.Task Task_name.Task_history; Masc.Task Task_name.Tasks
+  ; Masc.Tool_grant; Masc.Tool_help
+  ; Masc.Tool_list; Masc.Tool_revoke; Masc.Task Task_name.Transition
+  ; Masc.Task Task_name.Update_priority; Masc.Web_fetch; Masc.Web_search
+  ; Masc.Approval_pending; Masc.Approval_get; Masc.Config; Masc.Gc
+  ; Masc.Get_metrics; Masc.Mcp_session
+  ; Masc.Pause; Masc.Resume; Masc.Start; Masc.Tool_admin_snapshot
+  ; Masc.Tool_admin_update
+  ; Masc.Tool_stats ]
 
 let all_masc_keeper : Tool_name.Masc_keeper.t list =
   [ Clear; Compact; Create_from_persona; Down; List; Msg; Persona_audit; Repair

@@ -237,38 +237,23 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
   | Tool_name.Masc m ->
     let open Tool_name.Masc in
     match m with
-    | Add_task
-    | Batch_add_tasks
-    | Claim_next
-    | Task_history
-    | Tasks
-    | Transition
-    | Update_priority -> Some Mod_task
+    (* Domain tool-NAME groups collapse to a single tag each: the substrate no
+       longer enumerates the per-operation names. Tag alignment proof (PR-S1):
+       every member of each domain submodule mapped to the same tag before the
+       partition, so [| Domain _ ->] is exact, not a downgrade.
+         Task     -> Mod_task     (was 7 arms, all Mod_task)
+         Board    -> Mod_inline   (was 20 Board_* arms, all Mod_inline)
+         Goal     -> Mod_state    (was 4 Goal_* arms, all Mod_state)
+         Operator -> Mod_operator (was 4 Operator_* arms, all Mod_operator) *)
+    | Task _ -> Some Mod_task
+    | Board _ -> Some Mod_inline
+    | Goal _ -> Some Mod_state
+    | Operator _ -> Some Mod_operator
     | Agent_fitness
     | Agent_card
     | Agent_update
     | Agents
     | Get_metrics -> Some Mod_agent
-    | Board_cleanup
-    | Board_comment
-    | Board_comment_vote
-    | Board_curation_read
-    | Board_curation_submit
-    | Board_delete
-    | Board_get
-    | Board_hearths
-    | Board_list
-    | Board_post
-    | Board_profile
-    | Board_reaction
-    | Board_search
-    | Board_stats
-    | Board_sub_board_create
-    | Board_sub_board_delete
-    | Board_sub_board_get
-    | Board_sub_board_list
-    | Board_sub_board_update
-    | Board_vote
     | Approval_get
     | Approval_pending
     | Broadcast
@@ -277,10 +262,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Start
     -> Some Mod_inline
     | Check
-    | Goal_list
-    | Goal_transition
-    | Goal_upsert
-    | Goal_verify
     | Heartbeat
     | Reset
     | Status -> Some Mod_state
@@ -302,7 +283,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Plan_init
     | Plan_set_task
     | Plan_update -> Some Mod_plan
-    | Operator_action | Operator_confirm | Operator_digest | Operator_snapshot -> Some Mod_operator
     | Pause | Resume -> Some Mod_control
     | Tool_grant | Tool_list | Tool_revoke -> Some Mod_shard
 

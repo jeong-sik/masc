@@ -208,6 +208,9 @@ let static_destructive_tool_names =
   ; "shell_exec"
   ]
 
+let static_mcp_context_required_tool_names =
+  [ "masc_start"; "masc_broadcast"; "masc_messages"; "masc_approval_get"; "masc_mcp_session" ]
+
 let force_true_if_member name names current =
   if List.mem name names then Some true else current
 
@@ -415,9 +418,6 @@ let attach_inferred_effect_domain name (meta : metadata) =
   | None -> { meta with effect_domain = inferred_effect_domain name }
 
 let attach_static_capabilities name (meta : metadata) =
-  let static_mcp_context_required_tool_names =
-    [ "masc_start"; "masc_broadcast"; "masc_messages"; "masc_approval_get"; "masc_mcp_session" ]
-  in
   {
     meta with
     mcp_context_required =

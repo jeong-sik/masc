@@ -318,6 +318,14 @@ let test_generic_required_candidates_match_claim_context () =
        ~allowed_tool_names:[ "keeper_task_submit_for_verification"; "keeper_task_done" ]);
   check
     (list string)
+    "no-claim audit candidates keep operator cleanup completion"
+    [ "keeper_task_force_release" ]
+    (Surface.generic_required_tool_candidate_names
+       ~claim_context_allowed:true
+       ~turn_affordances:[ "task_audit" ]
+       ~allowed_tool_names:[ "keeper_task_force_release"; "keeper_task_force_done" ]);
+  check
+    (list string)
     "owned task candidates keep completion"
     [ "keeper_task_submit_for_verification" ]
     (Surface.generic_required_tool_candidate_names

@@ -269,11 +269,22 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 let tool_name_can_satisfy_actionable_gate ~(claim_context_allowed : bool) name =
+  let is_operator_cleanup_completion_tool name =
+    match
+      name
+      |> Keeper_tool_resolution.canonical_tool_name
+      |> Tool_name.of_string
+    with
+    | Some (Tool_name.Keeper Tool_name.Keeper.Task_force_done)
+    | Some (Tool_name.Keeper Tool_name.Keeper.Task_force_release) -> true
+    | _ -> false
+  in
   if claim_context_allowed
   then
     Keeper_tool_progress.is_claim_context_tool_name name
     || (Keeper_tool_progress.tool_name_can_satisfy_required_contract name
-        && not (Keeper_tool_progress.is_completion_tool_name name))
+        && (not (Keeper_tool_progress.is_completion_tool_name name)
+            || is_operator_cleanup_completion_tool name))
   else
     (not (Keeper_tool_progress.is_claim_context_tool_name name))
     && Keeper_tool_progress.is_owned_task_progress_tool_name name

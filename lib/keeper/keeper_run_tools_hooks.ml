@@ -459,7 +459,9 @@ let assemble_hooks
                   if acc.contract_violation_retries > 0
                   then
                     let satisfying_tools =
-                      computed_surface.required_tool_candidate_names
+                      match computed_surface.required_tool_names with
+                      | _ :: _ -> computed_surface.required_tool_names
+                      | [] -> computed_surface.required_tool_candidate_names
                     in
                     let preview =
                       satisfying_tools

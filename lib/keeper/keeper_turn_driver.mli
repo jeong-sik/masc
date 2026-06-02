@@ -138,7 +138,6 @@ val run_named :
   ?event_bus:Agent_sdk.Event_bus.t ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
-  ?runtime_manifest_required_tool_names:string list ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   ?per_provider_timeout_s:float ->
@@ -154,11 +153,6 @@ module For_testing : sig
     ?agent_ref:Agent_sdk.Agent.t option ref ->
     Agent_sdk.Agent.t option ->
     Agent_sdk.Checkpoint.t option
-
-  val missing_required_tool_names_after_lane_by_name :
-    required_tool_names:string list ->
-    materialized_tool_names:string list ->
-    string list
 
   val success_selected_model_raw : Runtime_candidate.t -> string option
 end

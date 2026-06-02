@@ -547,7 +547,6 @@ let run_turn
                           ~site:"runtime_runtime"
                           config
                           manifest)
-                   ~runtime_manifest_required_tool_names:[]
                       (* Keepers use turn-level retry for transient errors but benefit
               from OAS per-call retry for validation errors (malformed tool
               args). retry_on_validation_error=true lets OAS re-prompt the
@@ -763,8 +762,7 @@ let run_turn
                    in
                    let tool_contract_status ()
                        : Keeper_execution_receipt.tool_contract_result =
-                     Keeper_agent_run_turn_helpers.tool_contract_result_for_observed_tools
-                       ~required_tool_names:[]
+                     Contract_helpers.observed_tool_contract_status
                        ~missing_visible_required:[]
                        ~had_owned_active_task_at_turn_start
                        ~actual_keeper_tool_names:progress_keeper_tool_names

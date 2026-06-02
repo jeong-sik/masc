@@ -81,7 +81,6 @@ let run_named
     ?event_bus
     ?runtime_manifest_context
     ?runtime_manifest_append
-    ?(runtime_manifest_required_tool_names = [])
     ?sw
     ?net
     ?per_provider_timeout_s
@@ -191,7 +190,6 @@ let run_named
     event_bus;
     runtime_manifest_context;
     runtime_manifest_append;
-    runtime_manifest_required_tool_names;
     turn_start;
     seq_ref;
   } in
@@ -204,7 +202,5 @@ let run_named
 
 module For_testing = struct
   let checkpoint_after_attempt = checkpoint_after_attempt
-  let missing_required_tool_names_after_lane_by_name =
-    missing_required_tool_names_after_lane_by_name
   let success_selected_model_raw = success_selected_model_raw
 end

@@ -254,9 +254,6 @@ let test_turn_context_fields_stored () =
       ~approval_mode:"manual"
       ~tool_surface_class:"execution"
       ~visible_tool_count:2
-      ~required_tools:["tool_execute"]
-      ~required_tool_candidates:["tool_execute"; "tool_search_files"]
-      ~missing_required_tools:["tool_edit_file"]
       ~runtime_profile:"tool_use_strict"
       ();
     Keeper_tool_call_log.log_call
@@ -327,20 +324,17 @@ let test_turn_context_fields_stored () =
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(
         runtime_contract |> member "allowed_paths" |> to_list |> List.map to_string);
-    Alcotest.(check (list string)) "runtime_contract required_tools"
-      ["tool_execute"]
-      Yojson.Safe.Util.(
-        runtime_contract |> member "required_tools" |> to_list |> List.map to_string);
-    Alcotest.(check (list string)) "runtime_contract required_tool_candidates"
-      ["tool_execute"; "tool_search_files"]
-      Yojson.Safe.Util.(
-        runtime_contract |> member "required_tool_candidates" |> to_list
-        |> List.map to_string);
-    Alcotest.(check (list string)) "runtime_contract missing_required_tools"
-      ["tool_edit_file"]
-      Yojson.Safe.Util.(
-        runtime_contract |> member "missing_required_tools" |> to_list
-        |> List.map to_string);
+    let omits_field name =
+      match runtime_contract with
+      | `Assoc fields -> not (List.mem_assoc name fields)
+      | _ -> false
+    in
+    Alcotest.(check bool) "runtime_contract omits required_tools" true
+      (omits_field "required_tools");
+    Alcotest.(check bool) "runtime_contract omits required_tool_candidates" true
+      (omits_field "required_tool_candidates");
+    Alcotest.(check bool) "runtime_contract omits missing_required_tools" true
+      (omits_field "missing_required_tools");
     Alcotest.(check (option string)) "runtime_contract runtime_profile"
       (Some "tool_use_strict")
       (Safe_ops.json_string_opt "runtime_profile" runtime_contract);

@@ -21,9 +21,6 @@ type turn_context =
   ; approval_mode : string option
   ; tool_surface_class : string option
   ; visible_tool_count : int option
-  ; required_tools : string list option
-  ; required_tool_candidates : string list option
-  ; missing_required_tools : string list option
   ; runtime_profile : string option
   }
 
@@ -49,9 +46,6 @@ val set_turn_context :
   ?approval_mode:string ->
   ?tool_surface_class:string ->
   ?visible_tool_count:int ->
-  ?required_tools:string list ->
-  ?required_tool_candidates:string list ->
-  ?missing_required_tools:string list ->
   ?runtime_profile:string ->
   unit ->
   unit

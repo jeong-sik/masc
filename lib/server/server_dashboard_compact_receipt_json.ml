@@ -96,15 +96,6 @@ let compact_receipt_tool_surface_json receipt =
       ; ( "tool_surface_fallback_used"
         , Json_util.bool_opt_to_json
             (json_bool "tool_surface_fallback_used" surface) )
-      ; ( "missing_required_tools"
-        , Json_util.json_string_list
-            (Json_util.get_string_list surface "missing_required_tools") )
-      ; ( "required_tools"
-        , Json_util.json_string_list (Json_util.get_string_list surface "required_tools")
-        )
-      ; ( "required_tool_candidates"
-        , Json_util.json_string_list
-            (Json_util.get_string_list surface "required_tool_candidates") )
       ; "unexpected_tools", Json_util.json_string_list unexpected_tools
       ; "unexpected_tool_count", `Int (List.length unexpected_tools)
       ]

@@ -153,8 +153,6 @@ type keeper_runtime_mcp_log_context = {
   approval_mode : string option;
   tool_surface_class : string option;
   visible_tool_count : int option;
-  required_tools : string list option;
-  missing_required_tools : string list option;
   runtime_profile : string option;
 }
 
@@ -226,9 +224,9 @@ let runtime_mcp_keeper_log_context_of_entry
     tool_surface_class =
       Some (runtime_mcp_tool_surface_class allowed_tool_names);
     visible_tool_count = Some (List.length allowed_tool_names);
-    required_tools = Some [];
-    missing_required_tools = Some [];
-    runtime_profile = Some (Keeper_meta_contract.runtime_id_of_meta entry.meta);
+    runtime_profile =
+      (try Some (Keeper_meta_contract.runtime_id_of_meta entry.meta)
+       with Failure _ -> None);
   }
 
 let runtime_mcp_keeper_error_preview message =
@@ -338,8 +336,6 @@ let record_runtime_mcp_keeper_trajectory
       ?approval_mode:ctx.approval_mode
       ?tool_surface_class:ctx.tool_surface_class
       ?visible_tool_count:ctx.visible_tool_count
-      ?required_tools:ctx.required_tools
-      ?missing_required_tools:ctx.missing_required_tools
       ?runtime_profile:ctx.runtime_profile
       ()
   in
@@ -426,8 +422,6 @@ let record_runtime_mcp_keeper_tool_trace
     ?approval_mode:ctx.approval_mode
     ?tool_surface_class:ctx.tool_surface_class
     ?visible_tool_count:ctx.visible_tool_count
-    ?required_tools:ctx.required_tools
-    ?missing_required_tools:ctx.missing_required_tools
     ?runtime_profile:ctx.runtime_profile
     ~result_bytes:(String.length message)
     ();

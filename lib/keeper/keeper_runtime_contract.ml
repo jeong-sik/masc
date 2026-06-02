@@ -233,8 +233,7 @@ let path_resolution_contract_json =
 let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
-    ?visible_tool_count ?required_tools ?required_tool_candidates ?missing_required_tools
-    ?runtime_profile () : Yojson.Safe.t =
+    ?visible_tool_count ?runtime_profile () : Yojson.Safe.t =
   `Assoc
     [
       ("keeper_name", `String keeper_name);
@@ -253,19 +252,13 @@ let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?tr
       ("approval_mode", string_opt_json approval_mode);
       ("tool_surface_class", string_opt_json tool_surface_class);
       ("visible_tool_count", int_opt_json visible_tool_count);
-      ("required_tools", Json_util.json_string_list (nonempty_list required_tools));
-      ( "required_tool_candidates",
-        Json_util.json_string_list (nonempty_list required_tool_candidates) );
-      ( "missing_required_tools",
-        Json_util.json_string_list (nonempty_list missing_required_tools) );
       ("runtime_profile", string_opt_json runtime_profile);
     ]
 
 let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
-    ?visible_tool_count ?required_tools ?required_tool_candidates ?missing_required_tools
-    ?runtime_profile () : Yojson.Safe.t =
+    ?visible_tool_count ?runtime_profile () : Yojson.Safe.t =
   runtime_observability_contract_json_from_fields
     ~keeper_name
     ?agent_name
@@ -282,9 +275,6 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?approval_mode
     ?tool_surface_class
     ?visible_tool_count
-    ?required_tools
-    ?required_tool_candidates
-    ?missing_required_tools
     ?runtime_profile
     ()
   |> redact_backend_details

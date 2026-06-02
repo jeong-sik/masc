@@ -2221,7 +2221,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         asNullableString(execution.selected_runtime_canonical)
         ?? asNullableString(execution.selected_runtime_id)
         ?? '',
-      runtime_options: normalizeStringList(execution.runtime_options),
     },
     compaction: {
       profile: asNullableString(compaction.profile) ?? '(unknown compaction profile)',
@@ -2327,7 +2326,6 @@ export type SandboxNetworkMode = 'none' | 'inherit'
 export type SharedMemoryScope = 'disabled' | 'workspace'
 
 export type KeeperConfigUpdatePayload = {
-  runtime_id?: string
   active_goal_ids?: string[]
   allowed_paths?: string[]
   // Sandbox

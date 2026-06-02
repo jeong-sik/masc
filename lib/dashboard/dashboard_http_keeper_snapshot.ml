@@ -245,17 +245,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
         ]
       in
       let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in
-      let runtime_options =
-        let catalog =
-          Runtime.get_runtime_ids ()
-          |> List.map String.trim
-          |> List.filter (fun id -> id <> "")
-        in
-        let with_current =
-          if List.mem runtime_id catalog then catalog else runtime_id :: catalog
-        in
-        List.sort_uniq String.compare with_current
-      in
       (* RFC-0149 §3.3 — Result-returning resolver: on [Error] the
          canonical field surfaces as JSON [null] (parse-don't-validate
          honest signal) instead of the silent [Keeper_turn] rewrite the
@@ -271,8 +260,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("selected_runtime_id", `String runtime_id);
           ( "selected_runtime_canonical",
             selected_runtime_canonical_json );
-          ( "runtime_options",
-            `List (List.map (fun id -> `String id) runtime_options) );
           ("models", `List []);
           ("active_model", `Null);
           ("active_model_label", `Null);

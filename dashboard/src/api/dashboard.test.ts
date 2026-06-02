@@ -1368,7 +1368,6 @@ describe('fetchKeeperConfig', () => {
         verify: 'true',
         selected_runtime_id: 'keeper_unified',
         selected_runtime_canonical: 'keeper_unified',
-        runtime_options: ['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'],
       },
       compaction: {
         profile: 'balanced',
@@ -1486,7 +1485,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.verify).toBe(true)
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
     expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
-    expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
     expect(result.execution.per_provider_timeout_sec).toBe(12.5)
     expect(result.execution.per_provider_timeout_mode).toBe('override')
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])

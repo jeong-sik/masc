@@ -1211,7 +1211,6 @@ interface KeeperConfigExecution {
   verify: boolean
   selected_runtime_id: string
   selected_runtime_canonical: string
-  runtime_options: string[]
   runtime_ref?: RuntimeRef | null
 }
 

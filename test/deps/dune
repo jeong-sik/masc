@@ -113,6 +113,9 @@
    ;; Agent token-ledger extracted to lib/agent_economy/ (masc_agent_economy).
    ;; Re-export so test code using bare Agent_economy.X resolves after the carve.
    (re_export masc_agent_economy)
+   ;; Thompson Sampling extracted to lib/thompson/ (masc_thompson). Re-export so
+   ;; test code using bare Thompson_sampling.X resolves after the carve.
+   (re_export masc_thompson)
    (re_export masc_types)
    (re_export mirage-crypto)
    (re_export mirage-crypto-rng)

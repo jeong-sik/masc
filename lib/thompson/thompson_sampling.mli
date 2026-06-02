@@ -86,6 +86,16 @@ val init_agent : string -> unit
 
 (** Select agents using Thompson Sampling with starvation prevention.
 
+    @param is_healthy Injected health predicate (dependency inversion). The
+      caller supplies the agent-health check so this module stays a leaf and
+      does not depend on the masc_mcp mega-library root. Required: a default
+      would silently make every agent eligible. Production callers pass
+      [Agent_health.is_healthy].
+    @param on_priority_selected Injected observability hook fired once per
+      priority-trigger selection (Mentioned/ContentAlert), with the agent
+      name and trigger label ("mentioned" | "content_alert"). Defaults to a
+      no-op; an instrumented caller supplies the Prometheus increment for
+      [priority_trigger_selected_metric].
     @param agents List of agent names to consider
     @param max_n Maximum number of agents to select
     @param pending_triggers Priority triggers (Mentioned, ContentAlert).
@@ -93,10 +103,13 @@ val init_agent : string -> unit
     @param tick_interval_s Tick interval in seconds (for starvation calc)
     @return List of selection results, highest score first *)
 val select_with_feedback :
+  is_healthy:(agent_name:string -> bool) ->
+  ?on_priority_selected:(agent_name:string -> trigger_label:string -> unit) ->
   agents:string list ->
   max_n:int ->
   pending_triggers:(string * selection_trigger) list ->
   tick_interval_s:float ->
+  unit ->
   selection_result list
 
 (** {1 Feedback Updates} *)

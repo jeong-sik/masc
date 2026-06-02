@@ -576,6 +576,9 @@
    masc_turn
    ;; Agent token-ledger domain (extracted leaf — earn/spend/balance, Board-callable)
    masc_agent_economy
+   ;; Thompson Sampling agent selection (extracted leaf — Agent_health/Prometheus
+   ;; edges inverted to callbacks; Board-callable record_vote without mega-lib cycle)
+   masc_thompson
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
    masc_mcp.ide

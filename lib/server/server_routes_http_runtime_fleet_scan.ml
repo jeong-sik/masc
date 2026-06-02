@@ -7,6 +7,8 @@
 open Server_utils
 open Server_routes_http_common
 
+module String_set = Set.Make (String)
+
 type paused_keeper_scan = {
   names : string list;
   autoboot_enabled_names : string list;
@@ -357,13 +359,23 @@ type keeper_phase_counts =
   ; executable : int
   }
 
-let keeper_phase_counts ?base_path () =
+let empty_keeper_phase_counts =
+  { running = 0; failing = 0; recovering = 0; executable = 0 }
+
+type keeper_phase_snapshot =
+  { counts : keeper_phase_counts
+  ; running_names : string list
+  }
+
+let keeper_phase_snapshot ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.fold_left
        (fun acc (entry : Keeper_registry.registry_entry) ->
+          let counts = acc.counts in
           let executable =
-            if Keeper_state_machine.can_execute_turn entry.phase then acc.executable + 1
-            else acc.executable
+            if Keeper_state_machine.can_execute_turn entry.phase then
+              counts.executable + 1
+            else counts.executable
           in
           (* Keepers in Failing phase with restart budget remaining are
              expected to recover on the next heartbeat cycle — count them
@@ -373,14 +385,21 @@ let keeper_phase_counts ?base_path () =
             match entry.phase with
             | Keeper_state_machine.Failing
               when entry.conditions.restart_budget_remaining ->
-              acc.recovering + 1
-            | _ -> acc.recovering
+              counts.recovering + 1
+            | _ -> counts.recovering
           in
           match entry.phase with
           | Keeper_state_machine.Running ->
-            { acc with running = acc.running + 1; executable }
+            {
+              counts = { counts with running = counts.running + 1; executable };
+              running_names = entry.name :: acc.running_names;
+            }
           | Keeper_state_machine.Failing ->
-            { acc with failing = acc.failing + 1; recovering; executable }
+            {
+              acc with
+              counts =
+                { counts with failing = counts.failing + 1; recovering; executable };
+            }
           | Keeper_state_machine.Offline
           | Keeper_state_machine.Overflowed
           | Keeper_state_machine.Compacting
@@ -391,8 +410,13 @@ let keeper_phase_counts ?base_path () =
           | Keeper_state_machine.Crashed
           | Keeper_state_machine.Restarting
           | Keeper_state_machine.Dead
-          | Keeper_state_machine.Zombie -> { acc with executable })
-       { running = 0; failing = 0; recovering = 0; executable = 0 }
+          | Keeper_state_machine.Zombie ->
+            { acc with counts = { counts with executable } })
+       { counts = empty_keeper_phase_counts; running_names = [] }
+  |> fun snapshot ->
+  { snapshot with running_names = sorted_unique_strings snapshot.running_names }
+
+let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
 
 let take_at_most count values =
   let rec loop remaining acc = function
@@ -424,9 +448,13 @@ let supervisor_decision_json
     ; cooldown_seconds = 0.0
     }
   in
+  let running_name_set =
+    List.fold_left
+      (fun names name -> String_set.add name names)
+      String_set.empty running_names
+  in
   let missing_autoboot_names =
-    autoboot_names
-    |> List.filter (fun name -> not (List.exists (String.equal name) running_names))
+    autoboot_names |> List.filter (fun name -> not (String_set.mem name running_name_set))
   in
   match Keeper_fleet_capacity_supervisor.tick observation with
   | Spawn { reason; suggested_keeper_count } ->

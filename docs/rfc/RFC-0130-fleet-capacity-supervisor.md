@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0026", "0064", "0088", "0124"]
-implementation_prs: [16172, 16183]
+implementation_prs: [16183, 19786]
 ---
 
 # RFC-0130: Fleet Capacity Supervisor
@@ -156,8 +156,8 @@ The supervisor runs as a single Eio fiber at startup (via `Switch.run` + `Switch
 - No wiring. `execute` returns `Noop Capacity_at_target` regardless.
 - Flag: `MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED` defaults to `false`.
 
-### PR-3 (this PR — wire to /health output)
-- `Server_routes_http_runtime` calls `tick` and surfaces the decision in JSON under `keeper_fleet_safety.supervisor_decision` (read-only; no side effect).
+### PR-3 (done in #19786 — wire to /health output)
+- Done in #19786: `Server_routes_http_runtime` calls `tick` and surfaces the decision in JSON under `keeper_fleet_safety.supervisor_decision` (read-only; no side effect).
 - Test: synthetic 3/13 observation → JSON contains `"supervisor_decision":{"variant":"spawn","reason":"below_target_reaction_capacity"}`.
 
 ### PR-4 (execute, flagged on)

@@ -60,6 +60,11 @@ type keeper_phase_counts = {
   recovering : int;
   executable : int;
 }
+type keeper_phase_snapshot = {
+  counts : keeper_phase_counts;
+  running_names : string list;
+}
+val keeper_phase_snapshot : ?base_path:string -> unit -> keeper_phase_snapshot
 val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts
 val keeper_fleet_safety_health_json :
   ?bootable_names:string list ->

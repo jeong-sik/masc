@@ -76,8 +76,9 @@ let keeper_fleet_runtime_resolution_base_fields
     ?(include_reaction_ledger = true)
     () =
   let base_path = runtime_base_path_opt () in
-  let phase_counts = keeper_phase_counts ?base_path () in
-  let running_names = running_keeper_names ?base_path () in
+  let phase_snapshot = keeper_phase_snapshot ?base_path () in
+  let phase_counts = phase_snapshot.counts in
+  let running_names = phase_snapshot.running_names in
   let keeper_fibers = phase_counts.running in
   let paused_keepers_json =
     match meta_scan with

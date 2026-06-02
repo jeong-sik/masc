@@ -156,8 +156,15 @@ let trigger_bypasses_health = function
   | Mentioned _ -> true
   | ContentAlert _ | Scheduled | Starved | Thompson -> false
 
-let is_trigger_eligible ~agent_name trigger =
-  trigger_bypasses_health trigger || Agent_health.is_healthy ~agent_name
+(* [is_healthy] is injected by the caller of [select_with_feedback]
+   (dependency inversion). Previously this called [Agent_health.is_healthy]
+   directly, coupling this module to the masc_mcp mega-library root. The
+   caller now supplies the health predicate so this module stays a clean
+   leaf. Required (not optional) — a permissive default would silently make
+   every agent eligible if a caller forgot to wire health (CLAUDE.md
+   "Unknown -> Permissive Default" anti-pattern). *)
+let is_trigger_eligible ~is_healthy ~agent_name trigger =
+  trigger_bypasses_health trigger || is_healthy ~agent_name
 
 let normalized_subscore value =
   Float.max 0.0 (Float.min 0.999 value)
@@ -455,7 +462,16 @@ let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
 
 (** {1 Selection Algorithm} *)
 
-let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
+(* [on_priority_selected] is an injected observability hook for the
+   priority-trigger selection path. Previously this site called
+   [Prometheus.inc_counter] directly, coupling this module to the masc_mcp
+   mega-library root. Defaulted to a no-op (observability, not behavior) so
+   non-instrumented callers stay simple; an instrumented caller supplies the
+   real Prometheus increment. *)
+let select_with_feedback
+    ~is_healthy
+    ?(on_priority_selected = fun ~agent_name:_ ~trigger_label:_ -> ())
+    ~agents ~max_n ~pending_triggers ~tick_interval_s () =
   (* Drain any pending votes so Beta posteriors reflect recorded feedback
      before sampling. [record_vote] batches into [pending_votes], and
      without this flush the batched evidence never reaches [stats_table] —
@@ -493,7 +509,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
     | Mentioned _ | ContentAlert _
       when List.length !selected < max_n
            && not (is_selected name)
-           && is_trigger_eligible ~agent_name:name trigger ->
+           && is_trigger_eligible ~is_healthy ~agent_name:name trigger ->
         let s = get_stats name in
         let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
         let signal = starvation_bonus ~ticks in
@@ -512,8 +528,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
           | ContentAlert _ -> "content_alert"
           | Scheduled | Starved | Thompson -> "other"
         in
-        Prometheus.inc_counter priority_trigger_selected_metric
-          ~labels:[ ("agent", name); ("trigger", trigger_label) ] ();
+        on_priority_selected ~agent_name:name ~trigger_label;
         add_selected {
           agent_name = name;
           trigger;
@@ -530,7 +545,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
   let max_starvation = Env_config.AgentSelection.max_starvation_ticks in
   let starved = List.filter_map (fun name ->
     if is_selected name then None
-    else if not (is_trigger_eligible ~agent_name:name Starved) then None
+    else if not (is_trigger_eligible ~is_healthy ~agent_name:name Starved) then None
     else begin
       let s = get_stats name in
       let ticks = ticks_since_selection ~stats:s ~tick_interval_s in
@@ -563,7 +578,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
 
     let candidates = List.filter_map (fun name ->
       if is_selected name then None
-      else if not (is_trigger_eligible ~agent_name:name Thompson) then begin
+      else if not (is_trigger_eligible ~is_healthy ~agent_name:name Thompson) then begin
         (* Unhealthy agents excluded from Thompson selection *)
         Log.Metrics.info "thompson sampling skipping %s (unhealthy)" name;
         None

@@ -46,7 +46,6 @@ type surface =
   | Local_worker
   | Session_min
   | Admin
-  | Agent_internal
   | System_internal
 
 let public_mcp_surface_tools =
@@ -285,8 +284,6 @@ let execution_role_tools : string list =
   ]
 ;;
 
-let agent_internal_surface_tools : string list = []
-
 (* ================================================================ *)
 (* Surface query functions                                          *)
 (* ================================================================ *)
@@ -297,7 +294,6 @@ let tools_for_surface = function
   | Local_worker -> local_worker_surface_tools
   | Session_min -> session_min_surface_tools
   | Admin -> admin_surface_tools
-  | Agent_internal -> agent_internal_surface_tools
   | System_internal -> system_internal_surface_tools
 ;;
 
@@ -307,7 +303,6 @@ let all_surfaces =
   ; Local_worker
   ; Session_min
   ; Admin
-  ; Agent_internal
   ; System_internal
   ]
 ;;
@@ -327,7 +322,6 @@ let spawned_agent_set = build_surface_set spawned_agent_surface_tools
 let local_worker_set = build_surface_set local_worker_surface_tools
 let session_min_set = build_surface_set session_min_surface_tools
 let admin_set = build_surface_set admin_surface_tools
-let agent_internal_set = build_surface_set agent_internal_surface_tools
 let system_internal_set = build_surface_set system_internal_surface_tools
 
 let set_for_surface = function
@@ -336,7 +330,6 @@ let set_for_surface = function
   | Local_worker -> local_worker_set
   | Session_min -> session_min_set
   | Admin -> admin_set
-  | Agent_internal -> agent_internal_set
   | System_internal -> system_internal_set
 ;;
 
@@ -360,6 +353,5 @@ let surface_to_string = function
   | Local_worker -> "local_worker"
   | Session_min -> "session_min"
   | Admin -> "admin"
-  | Agent_internal -> "agent_internal"
   | System_internal -> "system_internal"
 ;;

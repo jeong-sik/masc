@@ -422,7 +422,6 @@ let has_internal_tool_prefix tool_name =
 
 let is_unmapped_internal_tool_name tool_name =
   has_internal_tool_prefix tool_name
-  || Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool_name
 ;;
 
 let unknown_tool_class tool_name =

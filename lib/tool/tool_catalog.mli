@@ -119,7 +119,6 @@ type surface =
   | Local_worker
   | Session_min
   | Admin
-  | Agent_internal
   | System_internal
 
 val tools_for_surface : surface -> string list

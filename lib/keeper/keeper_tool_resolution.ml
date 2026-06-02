@@ -111,7 +111,6 @@ let resolve name =
                   ; Tool_catalog_surfaces.Local_worker
                   ; Tool_catalog_surfaces.Session_min
                   ; Tool_catalog_surfaces.Admin
-                  ; Tool_catalog_surfaces.Agent_internal
                   ; Tool_catalog_surfaces.System_internal
                   ]
                 in
@@ -182,7 +181,6 @@ let all_admitting_sources name =
     ; Tool_catalog_surfaces.Local_worker
     ; Tool_catalog_surfaces.Session_min
     ; Tool_catalog_surfaces.Admin
-    ; Tool_catalog_surfaces.Agent_internal
     ; Tool_catalog_surfaces.System_internal
     ]
   in

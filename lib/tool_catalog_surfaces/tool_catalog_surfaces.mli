@@ -38,9 +38,6 @@ type surface =
       (** Minimum session surface (initialization tools only). *)
   | Admin
       (** Admin / operator dashboard surface. *)
-  | Agent_internal
-      (** Agent-internal surface. Concrete agent runtimes install their own
-          allowed tools behind their runtime boundary. *)
   | System_internal
       (** System-internal surface (telemetry, fixtures). *)
 

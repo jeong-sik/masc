@@ -962,16 +962,24 @@ let start_keeper_loops
             in
             match supervisor_tick.decision with
             | Keeper_fleet_capacity_supervisor.Spawn _ ->
+              let unregistered_missing_autoboot_names =
+                supervisor_tick.missing_autoboot_names
+                |> List.filter (fun name ->
+                  not
+                    (Keeper_registry.is_registered
+                       ~base_path:config.base_path
+                       name))
+              in
               let result =
                 Keeper_fleet_capacity_supervisor.execute
                   ~spawn_keeper:(fun keeper_name ->
                     if try_boot_one ~log_prefix:"fleet_capacity_supervisor" 0 keeper_name
                     then Ok ()
                     else Error "keeper boot did not register")
-                  ~suggested_keeper_names:supervisor_tick.suggested_keeper_names
+                  ~suggested_keeper_names:unregistered_missing_autoboot_names
                   supervisor_tick.decision
               in
-              if result.started_keeper_names <> [] then last_action_at := Some now;
+              if result.requested_keeper_names <> [] then last_action_at := Some now;
               if result.requested_keeper_names <> []
               then
                 Log.Keeper.info
@@ -1012,7 +1020,9 @@ let start_keeper_loops
           in
           loop ())
       in
-      start_fleet_capacity_supervisor_loop ()));
+      fork_subsystem
+        "fleet_capacity_supervisor"
+        start_fleet_capacity_supervisor_loop));
   (* Phase 5: unified startup subsystem summary *)
   Log.info ~ctx:"startup" "subsystems: keeper loops started"
 ;;

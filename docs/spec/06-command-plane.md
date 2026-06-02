@@ -115,7 +115,7 @@ Planned -> Active -> Paused -> Active (resume)
 - `intent_id` (optional, Intent와 연결)
 - `workload_profile`: `coding_task` | `research_pipeline`
 - `workload_template`: `coding_team` | `research_team` | `ops_governance_team`
-- `stage`: workload에 따른 advisory progress label (coding: decompose/inspect/implement/verify/review)
+- `stage`: workload profile별 advisory progress label (`coding_task`: decompose/inspect/implement/verify/review, `research_pipeline`: normalize/verify/curate/rank/audit)
 - `search_strategy`: `best_first_v1` | `legacy`
 - `chain`: 선택적 Chain Engine 연결 (chain_record)
 - `checkpoint_ref`: 검증 지점 참조
@@ -128,7 +128,7 @@ Planned -> Active -> Paused -> Active (resume)
 | `coding_task` | decompose -> inspect -> implement -> verify -> review |
 | `research_pipeline` | normalize -> verify -> curate -> rank -> audit |
 
-`coding_task` label은 진행 상태 표시용이다. `review` label은 `verify` 완료를 전제하는 hard gate가 아니며, review는 언제든 operator/reviewer 판단으로 수행할 수 있다.
+Profile별 label은 진행 상태 표시용이다. `review` label은 `verify` 완료를 전제하는 hard gate가 아니며, review는 언제든 operator/reviewer 판단으로 수행할 수 있다.
 
 ### 3.3. Intent
 

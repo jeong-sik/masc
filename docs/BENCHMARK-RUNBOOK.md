@@ -24,7 +24,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 ## 기준 원칙
 
 - 기본 delivery path는 supervised execution + Supervisor이고, 이 문서의 managed-operation lane은 benchmark/compatibility용이다
-- 기본 workload label set은 `coding_task`, `research_pipeline`은 explicit profile이다
+- 기본 workload profile은 `coding_task`이고, `research_pipeline`은 명시적으로 선택하는 profile이다
 - removed Command Plane search strategy harness는 benchmark 경로에 포함되지 않음
 - removed `masc_swarm_*` public tools는 benchmark 경로에 포함되지 않음
 - supervisor/session runtime은 별도 모드

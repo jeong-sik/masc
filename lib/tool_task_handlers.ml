@@ -57,7 +57,7 @@ let current_task_owner_hooks () = Atomic.get task_owner_hooks
    [handle_claim_next] can exclude it from the next [claim_next_r] call. Entries
    expire with the same TTL as the per-tool workflow scope block. *)
 
-let blocked_task_ttl_seconds () = (current_keeper_hooks ()).workflow_scope_block_ttl_seconds
+let blocked_task_ttl_seconds () = (current_task_owner_hooks ()).workflow_scope_block_ttl_seconds
 
 let blocked_task_ids_table : (string * string, float) Hashtbl.t = Hashtbl.create 16
 let blocked_task_ids_mutex = Mutex.create ()

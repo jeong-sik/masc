@@ -191,8 +191,7 @@ let top_procedures ~agent_name ~limit : procedure list =
   |> List.filteri (fun i _ -> i < limit)
 
 (** Format procedures for capsule injection. *)
-let format_for_dna ~agent_name ~limit : string =
-  let procs = top_procedures ~agent_name ~limit in
+let format_procedures_for_dna procs : string =
   if procs = [] then ""
   else
     let lines = List.map (fun p ->
@@ -200,3 +199,6 @@ let format_for_dna ~agent_name ~limit : string =
         p.pattern (p.confidence *. 100.0) (List.length p.evidence)
     ) procs in
     "[PROCEDURES]\n" ^ String.concat "\n" lines ^ "\n[/PROCEDURES]"
+
+let format_for_dna ~agent_name ~limit : string =
+  top_procedures ~agent_name ~limit |> format_procedures_for_dna

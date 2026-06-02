@@ -182,6 +182,12 @@ val load_procedures_text :
     renders them for prompt injection.  Same fail-soft
     contract as {!load_episodes_text}. *)
 
+val load_procedures_dna_text :
+  agent_name:string -> limit:int -> string option
+(** Reads cached top procedures for [agent_name] and renders the same
+    DNA capsule format as {!Procedural_memory.format_for_dna}. Returns
+    [None] when no procedures qualify. *)
+
 val load_world_text :
   backend:Agent_sdk.Memory.long_term_backend option ->
   memory:Agent_sdk.Memory.t ->

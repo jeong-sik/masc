@@ -729,6 +729,11 @@ let load_procedures_text ~(agent_name : string) ~(limit : int) : string option =
     Some (Printf.sprintf "[procedural memory: %d procedures]\n%s"
       (List.length ps) (String.concat "\n" lines))
 
+let load_procedures_dna_text ~(agent_name : string) ~(limit : int) : string option =
+  match top_procedures_cached ~agent_name ~limit with
+  | [] -> None
+  | ps -> Some (Procedural_memory.format_procedures_for_dna ps)
+
 let compact_world_text raw =
   raw
   |> String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c)

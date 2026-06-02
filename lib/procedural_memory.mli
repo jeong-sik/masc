@@ -74,7 +74,11 @@ val is_crystallized : procedure -> bool
 (** Top-N crystallised procedures sorted by confidence (descending). *)
 val top_procedures : agent_name:string -> limit:int -> procedure list
 
-(** Format top-N crystallised procedures as a capsule-injection
+(** Format an already-selected procedure list as a capsule-injection
     fragment: ["[PROCEDURES]\n- <pattern> (confidence: N%, evidence: N)\n…[/PROCEDURES]"].
-    Empty string when no procedures qualify. *)
+    Empty string when the list is empty. *)
+val format_procedures_for_dna : procedure list -> string
+
+(** Format top-N crystallised procedures as a capsule-injection
+    fragment. Empty string when no procedures qualify. *)
 val format_for_dna : agent_name:string -> limit:int -> string

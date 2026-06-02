@@ -61,6 +61,21 @@ let test_single_perfect_does_not_crystallize () =
     (P.is_crystallized p)
 ;;
 
+let test_format_procedures_for_dna_empty () =
+  check string "empty procedure list renders empty string" ""
+    (P.format_procedures_for_dna [])
+;;
+
+let test_format_procedures_for_dna_selected_list () =
+  let p = procedure ~evidence:[ "a"; "b" ] ~confidence:0.75 () in
+  check string "renders selected procedures as DNA capsule"
+    "[PROCEDURES]\n\
+     - When a pattern appears, reuse the learned action (confidence: 75%, \
+     evidence: 2)\n\
+     [/PROCEDURES]"
+    (P.format_procedures_for_dna [ p ])
+;;
+
 let () =
   run "procedural_memory"
     [
@@ -75,6 +90,13 @@ let () =
             test_rare_near_perfect_does_not_crystallize;
           test_case "single perfect does not crystallize" `Quick
             test_single_perfect_does_not_crystallize;
+        ] );
+      ( "format",
+        [
+          test_case "empty list renders empty string" `Quick
+            test_format_procedures_for_dna_empty;
+          test_case "selected list renders DNA capsule" `Quick
+            test_format_procedures_for_dna_selected_list;
         ] );
     ]
 ;;

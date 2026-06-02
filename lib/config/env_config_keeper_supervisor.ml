@@ -12,6 +12,26 @@ let domain_pool_enabled =
   Feature_flag_registry.get_bool "MASC_KEEPER_DOMAIN_POOL_ENABLED"
 ;;
 
+(** Fleet capacity supervisor execution loop (RFC-0130 PR-4).
+    When enabled, the server periodically converts the typed fleet
+    shortfall decision into keeper boot attempts for missing bootable
+    keepers. Default: true; set
+    [MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED=false] to preserve the
+    previous read-only [/health] behavior.
+    @category Policies @ops_class operator *)
+let fleet_capacity_tick_enabled =
+  Feature_flag_registry.get_bool "MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED"
+;;
+
+(** Interval between fleet capacity supervisor execution ticks.
+    Default: 30s. Clamped to >= 10s to avoid a tight boot retry loop.
+    @category Timeouts @ops_class operator *)
+let fleet_capacity_tick_interval_sec =
+  Float.max
+    10.0
+    (get_float_nonneg ~default:30.0 "MASC_FLEET_CAPACITY_SUPERVISOR_TICK_SEC")
+;;
+
 (** Maximum restart attempts before declaring a keeper dead.
     @category Thresholds @ops_class operator *)
 let max_restarts = get_int ~default:5 "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS"

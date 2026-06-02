@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0026", "0064", "0088", "0124"]
-implementation_prs: [16183, 19786]
+implementation_prs: [16183, 19786, 19795]
 ---
 
 # RFC-0130: Fleet Capacity Supervisor
@@ -56,7 +56,7 @@ type observation =
 
 type spawn_request =
   { reason : Spawn_reason.t            (* closed sum, see §3.1 *)
-  ; suggested_keeper_names : string list  (* from autoboot/persona registry *)
+  ; suggested_keeper_count : int
   }
 
 type decision =
@@ -67,15 +67,22 @@ type decision =
 val tick : observation -> decision
 (** Pure function. No I/O. Deterministic given the observation. *)
 
+type execution_result =
+  { decision : decision
+  ; requested_keeper_names : string list
+  ; started_keeper_names : string list
+  ; failed_keeper_names : (string * string) list
+  }
+
 val execute :
-  sw:Eio.Switch.t ->
-  env:Eio_unix.Stdenv.base ->
-  base_path:string ->
+  spawn_keeper:(string -> (unit, string) result) ->
+  suggested_keeper_names:string list ->
   decision ->
-  Result.t
-(** Side-effecting wrapper. Translates [Spawn] into [Masc_keeper_up.run]
-    calls, [Backpressure] into a typed reject for the admission queue,
-    [Noop] into a single observability event. *)
+  execution_result
+(** Execution boundary. Translates [Spawn] into bounded keeper-start
+    callback calls, records per-keeper failures, and keeps [Backpressure] /
+    [Noop] as no-side-effect decisions. The server supplies the concrete
+    keeper boot callback from its Eio startup context. *)
 ```
 
 ### 2.2 Why pure `tick` + `execute` split
@@ -124,12 +131,12 @@ Fleet_capacity_supervisor.tick               (new)
        │
        ▼
 Fleet_capacity_supervisor.execute
-   ├── Spawn → Masc_keeper_up.run sw env ~base_path ~names
-   ├── Backpressure → Workspace.publish_backpressure ~reason
-   └── Noop → Lifecycle event only
+   ├── Spawn → server keeper boot callback for suggested missing names
+   ├── Backpressure → recorded no-side-effect decision
+   └── Noop → recorded no-side-effect decision
 ```
 
-The supervisor runs as a single Eio fiber at startup (via `Switch.run` + `Switch.on_release`), ticking every `fleet_capacity_supervisor_tick_seconds` (default 30s, clamped to ≥10s).
+The supervisor runs as a single Eio fiber after keeper autoboot, ticking every `MASC_FLEET_CAPACITY_SUPERVISOR_TICK_SEC` (default 30s, clamped to ≥10s). The execution loop uses `Keeper_runtime.bootable_keeper_names`, so intentionally paused or declaratively disabled keepers remain excluded from automatic start attempts even though `/health` still reports them in the broader safety surface.
 
 ### 3.3 Cooldown invariant
 
@@ -161,9 +168,11 @@ The supervisor runs as a single Eio fiber at startup (via `Switch.run` + `Switch
 - Test: synthetic 3/13 observation → JSON contains `"supervisor_decision":{"variant":"spawn","reason":"below_target_reaction_capacity"}`.
 
 ### PR-4 (execute, flagged on)
-- Implement `execute` calling `Masc_keeper_up.run` for `Spawn`.
+- Implemented in this PR: `Keeper_fleet_capacity_supervisor.execute` records bounded spawn attempts through an injected keeper-start callback.
+- The server wires a post-autoboot `fleet_capacity_supervisor` loop that converts one tick into keepalive starts for missing bootable keepers.
 - Property test: 3 running / 13 target → after one tick + execute, 13 running.
-- Flag default flips to `true`. Old behavior preserved behind `MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED=false`.
+- Flag default flips to `true`. Old read-only behavior is preserved behind `MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED=false`.
+- Tick interval: `MASC_FLEET_CAPACITY_SUPERVISOR_TICK_SEC`, default 30s, clamped to ≥10s.
 
 ### PR-5 (closeout)
 - Frontmatter `status: Implemented`, `implementation_prs: [PR-2#, PR-3#, PR-4#]`.

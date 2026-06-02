@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 377 unique knobs across 10 modules.
+**Total**: 379 unique knobs across 10 modules.
 
-**Typed getter classification**: 30/232 tagged (`operator`: 30, `algorithm`: 0, `unclassified`: 202).
+**Typed getter classification**: 31/233 tagged (`operator`: 31, `algorithm`: 0, `unclassified`: 202).
 
 ## Env_config_core (29 knobs; typed classification 0/7)
 
@@ -190,31 +190,33 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC` | typed:float | unclassified | unclassified | 25 | Base delay (seconds) for exponential backoff. Delay at attempt [n] is [base * 2^(n-1)]. Env: [MASC_KEEPER_TRANSIENT_B... |
 | `MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC` | typed:float | unclassified | unclassified | 31 | Hard cap on backoff delay (seconds). Env: [MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC].  Default: 4.0. |
 
-## Env_config_keeper_supervisor (21 knobs; typed classification 20/20)
+## Env_config_keeper_supervisor (23 knobs; typed classification 21/21)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_KEEPER_ALIVE_BUT_STUCK_DEDUP_TTL_SEC` | typed:float | Timeouts | operator | 153 | Per-keeper dedup window (seconds): once a keeper is flagged the counter is incremented at most once per window, even ... |
-| `MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED` | typed:bool | Policies | operator | 119 | Signal for alive-but-stuck keepers (#12838): keepers that are not Dead/Zombie and not paused, but whose [proactive_rt... |
-| `MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED` | typed:bool | Policies | operator | 128 | Queue a bounded recovery wakeup when [alive_but_stuck_scan] emits. The recovery uses the Event Layer queue plus [fibe... |
-| `MASC_KEEPER_ALIVE_BUT_STUCK_STALL_FLOOR_SEC` | typed:float | Timeouts | operator | 145 | Hard floor (seconds) so keepers with very small cooldowns are not flagged after a few minutes of legitimate quiet.  T... |
-| `MASC_KEEPER_ALIVE_BUT_STUCK_STALL_MULTIPLIER` | typed:int | Thresholds | operator | 136 | Multiplier on the keeper's own [proactive.cooldown_sec] before a stalled keeper is flagged.  Default: 10 (10 cooldown... |
-| `MASC_KEEPER_AUTO_RESUME_INITIAL_SEC` | typed:float | Timeouts | operator | 64 | Initial auto-resume backoff delay after an auto-pause (seconds). On every successive auto-pause the delay doubles, ca... |
-| `MASC_KEEPER_AUTO_RESUME_MAX_SEC` | typed:float | Timeouts | operator | 70 | Maximum auto-resume backoff delay (seconds).  Default: 86400 (24 hours). @category Timeouts @ops_class operator |
-| `MASC_KEEPER_DEAD_TTL_SEC` | typed:float | Timeouts | operator | 47 | Dead tombstone TTL: seconds before Dead entries are cleaned up. @category Timeouts @ops_class operator |
+| `MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED` | feature_flag | Policies | operator | 23 | Fleet capacity supervisor execution loop (RFC-0130 PR-4). When enabled, the server periodically converts the typed fl... |
+| `MASC_FLEET_CAPACITY_SUPERVISOR_TICK_SEC` | typed:float | Timeouts | operator | 32 | Interval between fleet capacity supervisor execution ticks. Default: 30s. Clamped to >= 10s to avoid a tight boot ret... |
+| `MASC_KEEPER_ALIVE_BUT_STUCK_DEDUP_TTL_SEC` | typed:float | Timeouts | operator | 173 | Per-keeper dedup window (seconds): once a keeper is flagged the counter is incremented at most once per window, even ... |
+| `MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED` | typed:bool | Policies | operator | 139 | Signal for alive-but-stuck keepers (#12838): keepers that are not Dead/Zombie and not paused, but whose [proactive_rt... |
+| `MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED` | typed:bool | Policies | operator | 148 | Queue a bounded recovery wakeup when [alive_but_stuck_scan] emits. The recovery uses the Event Layer queue plus [fibe... |
+| `MASC_KEEPER_ALIVE_BUT_STUCK_STALL_FLOOR_SEC` | typed:float | Timeouts | operator | 165 | Hard floor (seconds) so keepers with very small cooldowns are not flagged after a few minutes of legitimate quiet.  T... |
+| `MASC_KEEPER_ALIVE_BUT_STUCK_STALL_MULTIPLIER` | typed:int | Thresholds | operator | 156 | Multiplier on the keeper's own [proactive.cooldown_sec] before a stalled keeper is flagged.  Default: 10 (10 cooldown... |
+| `MASC_KEEPER_AUTO_RESUME_INITIAL_SEC` | typed:float | Timeouts | operator | 84 | Initial auto-resume backoff delay after an auto-pause (seconds). On every successive auto-pause the delay doubles, ca... |
+| `MASC_KEEPER_AUTO_RESUME_MAX_SEC` | typed:float | Timeouts | operator | 90 | Maximum auto-resume backoff delay (seconds).  Default: 86400 (24 hours). @category Timeouts @ops_class operator |
+| `MASC_KEEPER_DEAD_TTL_SEC` | typed:float | Timeouts | operator | 67 | Dead tombstone TTL: seconds before Dead entries are cleaned up. @category Timeouts @ops_class operator |
 | `MASC_KEEPER_DOMAIN_POOL_ENABLED` | feature_flag | n/a | n/a | 12 | Historical keeper Domain_pool pilot flag. The supervisor still reads this for observability, but keepalive fibers rem... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 95 | Base backoff delay (seconds) between liveness recovery attempts per keeper. Exponential: attempt 0 = base, 1 = 2*base... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 104 | Maximum backoff delay cap (seconds) for liveness recovery. Default: 3600 (1 hour). @category Timeouts @ops_class oper... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_ENABLED` | typed:bool | Policies | operator | 77 | Liveness Recovery Supervisor (#12801): enable auto-recovery of Dead keepers whose root cause has cleared.  Set to fal... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_MAX_ATTEMPTS` | typed:int | Thresholds | operator | 111 | Maximum total liveness recovery attempts per keeper before giving up permanently.  Default: 5. @category Thresholds @... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC` | typed:float | Timeouts | operator | 85 | Minimum time (seconds) a keeper must have been Dead before a liveness recovery attempt is made.  Allows transient roo... |
-| `MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC` | typed:float | Timeouts | operator | 55 | Paused keeper file TTL: seconds before stale paused keeper meta files are removed from disk. Default: 86400 (24 hours... |
-| `MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES` | typed:int | Thresholds | operator | 42 | Self-preservation: minimum crashed candidates to trigger. @category Thresholds @ops_class operator |
-| `MASC_KEEPER_SELF_PRESERVATION_RATIO` | typed:float | Thresholds | operator | 36 | Self-preservation: ratio of crashed keepers to trigger suppression. @category Thresholds @ops_class operator |
-| `MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S` | typed:float | Timeouts | operator | 21 | Base delay for exponential backoff between restarts (seconds). @category Timeouts @ops_class operator |
-| `MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S` | typed:float | Timeouts | operator | 25 | Maximum backoff delay cap (seconds). @category Timeouts @ops_class operator |
-| `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | typed:int | Thresholds | operator | 17 | Maximum restart attempts before declaring a keeper dead. @category Thresholds @ops_class operator |
-| `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 29 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
+| `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 115 | Base backoff delay (seconds) between liveness recovery attempts per keeper. Exponential: attempt 0 = base, 1 = 2*base... |
+| `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 124 | Maximum backoff delay cap (seconds) for liveness recovery. Default: 3600 (1 hour). @category Timeouts @ops_class oper... |
+| `MASC_KEEPER_LIVENESS_RECOVERY_ENABLED` | typed:bool | Policies | operator | 97 | Liveness Recovery Supervisor (#12801): enable auto-recovery of Dead keepers whose root cause has cleared.  Set to fal... |
+| `MASC_KEEPER_LIVENESS_RECOVERY_MAX_ATTEMPTS` | typed:int | Thresholds | operator | 131 | Maximum total liveness recovery attempts per keeper before giving up permanently.  Default: 5. @category Thresholds @... |
+| `MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC` | typed:float | Timeouts | operator | 105 | Minimum time (seconds) a keeper must have been Dead before a liveness recovery attempt is made.  Allows transient roo... |
+| `MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC` | typed:float | Timeouts | operator | 75 | Paused keeper file TTL: seconds before stale paused keeper meta files are removed from disk. Default: 86400 (24 hours... |
+| `MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES` | typed:int | Thresholds | operator | 62 | Self-preservation: minimum crashed candidates to trigger. @category Thresholds @ops_class operator |
+| `MASC_KEEPER_SELF_PRESERVATION_RATIO` | typed:float | Thresholds | operator | 56 | Self-preservation: ratio of crashed keepers to trigger suppression. @category Thresholds @ops_class operator |
+| `MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S` | typed:float | Timeouts | operator | 41 | Base delay for exponential backoff between restarts (seconds). @category Timeouts @ops_class operator |
+| `MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S` | typed:float | Timeouts | operator | 45 | Maximum backoff delay cap (seconds). @category Timeouts @ops_class operator |
+| `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | typed:int | Thresholds | operator | 37 | Maximum restart attempts before declaring a keeper dead. @category Thresholds @ops_class operator |
+| `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 49 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
 
 ## Env_config_oas_bridge (1 knobs; typed classification 0/0)
 
@@ -371,76 +373,76 @@ the categorization roadmap. Newly-added typed getters in
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALLOW_ANONYMOUS_MUTATIONS` | string_literal | n/a | n/a | 29 |  |
-| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 651 |  |
-| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 655 |  |
-| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 657 |  |
-| `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 221 |  |
-| `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 311 |  |
-| `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 313 |  |
-| `MASC_DASHBOARD_CACHE_MAX_ENTRIES` | string_literal | n/a | n/a | 223 |  |
-| `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` | string_literal | n/a | n/a | 231 |  |
-| `MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S` | string_literal | n/a | n/a | 275 |  |
-| `MASC_DECISION_AUDIT_RING_CAPACITY` | string_literal | n/a | n/a | 329 |  |
-| `MASC_DECISION_LAYER_LEVEL` | string_literal | n/a | n/a | 331 |  |
-| `MASC_DISCORD_STATUS_STALE_SEC` | string_literal | n/a | n/a | 315 |  |
-| `MASC_DRIFT_COSINE_WEIGHT` | string_literal | n/a | n/a | 212 |  |
-| `MASC_DRIFT_JACCARD_WEIGHT` | string_literal | n/a | n/a | 211 |  |
-| `MASC_DRIFT_THRESHOLD` | string_literal | n/a | n/a | 210 |  |
-| `MASC_ECONOMY_ENABLED` | string_literal | n/a | n/a | 376 |  |
-| `MASC_ECONOMY_FRUGAL_THRESHOLD` | string_literal | n/a | n/a | 378 |  |
-| `MASC_ECONOMY_HUSTLE_THRESHOLD` | string_literal | n/a | n/a | 380 |  |
-| `MASC_ECONOMY_INITIAL_BALANCE` | string_literal | n/a | n/a | 382 |  |
-| `MASC_ECONOMY_REPUTATION_MULTIPLIER` | string_literal | n/a | n/a | 384 |  |
-| `MASC_ECONOMY_REWARD_BOARD_POST` | string_literal | n/a | n/a | 386 |  |
-| `MASC_ECONOMY_REWARD_MENTION_RESPONSE` | string_literal | n/a | n/a | 388 |  |
-| `MASC_ECONOMY_REWARD_TASK_DONE` | string_literal | n/a | n/a | 390 |  |
-| `MASC_ECONOMY_REWARD_UPVOTE` | string_literal | n/a | n/a | 392 |  |
+| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 655 |  |
+| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 659 |  |
+| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 661 |  |
+| `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 225 |  |
+| `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 315 |  |
+| `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 317 |  |
+| `MASC_DASHBOARD_CACHE_MAX_ENTRIES` | string_literal | n/a | n/a | 227 |  |
+| `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` | string_literal | n/a | n/a | 235 |  |
+| `MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S` | string_literal | n/a | n/a | 279 |  |
+| `MASC_DECISION_AUDIT_RING_CAPACITY` | string_literal | n/a | n/a | 333 |  |
+| `MASC_DECISION_LAYER_LEVEL` | string_literal | n/a | n/a | 335 |  |
+| `MASC_DISCORD_STATUS_STALE_SEC` | string_literal | n/a | n/a | 319 |  |
+| `MASC_DRIFT_COSINE_WEIGHT` | string_literal | n/a | n/a | 216 |  |
+| `MASC_DRIFT_JACCARD_WEIGHT` | string_literal | n/a | n/a | 215 |  |
+| `MASC_DRIFT_THRESHOLD` | string_literal | n/a | n/a | 214 |  |
+| `MASC_ECONOMY_ENABLED` | string_literal | n/a | n/a | 380 |  |
+| `MASC_ECONOMY_FRUGAL_THRESHOLD` | string_literal | n/a | n/a | 382 |  |
+| `MASC_ECONOMY_HUSTLE_THRESHOLD` | string_literal | n/a | n/a | 384 |  |
+| `MASC_ECONOMY_INITIAL_BALANCE` | string_literal | n/a | n/a | 386 |  |
+| `MASC_ECONOMY_REPUTATION_MULTIPLIER` | string_literal | n/a | n/a | 388 |  |
+| `MASC_ECONOMY_REWARD_BOARD_POST` | string_literal | n/a | n/a | 390 |  |
+| `MASC_ECONOMY_REWARD_MENTION_RESPONSE` | string_literal | n/a | n/a | 392 |  |
+| `MASC_ECONOMY_REWARD_TASK_DONE` | string_literal | n/a | n/a | 394 |  |
+| `MASC_ECONOMY_REWARD_UPVOTE` | string_literal | n/a | n/a | 396 |  |
 | `MASC_GRPC_STREAM_MAX_BUFFER` | string_literal | n/a | n/a | 86 |  |
-| `MASC_GUARD_PENALTY_BETA` | string_literal | n/a | n/a | 204 |  |
-| `MASC_HEBBIAN_DECAY` | string_literal | n/a | n/a | 214 |  |
-| `MASC_HEBBIAN_RATE` | string_literal | n/a | n/a | 213 |  |
+| `MASC_GUARD_PENALTY_BETA` | string_literal | n/a | n/a | 208 |  |
+| `MASC_HEBBIAN_DECAY` | string_literal | n/a | n/a | 218 |  |
+| `MASC_HEBBIAN_RATE` | string_literal | n/a | n/a | 217 |  |
 | `MASC_HTTP_HOST` | string_literal | n/a | n/a | 21 |  |
 | `MASC_HTTP_MAX_CONNECTIONS` | string_literal | n/a | n/a | 22 |  |
-| `MASC_IMESSAGE_STATUS_STALE_SEC` | string_literal | n/a | n/a | 317 |  |
-| `MASC_KEEPER_AUTONOMOUS_CONCURRENCY` | string_literal | n/a | n/a | 491 |  |
-| `MASC_KEEPER_AUTONOMOUS_MAX_TOKENS` | string_literal | n/a | n/a | 170 |  |
-| `MASC_KEEPER_COMPACT_MAX_MESSAGES` | string_literal | n/a | n/a | 161 |  |
-| `MASC_KEEPER_COMPACT_MAX_TOKENS` | string_literal | n/a | n/a | 163 |  |
-| `MASC_KEEPER_COMPACT_RATIO` | string_literal | n/a | n/a | 159 |  |
-| `MASC_KEEPER_LLM_RERANK_RUNTIME` | string_literal | n/a | n/a | 557 |  |
-| `MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN` | string_literal | n/a | n/a | 188 |  |
-| `MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 184 |  |
-| `MASC_KEEPER_RULE_GUARDRAIL_REPETITION` | string_literal | n/a | n/a | 182 |  |
-| `MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 186 |  |
-| `MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 178 |  |
-| `MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 180 |  |
-| `MASC_KEEPER_RULE_REFLECT_REPETITION` | string_literal | n/a | n/a | 176 |  |
-| `MASC_KEEPER_TOOL_AFFINITY_K` | string_literal | n/a | n/a | 561 |  |
-| `MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS` | string_literal | n/a | n/a | 563 |  |
-| `MASC_KEEPER_TOOL_COST_MAX_USD` | string_literal | n/a | n/a | 165 |  |
-| `MASC_KEEPER_TOOL_DECAY_TURNS` | string_literal | n/a | n/a | 565 |  |
-| `MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS` | string_literal | n/a | n/a | 517 |  |
-| `MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC` | string_literal | n/a | n/a | 519 |  |
-| `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 168 |  |
-| `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 167 |  |
-| `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 215 |  |
-| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 749 |  |
-| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 785 |  |
-| `MASC_RUNTIME_ATTEMPT_LIVENESS` | string_literal | n/a | n/a | 474 |  |
-| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 797 |  |
-| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 697 |  |
-| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 699 |  |
-| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 701 |  |
-| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 703 |  |
-| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 729 |  |
-| `MASC_STRUCTURED_STATE` | string_literal | n/a | n/a | 151 |  |
+| `MASC_IMESSAGE_STATUS_STALE_SEC` | string_literal | n/a | n/a | 321 |  |
+| `MASC_KEEPER_AUTONOMOUS_CONCURRENCY` | string_literal | n/a | n/a | 495 |  |
+| `MASC_KEEPER_AUTONOMOUS_MAX_TOKENS` | string_literal | n/a | n/a | 174 |  |
+| `MASC_KEEPER_COMPACT_MAX_MESSAGES` | string_literal | n/a | n/a | 165 |  |
+| `MASC_KEEPER_COMPACT_MAX_TOKENS` | string_literal | n/a | n/a | 167 |  |
+| `MASC_KEEPER_COMPACT_RATIO` | string_literal | n/a | n/a | 163 |  |
+| `MASC_KEEPER_LLM_RERANK_RUNTIME` | string_literal | n/a | n/a | 561 |  |
+| `MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN` | string_literal | n/a | n/a | 192 |  |
+| `MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 188 |  |
+| `MASC_KEEPER_RULE_GUARDRAIL_REPETITION` | string_literal | n/a | n/a | 186 |  |
+| `MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 190 |  |
+| `MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 182 |  |
+| `MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 184 |  |
+| `MASC_KEEPER_RULE_REFLECT_REPETITION` | string_literal | n/a | n/a | 180 |  |
+| `MASC_KEEPER_TOOL_AFFINITY_K` | string_literal | n/a | n/a | 565 |  |
+| `MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS` | string_literal | n/a | n/a | 567 |  |
+| `MASC_KEEPER_TOOL_COST_MAX_USD` | string_literal | n/a | n/a | 169 |  |
+| `MASC_KEEPER_TOOL_DECAY_TURNS` | string_literal | n/a | n/a | 569 |  |
+| `MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS` | string_literal | n/a | n/a | 521 |  |
+| `MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC` | string_literal | n/a | n/a | 523 |  |
+| `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 172 |  |
+| `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 171 |  |
+| `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 219 |  |
+| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 753 |  |
+| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 789 |  |
+| `MASC_RUNTIME_ATTEMPT_LIVENESS` | string_literal | n/a | n/a | 478 |  |
+| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 801 |  |
+| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 701 |  |
+| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 703 |  |
+| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 705 |  |
+| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 707 |  |
+| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 733 |  |
+| `MASC_STRUCTURED_STATE` | string_literal | n/a | n/a | 155 |  |
 | `MASC_TELEMETRY_MAX_BYTES` | string_literal | n/a | n/a | 56 |  |
 | `MASC_TELEMETRY_RETENTION_DAYS` | string_literal | n/a | n/a | 53 |  |
-| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 765 |  |
-| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 767 |  |
-| `MASC_TLA_TRACE` | string_literal | n/a | n/a | 153 |  |
-| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 829 |  |
-| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 831 |  |
-| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 833 |  |
+| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 769 |  |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 771 |  |
+| `MASC_TLA_TRACE` | string_literal | n/a | n/a | 157 |  |
+| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 833 |  |
+| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 835 |  |
+| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 837 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 93 |  |
 | `MASC_WS_SLICE_INDEX_ENABLED` | string_literal | n/a | n/a | 96 |  |

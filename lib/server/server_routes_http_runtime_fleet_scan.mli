@@ -66,6 +66,24 @@ type keeper_phase_snapshot = {
 }
 val keeper_phase_snapshot : ?base_path:string -> unit -> keeper_phase_snapshot
 val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts
+type fleet_capacity_supervisor_tick = {
+  observation : Keeper_fleet_capacity_supervisor.observation;
+  decision : Keeper_fleet_capacity_supervisor.decision;
+  missing_autoboot_names : string list;
+  suggested_keeper_names : string list;
+}
+val fleet_capacity_supervisor_tick :
+  running_names:string list ->
+  autoboot_names:string list ->
+  running_keeper_fiber_count:int ->
+  target_reaction_capacity_count:int ->
+  minimum_running_fibers:int ->
+  reaction_capacity_shortfall_count:int ->
+  now:float ->
+  last_action_at:float option ->
+  cooldown_seconds:float ->
+  unit ->
+  fleet_capacity_supervisor_tick
 val keeper_fleet_safety_health_json :
   ?bootable_names:string list ->
   ?autoboot_scan:autoboot_keeper_scan ->

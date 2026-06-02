@@ -1,13 +1,14 @@
-(** Fleet Capacity Supervisor — pure tick core (RFC-0130 PR-2).
+(** Fleet Capacity Supervisor — tick core and execution boundary (RFC-0130).
 
     Closes the loop on [reaction_capacity_shortfall_count] (PR #16050)
     by converting the typed shortfall signal into a typed spawn decision.
     The decision is closed and total; probe-unknown failure modes are
     fail-closed at the admission boundary (matches RFC-0124 §2.2).
 
-    This module is intentionally I/O-free. [tick] is a deterministic
-    pure function over [observation]. The side-effecting [execute]
-    wrapper lives in a later PR (PR-4 per the RFC phased rollout). *)
+    [tick] is a deterministic pure function over [observation]. [execute]
+    owns the decision-to-spawn sequencing while accepting the concrete
+    side-effect as an injected callback so the server can wire keeper boot
+    without making this module depend on server/runtime plumbing. *)
 
 module Spawn_reason : sig
   type t =
@@ -62,6 +63,26 @@ type decision =
   | Noop of Noop_reason.t
 
 val decision_to_string : decision -> string
+
+type execution_result =
+  { decision : decision
+  ; requested_keeper_names : string list
+  ; started_keeper_names : string list
+  ; failed_keeper_names : (string * string) list
+  }
+
+val execute :
+  spawn_keeper:(string -> (unit, string) result) ->
+  suggested_keeper_names:string list ->
+  decision ->
+  execution_result
+(** Executes a [Spawn] decision by invoking [spawn_keeper] for at most
+    [suggested_keeper_count] names from [suggested_keeper_names].
+
+    [Backpressure] and [Noop] are execution no-ops and return an empty
+    request set. The result is total and records per-keeper failures
+    instead of raising; [spawn_keeper] may still raise cancellation, which
+    callers should preserve at the Eio boundary. *)
 
 val tick : observation -> decision
 (** Pure, total, deterministic.

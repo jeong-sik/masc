@@ -86,11 +86,7 @@ let resolve name =
                 List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas)
               then Resolved { canonical = normalized; via = Shard_schema; surface = None }
               else begin
-                (* RFC-0084 §1.3 + §6 D2 — surface coverage gate.
-                   [Tool_catalog_surfaces.surface] has 8 variants. 7 are
-                   admit-checked here; [Keeper_denied] is excluded (must-deny
-                   semantics — checked separately in PR-7 capability gate, not
-                   an admission source). *)
+                (* RFC-0084 §1.3 — surface coverage gate. *)
                 let surfaces_to_check =
                   [ Tool_catalog_surfaces.Public_mcp
                   ; Tool_catalog_surfaces.Spawned_agent
@@ -100,11 +96,6 @@ let resolve name =
                   ; Tool_catalog_surfaces.Agent_internal
                   ; Tool_catalog_surfaces.System_internal
                   ]
-                in
-                let _excluded_must_deny : Tool_catalog_surfaces.surface list =
-                  (* PR-7 will route [Keeper_denied] through the capability gate
-                     before admission; do not list it as an admit surface here. *)
-                  [ Tool_catalog_surfaces.Keeper_denied ]
                 in
                 let rec check_surfaces = function
                   | [] ->
@@ -159,7 +150,7 @@ let all_admitting_sources name =
     sources := Registry_core_tools :: !sources;
   if List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas) then
     sources := Shard_schema :: !sources;
-  (* RFC-0084 §1.3 + §6 D2 — admit-only surfaces (Keeper_denied excluded). *)
+  (* RFC-0084 §1.3 — admit-only surfaces. *)
   let surfaces_to_check =
     [ Tool_catalog_surfaces.Public_mcp
     ; Tool_catalog_surfaces.Spawned_agent

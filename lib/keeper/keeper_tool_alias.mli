@@ -28,10 +28,9 @@ type route =
     [None] means the name is not in our surface — a routing miss. *)
 val route : string -> route option
 
-(** [is_known_internal name] is [true] when [name] is a recognised
-    internal handler name (any [routing_table] target plus the full
-    [Tool_catalog_surfaces.keeper_internal_tools] set). Callers use this
-    to keep Prometheus label cardinality bounded. *)
+(** [is_known_internal name] is [true] when [name] is a recognised descriptor
+    internal handler or public [masc_*] tool name. Callers use this to keep
+    Prometheus label cardinality bounded. *)
 val is_known_internal : string -> bool
 
 (** [public_names ()] returns all LLM-native public names in stable order.
@@ -61,9 +60,9 @@ val record_route_outcome : tool:string -> routed_to:string -> result:string -> u
 
 (** {1 MCP surface routing (separate concern)} *)
 
-(** [public_masc_to_internal name] resolves an MCP-prefixed public name
-    (e.g. [masc_board_get]) to its internal keeper name, via the
-    [Tool_catalog_surfaces.keeper_internal_replacement] table. *)
+(** [public_masc_to_internal name] is retained for callers that still route
+    through [canonical_resolution]. The old keeper-internal replacement table is
+    gone, so public [masc_*] names stay canonical. *)
 val public_masc_to_internal : string -> string option
 
 (** [strip_mcp_masc_prefix name] removes the ["mcp__masc__"] prefix if

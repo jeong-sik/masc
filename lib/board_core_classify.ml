@@ -24,12 +24,6 @@ module Float = Stdlib.Float
 
 include Board_types
 
-(* #9919 audit follow-up: fleet-visible counter for the legacy
-   author-heuristic post-kind migration branch.  Replaces a
-   degenerate [Heuristic_metrics.record] emit. *)
-let legacy_migrate_post_kind_metric =
-  "masc_board_legacy_migrate_post_kind_total"
-
 let visibility_to_string = function
   | Public -> "public"
   | Unlisted -> "unlisted"
@@ -221,10 +215,9 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
          values) alongside the per-author label.  Both labels emitted so
          existing dashboards (keyed on raw [author]) keep working while
          operators gain a bounded breakdown. *)
-      Prometheus.inc_counter legacy_migrate_post_kind_metric
-        ~labels:[ ("author", author);
-                  ("automation_label", automation_label_token label) ]
-        ();
+      Board_metrics_hooks.inc_legacy_migrate_post_kind
+        ~author
+        ~automation_label:(automation_label_token label);
       Automation_post
   | Human_author -> Human_post
 

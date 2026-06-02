@@ -466,9 +466,8 @@ let load_persisted_votes store =
         | _ -> ()
       ) lines;
       if !fixture_detected > 0 then begin
-        Prometheus.inc_counter
-          "masc_board_vote_fixture_detected_total"
-          ~delta:(Float.of_int !fixture_detected) ();
+        Board_metrics_hooks.inc_vote_fixture_detected
+          ~count:!fixture_detected;
         Log.BoardLog.warn
           "#9921 fixture contamination: %d vote rows match fixture patterns \
            (hot-voter-*, synthetic-voter-*, :test-voter-*) in %s. Live \

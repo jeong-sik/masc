@@ -328,10 +328,6 @@
   model_inference_metrics_reader
   model_inference_metrics_aggregate
   model_inference_metrics_json
-  ;; godfile decomposition Lane D — internal facade-only sibling of
-  ;; Tool_catalog. Owns effect_domain / tool_group types and typed-name
-  ;; inference tables. Public surface stays in tool_catalog.mli.
-  tool_catalog_inference
   )
  (libraries
    mcp_protocol
@@ -576,6 +572,14 @@
    masc_turn
    ;; Agent token-ledger domain (extracted leaf — earn/spend/balance, Board-callable)
    masc_agent_economy
+   ;; Tool dispatch substrate (extracted lib — PR-S3, RFC-0056 LANE 2).
+   ;; tool_dispatch / tool_name / tool_catalog / tool_registry / tool_token /
+   ;; dispatch_outcome / tool_catalog_inference. The compiler enforces
+   ;; Tool⊥Keeper/Runtime/Goal/Task/Board: masc_tool_dispatch's (libraries)
+   ;; admits only neutral leaves. Telemetry (Tool_telemetry.with_span) and
+   ;; warm-up stats (Telemetry_eio) are injected at the composition root.
+   ;; (wrapped false) keeps bare Tool_dispatch.X / Tool_catalog.X refs working.
+   masc_mcp.masc_tool_dispatch
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
    masc_mcp.ide

@@ -95,7 +95,6 @@ let assemble_hooks
   let compute_tool_surface = ctx.compute_tool_surface in
   let config = ctx.config in
   let keeper_tool_bundle = ctx.keeper_tool_bundle in
-  let keeper_has_owned_active_task = ctx.keeper_has_owned_active_task in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
   let meta = ctx.meta in
   let reported_tool_names_ref = ctx.reported_tool_names_ref in
@@ -425,7 +424,6 @@ let assemble_hooks
                     append_ctx
                       ctx
                       (generic_required_tool_gate_guidance
-                         ~has_current_task:(keeper_has_owned_active_task ())
                          ~turn_affordances
                          ~allowed_tool_names:computed_surface.turn_visible_tool_names)
                   else if is_retry
@@ -462,7 +460,6 @@ let assemble_hooks
                     let satisfying_tools =
                       Keeper_agent_tool_surface
                       .generic_required_tool_candidate_names
-                        ~has_current_task:(keeper_has_owned_active_task ())
                         ~turn_affordances
                         ~allowed_tool_names:computed_surface.turn_visible_tool_names
                     in
@@ -528,7 +525,6 @@ let assemble_hooks
                   then
                     Some
                       (preferred_tool_choice_for_required_turn
-                         ~has_current_task:(keeper_has_owned_active_task ())
                          ~turn_affordances
                          ~allowed_tool_names:turn_visible_tool_names)
                   else clear_inherited_strict_tool_choice current_params.tool_choice

@@ -9,11 +9,10 @@ let retry_feedback_message text : Agent_sdk.Types.message =
   }
 ;;
 
-let satisfying_tools_for_violation ~acc ~has_current_task ~turn_affordances
+let satisfying_tools_for_violation ~acc ~turn_affordances
     ~violation_reason ~violation_detail =
   let local_tools =
     Keeper_agent_tool_surface.generic_required_tool_candidate_names
-      ~has_current_task
       ~turn_affordances
       ~allowed_tool_names:acc.Keeper_run_tools.tool_surface.required_tool_candidate_names
   in
@@ -58,7 +57,7 @@ let post_contract_violation_retry_feedback
   "retry_count > 0 && retry_message_count = history_message_count + 1 && String_util.contains_substring_ci feedback_text \"contract violation\""]
 ;;
 
-let run_with_single_retry ~keeper_name ~acc ~has_current_task ~turn_affordances
+let run_with_single_retry ~keeper_name ~acc ~turn_affordances
     ~history_messages ~call_run_named =
   match call_run_named ~initial_messages:history_messages with
   | Error
@@ -74,7 +73,6 @@ let run_with_single_retry ~keeper_name ~acc ~has_current_task ~turn_affordances
     let satisfying_tools =
       satisfying_tools_for_violation
         ~acc
-        ~has_current_task
         ~turn_affordances
         ~violation_reason
         ~violation_detail

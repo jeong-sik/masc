@@ -770,12 +770,10 @@ let prepare_agent_setup
         ~labels:[ "keeper", meta.name ]
         ()
     else ();
-    let has_current_task = keeper_has_owned_active_task () in
     let active_task_actionable_tool_gate_requested =
       (not is_last_turn)
       && actionable_signal_requires_active_task_tool_gate
            ~actionable_signal
-           ~has_current_task
            ~turn_affordances
            ~allowed_tool_names:turn_visible_tool_names
     in
@@ -789,7 +787,6 @@ let prepare_agent_setup
     in
     let turn_visible_tool_names =
       tool_names_for_required_gate_surface
-        ~has_current_task
         ~tool_gate_requested
         ~required_tool_names
         turn_visible_tool_names
@@ -810,7 +807,6 @@ let prepare_agent_setup
       if tool_gate_requested && required_tool_names = []
       then
         generic_required_tool_candidate_names
-          ~has_current_task
           ~turn_affordances
           ~allowed_tool_names:turn_visible_tool_names
       else []

@@ -236,11 +236,10 @@ let test_contract_filter_empty_input () =
 let test_active_task_actionable_signal_requests_gate () =
   check
     bool
-    "owned active task with executable tool requests gate"
+    "actionable signal with executable tool requests gate"
     true
     (Surface.actionable_signal_requires_active_task_tool_gate
        ~actionable_signal:true
-       ~has_current_task:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim"; "Edit" ]);
   check
@@ -249,25 +248,22 @@ let test_active_task_actionable_signal_requests_gate () =
     false
     (Surface.actionable_signal_requires_active_task_tool_gate
        ~actionable_signal:false
-       ~has_current_task:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Edit" ]);
   check
     bool
-    "no owned active task leaves claim intake ungated"
-    false
+    "actionable signal with claim tool requests gate"
+    true
     (Surface.actionable_signal_requires_active_task_tool_gate
        ~actionable_signal:true
-       ~has_current_task:false
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "keeper_task_claim"; "Edit" ]);
   check
     bool
-    "passive plus claim-only cannot advance owned active task"
-    false
+    "passive plus claim-only requests gate (claim is actionable)"
+    true
     (Surface.actionable_signal_requires_active_task_tool_gate
        ~actionable_signal:true
-       ~has_current_task:true
        ~turn_affordances:[ "task_claim" ]
        ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim" ])
 ;;
@@ -275,10 +271,9 @@ let test_active_task_actionable_signal_requests_gate () =
 let test_required_gate_surface_excludes_owned_task_claim_context () =
   check
     (list string)
-    "owned task gate keeps only execution progress tools"
-    [ "Edit"; "Write" ]
+    "gate keeps actionable tools including claim-context"
+    [ "keeper_task_claim"; "Edit"; "Write" ]
     (Surface.tool_names_for_required_gate_surface
-       ~has_current_task:true
        ~tool_gate_requested:true
        ~required_tool_names:[]
        [ "Read"; "Grep"; "keeper_task_claim"; "keeper_stay_silent"; "Edit"; "Write" ]);
@@ -287,7 +282,6 @@ let test_required_gate_surface_excludes_owned_task_claim_context () =
     "explicit required tool is preserved even when claim-like"
     [ "keeper_task_claim" ]
     (Surface.tool_names_for_required_gate_surface
-       ~has_current_task:true
        ~tool_gate_requested:true
        ~required_tool_names:[ "keeper_task_claim" ]
        [ "Read"; "keeper_task_claim" ])

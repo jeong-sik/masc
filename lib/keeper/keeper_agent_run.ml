@@ -625,8 +625,6 @@ let run_turn
                  Keeper_agent_run_contract_retry.run_with_single_retry
                    ~keeper_name:meta.name
                    ~acc
-                   ~has_current_task:
-                     (Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta))
                    ~turn_affordances
                    ~history_messages
                    ~call_run_named

@@ -301,7 +301,6 @@ let turn_affordances_require_tool_gate_with_allowed
   gate_requested
 
 let tool_names_for_required_gate_surface
-    ?(has_current_task : bool = false)
     ~(tool_gate_requested : bool)
     ~(required_tool_names : string list)
     (tool_names : string list) : string list =
@@ -325,9 +324,7 @@ let tool_names_for_required_gate_surface
       |> List.filter (fun name ->
         is_explicit_required_tool_name name
         || (Keeper_tool_progress.tool_name_can_satisfy_required_contract name
-            && not (is_stay_silent name)
-            && ((not has_current_task)
-                || not (Keeper_tool_progress.is_claim_context_tool_name name))))
+            && not (is_stay_silent name)))
       |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
     in
     match actionable with
@@ -352,7 +349,7 @@ let has_turn_affordance expected turn_affordances =
 
 let has_task_claim_affordance = has_turn_affordance Task_claim
 
-let generic_required_actionable_tool_names ~(has_current_task : bool)
+let generic_required_actionable_tool_names
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let is_stay_silent name =
     String.equal
@@ -363,8 +360,6 @@ let generic_required_actionable_tool_names ~(has_current_task : bool)
     List.mem name allowed_tool_names
     && Keeper_tool_progress.tool_name_can_satisfy_required_contract name
     && not (is_stay_silent name)
-    && ((not has_current_task)
-        || not (Keeper_tool_progress.is_claim_context_tool_name name))
   in
   let preferred =
     preferred_tool_names_for_turn_affordances turn_affordances
@@ -378,7 +373,7 @@ let generic_required_actionable_tool_names ~(has_current_task : bool)
     |> List.filter can_recommend_tool
     |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
-let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
+let preferred_tool_choice_for_required_turn
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let is_stay_silent name =
     String.equal
@@ -393,13 +388,11 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     List.exists
       (fun name ->
          progress_tool_available name
-         && (not (is_stay_silent name))
-         && ((not has_current_task)
-             || not (Keeper_tool_progress.is_claim_context_tool_name name)))
+         && not (is_stay_silent name))
       allowed_tool_names
   in
   let actionable_tool_names =
-    generic_required_actionable_tool_names ~has_current_task ~turn_affordances
+    generic_required_actionable_tool_names ~turn_affordances
       ~allowed_tool_names
   in
   let exact_tool_choice_if_public = function
@@ -414,21 +407,10 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
           progress_tool_available
           [ "keeper_board_curation_submit" ]
   then
-    (* Keep the curation submit tool visible, but do not force exact
-       tool_choice. Several keeper runtimes can use runtime MCP tools while
-       lacking inline exact-tool-choice support; exact forcing turns those
-       productive lanes into spurious pause-human failures. *)
     Agent_sdk.Types.Any
-  else if (not has_current_task)
-     && has_task_claim_affordance turn_affordances
-     && progress_tool_available "keeper_task_claim"
+  else if has_task_claim_affordance turn_affordances
+          && progress_tool_available "keeper_task_claim"
   then
-    (* Runtime MCP transports may report the correct call as
-       [mcp__masc__keeper_task_claim]. OAS exact-tool contracts compare
-       raw provider names before MASC canonicalizes them, so exact
-       [Tool "keeper_task_claim"] can reject a valid claim. Keep the
-       turn tool-required and let MASC validate the canonical observed
-       tool names after execution. *)
     Agent_sdk.Types.Any
   else if has_turn_affordance Board_post_or_comment turn_affordances
           && List.exists
@@ -450,67 +432,38 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   else if has_turn_affordance Task_verify turn_affordances
           && progress_tool_available "masc_transition"
   then Agent_sdk.Types.Any
-  else if has_current_task
-          && has_turn_affordance Task_verify turn_affordances
+  else if has_turn_affordance Task_verify turn_affordances
           && progress_tool_available "keeper_task_submit_for_verification"
   then Agent_sdk.Types.Any
-  else if has_current_task
-          && has_turn_affordance Task_verify turn_affordances
+  else if has_turn_affordance Task_verify turn_affordances
           && progress_tool_available "keeper_task_done"
   then Agent_sdk.Types.Any
-  else if not has_current_task then
-    (* #10008: no active task and no applicable specific claim tool
-       to force.  Fall back to [Auto] instead of [Any] so the model
-       can respond with an honest refusal ("no eligible task to
-       claim", "no matching affordance to exercise") without
-       triggering the [Require_tool_use] contract violation.  The
-       caller ([Keeper_agent_run]) reads [tool_choice = Auto] as
-       "MASC dropped the specific-tool demand" and relaxes the
-       completion contract to [Allow_text_or_tool].  Otherwise the
-       affordance-driven gate would self-contradict — force a tool
-       call when no applicable tool exists. *)
-    Agent_sdk.Types.Auto
   else if not executable_progress_tool_available then
-    (* Active-task gates are intentionally strict only when at least one
-       executable progress tool is actually visible.  Claim/stay_silent
-       tools cannot advance an already-owned task, so forcing [Any] here
-       creates an impossible contract and burns a retry. *)
     Agent_sdk.Types.Auto
   else (
     match exact_tool_choice_if_public actionable_tool_names with
     | Some tool_choice -> tool_choice
-    | None ->
-      (* Active task in progress: keep the strict gate.  The keeper is
-         expected to make progress via some tool call (board update,
-         task_update, task_done, etc.). *)
-      Agent_sdk.Types.Any)
+    | None -> Agent_sdk.Types.Any)
 
-let generic_required_tool_candidate_names ~(has_current_task : bool)
+let generic_required_tool_candidate_names
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
-  let actionable_tools =
-    generic_required_actionable_tool_names ~has_current_task ~turn_affordances
-      ~allowed_tool_names
-  in
-  actionable_tools
+  generic_required_actionable_tool_names ~turn_affordances ~allowed_tool_names
 ;;
 
 let actionable_signal_requires_active_task_tool_gate ~(actionable_signal : bool)
-    ~(has_current_task : bool) ~(turn_affordances : string list)
+    ~(turn_affordances : string list)
     ~(allowed_tool_names : string list) =
   actionable_signal
-  && has_current_task
   && generic_required_actionable_tool_names
-       ~has_current_task
        ~turn_affordances
        ~allowed_tool_names
      <> []
 ;;
 
-let generic_required_tool_gate_guidance ~(has_current_task : bool)
+let generic_required_tool_gate_guidance
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let actionable_tools =
     generic_required_tool_candidate_names
-      ~has_current_task
       ~turn_affordances
       ~allowed_tool_names
   in
@@ -521,28 +474,21 @@ let generic_required_tool_gate_guidance ~(has_current_task : bool)
   in
   let omitted = List.length actionable_tools - min 6 (List.length actionable_tools) in
   let suffix = if omitted > 0 then Printf.sprintf " (+%d more)" omitted else "" in
-  let claim_context_note =
-    if has_current_task
-    then " You already hold an active task; claim/context tools alone do not count as execution progress."
-    else ""
-  in
   if String.equal preview ""
   then
     Printf.sprintf
       "[TOOL BLOCKED] This turn has an actionable runtime signal, but no \
        currently visible keeper tool can advance it. Do not call passive \
        reads/status, claim/context tools, or keeper_stay_silent merely to \
-       satisfy the contract.%s Emit a concise [STATE] blocker instead."
-      claim_context_note
+       satisfy the contract. Emit a concise [STATE] blocker instead."
   else
     Printf.sprintf
       "[TOOL REQUIRED] This turn has an actionable runtime signal. Before \
        answering in natural language, call one of the currently visible keeper \
        runtime tools. Preferred tools for this signal: %s%s. Passive \
-       reads/status alone do not satisfy this turn.%s"
+       reads/status alone do not satisfy this turn."
       preview
       suffix
-      claim_context_note
 
 let required_tool_names_for_turn ~(current_task_required_tool_names : string list)
     ~(per_call_required_tool_names : string list) =

@@ -177,15 +177,11 @@ val turn_affordances_require_tool_gate_with_allowed :
     progress when such tools exist. Passive status/read tools remain visible on
     optional turns and on surfaces that have no actionable alternative.
 
-    When [has_current_task] is true, claim/context tools are not treated as
-    actionable alternatives because the keeper already owns active work.
-
     Explicit [required_tool_names] are preserved even when they are read-only:
     operator/harness calls such as [masc_keeper_msg.required_tools =
     ["masc_web_search"]] are a direct evidence contract, not a generic
     actionable-world-signal gate. *)
 val tool_names_for_required_gate_surface :
-  ?has_current_task:bool ->
   tool_gate_requested:bool ->
   required_tool_names:string list ->
   string list ->
@@ -201,17 +197,14 @@ val has_turn_affordance : turn_affordance -> string list -> bool
 val has_task_claim_affordance : string list -> bool
 
 (** Ordered executable candidates for generic required-tool gates.
-    Claim/context tools are excluded when the keeper already owns active work,
-    and passive status/read tools are never recommended. *)
+    Passive status/read tools and stay_silent are never recommended. *)
 val generic_required_actionable_tool_names :
-  has_current_task:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string list
 
 (** Pick the schema-visible [tool_choice] when the gate fires. *)
 val preferred_tool_choice_for_required_turn :
-  has_current_task:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   Agent_sdk.Types.tool_choice
@@ -220,7 +213,6 @@ val preferred_tool_choice_for_required_turn :
     turns, where no explicit [required_tool_names] exist but the runtime still
     requires a keeper tool call. *)
 val generic_required_tool_gate_guidance :
-  has_current_task:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string
@@ -230,17 +222,14 @@ val generic_required_tool_gate_guidance :
     generic gate with any execution-progress tool, while this list explains
     the preferred candidates exposed to the model/operator. *)
 val generic_required_tool_candidate_names :
-  has_current_task:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   string list
 
-(** Whether an owned active task plus an actionable world signal should promote
-    the turn to the same generic required-tool gate that post-run validation
-    already enforces. *)
+(** Whether an actionable world signal should promote the turn to the same
+    generic required-tool gate that post-run validation already enforces. *)
 val actionable_signal_requires_active_task_tool_gate :
   actionable_signal:bool ->
-  has_current_task:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
   bool

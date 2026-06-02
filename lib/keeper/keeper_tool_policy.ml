@@ -156,24 +156,41 @@ let keeper_supported_keeper_masc_tools =
   ]
 
 let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
+  (* #19797 follow-up: keeper-management-tool identification is keeper-owned,
+     not derived from a [Tool_dispatch] tag. Membership in
+     [Keeper_types_profile.schemas] is the SSOT registration set that
+     [Keeper_tool_surface] registers from — an exact name match, NOT a
+     "masc_keeper_" prefix classifier (CLAUDE.md workaround signature #2).
+     Sourced from the low-level types module (already open) rather than
+     [Keeper_tool_surface] to avoid a module dependency cycle. These tools
+     are MCP-client-only except the read/msg subset safe keeper-to-keeper. *)
+  let is_keeper_management_tool name =
+    List.exists
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+      Keeper_types_profile.schemas
+  in
   let supported_in_keeper name =
     if List.mem name keeper_safe_inline_tools then
       true
+    else if is_keeper_management_tool name then
+      (* Reliable pre-init too: [Keeper_tool_surface.schemas] is a static list,
+         independent of tag-registry initialization. Placed before the
+         [is_registered]/not-initialized fallbacks so management tools are
+         never over-exposed during boot. *)
+      List.mem name keeper_supported_keeper_masc_tools
     else if Tool_dispatch.is_registered name then
       true
     else if not (Tool_dispatch.is_tag_registry_initialized ()) then
       true
     else
-      match Tool_dispatch.lookup_tag name with
-      | Some Tool_dispatch.Mod_inline
-      | Some Tool_dispatch.Mod_compact
-      | Some Tool_dispatch.Mod_operator
-      | Some Tool_dispatch.Mod_control ->
-          false
-      | Some Tool_dispatch.Mod_keeper ->
-          List.mem name keeper_supported_keeper_masc_tools
-      | Some _ -> true
-      | None -> false
+      (match Tool_dispatch.lookup_tag name with
+       | Some Tool_dispatch.Mod_inline
+       | Some Tool_dispatch.Mod_compact
+       | Some Tool_dispatch.Mod_operator
+       | Some Tool_dispatch.Mod_control ->
+           false
+       | Some _ -> true
+       | None -> false)
   in
   (* masc_board_* tools that have keeper_board_* wrappers with auto-injected
      author/voter fields. Exposing both leads to the LLM calling the raw

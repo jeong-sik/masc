@@ -17,7 +17,7 @@
     - [Some (Ok _)] on successful dispatch.
     - [Some (Error _)] when the tool is blocked in keeper context
       ([Mod_control] mutators, most [Mod_inline] tools, [Mod_compact],
-      [Mod_keeper], [Mod_operator]) or when the underlying dispatch reports
+      [Mod_external], [Mod_operator]) or when the underlying dispatch reports
       failure. [masc_approval_pending] is the keeper-safe [Mod_inline]
       exception.
     - [None] only if the selected module does not recognise [name] (does

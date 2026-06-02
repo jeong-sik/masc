@@ -37,15 +37,13 @@ let workspace_mutating_tool_names =
 ;;
 
 (* ================================================================ *)
-(* Surface type + canonical lists                                   *)
+(* Curated tool-name lists                                          *)
 (* ================================================================ *)
 
-type surface =
-  | Public_mcp
-  | Spawned_agent
-  | Local_worker
-  | Session_min
-  | Admin
+(* These are flat, consumer-owned tool-name lists.  The [surface] actor
+   classification type and its dispatch/reverse-lookup machinery were deleted
+   in the surface-cut refactor — tools are a flat list, and each consumer
+   projects the subset it needs by referencing the named list directly. *)
 
 let public_mcp_surface_tools =
   [ (* Workspace lifecycle *)
@@ -296,69 +294,3 @@ let execution_role_tools : string list =
   ]
 ;;
 
-(* ================================================================ *)
-(* Surface query functions                                          *)
-(* ================================================================ *)
-
-let tools_for_surface = function
-  | Public_mcp -> public_mcp_surface_tools
-  | Spawned_agent -> spawned_agent_surface_tools
-  | Local_worker -> local_worker_surface_tools
-  | Session_min -> session_min_surface_tools
-  | Admin -> admin_surface_tools
-;;
-
-let all_surfaces =
-  [ Public_mcp
-  ; Spawned_agent
-  ; Local_worker
-  ; Session_min
-  ; Admin
-  ]
-;;
-
-let build_surface_set tools =
-  let tbl = Hashtbl.create (List.length tools) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) tools;
-  tbl
-;;
-
-(* Per-surface membership tables, bound once at module load.  Direct
-   variant match (below) replaces a List.assoc_opt scan over an
-   (surface * Hashtbl) association list — the latter required linear
-   structural-equality comparison of variants on every call. *)
-let public_mcp_set = build_surface_set public_mcp_surface_tools
-let spawned_agent_set = build_surface_set spawned_agent_surface_tools
-let local_worker_set = build_surface_set local_worker_surface_tools
-let session_min_set = build_surface_set session_min_surface_tools
-let admin_set = build_surface_set admin_surface_tools
-
-let set_for_surface = function
-  | Public_mcp -> public_mcp_set
-  | Spawned_agent -> spawned_agent_set
-  | Local_worker -> local_worker_set
-  | Session_min -> session_min_set
-  | Admin -> admin_set
-;;
-
-let surface_sets : (surface * (string, unit) Hashtbl.t) list =
-  List.map (fun surface -> surface, set_for_surface surface) all_surfaces
-;;
-
-let is_on_surface surface name =
-  Hashtbl.mem (set_for_surface surface) name
-;;
-
-let surfaces_for_tool name =
-  List.filter_map
-    (fun (surface, tbl) -> if Hashtbl.mem tbl name then Some surface else None)
-    surface_sets
-;;
-
-let surface_to_string = function
-  | Public_mcp -> "public_mcp"
-  | Spawned_agent -> "spawned_agent"
-  | Local_worker -> "local_worker"
-  | Session_min -> "session_min"
-  | Admin -> "admin"
-;;

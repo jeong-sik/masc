@@ -1667,11 +1667,6 @@
  (libraries alcotest))
 
 (test
- (name test_surface_coverage_gap)
- (modules test_surface_coverage_gap)
- (libraries alcotest))
-
-(test
  (name test_keeper_prehook_gap)
  (modules test_keeper_prehook_gap)
  (libraries alcotest))

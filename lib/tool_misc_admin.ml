@@ -132,12 +132,12 @@ let tool_inventory_json _ctx ~include_hidden =
     in
     if not (List.mem s prev) then Hashtbl.replace surface_map name (s :: prev)
   in
+  (* The per-actor [surfaces_for_tool] contribution was dropped in the
+     surface-cut refactor (the [surface] type is deleted).  Tool visibility is
+     now reported via the public_mcp projection below plus the
+     Capability_registry projection seeds. *)
   Config.raw_all_tool_schemas
   |> List.iter (fun (schema : Masc_domain.tool_schema) ->
-         Tool_catalog_surfaces.surfaces_for_tool schema.name
-         |> List.iter (fun surface ->
-                add_surface schema.name
-                  (Tool_catalog_surfaces.surface_to_string surface));
          if Tool_catalog.is_public_mcp schema.name then
            add_surface schema.name "public_mcp");
   List.iter
@@ -157,10 +157,10 @@ let tool_inventory_json _ctx ~include_hidden =
     schemas
     |> List.map (fun (schema : Masc_domain.tool_schema) ->
            let help_entry = Tool_help_registry.entry_of_schema schema in
-           let metadata_fields =
-             Tool_catalog.metadata_to_fields schema.name
-             |> List.filter (fun (key, _value) -> not (String.equal key "surfaces"))
-           in
+           (* [metadata_to_fields] no longer emits a per-actor "surfaces" key
+              (surface type deleted); the local [surface_map] below owns the
+              tool's "surfaces" field. *)
+           let metadata_fields = Tool_catalog.metadata_to_fields schema.name in
            `Assoc
              ([
                 ("name", `String schema.name);

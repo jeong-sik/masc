@@ -61,11 +61,6 @@ include (Tool_catalog_inference : sig
     | Masc_core
 end)
 
-include (Tool_catalog_surfaces : sig
-  type surface = Tool_catalog_surfaces.surface =
-    | Public_mcp | Spawned_agent | Local_worker | Session_min
-    | Admin
-end)
 
 type metadata = {
   visibility : visibility;
@@ -527,16 +522,15 @@ let lifecycle_to_string = function
 
 let metadata_to_fields name =
   let meta = metadata name in
-  let surfaces =
-    Tool_catalog_surfaces.surfaces_for_tool name
-    |> List.map (fun s -> `String (Tool_catalog_surfaces.surface_to_string s))
-  in
+  (* The per-actor "surfaces" field was dropped in the surface-cut refactor:
+     the [surface] type that produced it (Tool_catalog_surfaces.surfaces_for_tool)
+     was deleted. Visibility is now expressed by the [visibility] field +
+     is_public_mcp / is_system_internal_hidden projections, not an actor list. *)
   let base =
     [
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
       ("implementationStatus", `String (implementation_status_to_string meta.implementation_status));
-      ("surfaces", `List surfaces);
     ]
   in
   let with_canonical =
@@ -617,12 +611,3 @@ let allow_direct_call name =
   match meta.visibility with
   | Default -> true
   | Hidden -> meta.allow_direct_call_when_hidden
-
-(* ================================================================ *)
-(* Re-export: Surface system (from Tool_catalog_surfaces)           *)
-(* ================================================================ *)
-
-let tools_for_surface = Tool_catalog_surfaces.tools_for_surface
-let all_surfaces = Tool_catalog_surfaces.all_surfaces
-let is_on_surface = Tool_catalog_surfaces.is_on_surface
-let surface_to_string = Tool_catalog_surfaces.surface_to_string

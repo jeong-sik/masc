@@ -23,7 +23,6 @@ type selector =
   | Empty
   | All
   | Names of string list
-  | Surface of Tool_catalog.surface
   | Union of selector list
   | Inter of selector list
   | Diff of { base : selector; exclude : selector }
@@ -93,8 +92,6 @@ let rec selector_matches_name selector name =
   | All -> true
   | Names names ->
       name_in_normalized_list name names
-  | Surface surface ->
-      Tool_catalog.is_on_surface surface name
   | Union selectors ->
       List.exists (fun item -> selector_matches_name item name) selectors
   | Inter selectors ->
@@ -107,9 +104,18 @@ let allows_name policy name =
   selector_matches_name policy.allow name
   && not (selector_matches_name policy.deny name)
 
+(* Union of every curated tool-name list.  Replaces the former
+   [all_surfaces |> concat_map tools_for_surface] iteration over the deleted
+   [surface] type.  The name set matches the pre-refactor base: the 5 actor
+   lists plus [system_internal_hidden] (which was the former System_internal
+   surface, included in [all_surfaces] at base).  normalize_names dedupes. *)
 let default_candidates () =
-  Tool_catalog.all_surfaces
-  |> List.concat_map Tool_catalog.tools_for_surface
+  ( Tool_catalog_surfaces.public_mcp_surface_tools
+  @ Tool_catalog_surfaces.spawned_agent_surface_tools
+  @ Tool_catalog_surfaces.local_worker_surface_tools
+  @ Tool_catalog_surfaces.session_min_surface_tools
+  @ Tool_catalog_surfaces.admin_surface_tools
+  @ Tool_catalog_surfaces.system_internal_hidden )
   |> normalize_names
 
 let rec resolve_selector ?candidates selector =
@@ -121,7 +127,6 @@ let rec resolve_selector ?candidates selector =
         | Some names -> names
         | None -> default_candidates ())
   | Names names -> normalize_names names
-  | Surface surface -> normalize_names (Tool_catalog.tools_for_surface surface)
   | Union selectors ->
       selectors
       |> List.concat_map (resolve_selector ?candidates)

@@ -580,6 +580,9 @@
    ;; warm-up stats (Telemetry_eio) are injected at the composition root.
    ;; (wrapped false) keeps bare Tool_dispatch.X / Tool_catalog.X refs working.
    masc_mcp.masc_tool_dispatch
+   ;; Thompson Sampling agent selection (extracted leaf — Agent_health/Prometheus
+   ;; edges inverted to callbacks; Board-callable record_vote without mega-lib cycle)
+   masc_thompson
    ;; Environment configuration (extracted sub-library)
    masc_mcp.config
    masc_mcp.ide

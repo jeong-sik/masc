@@ -22,7 +22,10 @@
    rename or label reshape fails here before it reaches CI. *)
 
 module BC = Masc_mcp.Board_core_classify
-module TS = Masc_mcp.Thompson_sampling
+(* Thompson_sampling carved into the masc_thompson leaf (Agent_health/Prometheus
+   edges inverted); the metric-name constant is still exported. Reference the
+   bare module (re-exported via masc_test_deps) instead of Masc_mcp.*. *)
+module TS = Thompson_sampling
 module Prom = Masc_mcp.Prometheus
 
 let counter_value metric ~labels =

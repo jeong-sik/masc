@@ -86,11 +86,11 @@ let contract_invariants =
 
 (** Eval criteria for contract catalog integration.
 
-    Returns the JSON shape matching [Masc_mcp_cdal_runtime.Criteria.
+    Returns the JSON shape matching [Masc_cdal_runtime.Criteria.
     Contract_catalog_invariants]. Kept as raw JSON here (not the typed
     variant) because [jsonl_writer] is a leaf sub-library that intentionally
     does not depend on [cdal_runtime]. Consumers that need the typed form
-    can pass the value through [Masc_mcp_cdal_runtime.Criteria.of_yojson],
+    can pass the value through [Masc_cdal_runtime.Criteria.of_yojson],
     which auto-routes contract_catalog shapes by required-field detection. *)
 let eval_criteria =
   `Assoc

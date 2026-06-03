@@ -8,7 +8,7 @@
 
 ## 1. Why this exists
 
-masc-mcp 레포는 두 dashboard surface가 같은 서버에서 병존 서빙된다. 같은 design intent를 표현하는데 vocabulary가 분기되어 있어, surface 간 이동 시 색·간격·타이포가 미묘하게 달라진다. 이 spec은 두 surface가 공유하는 canonical vocabulary와 design rule을 정의한다.
+masc 레포는 두 dashboard surface가 같은 서버에서 병존 서빙된다. 같은 design intent를 표현하는데 vocabulary가 분기되어 있어, surface 간 이동 시 색·간격·타이포가 미묘하게 달라진다. 이 spec은 두 surface가 공유하는 canonical vocabulary와 design rule을 정의한다.
 
 | Surface | 경로 | 스타일 시스템 | Active 테마 |
 |---------|------|----------------|------|

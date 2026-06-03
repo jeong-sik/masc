@@ -23,7 +23,7 @@
 ; This sub-library hosts the public retry classifier/contract and uses
 ; Bounded_event_dedupe for the shared in-memory state machine. Pure
 ; stdlib; no Eio link so the standalone test executable builds in
-; seconds without dragging the main masc_mcp library.
+; seconds without dragging the main masc library.
 ;
 ; (include_subdirs no) opts out of the parent (include_subdirs
 ; unqualified). (wrapped false) keeps the bare identifier
@@ -32,7 +32,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_keeper_tool_retry_state)
+ (name masc_keeper_tool_retry_state)
  (public_name masc.keeper_tool_retry_state)
  (wrapped false)
  (libraries masc.bounded_event_dedupe))

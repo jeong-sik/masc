@@ -3,7 +3,7 @@
     Activates the [Tool.disclosure_level] infrastructure that OAS PR
     #1508 + #1511 wired into [lib/pipeline/stage_parse.ml:42-46] and
     [lib/pipeline/pipeline_stage_prepare.ml:109-115] but which sits
-    dormant in masc-mcp (RFC-0084 §1.6: [worker_oas.ml] caller count
+    dormant in masc (RFC-0084 §1.6: [worker_oas.ml] caller count
     for `with_disclosure_level` / `with_disclosure_resolver` /
     `imseonghan` = 0).
 
@@ -42,7 +42,7 @@ type t =
           schema-token savings, highest tool-call error rate.
           Reserved for advanced canary keepers; not the default. *)
 
-(** [default] is [Full] — the safest strategy that today's masc-mcp
+(** [default] is [Full] — the safest strategy that today's masc
     keepers behave as.  PR-13 introduces the typed alternative;
     follow-up activation PR(s) flip keepers to [Hybrid] one at a time. *)
 val default : t

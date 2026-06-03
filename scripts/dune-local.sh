@@ -573,7 +573,7 @@ fi
 # -----------------------------------------------------------------------
 
 # --- OCaml minimum version guard ---------------------------------------
-# dune-project line 28 and masc_mcp.opam line 14 both declare a 5.4
+# dune-project line 28 and masc.opam line 14 both declare a 5.4
 # floor.  Older switches build the early lib/ deps fine but fail later
 # during opam dependency resolution or in stdlib calls added between
 # 5.1 and 5.4.  Catch the mismatch up-front so the error mentions the
@@ -591,7 +591,7 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
       _minor="${_ocaml_v##*.}"
       if [[ "${_major}" -lt 5 \
             || ( "${_major}" -eq 5 && "${_minor}" -lt 4 ) ]]; then
-        printf '[dune-local] OCaml %s detected; this repo requires >= 5.4 (dune-project:28, masc_mcp.opam:14)\n' \
+        printf '[dune-local] OCaml %s detected; this repo requires >= 5.4 (dune-project:28, masc.opam:14)\n' \
           "${_ocaml_v}" >&2
         printf '[dune-local] symptom under older switch: opam dep resolution fails or stdlib API missing\n' >&2
         printf '[dune-local] repair (run each line in turn):\n' >&2

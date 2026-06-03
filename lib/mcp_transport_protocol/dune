@@ -1,7 +1,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_transport_protocol)
+ (name masc_transport_protocol)
  (public_name masc.mcp_transport_protocol)
  (modules mcp_transport_protocol)
  (wrapped false)

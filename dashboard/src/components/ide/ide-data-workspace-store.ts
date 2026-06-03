@@ -81,7 +81,7 @@ function isWorkspaceRepository(repository: Repository): boolean {
 }
 
 function isMascMcpRepository(repository: Repository): boolean {
-  return repository.id === 'masc-mcp' || repository.name === 'masc-mcp'
+  return repository.id === 'masc' || repository.name === 'masc'
 }
 
 export function selectPreferredIdeRepositoryId(

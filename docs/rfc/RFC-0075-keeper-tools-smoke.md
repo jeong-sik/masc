@@ -15,7 +15,7 @@ implementation_prs: []
 
 ## 1. Context
 
-`agent_tool_dispatch_runtime.ml:281-575` 의 dispatch 는 54개 도구를 name-string match 로 라우팅한다. 신규 도구 추가, handler 시그니처 변경, sandbox factory 시그니처 drift 등이 *런타임에야* fail 하며, MEMORY (2026-05-12 `masc-mcp CI Build and Test skips`) 에 따르면 핵심 lib 변경 PR 의 다수가 *Detect Changed Surfaces* gate 뒤에 묶여 test job 이 SKIPPED.
+`agent_tool_dispatch_runtime.ml:281-575` 의 dispatch 는 54개 도구를 name-string match 로 라우팅한다. 신규 도구 추가, handler 시그니처 변경, sandbox factory 시그니처 drift 등이 *런타임에야* fail 하며, MEMORY (2026-05-12 `masc CI Build and Test skips`) 에 따르면 핵심 lib 변경 PR 의 다수가 *Detect Changed Surfaces* gate 뒤에 묶여 test job 이 SKIPPED.
 
 RFC-0071 (exhaustive match codemod) + RFC-0072 (keeper sub-FSM transitions typed) 가 *컴파일 타임 가드*를 도입했지만, tool dispatch table 은 아직 `Tool_name.t` exhaustive 가 enforce 되지 않는다.
 

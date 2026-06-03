@@ -34,7 +34,7 @@ Symptom: `Dashboard_governance_judge.refresh_once` timed out at 45s every cycle 
 
 ### Coupling with RFC-0177
 
-RFC-0177 (`phonebook-internal-vendor-purge`) is purging vendor brand names from masc-mcp internal enums via 1:1 substitution (`Zai_glm → Provider_k`, `Anthropic_http → Provider_a`, etc.). User feedback memory (`feedback_vendor_brand_substitution_is_encryption_not_abstraction`, 2026-05-24) records that this approach was judged as *encryption, not abstraction*: the coupling is preserved, only the label changes.
+RFC-0177 (`phonebook-internal-vendor-purge`) is purging vendor brand names from masc internal enums via 1:1 substitution (`Zai_glm → Provider_k`, `Anthropic_http → Provider_a`, etc.). User feedback memory (`feedback_vendor_brand_substitution_is_encryption_not_abstraction`, 2026-05-24) records that this approach was judged as *encryption, not abstraction*: the coupling is preserved, only the label changes.
 
 If we migrate the phonebook to be the SSOT *while RFC-0177 substitutes labels in flight*, every consumer of phonebook is rewritten twice. This RFC therefore proposes ending the 1:1 substitution direction and replacing it with capability/intent-driven names.
 
@@ -43,7 +43,7 @@ If we migrate the phonebook to be the SSOT *while RFC-0177 substitutes labels in
 - One declarative SSOT for runtime routing (not "legacy routes + phonebook + dangling references").
 - Caller speaks **intent** (`judge`, `code-generation`, `tool-execution`), not provider names.
 - Tier-groups describe **capability profiles** the routing matcher uses to pick concrete models.
-- No vendor brand names in any masc-mcp internal type. No `provider_d`-style substituted labels either; either capability classes or stable model IDs.
+- No vendor brand names in any masc internal type. No `provider_d`-style substituted labels either; either capability classes or stable model IDs.
 - Fall-back chain is part of the declarative spec, not an emergent property of `tiers = ["X", "Y"]` tuples.
 
 ## 3. Non-goals
@@ -139,7 +139,7 @@ The §5 5-PR sequence is implemented as a stacked PR chain (each PR base = paren
 
 - **Keep legacy `[routes.*]` indefinitely, give up on phonebook**: smallest diff, but cements two-SSOT structure and leaves dangling `cross-verify` reference.
 - **Finish phonebook migration (data + cutover) without capability rename**: closes one SSOT but inherits RFC-0177's 1:1 substitution path.
-- **Externalize routing to OAS bridge**: pushes the decision out of masc-mcp entirely. Larger blast radius, deferred.
+- **Externalize routing to OAS bridge**: pushes the decision out of masc entirely. Larger blast radius, deferred.
 
 ## 8. Evidence
 

@@ -15,7 +15,7 @@ This PR drains all of these by hand, in two files, with no model-body change.
 
 ## Why these were excluded from Rule 2
 
-- **`.mli` files** are interface declarations — typically ~300-400 LOC at masc-mcp's current scale and they don't *grow* the way `.ml` files do (they're appended only when a new public symbol is added, not when an implementation expands). So the *growth-driven* drift Rule 2 targets doesn't apply to them. Rule 1 already treats `.mli` as a fallback (it uses `.mli` only if the preamble cites no `.ml` at all).
+- **`.mli` files** are interface declarations — typically ~300-400 LOC at masc's current scale and they don't *grow* the way `.ml` files do (they're appended only when a new public symbol is added, not when an implementation expands). So the *growth-driven* drift Rule 2 targets doesn't apply to them. Rule 1 already treats `.mli` as a fallback (it uses `.mli` only if the preamble cites no `.ml` at all).
 - **Prose form with a bare name** (`line 493 -- Decision_undecided` vs `[mark_turn_started] ... line 493 -- ...`) is a third drift class, distinct from Rule 1's bracketed-name prose and Rule 2's compact form. A third regex was deliberately deferred — drift here is already at +1094 lines on main (see "Drift severity" below), so a manual symbol-anchor pass is the smaller and safer fix.
 
 ## Drift severity (proof that the cleanup matters)

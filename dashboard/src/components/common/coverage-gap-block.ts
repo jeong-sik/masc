@@ -44,7 +44,7 @@ export function classifyCoverageError(error: string | null | undefined): Coverag
     return {
       reason: 'fd_exhaustion',
       label: 'FD exhaustion — see RFC-0097',
-      href: 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/rfc/RFC-0097-keeper-sandbox-container-reuse.md',
+      href: 'https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-0097-keeper-sandbox-container-reuse.md',
     }
   }
   // RFC-0122: keeper disk pressure circuit breaker — mirrors backend
@@ -54,7 +54,7 @@ export function classifyCoverageError(error: string | null | undefined): Coverag
     return {
       reason: 'disk_exhaustion',
       label: 'Disk pressure — see RFC-0122',
-      href: 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/rfc/RFC-0122-keeper-disk-pressure.md',
+      href: 'https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-0122-keeper-disk-pressure.md',
     }
   }
   return null
@@ -69,12 +69,12 @@ const ERROR_CLASS_HINTS: Record<string, CoverageErrorHint> = {
   fd_exhaustion: {
     reason: 'fd_exhaustion',
     label: 'FD exhaustion — see RFC-0097',
-    href: 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/rfc/RFC-0097-keeper-sandbox-container-reuse.md',
+    href: 'https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-0097-keeper-sandbox-container-reuse.md',
   },
   disk_exhaustion: {
     reason: 'disk_exhaustion',
     label: 'Disk pressure — see RFC-0122',
-    href: 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/rfc/RFC-0122-keeper-disk-pressure.md',
+    href: 'https://github.com/jeong-sik/masc/blob/main/docs/rfc/RFC-0122-keeper-disk-pressure.md',
   },
 }
 

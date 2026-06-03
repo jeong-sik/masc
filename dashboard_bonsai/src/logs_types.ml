@@ -148,7 +148,7 @@ let fixture : response =
         ; source = "structured"
         ; legacy_classified = false
         ; module_ = "Server"
-        ; message = "masc-mcp server started on :8935"
+        ; message = "masc server started on :8935"
         ; details = None
         }
       ]

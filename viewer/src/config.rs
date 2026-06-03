@@ -52,13 +52,13 @@ fn runtime_base_url_override() -> Option<String> {
     }
 
     // 2) URL query override:
-    //    ?masc_mcp_url=https://your-masc.up.railway.app
+    //    ?masc_url=https://your-masc.up.railway.app
     if let Ok(search) = win.location().search() {
-        if let Some(raw) = parse_query_param(&search, "masc_mcp_url") {
+        if let Some(raw) = parse_query_param(&search, "masc_url") {
             let normalized = normalize_base_url(&raw);
             if !normalized.is_empty() {
                 if let Ok(Some(storage)) = win.local_storage() {
-                    let _ = storage.set_item("masc_mcp_url", &normalized);
+                    let _ = storage.set_item("masc_url", &normalized);
                 }
                 return Some(normalized);
             }
@@ -66,9 +66,9 @@ fn runtime_base_url_override() -> Option<String> {
     }
 
     // 3) localStorage fallback:
-    //    localStorage.setItem("masc_mcp_url", "https://your-masc.up.railway.app")
+    //    localStorage.setItem("masc_url", "https://your-masc.up.railway.app")
     if let Ok(Some(storage)) = win.local_storage() {
-        if let Ok(Some(raw)) = storage.get_item("masc_mcp_url") {
+        if let Ok(Some(raw)) = storage.get_item("masc_url") {
             let normalized = normalize_base_url(&raw);
             if !normalized.is_empty() {
                 return Some(normalized);
@@ -77,9 +77,9 @@ fn runtime_base_url_override() -> Option<String> {
     }
 
     // 4) Meta tag fallback:
-    //    <meta name="masc-mcp-url" content="https://your-masc.up.railway.app">
+    //    <meta name="masc-url" content="https://your-masc.up.railway.app">
     if let Some(doc) = win.document() {
-        if let Ok(Some(meta)) = doc.query_selector("meta[name='masc-mcp-url']") {
+        if let Ok(Some(meta)) = doc.query_selector("meta[name='masc-url']") {
             if let Some(raw) = meta.get_attribute("content") {
                 let normalized = normalize_base_url(&raw);
                 if !normalized.is_empty() {
@@ -92,7 +92,7 @@ fn runtime_base_url_override() -> Option<String> {
     None
 }
 
-pub fn masc_mcp_base_url() -> String {
+pub fn masc_base_url() -> String {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(runtime) = runtime_base_url_override() {
@@ -103,7 +103,7 @@ pub fn masc_mcp_base_url() -> String {
 }
 
 pub fn build_masc_url(path: &str) -> String {
-    compose_masc_url(&masc_mcp_base_url(), path)
+    compose_masc_url(&masc_base_url(), path)
 }
 
 fn normalize_non_empty(raw: &str) -> Option<String> {
@@ -552,17 +552,17 @@ mod tests {
     fn compose_masc_url_supports_absolute_upstream() {
         assert_eq!(
             compose_masc_url(
-                "https://masc-mcp-production.up.railway.app",
+                "https://masc-production.up.railway.app",
                 "api/v1/trpg/state?workspace_id=default"
             ),
-            "https://masc-mcp-production.up.railway.app/api/v1/trpg/state?workspace_id=default"
+            "https://masc-production.up.railway.app/api/v1/trpg/state?workspace_id=default"
         );
         assert_eq!(
             compose_masc_url(
-                "https://masc-mcp-production.up.railway.app/",
+                "https://masc-production.up.railway.app/",
                 "/sse?workspace=monitor"
             ),
-            "https://masc-mcp-production.up.railway.app/sse?workspace=monitor"
+            "https://masc-production.up.railway.app/sse?workspace=monitor"
         );
     }
 

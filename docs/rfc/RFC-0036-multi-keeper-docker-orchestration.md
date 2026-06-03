@@ -16,7 +16,7 @@ The 2026-05-07 verification report (`docker_cleanup_code_verification.md`) ident
 
 | # | Symptom | Mechanism |
 |---|---------|-----------|
-| 30 | Keeper transitions to `Dead`/`Zombie`; the in-process registry tombstone is reaped, but no Docker container is ever removed because keepers run as Eio fibers inside the single masc-mcp container | `Keeper_supervisor.cleanup_dead_tombstone` only touches in-memory registry + meta JSONL. There is nothing for it to talk to at the docker daemon level. |
+| 30 | Keeper transitions to `Dead`/`Zombie`; the in-process registry tombstone is reaped, but no Docker container is ever removed because keepers run as Eio fibers inside the single masc container | `Keeper_supervisor.cleanup_dead_tombstone` only touches in-memory registry + meta JSONL. There is nothing for it to talk to at the docker daemon level. |
 | 32 | Subprocesses spawned by keepers (e.g., `tool_execute` in `docker` mode → DinD container, or file-search commands) can outlive their parent if the keeper crashes mid-call | `Process_eio.reset_for_testing` exists, but it's a test helper for the worker pool. No production hook drains keeper-owned subprocess descriptors on Dead transition. |
 | 34 | No `docker-compose.yml` per-keeper layout; smoke test (`keeper-docker-multikeeper-isolation-smoke.sh`) is the only place that runs `docker run` per keeper | The production architecture is "single container, many fibers." The smoke path proves isolation but is not the runtime model. |
 

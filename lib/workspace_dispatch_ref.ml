@@ -13,7 +13,7 @@
     Until registered the ref is a no-op returning [None] (the same
     behavior the descriptor projection stub had).
 
-    The ref is process-global mutable — acceptable because masc-mcp is
+    The ref is process-global mutable — acceptable because masc is
     a single-process server with a single workspace dispatcher. *)
 
 let dispatch

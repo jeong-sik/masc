@@ -415,7 +415,7 @@
         <div class="meta">
           <span class="pill">기준 커밋 <code>23a5dd15218a</code></span>
           <span class="pill">생성일 2026-05-18</span>
-          <span class="pill">대상 <code>masc-mcp</code></span>
+          <span class="pill">대상 <code>masc</code></span>
           <span class="pill">산출물 <code>docs/reverse-engineering-design.html</code></span>
         </div>
 
@@ -1407,7 +1407,7 @@
 
         <div class="callout">
           <strong>Root:</strong>
-          GitHub <a href="https://github.com/jeong-sik/masc-mcp/issues/16077">#16077</a>,
+          GitHub <a href="https://github.com/jeong-sik/masc/issues/16077">#16077</a>,
           MASC Goal <code>goal-refactor-wbs-20260518</code>,
           documentation tasks <code>task-362</code>..<code>task-363</code>.
         </div>
@@ -1417,37 +1417,37 @@
           <tbody>
             <tr>
               <td>MCP request admission을 transport-neutral reducer로 만든다.</td>
-              <td><code>goal-refactor-mcp-context-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16080">GitHub #16080</a></td>
+              <td><code>goal-refactor-mcp-context-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16080">GitHub #16080</a></td>
               <td><code>task-364</code> H1/H2 parity<br><code>task-365</code> request context<br><code>task-366</code> actor/token reducer<br><code>task-367</code> caller identity FSM</td>
               <td>initialize, unknown session, protocol mismatch, bad Accept, DELETE, streaming branch를 먼저 고정한 뒤 reducer를 추출한다.</td>
             </tr>
             <tr>
               <td>Keeper turn을 typed pipeline으로 나누되 liveness와 receipt authority를 보존한다.</td>
-              <td><code>goal-refactor-keeper-turn-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16079">GitHub #16079</a></td>
+              <td><code>goal-refactor-keeper-turn-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16079">GitHub #16079</a></td>
               <td><code>task-368</code> spawn no-fork<br><code>task-369</code> event queue payload<br><code>task-370</code> receipt fixtures<br><code>task-371</code> heartbeat seam<br><code>task-372</code> TurnPlan records</td>
               <td>spawn admission, wake hint vs payload, receipt append order, event intake, ProviderAttempt/PostTurn record를 독립 PR로 자른다.</td>
             </tr>
             <tr>
               <td>Task/Goal lifecycle을 pure reducer + persistence adapter로 정렬한다.</td>
-              <td><code>goal-refactor-task-goal-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16078">GitHub #16078</a></td>
+              <td><code>goal-refactor-task-goal-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16078">GitHub #16078</a></td>
               <td><code>task-373</code> Done-to-verification<br><code>task-374</code> orphan recovery<br><code>task-375</code> task executor<br><code>task-376</code> goal reject semantics</td>
               <td>Done redirect와 verification callback ordering을 먼저 증명하고, manual reject vs quorum fail 의미를 이름 붙인 뒤 reducer를 분리한다.</td>
             </tr>
             <tr>
               <td>Dashboard runtime truth를 read-model modules로 분리하고 transport parity를 고정한다.</td>
-              <td><code>goal-refactor-dashboard-readmodel-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16081">GitHub #16081</a></td>
+              <td><code>goal-refactor-dashboard-readmodel-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16081">GitHub #16081</a></td>
               <td><code>task-377</code> auth material parity<br><code>task-378</code> shell fetch SSOT<br><code>task-379</code> WS/SSE slice parity<br><code>task-380</code> DashboardSurface</td>
               <td>HTTP/SSE/WS token material, shell fetch duplication, backend slice와 frontend hydrator mapping을 고정한 뒤 기존 root JSON field를 보존하는 additive <code>dashboard_surface_envelope</code>부터 도입한다.</td>
             </tr>
             <tr>
               <td>JSONL writer contract를 하나로 수렴하되 파일 경로와 row schema는 보존한다.</td>
-              <td><code>goal-refactor-jsonl-substrate-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16082">GitHub #16082</a></td>
+              <td><code>goal-refactor-jsonl-substrate-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16082">GitHub #16082</a></td>
               <td><code>task-381</code> store inventory<br><code>task-382</code> writer fixtures<br><code>task-383</code> shared adapter<br><code>task-384</code> audit/read fixtures</td>
               <td>audit, telemetry, board, runtime, receipts, goal events, trajectory store를 인벤토리화하고 per-path append contract를 테스트로 잠근다.</td>
             </tr>
             <tr>
               <td>LSP 기반 역공학 lane을 만들어 다음 설계도 갱신을 자동화한다.</td>
-              <td><code>goal-refactor-lsp-atlas-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16083">GitHub #16083</a></td>
+              <td><code>goal-refactor-lsp-atlas-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16083">GitHub #16083</a></td>
               <td><code>task-385</code> LSP handshake<br><code>task-386</code> symbol graph design<br><code>task-387</code> first graph snapshot</td>
               <td>기존 <code>/api/v1/ide/lsp</code> 위에 read-only exporter contract를 두고 file/symbol/range/reference/test-owner JSON을 만든다. 설계 SSOT: <a href="design/lsp-symbol-graph-exporter.md">LSP Symbol Graph Exporter</a>.</td>
             </tr>

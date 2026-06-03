@@ -113,7 +113,7 @@ function categorize(name: string): MetricCategory {
   if (name.startsWith('masc_tool_')) return 'tool'
   if (name.startsWith('masc_delta_') || name.startsWith('masc_full_checkpoint')) return 'delta'
   if (name.startsWith('masc_provider_')) return 'provider'
-  if (name.startsWith('masc_mcp_') || name.startsWith('masc_uptime') || name.startsWith('masc_tasks') || name.startsWith('masc_errors') || name.startsWith('masc_active') || name.startsWith('masc_pending')) return 'server'
+  if (name.startsWith('masc_') || name.startsWith('masc_uptime') || name.startsWith('masc_tasks') || name.startsWith('masc_errors') || name.startsWith('masc_active') || name.startsWith('masc_pending')) return 'server'
   return 'other'
 }
 

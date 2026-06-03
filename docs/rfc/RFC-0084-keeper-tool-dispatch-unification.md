@@ -41,7 +41,7 @@ follow_up_prs:
 
 ## §0 Summary
 
-masc-mcp Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 서로 다른 권한·trace·telemetry 동작을 갖는다. 본 RFC는 단일 `Tool_dispatch.guarded_dispatch` entry로 수렴하면서 **모든 dispatch가 4-tuple `(Span, Audit, Metric, Trace_id)`을 100% emit하도록 invariant를 강제**한다. 14개의 stacked PR로 분할 진행한다 (1-2주 horizon).
+masc Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 서로 다른 권한·trace·telemetry 동작을 갖는다. 본 RFC는 단일 `Tool_dispatch.guarded_dispatch` entry로 수렴하면서 **모든 dispatch가 4-tuple `(Span, Audit, Metric, Trace_id)`을 100% emit하도록 invariant를 강제**한다. 14개의 stacked PR로 분할 진행한다 (1-2주 horizon).
 
 ### 0.1 North Star
 
@@ -54,7 +54,7 @@ masc-mcp Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 
 | 비대칭 종류 | 행동 |
 |---|---|
 | **결함** — 권한 게이트 0건, dead pre-hook chain, observer silent skip | 통일 (typed wrapper로 root-fix) |
-| **의도된 경계** — OAS↔masc-mcp boundary, Public MCP vs Internal, Runtime lens carve-out | typed enumeration으로 명시 (통일 금지) |
+| **의도된 경계** — OAS↔masc boundary, Public MCP vs Internal, Runtime lens carve-out | typed enumeration으로 명시 (통일 금지) |
 
 본 RFC는 **결함은 통일, 경계는 명시**. 두 행동이 동시에 typed 방식으로 진행.
 
@@ -64,7 +64,7 @@ masc-mcp Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 
 
 ### §1.1 3-Entry Dispatch Divergence
 
-masc-mcp `lib/tool_dispatch.ml`에는 2개의 entry function이 있고, `lib/keeper/keeper_tag_dispatch.ml`이 3번째 fallback entry를 형성한다. 각 entry가 서로 다른 caller를 받고 서로 다른 hook/guard를 적용한다.
+masc `lib/tool_dispatch.ml`에는 2개의 entry function이 있고, `lib/keeper/keeper_tag_dispatch.ml`이 3번째 fallback entry를 형성한다. 각 entry가 서로 다른 caller를 받고 서로 다른 hook/guard를 적용한다.
 
 **Entry 1 — `Tool_dispatch.dispatch`** (`lib/tool_dispatch.ml:117-130`):
 
@@ -123,7 +123,7 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.result optio
 
 ### §1.2 Telemetry 4-Tuple Emission Gap
 
-`Tracing.with_span`은 oas `lib/agent/agent_tools.ml:161 invoke_hook`에서 hook 호출을 wrap하지만, **masc-mcp `lib/tool_dispatch.ml`이나 legacy keeper registered-runtime path에 0건**이었다.
+`Tracing.with_span`은 oas `lib/agent/agent_tools.ml:161 invoke_hook`에서 hook 호출을 wrap하지만, **masc `lib/tool_dispatch.ml`이나 legacy keeper registered-runtime path에 0건**이었다.
 
 | Tuple slot | 현재 상태 |
 |---|---|
@@ -177,7 +177,7 @@ NixOS/Alpine/Linux server에서 silent fail.
 
 ### §1.6 Dormant Hybrid Disclosure Infrastructure
 
-OAS측 `Tool.disclosure_level` Hybrid + `Disclosure_resolver`는 `lib/pipeline/stage_parse.ml:42-46` + `lib/pipeline/pipeline_stage_prepare.ml:109-115` wired (since 0.194.0). 그러나 masc-mcp `worker_oas.ml`(886줄)에서 **caller 0** (`rg -n 'with_disclosure_level\|with_disclosure_resolver\|imseonghan' lib/ bin/` = 0).
+OAS측 `Tool.disclosure_level` Hybrid + `Disclosure_resolver`는 `lib/pipeline/stage_parse.ml:42-46` + `lib/pipeline/pipeline_stage_prepare.ml:109-115` wired (since 0.194.0). 그러나 masc `worker_oas.ml`(886줄)에서 **caller 0** (`rg -n 'with_disclosure_level\|with_disclosure_resolver\|imseonghan' lib/ bin/` = 0).
 
 → 모든 keeper tool은 현재 Full_schema 단일 사이클. RFC-OAS-013 §1.3 경고가 정확히 main에 실현됨.
 
@@ -232,7 +232,7 @@ PR-14 CI lint `ci/lint-no-direct-dispatch.sh`가 강제.
 
 | 경계 | 코드에 typed enumeration 필수 |
 |---|---|
-| **OAS Agent SDK ↔ masc-mcp keeper runtime** | masc-mcp의 oas usage는 `Worker_oas` 단일 module에 집중. 역방향 의존 0. (RFC-OAS-011 + SDK Independence Gate strict mode 이미 강제) |
+| **OAS Agent SDK ↔ masc keeper runtime** | masc의 oas usage는 `Worker_oas` 단일 module에 집중. 역방향 의존 0. (RFC-OAS-011 + SDK Independence Gate strict mode 이미 강제) |
 | **Public MCP ↔ Internal** | `Surface.Public_mcp` vs 그 외. 같은 dispatch path, 다른 capability set. |
 | **Runtime lens (외부 `"runtime"` placeholder vs 내부 real provider)** | `lib/runtime/runtime_catalog_runtime.candidate_probe_to_yojson` + `runtime_observation.runtime_attempt_to_json` carve-out — typed surface로 명시. 메모리 `reference_runtime_lens_boundary_carve_out`. |
 | **Boot policy ↔ runtime route** | 같은 `Tool_resolution.resolve` 결과를 *재사용*. 두 번 결정하지 않음 (PR-6). |
@@ -449,7 +449,7 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 | **oas RFC-OAS-013 closeout** (`resolve_disclosure_level` dedup) | oas repo의 SDK Independence Gate + Draft Auto-Merge Guard. 별도 track. |
 | **Keeper sub-library extraction** | Memory `project_keeper_sublib_extraction_analysis`: 189↔118 cycle. 본 sprint는 typed boundary *준비*. |
 | **TLA+ spec for new dispatch FSM** | AGENT-LLM-A.md TLA+ Bug Model. Property test (PR-14)가 1차 안전선. TLA+ spec은 다음 RFC. |
-| **MCP `_meta` field로 descriptor 전달** | RFC-OAS-012 영역. masc-mcp 변경 0. |
+| **MCP `_meta` field로 descriptor 전달** | RFC-OAS-012 영역. masc 변경 0. |
 
 ---
 
@@ -513,14 +513,14 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 
 - RFC-OAS-008 typed tool identification (oas measured 머지)
 - RFC-OAS-009 v2 sever core→CDAL deps (oas PR-B 머지)
-- RFC-OAS-011 CDAL → masc-mcp migration (완료)
+- RFC-OAS-011 CDAL → masc migration (완료)
 - RFC-OAS-013 keeper tool disclosure activation (PR-13에서 활성화)
 
 ### 9.5 메모리
 
 - `reference_runtime_lens_boundary_carve_out` — 외부 placeholder vs 내부 real lens
 - `feedback_user_rejects_cron_pr_loop` — Draft + human-approved-ready label
-- `feedback_masc_mcp_draft_guard_blocks_agent_ready` — agent ready 자동 차단
+- `feedback_masc_draft_guard_blocks_agent_ready` — agent ready 자동 차단
 - `feedback_keeper_tool_alias_3_tier_is_overengineered` — 공용 도구 이름 1st-class
 - `feedback_lint_string_classifier_is_workaround_not_fundamental` — string classifier 자체 거부
 - `feedback_rfc_number_reservation_needed` — RFC 번호 race 사고

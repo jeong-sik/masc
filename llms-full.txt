@@ -1,6 +1,6 @@
 # MASC-MCP LLM Front Door Full
 
-This file is the AI-friendly narrow waist for `masc-mcp`.
+This file is the AI-friendly narrow waist for `masc`.
 
 Public MCP surface boundaries, compatibility aliases, and internal prompt-plane notes live in `docs/MCP-SURFACE-AUDIT.md`.
 

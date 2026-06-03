@@ -244,4 +244,4 @@ PR-1 is prerequisite for PR-2/PR-3; PR-4/PR-5 can land in parallel after PR-3.
 - `lib/workspace/workspace_task_schedule.ml:380-422` — `task_claim_next_preserved` handling
 - `lib/workspace/workspace_task.ml:380-417` — oscillation threshold detection (5/10/20)
 - `lib/workspace/workspace_hooks.ml:219` — `#10421` hook definition
-- Issue #13302 P0-4 audit: https://github.com/jeong-sik/masc-mcp/issues/13302#issuecomment-4380878513
+- Issue #13302 P0-4 audit: https://github.com/jeong-sik/masc/issues/13302#issuecomment-4380878513

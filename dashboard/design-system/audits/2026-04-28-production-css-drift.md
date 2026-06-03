@@ -4,7 +4,7 @@
 - **Branch**: `feature/ds-drift-phase0-audit`
 - **Base commit**: `86053a88bb`
 - **Scope**: 19 hand-written CSS files under `dashboard/src/styles/` (excluding `tokens.generated.css`/`tokens.generated.ts`)
-- **Plan**: `~/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md`
+- **Plan**: `~/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-h-curious-dusk.md`
 - **Method**: comments stripped (`/\*…\*/`), then `rg` counts. Hex catalog lower-cased, deduped per file.
 
 ---

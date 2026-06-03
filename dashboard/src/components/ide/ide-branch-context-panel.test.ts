@@ -28,8 +28,8 @@ function makeGraph(overrides: Partial<GitGraphResponse> = {}): GitGraphResponse 
     repos: [
       {
         id: 'masc',
-        root: '/workspace/masc-mcp',
-        label: 'masc-mcp',
+        root: '/workspace/masc',
+        label: 'masc',
         current_branch: 'fix/ide-branch',
         head: 'abcdef1234567890',
         dirty: true,
@@ -44,7 +44,7 @@ function makeGraph(overrides: Partial<GitGraphResponse> = {}): GitGraphResponse 
         id: 'lane-1',
         label: 'sangsu',
         branch: 'fix/ide-branch',
-        worktree_path: '/workspace/masc-mcp/.worktrees/fix-ide-branch',
+        worktree_path: '/workspace/masc/.worktrees/fix-ide-branch',
         color: '#d4a14a',
       },
     ],
@@ -94,7 +94,7 @@ describe('buildIdeBranchContextModel', () => {
   it('maps graph data to compact IDE branch context', () => {
     const model = buildIdeBranchContextModel(makeGraph(), 'masc')
 
-    expect(model?.repoLabel).toBe('masc-mcp')
+    expect(model?.repoLabel).toBe('masc')
     expect(model?.currentBranch).toBe('fix/ide-branch')
     expect(model?.head).toBe('abcdef1234')
     expect(model?.headRef).toBe('abcdef1234567890')
@@ -140,12 +140,12 @@ describe('IdeBranchContextPanel', () => {
     )
 
     await waitFor(() => expect(container.textContent).toContain('BRANCH GRAPH'))
-    await waitFor(() => expect(container.textContent).toContain('masc-mcp'))
+    await waitFor(() => expect(container.textContent).toContain('masc'))
 
     expect(fetchGraph).toHaveBeenCalledWith(expect.objectContaining({ limit: 80, repoId: 'masc' }))
     expect(container.textContent).toContain('fix/ide-branch')
     expect(container.textContent).toContain('abcdef1234')
-    expect(container.querySelector('svg[aria-label="Branch graph for masc-mcp"]')).not.toBeNull()
+    expect(container.querySelector('svg[aria-label="Branch graph for masc"]')).not.toBeNull()
 
     const repoLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-branch-repo-row button')]
     expect(repoLinks.map(link => link.getAttribute('aria-label'))).toEqual([
@@ -166,7 +166,7 @@ describe('IdeBranchContextPanel', () => {
       supervisor: 'local',
       entries: [{
         keeper_id: 'sangsu',
-        workspace_label: 'masc-mcp',
+        workspace_label: 'masc',
         role: 'coder',
         status: 'active',
         last_seen_ms: 100,

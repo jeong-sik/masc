@@ -156,4 +156,4 @@ Pending RISKY edges (require feature-flag / dual-emit infrastructure):
 - `docs/keeper-fsm-graph.dot` — cross sub-FSM edges (different metric)
 - `lib/keeper/keeper_turn_fsm.mli` — ADT + `emit_transition` signature
 - `specs/keeper-turn-fsm/KeeperTurnFSM.tla` — TLA+ spec (turn_state abstraction level)
-- `planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-hashed-pretzel.md` — parent plan, Phase 4 onward
+- `planning/claude-plans/me-workspace-yousleepwhen-masc-hashed-pretzel.md` — parent plan, Phase 4 onward

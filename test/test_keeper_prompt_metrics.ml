@@ -58,7 +58,7 @@ let base_system_prompt =
 
 let continuity_snapshot_text =
   "Recent continuity snapshot:\n\
-   Goal: Deploy masc-mcp v0.97.0 to production\n\
+   Goal: Deploy masc v0.97.0 to production\n\
    Progress: OAS pinned, keeper hooks updated, CI passing\n\
    Next: Run integration tests, prepare release notes\n\
    Decisions: Use squash merge for PR #3895\n\

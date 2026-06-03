@@ -106,7 +106,7 @@ existing `Big_three` execution path with a different provider set.
 ### 4.3 Harness — partial-Eio-context diagnostic (H) — IMPLEMENTED
 
 **Scope revision (2026-05-07)**: Original proposal was register-fallback,
-but `Llm_provider.Provider_registry`'s public API on masc-mcp's downstream
+but `Llm_provider.Provider_registry`'s public API on masc's downstream
 requires both `~sw` and `~net` to probe — there is no register-without-probe
 entry point exposed. Realistic surgical change is **visibility**: turn
 silent skip into a one-shot WARN that tells the operator which half of

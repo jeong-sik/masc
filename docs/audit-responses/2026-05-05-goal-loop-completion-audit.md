@@ -186,8 +186,8 @@
 - [근거] `python3 scripts/extract_goal_loop_source_row_candidates.py
   <12 prompt source files> --summary-only --require-complete --format text
   --checked-at 2026-05-06
-  --no-row-tracking-issue-ref https://github.com/jeong-sik/masc-mcp/issues/13265
-  --no-row-tracking-issue-ref https://github.com/jeong-sik/masc-mcp/issues/13636`
+  --no-row-tracking-issue-ref https://github.com/jeong-sik/masc/issues/13265
+  --no-row-tracking-issue-ref https://github.com/jeong-sik/masc/issues/13636`
   checked at 2026-05-06T17:12:00+09:00, confidence High: exits non-zero with
   `rows=132 expected=206 missing=74 sources=12 errors=0`. This conservative
   extractor records only explicit IDs, explicit S/F anti-pattern rows,
@@ -207,10 +207,10 @@
   separately, and blocks currentness on 3 future-dated source snapshot/report
   claims in `artifact_synthesis.md`, `audit_derived_state.md`, and
   `progress-evaluation.md`.
-- [근거] `gh pr view 13577 --repo jeong-sik/masc-mcp --json
+- [근거] `gh pr view 13577 --repo jeong-sik/masc --json
   number,state,isDraft,mergeable,mergeStateStatus,labels,url`,
-  `gh issue view 13265 --repo jeong-sik/masc-mcp --json number,state,url`, and
-  `gh pr checks 13577 --repo jeong-sik/masc-mcp` checked at
+  `gh issue view 13265 --repo jeong-sik/masc --json number,state,url`, and
+  `gh pr checks 13577 --repo jeong-sik/masc` checked at
   2026-05-06T15:00:55+09:00, confidence High: #13577 is open, draft,
   mergeable, and label-free; #13265 is open. Current red
   checks are `CI Gate` and `Draft Auto-Merge Guard`; their logs identify the
@@ -279,7 +279,7 @@
   unique requirement IDs, 11 unique issue refs, and no missing or invalid
   tracking refs; recording the map is separate from satisfying every mapped
   prompt requirement.
-- [근거] `gh issue view <issue> --repo jeong-sik/masc-mcp --json
+- [근거] `gh issue view <issue> --repo jeong-sik/masc --json
   number,state,title,url,labels` for #13265, #13505, #13610, #13611, #13636,
   #13684, #13685, #13686, #13688, #13689, and #13690 checked at
   2026-05-06T17:25:00+09:00, confidence High: all 11 prompt-checklist

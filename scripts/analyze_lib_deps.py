@@ -58,7 +58,7 @@ def discover_sub_libraries() -> None:
 
 
 def get_monolith_modules() -> dict[str, Path]:
-    """Discover every .ml file absorbed into the flat `masc_mcp` library.
+    """Discover every .ml file absorbed into the flat `masc` library.
 
     `lib/dune` declares the library with `(include_subdirs unqualified)` and no
     explicit `(modules ...)` stanza, so the module set is *every* `.ml` under
@@ -394,7 +394,7 @@ def graph_json(
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Analyze dependency edges in the flat masc_mcp library."
+        description="Analyze dependency edges in the flat masc library."
     )
     parser.add_argument("--json", action="store_true",
                         help="Write graph JSON to reports/lib-dependency-graph.json.")
@@ -411,7 +411,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-# Regression floor: the flat `masc_mcp` namespace has had 600+ modules for the
+# Regression floor: the flat `masc` namespace has had 600+ modules for the
 # whole life of this script.  If discovery returns far fewer, module discovery
 # is broken (the pre-2026-05 `(modules ...)`-parsing bug returned 0).
 _SELF_TEST_MIN_MODULES = 400
@@ -467,7 +467,7 @@ def main() -> None:
     print(f"  {', '.join(sorted(SUB_LIBRARY_DIRS))}")
     print()
 
-    print(f"Flat-namespace modules (absorbed into masc_mcp): {len(modules)}")
+    print(f"Flat-namespace modules (absorbed into masc): {len(modules)}")
 
     missing = [n for n, p in modules.items() if not p.exists()]
     if missing:

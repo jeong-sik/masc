@@ -13,7 +13,7 @@
  * names or returns null where an array is expected, this file breaks
  * before production does.
  *
- * Background: masc-mcp #7315 (keeper wiring) + #7319 (KDP/KCL unstub)
+ * Background: masc #7315 (keeper wiring) + #7319 (KDP/KCL unstub)
  * + #7439 (valibot schema pilot). See API_CONTRACT.md.
  */
 

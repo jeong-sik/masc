@@ -24,7 +24,7 @@ implementation_prs: [15467,15474,15488,15493,15494,15522,15531]
 > Companion to RFC-0056. RFC-0056 enumerated *incremental* leaf extraction
 > (1A trajectory → 1K compaction_trigger, 11 phases shipped). This RFC
 > evaluates whether the **remaining ~244 modules in `lib/keeper/`** should
-> be promoted to a single sub-library `masc_mcp.keeper` in one PR, instead
+> be promoted to a single sub-library `masc.keeper` in one PR, instead
 > of continuing leaf-by-leaf sweep. Recommendation: **Option B with
 > prerequisite rename PR (Phase 2.A)** — bulk extraction is feasible but
 > blocked by 38 collision-risk filenames that lack the `keeper_` prefix.
@@ -164,8 +164,8 @@ warm-up for Options B/C.
 **Mechanism**: Add `lib/keeper/dune` with a single `(library)` stanza
 using `(wrapped false)`. Dune auto-excludes the subdir from parent
 `lib/dune`'s `(include_subdirs unqualified)`. Parent adds
-`masc_mcp.keeper` to its `(libraries …)` list. Tests add
-`(re_export masc_mcp.keeper)` to `test/deps/dune`.
+`masc.keeper` to its `(libraries …)` list. Tests add
+`(re_export masc.keeper)` to `test/deps/dune`.
 
 **Caller delta**: `Keeper_X` ⇒ `Keeper_X` (zero change, 248 + 335 = 583
 files untouched). Because `(wrapped false)` keeps bare top-level module
@@ -233,7 +233,7 @@ Defer indefinitely; revisit only when ecosystem moves.
 
 ### 3.D. Tezos `lib_*/` with `(wrapped true) + -open`
 
-**Mechanism**: `lib/keeper/dune` with `(library (name masc_mcp_keeper)
+**Mechanism**: `lib/keeper/dune` with `(library (name masc_keeper)
 (wrapped true))`. Modules become `Masc_mcp_keeper.Keeper_X`. Parent
 `lib/dune` adds `(flags (:standard -open Masc_mcp_keeper))` so internal
 references resolve `Keeper_X` ⇒ `Masc_mcp_keeper.Keeper_X` transparently.
@@ -268,7 +268,7 @@ decomposition: it creates the library boundary; mesh work happens
 | PR | Phase | Scope | Approximate cost |
 |---|---|---|---|
 | **PR-A** | 2.A — rename | 38 `*.ml` files in `lib/keeper/` to `keeper_*` prefix; internal-only ref updates. **Skip files referenced from outside `lib/keeper/`** (per-file audit) — these get individual rename PRs or `(wrapped false)` exception list. | 38 git mv, ≤150 internal ref-sed lines |
-| **PR-B** | 2.B — promote | `lib/keeper/dune` new `(library)` stanza with `(wrapped false)`; parent `lib/dune` removes implicit keeper inclusion + adds `masc_mcp.keeper` dep; `test/deps/dune` re_export | ~10 dune edits, 0 caller updates |
+| **PR-B** | 2.B — promote | `lib/keeper/dune` new `(library)` stanza with `(wrapped false)`; parent `lib/dune` removes implicit keeper inclusion + adds `masc.keeper` dep; `test/deps/dune` re_export | ~10 dune edits, 0 caller updates |
 
 After both merge: `lib/keeper/` is a real sub-library. Mesh
 decomposition (Strategies #1, #5, #6 from Track A) resumes as RFC-0056

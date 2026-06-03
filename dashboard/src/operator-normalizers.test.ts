@@ -90,13 +90,13 @@ describe('normalizeOperatorDigest', () => {
   it('extracts root namespace', () => {
     const result = normalizeOperatorDigest({
       root: {
-        project: 'masc-mcp',
+        project: 'masc',
         cluster: 'local',
         paused: true,
         pause_reason: 'maintenance',
       },
     })
-    expect(result.root!.project).toBe('masc-mcp')
+    expect(result.root!.project).toBe('masc')
     expect(result.root!.cluster).toBe('local')
     expect(result.root!.paused).toBe(true)
     expect(result.root!.pause_reason).toBe('maintenance')
@@ -190,9 +190,9 @@ describe('normalizeOperatorSnapshot', () => {
 
   it('extracts root namespace', () => {
     const result = normalizeOperatorSnapshot({
-      root: { project: 'masc-mcp', paused: false },
+      root: { project: 'masc', paused: false },
     })
-    expect(result.root.project).toBe('masc-mcp')
+    expect(result.root.project).toBe('masc')
     expect(result.root.paused).toBe(false)
   })
 

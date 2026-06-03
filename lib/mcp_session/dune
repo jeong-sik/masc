@@ -1,7 +1,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_session)
+ (name masc_session)
  (public_name masc.mcp_session)
  (modules mcp_session)
  (wrapped false)

@@ -6,7 +6,7 @@
 
 ## 0. 동기
 
-masc-mcp `lib/` 전체 `String.starts_with` / `String.ends_with` 사용 100+ 건 중, **도메인 분류를 string convention에 의존하는 3건**을 식별했다 (PR #19747 audit). 이들은 typed variant가 가능함에도 불구하고, agent/human이 작성하는 텍스트의 prefix/suffix로 비즈니스 로직을 판정한다.
+masc `lib/` 전체 `String.starts_with` / `String.ends_with` 사용 100+ 건 중, **도메인 분류를 string convention에 의존하는 3건**을 식별했다 (PR #19747 audit). 이들은 typed variant가 가능함에도 불구하고, agent/human이 작성하는 텍스트의 prefix/suffix로 비즈니스 로직을 판정한다.
 
 새 variant 추가 시 컴파일러가 누락을 잡지 못하고, convention 변경이 조용히 break된다. CLAUDE.md §워크어라운드 시그니처 #2: "컴파일러가 reader 누락을 못 잡음. 새 prefix가 자유롭게 추가됨."
 

@@ -64,7 +64,7 @@ let test_git_root_is_directory () =
 
 let test_is_git_repo_current () =
   let result = Workspace_git.is_git_repo ~base_path:(current_repo_base_path ()) in
-  (* Current directory should be a git repo for masc-mcp *)
+  (* Current directory should be a git repo for masc *)
   check bool "current dir is git repo" true result
 
 let test_is_git_repo_returns_bool () =

@@ -4,7 +4,7 @@
 ; 2026-05-15): the 5-module tool_* cluster has *zero* cycles with
 ; keeper_* / Prometheus / Activity_graph; the only blocker is that
 ; Tool_args (335+199 LoC) and Tool_result (250+85 LoC) reside in
-; parent masc_mcp, so keeper namespace promotion would create a
+; parent masc, so keeper namespace promotion would create a
 ; sub-lib -> parent direction.
 ;
 ; Extracting these two as a leaf sub-lib unblocks both keeper
@@ -19,7 +19,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_tool_types)
+ (name masc_tool_types)
  (public_name masc.tool_types)
  (wrapped false)
  (libraries yojson masc_log masc_core eio time_compat)

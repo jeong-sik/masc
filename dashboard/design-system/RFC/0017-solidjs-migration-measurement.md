@@ -169,7 +169,7 @@ For the RFC 0017 trajectory this means:
 ## Reproduction
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp/.worktrees/ds-v2-rfc0017-perf-bench/dashboard
+cd ~/me/workspace/yousleepwhen/masc/.worktrees/ds-v2-rfc0017-perf-bench/dashboard
 MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:8935 pnpm dev &
 
 cd /tmp/rfc0017-bench   # or wherever the runner lives

@@ -1,5 +1,5 @@
 #use "topfind";;
-#require "masc_mcp";;
+#require "masc";;
 let () =
   let agent_name = "keeper-direct-agent" in
   let keeper_name = Masc_mcp.Keeper_identity.canonical_keeper_name_from_agent_name agent_name in

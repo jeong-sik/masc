@@ -164,8 +164,8 @@
       "numbered_items": 18,
       "path": "prompt_corpus/GOAL_LOOP/INTEGRATED_IMPROVEMENT_DESIGN.md",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ],
       "unstructured_marker_total": 128
     },
@@ -176,8 +176,8 @@
       "numbered_items": 0,
       "path": "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ],
       "unstructured_marker_total": 43
     },
@@ -188,8 +188,8 @@
       "numbered_items": 11,
       "path": "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ],
       "unstructured_marker_total": 240
     },
@@ -200,8 +200,8 @@
       "numbered_items": 40,
       "path": "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ],
       "unstructured_marker_total": 209
     },
@@ -212,8 +212,8 @@
       "numbered_items": 13,
       "path": "prompt_corpus/GOAL_LOOP/live_incident_analysis.md",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ],
       "unstructured_marker_total": 72
     },
@@ -224,8 +224,8 @@
       "numbered_items": 0,
       "path": "prompt_corpus/GOAL_LOOP/masc_final_diagnosis.md",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ],
       "unstructured_marker_total": 55
     },
@@ -236,8 +236,8 @@
       "numbered_items": 0,
       "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ],
       "unstructured_marker_total": 150
     }

@@ -6,13 +6,13 @@
 ; this is Phase 0 budget G3 / G5 in RFC-0056.
 ;
 ; Pairs with lib/cdal_runtime/ which hosts the producer side.
-; Dependency direction: masc_mcp main lib -> masc.cdal -> masc_core
+; Dependency direction: masc main lib -> masc.cdal -> masc_core
 ; (no cycle by construction; Phase 1 will add masc.cdal_runtime once
 ; cdal_judge / cdal_eval_v1 / cdal_loader join this sub-library).
 (include_subdirs no)
 
 (library
- (name masc_mcp_cdal)
+ (name masc_cdal)
  (public_name masc.cdal)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.

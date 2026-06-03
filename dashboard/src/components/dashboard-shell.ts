@@ -638,7 +638,7 @@ function shortCommit(commit: string | null | undefined): string {
     clickable GitHub permalink. Hard-coded because this is the only
     origin the dashboard is ever built from — a future fork would
     override this via a build-time constant, not a runtime flag. */
-const UPSTREAM_REPO = 'jeong-sik/masc-mcp'
+const UPSTREAM_REPO = 'jeong-sik/masc'
 
 /** Pure: turn a raw commit hash into a GitHub commit URL. Returns
     null for empty / non-hex-looking input so the dropdown renders

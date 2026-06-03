@@ -46,13 +46,13 @@
   ],
   "candidate_artifacts_checked": [
     {
-      "artifact_name": "masc_mcp_audit_complete.agent.final.zip",
+      "artifact_name": "masc_audit_complete.agent.final.zip",
       "artifact_kind": "zip",
       "result": "NOT_ROW_CORPUS",
       "observed_issue_total": 47,
       "sha256": "41bf451170f10ddb68e29385ef784ddae13d192550cdd7a72c516e2d46654dad",
       "contents": [
-        "masc_mcp_audit_complete.agent.final.md",
+        "masc_audit_complete.agent.final.md",
         "roadmap_timeline.png",
         "god_file_decomposition.png",
         "readme_code_mismatch.png",
@@ -61,13 +61,13 @@
       "note": "Archive contains a 47-issue audit report and images, not a 206-row strict finding corpus."
     },
     {
-      "artifact_name": "masc_mcp_audit_complete.agent.final (1).zip",
+      "artifact_name": "masc_audit_complete.agent.final (1).zip",
       "artifact_kind": "zip",
       "result": "NOT_ROW_CORPUS",
       "observed_issue_total": 47,
       "sha256": "59854bccc7d62cd385a338f9816fcb41e1af0862306962d817b572d86d7ff15b",
       "contents": [
-        "masc_mcp_audit_complete.agent.final.md",
+        "masc_audit_complete.agent.final.md",
         "god_file_decomposition.png",
         "readme_code_mismatch.png",
         "fig_telemetry_gap.png",
@@ -76,14 +76,14 @@
       "note": "Duplicate-named archive has the same 47-issue report shape and no 206-row strict finding corpus."
     },
     {
-      "artifact_name": "masc_mcp_audit_complete.agent.final.md",
+      "artifact_name": "masc_audit_complete.agent.final.md",
       "artifact_kind": "markdown",
       "result": "NOT_ROW_CORPUS",
       "observed_issue_total": 47,
       "note": "Markdown report states a 47-issue total rather than the claimed 206-row GOAL LOOP corpus."
     },
     {
-      "artifact_name": "masc_mcp_audit_complete.agent.final.footnote.docx",
+      "artifact_name": "masc_audit_complete.agent.final.footnote.docx",
       "artifact_kind": "docx",
       "result": "NOT_ROW_CORPUS",
       "observed_issue_total": 47,
@@ -91,7 +91,7 @@
       "note": "Docx variant mirrors the 47-issue report shape and does not provide the missing strict rows."
     },
     {
-      "artifact_name": "masc_mcp_audit_complete.agent.final.footnote (1).docx",
+      "artifact_name": "masc_audit_complete.agent.final.footnote (1).docx",
       "artifact_kind": "docx",
       "result": "DUPLICATE_NOT_ROW_CORPUS",
       "observed_issue_total": 47,
@@ -296,20 +296,20 @@
       "artifact_kind": "remote_marker_search_report",
       "result": "NOT_ROW_CORPUS",
       "issue_comment_search": {
-        "issue": "jeong-sik/masc-mcp#13265",
+        "issue": "jeong-sik/masc#13265",
         "result": "NO_STRICT_CORPUS_POINTER",
         "note": "Issue body and comments record the blocker and negative searches but do not attach or link a strict 206-row corpus."
       },
       "pull_request_comment_search": {
         "prs_checked": [
-          "jeong-sik/masc-mcp#13266",
-          "jeong-sik/masc-mcp#13577"
+          "jeong-sik/masc#13266",
+          "jeong-sik/masc#13577"
         ],
         "result": "NO_STRICT_CORPUS_POINTER",
         "note": "PR comments contain verification and negative-evidence updates only; no strict corpus artifact or stable external corpus URL was found."
       },
       "issue_search": {
-        "query": "goal-loop-206-audit-external-claim-2026-05-05 repo:jeong-sik/masc-mcp",
+        "query": "goal-loop-206-audit-external-claim-2026-05-05 repo:jeong-sik/masc",
         "results_total": 1,
         "matching_issue_numbers": [
           13265

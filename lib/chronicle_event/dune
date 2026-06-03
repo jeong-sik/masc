@@ -1,5 +1,5 @@
 ; RFC-0056 Phase 1G — extract Chronicle_event leaf module from flat
-; masc_mcp namespace. Stacked on Phase 1F (memory_jsonl).
+; masc namespace. Stacked on Phase 1F (memory_jsonl).
 ;
 ; Chronicle_event is dependency-leaf: stdlib + Yojson only. Implements
 ; the Chronicle wire format (Actor / Target / Content / Event records
@@ -11,7 +11,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_chronicle_event)
+ (name masc_chronicle_event)
  (public_name masc.chronicle_event)
  (wrapped false)
  (flags (:standard -w +4))

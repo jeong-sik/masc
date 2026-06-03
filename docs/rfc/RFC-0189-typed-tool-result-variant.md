@@ -212,7 +212,7 @@ Each PR-1b step must:
 1. `dune build --root . lib/` → exit 0
 2. `dune exec --root . test/test_tool_result.exe` → 20/20 PASS
 3. `dune build @runtest` → no new regression (sandbox config caveat per
-   `reference_masc_mcp_sandbox_config_unresolved_runtest`)
+   `reference_masc_sandbox_config_unresolved_runtest`)
 4. Migrated file's `dune` `(libraries ...)` unchanged → no new dependency
 5. `Log.warn` count from `of_legacy` measured before/after each step — should
    trend toward zero as PR-1b lands

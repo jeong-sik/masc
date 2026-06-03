@@ -101,7 +101,7 @@ straight.
 
 ## Cross-link
 
-- Plan: `/Users/dancer/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md` § "Phase C/D/E/F Closure Plan / Step 1"
+- Plan: `/Users/dancer/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-h-curious-dusk.md` § "Phase C/D/E/F Closure Plan / Step 1"
 - Spec: `dashboard/design-system/preview/cb-group-f.jsx:291-429`
 - Mock: `dashboard/design-system/preview/data-p2.js:199-237`
 - Type: `dashboard/src/types/dashboard-execution.ts:118-133`

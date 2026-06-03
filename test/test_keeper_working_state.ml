@@ -6,7 +6,7 @@ let evidence ?(kind = "pr") target = WS.make_evidence_ref ~kind ~target
 
 let six_w =
   WS.make_six_w ~who:"keeper-a" ~what:"finish PR review"
-    ~when_:"2026-05-21T02:00:00+09:00" ~where_:"jeong-sik/masc-mcp"
+    ~when_:"2026-05-21T02:00:00+09:00" ~where_:"jeong-sik/masc"
     ~why:"active work must survive compaction" ~how:"track PR and CI refs"
 
 let active_loop ?(id = "loop-1") ?(title = "PR #1") ?(refs = [ evidence "#1" ])

@@ -17,8 +17,8 @@ Status: Active (prereq #15727 + PR-2 #15816 + PR-3 oas #1618 merged; PR-4/5/6 pe
 Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: generic FD accountant that *extends* `Docker_spawn_throttle` ([[#15727]] merged) + `Keeper_fd_pressure` ([[#15727]]) into a multi-class pool covering provider HTTP, sandbox exec, log writer, and any other FD-bound spawn kind
-Out of scope: docker-specific throttle policy (already merged as #15727), `kern.maxfiles` raise mechanics (covered by `launchd/masc-mcp-start.sh`), per-keeper sandbox container reuse ([[RFC-0097]] separate work)
-Series: **IMPROVE-03** of the masc-mcp + oas improvement series. Sibling RFCs: [[RFC-0098]] / [[RFC-0099]] / [[RFC-0100]] / [[RFC-OAS-020]].
+Out of scope: docker-specific throttle policy (already merged as #15727), `kern.maxfiles` raise mechanics (covered by `launchd/masc-start.sh`), per-keeper sandbox container reuse ([[RFC-0097]] separate work)
+Series: **IMPROVE-03** of the masc + oas improvement series. Sibling RFCs: [[RFC-0098]] / [[RFC-0099]] / [[RFC-0100]] / [[RFC-OAS-020]].
 
 ## 1. Problem
 
@@ -43,7 +43,7 @@ The four spawn classes share one observable resource (`kern.maxfiles`) but have 
 - **Replacing `Docker_spawn_throttle`.** This RFC *extends* it. The docker class becomes one of N classes on the generic accountant. The existing public API (`with_slot`, `effective_concurrency`) is preserved.
 - **Replacing `Keeper_fd_pressure`.** The pressure-detection module continues to own the breaker state; the accountant *consumes* its signal across all classes (not just docker).
 - **Per-keeper sandbox container reuse.** [[RFC-0097]] owns that; this RFC's accountant *measures* container-exec spawn cost regardless of which spawn model is in play.
-- **Raising `kern.maxfiles`.** That's a system-config concern handled in `launchd/masc-mcp-start.sh`'s `sb_raise_nofile_limit`. This RFC adds *startup observability* (log whether the raise succeeded) but doesn't change the mechanism.
+- **Raising `kern.maxfiles`.** That's a system-config concern handled in `launchd/masc-start.sh`'s `sb_raise_nofile_limit`. This RFC adds *startup observability* (log whether the raise succeeded) but doesn't change the mechanism.
 - **Replacing provider keep-alive plans.** [[RFC-0100]] composes with this RFC — keep-alive HTTP pooling reduces *cost per call*; this RFC bounds *concurrent call count*. Both are needed.
 
 ## 3. Design
@@ -194,7 +194,7 @@ PR-2 is **wire-inert** (docker behavior preserved via delegation). PR-3 onward o
 ## 7. Open questions
 
 - **Q1**: Should `Log_writer` cap be per-instance (each writer 1 FD) or shared (sum across writers)? **Decision (default)**: shared cap (count of in-flight log-write operations, not file handles). Per-instance accounting is operator-confusing.
-- **Q2**: Provider HTTP wrap — should it be inside `oas/lib/llm_provider/backend_*` (consumer-internal) or at the masc-mcp boundary (cdal_runtime call site)? **Open** — PR-3 picks based on which has cleaner ownership.
+- **Q2**: Provider HTTP wrap — should it be inside `oas/lib/llm_provider/backend_*` (consumer-internal) or at the masc boundary (cdal_runtime call site)? **Open** — PR-3 picks based on which has cleaner ownership.
 - **Q3**: `Log_writer` migration is the trickiest (every `Log.*` call). Should PR-4 wrap only the highest-throughput writers (dashboard SSE log stream, telemetry JSONL) and leave `Log.warn`/`Log.error` unwrapped? **Decision (default)**: yes — high-throughput writers only. The low-throughput `Log.warn` path is FD-cost negligible.
 
 ## 8. Acceptance
@@ -202,11 +202,11 @@ PR-2 is **wire-inert** (docker behavior preserved via delegation). PR-3 onward o
 - [x] **Prereq** (#15727): `Docker_spawn_throttle` Layer A (per-class semaphore) + Layer B (`Keeper_fd_pressure`-aware mutex) — the docker-only ancestor this RFC extends.
 - [x] **PR-1** (#15803): RFC body merged.
 - [x] **PR-2** (#15816): `lib/server/fd_accountant.ml(i)` multi-kind generic pool (`Docker_spawn` / `Provider_http` / `Provider_cli` / `Sandbox_exec` / `Log_writer`) + `Docker_spawn_throttle.with_slot` delegation (public API preserved, wire-inert) — tests include cap-bounds fan-in and provider transport wrapping.
-- [x] **PR-3** (oas #1618): provider HTTP wrap via dependency-injection hook (`Fd_throttle_hook` in oas + `Provider_throttle.with_permit_priority` composes), since oas cannot depend on masc-mcp directly. RFC §3.3 originally specified direct `Fd_accountant` call from `backend_*.ml`; DI pattern replaces that. Embedder (masc-mcp) wires `Fd_throttle_hook.set_handler (fun thunk -> Fd_accountant.with_slot ~kind:Provider_http thunk)` at bootstrap (follow-up commit, not in PR-3 itself).
+- [x] **PR-3** (oas #1618): provider HTTP wrap via dependency-injection hook (`Fd_throttle_hook` in oas + `Provider_throttle.with_permit_priority` composes), since oas cannot depend on masc directly. RFC §3.3 originally specified direct `Fd_accountant` call from `backend_*.ml`; DI pattern replaces that. Embedder (masc) wires `Fd_throttle_hook.set_handler (fun thunk -> Fd_accountant.with_slot ~kind:Provider_http thunk)` at bootstrap (follow-up commit, not in PR-3 itself).
 - [ ] **PR-4**: sandbox exec wrap (agent Execute runtime / sandbox runner) + log writer wrap (largest writers only).
 - [ ] **PR-5**: `Fd_accountant.fd_snapshot` → Prometheus `/metrics` + dashboard `System Health` panel + startup nofile-limit log.
 - [ ] **PR-6**: compose with [[RFC-0099]] `Backpressure` evict signal — `pressure_active = true > 5 s` → `Session_lifecycle_event.Evict { reason = Backpressure }` publish.
-- [x] **Status promoted to `Active`** at PR-2 merge (this closeout commit). `Implemented` promotion deferred until PR-5 (operator-visibility surface) at minimum. The wire-up commit on the masc-mcp side that calls `Fd_throttle_hook.set_handler` is intentionally separated from this closeout and tracked as a follow-up.
+- [x] **Status promoted to `Active`** at PR-2 merge (this closeout commit). `Implemented` promotion deferred until PR-5 (operator-visibility surface) at minimum. The wire-up commit on the masc side that calls `Fd_throttle_hook.set_handler` is intentionally separated from this closeout and tracked as a follow-up.
 
 ## 9. References
 

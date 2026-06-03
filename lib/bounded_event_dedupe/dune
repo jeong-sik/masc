@@ -5,7 +5,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_bounded_event_dedupe)
+ (name masc_bounded_event_dedupe)
  (public_name masc.bounded_event_dedupe)
  (wrapped false)
  (libraries))

@@ -21,7 +21,7 @@ let pp_error fmt = function
 (* Discord requires a specific User-Agent format:
    "DiscordBot ($url, $version)". *)
 let user_agent =
-  "DiscordBot (https://github.com/jeong-sik/masc-mcp, 0.1)"
+  "DiscordBot (https://github.com/jeong-sik/masc, 0.1)"
 
 let build_request ~token ~channel_id ~content =
   let url =

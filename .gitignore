@@ -46,8 +46,8 @@ _coverage/
 
 
 # Downloaded release binary
-masc-mcp-macos-arm64
-masc-mcp-linux-x64
+masc-macos-arm64
+masc-linux-x64
 
 # Downloaded release binary
 figma-mcp-macos-arm64

@@ -337,7 +337,7 @@ From the 17-iter /loop session that built PR #18823:
 
 - RFC-0183 (portal trio): protocol-level dispatch design.
 - `masc_set_param` (HTTP route only — not internal-callable).
-- `masc_mcp_session` (Tool_inline_dispatch with `load/save_mcp_sessions` callbacks — caller-injected closures, not ctx Eio fields).
+- `masc_session` (Tool_inline_dispatch with `load/save_mcp_sessions` callbacks — caller-injected closures, not ctx Eio fields).
 
 ---
 

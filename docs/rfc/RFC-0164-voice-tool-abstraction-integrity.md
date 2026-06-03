@@ -15,7 +15,7 @@ implementation_prs: []
 
 ## §0 TL;DR
 
-Voice tools (`keeper_voice_speak` / `keeper_voice_listen` / `keeper_voice_agent` / `keeper_voice_session_start` / `keeper_voice_session_end` / `keeper_voice_sessions`) are **client-intercepted** in `lib/keeper/agent_tool_voice_runtime.ml` — masc-mcp dispatches them locally via `Voice_bridge.agent_speak` (ElevenLabs HTTP) without provider involvement. They do **not** require provider execution capability.
+Voice tools (`keeper_voice_speak` / `keeper_voice_listen` / `keeper_voice_agent` / `keeper_voice_session_start` / `keeper_voice_session_end` / `keeper_voice_sessions`) are **client-intercepted** in `lib/keeper/agent_tool_voice_runtime.ml` — masc dispatches them locally via `Voice_bridge.agent_speak` (ElevenLabs HTTP) without provider involvement. They do **not** require provider execution capability.
 
 Despite this, the codebase carries a redundant **keeper-side voice gate** (`voice_enabled` / `voice_channel` / `voice_agent_id` / `policy_voice_enabled` fields + `default_voice_enabled_for` / `default_voice_channel_for` / `default_voice_agent_id_for` helpers + `canonical_voice_channel` sentinel) that:
 

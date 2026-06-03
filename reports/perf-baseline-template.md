@@ -1,4 +1,4 @@
-# masc-mcp performance baseline — report template
+# masc performance baseline — report template
 
 This template is the **canonical layout** that `scripts/perf-baseline.sh`
 emits and that every optimisation PR (RFC PR-0.2 follow-ups: cache,

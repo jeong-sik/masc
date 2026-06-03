@@ -1,4 +1,4 @@
-(** Bridge between OAS Llm_provider.Metrics.t and the masc-mcp
+(** Bridge between OAS Llm_provider.Metrics.t and the masc
     Prometheus counter registry.
 
     See the implementation docstring for the rationale; briefly,

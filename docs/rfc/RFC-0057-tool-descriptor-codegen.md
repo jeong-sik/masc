@@ -1,7 +1,7 @@
 # RFC-0057: Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation
 
 > **Status**: Draft
-> **Author**: masc-mcp design loop
+> **Author**: masc design loop
 > **Date**: 2026-05-09
 > **Depends on**: RFC-0054 (shell-ir-ppx-deriving) — PPX track CLOSED-WONTFIX, codegen track ACTIVE
 > **Replaces**: progress_report.md §3.2 "PPX 개발" claim (outdated)

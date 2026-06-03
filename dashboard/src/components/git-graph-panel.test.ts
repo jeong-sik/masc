@@ -109,7 +109,7 @@ function makeRepo(overrides: Partial<GitGraphResponse['repos'][number]> = {}): G
   return {
     id: 'repo-1',
     root: '/workspace/masc',
-    label: 'masc-mcp',
+    label: 'masc',
     current_branch: 'main',
     head: 'abc123',
     dirty: false,
@@ -168,7 +168,7 @@ describe('GitGraphPanel', () => {
         id: 'lane-1',
         label: 'sangsu',
         branch: 'fix/git-context',
-        worktree_path: '/workspace/masc-mcp/.worktrees/fix-git-context',
+        worktree_path: '/workspace/masc/.worktrees/fix-git-context',
         color: '#d4a14a',
       }],
       nodes: [{
@@ -229,7 +229,7 @@ describe('GitGraphPanel', () => {
   })
 
   it('compacts long worktree paths for lane labels', () => {
-    expect(compactGitGraphPath('/workspace/masc-mcp/.worktrees/fix-git-context')).toBe('.worktrees/fix-git-context')
+    expect(compactGitGraphPath('/workspace/masc/.worktrees/fix-git-context')).toBe('.worktrees/fix-git-context')
     expect(compactGitGraphPath('repo')).toBe('repo')
     expect(compactGitGraphPath('')).toBe('workspace')
   })
@@ -269,7 +269,7 @@ describe('GitGraphPanel', () => {
       error: null,
     }
     render(h(GitGraphPanel, null), container)
-    expect(container.textContent).toContain('masc-mcp')
+    expect(container.textContent).toContain('masc')
     expect(container.textContent).toContain('/workspace/masc')
     expect(container.textContent).toContain('Repos')
     expect(container.textContent).toContain('1')

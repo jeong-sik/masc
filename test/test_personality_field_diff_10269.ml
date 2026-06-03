@@ -69,12 +69,12 @@ let test_long_field_truncates_preview () =
 let test_utf8_preview_stays_readable () =
   match
     Kr.personality_field_diff_summary
-      ~field:"goal" ~current:"" ~target:"masc-mcp의 Telemetry와 Logging"
+      ~field:"goal" ~current:"" ~target:"masc의 Telemetry와 Logging"
   with
   | None -> fail "expected Some summary for missing UTF-8 target"
   | Some s ->
       check bool "Korean UTF-8 is preserved" true
-        (Astring.String.is_infix ~affix:"masc-mcp의" s);
+        (Astring.String.is_infix ~affix:"masc의" s);
       check bool "Korean bytes are not octal-escaped" false
         (Astring.String.is_infix ~affix:"\\236" s)
 

@@ -45,7 +45,7 @@ describe('normalizeMission', () => {
       summary: {
         workspace_health: 'healthy',
         cluster: 'local',
-        project: 'masc-mcp',
+        project: 'masc',
         paused: false,
         tempo_interval_s: 30,
         active_agents: 3,
@@ -54,7 +54,7 @@ describe('normalizeMission', () => {
     })
     expect(result.summary.workspace_health).toBe('healthy')
     expect(result.summary.cluster).toBe('local')
-    expect(result.summary.project).toBe('masc-mcp')
+    expect(result.summary.project).toBe('masc')
     expect(result.summary.paused).toBe(false)
     expect(result.summary.tempo_interval_s).toBe(30)
     expect(result.summary.active_agents).toBe(3)

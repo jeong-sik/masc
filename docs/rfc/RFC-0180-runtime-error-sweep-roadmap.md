@@ -101,10 +101,10 @@ paused keeper 의 sandbox cleanup race — `lib/keeper/keeper_lifecycle*.ml` 의
 | **PR-0** (본 RFC) | — | This RFC (Draft → Active on merge) | Low |
 | **PR-1** | G1 β | #18686 (Draft, awaiting CI + Ready) | Low (description only) |
 | **PR-2** | G1 ζ/γ/ε partial | config-only (별 repo or `<base-path>/.masc/`) | 본 cycle 완료 |
-| **PR-3** | G2 α typed boundary | masc-mcp lib | Medium |
-| **PR-4** | G5 γ playground policy | masc-mcp lib | Low |
-| **PR-5** | G3 δ eager reach | masc-mcp lib (RFC discovery 후 별 RFC 가능) | Medium |
-| **PR-6** | G4 ε typed PR awareness | masc-mcp lib | Medium |
+| **PR-3** | G2 α typed boundary | masc lib | Medium |
+| **PR-4** | G5 γ playground policy | masc lib | Low |
+| **PR-5** | G3 δ eager reach | masc lib (RFC discovery 후 별 RFC 가능) | Medium |
+| **PR-6** | G4 ε typed PR awareness | masc lib | Medium |
 | **monitor** | G6 η | no-op, dashboard alert 만 | None |
 
 ## 3. Workaround Sig 검증 (전체)

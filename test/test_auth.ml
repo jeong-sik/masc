@@ -271,7 +271,7 @@ let test_verify_token_reports_token_owner_on_agent_mismatch () =
          && contains_substring rendered "bearer token belongs to agent_code");
       check bool "mismatch message explains fix" true
         (contains_substring rendered
-           "masc-mcp login --agent provider_f --role worker --shell")
+           "masc login --agent provider_f --role worker --shell")
   | Ok _, Ok _ ->
       fail "verify_token should fail when token owner and requested agent differ"
   | Ok _, Error e ->

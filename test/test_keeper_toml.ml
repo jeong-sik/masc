@@ -453,7 +453,7 @@ proactive_enabled = true
 proactive_idle_sec = 300
 proactive_cooldown_sec = 60
 autoboot_enabled = false
-active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
+active_goal_ids = ["goal-runtime", "goal-masc"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -470,7 +470,7 @@ active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
       check (option (list string)) "active_goal_ids"
-        (Some [ "goal-runtime"; "goal-masc-mcp" ])
+        (Some [ "goal-runtime"; "goal-masc" ])
         d.active_goal_ids
 
 let test_profile_rejects_partial_proactive_interval_pair () =

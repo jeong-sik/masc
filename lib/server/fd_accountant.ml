@@ -172,8 +172,8 @@ let install_with_process_sandbox_exec_guard () =
     }
 
 let install_autonomy_exec_sandbox_exec_guard () =
-  Masc_mcp_cdal_runtime.Autonomy_exec.set_run_guard
-    { Masc_mcp_cdal_runtime.Autonomy_exec.run =
+  Masc_cdal_runtime.Autonomy_exec.set_run_guard
+    { Masc_cdal_runtime.Autonomy_exec.run =
         (fun f ->
           if Eio_guard.is_ready () then
             with_slot ~kind:Sandbox_exec f

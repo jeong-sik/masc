@@ -11,8 +11,8 @@ implementation_prs: []
 - **Status**: Implemented (frontmatter SSOT) — §3.3 + §3.2 + §3.1 sunsets all merged; legacy silent paths deleted; counters demoted to informational per the per-section sunset criteria.  See §4 *Removal targets* for the per-section PR trail.
 - **Created**: 2026-05-20
 - **Owner**: keeper observability + memory + runtime
-- **Predecessors**: masc-mcp #16771, #16778, #16787 (all MERGED to main 2026-05-19)
-- **Evidence base**: `~/me/memory/masc-mcp-code-flowchart-audit-2026-05-20.html` §3 MEMORY, §4 COMPACT, §6 RUNTIME
+- **Predecessors**: masc #16771, #16778, #16787 (all MERGED to main 2026-05-19)
+- **Evidence base**: `~/me/memory/masc-code-flowchart-audit-2026-05-20.html` §3 MEMORY, §4 COMPACT, §6 RUNTIME
 - **Related**: RFC-0144 (workaround sunset taxonomy), RFC-0145 (permissive silent fallback elimination)
 
 ## 1. Motivation
@@ -160,7 +160,7 @@ This RFC is the retroactive sunset; the feedback memory is the pre-PR check that
 ## 8. References
 
 - `~/me/instructions/software-development.md` §AI 코드 생성 안티패턴 + §워크어라운드 거부 기준 §1 (텔레메트리-as-fix)
-- `~/me/memory/masc-mcp-code-flowchart-audit-2026-05-20.html` (parent audit)
+- `~/me/memory/masc-code-flowchart-audit-2026-05-20.html` (parent audit)
 - `~/me/memory/feedback_telemetry_as_fix_self_recurrence.md` (lesson memory)
 - RFC-0144 — Workaround Sunset Tracking for Keeper Dedup Carryovers (same meta-pattern, different cluster)
 - RFC-0145 — Permissive Silent Fallback Elimination (same family of anti-patterns)

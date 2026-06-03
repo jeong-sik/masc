@@ -84,7 +84,7 @@ describe('ExecuteOutputDrawer event mapping', () => {
           branch: 'feat/runtime',
           path: '/tmp/runtime',
           git_root: '/tmp/runtime',
-          repo_name: 'masc-mcp',
+          repo_name: 'masc',
         },
       }],
       cursor: {
@@ -178,7 +178,7 @@ describe('ExecuteOutputDrawer event mapping', () => {
         branch: 'feat/runtime',
         path: '/tmp/runtime',
         git_root: '/tmp/runtime',
-        repo_name: 'masc-mcp',
+        repo_name: 'masc',
       },
     }]
     cursorOverlaySignal.value = {

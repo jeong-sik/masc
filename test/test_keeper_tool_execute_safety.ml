@@ -216,9 +216,9 @@ let test_playground_guard_inside () =
   Alcotest.(check bool) "exact playground dir"
     true (is_inside_playground ~playground_abs:pg pg);
   Alcotest.(check bool) "repos subdir"
-    true (is_inside_playground ~playground_abs:pg (pg ^ "/repos/masc-mcp"));
+    true (is_inside_playground ~playground_abs:pg (pg ^ "/repos/masc"));
   Alcotest.(check bool) "deep nested"
-    true (is_inside_playground ~playground_abs:pg (pg ^ "/repos/masc-mcp/lib/keeper"))
+    true (is_inside_playground ~playground_abs:pg (pg ^ "/repos/masc/lib/keeper"))
 
 let test_playground_guard_outside () =
   let pg = "/project/.masc/playground/cheolsu" in
@@ -242,7 +242,7 @@ let test_playground_guard_trailing_slash () =
   Alcotest.(check bool) "trailing slash nested match"
     true
     (is_inside_playground ~playground_abs:pg
-       "/project/.masc/playground/cheolsu/repos/masc-mcp")
+       "/project/.masc/playground/cheolsu/repos/masc")
 
 let test_playground_guard_symlink_escape () =
   let base = temp_dir () in
@@ -365,12 +365,12 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
   let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let repo_dir =
-    Filename.concat base ".masc/playground/sangsu/repos/masc-mcp"
+    Filename.concat base ".masc/playground/sangsu/repos/masc"
   in
   ensure_dir repo_dir;
   let args =
     `Assoc
-      [ "cwd", `String "repos/masc-mcp"
+      [ "cwd", `String "repos/masc"
       ; "executable", `String "cat"
       ; "argv", `List [ `String "lib/foo.ml" ]
       ]
@@ -395,7 +395,7 @@ let test_tool_execute_rejects_parent_git_repo_path_arg () =
   let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
-  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  let repo_dir = Filename.concat playground "repos/masc" in
   ensure_dir repo_dir;
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute
@@ -406,7 +406,7 @@ let test_tool_execute_rejects_parent_git_repo_path_arg () =
       ~args:
         (`Assoc
            [ "executable", `String "cat"
-           ; "argv", `List [ `String "./repos/masc-mcp/.missing.ml" ]
+           ; "argv", `List [ `String "./repos/masc/.missing.ml" ]
            ; "cwd", `String playground
            ])
       ()
@@ -429,7 +429,7 @@ let test_tool_execute_rejects_wrapped_git_repo_path_arg () =
   let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
-  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  let repo_dir = Filename.concat playground "repos/masc" in
   ensure_dir repo_dir;
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute
@@ -444,7 +444,7 @@ let test_tool_execute_rejects_wrapped_git_repo_path_arg () =
              , `List
                  [ `String "git"
                  ; `String "-C"
-                 ; `String "./repos/masc-mcp"
+                 ; `String "./repos/masc"
                  ; `String "status"
                  ] )
            ; "cwd", `String playground
@@ -467,12 +467,12 @@ let test_tool_execute_rg_pattern_under_repos_is_not_repo_path () =
   let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
-  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  let repo_dir = Filename.concat playground "repos/masc" in
   ensure_dir repo_dir;
   ignore
     (Fs_compat.save_file_atomic
        (Filename.concat playground "note.txt")
-       "literal repos/masc-mcp mention\n");
+       "literal repos/masc mention\n");
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
@@ -482,7 +482,7 @@ let test_tool_execute_rg_pattern_under_repos_is_not_repo_path () =
       ~args:
         (`Assoc
            [ "executable", `String "rg"
-           ; "argv", `List [ `String "repos/masc-mcp"; `String "." ]
+           ; "argv", `List [ `String "repos/masc"; `String "." ]
            ; "cwd", `String playground
            ])
       ()
@@ -501,7 +501,7 @@ let test_tool_execute_rejects_inline_git_work_tree_path_arg () =
   let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
-  ensure_dir (Filename.concat playground "repos/masc-mcp");
+  ensure_dir (Filename.concat playground "repos/masc");
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
@@ -511,7 +511,7 @@ let test_tool_execute_rejects_inline_git_work_tree_path_arg () =
       ~args:
         (`Assoc
            [ "executable", `String "git"
-           ; "argv", `List [ `String "--work-tree=./repos/masc-mcp"; `String "status" ]
+           ; "argv", `List [ `String "--work-tree=./repos/masc"; `String "status" ]
            ; "cwd", `String playground
            ])
       ()
@@ -532,7 +532,7 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
   let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
-  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  let repo_dir = Filename.concat playground "repos/masc" in
   ensure_dir repo_dir;
   run_process_ok ~cwd:repo_dir "git" [ "init"; "-q"; "--initial-branch=main" ];
   ensure_dir (Filename.concat repo_dir ".worktrees/task");
@@ -545,7 +545,7 @@ let test_tool_execute_rejects_stale_worktree_path_arg () =
       ~args:
         (`Assoc
            [ "executable", `String "cat"
-           ; "argv", `List [ `String "./repos/masc-mcp/.worktrees/task/.missing.ml" ]
+           ; "argv", `List [ `String "./repos/masc/.worktrees/task/.missing.ml" ]
            ; "cwd", `String playground
            ])
       ()
@@ -566,7 +566,7 @@ let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
   let config = Workspace.default_config base in
   let meta = make_local_meta "sangsu" in
   let playground = Filename.concat base (playground_path_of meta.name) in
-  let repo_dir = Filename.concat playground "repos/masc-mcp" in
+  let repo_dir = Filename.concat playground "repos/masc" in
   let missing_worktree = Filename.concat repo_dir ".worktrees/task-missing" in
   ensure_dir repo_dir;
   run_process_ok ~cwd:repo_dir "git" [ "init"; "-q"; "--initial-branch=main" ];
@@ -580,7 +580,7 @@ let test_tool_execute_missing_worktree_cwd_does_not_create_directory () =
         (`Assoc
            [ "executable", `String "ls"
            ; "argv", `List []
-           ; "cwd", `String "repos/masc-mcp/.worktrees/task-missing"
+           ; "cwd", `String "repos/masc/.worktrees/task-missing"
            ])
       ()
   in
@@ -786,7 +786,7 @@ let test_playground_guard_traversal () =
     false (is_inside_playground ~playground_abs:pg "/project/.masc");
   (* The raw non-canonical form would match the prefix — this proves
      we MUST canonicalize before checking *)
-  let raw_traversal = pg ^ "/repos/masc-mcp/../../../../../../lib" in
+  let raw_traversal = pg ^ "/repos/masc/../../../../../../lib" in
   let would_match_raw = String.starts_with ~prefix:(pg ^ "/") raw_traversal in
   Alcotest.(check bool) "raw traversal WOULD match prefix (proves canonicalization needed)"
     true would_match_raw
@@ -866,7 +866,7 @@ let test_execution_location_classifies_repo_worktree_subpath () =
   let meta = make_readonly_meta "exec-location-worktree" in
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   let cwd =
-    Filename.concat playground "repos/masc-mcp/.worktrees/task-123/lib"
+    Filename.concat playground "repos/masc/.worktrees/task-123/lib"
   in
   let loc =
     Masc_mcp.Keeper_tool_execute_path.execution_location_json
@@ -875,7 +875,7 @@ let test_execution_location_classifies_repo_worktree_subpath () =
       ~args:
         (`Assoc
            [ ( "cwd"
-             , `String "repos/masc-mcp/.worktrees/task-123/lib" )
+             , `String "repos/masc/.worktrees/task-123/lib" )
            ])
       ~cwd
   in
@@ -883,21 +883,21 @@ let test_execution_location_classifies_repo_worktree_subpath () =
     (loc |> Json.member "scope" |> Json.to_string);
   Alcotest.(check string) "cwd source" "explicit_cwd"
     (loc |> Json.member "cwd_source" |> Json.to_string);
-  Alcotest.(check string) "repo name" "masc-mcp"
+  Alcotest.(check string) "repo name" "masc"
     (loc |> Json.member "repo_name" |> Json.to_string);
   Alcotest.(check string)
     "relative cwd"
-    "repos/masc-mcp/.worktrees/task-123/lib"
+    "repos/masc/.worktrees/task-123/lib"
     (loc |> Json.member "relative_cwd" |> Json.to_string);
   Alcotest.(check string)
     "repo root"
     (normalize_path_for_containment
-       (Filename.concat playground "repos/masc-mcp"))
+       (Filename.concat playground "repos/masc"))
     (loc |> Json.member "repo_root" |> Json.to_string);
   Alcotest.(check string)
     "worktree root"
     (normalize_path_for_containment
-       (Filename.concat playground "repos/masc-mcp/.worktrees/task-123"))
+       (Filename.concat playground "repos/masc/.worktrees/task-123"))
     (loc |> Json.member "worktree_root" |> Json.to_string)
 
 let test_execution_location_outside_playground_has_null_relative_cwd () =
@@ -1159,14 +1159,14 @@ let test_rewrite_turn_runtime_paths_to_host () =
     |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
   in
   let input =
-    Printf.sprintf "worktree %s/repos/masc-mcp\npwd=%s/repos/masc-mcp\n"
+    Printf.sprintf "worktree %s/repos/masc\npwd=%s/repos/masc\n"
       container_root container_root
   in
   let rewritten =
     Keeper_tool_command_runtime.rewrite_turn_runtime_paths_to_host ~config ~meta input
   in
   Alcotest.(check string) "container paths rewritten to host root"
-    (Printf.sprintf "worktree %s/repos/masc-mcp\npwd=%s/repos/masc-mcp\n"
+    (Printf.sprintf "worktree %s/repos/masc\npwd=%s/repos/masc\n"
        host_root host_root)
     rewritten
 
@@ -1190,7 +1190,7 @@ let test_rewrite_docker_host_paths_to_container () =
   in
   let container_root = Keeper_sandbox.container_root meta.name in
   let input =
-    Printf.sprintf "cd %s/repos/masc-mcp && test -d %s2\n"
+    Printf.sprintf "cd %s/repos/masc && test -d %s2\n"
       host_root host_root
   in
   let rewritten =
@@ -1198,7 +1198,7 @@ let test_rewrite_docker_host_paths_to_container () =
       ~config ~meta input
   in
   Alcotest.(check string) "host root rewritten only on path boundary"
-    (Printf.sprintf "cd %s/repos/masc-mcp && test -d %s2\n"
+    (Printf.sprintf "cd %s/repos/masc && test -d %s2\n"
        container_root host_root)
     rewritten
 
@@ -1211,10 +1211,10 @@ let test_rewrite_docker_container_paths_for_host_validation () =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
   in
-  let host_repo = Filename.concat (Filename.concat host_root "repos") "masc-mcp" in
+  let host_repo = Filename.concat (Filename.concat host_root "repos") "masc" in
   let container_root = Keeper_sandbox.container_root meta.name in
   let input =
-    Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" container_root
+    Printf.sprintf "git -C %s/repos/masc log --oneline -5\n" container_root
   in
   ensure_dir host_repo;
   let rewritten =
@@ -1222,7 +1222,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
       ~config ~meta input
   in
   Alcotest.(check string) "container root rewritten to host root for validation"
-    (Printf.sprintf "git -C %s/repos/masc-mcp log --oneline -5\n" host_root)
+    (Printf.sprintf "git -C %s/repos/masc log --oneline -5\n" host_root)
     rewritten
 
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)

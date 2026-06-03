@@ -1,4 +1,4 @@
-(** Prometheus-Compatible Metrics for masc-mcp.
+(** Prometheus-Compatible Metrics for masc.
 
     Lightweight metrics collection with Prometheus text format export.
     Thread-safe via [Stdlib.Mutex] — works across OCaml 5 domains and
@@ -185,7 +185,7 @@ val metric_oas_bus_capacity : string
     on upstream pin bumps).
 
     A non-zero rate means an OAS pin bump shipped a new payload
-    variant before the masc-mcp consumer was migrated.  The catch-all
+    variant before the masc consumer was migrated.  The catch-all
     is deliberate (see [Keeper_event_bridge.native_event_to_json])
     but degrades SSE subscribers to a kind-only payload, so this
     counter is the per-process signal that an explicit arm needs

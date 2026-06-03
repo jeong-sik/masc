@@ -65,12 +65,12 @@ describe('IdeEditor', () => {
     documentStore.load({
       file_path: 'package.json',
       language: 'json',
-      content: '{\n  "name": "masc-mcp"\n}\n',
+      content: '{\n  "name": "masc"\n}\n',
     })
 
     await waitFor(() => {
       expect(container.textContent).toContain('3 lines')
-      expect(container.querySelector('.cm-content')?.textContent).toContain('masc-mcp')
+      expect(container.querySelector('.cm-content')?.textContent).toContain('masc')
     })
   })
 

@@ -169,7 +169,7 @@ let list_entries ~config =
 
    The legacy [list_entries] above issues one [for-each-ref] and then
    three more git processes per branch ([current_branch],
-   [upstream_for_branch], [ahead_behind_for_branch]).  On masc-mcp
+   [upstream_for_branch], [ahead_behind_for_branch]).  On masc
    (~290 local branches) that fanned out to ~870 synchronous git
    subprocesses on the Eio main domain — measured at 30-53s for
    /api/v1/dashboard/branches.

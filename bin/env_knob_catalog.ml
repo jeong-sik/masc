@@ -311,7 +311,7 @@ let render entries =
      `MASC_*` env var, declare it in the appropriate `env_config_*.ml`\n\
      module and regenerate this file.\n\
      \n\
-     See [#10733](https://github.com/jeong-sik/masc-mcp/issues/10733) for\n\
+     See [#10733](https://github.com/jeong-sik/masc/issues/10733) for\n\
      the categorization roadmap. Newly-added typed getters in\n\
      `lib/config/env_config_*.ml` must carry nearby `@category` and\n\
      `@ops_class` tags; existing knobs remain in the backfill lane.\n\

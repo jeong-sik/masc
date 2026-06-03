@@ -252,9 +252,9 @@ cadence pattern).
 
 Rejected. Concrete failure mode: operator on-call escalates "state
 snapshot looks current per dashboard" when the underlying continuity
-write has been stuck for hours. We have a recent precedent — masc-mcp
+write has been stuck for hours. We have a recent precedent — masc
 2026-05-08~09 PR sweep flagged 14 read-drop counter PRs as the same
-telemetry-as-fix anti-pattern (memory: [[reference_masc_mcp_lib_types_agent_sdk_collision]]).
+telemetry-as-fix anti-pattern (memory: [[reference_masc_lib_types_agent_sdk_collision]]).
 
 ### 8.2 Single field with derived "actual write" timestamp from messages
 

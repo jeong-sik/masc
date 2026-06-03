@@ -20,7 +20,7 @@
 \*
 \*   In particular, the bug-model fixture (CancelledAbsorbed action +
 \*   CancelledNeverAbsorbed invariant) is paired and verified — memory
-\*   reference_masc_mcp_integrated_improvement_design_audit records
+\*   reference_masc_integrated_improvement_design_audit records
 \*   "Clean 56 states / no error.  Buggy: invariant violated in 3 steps".
 \*   The runtime owes the spec; the contract is already proven.
 \*

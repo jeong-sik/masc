@@ -1,5 +1,5 @@
 ; RFC-0056 Phase 1H — extract the Tool_call_quality_benchmark quality
-; scoring domain (8 modules) from flat masc_mcp namespace. Stacked on
+; scoring domain (8 modules) from flat masc namespace. Stacked on
 ; Phase 1G (chronicle_event).
 ;
 ; Initial intent was to extract only the 6 `tool_call_quality_benchmark_*`
@@ -33,7 +33,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_tool_call_quality_benchmark)
+ (name masc_tool_call_quality_benchmark)
  (public_name masc.tool_call_quality_benchmark)
  (wrapped false)
  ;; Drop -w +4 (fragile-match) because we are *moving* pre-existing

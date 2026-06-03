@@ -10,7 +10,7 @@
   #13779 event-stream-temporal-sync, #13781 event-stream-gradient-attraction
 - **Out of scope**: dashboard credential/identity (RFC-0008 territory), oas/agent_sdk
   bumps (handled separately under `chore(oas)` PRs), cross-repo work outside
-  `masc-mcp` and `oas`.
+  `masc` and `oas`.
 
 ## Problem
 
@@ -173,6 +173,6 @@ opened in parallel.
 - **Wait until in-flight PRs merge.** Rejected: the Master Report's confidence
   ladder asks for PR-1 work to land *concurrently* with the dashboard layer
   so that the ranker is ready when the cockpit needs to call it.
-- **Open the RFC against `~/me/docs/rfc/` instead of `masc-mcp/docs/rfc/`.**
-  Rejected: the RFC's enforcement target is `masc-mcp` modules, so it must
+- **Open the RFC against `~/me/docs/rfc/` instead of `masc/docs/rfc/`.**
+  Rejected: the RFC's enforcement target is `masc` modules, so it must
   live in the same repo as the code it governs.

@@ -206,7 +206,7 @@ let degraded_trust_json ?now () =
    call site hits EMFILE/ENFILE. That misses the slow-burn case where the
    *host* kernel FD table accumulates against [kern.maxfiles] from an
    adjacent process (Apple Virtualization VM XPC under Docker Desktop)
-   while masc-mcp's own [nofile] budget stays comfortable.
+   while masc's own [nofile] budget stays comfortable.
 
    The out-of-process [sysmon-fd-oom-disk.sh] daemon emits a JSON state
    file at [/tmp/masc-host-pressure.state] on WARN/CRIT thresholds; the

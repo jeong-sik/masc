@@ -5,7 +5,7 @@
 | Status | Draft |
 | Related | RFC-0165 / 0166 / 0167 / 0168 / 0169 / 0170 (client-agnostic family) |
 | Scope | `dashboard/design-system/preview/*.{html,jsx}`, `dashboard/design-system/ui_kits/cockpit/*.{jsx,js}`, `dashboard/design-system/headless-core/anchored-thread-rail.test.ts` |
-| Repos | masc-mcp |
+| Repos | masc |
 
 ## 1. Problem
 

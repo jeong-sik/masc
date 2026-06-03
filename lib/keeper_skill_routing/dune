@@ -1,5 +1,5 @@
 ; RFC-0056 Phase 1B — extract Keeper_skill_routing leaf module from flat
-; masc_mcp namespace. Stacked on Phase 1A (lib/trajectory/).
+; masc namespace. Stacked on Phase 1A (lib/trajectory/).
 ;
 ; Keeper_skill_routing is dependency-leaf: only stdlib (List, Printf,
 ; String) and masc_core (String_util). 215 LoC, fan-in ~9 bare + 1
@@ -13,7 +13,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_keeper_skill_routing)
+ (name masc_keeper_skill_routing)
  (public_name masc.keeper_skill_routing)
  (wrapped false)
  (flags (:standard -w +4))

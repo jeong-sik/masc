@@ -1,6 +1,6 @@
 #!/bin/bash
 # MASC MCP Server (OCaml) - Shared/full-runtime start script (HTTP/SSE default)
-# Usage: ./start-masc-mcp.sh [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH] [--sidecar-root PATH]
+# Usage: ./start-masc.sh [--print-port] [--stdio] [--http] [--eio] [--lwt] [--host HOST] [--port PORT] [--base-path PATH|--path PATH] [--sidecar-root PATH]
 # Note: Eio is the default runtime; --lwt exits with an error.
 # For dir-local local-dev startup, prefer scripts/run-local.sh.
 
@@ -35,9 +35,9 @@ cd "$SCRIPT_DIR"
 DUNE_JOBS="${MASC_DUNE_JOBS:-8}"
 
 # mkdir-based build mutex (atomic on POSIX, works on macOS without flock).
-# Prevents multiple start-masc-mcp.sh instances from building concurrently.
+# Prevents multiple start-masc.sh instances from building concurrently.
 # Stores owner PID to detect and recover from stale locks left by crashed processes.
-MASC_BUILD_LOCK="${MASC_BUILD_LOCK_PATH:-/tmp/masc-mcp-build.lock}"
+MASC_BUILD_LOCK="${MASC_BUILD_LOCK_PATH:-/tmp/masc-build.lock}"
 _MASC_LOCK_HELD=""
 _masc_cleanup_lock() {
     if [ -n "$_MASC_LOCK_HELD" ] && [ -d "$MASC_BUILD_LOCK" ]; then
@@ -789,14 +789,14 @@ build_dashboard_spa
 
 # Resolve executable path
 # Priority: 1. Release binary  2. Local build  3. Workspace build  4. Installed  5. Auto-download
-RELEASE_BINARY="$SCRIPT_DIR/masc-mcp-macos-arm64"
-WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main.exe"
+RELEASE_BINARY="$SCRIPT_DIR/masc-macos-arm64"
+WORKSPACE_EXE="$SCRIPT_DIR/../_build/default/masc/bin/main.exe"
 LOCAL_EXE="$SCRIPT_DIR/_build/default/bin/main.exe"
-INSTALLED_EXE="$(command -v masc-mcp || true)"
+INSTALLED_EXE="$(command -v masc || true)"
 # Eio-based server (main_eio.exe)
-WORKSPACE_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_eio.exe"
+WORKSPACE_EIO_EXE="$SCRIPT_DIR/../_build/default/masc/bin/main_eio.exe"
 LOCAL_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
-WORKSPACE_STDIO_EIO_EXE="$SCRIPT_DIR/../_build/default/masc-mcp/bin/main_stdio_eio.exe"
+WORKSPACE_STDIO_EIO_EXE="$SCRIPT_DIR/../_build/default/masc/bin/main_stdio_eio.exe"
 LOCAL_STDIO_EIO_EXE="$SCRIPT_DIR/_build/default/bin/main_stdio_eio.exe"
 MASC_EXE=""
 MASC_EIO_EXE=""

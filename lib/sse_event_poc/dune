@@ -1,7 +1,7 @@
 (include_subdirs no)
 
 ; PoC library — used only by test/sse_event_poc. Mark (optional) so that
-; production `opam install masc_mcp` (with-test=false) skips this lib when
+; production `opam install masc` (with-test=false) skips this lib when
 ; atdgen-runtime is absent, keeping atdgen/atdgen-runtime as with-test-only
 ; dependencies in masc.opam. No caller in lib/ depends on this module.
 (library

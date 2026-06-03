@@ -12,7 +12,7 @@
 # dependency invariant this gate enforces; a dedicated RFC should adopt it.
 # Plan + per-file severance: docs/audit/2026-05-31-tool-keeper-boundary-severance.md.
 #
-# masc_mcp is one flat library ((include_subdirs unqualified)), so the compiler
+# masc is one flat library ((include_subdirs unqualified)), so the compiler
 # cannot enforce this direction. This ratchet is the deterministic substitute:
 # the existing debt (baseline `.callers`) may shrink but must not grow. Each
 # severance PR removes a file from the baseline (regenerate in the same PR).

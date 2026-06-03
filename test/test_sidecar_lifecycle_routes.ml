@@ -216,12 +216,12 @@ let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
     bool
     "mentions explicit env hint"
     true
-    (contains_substring message "MASC_SIDECAR_ROOT=/path/to/masc-mcp");
+    (contains_substring message "MASC_SIDECAR_ROOT=/path/to/masc");
   check
     bool
     "mentions launcher flag hint"
     true
-    (contains_substring message "--sidecar-root /path/to/masc-mcp");
+    (contains_substring message "--sidecar-root /path/to/masc");
   check
     bool
     "includes searched runtime path"

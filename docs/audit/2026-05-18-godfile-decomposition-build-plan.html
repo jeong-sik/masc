@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>masc-mcp Godfile Decomposition Build Plan - 2026-05-18</title>
+  <title>masc Godfile Decomposition Build Plan - 2026-05-18</title>
   <style>
     :root {
       --bg: #f6f7f7;
@@ -237,7 +237,7 @@
   <header>
     <h1>Godfile Decomposition Build Plan</h1>
     <p class="lede">
-      현재 <code>masc-mcp</code>의 1000+ LOC OCaml 파일 전체를 병렬 lane으로 분류하고,
+      현재 <code>masc</code>의 1000+ LOC OCaml 파일 전체를 병렬 lane으로 분류하고,
       단순 파일 쪼개기가 아니라 Dune 라이브러리 DAG를 만드는 순서로 정리한 실행 계획.
     </p>
     <div class="meta">
@@ -263,7 +263,7 @@
         <p>
           <code>scripts/lint/godfile-size-regression.sh</code>는 현재 통과한다. 그러나
           <code>lib/dune</code>가 여전히 <code>(include_subdirs unqualified)</code>로 거대한
-          <code>masc_mcp</code> flat library를 만들기 때문에, 같은 라이브러리 안의
+          <code>masc</code> flat library를 만들기 때문에, 같은 라이브러리 안의
           <code>include</code> 기반 split은 빌드 경계를 거의 개선하지 못한다.
         </p>
       </div>
@@ -432,7 +432,7 @@
           <tr><td>Runtime</td><td class="num">6</td><td class="num">8,431</td><td><code>runtime_transport</code>, <code>runtime_catalog_runtime</code>, <code>runtime_config</code></td><td>Cut <code>Runtime_runner</code> ownership leak; extract refs/names before transport.</td></tr>
           <tr><td>Dashboard</td><td class="num">3</td><td class="num">5,093</td><td><code>dashboard_http_keeper</code>, <code>dashboard_goals_types</code>, <code>dashboard_safe_autonomy</code></td><td>Projection helpers and JSON builders; preserve compact mode.</td></tr>
           <tr><td>Workspace</td><td class="num">3</td><td class="num">3,766</td><td><code>workspace_worktree</code>, <code>workspace_task</code>, <code>workspace_task_schedule</code></td><td>Already sub-library; narrow public API and split dangerous filesystem/git helpers.</td></tr>
-          <tr><td>Config</td><td class="num">2</td><td class="num">2,220</td><td><code>env_config_snapshot</code>, <code>env_config_keeper</code></td><td>Keep in <code>masc_mcp.config</code>; extract typed buckets, not root flat modules.</td></tr>
+          <tr><td>Config</td><td class="num">2</td><td class="num">2,220</td><td><code>env_config_snapshot</code>, <code>env_config_keeper</code></td><td>Keep in <code>masc.config</code>; extract typed buckets, not root flat modules.</td></tr>
           <tr><td>Operator / voice / backend</td><td class="num">3</td><td class="num">3,856</td><td><code>operator_control_snapshot</code>, <code>voice_bridge</code>, <code>backend</code></td><td>Lower priority; split after higher fan-in surfaces stop moving.</td></tr>
         </tbody>
       </table>
@@ -456,7 +456,7 @@
           <h3>Do Not</h3>
           <ul>
             <li>Do not split <code>foo.ml</code> into <code>foo_part1.ml</code> under the same flat namespace and call it done.</li>
-            <li>Do not create sub-libraries that depend back on <code>masc_mcp</code>; that launders the cycle.</li>
+            <li>Do not create sub-libraries that depend back on <code>masc</code>; that launders the cycle.</li>
             <li>Do not add generic names like <code>Types</code>, <code>Utils</code>, <code>Config</code>, <code>Error</code> to <code>(wrapped false)</code> libraries.</li>
             <li>Do not bulk-promote <code>lib/server</code>, <code>lib/dashboard</code>, or <code>lib/runtime</code> before refs/types/config leaves are extracted.</li>
             <li>Do not mix bulk promotion with a global <code>(wrapped true) + -open</code> migration.</li>
@@ -468,8 +468,8 @@
         <pre><code>(include_subdirs no)
 
 (library
- (name masc_mcp_keeper_hooks_oas)
- (public_name masc_mcp.keeper_hooks_oas)
+ (name masc_keeper_hooks_oas)
+ (public_name masc.keeper_hooks_oas)
  (wrapped false)
  (modules
   keeper_hooks_oas_types
@@ -550,7 +550,7 @@
           <tr><td class="rank-p2">22</td><td>Dashboard goals helper split</td><td><code>dashboard_goals_types.ml</code></td><td>Accessors, attainment, health badges, timeline, builders split behind same JSON contract.</td></tr>
           <tr><td class="rank-p2">23</td><td>Runtime bootstrap phase split</td><td><code>server_runtime_bootstrap.ml</code></td><td>Config-root, auth/token, migrations, lazy startup, transports are ordered explicitly.</td></tr>
           <tr><td class="rank-p3">24</td><td>Route parity cleanup</td><td><code>server_routes_http_routes_dashboard.ml</code>, <code>server_h2_gateway.ml</code></td><td>H1/H2 routes share handler modules; no duplicate route behavior.</td></tr>
-          <tr><td class="rank-p3">25</td><td>First Dune promotions</td><td>metrics names, keeper hook pure helpers, runtime refs, tool schema helpers</td><td>Each promoted lib has no dependency back to <code>masc_mcp</code>; <code>test/deps/dune</code> re-export added.</td></tr>
+          <tr><td class="rank-p3">25</td><td>First Dune promotions</td><td>metrics names, keeper hook pure helpers, runtime refs, tool schema helpers</td><td>Each promoted lib has no dependency back to <code>masc</code>; <code>test/deps/dune</code> re-export added.</td></tr>
           <tr><td class="rank-p4">26</td><td>Directory shell promotions</td><td><code>lib/keeper/dune</code>, later server/dashboard/runtime if closure permits</td><td>Only after collision audit and cycle gate pass; no broad caller churn.</td></tr>
           <tr><td class="rank-p4">27</td><td>Ratchet update</td><td><code>scripts/ocaml-structure-baseline.json</code>, godfile inventory</td><td>Caps and baselines only move downward or with explicit RFC reference.</td></tr>
         </tbody>
@@ -564,7 +564,7 @@
           <tr><th>Lane</th><th>Focused checks</th><th>Always run</th></tr>
         </thead>
         <tbody>
-          <tr><td>Metrics</td><td><code>test_prometheus*</code>, text export snapshots, metric-name duplicate grep</td><td><code>scripts/dune-local.sh build lib/masc_mcp.cmxa</code></td></tr>
+          <tr><td>Metrics</td><td><code>test_prometheus*</code>, text export snapshots, metric-name duplicate grep</td><td><code>scripts/dune-local.sh build lib/masc.cmxa</code></td></tr>
           <tr><td>Keeper</td><td><code>test_keeper_registry</code>, <code>test_keeper_state_machine*</code>, <code>test_keeper_supervisor</code>, runtime manifest/receipt tests</td><td><code>scripts/dune-local.sh build test/test_rfc_0086_keeper_namespace_invariant.exe</code></td></tr>
           <tr><td>Server/Dashboard</td><td><code>test_dashboard_http_core</code>, <code>test_dashboard_keeper_routes</code>, <code>test_dashboard_goals</code>, bootstrap tests</td><td><code>scripts/dune-local.sh build @lib/check</code></td></tr>
           <tr><td>Runtime/Tools</td><td>Runtime catalog/transport tests, worker gate tests, tool schema snapshots</td><td><code>bash scripts/lint/godfile-size-regression.sh</code></td></tr>
@@ -573,7 +573,7 @@
       </table>
       <div class="panel">
         <h3>Focused command set</h3>
-        <pre><code>scripts/dune-local.sh build lib/masc_mcp.cmxa
+        <pre><code>scripts/dune-local.sh build lib/masc.cmxa
 scripts/dune-local.sh build @lib/check
 scripts/dune-local.sh build test/test_rfc_0086_keeper_namespace_invariant.exe
 ./_build/default/test/test_rfc_0086_keeper_namespace_invariant.exe

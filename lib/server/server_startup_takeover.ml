@@ -73,7 +73,7 @@ let status_line_is_healthy line =
 let looks_like_server_command command =
   List.exists
     (fun marker -> String_util.contains_substring command marker)
-    [ "main_eio"; "masc-mcp" ]
+    [ "main_eio"; "masc" ]
 ;;
 
 let process_command pid =
@@ -204,7 +204,7 @@ let acquire_pid_lock
               ~level:Log.Error
               ~module_name:"Server"
               (Printf.sprintf
-                 "[FATAL] PID %d is alive but does not look like a masc-mcp server; \
+                 "[FATAL] PID %d is alive but does not look like a masc server; \
                   refusing takeover"
                  pid);
             Already_running { pid })
@@ -274,7 +274,7 @@ let acquire_base_path_lock ?lock_path base_path =
               ~level:Log.Error
               ~module_name:"Server"
               (Printf.sprintf
-                 "[FATAL] PID %d owns %s but does not look like a masc-mcp server; \
+                 "[FATAL] PID %d owns %s but does not look like a masc server; \
                   refusing takeover"
                  pid
                  path);

@@ -14,7 +14,7 @@ logs
 !dashboard/.env.development
 !dashboard/.env.production
 *.exe
-masc-mcp-linux-x64
+masc-linux-x64
 a.out
 *.native
 dashboard/dist/

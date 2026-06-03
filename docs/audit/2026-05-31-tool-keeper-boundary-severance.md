@@ -38,7 +38,7 @@ this gate. The dispatch path (`tool_dispatch.ml`) is already keeper-clean (RFC-0
 
 ## 2. Definition of Done (Harness First)
 
-`masc_mcp` is one flat library (`(include_subdirs unqualified)`), so the compiler cannot
+`masc` is one flat library (`(include_subdirs unqualified)`), so the compiler cannot
 enforce the direction. The deterministic gate is `scripts/lint/tool-keeper-boundary-ratchet.sh`
 (wired into `fundamental-check.yml`, runs on every PR): the baseline `.callers` list may
 **shrink but not grow**. Each severance PR removes its file and regenerates the baseline in

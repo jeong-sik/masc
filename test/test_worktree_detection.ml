@@ -42,7 +42,7 @@ let test_find_git_root_worktree () =
 
 let test_find_git_root_subdir () =
   (* Test from a subdirectory *)
-  let path = "/Users/dancer/me/.worktrees/masc-agent-meta/features/masc-mcp" in
+  let path = "/Users/dancer/me/.worktrees/masc-agent-meta/features/masc" in
   if Sys.file_exists path then begin
     let result = Workspace_utils.find_git_root path in
     check (option string) "subdir resolves to main repo" (Some "/Users/dancer/me") result

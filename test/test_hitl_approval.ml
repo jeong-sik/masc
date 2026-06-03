@@ -1139,7 +1139,7 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
           [
             ( "file_path",
               `String
-                "repos/masc-mcp/.worktrees/keeper-sandbox-writer-task-210/lib/example.ml"
+                "repos/masc/.worktrees/keeper-sandbox-writer-task-210/lib/example.ml"
             );
             ("content", `String "let x = 1\n");
           ])
@@ -1176,12 +1176,12 @@ let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
       [
         ( "file_path",
           `String
-            "repos/masc-mcp/.worktrees/keeper-sandbox-writer-negative-task-210/lib/example.ml"
+            "repos/masc/.worktrees/keeper-sandbox-writer-negative-task-210/lib/example.ml"
         );
       ]
   in
   let root_checkout_input =
-    `Assoc [ ("file_path", `String "repos/masc-mcp/lib/example.ml") ]
+    `Assoc [ ("file_path", `String "repos/masc/lib/example.ml") ]
   in
   Alcotest.(check (option string))
     "unclaimed keeper has no code-write routine label"
@@ -1212,7 +1212,7 @@ let test_callback_production_worktree_prepare_auto_approved () =
     cb ~tool_name:"tool_execute"
       ~input:(`Assoc [
         ("task_id", `String "task-187");
-        ("repo_name", `String "masc-mcp");
+        ("repo_name", `String "masc");
       ])
   in
   match decision with

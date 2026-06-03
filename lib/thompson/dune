@@ -1,7 +1,7 @@
 (include_subdirs no)
 
 ;; Thompson_sampling — Beta-distribution agent selection with starvation
-;; prevention and vote/quality feedback. Carved out of the masc_mcp
+;; prevention and vote/quality feedback. Carved out of the masc
 ;; mega-library so the Board domain can depend on Thompson_sampling.record_vote
 ;; without forcing a Board <-> mega-lib cycle.
 ;;

@@ -7,9 +7,9 @@ vi.mock('../../api/git-graph', () => ({
   fetchGitGraph: vi.fn(() => Promise.resolve({
     generated_at: '2026-05-06T00:00:00Z',
     repos: [{
-      id: 'masc-mcp',
-      root: '/workspace/masc-mcp',
-      label: 'masc-mcp',
+      id: 'masc',
+      root: '/workspace/masc',
+      label: 'masc',
       current_branch: 'main',
       head: 'abc123',
       dirty: false,
@@ -36,10 +36,10 @@ vi.mock('../../api/git-graph', () => ({
 vi.mock('../../api/repositories', () => ({
   discoverRepositories: vi.fn(() => Promise.resolve([])),
   fetchRepositoriesList: vi.fn(() => Promise.resolve([{
-    id: 'masc-mcp',
-    name: 'masc-mcp',
+    id: 'masc',
+    name: 'masc',
     url: '',
-    local_path: '/workspace/masc-mcp',
+    local_path: '/workspace/masc',
     default_branch: 'main',
     status: 'active',
     auto_sync: false,
@@ -274,10 +274,10 @@ describe('IdeShell', () => {
         keeper: 'sangsu',
       },
       repositories: [{
-        id: 'masc-mcp',
-        name: 'masc-mcp',
+        id: 'masc',
+        name: 'masc',
         url: '',
-        local_path: '/workspace/masc-mcp',
+        local_path: '/workspace/masc',
         default_branch: 'main',
         status: 'active',
         auto_sync: false,
@@ -285,12 +285,12 @@ describe('IdeShell', () => {
         created_at: null,
         updated_at: null,
       }],
-      activeRepositoryId: 'masc-mcp',
-      workspaceSource: { kind: 'repository', repoId: 'masc-mcp' },
+      activeRepositoryId: 'masc',
+      workspaceSource: { kind: 'repository', repoId: 'masc' },
       dashboardConnected: true,
     })
 
-    expect(model.workspaceLabel).toBe('masc-mcp')
+    expect(model.workspaceLabel).toBe('masc')
     expect(model.connectionLabel).toBe('runtime · live')
     expect(model.connectionTone).toBe('ok')
     expect(model.chips.map(chip => chip.label)).toEqual([
@@ -429,7 +429,7 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     await waitFor(() => expect(activeIdeFile.value).toBe('lib/runtime.ml'))
-    await waitFor(() => expect(container.querySelector('[data-testid="ide-statusbar-workspace"]')?.textContent).toBe('masc-mcp'))
+    await waitFor(() => expect(container.querySelector('[data-testid="ide-statusbar-workspace"]')?.textContent).toBe('masc'))
 
     const statusbar = container.querySelector('[data-testid="ide-statusbar"]')
     expect(statusbar?.getAttribute('aria-label')).toBe('IDE operational status')
@@ -774,7 +774,7 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     expect(container.textContent).toContain('BRANCH GRAPH')
-    await waitFor(() => expect(container.textContent).toContain('masc-mcp'))
+    await waitFor(() => expect(container.textContent).toContain('masc'))
   })
 
   it('keeps the right diagnostics bounded above the primary conversation rail', () => {

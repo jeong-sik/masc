@@ -21,7 +21,7 @@ val validate_repo_path_args_ready :
 (** Reject typed Execute path arguments that point into a sandbox [repos/<repo>]
     directory unless that repo is an independent git checkout. This catches
     commands run from the playground root with arguments like
-    [./repos/masc-mcp/lib/foo.ml]. *)
+    [./repos/masc/lib/foo.ml]. *)
 
 val execution_location_json :
   config:Workspace.config ->

@@ -1,7 +1,7 @@
-# Actor-Mailbox Pattern in masc-mcp
+# Actor-Mailbox Pattern in masc
 
 This document describes the actor-mailbox pattern that already exists
-in masc-mcp and the design rules a new use of it should follow. It is
+in masc and the design rules a new use of it should follow. It is
 not a proposal — it codifies what `lib/session.ml`, `lib/board_dispatch.ml`,
 and `lib/pulse/` already practice.
 

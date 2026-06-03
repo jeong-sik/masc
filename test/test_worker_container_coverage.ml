@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in

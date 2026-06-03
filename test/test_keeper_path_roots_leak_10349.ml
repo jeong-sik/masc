@@ -26,7 +26,7 @@
        matchers keep recognising the error class. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let counter = ref 0
 
@@ -68,7 +68,7 @@ let with_clean_env f =
 
 let counter_value labels =
   Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string PathRejection)
+    Masc.Keeper_metrics.(to_string PathRejection)
     ~labels ()
 
 let assert_no_roots_leak msg err =

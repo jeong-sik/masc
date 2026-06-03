@@ -15,7 +15,7 @@
     anti-pattern self-check note in
     [keeper_turn_runtime_budget.ml]. *)
 
-module KCB = Masc_mcp.Keeper_turn_runtime_budget
+module KCB = Masc.Keeper_turn_runtime_budget
 
 (* The runtime snapshot freezes from env defaults; test/dune sets
    MASC_BASE_PATH="" so the snapshot is deterministic. We do not

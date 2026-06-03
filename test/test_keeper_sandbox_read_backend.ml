@@ -6,16 +6,16 @@
     where docker is available, gated through env-set integration
     tests. *)
 
-module Workspace = Masc_mcp.Workspace
-module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
-module Keeper_sandbox_read_backend = Masc_mcp.Keeper_sandbox_read_backend
-module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
-module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
-module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
-module Fd_accountant = Masc_mcp.Fd_accountant
+module Workspace = Masc.Workspace
+module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
+module Keeper_sandbox_read_backend = Masc.Keeper_sandbox_read_backend
+module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
+module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
+module Keeper_types = Masc.Keeper_types
+module Keeper_alerting_path = Masc.Keeper_alerting_path
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
+module Fd_accountant = Masc.Fd_accountant
 module Env_config_keeper = Env_config_keeper
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)

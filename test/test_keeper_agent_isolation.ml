@@ -10,15 +10,15 @@ module Types = Masc_domain
 
     Pure synchronous tests — no Eio or network required. *)
 
-module Keeper_tool_dispatch_runtime = Masc_mcp.Keeper_tool_dispatch_runtime
-module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
-module Keeper_tool_surfaces = Masc_mcp.Keeper_tool_surfaces
-module Tool_shard = Masc_mcp.Tool_shard
+module Keeper_tool_dispatch_runtime = Masc.Keeper_tool_dispatch_runtime
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_tool_surfaces = Masc.Keeper_tool_surfaces
+module Tool_shard = Masc.Tool_shard
 module Tool_catalog = Tool_catalog
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_identity = Masc_mcp.Keeper_identity
-module Keeper_tool_registry = Masc_mcp.Keeper_tool_registry
-module Config = Masc_mcp.Config
+module Keeper_types = Masc.Keeper_types
+module Keeper_identity = Masc.Keeper_identity
+module Keeper_tool_registry = Masc.Keeper_tool_registry
+module Config = Masc.Config
 
 (* ============================================================
    Helper: create keeper_meta via meta_of_json (canonical pattern)
@@ -255,13 +255,13 @@ let test_keeper_agent_sender_plain_name () =
   let meta = make_meta ~name:"sangsu" () in
   Alcotest.(check string)
     "returns meta.agent_name" "sangsu"
-    (Masc_mcp.Keeper_tool_shared_runtime.keeper_agent_sender ~meta)
+    (Masc.Keeper_tool_shared_runtime.keeper_agent_sender ~meta)
 
 let test_keeper_agent_sender_prefixed_name () =
   let meta = make_meta ~name:"keeper-admin" () in
   Alcotest.(check string)
     "returns meta.agent_name" "keeper-admin"
-    (Masc_mcp.Keeper_tool_shared_runtime.keeper_agent_sender ~meta)
+    (Masc.Keeper_tool_shared_runtime.keeper_agent_sender ~meta)
 
 let test_keeper_agent_name_plain () =
   Alcotest.(check string)

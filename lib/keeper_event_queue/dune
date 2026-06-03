@@ -8,7 +8,7 @@
 ;
 ; 91+87 LoC. Fan-in: 4 lib (keeper_supervisor, keeper_registry.mli,
 ; keeper_keepalive_signal.mli, keeper_keepalive.mli) + 6 test files.
-; All wrapped-pattern callers (Masc_mcp.Keeper_event_queue, 7 sites)
+; All wrapped-pattern callers (Masc.Keeper_event_queue, 7 sites)
 ; drop prefix via G5 sed.
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).

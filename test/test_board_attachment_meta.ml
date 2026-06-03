@@ -3,7 +3,7 @@
     Pure-data round-trip + meta_json embedding.  No I/O. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 module BAM = Board_attachment_meta
 
 (* Initialize crypto RNG once — required by Random_id.prefixed via

@@ -1,6 +1,6 @@
 open Alcotest
 
-module WT = Masc_mcp.Keeper_wake_telemetry
+module WT = Masc.Keeper_wake_telemetry
 module Types = Agent_sdk.Types
 
 let text_msg role s : Types.message =

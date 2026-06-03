@@ -1,7 +1,7 @@
 open Alcotest
 
-module KG = Masc_mcp.Keeper_guards
-module KTR = Masc_mcp.Keeper_tool_response
+module KG = Masc.Keeper_guards
+module KTR = Masc.Keeper_tool_response
 
 let str_contains s sub =
   try

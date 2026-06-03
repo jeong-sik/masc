@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let check_float name expected actual =
   Alcotest.(check (float 0.0001)) name expected actual

@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 open Yojson.Safe.Util
 
 let with_temp_base f =

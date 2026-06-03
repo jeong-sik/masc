@@ -28,8 +28,8 @@
 
 open Alcotest
 
-module D = Masc_mcp.Tool_inline_dispatch_extra
-module Prom = Masc_mcp.Prometheus
+module D = Masc.Tool_inline_dispatch_extra
+module Prom = Masc.Prometheus
 
 (* --- helpers ----------------------------------------------------- *)
 

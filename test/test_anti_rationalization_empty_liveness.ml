@@ -15,7 +15,7 @@
     empty input, the branch silently falls through to [Format_reject]
     again and this assertion surfaces the regression. *)
 
-module AR = Masc_mcp.Anti_rationalization
+module AR = Masc.Anti_rationalization
 
 let test_empty_verdict_emits_canonical_error () =
   match AR.parse_verdict "" with

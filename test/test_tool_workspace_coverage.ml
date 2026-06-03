@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** Coverage tests for Tool_workspace *)
 
-open Masc_mcp
+open Masc
 open Workspace_types
 
 let () = Random.self_init ()

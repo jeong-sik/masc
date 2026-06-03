@@ -7,7 +7,7 @@
    - [Env_keeper_scrub.filter_environment] strips scrubbed keys while
      preserving pass-through entries and entries without ['='] *)
 
-open Masc_mcp
+open Masc
 
 let fail msg = failwith msg
 let assert_true msg b = if not b then fail msg

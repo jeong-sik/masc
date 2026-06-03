@@ -7,7 +7,7 @@ code_refs:
   - lib/mcp_server.ml
 ---
 
-# MASC-MCP Product Review
+# MASC Product Review
 
 ## Summary
 

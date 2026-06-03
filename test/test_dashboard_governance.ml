@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** Dashboard governance regression tests. *)
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
 

@@ -13,10 +13,10 @@
 
 open Alcotest
 
-module RL = Masc_mcp.Rate_limit
+module RL = Masc.Rate_limit
 module CB = Circuit_breaker
-module Prom = Masc_mcp.Prometheus
-module SH = Masc_mcp.Streamable_http
+module Prom = Masc.Prometheus
+module SH = Masc.Streamable_http
 
 (** {1 Rate Limit Concurrency} *)
 

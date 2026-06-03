@@ -2,8 +2,8 @@ open Alcotest
 
 let annotation_fields tool_name =
   match
-    Masc_mcp.Mcp_server_eio_tool_profile.tool_annotations_for_profile
-      Masc_mcp.Mcp_server_eio_tool_profile.Full
+    Masc.Mcp_server_eio_tool_profile.tool_annotations_for_profile
+      Masc.Mcp_server_eio_tool_profile.Full
       tool_name
   with
   | Some (`Assoc fields) -> fields
@@ -24,8 +24,8 @@ let bool_annotation name tool_name =
 ;;
 
 let tool_json name =
-  Masc_mcp.Mcp_server_eio_tool_profile.tool_json_for_profile
-    Masc_mcp.Mcp_server_eio_tool_profile.Full
+  Masc.Mcp_server_eio_tool_profile.tool_json_for_profile
+    Masc.Mcp_server_eio_tool_profile.Full
     { Masc_domain.name
     ; description = "test schema"
     ; input_schema = `Assoc [ "type", `String "object" ]
@@ -143,38 +143,38 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
 
 let test_descriptor_resolution_capabilities_for_public_aliases () =
   let capability_has =
-    Masc_mcp.Keeper_tool_descriptor_resolution.capability_has
+    Masc.Keeper_tool_descriptor_resolution.capability_has
   in
   check
     bool
     "ReadFile read-only via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Read_only "Read");
+    (capability_has Masc.Tool_capability.Read_only "Read");
   check
     bool
     "SearchFiles read-only via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Read_only "Grep");
+    (capability_has Masc.Tool_capability.Read_only "Grep");
   check
     bool
     "mcp-prefixed SearchFiles read-only via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Read_only "mcp__masc__Grep");
+    (capability_has Masc.Tool_capability.Read_only "mcp__masc__Grep");
   check
     bool
     "WriteFile destructive via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Destructive "Write");
+    (capability_has Masc.Tool_capability.Destructive "Write");
   check
     bool
     "Execute destructive via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Destructive "Execute");
+    (capability_has Masc.Tool_capability.Destructive "Execute");
   check
     bool
     "ReadFile not destructive via descriptor resolution"
     false
-    (capability_has Masc_mcp.Tool_capability.Destructive "Read")
+    (capability_has Masc.Tool_capability.Destructive "Read")
 ;;
 
 let () =

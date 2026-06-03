@@ -1,5 +1,5 @@
 let () =
-  let open Masc_mcp.Keeper_relevance_check in
+  let open Masc.Keeper_relevance_check in
   let check_bool label expected got =
     if expected <> got then
       Alcotest.fail (Printf.sprintf "%s: expected %b, got %b" label expected got)

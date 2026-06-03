@@ -14,8 +14,8 @@
     [auth_error_kind.mli §Dashboard actor fallback typed surface]. *)
 
 open Alcotest
-module Aek = Masc_mcp.Auth_error_kind
-module Sda = Masc_mcp.Silent_dashboard_actor_outcome
+module Aek = Masc.Auth_error_kind
+module Sda = Masc.Silent_dashboard_actor_outcome
 
 (* ----- Outcome_none: byte-equivalent log message --------------------- *)
 
@@ -249,7 +249,7 @@ let test_outcome_error_labels_for_every_err_kind () =
 (* ----- Side-effect: prometheus counter increments -------------------- *)
 
 let test_outcome_none_increments_counter () =
-  let module Prom = Masc_mcp.Prometheus in
+  let module Prom = Masc.Prometheus in
   let labels = [ ("outcome", "none") ] in
   let before =
     Prom.metric_value_or_zero
@@ -262,7 +262,7 @@ let test_outcome_none_increments_counter () =
   let fb : Aek.dashboard_actor_fallback =
     { outcome = Aek.Outcome_none; token_hash_prefix = "feedface" }
   in
-  Masc_mcp.Server_auth.record_dashboard_actor_fallback fb;
+  Masc.Server_auth.record_dashboard_actor_fallback fb;
   let after =
     Prom.metric_value_or_zero
       Prom.metric_silent_dashboard_actor_fallback ~labels ()
@@ -273,7 +273,7 @@ let test_outcome_none_increments_counter () =
     after
 
 let test_outcome_error_increments_counter_with_err_kind () =
-  let module Prom = Masc_mcp.Prometheus in
+  let module Prom = Masc.Prometheus in
   let labels =
     [ ("outcome", "error"); ("err_kind", "unauthorized") ]
   in
@@ -291,7 +291,7 @@ let test_outcome_error_increments_counter_with_err_kind () =
     ; token_hash_prefix = "feedface"
     }
   in
-  Masc_mcp.Server_auth.record_dashboard_actor_fallback fb;
+  Masc.Server_auth.record_dashboard_actor_fallback fb;
   let after =
     Prom.metric_value_or_zero
       Prom.metric_silent_dashboard_actor_fallback ~labels ()

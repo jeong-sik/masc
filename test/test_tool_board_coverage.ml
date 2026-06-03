@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 
 (** {1 Test helpers} *)
 

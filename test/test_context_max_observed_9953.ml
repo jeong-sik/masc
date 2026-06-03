@@ -31,10 +31,10 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module UM = Masc_mcp.Keeper_unified_metrics
-module Prom = Masc_mcp.Prometheus
+module UM = Masc.Keeper_unified_metrics
+module Prom = Masc.Prometheus
 
-let metric = Masc_mcp.Keeper_metrics.(to_string ContextMaxObserved)
+let metric = Masc.Keeper_metrics.(to_string ContextMaxObserved)
 let runtime_label = "runtime"
 
 let counter_for ~keeper ~model_used ~resolved_model_id ~bucket =

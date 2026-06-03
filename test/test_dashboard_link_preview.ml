@@ -1,6 +1,6 @@
 open Alcotest
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 let test_extract_html_preview_fields () =
   let html =

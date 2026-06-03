@@ -1,9 +1,9 @@
-module Workspace = Masc_mcp.Workspace
-module Store = Masc_mcp.Keeper_meta_store
-module Profile = Masc_mcp.Keeper_types_profile
-module Status_detail = Masc_mcp.Keeper_status_detail
-module Keeper_tool_surface = Masc_mcp.Keeper_tool_surface
-module Keeper_tool_surface_ops = Masc_mcp.Keeper_tool_surface_ops
+module Workspace = Masc.Workspace
+module Store = Masc.Keeper_meta_store
+module Profile = Masc.Keeper_types_profile
+module Status_detail = Masc.Keeper_status_detail
+module Keeper_tool_surface = Masc.Keeper_tool_surface
+module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
 
 let temp_dir () =
   let path = Filename.temp_file "keeper-effective-meta-" "" in
@@ -49,7 +49,7 @@ max-concurrent = 1
 let init_runtime_default_for_tests () =
   let path = Filename.temp_file "keeper_effective_meta_runtime_" ".toml" in
   write_file path runtime_toml;
-  match Masc_mcp.Runtime.init_default ~config_path:path with
+  match Masc.Runtime.init_default ~config_path:path with
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 ;;
@@ -165,7 +165,7 @@ sandbox_profile = "docker"
 tool_access = ["tool_execute", "tool_read_file"]
 |};
   let config = Workspace.default_config base in
-  ignore (seed_runtime_meta config name : Masc_mcp.Keeper_meta_contract.keeper_meta);
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   match Store.read_effective_meta config name with
   | Error err -> Alcotest.failf "read_effective_meta failed: %s" err
   | Ok None -> Alcotest.fail "expected seeded keeper meta"
@@ -192,7 +192,7 @@ let test_missing_sandbox_profile_fails_loud_for_profile_source () =
 goal = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
-  ignore (seed_runtime_meta config name : Masc_mcp.Keeper_meta_contract.keeper_meta);
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   match Store.read_effective_meta config name with
   | Ok _ -> Alcotest.fail "expected missing sandbox_profile to fail loudly"
   | Error err ->
@@ -205,7 +205,7 @@ let test_missing_profile_source_fails_loud () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
   let name = "nosource" in
   let config = Workspace.default_config base in
-  ignore (seed_runtime_meta config name : Masc_mcp.Keeper_meta_contract.keeper_meta);
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   match Store.read_effective_meta config name with
   | Ok _ -> Alcotest.fail "expected absent TOML/persona source to fail loudly"
   | Error err ->
@@ -220,7 +220,7 @@ let test_status_cache_tracks_toml_overlay_changes () =
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
     ~goal:"first cache goal";
   let config = Workspace.default_config base in
-  ignore (seed_runtime_meta config name : Masc_mcp.Keeper_meta_contract.keeper_meta);
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Alcotest.(check string)
     "initial TOML goal reaches status"
     "first cache goal"
@@ -241,7 +241,7 @@ let test_keeper_list_row_surfaces_effective_meta_errors () =
 goal = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
-  ignore (seed_runtime_meta config name : Masc_mcp.Keeper_meta_contract.keeper_meta);
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   match Keeper_tool_surface_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
   | None -> Alcotest.fail "expected error row for invalid effective meta"
   | Some row ->
@@ -267,10 +267,10 @@ goal = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Masc_mcp.Keeper_registry.clear ();
-  ignore (Masc_mcp.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Masc.Keeper_registry.clear ();
+  ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
   Fun.protect
-    ~finally:Masc_mcp.Keeper_registry.clear
+    ~finally:Masc.Keeper_registry.clear
     (fun () ->
       match Keeper_tool_surface_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
       | None -> Alcotest.fail "expected error row for invalid effective meta"
@@ -290,10 +290,10 @@ goal = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Masc_mcp.Keeper_registry.clear ();
-  ignore (Masc_mcp.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Masc.Keeper_registry.clear ();
+  ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
   Fun.protect
-    ~finally:Masc_mcp.Keeper_registry.clear
+    ~finally:Masc.Keeper_registry.clear
     (fun () ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->

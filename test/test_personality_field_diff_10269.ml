@@ -7,7 +7,7 @@
     field + length signature. *)
 
 open Alcotest
-module Kr = Masc_mcp.Keeper_runtime
+module Kr = Masc.Keeper_runtime
 
 let opt_string = option string
 

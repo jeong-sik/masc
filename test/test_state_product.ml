@@ -1,6 +1,6 @@
 (** Tests for State_product — orthogonal state machine composition. *)
 
-open Masc_mcp
+open Masc
 
 module AT = State_product.Agent_turn
 module TV = State_product.Tool_validation

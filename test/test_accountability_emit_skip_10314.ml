@@ -27,7 +27,7 @@ module Types = Masc_domain
        so dashboards can rate-alert per failure mode. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 module Acct = Keeper_accountability
 module Prom = Prometheus

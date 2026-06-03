@@ -22,7 +22,7 @@
        order (so the log line is stable across runs). *)
 
 open Alcotest
-module KR = Masc_mcp.Keeper_runtime
+module KR = Masc.Keeper_runtime
 
 (* --- empty / no-diff cases -------------------------------------- *)
 

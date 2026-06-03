@@ -10,7 +10,7 @@
     resolution. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let with_temp_dir f =
   let dir = Filename.temp_file "board_activity_test" "" in

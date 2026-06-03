@@ -3,8 +3,8 @@
 
 open Alcotest
 
-module CT = Masc_mcp.Chronicle_types
-module CI = Masc_mcp.Chronicle_index
+module CT = Masc.Chronicle_types
+module CI = Masc.Chronicle_index
 
 (* --- Chronicle_types tests --- *)
 

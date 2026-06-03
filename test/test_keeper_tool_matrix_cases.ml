@@ -1,8 +1,8 @@
 module Types = Masc_domain
 
 module Generic = Test_mcp_tool_matrix_cases
-module KET = Masc_mcp.Keeper_tool_dispatch_runtime
-module KTO = Masc_mcp.Keeper_tools_oas_bundle
+module KET = Masc.Keeper_tool_dispatch_runtime
+module KTO = Masc.Keeper_tools_oas_bundle
 module Tool = Agent_sdk.Tool
 
 type init_mode = Generic.init_mode =
@@ -24,9 +24,9 @@ type keeper_case = {
 
 and fixture = {
   generic : Generic.fixture;
-  config : Masc_mcp.Workspace.config;
-  meta : Masc_mcp.Keeper_meta_contract.keeper_meta;
-  ctx_snapshot : Masc_mcp.Keeper_types.working_context;
+  config : Masc.Workspace.config;
+  meta : Masc.Keeper_meta_contract.keeper_meta;
+  ctx_snapshot : Masc.Keeper_types.working_context;
   tools : Agent_sdk.Tool.t list;
 }
 
@@ -69,7 +69,7 @@ let voice_guard_fragments =
 
 let init_keeper_bridge () =
   Masc_test_deps.init_keeper_tool_registry ();
-  ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
+  ignore (Masc.Mcp_server_eio.get_clock_opt ());
   (* Use find_project_root — the test cwd is _build/default/test/ which
      does not contain config/tool_policy.toml, so Sys.getcwd fails the
      direct shortcut and falls into the exe-relative walk that picks up
@@ -78,8 +78,8 @@ let init_keeper_bridge () =
   (match KET.init_policy_config ~base_path with
    | Ok () -> ()
    | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
-  Masc_mcp.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc_mcp.Keeper_tag_dispatch.dispatch;
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas
+  Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch;
+  KET.inject_masc_schemas Masc.Config.raw_all_tool_schemas
 
 let make_meta ?(name = "keeper-tool-matrix") () =
   match
@@ -91,7 +91,7 @@ let make_meta ?(name = "keeper-tool-matrix") () =
           ("trace_id", `String "keeper-tool-matrix-trace");
           ("allowed_paths", `List [ `String "*" ]);
           ( "tool_access",
-            Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+            Masc.Keeper_meta_tool_access.tool_access_to_json
               ([] ) );
         ])
   with
@@ -117,12 +117,12 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let generic =
     Generic.make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode
   in
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let ctx =
-    Masc_mcp.Keeper_context_runtime.create ~system_prompt:"keeper tool matrix"
+    Masc.Keeper_context_runtime.create ~system_prompt:"keeper tool matrix"
       ~max_tokens:4000
     |> fun ctx ->
-    Masc_mcp.Keeper_context_runtime.append ctx
+    Masc.Keeper_context_runtime.append ctx
       (Agent_sdk.Types.user_msg "tool matrix memory needle")
   in
   let ctx_snapshot = ctx in
@@ -135,10 +135,10 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
           tools resolve the agent through the prefixed alias while
           dispatched masc tools use the raw meta identity. *)
        ignore
-         (Masc_mcp.Workspace.bind_session config ~agent_name:meta.name
+         (Masc.Workspace.bind_session config ~agent_name:meta.name
             ~capabilities:[] ());
        ignore
-         (Masc_mcp.Workspace.bind_session config ~agent_name:("keeper-" ^ meta.name)
+         (Masc.Workspace.bind_session config ~agent_name:("keeper-" ^ meta.name)
             ~capabilities:[] ())
    | Fresh | Init_only -> ());
   { generic; config; meta; ctx_snapshot; tools }
@@ -152,7 +152,7 @@ let find_tool fixture name =
   match by_name name with
   | Some _ as found -> found
   | None ->
-    (match Masc_mcp.Keeper_tool_alias.public_name_for_internal name with
+    (match Masc.Keeper_tool_alias.public_name_for_internal name with
      | Some public -> by_name public
      | None -> None)
 
@@ -165,13 +165,13 @@ let ensure_sample_file fixture =
 let ensure_keeper_claim fixture =
   ignore (Generic.ensure_task fixture.generic);
   ignore
-    (Masc_mcp.Workspace.claim_next fixture.config
+    (Masc.Workspace.claim_next fixture.config
        ~agent_name:fixture.meta.agent_name)
 
 let ensure_voice_session fixture =
-  let mgr = Masc_mcp.Keeper_voice_local.get_session_manager () in
+  let mgr = Masc.Keeper_voice_local.get_session_manager () in
   ignore
-    (Masc_mcp.Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
+    (Masc.Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
        ~voice:"tool-matrix" ())
 
 let prepare_keeper_name fixture name =

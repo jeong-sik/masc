@@ -34,8 +34,8 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module L = Masc_mcp.Keeper_turn_livelock
-module Prom = Masc_mcp.Prometheus
+module L = Masc.Keeper_turn_livelock
+module Prom = Masc.Prometheus
 
 (* Keeper_turn_livelock now uses Eio.Mutex (was Stdlib.Mutex; the latter
    raised EDEADLK whenever two Eio fibers contended). Every public entry
@@ -44,23 +44,23 @@ module Prom = Masc_mcp.Prometheus
 let with_eio f () = Eio_main.run @@ fun _env -> f ()
 
 let starts_for ~keeper =
-  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string TurnStarts)
+  Prom.metric_value_or_zero Masc.Keeper_metrics.(to_string TurnStarts)
     ~labels:[ ("keeper", keeper) ] ()
 
 let scheduled_for ~keeper =
-  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string TurnScheduled)
+  Prom.metric_value_or_zero Masc.Keeper_metrics.(to_string TurnScheduled)
     ~labels:[ ("keeper_name", keeper) ] ()
 
 let reattempts_for ~keeper =
-  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string TurnReattempts)
+  Prom.metric_value_or_zero Masc.Keeper_metrics.(to_string TurnReattempts)
     ~labels:[ ("keeper", keeper) ] ()
 
 let regressions_for ~keeper =
-  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string TurnRegressions)
+  Prom.metric_value_or_zero Masc.Keeper_metrics.(to_string TurnRegressions)
     ~labels:[ ("keeper", keeper) ] ()
 
 let blocks_for ~keeper ~reason =
-  Prom.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string TurnLivelockBlocks)
+  Prom.metric_value_or_zero Masc.Keeper_metrics.(to_string TurnLivelockBlocks)
     ~labels:[ ("keeper", keeper); ("reason", reason) ] ()
 
 (* Fresh start: no prior state → [Fresh] outcome, starts counter

@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** Coverage tests for Tool_task *)
 
-open Masc_mcp
+open Masc
 
 let () = Random.self_init ()
 let () = Keeper_task_owner_backend.install_hooks ()
@@ -2077,13 +2077,13 @@ let () = test "build_verdict_sse_payload: distinct runtimes = cross_runtime true
   let result =
     make_review_result
       ~evaluator_runtime:"verifier"
-      ~generator_runtime:Masc_mcp.(Keeper_config.default_runtime_id ())
+      ~generator_runtime:Masc.(Keeper_config.default_runtime_id ())
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t1" ~req ~result in
   assert (payload_member "cross_runtime" json = `Bool true);
   assert (payload_member "generator_runtime" json
-          = `String Masc_mcp.(Keeper_config.default_runtime_id ()));
+          = `String Masc.(Keeper_config.default_runtime_id ()));
   assert (payload_member "evaluator_runtime" json = `String "verifier");
   assert (payload_member "task_id" json = `String "t1")
 )
@@ -2132,7 +2132,7 @@ let () = test "build_verdict_sse_payload: empty evaluator string = cross_runtime
   let result =
     make_review_result
       ~evaluator_runtime:""
-      ~generator_runtime:Masc_mcp.(Keeper_config.default_runtime_id ())
+      ~generator_runtime:Masc.(Keeper_config.default_runtime_id ())
       () in
   let json = Tool_task.build_verdict_sse_payload
     ~now:1234567890.0 ~task_id:"t5" ~req ~result in

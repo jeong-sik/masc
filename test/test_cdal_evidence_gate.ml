@@ -7,7 +7,7 @@
     handoff. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 module Gate = Cdal_evidence_gate
 

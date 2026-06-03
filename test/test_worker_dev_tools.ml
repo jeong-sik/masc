@@ -2,7 +2,7 @@
     Tests file_read, file_write, shell_exec with safety validation. *)
 
 open Agent_sdk
-open Masc_mcp
+open Masc
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()

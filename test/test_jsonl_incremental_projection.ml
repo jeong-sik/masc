@@ -5,7 +5,7 @@
     pinned too. *)
 
 open Alcotest
-module P = Masc_mcp.Jsonl_incremental_projection
+module P = Masc.Jsonl_incremental_projection
 
 let big_tail = 1_000_000
 

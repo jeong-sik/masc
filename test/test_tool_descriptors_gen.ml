@@ -149,11 +149,11 @@ let test_web_tools_absent_from_mcp_inventory () =
       Alcotest.(check bool)
         (name ^ " absent from Config.raw_all_tool_schemas")
         false
-        (has_schema name Masc_mcp.Config.raw_all_tool_schemas);
+        (has_schema name Masc.Config.raw_all_tool_schemas);
       Alcotest.(check bool)
         (name ^ " absent from Config.raw_tool_name_set")
         false
-        (Masc_mcp.Config.is_raw_tool_name name);
+        (Masc.Config.is_raw_tool_name name);
       Alcotest.(check bool)
         (name ^ " absent from public_mcp_surface_tools")
         false

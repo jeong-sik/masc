@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 module Boot = Server_bootstrap_loops.For_testing
 module U = Yojson.Safe.Util

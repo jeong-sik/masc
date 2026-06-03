@@ -1,6 +1,6 @@
 open Alcotest
 
-module KTO = Masc_mcp.Keeper_tool_observation
+module KTO = Masc.Keeper_tool_observation
 
 let test_tool_usage_delta_uses_registry_counts () =
   let before = [ "keeper_board_post", 1; "tool_read_file", 0; "keeper_voice_agent", 2 ] in
@@ -92,12 +92,12 @@ let test_final_keeper_tool_names_ignores_legacy_mcp_alias () =
 
 let test_requested_tool_names_seen_preserves_prior_turn_surface () =
   let seen =
-    Masc_mcp.Keeper_run_tools.merge_requested_tool_names_seen
+    Masc.Keeper_run_tools.merge_requested_tool_names_seen
       ~seen:[]
       [ "keeper_board_curation_submit"; "keeper_board_post" ]
   in
   let seen =
-    Masc_mcp.Keeper_run_tools.merge_requested_tool_names_seen
+    Masc.Keeper_run_tools.merge_requested_tool_names_seen
       ~seen
       [ "keeper_board_post"; "keeper_board_comment" ]
   in

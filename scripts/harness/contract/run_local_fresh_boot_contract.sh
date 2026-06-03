@@ -205,7 +205,7 @@ env \
   -u MASC_CONFIG_DIR \
   -u MASC_PERSONAS_DIR \
   -u MASC_HOST \
-  -u MASC_MCP_PORT \
+  -u MASC_PORT \
   -u MASC_FULL_SURFACE \
   -u MASC_PUBLIC_TOOLS_EXTRA \
   bash "$RUN_LOCAL_SCRIPT" --target-dir "$BASE_PATH" --host 127.0.0.1 --port "$PORT" \
@@ -223,7 +223,7 @@ env \
     -u MASC_CONFIG_DIR \
     -u MASC_PERSONAS_DIR \
     -u MASC_HOST \
-    -u MASC_MCP_PORT \
+    -u MASC_PORT \
     -u MASC_FULL_SURFACE \
     -u MASC_PUBLIC_TOOLS_EXTRA \
     MASC_KEEPER_BOOTSTRAP_ENABLED=0 \

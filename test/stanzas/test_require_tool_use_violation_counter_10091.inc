@@ -1,5 +1,5 @@
 ; #10091: dedicated stanza so MASC_BASE_PATH is set BEFORE the
-; test executable loads — the top-level Masc_mcp init includes
+; test executable loads — the top-level Masc init includes
 ; [Cdal_verdict_gate.default_base_path] which triggers the #9903
 ; prod-guard when base_path resolves to the operator's HOME.
 

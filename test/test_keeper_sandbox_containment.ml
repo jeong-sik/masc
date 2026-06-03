@@ -3,7 +3,7 @@
     RFC-0006 Phase B-1: pin the host-FS read guard for hardened keepers.
     The containment is no-op for local keepers. *)
 
-open Masc_mcp
+open Masc
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 

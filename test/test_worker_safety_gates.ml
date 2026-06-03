@@ -5,14 +5,14 @@
     - Gate 1: Cost budget
     - Gate 2: Destructive pattern detection
 
-    Uses Masc_mcp.Worker_oas.make_tool_tracking_hooks with gate_config. *)
+    Uses Masc.Worker_oas.make_tool_tracking_hooks with gate_config. *)
 
 open Alcotest
 
 (* ── Aliases ──────────────────────────────────── *)
 
-module WO = Masc_mcp.Worker_oas
-module EG = Masc_mcp.Eval_gate
+module WO = Masc.Worker_oas
+module EG = Masc.Eval_gate
 
 (* ── Helpers ──────────────────────────────────── *)
 

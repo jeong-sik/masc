@@ -11,7 +11,7 @@ code_refs:
 
 **Status**: Draft
 **Date**: 2026-03-29
-**Scope**: MASC-MCP full product surface
+**Scope**: MASC full product surface
 **Version at analysis**: v2.161.0 (dune-project), 305+ MCP tools, 289K LOC
 **One sentence**: 문서가 약속하는 기능과 실제 작동하는 기능의 차이를 정량 검증하여, 17개 갭을 4-Wave 해결 계획으로 정리한다.
 

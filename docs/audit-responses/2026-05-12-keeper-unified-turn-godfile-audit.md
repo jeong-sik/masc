@@ -110,7 +110,7 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 
 `run_unified_turn` (line 3037 alias)은 코드에서 호출 0건 (rg evidence: 1 hit, `Keeper_unified_turn.run_unified_turn\b`, 그것도 test doc 주석). 즉, alias는 *역사적 호환*만 유지하고 있다.
 
-`include`된 helper 모듈의 API는 `module UT = Masc_mcp.Keeper_unified_turn` 별칭으로 `test/test_keeper_unified.ml` (12334 LOC)에서 **123회** 사용된다 (rg evidence: `UT\.` 123 hits in test/test_keeper_unified.ml). 즉 `.mli`의 30개 val은 *대부분 테스트 진입점*이고, production caller는 `run_keeper_cycle` 1개에 수렴한다.
+`include`된 helper 모듈의 API는 `module UT = Masc.Keeper_unified_turn` 별칭으로 `test/test_keeper_unified.ml` (12334 LOC)에서 **123회** 사용된다 (rg evidence: `UT\.` 123 hits in test/test_keeper_unified.ml). 즉 `.mli`의 30개 val은 *대부분 테스트 진입점*이고, production caller는 `run_keeper_cycle` 1개에 수렴한다.
 
 ### `mli`에 있지만 production caller 0인 (테스트 전용) 함수 — cross-check 결과
 

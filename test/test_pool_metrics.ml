@@ -14,7 +14,7 @@
 *)
 
 open Alcotest
-module PM = Masc_mcp.Pool_metrics
+module PM = Masc.Pool_metrics
 
 let metric_names = [
   PM.metric_idle_total, "masc_pool_idle_total";
@@ -63,7 +63,7 @@ let metric_lines_for name text =
          || prefix_match (name ^ "{")))
 
 let test_to_prometheus_text_contains_metric_families () =
-  let text = Masc_mcp.Prometheus.to_prometheus_text () in
+  let text = Masc.Prometheus.to_prometheus_text () in
   List.iter
     (fun (_, name) ->
       let lines = metric_lines_for name text in
@@ -77,7 +77,7 @@ let test_inflight_is_gauge_type () =
   (* TYPE line discipline: idle/inflight should render as gauge,
      reuse/evict/create as counter.  Pin a representative for each
      bucket so render-time drift is caught. *)
-  let text = Masc_mcp.Prometheus.to_prometheus_text () in
+  let text = Masc.Prometheus.to_prometheus_text () in
   let contains needle =
     let nlen = String.length needle in
     let len = String.length text in

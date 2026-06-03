@@ -9,10 +9,10 @@
     - Guard evaluation (pure, snapshot-based) *)
 
 open Alcotest
-module SM = Masc_mcp.Keeper_state_machine
-module SM_json = Masc_mcp.Keeper_state_machine_json
-module Meas = Masc_mcp.Keeper_measurement
-module Guard = Masc_mcp.Keeper_guard
+module SM = Masc.Keeper_state_machine
+module SM_json = Masc.Keeper_state_machine_json
+module Meas = Masc.Keeper_measurement
+module Guard = Masc.Keeper_guard
 module KSP = Test_keeper_state_machine_preconditions
 
 let phase_t = testable (Fmt.of_to_string SM.phase_to_string) ( = )

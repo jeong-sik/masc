@@ -7,7 +7,7 @@
     list so a future seed parse failure does not flood
     [warn_unknown_keeper_meta_keys] on every keeper read. *)
 
-open Masc_mcp
+open Masc
 
 (* [shared_memory_scope] removed in commit e3f4d82c60 ("refactor: remove
    shared_memory_scope and all related logic"). Drop from the drift gate so

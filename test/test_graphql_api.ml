@@ -1,7 +1,7 @@
 (** GraphQL API tests (read-only queries). *)
 
-module Graphql_api = Masc_mcp.Graphql_api
-module Workspace = Masc_mcp.Workspace
+module Graphql_api = Masc.Graphql_api
+module Workspace = Masc.Workspace
 module Workspace_utils = Workspace_utils
 
 let temp_dir () =

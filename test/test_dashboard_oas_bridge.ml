@@ -5,7 +5,7 @@
     filters, and the nearest-rank percentile in {!Dashboard_oas_bridge.summary},
     plus provider-error count aggregation for I2 (#11925). *)
 
-module DOB = Masc_mcp.Dashboard_oas_bridge
+module DOB = Masc.Dashboard_oas_bridge
 module Json = Yojson.Safe.Util
 module P = Provider_error
 

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Gate = Masc_mcp.Tool_resource_gate
+module Gate = Masc.Tool_resource_gate
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()

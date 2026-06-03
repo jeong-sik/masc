@@ -5,7 +5,7 @@ module Types = Masc_domain
     Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema
     -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping. *)
 
-open Masc_mcp
+open Masc
 
 (** Simple substring check — avoids Astring dependency. *)
 let string_contains haystack needle =

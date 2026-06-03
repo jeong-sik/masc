@@ -13,8 +13,8 @@
 
 open Alcotest
 
-module Tool_task = Masc_mcp.Tool_task
-module Workspace = Masc_mcp.Workspace
+module Tool_task = Masc.Tool_task
+module Workspace = Masc.Workspace
 
 (* ============================================================
    Stderr Capture Utility

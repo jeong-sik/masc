@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Orchestrator = Masc_mcp.Orchestrator
+module Orchestrator = Masc.Orchestrator
 
 (* ============================================================
    default_config Tests
@@ -132,7 +132,7 @@ let test_config_reasonable_timeout () =
    should_orchestrate Tests (requires MASC Workspace)
    ============================================================ *)
 
-module Workspace = Masc_mcp.Workspace
+module Workspace = Masc.Workspace
 
 let rec rm_rf path =
   if Sys.file_exists path then

@@ -3,7 +3,7 @@
     Pins the single typed schema so raw [cmd] strings cannot return to the
     public tool descriptor. *)
 
-open Masc_mcp
+open Masc
 
 let pp_json = Yojson.Safe.to_string
 

@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module K = Masc_mcp.Keeper_cli_mcp_config
+module K = Masc.Keeper_cli_mcp_config
 
 let mkdir_p path =
   let rec loop dir =
@@ -90,7 +90,7 @@ let test_effective_config_prefers_explicit () =
 let test_warning_not_required_when_auto_construct_succeeds () =
   Unix.putenv K.feature_flag_env "";
   with_temp_base (fun base ->
-    let auth_dir = Masc_mcp.Auth.auth_dir base in
+    let auth_dir = Masc.Auth.auth_dir base in
     mkdir_p auth_dir;
     write_file (Filename.concat auth_dir "keeper.token") "token-for-test\n";
     let effective =

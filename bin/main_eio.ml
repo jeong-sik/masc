@@ -10,58 +10,58 @@
 open Cmdliner
 
 (** Module aliases *)
-module Http = Masc_mcp.Http_server_eio
-module Http_h2 = Masc_mcp.Http_server_h2
-module Mcp_server = Masc_mcp.Mcp_server
-module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Workspace = Masc_mcp.Workspace
+module Http = Masc.Http_server_eio
+module Http_h2 = Masc.Http_server_h2
+module Mcp_server = Masc.Mcp_server
+module Mcp_eio = Masc.Mcp_server_eio
+module Workspace = Masc.Workspace
 module Workspace_utils = Workspace_utils
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_meta_store = Masc_mcp.Keeper_meta_store
-module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
-module Keeper_memory = Masc_mcp.Keeper_memory
-module Keeper_execution = Masc_mcp.Keeper_execution
-module Keeper_runtime = Masc_mcp.Keeper_runtime
-module Tool_operator = Masc_mcp.Tool_operator
-module Operator_control = Masc_mcp.Operator_control
-module Dashboard_execution = Masc_mcp.Dashboard_execution
-module Dashboard_briefing = Masc_mcp.Dashboard_briefing
+module Keeper_types = Masc.Keeper_types
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_memory = Masc.Keeper_memory
+module Keeper_execution = Masc.Keeper_execution
+module Keeper_runtime = Masc.Keeper_runtime
+module Tool_operator = Masc.Tool_operator
+module Operator_control = Masc.Operator_control
+module Dashboard_execution = Masc.Dashboard_execution
+module Dashboard_briefing = Masc.Dashboard_briefing
 (* module Dashboard_proof removed *)
-module Dashboard_briefing_sections = Masc_mcp.Dashboard_briefing_sections
-module Build_identity = Masc_mcp.Build_identity
-module Auth_login = Masc_mcp.Auth_login
-module Keeper_id = Masc_mcp.Keeper_id
-module Keeper_msg_async = Masc_mcp.Keeper_msg_async
-module Keeper_status_bridge = Masc_mcp.Keeper_status_bridge
-module Keeper_tool_call_log = Masc_mcp.Keeper_tool_call_log
-module Graphql_api = Masc_mcp.Graphql_api
+module Dashboard_briefing_sections = Masc.Dashboard_briefing_sections
+module Build_identity = Masc.Build_identity
+module Auth_login = Masc.Auth_login
+module Keeper_id = Masc.Keeper_id
+module Keeper_msg_async = Masc.Keeper_msg_async
+module Keeper_status_bridge = Masc.Keeper_status_bridge
+module Keeper_tool_call_log = Masc.Keeper_tool_call_log
+module Graphql_api = Masc.Graphql_api
 module Types = Masc_domain
-module Tempo = Masc_mcp.Tempo
-module Auth = Masc_mcp.Auth
-module Board = Masc_mcp.Board
-module Board_curation = Masc_mcp.Board_curation
-module Board_dispatch = Masc_mcp.Board_dispatch
-module Task_dispatch = Masc_mcp.Task_dispatch
+module Tempo = Masc.Tempo
+module Auth = Masc.Auth
+module Board = Masc.Board
+module Board_curation = Masc.Board_curation
+module Board_dispatch = Masc.Board_dispatch
+module Task_dispatch = Masc.Task_dispatch
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
-module Progress = Masc_mcp.Progress
-module Sse = Masc_mcp.Sse
+module Progress = Masc.Progress
+module Sse = Masc.Sse
 module Safe_ops = Safe_ops
-module Tool_board = Masc_mcp.Tool_board
-module Server_mcp_transport_http = Masc_mcp.Server_mcp_transport_http
+module Tool_board = Masc.Tool_board
+module Server_mcp_transport_http = Masc.Server_mcp_transport_http
 
 
 (* ============================================ *)
 (* Extracted modules (lib/)                      *)
 (* ============================================ *)
-include Masc_mcp.Server_utils
-include Masc_mcp.Server_auth
-include Masc_mcp.Server_voice_config
-include Masc_mcp.Server_dashboard_http
-module Server_h2_gateway = Masc_mcp.Server_h2_gateway
-module Server_runtime_bootstrap = Masc_mcp.Server_runtime_bootstrap
-module Server_routes_http_runtime = Masc_mcp.Server_routes_http_runtime
-module Server_openai_compat = Masc_mcp.Server_openai_compat
-module Server_startup_takeover = Masc_mcp.Server_startup_takeover
+include Masc.Server_utils
+include Masc.Server_auth
+include Masc.Server_voice_config
+include Masc.Server_dashboard_http
+module Server_h2_gateway = Masc.Server_h2_gateway
+module Server_runtime_bootstrap = Masc.Server_runtime_bootstrap
+module Server_routes_http_runtime = Masc.Server_routes_http_runtime
+module Server_openai_compat = Masc.Server_openai_compat
+module Server_startup_takeover = Masc.Server_startup_takeover
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
 
@@ -104,7 +104,7 @@ let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 let get_protocol_version_for_session =
   Server_mcp_transport_http.get_protocol_version_for_session
 
-module Server_routes_http = Masc_mcp.Server_routes_http
+module Server_routes_http = Masc.Server_routes_http
 
 open Server_routes_http
 
@@ -113,7 +113,7 @@ open Server_routes_http
    manual edit here. *)
 let is_rate_limit_exempt path =
   String.equal path "/health"
-  || Masc_mcp.Server_health_paths.is_public path
+  || Masc.Server_health_paths.is_public path
 
 (** [safe_reqd_respond reqd response body] guards all direct
     [Httpun.Reqd.respond_with_string] calls in the main request handler
@@ -145,10 +145,10 @@ let safe_reqd_respond reqd response body =
 let try_rate_limit_block ~path ~client_addr ~request reqd =
   if is_rate_limit_exempt path then false
   else
-    let rl_key = Masc_mcp.Rate_limit.key_of_sockaddr client_addr in
-    if not (Masc_mcp.Rate_limit.check_global ~key:rl_key) then begin
-      let body = Masc_mcp.Rate_limit.too_many_requests_body () in
-      let rl_headers = Masc_mcp.Rate_limit.headers_global ~key:rl_key in
+    let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
+    if not (Masc.Rate_limit.check_global ~key:rl_key) then begin
+      let body = Masc.Rate_limit.too_many_requests_body () in
+      let rl_headers = Masc.Rate_limit.headers_global ~key:rl_key in
       let headers = Httpun.Headers.of_list (
         ("content-type", "application/json") ::
         ("content-length", string_of_int (String.length body)) ::
@@ -161,14 +161,14 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
       match auth_token_from_request request with
       | None -> false
       | Some token ->
-          match Masc_mcp.Rate_limit.agent_key_of_token_or_name ~token () with
+          match Masc.Rate_limit.agent_key_of_token_or_name ~token () with
           | None -> false
           | Some agent_key ->
-              if Masc_mcp.Rate_limit.check_agent_global ~key:agent_key then false
+              if Masc.Rate_limit.check_agent_global ~key:agent_key then false
               else begin
-                let body = Masc_mcp.Rate_limit.too_many_agent_requests_body () in
+                let body = Masc.Rate_limit.too_many_agent_requests_body () in
                 let rl_headers =
-                  Masc_mcp.Rate_limit.headers_agent_global ~key:agent_key
+                  Masc.Rate_limit.headers_agent_global ~key:agent_key
                 in
                 let headers =
                   Httpun.Headers.of_list
@@ -196,7 +196,7 @@ let is_mcp_like_path path =
     Caller should short-circuit further handling in that case. *)
 let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd =
   if is_mcp_like && not (validate_origin request) then begin
-    let body = json_rpc_error Masc_mcp.Mcp_error_code.Invalid_request "Invalid origin" in
+    let body = json_rpc_error Masc.Mcp_error_code.Invalid_request "Invalid origin" in
     let headers = Httpun.Headers.of_list (
       ("content-length", string_of_int (String.length body))
       :: json_headers "-" protocol_version origin
@@ -207,7 +207,7 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
   end
   else if is_mcp_like && request.Httpun.Request.meth <> `OPTIONS &&
           not (is_valid_protocol_version protocol_version) then begin
-    let body = json_rpc_error Masc_mcp.Mcp_error_code.Invalid_request "Unsupported protocol version" in
+    let body = json_rpc_error Masc.Mcp_error_code.Invalid_request "Unsupported protocol version" in
     let headers = Httpun.Headers.of_list (
       ("content-length", string_of_int (String.length body))
       :: json_headers "-" protocol_version origin
@@ -235,16 +235,16 @@ let dispatch_route ~router ~request ~path reqd =
     ] in
     let response = Httpun.Response.create ~headers `OK in
     safe_reqd_respond reqd response body
-  | `POST, "/webrtc/offer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+  | `POST, "/webrtc/offer" when Masc.Server_webrtc_transport.is_enabled () ->
     Http.Request.read_body_async reqd (fun body ->
-      match Masc_mcp.Server_webrtc_transport.handle_offer_request body with
+      match Masc.Server_webrtc_transport.handle_offer_request body with
       | Ok json -> Http.Response.json json reqd
       | Error msg ->
         Http.Response.json ~status:`Bad_request
           (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-  | `POST, "/webrtc/answer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+  | `POST, "/webrtc/answer" when Masc.Server_webrtc_transport.is_enabled () ->
     Http.Request.read_body_async reqd (fun body ->
-      match Masc_mcp.Server_webrtc_transport.handle_answer_request body with
+      match Masc.Server_webrtc_transport.handle_answer_request body with
       | Ok json -> Http.Response.json json reqd
       | Error msg ->
         Http.Response.json ~status:`Bad_request
@@ -551,7 +551,7 @@ let login_client_env =
   let doc =
     "Env var name your MCP client reads to pick up the minted bearer \
      token. Required; the server holds no list of \"known\" MCP \
-     clients. Example: MASC_MCP_TOKEN or any \
+     clients. Example: MASC_TOKEN or any \
      operator-chosen name. The value is \
      rendered verbatim into the shell exports and JSON output."
   in
@@ -727,7 +727,7 @@ let run_cmd host port base_path =
      [Atomic.set]/[Atomic.get] are lock-free and signal-safe. *)
   let pending_shutdown_signal = Atomic.make None in
   let request_shutdown signal_name =
-    Masc_mcp.Shutdown.mark_shutting_down ();
+    Masc.Shutdown.mark_shutting_down ();
     if Option.is_none (Atomic.get pending_shutdown_signal) then
       Atomic.set pending_shutdown_signal (Some signal_name)
   in
@@ -745,7 +745,7 @@ let run_cmd host port base_path =
             Eio.Time.sleep clock 0.05;
             await_shutdown_signal ()
         | Some signal_name ->
-            let shutdown_cfg = Masc_mcp.Shutdown.config_from_env () in
+            let shutdown_cfg = Masc.Shutdown.config_from_env () in
             let force_timeout = shutdown_cfg.force_timeout_s in
             let t_shutdown_start = Unix.gettimeofday () in
             Log.Server.info
@@ -770,8 +770,8 @@ let run_cmd host port base_path =
               "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: %d, ws: %d]"
               (Sse.client_count ())
               (Unix.gettimeofday () -. t_phase)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+              (Masc.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc.Server_mcp_transport_ws.session_count ());
 
             Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
             (* Phase 2: Run shutdown hooks with cleanup timeout *)
@@ -780,7 +780,7 @@ let run_cmd host port base_path =
               shutdown_cfg.cleanup_timeout_s;
             (try
               Eio.Time.with_timeout_exn clock shutdown_cfg.cleanup_timeout_s
-                (fun () -> Masc_mcp.Shutdown_hooks.run_all ())
+                (fun () -> Masc.Shutdown_hooks.run_all ())
             with
             | Eio.Time.Timeout ->
                 Log.Server.warn
@@ -797,8 +797,8 @@ let run_cmd host port base_path =
             Log.Server.info "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+              (Masc.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc.Server_mcp_transport_ws.session_count ());
             (* Phase 3: Board flush with 2s timeout *)
             let t_phase = Unix.gettimeofday () in
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
@@ -820,16 +820,16 @@ let run_cmd host port base_path =
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+              (Masc.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc.Server_mcp_transport_ws.session_count ());
 
             (* Phase 4: Return normally — Eio.Fiber.first will cancel
                run_server cleanly via Eio.Cancel.Cancelled. *)
             Log.Server.info
               "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs) [active conn: %d, ws: %d]"
               (Unix.gettimeofday () -. t_shutdown_start)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+              (Masc.Server_mcp_transport_http_sse.active_session_count ())
+              (Masc.Server_mcp_transport_ws.session_count ());
             ()
             in
             Eio.Fiber.first
@@ -843,8 +843,8 @@ let run_cmd host port base_path =
                 Log.Server.warn "shutdown: SSE close error: %s"
                   (Printexc.to_string exn));
             Log.Server.info "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, ws: %d]"
-            (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-            (Masc_mcp.Server_mcp_transport_ws.session_count ())
+            (Masc.Server_mcp_transport_http_sse.active_session_count ())
+            (Masc.Server_mcp_transport_ws.session_count ())
 
     with
     | Eio.Cancel.Cancelled _ ->
@@ -966,7 +966,7 @@ let init_cmd =
 
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
-  let info = Cmd.info "masc" ~version:Masc_mcp.Version.version ~doc in
+  let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
     info [ init_cmd; login_cmd ]
 

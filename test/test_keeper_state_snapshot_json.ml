@@ -8,8 +8,8 @@
     5. patch_checkpoint_last_assistant stores structured JSON when flag is on
     6. Structured JSON takes priority over text fallback in dual-source read *)
 
-module KMP = Masc_mcp.Keeper_memory_policy
-module KCC = Masc_mcp.Keeper_context_core
+module KMP = Masc.Keeper_memory_policy
+module KCC = Masc.Keeper_context_core
 
 let contains_substring text needle =
   let text_len = String.length text in

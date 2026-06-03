@@ -64,7 +64,7 @@ let scrubbed_env_names =
     [
       "MASC_STORAGE_TYPE";
       "MASC_KEEPER_BOOTSTRAP_ENABLED";
-      "MASC_MCP_PORT";
+      "MASC_PORT";
       "MASC_HOST";
       "MASC_BASE_PATH";
       "MASC_SIDECAR_ROOT";

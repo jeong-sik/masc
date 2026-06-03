@@ -24,7 +24,7 @@
 open Alcotest
 
 module KB = Env_config_keeper.KeeperBootstrap
-module Boot = Masc_mcp.Server_bootstrap_loops.For_testing
+module Boot = Masc.Server_bootstrap_loops.For_testing
 
 let approx = float 0.001
 

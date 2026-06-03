@@ -9,7 +9,7 @@
     Background: MASC/OAS Error-Warn Reduction Goal 2026-05-18 P2
     reducer. *)
 
-module D = Masc_mcp.Keeper_tool_deterministic_error
+module D = Masc.Keeper_tool_deterministic_error
 
 let reason_testable =
   let pp ppf reason = Format.pp_print_string ppf (D.to_telemetry_key reason) in

@@ -5,7 +5,7 @@
     metric label vocabulary stable as the lifecycle module grows. *)
 
 open Alcotest
-module CT = Masc_mcp.Workspace
+module CT = Masc.Workspace
 module L = Workspace_task_lifecycle
 module T = Masc_domain
 

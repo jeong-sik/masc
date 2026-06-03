@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module T = Masc_mcp.Tool_task_args
+module T = Masc.Tool_task_args
 
 (* The incident: an omitted optional contract must parse to [Ok None], not an
    Error. [Json_util.assoc_member_opt] returns [None] for an absent key. *)

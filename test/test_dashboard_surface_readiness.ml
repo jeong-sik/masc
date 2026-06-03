@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 type surface_contract = {
   id : string;

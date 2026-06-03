@@ -209,7 +209,7 @@ module Request : sig
   val default_max_body_bytes : int
 
   (** Effective max body size, resolved at module-load time
-      from [MASC_MCP_MAX_BODY_BYTES] (preferred) or
+      from [MASC_MAX_BODY_BYTES] (preferred) or
       [MCP_MAX_BODY_BYTES] (legacy), falling back to
       {!default_max_body_bytes}.  Restart required for env
       changes. *)

@@ -5,17 +5,17 @@ let get_string_field json key =
   json |> member key |> to_string
 
 let classification_of_cmd cmd =
-  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Ok ir -> Masc_mcp.Exec_core.classify_command_of_ir ir
+  match Masc.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Ok ir -> Masc.Exec_core.classify_command_of_ir ir
   | Error reason ->
       failwith
         ("command parse failed: "
-         ^ Masc_mcp.Exec_policy.block_reason_to_string reason)
+         ^ Masc.Exec_policy.block_reason_to_string reason)
 
 let test_rg_no_match_is_semantic_success () =
   let cmd = "rg missing_pattern lib/" in
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"exec-core"
       ~cmd
@@ -32,7 +32,7 @@ let test_rg_no_match_is_semantic_success () =
 
 let test_find_partial_is_semantic_success () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"exec-core"
       ~cmd:"find lib -name '*.ml'"
@@ -46,7 +46,7 @@ let test_find_partial_is_semantic_success () =
 
 let test_find_missing_path_is_runtime_error () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"exec-core"
       ~cmd:"find /tmp /definitely-missing-path-xyz"
@@ -60,7 +60,7 @@ let test_find_missing_path_is_runtime_error () =
 
 let test_missing_task_state_path_points_to_task_tools () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"exec-core"
       ~cmd:"cat .masc/backlog.json"
@@ -80,12 +80,12 @@ let test_missing_task_state_path_points_to_task_tools () =
 let test_blocked_json_adds_classification () =
   let cmd = "git push origin main" in
   let json =
-    Masc_mcp.Exec_core.blocked_result_json
+    Masc.Exec_core.blocked_result_json
       ~cmd
       ~error:"write_operation_gated"
       ~reason:"write tool_access required"
       ~classification:(classification_of_cmd cmd)
-      ~retryability:Masc_mcp.Exec_core.Operator_required
+      ~retryability:Masc.Exec_core.Operator_required
       ()
   in
   check string "error" "write_operation_gated"
@@ -107,7 +107,7 @@ let test_blocked_json_adds_classification () =
 
 let test_regex_pipe_inside_quotes_keeps_no_match_semantics () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"exec-core"
       ~cmd:"rg 'a|b' lib/"
@@ -121,7 +121,7 @@ let test_regex_pipe_inside_quotes_keeps_no_match_semantics () =
 
 let test_pipeline_last_command_uses_shared_words () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"exec-core"
       ~cmd:"printf foo | rg 'a|b'"
@@ -140,10 +140,10 @@ let test_unknown_write_is_not_git_write () =
     | _ -> Alcotest.fail "failed to parse mkdir command"
   in
   let classification =
-    Masc_mcp.Exec_core.classify_command_of_ir ir
+    Masc.Exec_core.classify_command_of_ir ir
   in
   check string "family" "unknown"
-    (Masc_mcp.Exec_core.classification_to_json classification
+    (Masc.Exec_core.classification_to_json classification
      |> member "family" |> to_string);
   check bool "risk_class is write" true
     (classification.risk_class <> Masc_exec.Shell_ir_risk.R0_Read)
@@ -170,8 +170,8 @@ let test_large_output_persists_artifact () =
     (fun () ->
       let output = String.make 17000 'x' in
       let json =
-        Masc_mcp.Exec_core.process_result_json
-          ~artifact_policy:Masc_mcp.Exec_core.Persist_if_large
+        Masc.Exec_core.process_result_json
+          ~artifact_policy:Masc.Exec_core.Persist_if_large
           ~base_path
           ~keeper_name:"exec-core"
           ~cmd:"cat README.md"
@@ -195,8 +195,8 @@ let test_inline_only_keeps_artifact_refs_empty () =
     (fun () ->
       let output = String.make 17000 'x' in
       let json =
-        Masc_mcp.Exec_core.process_result_json
-          ~artifact_policy:Masc_mcp.Exec_core.Inline_only
+        Masc.Exec_core.process_result_json
+          ~artifact_policy:Masc.Exec_core.Inline_only
           ~base_path
           ~keeper_name:"exec-core"
           ~cmd:"cat README.md"
@@ -225,7 +225,7 @@ let with_semantic_flag enabled f =
   | exception e -> restore (); raise e
 
 let run_json ~cmd ~status ~output =
-  Masc_mcp.Exec_core.process_result_json
+  Masc.Exec_core.process_result_json
     ~base_path:"/tmp"
     ~keeper_name:"exec-core-semantic"
     ~cmd
@@ -349,7 +349,7 @@ let test_output_cap_truncates_large_output () =
 
 let test_blocked_without_diagnosis_has_no_field () =
   let json =
-    Masc_mcp.Exec_core.blocked_result_json
+    Masc.Exec_core.blocked_result_json
       ~cmd:"some command"
       ~error:"generic_blocked"
       ~reason:"blocked for testing"
@@ -361,14 +361,14 @@ let test_blocked_without_diagnosis_has_no_field () =
 
 let test_blocked_with_diagnosis_has_all_fields () =
   let diag =
-    { Masc_mcp.Exec_core.rule_id = "test_rule"
+    { Masc.Exec_core.rule_id = "test_rule"
     ; explanation = "explaining why"
     ; rewrite = Some "use this instead"
     ; tool_suggestion = None
     }
   in
   let json =
-    Masc_mcp.Exec_core.blocked_result_json
+    Masc.Exec_core.blocked_result_json
       ~cmd:"bad cmd"
       ~error:"test_blocked"
       ~reason:"testing"
@@ -387,14 +387,14 @@ let test_blocked_with_diagnosis_has_all_fields () =
 
 let test_blocked_with_tool_suggestion () =
   let diag =
-    { Masc_mcp.Exec_core.rule_id = "redirect_blocked"
+    { Masc.Exec_core.rule_id = "redirect_blocked"
     ; explanation = "redirects are forbidden"
     ; rewrite = None
     ; tool_suggestion = Some "tool_edit_file"
     }
   in
   let json =
-    Masc_mcp.Exec_core.blocked_result_json
+    Masc.Exec_core.blocked_result_json
       ~cmd:"echo hi > file.txt"
       ~error:"readonly_blocked"
       ~reason:"redirect"
@@ -410,14 +410,14 @@ let test_blocked_with_tool_suggestion () =
 
 let test_blocked_diagnosis_both_rewrite_and_tool () =
   let diag =
-    { Masc_mcp.Exec_core.rule_id = "chaining_blocked"
+    { Masc.Exec_core.rule_id = "chaining_blocked"
     ; explanation = "chaining not allowed"
     ; rewrite = Some "split into two calls"
     ; tool_suggestion = Some "tool_search_files"
     }
   in
   let json =
-    Masc_mcp.Exec_core.blocked_result_json
+    Masc.Exec_core.blocked_result_json
       ~cmd:"a && b"
       ~error:"command_blocked_readonly"
       ~reason:"chaining"
@@ -434,7 +434,7 @@ let test_blocked_diagnosis_both_rewrite_and_tool () =
 
 let test_git_status_structured () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"git status --porcelain"
@@ -452,7 +452,7 @@ let test_git_status_structured () =
 
 let test_git_status_with_global_option_structured () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"git -C /tmp/repo status --porcelain"
@@ -466,7 +466,7 @@ let test_git_status_with_global_option_structured () =
 
 let test_git_log_structured () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"git log --oneline -5"
@@ -480,7 +480,7 @@ let test_git_log_structured () =
 
 let test_failed_git_status_has_no_structured_output () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"git status --porcelain"
@@ -495,7 +495,7 @@ let test_failed_git_status_has_no_structured_output () =
 
 let test_failed_git_log_has_no_structured_output () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"git log --oneline -5"
@@ -510,7 +510,7 @@ let test_failed_git_log_has_no_structured_output () =
 
 let test_pipeline_git_status_has_no_structured_output () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"git status --porcelain | cat"
@@ -525,7 +525,7 @@ let test_pipeline_git_status_has_no_structured_output () =
 
 let test_wc_structured () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"wc -l lib/foo.ml"
@@ -538,7 +538,7 @@ let test_wc_structured () =
 
 let test_git_diff_stat_structured () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"git diff --stat"
@@ -553,7 +553,7 @@ let test_git_diff_stat_structured () =
 
 let test_git_diff_stat_structured_plural () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"git diff --stat"
@@ -570,7 +570,7 @@ let test_git_diff_stat_structured_plural () =
 
 let test_unknown_cmd_no_structured () =
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"echo hello world"
@@ -588,7 +588,7 @@ let test_dune_test_structured () =
     "Test src/foo.ml: OK\nTest test/bar.ml: FAILED\nTest test/baz.ml: OK\n"
   in
   let json =
-    Masc_mcp.Exec_core.process_result_json
+    Masc.Exec_core.process_result_json
       ~base_path:"/tmp"
       ~keeper_name:"p10-test"
       ~cmd:"dune runtest"

@@ -1,6 +1,6 @@
 (** Unit tests for Trajectory module — JSONL trajectory logging. *)
 
-open Masc_mcp
+open Masc
 
 let () =
   (* Ensure RNG is initialized for any code that may need it *)

@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module Cancellation = Masc_mcp.Cancellation
+module Cancellation = Masc.Cancellation
 
 (* Initialize RNG for crypto *)
 let () = Mirage_crypto_rng_unix.use_default ()

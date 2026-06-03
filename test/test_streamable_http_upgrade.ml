@@ -10,8 +10,8 @@
 
 open Alcotest
 
-module Streaming = Masc_mcp.Server_mcp_streaming_tools
-module Http_transport = Masc_mcp.Server_mcp_transport_http
+module Streaming = Masc.Server_mcp_streaming_tools
+module Http_transport = Masc.Server_mcp_transport_http
 
 let tools_call_body ~tool_name =
   Printf.sprintf

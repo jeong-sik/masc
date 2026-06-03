@@ -9,9 +9,9 @@
 
 open Alcotest
 
-module Telemetry_eio = Masc_mcp.Telemetry_eio
-module Workspace = Masc_mcp.Workspace
-module Prometheus = Masc_mcp.Prometheus
+module Telemetry_eio = Masc.Telemetry_eio
+module Workspace = Masc.Workspace
+module Prometheus = Masc.Prometheus
 
 let error_kind value = Telemetry_eio.error_kind_of_string value
 let error_kind_to_string = Telemetry_eio.error_kind_to_string

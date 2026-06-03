@@ -4,7 +4,7 @@
     and [classify_actionable_signal] precedence (unclaimed_tasks >
     board_activity). *)
 
-open Masc_mcp
+open Masc
 module KCC = Keeper_contract_classifier
 
 let check_string label expected actual =

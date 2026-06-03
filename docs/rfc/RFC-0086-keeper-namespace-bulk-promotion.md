@@ -208,11 +208,11 @@ rename PR.
 **Mechanism**: Dune 3.7+ feature. Convert `lib/dune` from
 `(include_subdirs unqualified)` to `(include_subdirs qualified)`.
 Subdirectory names become module path prefixes. `lib/keeper/foo.ml`
-becomes `Masc_mcp.Keeper.Foo` (qualified path) instead of bare `Foo`.
+becomes `Masc.Keeper.Foo` (qualified path) instead of bare `Foo`.
 
 **Caller delta**: All 583 files referencing `Keeper_X` would resolve
 *differently* — `Keeper_X` (a top-level module today) becomes
-`Masc_mcp.Keeper.Keeper_X` or with `-open` `Keeper.Keeper_X`. The
+`Masc.Keeper.Keeper_X` or with `-open` `Keeper.Keeper_X`. The
 existing keeper_ prefix would actually become *redundant*
 (`Keeper.Keeper_X` is awkward).
 
@@ -234,9 +234,9 @@ Defer indefinitely; revisit only when ecosystem moves.
 ### 3.D. Tezos `lib_*/` with `(wrapped true) + -open`
 
 **Mechanism**: `lib/keeper/dune` with `(library (name masc_keeper)
-(wrapped true))`. Modules become `Masc_mcp_keeper.Keeper_X`. Parent
-`lib/dune` adds `(flags (:standard -open Masc_mcp_keeper))` so internal
-references resolve `Keeper_X` ⇒ `Masc_mcp_keeper.Keeper_X` transparently.
+(wrapped true))`. Modules become `Masc_keeper.Keeper_X`. Parent
+`lib/dune` adds `(flags (:standard -open Masc_keeper))` so internal
+references resolve `Keeper_X` ⇒ `Masc_keeper.Keeper_X` transparently.
 External `bin/` and `test/` need similar `-open` or qualified refs.
 
 **Caller delta**: With `-open` everywhere, zero caller change like

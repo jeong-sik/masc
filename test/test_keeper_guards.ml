@@ -8,23 +8,23 @@
       ([extract_command_from_input], [render_inline_skip_reason]) *)
 
 open Alcotest
-module KG = Masc_mcp.Keeper_guards
-module HK = Masc_mcp.Keeper_hooks_oas
-module HGA = Masc_mcp.Keeper_hooks_oas_gate_attempt
-module P = Masc_mcp.Prometheus
+module KG = Masc.Keeper_guards
+module HK = Masc.Keeper_hooks_oas
+module HGA = Masc.Keeper_hooks_oas_gate_attempt
+module P = Masc.Prometheus
 
 (* ----------------------------------------------------------------- *)
 (* Helpers                                                             *)
 (* ----------------------------------------------------------------- *)
 
 (** Build a minimal keeper_meta ref for guards that only read [name]. *)
-let make_meta_ref (name : string) : Masc_mcp.Keeper_meta_contract.keeper_meta ref =
+let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
   let json : Yojson.Safe.t = `Assoc [
     ("name", `String name);
     ("agent_name", `String name);
     ("trace_id", `String "keeper-guards-test");
     ("tool_access",
-      Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+      Masc.Keeper_meta_tool_access.tool_access_to_json
         ([]));
   ] in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -307,7 +307,7 @@ let test_gate_observer_failure_counts_actual_keeper () =
   let keeper = (!meta_ref).name in
   let labels = [ ("keeper", keeper); ("site", "gate_observer") ] in
   let before =
-    P.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string GuardsFailures) ~labels ()
+    P.metric_value_or_zero Masc.Keeper_metrics.(to_string GuardsFailures) ~labels ()
   in
   let on_gate_decision _event =
     raise (Failure "synthetic gate observer failure")
@@ -318,7 +318,7 @@ let test_gate_observer_failure_counts_actual_keeper () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"dangerous_tool" ()) in
   check string "denied tool still overrides" "Override" (decision_kind d);
   let after =
-    P.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string GuardsFailures) ~labels ()
+    P.metric_value_or_zero Masc.Keeper_metrics.(to_string GuardsFailures) ~labels ()
   in
   check (float 0.0001) "observer failure counted for keeper"
     (before +. 1.0) after

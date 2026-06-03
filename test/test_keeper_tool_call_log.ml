@@ -1,6 +1,6 @@
 (** Tests for Keeper_tool_call_log — truncation, redaction, and read_recent. *)
 
-open Masc_mcp
+open Masc
 
 let eio_test name fn =
   Alcotest.test_case name `Quick (fun () ->

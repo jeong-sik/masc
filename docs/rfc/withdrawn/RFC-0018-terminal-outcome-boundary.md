@@ -164,7 +164,7 @@ This RFC must wait for explicit approval before the PR series starts because:
 
 ## 10. Reference
 
-- Audit: `~/Downloads/Kimi_Agent_Keeper FSM 검토/MASC-MCP_Keeper_종합진단보고서.md` §1.2.2, §8.3
+- Audit: `~/Downloads/Kimi_Agent_Keeper FSM 검토/MASC_Keeper_종합진단보고서.md` §1.2.2, §8.3
 - Cycle 5 site: `lib/keeper/keeper_agent_run.ml:1290-1343` (Result.Error promotion comment)
 - TLA invariants: `specs/keeper-turn-fsm/KeeperTurnFSM.tla:314-327` (`EveryTurnHasTerminalReceipt`, `ReceiptMatchesState`, `ReceiptOutcomeSet`)
 - Plan: `~/me/planning/claude-plans/greedy-sleeping-blossom.md` (PPX rigor track gap-fill)

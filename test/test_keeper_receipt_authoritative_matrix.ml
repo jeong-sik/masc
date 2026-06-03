@@ -32,8 +32,8 @@
    so that when callers do diverge (a concern that surfaces in
    [ReceiptMatchesState] coverage work) the helper is already pinned. *)
 
-module R = Masc_mcp.Keeper_execution_receipt
-module F = Masc_mcp.Keeper_turn_fsm
+module R = Masc.Keeper_execution_receipt
+module F = Masc.Keeper_turn_fsm
 
 let all_outcomes : R.outcome_kind list =
   [ `Ok; `Skipped; `Error; `Cancelled ]

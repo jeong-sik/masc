@@ -4,9 +4,9 @@
     - Layer A: configured concurrency cap is respected under fan-in
     - Layer B: fd_pressure trip degrades effective concurrency to 1 *)
 
-module DST = Masc_mcp.Docker_spawn_throttle
-module FA = Masc_mcp.Fd_accountant
-module FD = Masc_mcp.Keeper_fd_pressure
+module DST = Masc.Docker_spawn_throttle
+module FA = Masc.Fd_accountant
+module FD = Masc.Keeper_fd_pressure
 
 let with_eio f =
   Eio_main.run (fun env -> ignore env; f ())

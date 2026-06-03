@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 open Test_operator_control_support
 
 let claim_and_start config ~agent_name ~task_id =

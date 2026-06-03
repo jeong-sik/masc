@@ -7,7 +7,7 @@
     flush so a single [record] call produces visible output once the
     flush interval has elapsed. *)
 
-module HM = Masc_mcp.Heuristic_metrics
+module HM = Masc.Heuristic_metrics
 
 let tmp_base () =
   let p =

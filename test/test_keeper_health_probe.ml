@@ -3,9 +3,9 @@
    call site, get_runtime_status branch) is covered by integration
    tests in test_keeper_supervisor.ml. *)
 
-module H = Masc_mcp.Keeper_health_probe
-module R = Masc_mcp.Keeper_registry
-module KSM = Masc_mcp.Keeper_state_machine
+module H = Masc.Keeper_health_probe
+module R = Masc.Keeper_registry
+module KSM = Masc.Keeper_state_machine
 
 let pressure_label_t = Alcotest.(option string)
 
@@ -60,7 +60,7 @@ let test_get_runtime_status_default_unknown () =
 let test_check_runtime_health_all_healthy () =
   let base_dir = Filename.temp_file "probe-" "" in
   Sys.remove base_dir;
-  let results = Masc_mcp.Keeper_health_probe.check_runtime_health ~base_path:base_dir in
+  let results = Masc.Keeper_health_probe.check_runtime_health ~base_path:base_dir in
   Alcotest.(check int) "empty registry = no runtimes" 0 (List.length results)
 ;;
 

@@ -1,7 +1,7 @@
 let test_resolve_bind_state_skips_read_only_lookup () =
   let called = ref false in
   let bound =
-    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
+    Masc.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:false
       ~agent_name:"agent_code"
@@ -15,7 +15,7 @@ let test_resolve_bind_state_skips_read_only_lookup () =
 let test_resolve_bind_state_checks_bind_required_tools () =
   let called = ref false in
   let bound =
-    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
+    Masc.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
       ~agent_name:"agent_code"
@@ -29,7 +29,7 @@ let test_resolve_bind_state_checks_bind_required_tools () =
 let test_resolve_bind_state_skips_unknown_agent () =
   let called = ref false in
   let bound =
-    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
+    Masc.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
       ~agent_name:"unknown"
@@ -43,7 +43,7 @@ let test_resolve_bind_state_skips_unknown_agent () =
 let test_resolve_bind_state_alias_does_not_probe_canonical () =
   let candidates = ref [] in
   let bound =
-    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
+    Masc.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
       ~agent_name:"agent_code-rotated"
@@ -60,7 +60,7 @@ let test_resolve_bind_state_alias_does_not_probe_canonical () =
 
 let test_resolve_bind_state_unknown_alias_stays_false () =
   let bound =
-    Masc_mcp.Mcp_server_eio_execute.resolve_bind_state
+    Masc.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
       ~agent_name:"a-b"

@@ -1,6 +1,6 @@
 (** Unit tests for Cognitive_gravity (RFC-0035 PR-1, Master Report Dim01 #5). *)
 
-open Masc_mcp.Cognitive_gravity
+open Masc.Cognitive_gravity
 
 let mk_item ?(keywords = []) ?(recency_seconds = 0.0)
     ?(frequency_weight = 0.0) payload =

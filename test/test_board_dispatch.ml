@@ -1,6 +1,6 @@
 (** Test Board_dispatch - routing and JSONL backend integration *)
 
-open Masc_mcp
+open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()

@@ -1,7 +1,7 @@
 module Types = Masc_domain
 
-module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Config = Masc_mcp.Config
+module Mcp_eio = Masc.Mcp_server_eio
+module Config = Masc.Config
 module Goal_store = Goal_store
 
 type init_mode =
@@ -296,7 +296,7 @@ let ensure_initialized fixture =
   (* masc_init pruned from registry. Initialise the workspace state directly so
      downstream tools can work. *)
   ignore
-    (Masc_mcp.Workspace.init fixture.state.workspace_config
+    (Masc.Workspace.init fixture.state.workspace_config
        ~agent_name:(Some fixture.agent_name))
 
 let ensure_bound fixture =
@@ -332,7 +332,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   seed_persona_dir base_path tool_matrix_agent_name;
   let auth_token =
     match
-      Masc_mcp.Auth.create_token base_path ~agent_name:tool_matrix_agent_name
+      Masc.Auth.create_token base_path ~agent_name:tool_matrix_agent_name
         ~role:Masc_domain.Admin
     with
     | Ok (token, _cred) -> token
@@ -452,11 +452,11 @@ let ensure_verification_request fixture =
   | Some req_id -> req_id
   | None ->
       let base_path =
-        Masc_mcp.Workspace.masc_dir fixture.state.workspace_config
+        Masc.Workspace.masc_dir fixture.state.workspace_config
       in
       let req =
         match
-          Masc_mcp.Verification.create_request ~base_path
+          Masc.Verification.create_request ~base_path
             ~task_id:(ensure_task fixture) ~output:(`String "tool matrix output")
             ~criteria:[] ~worker:"tool-matrix-worker"
             ~verifier:fixture.agent_name ()

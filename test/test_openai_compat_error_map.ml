@@ -7,7 +7,7 @@
     constructors — exhaustiveness over sub-variants is enforced by the
     OCaml compiler at the implementation site (no catch-all `_ ->`). *)
 
-module M = Masc_mcp.Openai_compat_error_map
+module M = Masc.Openai_compat_error_map
 module E = Agent_sdk.Error
 
 (* Renders [http_status] tag literally for diff-readable Alcotest output. *)

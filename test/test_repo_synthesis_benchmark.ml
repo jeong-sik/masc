@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let answers_path repo_root name =
   Filename.concat repo_root

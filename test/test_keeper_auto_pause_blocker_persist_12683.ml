@@ -11,11 +11,11 @@
     related test rows have been removed accordingly.) *)
 
 open Alcotest
-module KT = Masc_mcp.Keeper_types
-module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
-module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
-module Keeper_meta_json = Masc_mcp.Keeper_meta_json
-module MC = Masc_mcp.Keeper_meta_contract
+module KT = Masc.Keeper_types
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module Keeper_meta_json = Masc.Keeper_meta_json
+module MC = Masc.Keeper_meta_contract
 
 let test_turn_timeout_blocker_class_roundtrip () =
   let cls = Keeper_meta_contract.Turn_timeout in

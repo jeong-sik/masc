@@ -24,7 +24,7 @@
        [provenance="narrative"], [authoritative=false], and the
        fixed 9-key shape. *)
 
-module S = Masc_mcp.Briefing_sections
+module S = Masc.Briefing_sections
 
 (* ── Fixtures ──────────────────────────────────────────────── *)
 

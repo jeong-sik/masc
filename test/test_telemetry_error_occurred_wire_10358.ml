@@ -32,7 +32,7 @@ open Alcotest
    entries of the in-memory store rather than touching the
    filesystem — same approach as test_telemetry_unified. *)
 
-open Masc_mcp
+open Masc
 module T = Telemetry_eio
 
 let error_kind value = T.error_kind_of_string value
@@ -42,8 +42,8 @@ let make_config () =
   let dir = Filename.temp_file "telem_10358_" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  let config = Masc_mcp.Workspace.default_config dir in
-  ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "test-10358"));
+  let config = Masc.Workspace.default_config dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "test-10358"));
   (config, dir)
 
 let rec rm_rf path =

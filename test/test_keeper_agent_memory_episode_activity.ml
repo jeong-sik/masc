@@ -1,7 +1,7 @@
 (** Tests for keeper memory episode activity visibility. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 module Episode = Keeper_agent_memory_episode
 module Hooks = Workspace_hooks
@@ -59,7 +59,7 @@ let with_activity_emit fn f =
 
 let read_failure ~keeper ~outcome =
   P.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string MemoryActivityEmitFailures)
+    Masc.Keeper_metrics.(to_string MemoryActivityEmitFailures)
     ~labels:[("keeper", keeper); ("outcome", outcome)]
     ()
 

@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 

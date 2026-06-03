@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 module U = Yojson.Safe.Util
 
 let first_list_item name json =

@@ -12,8 +12,8 @@
    [test_heuristic_metrics_diagnostics.ml] (merged via PR #9879);
    this test only verifies the boot-time consumption shape.  *)
 
-module HM = Masc_mcp.Heuristic_metrics
-module HD = Masc_mcp.Heuristic_metrics_diagnostics
+module HM = Masc.Heuristic_metrics
+module HD = Masc.Heuristic_metrics_diagnostics
 
 let tmp_base_path () =
   Filename.concat

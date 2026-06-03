@@ -4,8 +4,8 @@
 let () = Mirage_crypto_rng_unix.use_default ()
 
 open Alcotest
-module Auth = Masc_mcp.Auth
-module Tool_spec = Masc_mcp.Tool_spec
+module Auth = Masc.Auth
+module Tool_spec = Masc.Tool_spec
 module Tool_dispatch = Tool_dispatch
 module Types = Masc_domain
 
@@ -102,8 +102,8 @@ let capture_stderr f =
   Buffer.contents buf
 
 let strict_unknown_tool_denial_count ~agent_name ~tool_class =
-  Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_auth_strict_unknown_tool_denials
+  Masc.Prometheus.metric_value_or_zero
+    Masc.Prometheus.metric_auth_strict_unknown_tool_denials
     ~labels:[ ("agent_name", agent_name); ("tool_class", tool_class) ]
     ()
 
@@ -588,7 +588,7 @@ let test_ensure_keeper_credential_uses_per_keeper_token () =
     ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       let ensure_result =
-        with_env "MASC_MCP_TOKEN" "" (fun () ->
+        with_env "MASC_TOKEN" "" (fun () ->
           Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent")
       in
       match ensure_result with
@@ -667,8 +667,8 @@ let test_ensure_keeper_credential_archives_dual_identity_bare () =
       let bare_path = Auth.credential_file dir "sangsu" in
       check bool "bare credential pre-exists" true (Sys.file_exists bare_path);
       let archive_metric () =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_config_credential_archived_starvation
+        Masc.Prometheus.metric_value_or_zero
+          Masc.Prometheus.metric_config_credential_archived_starvation
           ~labels:[("keeper_name", "sangsu")]
           ()
       in
@@ -880,8 +880,8 @@ let test_bare_alias_audit_emits_prometheus_gauges () =
           ~canonical_names:["keeper-sangsu-agent"]
       in
       let read state =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_auth_bare_alias
+        Masc.Prometheus.metric_value_or_zero
+          Masc.Prometheus.metric_auth_bare_alias
           ~labels:[("state", state)]
           ()
       in
@@ -978,8 +978,8 @@ let test_archive_bare_outcome_counter_increments_per_branch () =
         (Auth.enable_auth dir ~require_token:true
            ~agent_name:"bootstrap-admin");
       let read outcome =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_auth_bare_alias_outcome_total
+        Masc.Prometheus.metric_value_or_zero
+          Masc.Prometheus.metric_auth_bare_alias_outcome_total
           ~labels:[("outcome", outcome)]
           ()
       in
@@ -1036,8 +1036,8 @@ let test_bare_alias_audit_fiber_emits_heartbeat () =
        | Ok _ -> ()
        | Error e -> fail (Masc_domain.masc_error_to_string e));
       let read () =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Prometheus.metric_auth_bare_alias_audit_ticks_total
+        Masc.Prometheus.metric_value_or_zero
+          Masc.Prometheus.metric_auth_bare_alias_audit_ticks_total
           ()
       in
       let baseline = read () in
@@ -1072,7 +1072,7 @@ let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched
     ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       let first_result =
-        with_env "MASC_MCP_TOKEN" "" (fun () ->
+        with_env "MASC_TOKEN" "" (fun () ->
           Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent")
       in
       let raw_token_path =
@@ -1084,7 +1084,7 @@ let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched
           ~role:Masc_domain.Admin ~raw_token:shared_raw_token
       in
       let reused_result =
-        with_env "MASC_MCP_TOKEN" shared_raw_token (fun () ->
+        with_env "MASC_TOKEN" shared_raw_token (fun () ->
           Auth.ensure_keeper_credential dir ~agent_name:"keeper-masc-improver-agent")
       in
       match first_result, reused_result with

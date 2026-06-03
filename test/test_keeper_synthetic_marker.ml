@@ -6,7 +6,7 @@
     a marker rename or accidental case-shift cannot silently break the
     producer-consumer detection pair. *)
 
-open Masc_mcp
+open Masc
 
 let r = Alcotest.(check string)
 let b = Alcotest.(check bool)

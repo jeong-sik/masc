@@ -1,4 +1,4 @@
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
 

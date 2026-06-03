@@ -1,7 +1,7 @@
 (** test_planning_eio.ml - Tests for Planning_eio module (OCaml 5.x Pure Sync) *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir = ref ""
 

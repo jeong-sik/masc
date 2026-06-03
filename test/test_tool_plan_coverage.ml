@@ -5,7 +5,7 @@ open Alcotest
 
 let () = Random.self_init ()
 
-module Tool_plan = Masc_mcp.Tool_plan
+module Tool_plan = Masc.Tool_plan
 
 (* ============================================================
    Argument Helper Tests
@@ -38,9 +38,9 @@ let test_get_int_missing () =
 let test_context_creation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Masc_mcp.Workspace.default_config "/tmp/test" in
+  let config = Masc.Workspace.default_config "/tmp/test" in
   let ctx : Tool_plan.context = { config } in
-  check bool "context created" true (ctx.config.Masc_mcp.Workspace.base_path = "/tmp/test")
+  check bool "context created" true (ctx.config.Masc.Workspace.base_path = "/tmp/test")
 
 (* ============================================================
    Dispatch Tests
@@ -49,7 +49,7 @@ let test_context_creation () =
 let make_ctx () : Tool_plan.context =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Masc_mcp.Workspace.default_config "/tmp/test-plan" in
+  let config = Masc.Workspace.default_config "/tmp/test-plan" in
   ({ config } : Tool_plan.context)
 
 let test_dispatch_plan_init () =

@@ -12,7 +12,7 @@
 
 open Alcotest
 
-module Notify = Masc_mcp.Notify
+module Notify = Masc.Notify
 
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with

@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let header_count name headers =
   headers

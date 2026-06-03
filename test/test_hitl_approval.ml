@@ -9,12 +9,12 @@ module Types = Masc_domain
     4. Approval queue: stale entries expire with Reject
     5. Approval callback returns correct OAS decisions *)
 
-module GP = Masc_mcp.Governance_pipeline
-module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
-module AQ = Masc_mcp.Keeper_approval_queue
-module KT = Masc_mcp.Keeper_types
-module SDH = Masc_mcp.Server_dashboard_http
-module Mcp_eio = Masc_mcp.Mcp_server_eio
+module GP = Masc.Governance_pipeline
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module AQ = Masc.Keeper_approval_queue
+module KT = Masc.Keeper_types
+module SDH = Masc.Server_dashboard_http
+module Mcp_eio = Masc.Mcp_server_eio
 
 let check = Alcotest.(check string)
 
@@ -104,8 +104,8 @@ let test_approval_queue_failure_metric_labels_site () =
       "audit-approvals"
   in
   let before =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string ApprovalQueueFailures)
+    Masc.Prometheus.metric_value_or_zero
+      Masc.Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels
       ()
   in
@@ -125,8 +125,8 @@ let test_approval_queue_failure_metric_labels_site () =
         ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"tool_search_files"
         ~risk_level:AQ.Medium ();
       let after =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Keeper_metrics.(to_string ApprovalQueueFailures)
+        Masc.Prometheus.metric_value_or_zero
+          Masc.Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels
           ()
       in
@@ -146,7 +146,7 @@ let execute_approval_get args =
     (fun () ->
       let raw_token =
         match
-          Masc_mcp.Auth.create_token
+          Masc.Auth.create_token
             base_path
             ~agent_name:"approval-admin"
             ~role:Types.Admin
@@ -755,7 +755,7 @@ let test_approval_queue_get_pending_detail () =
 
 let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
   let runtime_contract =
-    Masc_mcp.Keeper_runtime_contract.runtime_contract_json_from_fields
+    Masc.Keeper_runtime_contract.runtime_contract_json_from_fields
       ~keeper_name:"redacted-contract-keeper"
       ~sandbox_profile:"docker"
       ~network_mode:"none"
@@ -1034,7 +1034,7 @@ let test_approval_get_dispatch_not_found () =
 
 let test_approval_get_rejects_worker_role () =
   match
-    Masc_mcp.Auth.authorize_tool_for_role ~agent_name:"worker"
+    Masc.Auth.authorize_tool_for_role ~agent_name:"worker"
       ~role:Masc_domain.Worker ~tool_name:"masc_approval_get"
   with
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
@@ -1186,7 +1186,7 @@ let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
   Alcotest.(check (option string))
     "unclaimed keeper has no code-write routine label"
     None
-    (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
+    (Masc.Keeper_routine_allowlist.sandboxed_code_write_rule_label
        ~config
        ~meta:unclaimed_meta
        ~tool_name:"Write"
@@ -1195,7 +1195,7 @@ let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
   Alcotest.(check (option string))
     "root checkout path has no code-write routine label"
     None
-    (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
+    (Masc.Keeper_routine_allowlist.sandboxed_code_write_rule_label
        ~config
        ~meta:claimed_meta
        ~tool_name:"Write"
@@ -1246,7 +1246,7 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
            Alcotest.fail
              ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err));
       let pending_before = AQ.pending_count () in
-      let config = Masc_mcp.Workspace.default_config base_path in
+      let config = Masc.Workspace.default_config base_path in
       let cb =
         GP.to_oas_approval_callback
           ~governance_level:"paranoid" ~keeper_name:"remember-keeper"
@@ -1314,7 +1314,7 @@ let test_runtime_trust_classifies_always_approve_flag () =
         ~keeper_name ~tool_name:"masc_create_task" ~risk_level:AQ.Medium
         ~auto_approved:true ();
       let snapshot =
-        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+        Masc.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
       in
       let open Yojson.Safe.Util in
       let approval = snapshot |> member "approval" in
@@ -1434,7 +1434,7 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
           ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ()
       done;
       let snapshot =
-        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+        Masc.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
       in
       let open Yojson.Safe.Util in
       let approval = snapshot |> member "approval" in

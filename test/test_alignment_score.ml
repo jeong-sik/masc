@@ -1,7 +1,7 @@
 (** Unit tests for Alignment_score (RFC-0035 PR-6,
     Master Report Dim03 P2 section 3.3). *)
 
-open Masc_mcp.Alignment_score
+open Masc.Alignment_score
 
 let approx_eq a b = Float.abs (a -. b) <= 0.01
 

@@ -6,10 +6,10 @@
 
     Pure synchronous tests — no Eio or network required. *)
 
-module Tool_shard = Masc_mcp.Tool_shard
-module Dashboard_keeper_feature_catalog = Masc_mcp.Dashboard_keeper_feature_catalog
-module Tool_shard_types = Masc_mcp.Tool_shard_types
-module Tool_shard_types_schemas_execute = Masc_mcp.Tool_shard_types_schemas_execute
+module Tool_shard = Masc.Tool_shard
+module Dashboard_keeper_feature_catalog = Masc.Dashboard_keeper_feature_catalog
+module Tool_shard_types = Masc.Tool_shard_types
+module Tool_shard_types_schemas_execute = Masc.Tool_shard_types_schemas_execute
 module Types = Masc_domain
 
 let contains text needle =
@@ -525,7 +525,7 @@ let test_keeper_dispatch_coverage () =
    Per-persona shard configuration tests
    ============================================================ *)
 
-module Keeper_types_profile = Masc_mcp.Keeper_types_profile
+module Keeper_types_profile = Masc.Keeper_types_profile
 
 let test_empty_defaults_shards_none () =
   let d = Keeper_types_profile.empty_keeper_profile_defaults in

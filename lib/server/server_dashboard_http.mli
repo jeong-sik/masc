@@ -17,7 +17,7 @@
     routing modules (server_routes_http_routes_dashboard,
     server_h2_gateway), via dotted call from
     server_runtime_bootstrap, and via the
-    [module SDH = Masc_mcp.Server_dashboard_http] alias
+    [module SDH = Masc.Server_dashboard_http] alias
     in [test/test_hitl_approval]. *)
 
 include module type of struct

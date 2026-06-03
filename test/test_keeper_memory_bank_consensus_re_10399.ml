@@ -33,7 +33,7 @@
 
 open Alcotest
 
-module M = Masc_mcp.Keeper_memory_bank
+module M = Masc.Keeper_memory_bank
 
 (* --- 1. default pattern: detect inflated markers --------- *)
 

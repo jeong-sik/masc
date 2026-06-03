@@ -24,7 +24,7 @@
      the .tla file are pinned to the §TypeOK enumeration. *)
 
 open Alcotest
-module SM = Masc_mcp.Keeper_state_machine
+module SM = Masc.Keeper_state_machine
 
 (* ── Hand-curated phase mapping (TLA+ → OCaml) ────────────────
    Source: specs/keeper-state-machine/KeeperStateMachine.tla §TypeOK

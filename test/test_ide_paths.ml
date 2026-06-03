@@ -66,7 +66,7 @@ let test_https_uppercase () =
   (* RFC-0128 §4.1 rule 1: lowercase normalisation precedes parsing. *)
   check_some_slug
     ~expected:"github.com_jeong-sik_masc"
-    ~input:"HTTPS://GitHub.com/Jeong-Sik/MASC-MCP.GIT"
+    ~input:"HTTPS://GitHub.com/Jeong-Sik/MASC.GIT"
     ()
 ;;
 

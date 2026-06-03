@@ -3,7 +3,7 @@
     Exercises [Keeper_tool_execute_typed_input.validate] on representative
     structured inputs and asserts only the typed-schema verdict. *)
 
-open Masc_mcp
+open Masc
 module Execute_input = Keeper_tool_execute_typed_input
 
 let typed_ok input =

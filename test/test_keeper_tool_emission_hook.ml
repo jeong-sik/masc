@@ -9,7 +9,7 @@
    - drain empties accumulator
    - install_into_hooks chain preserves original decision *)
 
-module H = Masc_mcp.Keeper_tool_emission_hook
+module H = Masc.Keeper_tool_emission_hook
 module THooks = Agent_sdk.Hooks
 module TT = Agent_sdk.Types
 

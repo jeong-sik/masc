@@ -14,7 +14,7 @@
     Behavior-preserving. Failure here means the descriptor surface
     drifted relative to its mli contract. *)
 
-open Masc_mcp
+open Masc
 module D = Exec_policy_path_arg_descriptor
 
 let test_is_path_flag_closed_set () =

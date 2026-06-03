@@ -44,7 +44,7 @@ POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-900}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_board_post}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
-MCP_TOKEN="${MASC_MCP_TOKEN:-}"
+MCP_TOKEN="${MASC_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-product-design-board-reprobe}"
 BOARD_POST_ID="${BOARD_POST_ID:-}"
 
@@ -70,7 +70,7 @@ Options:
   -h, --help               Show this help.
 
 Environment:
-  MASC_MCP_TOKEN           Optional bearer token for MCP calls.
+  MASC_TOKEN           Optional bearer token for MCP calls.
   POLL_TIMEOUT_SEC         Overall result polling window when --mutate is used.
   POLL_INTERVAL_SEC        Poll interval in seconds.
   MSG_TIMEOUT_SEC          HTTP request timeout for MCP tool calls.

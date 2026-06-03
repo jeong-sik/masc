@@ -7,7 +7,7 @@
 
 open Alcotest
 
-module Policy = Masc_mcp.Keeper_memory_policy
+module Policy = Masc.Keeper_memory_policy
 
 let test_known_kinds_return_some () =
   check (option string) "next -> short_term"

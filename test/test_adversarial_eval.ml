@@ -1,7 +1,7 @@
 (** test_adversarial_eval.ml — Tests for fresh-context adversarial evaluator.
     Includes red-line enforcement tests per RFC #3475. *)
 
-open Masc_mcp
+open Masc
 
 (* --- Red line enforcement tests --- *)
 

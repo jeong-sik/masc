@@ -3,13 +3,13 @@
     This avoids the large shared [tests] stanza while still exercising the
     real handler path that used to rely only on allowed_paths resolution. *)
 
-module Workspace = Masc_mcp.Workspace
+module Workspace = Masc.Workspace
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
-module Keeper_tool_filesystem_runtime = Masc_mcp.Keeper_tool_filesystem_runtime
-module Keeper_registry = Masc_mcp.Keeper_registry
-module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
+module Keeper_registry = Masc.Keeper_registry
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_types = Masc.Keeper_types
 
 let temp_dir () =
   let d = Filename.temp_file "tool_edit_file_containment_" "" in

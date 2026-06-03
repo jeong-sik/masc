@@ -1,7 +1,7 @@
 (** Edge Case Tests for Agent Identity *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* Empty/null params *)
 let test_empty_params () =

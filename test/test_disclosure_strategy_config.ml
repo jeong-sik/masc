@@ -16,59 +16,59 @@ open Alcotest
 *)
 
 let test_default_is_full () =
-  let pp = Format.asprintf "%a" Masc_mcp.Keeper_disclosure_strategy.pp in
+  let pp = Format.asprintf "%a" Masc.Keeper_disclosure_strategy.pp in
   (check string)
     "default = Full (RFC-0084 §3.5 safe baseline)"
     "Full"
-    (pp Masc_mcp.Keeper_disclosure_strategy.default)
+    (pp Masc.Keeper_disclosure_strategy.default)
 ;;
 
 let test_to_string_full () =
   (check string)
     "to_string Full = \"full\""
     "full"
-    (Masc_mcp.Keeper_disclosure_strategy.to_string Masc_mcp.Keeper_disclosure_strategy.Full)
+    (Masc.Keeper_disclosure_strategy.to_string Masc.Keeper_disclosure_strategy.Full)
 ;;
 
 let test_to_string_minimal_index () =
   (check string)
     "to_string Minimal_index = \"minimal_index\""
     "minimal_index"
-    (Masc_mcp.Keeper_disclosure_strategy.to_string
-       Masc_mcp.Keeper_disclosure_strategy.Minimal_index)
+    (Masc.Keeper_disclosure_strategy.to_string
+       Masc.Keeper_disclosure_strategy.Minimal_index)
 ;;
 
 let test_to_string_hybrid () =
   let h =
-    Masc_mcp.Keeper_disclosure_strategy.Hybrid
+    Masc.Keeper_disclosure_strategy.Hybrid
       { full_names = [ "tool_execute" ]; demote_on_error = true }
   in
-  (check string) "to_string Hybrid _ = \"hybrid\"" "hybrid" (Masc_mcp.Keeper_disclosure_strategy.to_string h)
+  (check string) "to_string Hybrid _ = \"hybrid\"" "hybrid" (Masc.Keeper_disclosure_strategy.to_string h)
 ;;
 
 let test_of_toml_full () =
   match
-    Masc_mcp.Keeper_disclosure_strategy.of_toml
+    Masc.Keeper_disclosure_strategy.of_toml
       ~strategy:"full"
       ~full_names:[]
       ~demote_on_error:false
   with
-  | Ok Masc_mcp.Keeper_disclosure_strategy.Full -> ()
+  | Ok Masc.Keeper_disclosure_strategy.Full -> ()
   | Ok other ->
     failf
       "of_toml \"full\" should return Full, got %s"
-      (Masc_mcp.Keeper_disclosure_strategy.to_string other)
+      (Masc.Keeper_disclosure_strategy.to_string other)
   | Error msg -> failf "of_toml \"full\" failed: %s" msg
 ;;
 
 let test_of_toml_hybrid_sorted () =
   match
-    Masc_mcp.Keeper_disclosure_strategy.of_toml
+    Masc.Keeper_disclosure_strategy.of_toml
       ~strategy:"hybrid"
       ~full_names:[ "keeper_zsh"; "tool_execute"; "tool_edit_file" ]
       ~demote_on_error:true
   with
-  | Ok (Masc_mcp.Keeper_disclosure_strategy.Hybrid { full_names; demote_on_error }) ->
+  | Ok (Masc.Keeper_disclosure_strategy.Hybrid { full_names; demote_on_error }) ->
     (check (list string))
       "Hybrid.full_names sorted (RFC-OAS-013 §2.4 prefix-cache stability)"
       [ "tool_execute"; "tool_edit_file"; "keeper_zsh" ]
@@ -80,7 +80,7 @@ let test_of_toml_hybrid_sorted () =
 
 let test_of_toml_hybrid_empty_rejected () =
   match
-    Masc_mcp.Keeper_disclosure_strategy.of_toml
+    Masc.Keeper_disclosure_strategy.of_toml
       ~strategy:"hybrid"
       ~full_names:[]
       ~demote_on_error:false
@@ -91,22 +91,22 @@ let test_of_toml_hybrid_empty_rejected () =
 
 let test_of_toml_minimal_index () =
   match
-    Masc_mcp.Keeper_disclosure_strategy.of_toml
+    Masc.Keeper_disclosure_strategy.of_toml
       ~strategy:"minimal_index"
       ~full_names:[]
       ~demote_on_error:false
   with
-  | Ok Masc_mcp.Keeper_disclosure_strategy.Minimal_index -> ()
+  | Ok Masc.Keeper_disclosure_strategy.Minimal_index -> ()
   | Ok other ->
     failf
       "of_toml \"minimal_index\" returned wrong variant: %s"
-      (Masc_mcp.Keeper_disclosure_strategy.to_string other)
+      (Masc.Keeper_disclosure_strategy.to_string other)
   | Error msg -> failf "of_toml \"minimal_index\" failed: %s" msg
 ;;
 
 let test_of_toml_unknown_rejected () =
   match
-    Masc_mcp.Keeper_disclosure_strategy.of_toml
+    Masc.Keeper_disclosure_strategy.of_toml
       ~strategy:"verbose_quantum"
       ~full_names:[]
       ~demote_on_error:false
@@ -119,15 +119,15 @@ let test_of_toml_unknown_rejected () =
 ;;
 
 let test_is_full_semantics () =
-  (check bool) "is_full Full" true (Masc_mcp.Keeper_disclosure_strategy.is_full Full);
+  (check bool) "is_full Full" true (Masc.Keeper_disclosure_strategy.is_full Full);
   (check bool)
     "is_full Minimal_index"
     false
-    (Masc_mcp.Keeper_disclosure_strategy.is_full Minimal_index);
+    (Masc.Keeper_disclosure_strategy.is_full Minimal_index);
   (check bool)
     "is_full Hybrid _"
     false
-    (Masc_mcp.Keeper_disclosure_strategy.is_full
+    (Masc.Keeper_disclosure_strategy.is_full
        (Hybrid { full_names = [ "x" ]; demote_on_error = false }))
 ;;
 

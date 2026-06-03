@@ -3,7 +3,7 @@
     Covers the deterministic ADT mappers that don't require a
     [keeper_meta] / [working_context] fixture. *)
 
-open Masc_mcp
+open Masc
 module KCP = Keeper_compact_policy
 
 let check_string label expected actual =

@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let test_decode_agent_success () =
   let json =

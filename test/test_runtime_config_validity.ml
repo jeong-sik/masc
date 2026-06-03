@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let empty_env _name = None
 

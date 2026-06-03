@@ -5,7 +5,7 @@
     several sources) forces exactly one rebuild. *)
 
 open Alcotest
-module P = Masc_mcp.Jsonl_mtime_projection
+module P = Masc.Jsonl_mtime_projection
 
 let with_temp_dir f =
   let dir = Filename.temp_file "jsonl_proj_test" "" in

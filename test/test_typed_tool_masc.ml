@@ -1,6 +1,6 @@
 (** Tests for Typed_tool_masc — MASC typed tool bridge and broadcast PoC. *)
 
-open Masc_mcp
+open Masc
 
 let parse json =
   Agent_sdk.Tool_schema_gen.parse Tool_broadcast_typed.broadcast_schema json

@@ -11,7 +11,7 @@
     Callers reach the entire board surface — store /
     persistence / classification / payload normalisation /
     voting / karma / flair — through {!Board.X} unqualified
-    after [open Masc_mcp].  478 dotted [Board.X] call sites
+    after [open Masc].  478 dotted [Board.X] call sites
     in lib + bin + test all resolve through this runtime.
 
     No locally-defined surface; this facade has no

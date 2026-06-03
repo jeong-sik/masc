@@ -5,9 +5,9 @@
 
 open Alcotest
 
-module Mcp_server_eio = Masc_mcp.Mcp_server_eio
-module Mcp_server = Masc_mcp.Mcp_server
-module Mcp_server_eio_protocol = Masc_mcp.Mcp_server_eio_protocol
+module Mcp_server_eio = Masc.Mcp_server_eio
+module Mcp_server = Masc.Mcp_server
+module Mcp_server_eio_protocol = Masc.Mcp_server_eio_protocol
 (* ============================================================
    is_jsonrpc_v2 Tests
    ============================================================ *)
@@ -276,7 +276,7 @@ let test_jsonrpc_request_of_yojson_valid () =
     ("method", `String "test_method");
     ("params", `Assoc []);
   ] in
-  match Masc_mcp.Mcp_server.jsonrpc_request_of_yojson json with
+  match Masc.Mcp_server.jsonrpc_request_of_yojson json with
   | Ok req ->
       check string "method" "test_method" req.method_;
       check string "jsonrpc" "2.0" req.jsonrpc
@@ -287,7 +287,7 @@ let test_jsonrpc_request_of_yojson_minimal () =
     ("jsonrpc", `String "2.0");
     ("method", `String "notify");
   ] in
-  match Masc_mcp.Mcp_server.jsonrpc_request_of_yojson json with
+  match Masc.Mcp_server.jsonrpc_request_of_yojson json with
   | Ok req ->
       check (option (testable Yojson.Safe.pp Yojson.Safe.equal)) "id None" None req.id;
       check (option (testable Yojson.Safe.pp Yojson.Safe.equal)) "params None" None req.params

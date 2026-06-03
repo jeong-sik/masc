@@ -257,7 +257,7 @@ val dashboard_ack :
 (** {1 Test-only seams (via [module Ws =] alias)}
 
     [test/test_ws_transport.ml] takes
-    [module Ws = Masc_mcp.Server_mcp_transport_ws] and
+    [module Ws = Masc.Server_mcp_transport_ws] and
     reaches white-box helpers / state probes through that
     alias.  Pinned here so the test compiles against the
     production .mli; production callers stay confined to

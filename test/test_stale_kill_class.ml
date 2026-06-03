@@ -8,9 +8,9 @@
     rename or signature change in [stale_kill_class] fails at the test
     boundary, not in production telemetry. *)
 
-open Masc_mcp.Keeper_registry
+open Masc.Keeper_registry
 
-module SW = Masc_mcp.Keeper_stale_watchdog
+module SW = Masc.Keeper_stale_watchdog
 
 let r = Alcotest.(check string)
 

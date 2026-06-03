@@ -47,7 +47,7 @@
 module Types = Prompt_registry_types
 (** Re-export of the type-only sub-module so callers reach
     record / variant types via [Prompt_registry.Types.X]
-    after [open Masc_mcp].
+    after [open Masc].
     [test/test_prompt_registry_pbt.ml] uses this alias. *)
 
 type prompt_metrics = Prompt_registry_types.prompt_metrics = {

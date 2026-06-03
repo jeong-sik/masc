@@ -1,8 +1,8 @@
 open Alcotest
 
-module Transport = Masc_mcp.Server_mcp_transport_http
-module Request_context = Masc_mcp.Server_mcp_request_context
-module Headers = Masc_mcp.Server_mcp_transport_http_headers
+module Transport = Masc.Server_mcp_transport_http
+module Request_context = Masc.Server_mcp_request_context
+module Headers = Masc.Server_mcp_transport_http_headers
 module Negotiation = Mcp_transport_protocol.Http_negotiation
 
 let source_file rel =

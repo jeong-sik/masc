@@ -5,7 +5,7 @@
 
     @since OAS Integration Phase 2 *)
 
-open Masc_mcp
+open Masc
 
 module Oas = Agent_sdk
 module Core = Verifier_core
@@ -303,7 +303,7 @@ let test_hook_readonly_skips_verifier () =
 (* ================================================================ *)
 
 let test_default_gate_roundtrip () =
-  let gate : Masc_mcp.Eval_gate.gate_config =
+  let gate : Masc.Eval_gate.gate_config =
     { max_cost_usd = 0.10;
       max_tool_calls_per_turn = 5;
       entropy_threshold = 2;

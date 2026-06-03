@@ -1,6 +1,6 @@
 (** Test Cache_eio Module - Pure Synchronous Tests *)
 
-open Masc_mcp
+open Masc
 
 let () = Random.init 42
 

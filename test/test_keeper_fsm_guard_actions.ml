@@ -15,8 +15,8 @@
     5. Non-[Assert_failure] exceptions propagate unchanged — only the
        spec-violation channel is intercepted. *)
 
-module P = Masc_mcp.Prometheus
-module G = Masc_mcp.Keeper_fsm_guard_runtime
+module P = Masc.Prometheus
+module G = Masc.Keeper_fsm_guard_runtime
 
 let counter_name = P.metric_fsm_guard_violation
 

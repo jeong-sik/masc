@@ -1,7 +1,7 @@
-module Tool_agent = Masc_mcp.Tool_agent
-module Workspace = Masc_mcp.Workspace
-module Meta_cognition = Masc_mcp.Meta_cognition
-module Prometheus = Masc_mcp.Prometheus
+module Tool_agent = Masc.Tool_agent
+module Workspace = Masc.Workspace
+module Meta_cognition = Masc.Meta_cognition
+module Prometheus = Masc.Prometheus
 
 let counter = ref 0
 let persistence_surface = "meta_cognition_snapshot"

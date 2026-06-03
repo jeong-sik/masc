@@ -1,6 +1,6 @@
 open Alcotest
 
-module Admission = Masc_mcp.Keeper_wip_admission
+module Admission = Masc.Keeper_wip_admission
 
 let scope ?goal_id ?(category = Admission.Fix) repo =
   { Admission.repo; goal_id; category }

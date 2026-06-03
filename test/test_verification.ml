@@ -3,8 +3,8 @@
 (* Mirage_crypto_rng is consumed by V.generate_id (#7544). *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
-module V = Masc_mcp.Verification
-module P = Masc_mcp.Prometheus
+module V = Masc.Verification
+module P = Masc.Prometheus
 module VS = Workspace_verification_store
 module CU = Workspace_utils
 
@@ -381,7 +381,7 @@ let test_pending_for_agent () =
 
 (* --- Attribution conversion tests --- *)
 
-module A = Masc_mcp.Attribution
+module A = Masc.Attribution
 
 let test_origin_det_for_rule_based () =
   let cs = [ V.Contains "x"; V.Not_contains "y"; V.Schema_match (`Assoc []) ] in

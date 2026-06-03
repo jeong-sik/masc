@@ -3,10 +3,10 @@
 
 open Alcotest
 
-module Audit = Masc_mcp.Keeper_transition_audit
-module KTF = Masc_mcp.Keeper_turn_fsm
-module KSM = Masc_mcp.Keeper_state_machine
-module P = Masc_mcp.Prometheus
+module Audit = Masc.Keeper_transition_audit
+module KTF = Masc.Keeper_turn_fsm
+module KSM = Masc.Keeper_state_machine
+module P = Masc.Prometheus
 
 let fail = Alcotest.fail
 
@@ -46,7 +46,7 @@ let keeper_meta name =
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
           ("goal", `String "transition-audit-test");
-          ("runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ()));
+          ("runtime_id", `String Masc.(Keeper_config.default_runtime_id ()));
         ])
   with
   | Ok meta -> meta
@@ -65,7 +65,7 @@ let transition ?(prev_phase = KSM.Running) ?(new_phase = KSM.Paused)
   }
 
 let transition_audit_failure_count site =
-  P.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string TransitionAuditFailures)
+  P.metric_value_or_zero Masc.Keeper_metrics.(to_string TransitionAuditFailures)
     ~labels:[("site", site)]
     ()
 
@@ -209,11 +209,11 @@ let test_runtime_trust_timeline_carries_transition_operator_signal () =
       let sink = Filename.concat base_dir "transition-audit.jsonl" in
       with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
           let keeper_name = "runtime-trust-transition-signal" in
-          let config = Masc_mcp.Workspace.default_config base_dir in
+          let config = Masc.Workspace.default_config base_dir in
           let meta = keeper_meta keeper_name in
           Audit.record_transition ~keeper_name (transition ());
           let snapshot =
-            Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+            Masc.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
           in
           let open Yojson.Safe.Util in
           let event = snapshot |> member "latest_causal_event" in

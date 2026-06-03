@@ -1,6 +1,6 @@
 (** Coverage tests for Tool_control *)
 
-open Masc_mcp
+open Masc
 
 let () = Random.self_init ()
 

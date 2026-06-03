@@ -6,10 +6,10 @@
 *)
 module Tool_args = Tool_args
 module Tool_result = Tool_result
-module Meta_cognition = Masc_mcp.Meta_cognition
+module Meta_cognition = Masc.Meta_cognition
 
-module Tool_agent = Masc_mcp.Tool_agent
-module Workspace = Masc_mcp.Workspace
+module Tool_agent = Masc.Tool_agent
+module Workspace = Masc.Workspace
 
 let test_counter = ref 0
 
@@ -169,7 +169,7 @@ let test_handle_agent_card () =
   Alcotest.(check bool) "agent card succeeds" true (Tool_result.is_success result);
   let json = Yojson.Safe.from_string (Tool_result.message result) in
   let open Yojson.Safe.Util in
-  Alcotest.(check string) "card name" "MASC-MCP"
+  Alcotest.(check string) "card name" "MASC"
     (json |> member "name" |> to_string);
   Alcotest.(check string) "card schema" "masc.agent_card.v1"
     (json |> member "schema" |> to_string);

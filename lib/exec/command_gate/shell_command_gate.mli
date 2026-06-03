@@ -12,7 +12,7 @@
     one [verdict], which validation, telemetry, native dispatch, path
     validation, and exit classification all share.
 
-    The lib-root [Masc_mcp.Shell_command_gate] transition facade has
+    The lib-root [Masc.Shell_command_gate] transition facade has
     been retired. Raw-string boundaries use [gate_raw] to cross into
     Shell IR once; typed callers use [gate_typed] or
     [lower_typed_pipeline] directly.

@@ -11,7 +11,7 @@
     These tests are pure in-memory state checks; they do not exercise
     the supervisor wiring (covered by the integration build). *)
 
-module KK = Masc_mcp.Keeper_keepalive
+module KK = Masc.Keeper_keepalive
 
 let with_fresh_state body () =
   Eio_main.run @@ fun _env ->
@@ -52,7 +52,7 @@ let test_force_release_drops_reactive_holder () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name:"zombie-reactive"
-      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ->
         (* Pre-condition: the holder table records us. *)
         let now = Time_compat.now () in
@@ -96,7 +96,7 @@ let test_force_release_is_idempotent () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name:"twice-release"
-      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ->
         let first = KK.force_release_holder_for ~keeper_name:"twice-release" in
         if List.length first = 0 then
@@ -119,7 +119,7 @@ let test_force_release_reports_nonnegative_age () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name:"age-check"
-      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ->
         let released = KK.force_release_holder_for ~keeper_name:"age-check" in
         match List.assoc_opt "reactive" released with

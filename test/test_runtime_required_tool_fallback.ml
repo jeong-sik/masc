@@ -1,6 +1,6 @@
-module Runtime = Masc_mcp.Runtime
-module EC = Masc_mcp.Keeper_error_classify
-module Tool_surface = Masc_mcp.Keeper_agent_tool_surface
+module Runtime = Masc.Runtime
+module EC = Masc.Keeper_error_classify
+module Tool_surface = Masc.Keeper_agent_tool_surface
 module SdkE = Agent_sdk.Error
 
 let write_temp_runtime_config content =

@@ -2,8 +2,8 @@
 
 open Masc_domain
 
-let schema_inventory = Masc_mcp.Tools.all_schemas_extended
-let registered_schema_inventory = Masc_mcp.Config.raw_all_tool_schemas
+let schema_inventory = Masc.Tools.all_schemas_extended
+let registered_schema_inventory = Masc.Config.raw_all_tool_schemas
 
 let find_schema_in schemas name =
   List.find_opt
@@ -355,8 +355,8 @@ let test_remote_operator_action_schema_is_strict () =
     | Some schema -> schema
     | None -> Alcotest.failf "%s masc_operator_action schema not found" label
   in
-  check_schema "local" (find_operator_action Masc_mcp.Tool_operator.schemas "local");
-  check_schema "remote" (find_operator_action Masc_mcp.Tool_operator.remote_schemas "remote")
+  check_schema "local" (find_operator_action Masc.Tool_operator.schemas "local");
+  check_schema "remote" (find_operator_action Masc.Tool_operator.remote_schemas "remote")
 
 let test_retired_front_door_tools_absent_from_schema_inventory () =
   let retired_tools =
@@ -384,7 +384,7 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
     retired_tools
 
 let test_masc_board_post_schema_supports_judgment () =
-  let schema = Masc_mcp.Tool_board.tool_post_create in
+  let schema = Masc.Tool_board.tool_post_create in
   match get_json_assoc "properties" schema.input_schema with
   | Some props ->
       Alcotest.(check bool) "has classification_reason" true
@@ -511,7 +511,7 @@ let test_masc_persona_authoring_schemas () =
                  | _ -> false)
             | _ -> false
           in
-          let module Contract = Masc_mcp.Keeper_persona_authoring_contract in
+          let module Contract = Masc.Keeper_persona_authoring_contract in
           Alcotest.(check (list string)) "alignment enum follows contract"
             Contract.alignment_choices (enum_strings "alignment");
           Alcotest.(check (list string)) "risk_posture enum follows contract"
@@ -585,7 +585,7 @@ let test_keeper_sandbox_args_rejected () =
     `Assoc [ "sandbox_profile", `String "docker"; "network_mode", `String "none" ]
   in
   match
-    Masc_mcp.Keeper_config.reject_removed_keeper_input_keys
+    Masc.Keeper_config.reject_removed_keeper_input_keys
       ~tool_name:"masc_keeper_up"
       args
   with

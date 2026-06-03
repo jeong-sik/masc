@@ -8,8 +8,8 @@
     to read [disposition] directly; this PR establishes the
     invariant. *)
 
-module T = Masc_mcp.Keeper_turn_terminal
-module D = Masc_mcp.Keeper_turn_disposition
+module T = Masc.Keeper_turn_terminal
+module D = Masc.Keeper_turn_disposition
 
 let check_invariant label (t : T.t) =
   let expected = D.of_wire (T.code t) in

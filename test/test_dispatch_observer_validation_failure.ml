@@ -30,15 +30,15 @@ let mk_validation_failure ~tool_name =
 
 let test_validation_failure_recorded_by_metrics () =
   let tool_name = "test_validation_observer_tool" in
-  Masc_mcp.Tool_metrics.clear ();
+  Masc.Tool_metrics.clear ();
   Tool_dispatch.clear_hooks ();
-  Masc_mcp.Tool_metrics.install ();
+  Masc.Tool_metrics.install ();
   let result = mk_validation_failure ~tool_name in
   (* Same call shape as the fixed validation path in
      Keeper_tools_oas_handler. *)
   Tool_dispatch.run_dispatch_observers Dispatch_outcome.Handled (Some result);
   Tool_dispatch.clear_hooks ();
-  match Masc_mcp.Tool_metrics.stats_for tool_name with
+  match Masc.Tool_metrics.stats_for tool_name with
   | None ->
     fail
       "validation failure was dropped: Tool_metrics observer recorded nothing \
@@ -54,13 +54,13 @@ let test_handler_error_shape_is_dropped () =
      NOT be recorded, confirming the observers really do drop non-[Handled]
      outcomes and that the fix works precisely by switching to [Handled]. *)
   let tool_name = "test_validation_observer_dropped_tool" in
-  Masc_mcp.Tool_metrics.clear ();
+  Masc.Tool_metrics.clear ();
   Tool_dispatch.clear_hooks ();
-  Masc_mcp.Tool_metrics.install ();
+  Masc.Tool_metrics.install ();
   (* No_handler with a result option still does not match [Handled, Some _]. *)
   Tool_dispatch.run_dispatch_observers Dispatch_outcome.No_handler None;
   Tool_dispatch.clear_hooks ();
-  match Masc_mcp.Tool_metrics.stats_for tool_name with
+  match Masc.Tool_metrics.stats_for tool_name with
   | None -> ()
   | Some _ -> fail "No_handler outcome must not be recorded by Tool_metrics"
 ;;

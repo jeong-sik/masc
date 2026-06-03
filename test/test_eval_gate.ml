@@ -1,6 +1,6 @@
 (** Unit tests for Eval_gate module — Pre/Post execution gates. *)
 
-open Masc_mcp
+open Masc
 
 (* ================================================================ *)
 (* Helpers                                                           *)

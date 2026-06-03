@@ -1,4 +1,4 @@
-module M = Masc_mcp.Keeper_runtime_manifest
+module M = Masc.Keeper_runtime_manifest
 
 let manifest ~event ~decision ~links =
   { M.schema_version = 1

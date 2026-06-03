@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let make_meta () =
   let json =

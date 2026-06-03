@@ -8,7 +8,7 @@
     all return [true]; absent, empty, or anything else returns [false]. *)
 val env_true : string -> bool
 
-(** [true] when [MASC_MCP_STRICT_FINALIZERS] env is truthy. Callers can
+(** [true] when [MASC_STRICT_FINALIZERS] env is truthy. Callers can
     opt into raising finally-block exceptions instead of swallowing
     them. *)
 val strict_finalizers : unit -> bool

@@ -8,7 +8,7 @@ let json_list values =
 
 let () =
   let raw_all_tool_names =
-    Masc_mcp.Config.raw_all_tool_schemas
+    Masc.Config.raw_all_tool_schemas
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     |> sorted_unique
   in

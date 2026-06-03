@@ -8,7 +8,7 @@
     1. [Masc_exec_command_gate.Shell_command_gate.gate_raw] verdict shape
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
-    2. [Masc_mcp.Worker_dev_tools.validate_command_tool_execute_with_allowlist]
+    2. [Masc.Worker_dev_tools.validate_command_tool_execute_with_allowlist]
        worker verdict also matches the recorded baseline so any future
        behavior change (Phase 2+) is visible as a corpus diff, not as
        a silent flip.
@@ -18,7 +18,7 @@
        typed-pipeline lowering through [lower_typed_pipeline]. *)
 
 module Gate = Masc_exec_command_gate.Shell_command_gate
-module W = Masc_mcp.Worker_dev_tools
+module W = Masc.Worker_dev_tools
 
 let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls" ]
 
@@ -116,7 +116,7 @@ let worker_tag (result : (unit, W.block_reason) result) : string =
 ;;
 
 let validate_worker_execute_raw ~allowed_commands raw =
-  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Tool_execute raw with
+  match Masc.Exec_policy.parse_string_to_ir ~mode:Tool_execute raw with
   | Ok ir -> W.validate_command_tool_execute_with_allowlist ~allowed_commands ir
   | Error reason -> Error reason
 ;;

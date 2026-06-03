@@ -6,7 +6,7 @@ module Types = Masc_domain
     They intentionally do not introduce a new FSM or change transition policy. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let counter = ref 0
 

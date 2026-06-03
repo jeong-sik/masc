@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module KP = Masc_mcp.Keeper_prompt
+module KP = Masc.Keeper_prompt
 
 (* Per-build snapshot of Keeper WARN entries emitted by build_keeper_system_prompt.
    Filters on the canonical aggregation prefix written by F-3. *)

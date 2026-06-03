@@ -19,6 +19,17 @@ include Keeper_turn_driver_helpers
 include Keeper_turn_driver_provider_attempt
 include Keeper_turn_driver_backpressure
 
+(* Composition root for the inverted runtime -> keeper-name-translation edge.
+   This facade already bridges keeper and runtime ([include Runtime_oas_runner]
+   above), and is in the startup link closure, so its top-level effect runs once
+   before any runtime tool dispatch. Register the two pure Keeper_identity
+   translators here; the runtime accessor stays fail-fast if this never ran. *)
+let () =
+  Runtime_oas_runner.set_keeper_name_xlat
+    { Runtime_oas_runner.keeper_agent_name = Keeper_identity.keeper_agent_name
+    ; keeper_name_from_agent_name = Keeper_identity.keeper_name_from_agent_name
+    }
+
 let release_client_capacity_quietly =
   Keeper_turn_driver_admission.release_client_capacity_quietly
 

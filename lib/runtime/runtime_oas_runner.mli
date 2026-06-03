@@ -43,8 +43,24 @@ val resolve_runtime_providers :
   (Llm_provider.Provider_config.t list, string) result
 (** Resolve runtime provider configs via MASC Runtime_config. *)
 
+(** {1 Keeper name translation (injected)} *)
+
+type keeper_name_xlat =
+  { keeper_agent_name : string -> string
+  ; keeper_name_from_agent_name : string -> string option
+  }
+(** The two pure keeper-name translators the runtime needs. Injected by the
+    keeper composition root so the runtime does not code-depend on the
+    keeper-domain [Keeper_identity] module. *)
+
+val set_keeper_name_xlat : keeper_name_xlat -> unit
+(** Register the keeper name translators. Called once by the keeper at init,
+    before any runtime tool dispatch. Reading the translators before this is
+    called raises (no silent default). *)
+
 val keeper_agent_name_opt : string -> string option
-(** Derive the agent name from a keeper name; [None] when the name is empty. *)
+(** Derive the agent name from a keeper name; [None] when the name is empty.
+    Requires {!set_keeper_name_xlat} to have run. *)
 
 val runtime_mcp_policy_for_tools :
   keeper_name:string -> Agent_sdk.Tool.t list ->

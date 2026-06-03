@@ -65,9 +65,36 @@ let resolve_runtime_providers
          ~label:rt.Runtime.id
          [ rt.Runtime.provider_config ])
 
+(* Injected keeper name translators (dependency inversion of the
+   runtime -> keeper-domain Keeper_identity edge). The runtime no longer
+   code-depends on Keeper_identity; the keeper composition root registers the
+   two pure name translators once at init via [set_keeper_name_xlat]. The
+   accessor is fail-fast: an unset read raises rather than substituting an
+   identity/None default, because a silent name mistranslation would be an
+   unknown -> permissive-default error (and a module-level eager read could
+   crash before init). *)
+type keeper_name_xlat =
+  { keeper_agent_name : string -> string
+  ; keeper_name_from_agent_name : string -> string option
+  }
+
+let keeper_name_xlat : keeper_name_xlat option ref = ref None
+
+let set_keeper_name_xlat (x : keeper_name_xlat) = keeper_name_xlat := Some x
+
+let require_keeper_name_xlat () =
+  match !keeper_name_xlat with
+  | Some x -> x
+  | None ->
+    failwith
+      "runtime_oas_runner: keeper_name_xlat not registered (keeper must call \
+       Runtime_oas_runner.set_keeper_name_xlat at init)"
+
 let keeper_agent_name_opt (keeper_name : string) =
   let keeper_name = String.trim keeper_name in
-  if keeper_name = "" then None else Some (Keeper_identity.keeper_agent_name keeper_name)
+  if keeper_name = ""
+  then None
+  else Some ((require_keeper_name_xlat ()).keeper_agent_name keeper_name)
 
 let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool.t list) =
   let agent_name = keeper_agent_name_opt keeper_name in
@@ -132,7 +159,8 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
   else (
     match keeper_agent_name_opt keeper_name, policy_opt with
     | Some agent_name, Some policy
-      when Option.is_some (Keeper_identity.keeper_name_from_agent_name agent_name) ->
+      when Option.is_some
+             ((require_keeper_name_xlat ()).keeper_name_from_agent_name agent_name) ->
       (not
          (Runtime_agent.cli_tool_a_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
       && List.exists

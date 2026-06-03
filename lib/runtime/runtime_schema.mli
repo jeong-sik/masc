@@ -67,7 +67,6 @@ type thinking_control_format =
 
 type model_capabilities =
   { max_output_tokens : int option
-  ; supports_parallel_tool_calls : bool
   ; supports_tool_choice : bool
   ; supports_extended_thinking : bool
   ; supports_reasoning_budget : bool

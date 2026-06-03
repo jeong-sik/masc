@@ -1,5 +1,45 @@
 (** IDE Event Types — unified event model for Keeper activity visualization. *)
 
+(** Structured descriptor for what a shell command did.
+    Computed from Shell IR GADT by the Execute handler.
+    Consumed by the bridge for deterministic event generation. *)
+type command_descriptor =
+  | Gh_pr_create of { title : string; base : string; draft : bool }
+  | Gh_pr_merge of { pr_number : int; squash : bool }
+  | Gh_pr_comment of { pr_number : int; body : string }
+  | Gh_pr_close of { pr_number : int }
+  | Gh_pr_edit of { pr_number : int; title : string option }
+  | Gh_pr_review of { pr_number : int }
+  | Gh_issue_create of { title : string; body : string }
+  | Gh_issue_close of { issue_number : int }
+  | Git_push of { remote : string; branch : string; force : bool }
+  | Git_commit of { message : string }
+  | Generic
+
+let command_descriptor_to_json = function
+  | Gh_pr_create { title; base; draft } ->
+    `Assoc [ "kind", `String "gh_pr_create"; "title", `String title; "base", `String base; "draft", `Bool draft ]
+  | Gh_pr_merge { pr_number; squash } ->
+    `Assoc [ "kind", `String "gh_pr_merge"; "pr_number", `Int pr_number; "squash", `Bool squash ]
+  | Gh_pr_comment { pr_number; body } ->
+    `Assoc [ "kind", `String "gh_pr_comment"; "pr_number", `Int pr_number; "body", `String body ]
+  | Gh_pr_close { pr_number } ->
+    `Assoc [ "kind", `String "gh_pr_close"; "pr_number", `Int pr_number ]
+  | Gh_pr_edit { pr_number; title } ->
+    `Assoc [ "kind", `String "gh_pr_edit"; "pr_number", `Int pr_number; "title", (match title with Some t -> `String t | None -> `Null) ]
+  | Gh_pr_review { pr_number } ->
+    `Assoc [ "kind", `String "gh_pr_review"; "pr_number", `Int pr_number ]
+  | Gh_issue_create { title; body } ->
+    `Assoc [ "kind", `String "gh_issue_create"; "title", `String title; "body", `String body ]
+  | Gh_issue_close { issue_number } ->
+    `Assoc [ "kind", `String "gh_issue_close"; "issue_number", `Int issue_number ]
+  | Git_push { remote; branch; force } ->
+    `Assoc [ "kind", `String "git_push"; "remote", `String remote; "branch", `String branch; "force", `Bool force ]
+  | Git_commit { message } ->
+    `Assoc [ "kind", `String "git_commit"; "message", `String message ]
+  | Generic ->
+    `Assoc [ "kind", `String "generic" ]
+
 type ide_event =
   | Tool_event of tool_event
   | Turn_event of turn_event

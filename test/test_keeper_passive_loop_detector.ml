@@ -38,20 +38,6 @@ let test_claim_context_increments_streak () =
   check int "claim_context increments" 1
     (PLD.current_streak ~keeper_name:"k1")
 
-let test_terminal_reason_maps_required_tool_failures () =
-  let module D = Masc_mcp.Keeper_turn_disposition in
-  let module Code = Masc_mcp.Keeper_turn_terminal_code in
-  check (option string) "no tool call maps to detector class"
-    (Some "required_tool_no_call")
-    (PLD.progress_class_of_disposition D.Required_tool_use_no_tool_call);
-  check (option string) "unsatisfied maps to detector class"
-    (Some "required_tool_unsatisfied")
-    (PLD.progress_class_of_disposition D.Required_tool_use_unsatisfied);
-  check (option string) "provider errors do not count"
-    None
-    (PLD.progress_class_of_disposition
-       (D.Provider_error (Code.Provider_runtime_error "provider_error")))
-
 let test_required_tool_no_call_fires_metric_at_three () =
   Eio_main.run @@ fun _env ->
   setup ();
@@ -347,8 +333,6 @@ let () =
         test_passive_increments_streak;
       test_case "claim_context increments streak" `Quick
         test_claim_context_increments_streak;
-      test_case "terminal reason maps required-tool failures" `Quick
-        test_terminal_reason_maps_required_tool_failures;
       test_case "required-tool no-call fires at 3" `Quick
         test_required_tool_no_call_fires_metric_at_three;
       test_case "required-tool streak is separate from passive streak" `Quick

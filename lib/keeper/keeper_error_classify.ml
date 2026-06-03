@@ -110,35 +110,6 @@ let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
 let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_provider_rejected_parse_error err || is_model_rejected_parse_error err
 
-let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation { contract; _ }) ->
-      contract = Agent_sdk.Completion_contract_id.Require_tool_use
-  (* Other agent-level errors are not require-tool-use contract violations. *)
-  | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
-  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
-  | Agent_sdk.Error.Agent (AgentExecutionIdleTimeout _)
-  | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
-  | Agent_sdk.Error.Agent (CostBudgetExceeded _)
-  | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
-  | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (IdleDetected _)
-  | Agent_sdk.Error.Agent (ToolRetryExhausted _)
-  | Agent_sdk.Error.Agent (GuardrailViolation _)
-  | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
-  | Agent_sdk.Error.Agent (InputRequired _) -> false
-  (* Non-Agent error families. *)
-  | Agent_sdk.Error.Api _
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
-  | Agent_sdk.Error.Internal _ -> false
-
 (** Receipt I/O failure: the turn body succeeded but the authoritative
     receipt could not be persisted.  See
     [keeper_agent_run.ml::execution_receipt_append_failed]. *)
@@ -238,7 +209,6 @@ type degraded_retry_reason =
   | Provider_timeout
   | Turn_timeout
   | Runtime_candidates_filtered
-  | Required_tool_contract_violation
   | Runtime_exhausted
   | Capacity_backpressure
   | Rate_limit
@@ -253,7 +223,6 @@ let degraded_retry_reason_to_string = function
   | Provider_timeout -> "provider_timeout"
   | Turn_timeout -> "turn_timeout"
   | Runtime_candidates_filtered -> "runtime_candidates_filtered"
-  | Required_tool_contract_violation -> "required_tool_contract_violation"
   | Runtime_exhausted -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Rate_limit -> "rate_limit"
@@ -358,9 +327,7 @@ let degraded_retry_after_recoverable_error
         None
 
 let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
-  if is_required_tool_contract_violation err then
-    Some Required_tool_contract_violation
-  else if Keeper_turn_driver.sdk_error_is_hard_quota err then
+  if Keeper_turn_driver.sdk_error_is_hard_quota err then
     Some Hard_quota
   else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
     Some Max_turns
@@ -804,7 +771,6 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
 let should_cap_rotation_for_contract_violation
     ~(attempted_runtimes : string list)
     ~(fallback_not_yet_tried : bool)
-    (err : Agent_sdk.Error.sdk_error) : bool =
-  is_required_tool_contract_violation err
-  && List.length attempted_runtimes >= 2
+    (_err : Agent_sdk.Error.sdk_error) : bool =
+  List.length attempted_runtimes >= 2
   && not fallback_not_yet_tried

@@ -36,24 +36,11 @@ let record_failure_and_maybe_escalate
     && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
     && not updated_meta.paused
   in
-  let tool_contract_auto_paused =
-    EC.is_required_tool_contract_violation err
-    && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
-    && not updated_meta.paused
-  in
   let auto_pause_succeeded =
-    if runtime_auto_paused || tool_contract_auto_paused
+    if runtime_auto_paused
     then (
-      let released_task_id =
-        if tool_contract_auto_paused
-        then Option.map Keeper_id.Task_id.to_string updated_meta.current_task_id
-        else None
-      in
-      let pause_meta =
-        if tool_contract_auto_paused
-        then { updated_meta with current_task_id = None }
-        else updated_meta
-      in
+      let released_task_id = None in
+      let pause_meta = updated_meta in
       match
         Keeper_turn_runtime_budget.sync_keeper_paused_state_with_resume_policy
           ~config

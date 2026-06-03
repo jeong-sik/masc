@@ -128,43 +128,6 @@ let effect_domain_for_tool_name name =
   Keeper_tool_descriptor_resolution.effect_domain_for_tool_name name
 ;;
 
-let tool_name_can_satisfy_required_contract name =
-  let observation_alias = is_keeper_observation_alias name in
-  let name = Keeper_tool_resolution.canonical_tool_name name in
-  (* Completion tools (stay_silent, release, done, etc.) intentionally satisfy
-     the contract even though their effect_domain is Read_only. Without this
-     exemption, analyst/janitor keepers that correctly call keeper_stay_silent
-     alongside status reads trigger false contract violations - observed
-     2026-04-28 when agent_code-spark returned stay_silent + keeper_task_list
-     on an actionable signal. *)
-  if observation_alias
-  then false
-  else if is_completion_tool_name name
-  then true
-  else (
-    match effect_domain_for_tool_name name with
-    | Some Tool_catalog.Read_only -> false
-    | Some
-        ( Tool_catalog.Masc_workspace
-        | Tool_catalog.Playground_write
-        | Tool_catalog.Host_repo_write ) -> true
-    | None ->
-      not
-        (Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name))
-;;
-
-let required_tool_satisfaction ?(satisfying_tools : string list = [])
-  (call : Agent_sdk.Completion_contract.tool_call)
-  : (unit, string) result
-  =
-  ignore satisfying_tools;
-  ignore call;
-  (* Provider-level [Require_tool_use] only means a tool call happened. Keeper
-     progress/liveness classification remains separate; do not reinterpret the
-     provider contract as "must mutate state" or "passive reads do not count". *)
-  Ok ()
-;;
-
 let parse_tool_csv text =
   text
   |> String.split_on_char ','
@@ -194,8 +157,6 @@ let classify_tool_progress name =
     then Completion
     else if is_claim_context_tool_name name
     then Claim_context
-    else if tool_name_can_satisfy_required_contract name
-    then Execution
     else Passive_status)
 ;;
 

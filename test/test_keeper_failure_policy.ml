@@ -166,7 +166,6 @@ let test_only_liveness_failures_allow_keeper_death () =
     [
       Policy.Transient_provider_failure;
       Policy.Runtime_exhausted { retryable = false };
-      Policy.Required_tool_contract_violation;
       Policy.Stale_turn { progress_seen = true };
       Policy.Stale_termination_storm { count = 6 };
       Policy.Ambiguous_partial_commit;

@@ -103,7 +103,6 @@ let sweep_and_recover (ctx : _ context) =
            | Keeper_registry.Stale_turn_timeout _
            | Keeper_registry.Stale_fleet_batch _
            | Keeper_registry.Provider_runtime_error _
-           | Keeper_registry.Tool_required_unsatisfied _
            | Keeper_registry.Ambiguous_partial_commit _
            | Keeper_registry.Fiber_unresolved _
            | Keeper_registry.Exception _ )
@@ -133,7 +132,6 @@ let sweep_and_recover (ctx : _ context) =
     | Some (Keeper_registry.Heartbeat_consecutive_failures _)
     | Some (Keeper_registry.Turn_consecutive_failures _)
     | Some (Keeper_registry.Provider_runtime_error _)
-    | Some (Keeper_registry.Tool_required_unsatisfied _)
     | Some Keeper_registry.Turn_overflow_pause
     | Some Keeper_registry.Turn_livelock_pause
     | Some (Keeper_registry.Ambiguous_partial_commit _)
@@ -166,7 +164,6 @@ let sweep_and_recover (ctx : _ context) =
       | Some (Keeper_registry.Heartbeat_consecutive_failures _)
       | Some (Keeper_registry.Turn_consecutive_failures _)
       | Some (Keeper_registry.Provider_runtime_error _)
-      | Some (Keeper_registry.Tool_required_unsatisfied _)
       | Some Keeper_registry.Turn_overflow_pause
       | Some Keeper_registry.Turn_livelock_pause
       | Some (Keeper_registry.Ambiguous_partial_commit _)

@@ -37,11 +37,6 @@ type t =
   (** Runtime aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating
           this as the root cause. *)
-  | Required_tool_use_no_tool_call
-  (** Required-tool-use contract: model returned no tool call. *)
-  | Required_tool_use_unsatisfied
-  (** Required-tool-use contract: tool call did not satisfy the
-          contract. *)
   | Post_commit_ambiguous
   (** Provider failed after a mutating tool may have committed side
           effects. Reconcile required. *)

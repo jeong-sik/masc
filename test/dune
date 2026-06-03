@@ -170,7 +170,6 @@
   test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
-  test_keeper_unified_required_tools
   test_keeper_unified_tool_observation
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip
@@ -430,7 +429,6 @@
   test_autonomy_liberation
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
-  test_keeper_unified_required_tools
   test_keeper_unified_tool_observation
   test_keeper_unified_idle_cooldown
   test_keeper_unified_inline_skip

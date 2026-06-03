@@ -36,17 +36,8 @@ let required_tool_unsatisfied_progress_class = "required_tool_unsatisfied"
    ([Required_tool_use_no_tool_call] and [Required_tool_use_unsatisfied])
    are dispositions known at construction time; everything else returns
    [None] without ever needing to introspect the [code] string. *)
-let progress_class_of_disposition (d : Keeper_turn_disposition.t) =
-  match d with
-  | Required_tool_use_no_tool_call ->
-      Some required_tool_no_call_progress_class
-  | Required_tool_use_unsatisfied ->
-      Some required_tool_unsatisfied_progress_class
-  | Success | External_cancel | Input_required | Turn_wall_clock_timeout
-  | Post_commit_ambiguous
-  | Runtime_attempts_exhausted
-  | Provider_error _ | Unknown _ ->
-      None
+let progress_class_of_disposition (_d : Keeper_turn_disposition.t) =
+  None
 
 type keeper_state = {
   mutable streak : int;

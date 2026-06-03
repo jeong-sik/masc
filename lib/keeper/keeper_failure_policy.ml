@@ -149,7 +149,6 @@ type failure =
       }
   | Transient_provider_failure
   | Runtime_exhausted of { retryable : bool }
-  | Required_tool_contract_violation
   | Fatal_environment of { detail : string option }
   | Stale_turn of { progress_seen : bool }
   | Stale_termination_storm of { count : int }
@@ -359,14 +358,6 @@ let decide = function
       ~operator_action:Reroute_or_tune_provider
       ~keeper_death_allowed:false
       ~reason:"runtime_exhausted_terminal"
-  | Required_tool_contract_violation ->
-    make_decision
-      ~failure_scope:Turn_scope
-      ~lifecycle_effect:Pause_current_work
-      ~circuit_effect:Skip_circuit
-      ~operator_action:Fix_invocation
-      ~keeper_death_allowed:false
-      ~reason:"required_tool_contract_violation"
   | Fatal_environment { detail } ->
     let reason =
       match detail with

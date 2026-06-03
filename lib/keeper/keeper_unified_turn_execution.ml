@@ -364,8 +364,7 @@ let run (ctx : ctx)
         committed_tools <> []
         && Keeper_tool_registry.all_tools_reconcile_safe
              committed_tools
-        && (EC.is_auto_recoverable_turn_error err
-            || EC.is_required_tool_contract_violation err)
+        && EC.is_auto_recoverable_turn_error err
       then (
         let err_preview =
           short_preview (Agent_sdk.Error.to_string err)
@@ -373,8 +372,6 @@ let run (ctx : ctx)
         let reason =
           if EC.is_server_rejected_parse_error err
           then "server parse rejection"
-          else if EC.is_required_tool_contract_violation err
-          then "required tool contract violation"
           else "transient error"
         in
         Log.Keeper.warn

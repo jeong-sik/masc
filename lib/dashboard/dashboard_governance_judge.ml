@@ -756,6 +756,19 @@ let mark_compute_start (st : state) =
         (float_of_int st.compute_in_flight);
       st.compute_in_flight)
 
+(* docs/spec/18-log-severity-taxonomy.md § 3.6 (outcome-carrying line at a
+   static level): the compute-finish line embeds a runtime [outcome=%s], so its
+   severity must be derived from that outcome rather than hardcoded [Info] — an
+   errored compute logged at [Info] hides under the noise floor with no
+   companion WARN/ERROR. A genuine "error" outcome is degraded-with-auto-recovery
+   (the next [refresh_once] retries) → [Warn]. A graceful cancellation
+   (reason="cancelled", e.g. shutdown / superseded refresh) is not
+   operator-actionable → [Info]. Success → [Info]. *)
+let level_of_compute_outcome ~outcome ~reason : Log.level =
+  match outcome with
+  | "error" when reason <> "cancelled" -> Log.Warn
+  | _ -> Log.Info
+
 let mark_compute_finish (st : state) ~started_at ~outcome ~reason
     ~timeout_sec =
   (* Clamp the elapsed time to >= 0 so a backwards system clock
@@ -778,13 +791,16 @@ let mark_compute_finish (st : state) ~started_at ~outcome ~reason
   Prometheus.inc_counter governance_compute_total_metric ~labels ();
   Prometheus.observe_histogram governance_compute_duration_metric
     ~labels duration_sec;
-  Log.Governance.info
-    "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs compute_timeout=%s in_flight_after=%d"
-    outcome reason duration_sec
-    (match timeout_sec with
-     | Some value -> Printf.sprintf "%.1fs" value
-     | None -> "unknown")
-    in_flight;
+  (* Single emission at the outcome-derived level (never two lines). *)
+  Log.Governance.emit
+    (level_of_compute_outcome ~outcome ~reason)
+    (Printf.sprintf
+       "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs compute_timeout=%s in_flight_after=%d"
+       outcome reason duration_sec
+       (match timeout_sec with
+        | Some value -> Printf.sprintf "%.1fs" value
+        | None -> "unknown")
+       in_flight);
   (duration_sec, in_flight)
 
 let refresh_once ~sw ~net

@@ -101,11 +101,17 @@ let test_reset_clears_cached_session_mappings () =
     Client_registry_eio.get_or_create_identity ~mcp_session_id:sid
       (`Assoc [ ("_agent_name", `String "cached-agent") ])
   in
-  Client_registry_eio.set_resolved_name sid "cached-agent";
-  check (option string) "resolved name set" (Some "cached-agent")
+  Client_registry_eio.set_resolved_name sid "cached-agent" ~is_ephemeral:false;
+  check
+    (option (pair string bool))
+    "resolved name set"
+    (Some ("cached-agent", false))
     (Client_registry_eio.get_resolved_name sid);
   Client_registry_eio.reset_for_testing ();
-  check (option string) "resolved name cleared" None
+  check
+    (option (pair string bool))
+    "resolved name cleared"
+    None
     (Client_registry_eio.get_resolved_name sid);
   let id2 =
     Client_registry_eio.get_or_create_identity ~mcp_session_id:sid

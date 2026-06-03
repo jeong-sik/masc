@@ -28,11 +28,22 @@ type channel =
   | Internal
   | External of string
 
+(** Provenance of [agent_name]: caller-supplied vs system-minted
+    fallback. Carried so the auth-fallback gate decides ephemerality
+    from a typed origin instead of re-probing the name string. *)
+type agent_name_origin =
+  [ `Supplied
+  | `System_fallback
+  ]
+[@@deriving to_yojson]
+
 (** Agent identity record *)
 type t = {
   uuid : string;              (** Permanent unique identifier *)
   session_key : string;
   agent_name : string;
+  agent_name_origin : agent_name_origin;
+      (** Provenance of [agent_name] (see {!agent_name_origin}). *)
   channel : channel option;
   user_id : string option;
   capabilities : string list;

@@ -725,6 +725,7 @@
   test_client_identity
   test_mcp_full_cycle
   test_client_registry_eio
+  test_minted_name_gate
   test_identity_e2e
   test_identity_edge_cases
   test_verification
@@ -911,6 +912,7 @@
   test_client_identity
   test_mcp_full_cycle
   test_client_registry_eio
+  test_minted_name_gate
   test_identity_e2e
   test_identity_edge_cases
   test_verification

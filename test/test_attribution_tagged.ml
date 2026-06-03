@@ -11,8 +11,8 @@
       the bottom — it isn't run, but if it stopped compiling the test
       suite wouldn't link, which doubles as the phantom-type check). *)
 
-module AT = Masc.Attribution_tagged
-module A = Masc.Attribution
+module AT = Attribution_tagged
+module A = Attribution
 
 let outcome_kind = function
   | A.Passed -> "passed"

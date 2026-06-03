@@ -37,7 +37,7 @@ val decide
     [task_status] under the supplied caller context. Pure over the [decide]
     table — useful for surfacing valid next actions to keepers before they
     dispatch a transition (closes the workaround posture noted in
-    [Task_transition_state] module header). *)
+    [Task.Transition_state] module header). *)
 val valid_next_actions
   :  verification_enabled:bool
   -> same_agent:bool

@@ -151,7 +151,7 @@ end
 let session_registry_ref : (Yojson.Safe.t -> int) option ref = ref None
 
 (** One-shot gate for the "registry not wired" message below. Keeps the
-    log from flooding when callers on a hot path (Tool_task,
+    log from flooding when callers on a hot path (Task.Tool,
     tool_inline_dispatch_comm) invoke push_event_to_sessions before
     bootstrap wires the bridge — or in test harnesses that never wire
     it at all. *)
@@ -168,7 +168,7 @@ let set_session_push_fn (fn : Yojson.Safe.t -> int) =
   Atomic.set unwired_warned false
 
 (** Push a structured event to all active agent sessions.
-    Used by modules (e.g. Tool_task) that lack direct Session.registry access. *)
+    Used by modules (e.g. Task.Tool) that lack direct Session.registry access. *)
 let push_event_to_sessions (event : Yojson.Safe.t) : unit =
   match !session_registry_ref with
   | Some push_fn ->

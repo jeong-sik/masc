@@ -268,7 +268,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
        ([keeper_unified_turn_types.runtime_exhausted_failure_reason_of_raw_error])
        carries the already-typed [No_tool_capable] reason on the record.
        Reading the typed field instead of reparsing [code =
-       "no_capable_provider"] removes a typed->string->typed round-trip;
+       "no_tool_capable_provider"] removes a typed->string->typed round-trip;
        the [code] string is retained on the record for wire/dashboard readers. *)
     Some
       (runtime_blocker_surface_of_typed_class

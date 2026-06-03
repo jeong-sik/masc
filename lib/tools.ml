@@ -28,7 +28,7 @@ let raw_schemas : tool_schema list =
      (Tool_schemas_misc.schemas chain) via RFC-0057 PR-2 *)
   @ Tool_schemas_agent.schemas
   @ Tool_run.schemas
-  @ Tool_task.schemas
+  @ Task.Tool.schemas
   @ Tool_library.schemas
 
 let all_schemas : tool_schema list = raw_schemas

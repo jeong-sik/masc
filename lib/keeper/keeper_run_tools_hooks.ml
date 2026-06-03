@@ -136,6 +136,8 @@ let assemble_hooks
       initial_tool_surface.tool_gate_requested
       && initial_tool_surface.turn_visible_tool_names = []
     then (
+      acc.receipt_tool_contract_result <-
+        Keeper_execution_receipt.Contract_no_tool_capable_provider;
       Prometheus.inc_counter
         Prometheus.metric_empty_tool_universe_observed
         ~labels:

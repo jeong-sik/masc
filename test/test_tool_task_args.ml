@@ -1,4 +1,4 @@
-(** Tests for [Tool_task_args.parse_task_contract] — the canonical optional
+(** Tests for [Task.Args.parse_task_contract] — the canonical optional
     [contract] argument parser shared by the public masc_task_create facade and,
     after de-duplication, the keeper-internal keeper_task_create path.
 
@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module T = Masc.Tool_task_args
+module T = Masc.Task.Args
 
 (* The incident: an omitted optional contract must parse to [Ok None], not an
    Error. [Json_util.assoc_member_opt] returns [None] for an absent key. *)
@@ -51,7 +51,7 @@ let test_wrong_type_contract () =
   | Ok _ -> fail "non-object contract must be Error, not Ok"
 
 let () =
-  run "Tool_task_args"
+  run "Task.Args"
     [ ( "parse_task_contract"
       , [ test_case "omitted -> Ok None (regression)" `Quick test_omitted_contract
         ; test_case "explicit null -> Ok None" `Quick test_explicit_null_contract

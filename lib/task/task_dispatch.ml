@@ -5,6 +5,7 @@
     @since 0.7.0
 *)
 
+module Workspace = Workspace_core
 open Masc_domain
 
 (** Backend variant *)

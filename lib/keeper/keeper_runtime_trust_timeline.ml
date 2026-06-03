@@ -348,7 +348,7 @@ let receipt_timeline_event receipt =
           |> Option.value ~default:"unknown"
         in
         let tool_contract_result =
-          json_string_opt_member "completion_contract_result" receipt
+          json_string_opt_member "tool_contract_result" receipt
           |> Option.value ~default:"unknown"
         in
         let runtime_outcome =

@@ -250,7 +250,7 @@ let test_structural_timeout_maps_to_oas_timeout () =
 (* The consumer [runtime_blocker_surface_of_failure_reason] now reads the
    typed [reason = Some (No_tool_capable _)] field on
    [Provider_runtime_error] instead of reparsing [code =
-   "no_capable_provider"].  These tests pin that the typed-match path
+   "no_tool_capable_provider"].  These tests pin that the typed-match path
    yields the same blocker surface the old string-match produced, and that a
    non-no_tool_capable provider error still falls through to the
    provider_runtime_error catch-all (no widening). *)
@@ -280,12 +280,12 @@ let test_no_tool_capable_typed_reason_surface () =
         (Some
            (No_tool_capable
               (Some { configured_labels = [ "a" ]; provider_rejections = [] })))
-      ~code:"no_capable_provider"
+      ~code:"no_tool_capable_provider"
   in
   let none_shape =
     no_tool_capable_surface_exn
       ~reason:(Some (No_tool_capable None))
-      ~code:"no_capable_provider"
+      ~code:"no_tool_capable_provider"
   in
   List.iter
     (fun (label, surface) ->

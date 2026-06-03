@@ -73,8 +73,8 @@ let compute_outcomes_rollup
   List.iter
     (fun (v : Dashboard_harness_health.harness_verdict_item) ->
       match Eval_calibration.verdict_of_string (String.lowercase_ascii v.verdict) with
-      | Some Anti_rationalization.Approve -> incr pass_v
-      | Some (Anti_rationalization.Reject reason) ->
+      | Some Task.Anti_rationalization.Approve -> incr pass_v
+      | Some (Task.Anti_rationalization.Reject reason) ->
           incr fail_v;
           let r =
             match (v.fallback_reason, String.trim reason) with

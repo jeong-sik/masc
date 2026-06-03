@@ -102,7 +102,7 @@ let cancel_reason_label = function
 
 let failure_reason_label = function
   | Failure_runtime_unavailable _ -> "runtime_unavailable"
-  | Failure_no_tool_capable_provider _ -> "no_capable_provider"
+  | Failure_no_tool_capable_provider _ -> "no_tool_capable_provider"
   | Failure_provider_error _ -> "provider_error"
   | Failure_tool_contract_violation _ -> "tool_contract_violation"
   | Failure_receipt_lost _ -> "receipt_lost"

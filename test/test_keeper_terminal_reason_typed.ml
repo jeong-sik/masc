@@ -46,6 +46,7 @@ let roundtrip_corpus =
   ; "api_error_overloaded"
   ; "api_error_server:502"
   ; "api_error_timeout"
+  ; "api_error_network"
   ; "api_error_context_overflow"
   ; "api_error_oas_agent_execution_timeout"
     (* completion-contract-violation (legacy + enriched forms) *)
@@ -398,7 +399,38 @@ let () =
                                           let got =
                                             R.operator_disposition receipt
                                           in
+                                          (* The frozen oracle is a verbatim copy of the
+                                             PRE-FIX classifier, which paged a human for a
+                                             transient provider-runtime timeout/network
+                                             error. The transient-liveness fix deliberately
+                                             diverges on EXACTLY those two wire codes: where
+                                             the old code returned
+                                             [(Disp_pause_human, Reason_provider_runtime_error)]
+                                             with no degraded-retry / runtime-fallback set,
+                                             production now advances to the next runtime/model
+                                             (no operator page). The oracle stays frozen; this
+                                             scoped exception encodes the one intended spec
+                                             change. Every OTHER mismatch (including the
+                                             structural [api_error_oas_agent_execution_timeout]
+                                             and all non-transient [api_error_*] codes) still
+                                             fails — that is what proves the fix is not
+                                             over-broadened. *)
+                                          let lc =
+                                            String.lowercase_ascii code
+                                          in
+                                          let acceptable_transient_divergence =
+                                            (String.equal lc "api_error_timeout"
+                                             || String.equal lc "api_error_network")
+                                            && want
+                                               = ( R.Disp_pause_human
+                                                 , R.Reason_provider_runtime_error )
+                                            && (match fst got with
+                                                | R.Disp_fail_open_next_runtime
+                                                | R.Disp_pass_next_model -> true
+                                                | _ -> false)
+                                          in
                                           if want <> got
+                                             && not acceptable_transient_divergence
                                           then (
                                             incr mismatches;
                                             if !mismatches <= 20
@@ -432,6 +464,73 @@ let () =
     "test_keeper_terminal_reason_typed: matrix cases=%d mismatches=%d\n"
     !count
     !mismatches
+;;
+
+(* ------------------------------------------------------------------ *)
+(* 3. Transient-liveness fix: the USER-VISIBLE property.               *)
+(*                                                                     *)
+(* The bug is "a transient that self-heals still pages a human." The   *)
+(* page is gated by [needs_operator_broadcast (fst disposition)] in    *)
+(* [append]; the disposition label is incidental. So assert the        *)
+(* broadcast decision directly, not just the label.                    *)
+(* ------------------------------------------------------------------ *)
+
+(* A bare provider-runtime failure receipt: no in-turn degraded-retry /
+   runtime-fallback was recorded (this is the real fleet case — the turn
+   recovered via the SAME runtime's retry, so neither cross-runtime flag is
+   set). With these flags clear, the disposition is decided purely by the
+   transient-vs-terminal nature of [terminal_reason_code]. *)
+let bare_provider_runtime_receipt code : R.t =
+  { base_receipt with
+    terminal_reason_code = code
+  ; outcome = `Error
+  ; degraded_retry_applied = false
+  ; degraded_retry_runtime = None
+  ; runtime_fallback_applied = false
+  ; runtime_outcome = R.Runtime_completed
+  ; error_kind = None
+  }
+;;
+
+let () =
+  (* Transient: idle-chunk liveness kill ([api_error_timeout]) and a
+     transient network error ([api_error_network]) must advance the FSM and
+     must NOT page a human. *)
+  List.iter
+    (fun code ->
+       let disposition, _reason =
+         R.operator_disposition (bare_provider_runtime_receipt code)
+       in
+       check
+         (Printf.sprintf "transient-advances: %s -> %s (not pause_human)" code
+            (R.operator_disposition_kind_to_string disposition))
+         (match disposition with
+          | R.Disp_fail_open_next_runtime | R.Disp_pass_next_model -> true
+          | _ -> false);
+       check
+         (Printf.sprintf "transient-no-broadcast: %s" code)
+         (not (R.needs_operator_broadcast disposition)))
+    [ "api_error_timeout"; "api_error_network" ];
+  (* Non-transient provider-runtime failures MUST still page a human:
+     - [api_error_oas_agent_execution_timeout] is the STRUCTURAL OAS budget
+       timeout (distinct wire code, non-transient). This is the strongest
+       anti-over-broadening assertion: it also starts with [api_error_] and
+       parses to [Provider_runtime_failure], yet must stay paused.
+     - a genuine overloaded provider likewise stays paused. *)
+  List.iter
+    (fun code ->
+       let disposition, reason =
+         R.operator_disposition (bare_provider_runtime_receipt code)
+       in
+       check
+         (Printf.sprintf "non-transient-pauses: %s -> %s" code
+            (R.operator_disposition_kind_to_string disposition))
+         (disposition = R.Disp_pause_human
+          && reason = R.Reason_provider_runtime_error);
+       check
+         (Printf.sprintf "non-transient-broadcasts: %s" code)
+         (R.needs_operator_broadcast disposition))
+    [ "api_error_oas_agent_execution_timeout"; "api_error_overloaded" ]
 ;;
 
 let () =

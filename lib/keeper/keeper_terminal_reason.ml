@@ -24,6 +24,23 @@ let terminal_prefix_max_turns_exceeded = "agent_error_max_turns_exceeded"
 let terminal_prefix_execution_timeout = "agent_error_execution_timeout"
 let terminal_prefix_idle_timeout = "agent_error_idle_timeout"
 
+(* SSOT for the two retry-recoverable transient wire codes inside the
+   [api_error_*] / [Provider_runtime_failure] family. These are the wire
+   forms of exactly the [Agent_sdk.Error] variants that
+   [Keeper_error_classify.is_transient_network_error] reports as transient:
+   a plain (non-structural) [Api.Timeout] and an [Api.NetworkError]. The
+   producer [Keeper_agent_error.api_error_terminal_reason_code] builds the
+   same strings; it references these constants so encoder and the
+   consumer-side classifier cannot drift.
+
+   NOTE the structural OAS budget timeout is a DISTINCT producer wire code
+   ([api_error_oas_agent_execution_timeout]) and is intentionally NOT in
+   this set — it carries the [(budget=...)] message that
+   [is_transient_network_error] treats as non-transient, so it must still
+   page a human. *)
+let wire_api_error_timeout = "api_error_timeout"
+let wire_api_error_network = "api_error_network"
+
 let is_auto_recoverable_turn_budget_terminal terminal_reason =
   String.starts_with ~prefix:terminal_prefix_max_turns_exceeded terminal_reason
   || String.starts_with ~prefix:terminal_prefix_execution_timeout terminal_reason
@@ -90,4 +107,33 @@ let to_wire = function
   | Auto_recoverable_budget wire -> wire
   | Pre_dispatch_success wire -> wire
   | Other wire -> wire
+;;
+
+(* A [Provider_runtime_failure] whose underlying error is a retry-recoverable
+   transient (idle-chunk liveness kill wrapped as [Api.Timeout], or a
+   transient [Api.NetworkError]). The keeper's in-turn retry typically
+   self-heals these on the next attempt, so the disposition classifier must
+   advance to the next runtime/model rather than page a human.
+
+   Matched by EXACT equality against the two transient wire constants (on a
+   lowercased copy, mirroring [of_wire]). Exact — not prefix — equality is
+   load-bearing: it excludes the structural OAS budget timeout
+   [api_error_oas_agent_execution_timeout] (also [Provider_runtime_failure],
+   but non-transient) and every other [api_error_*] code (rate_limited,
+   overloaded, server:*, context_overflow, …), all of which must still pause.
+   Only [Provider_runtime_failure] is inspected; all other variants are
+   [false]. *)
+let is_transient_provider_runtime_failure = function
+  | Provider_runtime_failure wire ->
+    let lowered = String.lowercase_ascii wire in
+    String.equal lowered wire_api_error_timeout
+    || String.equal lowered wire_api_error_network
+  | Runtime_exhausted _
+  | Config_or_auth _
+  | Completion_contract_violation _
+  | Turn_livelock _
+  | Internal_error _
+  | Auto_recoverable_budget _
+  | Pre_dispatch_success _
+  | Other _ -> false
 ;;

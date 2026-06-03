@@ -134,11 +134,16 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   | Agent_sdk.Retry.InvalidRequest _ -> "api_error_invalid_request"
   | Agent_sdk.Retry.NotFound _ -> "api_error_not_found"
   | Agent_sdk.Retry.ContextOverflow _ -> "api_error_context_overflow"
-  | Agent_sdk.Retry.NetworkError _ -> "api_error_network"
+  (* SSOT: the two transient wire codes are owned by [Keeper_terminal_reason]
+     so the consumer-side disposition classifier
+     ([Keeper_terminal_reason.is_transient_provider_runtime_failure]) and this
+     encoder cannot drift. The structural-OAS-timeout branch keeps its own
+     distinct (non-transient) code. *)
+  | Agent_sdk.Retry.NetworkError _ -> Keeper_terminal_reason.wire_api_error_network
   | Agent_sdk.Retry.Timeout { message }
     when Keeper_error_classify.is_structural_oas_timeout_message message ->
     "api_error_oas_agent_execution_timeout"
-  | Agent_sdk.Retry.Timeout _ -> "api_error_timeout"
+  | Agent_sdk.Retry.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
 ;;
 
 let provider_error_terminal_reason_code

@@ -111,37 +111,6 @@ groups:
             semaphore-wait timeouts. This converts the Phase 0
             starvation-rate requirement into an alertable fleet ratio.
 
-      - alert: GoalLoopKeeperAliveButStuckCritical
-        expr: |
-          (
-            /
-          ) > 2
-        for: 5m
-        labels:
-          severity: critical
-          component: goal_loop
-          subsystem: observe
-        annotations:
-          summary: "Keeper {{ $labels.keeper_name }} stuck for > 2x threshold"
-          description: |
-            Supervisor-visible liveness has exceeded the configured
-            stuck threshold by more than 2x and must enter recovery.
-
-      - alert: GoalLoopKeeperZombieLoopCritical
-        expr: |
-          sum by (keeper_name) (
-          ) > 0
-        for: 0m
-        labels:
-          severity: critical
-          component: goal_loop
-          subsystem: observe
-        annotations:
-          summary: "Keeper {{ $labels.keeper_name }} zombie loop detected"
-          description: |
-            A loop made progress-signalling noise without real task progress.
-            This is a direct Observe-phase re-entry trigger.
-
   - name: masc_goal_loop_observe_provider
     interval: 30s
     rules:

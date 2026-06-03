@@ -1,10 +1,11 @@
 /* global React */
-// CrewPlane.jsx — Phase C-2: persona-aware fleet view
+// CrewPlane.jsx — Phase C-2: synthetic fleet view
 // ─────────────────────────────────────────────────────────────────────
 // Two layouts: SOLO (1 keeper computer) and SWARM (2x2 grid w/ pagination).
 // Roster on the left lists all 14 keepers as persona cards.
 // Stage on the right is the keeper's "computer" — header + action stream + memory.
-// All data sourced from window.MASC_CREW (real .masc dump, redacted).
+// All data comes from window.MASC_CREW. Repository previews intentionally do
+// not ship .masc dumps, keeper prompts, runtime profiles, or decision logs.
 
 const { useState: cpUseState, useMemo: cpUseMemo, useEffect: cpUseEffect } = React;
 
@@ -314,8 +315,8 @@ function CrewPlane({ branch, keepers: selKeepers }) {
   if (!C.keepers.length) {
     return (
       <div className="plane">
-        <div className="plane-hdr"><span className="ti">Crew</span><span className="sub">· data-crew.js missing</span></div>
-        <div style={{padding:24, color:"var(--ink-2)"}}>No MASC_CREW data found. Run the import script.</div>
+        <div className="plane-hdr"><span className="ti">Crew</span><span className="sub">· no repository seed</span></div>
+        <div style={{padding:24, color:"var(--ink-2)"}}>Crew seed data is intentionally omitted from repository previews.</div>
       </div>
     );
   }

@@ -34,7 +34,7 @@ Keeper attribution runs on a **12-slot palette** (infrastructure capability — 
 | **qa-king** | QA | Red `#c46a5a` |
 | **rama** (ramarama) | Researcher | Purple `#8a6aa0` |
 
-There are also supporting roles (scholar, janitor, issue_king, taskmaster, verifier, executor, velvet-hammer, ollama-local) and providers (Provider-A, Provider-B, Provider-D, Provider-E) that appear in the runtime chain and provider matrix. Unnamed keepers hash onto the remaining slots via `kSlot(id)` (FNV-1a mod 12).
+There are also supporting roles that appear in the runtime chain and provider-neutral execution matrix. Unnamed keepers hash onto the remaining slots via `kSlot(id)` (FNV-1a mod 12).
 
 ### Goals seen in the system (Korean + English mixed)
 
@@ -56,7 +56,7 @@ MASC is **bilingual Korean/English** under the hood — titles, goals and some c
   - `sidebar.css` · `ticker.css` · `kpi.css` · `lifeline.css` · `center.css` · `swimlanes.css` · `deck.css` · `drawer.css` · `rail.css` — zone-specific styles
   - `code.css` · `layers.css` — code mode + stacked overlays
   - The hand-written `tokens.css` was deleted (Wave 2); the generated counterpart now ships in its place.
-- **`.masc/`** (read-only mount) — runtime state/config directory: agent manifests, goals, tasks, activity events, auth, trajectories, trash. Used to derive copy, keeper names, and real goal/task strings. Not source of visuals.
+- **Synthetic seed data only** — repository previews must not embed `.masc/` records, keeper prompts, provider model names, decision logs, auth material, trajectories, or operator transcripts.
 - No Figma provided.
 - No slide template provided — `slides/` is omitted per instructions.
 
@@ -83,7 +83,7 @@ Examples seen in the system:
 ```
 goal-merge-blockers       ACTIVE   3/3    priority 1
 nick0cave  →  t-9f2a  tool.write_file  +18 −4   2m ago
-RUNTIME  provider-a > provider-b > provider-d   hit@2   1.24s
+RUNTIME  descriptor-run-42   policy=allow   local-sandbox   1.24s
 FLAG  @sangsu  drift detected at L187    +2 replies
 ```
 

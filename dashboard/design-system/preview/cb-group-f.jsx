@@ -361,12 +361,12 @@ function CostMatrix() {
     return 'z4';
   };
   return (
-    <section aria-label={`Cost matrix · provider × model · total $${P2f.costs.total_cost_usd.toFixed(2)} over 24h`} style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+    <section aria-label={`Cost matrix · runtime slot x capability tier · total $${P2f.costs.total_cost_usd.toFixed(2)} over 24h`} style={{display:'flex',flexDirection:'column',gap:'8px'}}>
       <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
-        <span>provider × model · $ spent (24h)</span>
+        <span>runtime slot x capability tier · $ spent (24h)</span>
         <span style={{marginLeft:'auto',color:'var(--color-accent-fg)'}}>${P2f.costs.total_cost_usd.toFixed(2)}</span>
       </div>
-      <table className="cs-mat" aria-label="Provider × model cost matrix">
+      <table className="cs-mat" aria-label="Runtime slot x capability tier cost matrix">
         <thead>
           <tr>
             <th scope="col"></th>

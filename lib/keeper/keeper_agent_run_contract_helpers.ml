@@ -54,13 +54,12 @@ let no_progress_success_tool_names_for_contract
   keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok_no_progress"
 ;;
 
-let observed_tool_contract_status ~missing_visible_required
-      ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
+let observed_tool_contract_status ~had_owned_active_task_at_turn_start
+      ~actual_keeper_tool_names
   : Keeper_execution_receipt.tool_contract_result
   =
   Keeper_agent_run_turn_helpers.tool_contract_result_for_observed_tools
-    ~missing_visible_required ~had_owned_active_task_at_turn_start
-    ~actual_keeper_tool_names
+    ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
 ;;
 
 let text_only_violation_contract_status ~actual_keeper_tool_names ~fallback

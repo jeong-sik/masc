@@ -84,6 +84,60 @@ let compute_command_descriptor (ir : Masc_exec.Shell_ir.t) : Ide_event_types.com
        Git_commit { message = if amend then message ^ " (amend)" else message }
      | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Git_merge { squash; branch; _ }) ->
        Gh_pr_merge { pr_number = 0; squash } (* git merge is analogous to pr merge *)
+     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Curl { url; method_; body; _ }) ->
+       (* Detect GitHub API PR operations via curl *)
+       let is_github_api = String.length url > 23 && String.sub url 0 23 = "https://api.github.com/" in
+       if is_github_api then
+         let parts = String.split_on_char '/' url in
+         (* URL pattern: https://api.github.com/repos/{owner}/{repo}/pulls/{number} *)
+         let find_repo parts =
+           let rec scan = function
+             | "repos" :: owner :: repo :: _ -> Some (owner ^ "/" ^ repo)
+             | _ :: rest -> scan rest
+             | [] -> None
+           in
+           scan parts
+         in
+         let find_pr_number parts =
+           let rec scan = function
+             | "pulls" :: n :: _ -> (match int_of_string_opt n with Some i -> i | None -> 0)
+             | "pull" :: n :: _ -> (match int_of_string_opt n with Some i -> i | None -> 0)
+             | _ :: rest -> scan rest
+             | [] -> 0
+           in
+           scan parts
+         in
+         let extract_title body_str =
+           try
+             let json = Yojson.Safe.from_string body_str in
+             Yojson.Safe.Util.member "title" json |> Yojson.Safe.Util.to_string
+           with _ -> ""
+         in
+         let extract_base body_str =
+           try
+             let json = Yojson.Safe.from_string body_str in
+             Yojson.Safe.Util.member "base" json |> Yojson.Safe.Util.to_string
+           with _ -> "main"
+         in
+         match find_repo parts with
+         | Some repo ->
+           (match method_ with
+            | `POST ->
+              (* POST /repos/{owner}/{repo}/pulls = create PR *)
+              let title = match body with Some b -> extract_title b | None -> "" in
+              let base = match body with Some b -> extract_base b | None -> "main" in
+              Gh_api_pr_create { repo; title; base }
+            | `PUT ->
+              (* PUT /repos/{owner}/{repo}/pulls/{number}/merge = merge PR *)
+              let pr_number = find_pr_number parts in
+              Gh_api_pr_merge { repo; pr_number }
+            | `DELETE ->
+              (* DELETE /repos/{owner}/{repo}/pulls/{number} = close PR *)
+              let pr_number = find_pr_number parts in
+              Gh_api_pr_comment { repo; pr_number; body = "" }
+            | _ -> Generic)
+         | None -> Generic
+       else Generic
      | _ -> Generic)
   | _ -> Generic
 

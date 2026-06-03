@@ -14,6 +14,9 @@ type command_descriptor =
   | Gh_issue_close of { issue_number : int }
   | Git_push of { remote : string; branch : string; force : bool }
   | Git_commit of { message : string }
+  | Gh_api_pr_create of { repo : string; title : string; base : string }
+  | Gh_api_pr_merge of { repo : string; pr_number : int }
+  | Gh_api_pr_comment of { repo : string; pr_number : int; body : string }
   | Generic
 
 val command_descriptor_to_json : command_descriptor -> Yojson.Safe.t

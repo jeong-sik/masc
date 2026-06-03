@@ -104,10 +104,10 @@ let default_config
   ; stream_idle_timeout_s = None
   ; max_execution_time_s = None
   ; body_timeout_s = None
-  ; max_tokens = Llm_provider.Constants.Inference_profile.agent_default.max_tokens
+  ; max_tokens = Runtime_provider_defaults.agent_default_max_tokens
   ; max_input_tokens = None
   ; max_cost_usd = None
-  ; temperature = Llm_provider.Constants.Inference_profile.agent_default.temperature
+  ; temperature = Runtime_provider_defaults.agent_default_temperature
   ; hooks = None
   ; context_reducer = None
   ; guardrails = None

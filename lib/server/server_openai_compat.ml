@@ -142,10 +142,18 @@ let handle_chat_completions ~config ~sw ~clock (body : string)
       | Some v -> v
       | None -> `List []
     in
-    let max_tokens = Safe_ops.json_int
-      ~default:Llm_provider.Constants.Inference_profile.agent_default.max_tokens "max_tokens" json in
-    let temperature = Safe_ops.json_float
-      ~default:Llm_provider.Constants.Inference_profile.agent_default.temperature "temperature" json in
+    let max_tokens =
+      Safe_ops.json_int
+        ~default:Runtime_provider_defaults.agent_default_max_tokens
+        "max_tokens"
+        json
+    in
+    let temperature =
+      Safe_ops.json_float
+        ~default:Runtime_provider_defaults.agent_default_temperature
+        "temperature"
+        json
+    in
     if model = "" then
       (`Bad_request,
        error_response ~status:"invalid_request_error"

@@ -77,8 +77,8 @@ val handle_chat_completions :
 
     | Field | Default |
     |---|---|
-    | [max_tokens] | {!Llm_provider.Constants.Inference_profile.agent_default}[.max_tokens] |
-    | [temperature] | {!Llm_provider.Constants.Inference_profile.agent_default}[.temperature] |
+    | [max_tokens] | {!Runtime_provider_defaults.agent_default_max_tokens} |
+    | [temperature] | {!Runtime_provider_defaults.agent_default_temperature} |
     | [system] (concat of all system messages) | empty string |
 
     {2 Response shape}

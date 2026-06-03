@@ -55,7 +55,7 @@ let agent_config_of_worker_meta
   ; system_prompt = Some system_prompt
   ; max_tokens = Some max_tokens
   ; max_turns = effective_max_turns meta
-  ; temperature = Some Llm_provider.Constants.Inference_profile.worker_default.temperature
+  ; temperature = Some Runtime_provider_defaults.worker_default_temperature
   ; top_p = Some 0.95
   ; top_k = Some 40
   ; (* min_p intentionally omitted: the constant is 0.0 (no-op) and some
@@ -170,7 +170,7 @@ let build_agent
     | Some n -> Agent_sdk.Builder.with_max_tokens n b
     | None -> b)
     |> Agent_sdk.Builder.with_max_turns config.max_turns
-    |> Agent_sdk.Builder.with_temperature Llm_provider.Constants.Inference_profile.worker_default.temperature
+    |> Agent_sdk.Builder.with_temperature Runtime_provider_defaults.worker_default_temperature
     |> Agent_sdk.Builder.with_top_p 0.95
     |> Agent_sdk.Builder.with_top_k 40
     (* with_min_p intentionally omitted — see agent_config_of_worker_meta

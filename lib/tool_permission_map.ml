@@ -24,8 +24,18 @@ let declared_permission_for_tool tool_name =
 ;;
 
 let known_tool_names =
+  (* Union of every curated tool-name list (replaces the deleted
+     [all_surfaces |> concat_map tools_for_surface]) plus explicit metadata
+     names.  Name set matches the pre-refactor base: the 5 actor lists plus
+     [system_internal_hidden] (the former System_internal surface, included in
+     [all_surfaces] at base).  List.sort_uniq dedupes. *)
   let metadata_tools =
-    Tool_catalog.all_surfaces |> List.concat_map Tool_catalog.tools_for_surface
+    Tool_catalog_surfaces.public_mcp_surface_tools
+    @ Tool_catalog_surfaces.spawned_agent_surface_tools
+    @ Tool_catalog_surfaces.local_worker_surface_tools
+    @ Tool_catalog_surfaces.session_min_surface_tools
+    @ Tool_catalog_surfaces.admin_surface_tools
+    @ Tool_catalog_surfaces.system_internal_hidden
   in
   let explicit_tools = List.map fst Tool_catalog.explicit_metadata in
   let known = metadata_tools @ explicit_tools in

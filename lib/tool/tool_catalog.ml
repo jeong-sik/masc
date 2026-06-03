@@ -45,27 +45,16 @@ type implementation_status =
   | Simulation
   | Placeholder
 
-(* effect_domain / tool_group live in Tool_catalog_inference. Re-export the
-   variants here so [tool_catalog.mli] keeps the same public constructors. *)
+(* effect_domain lives in Tool_catalog_inference. Re-export the variants here
+   so [tool_catalog.mli] keeps the same public constructors. *)
 include (Tool_catalog_inference : sig
   type effect_domain = Tool_catalog_inference.effect_domain =
     | Read_only
     | Masc_workspace
     | Playground_write
     | Host_repo_write
-
-  type tool_group = Tool_catalog_inference.tool_group =
-    | Masc_board
-    | Masc_plan
-    | Masc_agent
-    | Masc_core
 end)
 
-include (Tool_catalog_surfaces : sig
-  type surface = Tool_catalog_surfaces.surface =
-    | Public_mcp | Spawned_agent | Local_worker | Session_min
-    | Admin | Agent_internal | System_internal
-end)
 
 type metadata = {
   visibility : visibility;
@@ -401,20 +390,18 @@ let implementation_status_to_string = function
   | Simulation -> "simulation"
   | Placeholder -> "placeholder"
 
-(* effect_domain_to_string / tool_group_to_string: re-export from
-   Tool_catalog_inference to keep one definition. *)
+(* effect_domain_to_string: re-export from Tool_catalog_inference to keep one
+   definition. *)
 let effect_domain_to_string = Tool_catalog_inference.effect_domain_to_string
-let tool_group_to_string = Tool_catalog_inference.tool_group_to_string
 
 let implementation_allows_public_visibility = function
   | Real | Adapter -> true
   | Simulation | Placeholder -> false
 
-(* Typed-name inference (effect_domain / tool_group) lives in
-   Tool_catalog_inference. Re-export the public entry points so the
-   facade contract in [tool_catalog.mli] is unchanged. *)
+(* Typed-name inference (effect_domain) lives in Tool_catalog_inference.
+   Re-export the public entry point so the facade contract in
+   [tool_catalog.mli] is unchanged. *)
 let inferred_effect_domain = Tool_catalog_inference.inferred_effect_domain
-let tool_group = Tool_catalog_inference.tool_group
 
 
 let attach_inferred_effect_domain name (meta : metadata) =
@@ -439,7 +426,7 @@ let metadata name =
      registry, help registry, governance risk, etc.  Cache
      surface-membership checks per call rather than re-querying. *)
   let is_system_internal =
-    Tool_catalog_surfaces.is_on_surface System_internal name
+    Tool_catalog_surfaces.is_system_internal_hidden name
   in
   let base =
     match Hashtbl.find_opt metadata_table name with
@@ -461,9 +448,10 @@ let metadata name =
   in
   let with_surface_visibility =
     if is_system_internal then
-    (* Surface membership is the canonical "hidden but callable" contract for
-       system-internal tools, even when a tool also carries explicit metadata
-       for semantic hints like readonly/destructive. *)
+    (* System-internal membership is the canonical "hidden but callable"
+       contract for these tools, even when a tool also carries explicit
+       metadata with Default visibility for semantic hints like
+       readonly/destructive — that Default is overridden to Hidden here. *)
       {
         base with
         visibility = Hidden;
@@ -526,16 +514,15 @@ let lifecycle_to_string = function
 
 let metadata_to_fields name =
   let meta = metadata name in
-  let surfaces =
-    Tool_catalog_surfaces.surfaces_for_tool name
-    |> List.map (fun s -> `String (Tool_catalog_surfaces.surface_to_string s))
-  in
+  (* The per-actor "surfaces" field was dropped in the surface-cut refactor:
+     the [surface] type that produced it (Tool_catalog_surfaces.surfaces_for_tool)
+     was deleted. Visibility is now expressed by the [visibility] field +
+     is_public_mcp / is_system_internal_hidden projections, not an actor list. *)
   let base =
     [
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
       ("implementationStatus", `String (implementation_status_to_string meta.implementation_status));
-      ("surfaces", `List surfaces);
     ]
   in
   let with_canonical =
@@ -560,16 +547,12 @@ let metadata_to_fields name =
         :: with_reason
     | None -> with_reason
   in
-  let with_tool_group =
-    match tool_group name with
-    | Some group ->
-        ("toolGroup", `String (tool_group_to_string group)) :: with_effect_domain
-    | None -> with_effect_domain
-  in
+  (* The "toolGroup" field was dropped in the surface-cut refactor: the
+     [tool_group] display classifier was deleted. *)
   let with_mcp_context_required =
     match meta.mcp_context_required with
-    | Some value -> ("mcpContextRequired", `Bool value) :: with_tool_group
-    | None -> with_tool_group
+    | Some value -> ("mcpContextRequired", `Bool value) :: with_effect_domain
+    | None -> with_effect_domain
   in
   let with_actor_binding =
     match meta.requires_actor_binding with
@@ -616,12 +599,3 @@ let allow_direct_call name =
   match meta.visibility with
   | Default -> true
   | Hidden -> meta.allow_direct_call_when_hidden
-
-(* ================================================================ *)
-(* Re-export: Surface system (from Tool_catalog_surfaces)           *)
-(* ================================================================ *)
-
-let tools_for_surface = Tool_catalog_surfaces.tools_for_surface
-let all_surfaces = Tool_catalog_surfaces.all_surfaces
-let is_on_surface = Tool_catalog_surfaces.is_on_surface
-let surface_to_string = Tool_catalog_surfaces.surface_to_string

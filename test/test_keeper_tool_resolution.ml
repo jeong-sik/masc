@@ -37,7 +37,9 @@ let test_unknown_returns_tried_list () =
   match TR.resolve "__nonexistent_tool_xyz" with
   | TR.Unknown { name; tried } ->
       check string "name preserved" "__nonexistent_tool_xyz" name;
-      check bool "at least 13 tried sources" true (List.length tried >= 13)
+      (* 9 base sources after the per-actor Surface sources were removed in the
+         surface-cut refactor (was >= 13 with the 5 surface admit sources). *)
+      check bool "at least 9 tried sources" true (List.length tried >= 9)
   | _ ->
       fail "__nonexistent_tool_xyz should be Unknown"
 
@@ -71,13 +73,12 @@ let test_extend_turns_resolved () =
       fail (Printf.sprintf "extend_turns should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
-let test_surface_admits_tool_execute () =
+let test_tool_execute_resolves () =
+  (* Was "resolves via surface"; the per-actor Surface source was removed in
+     the surface-cut refactor. tool_execute now resolves via an earlier source
+     (Dispatch_table / Tool_name_variant / Public_descriptor). *)
   match TR.resolve "tool_execute" with
-  | TR.Resolved { via = TR.Surface _; _ } -> ()
-  | TR.Resolved { via; _ } ->
-      (* Admitted through a different source — still ok for shim *)
-      ignore via
-  | TR.Alias_to _ -> ()
+  | TR.Resolved _ | TR.Alias_to _ -> ()
   | TR.Unknown { tried; _ } ->
       fail (Printf.sprintf "tool_execute should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
@@ -294,7 +295,7 @@ let () =
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
         test_case "extend_turns resolves" `Quick test_extend_turns_resolved;
-        test_case "tool_execute resolves via surface" `Quick test_surface_admits_tool_execute;
+        test_case "tool_execute resolves" `Quick test_tool_execute_resolves;
         test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;
         test_case "masc_board_post resolves via alias" `Quick test_alias_masc_to_internal;
       ]

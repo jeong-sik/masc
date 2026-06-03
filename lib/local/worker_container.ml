@@ -72,7 +72,7 @@ let evidence_session_id_of_worker_run = function
   | _ -> None
 
 let session_min_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Session_min
+  Tool_catalog_surfaces.session_min_surface_tools
 
 let worker_meta_allowed_fields =
   [

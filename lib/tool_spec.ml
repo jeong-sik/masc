@@ -108,9 +108,9 @@ let register (spec : t) =
   (* 1. Tag + schema registry *)
   Tool_dispatch.register_module_tag
     ~schemas:[ to_tool_schema spec ] ~tag:spec.module_tag;
-  (* 2. Catalog metadata — enforce Hidden for System_internal tools *)
+  (* 2. Catalog metadata — enforce Hidden for system-internal tools *)
   let is_system_internal =
-    Tool_catalog_surfaces.is_on_surface System_internal spec.name
+    Tool_catalog_surfaces.is_system_internal_hidden spec.name
   in
   let effective_visibility =
     if is_system_internal && spec.visibility = Tool_catalog.Default

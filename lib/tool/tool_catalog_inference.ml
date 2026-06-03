@@ -1,11 +1,12 @@
 module List = Stdlib.List
 
-(** Tool_catalog_inference — typed-tool-name -> effect_domain / tool_group.
+(** Tool_catalog_inference — typed-tool-name -> effect_domain.
 
     Pure inference layer. Given a {!Tool_name.t} variant, returns the
-    inferred {!effect_domain} or {!tool_group}. The facade
-    [Tool_catalog] re-exports these via type aliasing so the public
-    contract in [tool_catalog.mli] is unchanged.
+    inferred {!effect_domain}. The facade [Tool_catalog] re-exports this via
+    type aliasing so the public contract in [tool_catalog.mli] is unchanged.
+    (The [tool_group] display classifier was deleted in the surface-cut
+    refactor.)
 
     {b Why split}: this is the largest pure section of [tool_catalog]
     (~410 LoC of typed-name pattern matches with no side effects).
@@ -18,23 +19,11 @@ type effect_domain =
   | Playground_write
   | Host_repo_write
 
-type tool_group =
-  | Masc_board
-  | Masc_plan
-  | Masc_agent
-  | Masc_core
-
 let effect_domain_to_string = function
   | Read_only -> "read_only"
   | Masc_workspace -> "masc_workspace"
   | Playground_write -> "playground_write"
   | Host_repo_write -> "host_repo_write"
-
-let tool_group_to_string = function
-  | Masc_board -> "masc_board"
-  | Masc_plan -> "masc_plan"
-  | Masc_agent -> "masc_agent"
-  | Masc_core -> "masc_core"
 
 module TN = Tool_name
 module TM = Tool_name.Masc
@@ -130,59 +119,4 @@ let inferred_effect_domain_of_typed_tool_name = function
 let inferred_effect_domain name =
   match Tool_name.of_string name with
   | Some typed_name -> inferred_effect_domain_of_typed_tool_name typed_name
-  | None -> None
-
-(* PR-S1: in this grouping each domain IS uniform — all Board names map to
-   [Masc_board], and all Task/Goal/Operator names map to [Masc_core] — so the
-   domains collapse to a single nested wildcard arm each. *)
-let tool_group_of_typed_tool_name = function
-  | TN.Masc (TM.Board _) ->
-      Some Masc_board
-  | TN.Masc
-      ( TM.Plan_clear_task
-      | TM.Plan_get
-      | TM.Plan_get_task
-      | TM.Plan_init
-      | TM.Plan_set_task
-      | TM.Plan_update ) ->
-      Some Masc_plan
-  | TN.Masc (TM.Agent_fitness | TM.Agent_update | TM.Agent_card | TM.Agents) ->
-      Some Masc_agent
-  | TN.Masc (TM.Task _)
-  | TN.Masc (TM.Goal _)
-  | TN.Masc (TM.Operator _)
-  | TN.Masc
-      ( TM.Approval_pending
-      | TM.Approval_get
-      | TM.Broadcast
-      | TM.Check
-      | TM.Cleanup_zombies
-      | TM.Config
-      | TM.Dashboard
-      | TM.Deliver
-      | TM.Gc
-      | TM.Get_metrics
-      | TM.Heartbeat
-      | TM.Mcp_session
-      | TM.Messages
-      | TM.Note_add
-      | TM.Pause
-      | TM.Reset
-      | TM.Resume
-      | TM.Start
-      | TM.Status
-      | TM.Tool_admin_snapshot
-      | TM.Tool_admin_update
-      | TM.Tool_grant
-      | TM.Tool_help
-      | TM.Tool_list
-      | TM.Tool_revoke
-      | TM.Tool_stats
-      | TM.Web_fetch
-      | TM.Web_search ) ->
-      Some Masc_core
-
-let tool_group name =
-  match Tool_name.of_string name with
-  | Some typed_name -> tool_group_of_typed_tool_name typed_name
   | None -> None

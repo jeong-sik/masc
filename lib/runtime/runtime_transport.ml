@@ -127,16 +127,11 @@ let resolve_tool_lane_for_oas_tools
   let public_tools = public_mcp_tools_of_oas_tools tools in
   let public_tool_names = public_mcp_tool_names_of_oas_tools public_tools in
   let requested_agent_name = Option.bind agent_name String_util.trim_nonempty in
-  let agent_internal_tool_names =
-    match requested_agent_name with
-    | Some agent_name when Option.is_some (keeper_name_of_agent_name agent_name) ->
-      tools
-      |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
-        Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool.schema.name)
-      |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
-      |> dedupe_preserve_order
-    | _ -> []
-  in
+  (* The Agent_internal surface was empty (agent_internal_surface_tools = []),
+     so no tool was ever a member.  Surface deleted in the surface-cut
+     refactor; the agent-internal contribution to the runtime tool set is
+     always []. *)
+  let agent_internal_tool_names = [] in
   let requires_per_keeper_bridging =
     Provider_tool_support
     .provider_requires_per_keeper_bridging_for_bound_actor_tools

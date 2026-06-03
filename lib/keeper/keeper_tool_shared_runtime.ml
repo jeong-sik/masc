@@ -502,22 +502,19 @@ let tag_dispatch_fn
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let names = Keeper_tool_policy.keeper_allowed_tool_names meta in
   let has_prefix prefix name = String.starts_with ~prefix name in
+  (* Display-only grouping for the keeper tools list. The typed [tool_group]
+     classifier was deleted in the surface-cut refactor; this prefix categorizer
+     (formerly the fallback for non-typed names) now categorizes all names. *)
   let categorize n =
-    match Tool_name.of_string n with
-    | Some typed ->
-      (match Tool_catalog.tool_group (Tool_name.to_string typed) with
-       | Some group -> Tool_catalog.tool_group_to_string group
-       | None -> "core")
-    | None ->
-      if has_prefix "keeper_board_" n || has_prefix "masc_board_" n then "board"
-      else if has_prefix "keeper_voice_" n then "voice"
-      else if has_prefix "keeper_task_" n || has_prefix "keeper_tasks_" n then "workspace"
-      else if String.equal n "tool_execute" then "execute"
-      else if String.equal n "tool_search_files" then "search_files"
-      else if has_prefix "tool_" n then "fs"
-      else if has_prefix "keeper_library_" n || has_prefix "keeper_memory_" n then "memory"
-      else if has_prefix "keeper_" n then "meta"
-      else "core"
+    if has_prefix "keeper_board_" n || has_prefix "masc_board_" n then "board"
+    else if has_prefix "keeper_voice_" n then "voice"
+    else if has_prefix "keeper_task_" n || has_prefix "keeper_tasks_" n then "workspace"
+    else if String.equal n "tool_execute" then "execute"
+    else if String.equal n "tool_search_files" then "search_files"
+    else if has_prefix "tool_" n then "fs"
+    else if has_prefix "keeper_library_" n || has_prefix "keeper_memory_" n then "memory"
+    else if has_prefix "keeper_" n then "meta"
+    else "core"
   in
   let map =
     List.fold_left

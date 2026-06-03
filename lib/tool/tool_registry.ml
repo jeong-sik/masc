@@ -71,20 +71,24 @@ let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
 
 module StringSet = Set_util.StringSet
 
-(** Use the leaf surface-name SSOT instead of Config.raw_all_tool_schemas.
+(** Use the leaf curated tool-name lists instead of Config.raw_all_tool_schemas.
     Tool_registry sits below keeper/OAS dispatch, and depending on Config
-    creates Config -> keeper -> Tool_registry -> Config cycles.  Surface names
-    still include hidden/internal tools without importing the full schema graph. *)
+    creates Config -> keeper -> Tool_registry -> Config cycles.  These names
+    still include hidden/internal tools (including [system_internal_hidden])
+    without importing the full schema graph.  Replaces the deleted
+    [all_surfaces |> tools_for_surface] fold; the name set matches the
+    pre-refactor base (5 actor lists + the former System_internal surface). *)
 let known_tool_names : StringSet.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     List.fold_left
-      (fun set surface ->
-         List.fold_left
-           (fun set name -> StringSet.add name set)
-           set
-           (Tool_catalog_surfaces.tools_for_surface surface))
+      (fun set name -> StringSet.add name set)
       StringSet.empty
-      Tool_catalog_surfaces.all_surfaces)
+      ( Tool_catalog_surfaces.public_mcp_surface_tools
+      @ Tool_catalog_surfaces.spawned_agent_surface_tools
+      @ Tool_catalog_surfaces.local_worker_surface_tools
+      @ Tool_catalog_surfaces.session_min_surface_tools
+      @ Tool_catalog_surfaces.admin_surface_tools
+      @ Tool_catalog_surfaces.system_internal_hidden ))
 ;;
 
 let is_known_tool tool_name = StringSet.mem tool_name (Eio.Lazy.force known_tool_names)

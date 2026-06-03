@@ -16,12 +16,10 @@ type tried_source =
   | Registry_core_tools         (** effective_core_tools *)
   | Shard_schema                (** Tool_shard.all_keeper_tool_schemas *)
   | Descriptor_registry         (** Keeper_tool_descriptor.all_descriptors public_name (flat SSOT) *)
-  | Surface of Tool_catalog_surfaces.surface
 
 (** Resolution outcome for a tool name. *)
 type resolution =
-  | Resolved of { canonical : string; via : tried_source;
-                  surface : Tool_catalog_surfaces.surface option }
+  | Resolved of { canonical : string; via : tried_source }
   | Alias_to of { from_ : string; canonical : string; via : tried_source }
   | Unknown of { name : string; tried : tried_source list }
 

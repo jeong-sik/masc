@@ -22,8 +22,11 @@ let dedupe_tool_names names =
 
 (* ── Runtime-resolved tool names ─────────────────────────────── *)
 
-let keeper_internal_candidate_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Agent_internal
+(* The Agent_internal surface was empty (agent_internal_surface_tools = []),
+   so this candidate list has always been empty.  Surface deleted in the
+   surface-cut refactor; retained as [] because the [Registry_internal_candidate]
+   resolution source and keeper_tool_policy still reference it. *)
+let keeper_internal_candidate_tool_names : string list = []
 ;;
 
 let keeper_voice_tool_schemas =

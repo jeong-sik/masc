@@ -29,19 +29,9 @@ let caller_agent_name_from_arguments arguments =
   | None -> None
 
 let direct_call_block_message name =
-  if Tool_catalog.is_on_surface Tool_catalog.Agent_internal name then (
-    let replacement_hint =
-      match (Tool_catalog.metadata name).Tool_catalog.replacement with
-      | Some replacement -> Printf.sprintf " Try `%s` instead." replacement
-      | None -> ""
-    in
-    Printf.sprintf
-      "Tool '%s' is keeper-internal and not callable from external MCP clients.%s"
-      name replacement_hint)
-  else
-    Printf.sprintf
-      "Tool '%s' is hidden from the default tool surface and not callable directly."
-      name
+  Printf.sprintf
+    "Tool '%s' is hidden from the default tool surface and not callable directly."
+    name
 
 let resolve_owner_keeper_identity config owner_name =
   let candidates =
@@ -176,10 +166,11 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
     | Some raw -> Auth.verify_internal_keeper_token config.base_path ~token:raw
     | None -> false
   in
-  let internal_keeper_runtime_tool =
-    verified_internal_keeper_runtime
-    && Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool_name
-  in
+  (* The Agent_internal surface was empty (agent_internal_surface_tools = []),
+     so this flag was already always [false].  Surface deleted in the
+     surface-cut refactor; flag retained because [mcp_server_eio_execute]
+     reads it to skip the direct-call block for internal keeper runtimes. *)
+  let internal_keeper_runtime_tool = false in
   let owner_keeper_identity =
     match token with
     | None -> None

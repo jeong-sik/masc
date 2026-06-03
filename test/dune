@@ -744,6 +744,7 @@
   test_tool_registry
   test_tool_dispatch
   test_tool_spec
+  test_tool_catalog_system_internal_hidden
   test_typed_tool_masc
   test_state_product
   test_tool_result
@@ -928,6 +929,7 @@
   test_tool_registry
   test_tool_dispatch
   test_tool_spec
+  test_tool_catalog_system_internal_hidden
   test_typed_tool_masc
   test_state_product
   test_tool_result
@@ -1662,11 +1664,6 @@
 (test
  (name test_dispatch_telemetry_gap)
  (modules test_dispatch_telemetry_gap)
- (libraries alcotest))
-
-(test
- (name test_surface_coverage_gap)
- (modules test_surface_coverage_gap)
  (libraries alcotest))
 
 (test

@@ -36,10 +36,15 @@ let testable_permission =
 (* Equivalence tests                                                 *)
 (* ================================================================ *)
 
-(** Collect all tool names from all surfaces. *)
+(** Collect all tool names from every curated list. Replaces the deleted
+    [all_surfaces |> concat_map tools_for_surface] (surface type removed in the
+    surface-cut refactor); the name set is identical. *)
 let all_surface_tools () =
-  Tool_catalog.all_surfaces
-  |> List.concat_map Tool_catalog.tools_for_surface
+  ( Tool_catalog_surfaces.public_mcp_surface_tools
+  @ Tool_catalog_surfaces.spawned_agent_surface_tools
+  @ Tool_catalog_surfaces.local_worker_surface_tools
+  @ Tool_catalog_surfaces.session_min_surface_tools
+  @ Tool_catalog_surfaces.admin_surface_tools )
   |> List.sort_uniq String.compare
 
 let test_equivalence_admin () =

@@ -74,9 +74,10 @@ val tool_schemas_for_profile :
       state profile] returns the schema
     list visible on [profile]:
 
-    - [Full]: union of [Config.visible_tool_schemas] (gated by
-      [include_hidden]) plus optional agent-internal tools when
-      [include_agent_internal = true], deduped by name.
+    - [Full]: [Config.visible_tool_schemas] (gated by [include_hidden]),
+      deduped by name.  [include_agent_internal] is a retained no-op:
+      the Agent_internal surface was empty and was deleted in the
+      surface-cut refactor, so it adds no schema.
     - [Managed_agent]: SDK tool contract +
       [managed_agent_passthrough_tool_names] subset.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].
@@ -95,9 +96,10 @@ val tool_allowed_in_profile :
       list-time {!tool_schemas_for_profile}):
 
     - [Full]: [tool_name] is in
-      [Config.visible_tool_schemas].  [Tool_catalog.Agent_internal]
-      tools are gated by [internal_keeper_runtime] (default
-      [false]) — see #8699 for the exhaustive-match rationale.
+      [Config.visible_tool_schemas].  [internal_keeper_runtime] is a
+      retained no-op (default [false]): the Agent_internal surface was
+      empty and was deleted in the surface-cut refactor, so no tool is
+      gated by it.
     - [Managed_agent]: SDK binding by name, OR present in the
       managed-agent profile schema list.
     - [Operator_remote]: in [Tool_operator.remote_tool_names]. *)

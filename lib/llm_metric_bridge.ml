@@ -221,6 +221,51 @@ let error_reason_label = function
   | Reason_provider_error -> "provider_error"
   | Reason_unmapped _ | Reason_absent -> "unknown"
 
+(* ── JSONL persistence for inference error/retry events ──────── *)
+
+(** Lazy-initialised Dated_jsonl store for inference events.
+    Created on first call to [init ~base_path]; events emitted
+    before [init] are silently dropped (Prometheus-only), matching
+    the pre-JSONL baseline. *)
+let inference_store_ref : (string * Dated_jsonl.t) option ref = ref None
+
+(** Initialise the inference-events JSONL store rooted at
+    [base_path/data/inference-events/].  Idempotent for the same
+    base_path; a different base_path replaces the previous store
+    (mirrors [Tool_metrics_persist.get_or_create_store]). *)
+let init ~base_path =
+  match !inference_store_ref with
+  | Some (cached, _) when String.equal cached base_path -> ()
+  | _ ->
+    let dir =
+      Filename.concat
+        (Config_dir_resolver.data_dir ~base_path)
+        "inference-events"
+    in
+    Fs_compat.mkdir_p dir;
+    let store = Dated_jsonl.create ~base_dir:dir ~retention_days:30 () in
+    inference_store_ref := Some (base_path, store)
+
+(** Best-effort append of an inference event to JSONL.  Catches all
+    exceptions (including Cancel, which we re-raise) so that a JSONL
+    write failure never blocks the Prometheus hot path. *)
+let append_inference_event (json : Yojson.Safe.t) =
+  match !inference_store_ref with
+  | None -> ()  (* pre-init: Prometheus-only, as before *)
+  | Some (_, store) ->
+    try Dated_jsonl.append store json
+    with Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Metrics.warn "llm_metric_bridge: inference event JSONL write failed: %s"
+        (Printexc.to_string exn)
+
+(** Look up the cached provider for a model_id, returning the
+    [unknown_provider_label] sentinel when absent. *)
+let provider_for_model model_id =
+  Stdlib.Mutex.protect provider_cache_mutex (fun () ->
+    Option.value ~default:unknown_provider_label
+      (Hashtbl.find_opt provider_by_model model_id))
+
 let emit_error ~model_id ~error =
   Prometheus.inc_counter error_metric
     ~labels:[("model", model_id)]
@@ -229,7 +274,20 @@ let emit_error ~model_id ~error =
   Prometheus.inc_counter error_by_reason_metric
     ~labels:
       [ ("model", model_id); ("error_reason", error_reason_label reason) ]
-    ()
+    ();
+  (* JSONL persistence *)
+  let json =
+    `Assoc
+      [
+        ("ts", `String (Masc_domain.now_iso ()));
+        ("event_type", `String "llm_error");
+        ("model_id", `String model_id);
+        ("provider", `String (provider_for_model model_id));
+        ("error_reason", `String (error_reason_label reason));
+        ("error_message", `String error);
+      ]
+  in
+  append_inference_event json
 
 let emit_retry ~provider ~model_id ~attempt =
   remember_provider ~model_id ~provider;
@@ -240,7 +298,19 @@ let emit_retry ~provider ~model_id ~attempt =
         ("model", model_id);
         ("attempt", string_of_int attempt);
       ]
-    ()
+    ();
+  (* JSONL persistence *)
+  let json =
+    `Assoc
+      [
+        ("ts", `String (Masc_domain.now_iso ()));
+        ("event_type", `String "llm_retry");
+        ("model_id", `String model_id);
+        ("provider", `String provider);
+        ("attempt", `Int attempt);
+      ]
+  in
+  append_inference_event json
 
 let emit_token_usage ~provider ~model_id ~input_tokens ~output_tokens =
   remember_provider ~model_id ~provider;

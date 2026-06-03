@@ -624,6 +624,7 @@ export interface DashboardRuntimeModelMetric {
   total_input_tokens?: number | null
   total_output_tokens?: number | null
   total_cache_read_tokens?: number | null
+  total_cache_creation_tokens?: number | null
   total_reasoning_tokens?: number | null
   usage_sample_count?: number | null
   telemetry_sample_count?: number | null
@@ -762,6 +763,7 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
     total_input_tokens: asNumber(raw.total_input_tokens) ?? null,
     total_output_tokens: asNumber(raw.total_output_tokens) ?? null,
     total_cache_read_tokens: asNumber(raw.total_cache_read_tokens) ?? null,
+    total_cache_creation_tokens: asNumber(raw.total_cache_creation_tokens) ?? null,
     total_reasoning_tokens: asNumber(raw.total_reasoning_tokens) ?? null,
     usage_sample_count: asNumber(raw.usage_sample_count) ?? null,
     telemetry_sample_count: asNumber(raw.telemetry_sample_count) ?? null,

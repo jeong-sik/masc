@@ -147,6 +147,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; input_tokens = None
              ; output_tokens = None
              ; cache_read_tokens = None
+             ; cache_creation_tokens = None
              ; reasoning_tokens = None
              ; fallback_applied = false
              ; cost_usd = None
@@ -229,6 +230,11 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            let input_tokens_raw = json_int_field_opt "input_tokens" tfields in
            let output_tokens_raw = json_int_field_opt "output_tokens" tfields in
            let cache_read_tokens_raw = json_int_field_opt "cache_read_tokens" tfields in
+           let cache_creation_tokens_raw =
+             match json_int_field_opt "cache_creation_tokens" tfields with
+             | Some _ as v -> v
+             | None -> json_int_field_opt "cache_creation_input_tokens" tfields
+           in
            let reasoning_tokens_raw = json_int_field_opt "reasoning_tokens" tfields in
            let fallback_applied =
              match List.assoc_opt "fallback_applied" tfields with
@@ -272,6 +278,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
            let cache_read_tokens =
              if usage_untrusted then None else cache_read_tokens_raw
            in
+           let cache_creation_tokens =
+             if usage_untrusted then None else cache_creation_tokens_raw
+           in
            let reasoning_tokens =
              if usage_untrusted then None else reasoning_tokens_raw
            in
@@ -311,6 +320,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; input_tokens
              ; output_tokens
              ; cache_read_tokens
+             ; cache_creation_tokens
              ; reasoning_tokens
              ; fallback_applied
              ; cost_usd
@@ -461,6 +471,14 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
        let input_tokens = if usage_untrusted then None else input_tokens_raw in
        let output_tokens = if usage_untrusted then None else output_tokens_raw in
        let cache_read_tokens = if usage_untrusted then None else cache_read_tokens_raw in
+       let cache_creation_tokens_raw =
+         match json_int_field_opt "cache_creation_tokens" fields with
+         | Some _ as v -> v
+         | None -> json_int_field_opt "cache_creation_input_tokens" fields
+       in
+       let cache_creation_tokens =
+         if usage_untrusted then None else cache_creation_tokens_raw
+       in
        let prompt_tok_per_sec =
          match List.assoc_opt "prompt_per_second" fields with
          | Some (`Float f) when f > 0.0 -> Some f
@@ -496,6 +514,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          ; input_tokens
          ; output_tokens
          ; cache_read_tokens
+         ; cache_creation_tokens
          ; reasoning_tokens =
              (if usage_untrusted
               then None

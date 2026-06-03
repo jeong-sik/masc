@@ -22,16 +22,16 @@
 #     VOLUME). The image-baked /app/config remains read-only seed.
 
 services:
-  masc-mcp:
+  masc:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         # Override locally:
         #   docker compose build --build-arg BINARY_PATH=_build/default/bin/main_eio.exe
-        BINARY_PATH: masc-mcp-linux-x64
-    image: masc-mcp:local
-    container_name: masc-mcp
+        BINARY_PATH: masc-linux-x64
+    image: masc:local
+    container_name: masc
     restart: unless-stopped
     stop_signal: SIGTERM
     # Give the server's force-exit watchdog (MASC_SHUTDOWN_FORCE_TIMEOUT

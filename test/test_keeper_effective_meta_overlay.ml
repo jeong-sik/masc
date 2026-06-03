@@ -119,7 +119,6 @@ let seed_runtime_meta config name =
         ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "effective meta overlay regression");
-        ("tool_access", `List [ `String "masc_status" ]);
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -162,7 +161,6 @@ let test_toml_overlay_reaches_effective_meta () =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "docker"
-tool_access = ["tool_execute", "tool_read_file"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -177,11 +175,7 @@ tool_access = ["tool_execute", "tool_read_file"]
       Alcotest.(check string)
         "docker default network overlays from TOML profile"
         "none"
-        (Profile.network_mode_to_string meta.network_mode);
-      Alcotest.(check (list string))
-        "tool_access overlays from TOML"
-        [ "tool_execute"; "tool_read_file" ]
-        meta.tool_access
+        (Profile.network_mode_to_string meta.network_mode)
 
 let test_missing_sandbox_profile_fails_loud_for_profile_source () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

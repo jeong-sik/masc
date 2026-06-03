@@ -1427,52 +1427,6 @@ let test_oneof_null_const_matches_non_null_branch () =
 ;;
 
 (* ================================================================ *)
-(* Production schema regression: Keeper_schema.tool_access_schema   *)
-(* ================================================================ *)
-
-let keeper_tool_access_parent_schema () =
-  `Assoc
-    [
-      ("type", `String "object");
-      ( "properties",
-        `Assoc [ ("tool_access", Keeper_schema.tool_access_schema "test") ] );
-      ("required", `List [ `String "tool_access" ]);
-    ]
-;;
-
-let test_keeper_schema_tool_access_array () =
-  let schema = keeper_tool_access_parent_schema () in
-  let args =
-    `Assoc
-      [ ("tool_access", `List [`String "masc_status"; `String "tool_execute"]) ]
-  in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> ()
-  | Error result ->
-    Alcotest.failf
-      "expected tool_access array to pass: %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
-;;
-
-let test_keeper_schema_tool_access_rejects_object () =
-  let schema = keeper_tool_access_parent_schema () in
-  let args =
-    `Assoc [ ("tool_access", `Assoc [("tools", `List [`String "rg"])]) ]
-  in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected object form to fail"
-  | Error _ -> ()
-;;
-
-let test_keeper_schema_tool_access_rejects_string_value () =
-  let schema = keeper_tool_access_parent_schema () in
-  let args = `Assoc [ ("tool_access", `String "masc_status") ] in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected string value to fail"
-  | Error _ -> ()
-;;
-
-(* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -1595,13 +1549,5 @@ let () =
         test_oneof_null_const_matches_null_branch;
       Alcotest.test_case "null const: non-null branch matches" `Quick
         test_oneof_null_const_matches_non_null_branch;
-    ]);
-    ("keeper_schema_tool_access", [
-      Alcotest.test_case "array passes" `Quick
-        test_keeper_schema_tool_access_array;
-      Alcotest.test_case "object rejected" `Quick
-        test_keeper_schema_tool_access_rejects_object;
-      Alcotest.test_case "string value rejected" `Quick
-        test_keeper_schema_tool_access_rejects_string_value;
     ]);
   ]

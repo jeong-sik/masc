@@ -108,7 +108,6 @@ type t =
   | RecordingErrorDedup
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
-  | RequireToolUseViolations
   | ToolCallTotal
   | ProfileConfigConflicts
   | OasTimeoutClassifications
@@ -343,7 +342,6 @@ let to_string = function
   | PausedStatePersistErrors -> "masc_keeper_paused_state_persist_errors_total"
   | UnexpectedToolPartialTolerance ->
     "masc_keeper_unexpected_tool_partial_tolerance_total"
-  | RequireToolUseViolations -> "masc_keeper_require_tool_use_violations_total"
   | ToolCallTotal -> "masc_keeper_tool_call_total"
   | ProfileConfigConflicts -> "masc_keeper_profile_config_conflicts_total"
   | OasTimeoutClassifications -> "masc_keeper_oas_timeout_classifications_total"

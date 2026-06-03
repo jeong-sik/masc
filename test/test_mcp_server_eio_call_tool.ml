@@ -33,8 +33,7 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
-let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
-    ?tool_access name =
+let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
   let agent_name =
     Option.value agent_name
       ~default:(Masc.Keeper_identity.keeper_agent_name name)
@@ -57,14 +56,6 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
            ( "active_goal_ids",
              `List (List.map (fun goal_id -> `String goal_id) goal_ids) );
          ])
-    @
-    (match tool_access with
-     | Some tool_access ->
-         [
-           ( "tool_access",
-             Masc.Keeper_meta_tool_access.tool_access_to_json tool_access );
-         ]
-     | None -> [])
   in
   match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
   | Ok meta -> meta
@@ -323,7 +314,6 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   let meta =
     make_keeper_meta
       ~current_task_id:"task-001"
-      ~tool_access:([ "tool_execute" ])
       keeper_name
   in
   Fun.protect

@@ -59,7 +59,6 @@ type tool_contract_result =
   | Contract_violated
   | Contract_tool_surface_mismatch
   | Contract_no_tool_capable_provider
-  | Contract_missing_required_tool_use
   | Contract_claim_only_after_owned_task
   | Contract_needs_execution_progress
   | Contract_passive_only

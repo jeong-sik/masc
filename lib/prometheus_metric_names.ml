@@ -291,16 +291,6 @@ let metric_timeout_policy_overshoot = "masc_timeout_policy_overshoot_total"
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
 
-(* #10091: [require_tool_use] contract violations labelled by
-   [has_current_task] (true = #10091's active-task path that
-   [#10031] intentionally left strict, false = the no-task path
-   that [#10031] relaxed to [Auto]) and by fine-grained
-   [contract_status] ([passive_only], [needs_execution_progress],
-   [claim_only_after_owned_task], [tool_surface_mismatch],
-   [missing_required_tool_use]).  The fleet histogram of
-   (keeper, contract_status) pairs tells the operator which
-   keeper tool surfaces need reshaping for the current task mix
-   without masking the strict gate. *)
 (* #10474: no_tool_capable_provider and proactive cycle outcome counters.
    [Keeper_metrics.(to_string NoToolProvider)] fires every time a keeper's
    runtime has zero tool-capable providers, labelled by runtime so

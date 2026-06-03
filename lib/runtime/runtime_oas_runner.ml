@@ -43,27 +43,19 @@ let runtime_catalog_error_to_sdk_error detail =
     bypassing the old Model_spec facade. *)
 let resolve_runtime_providers
       ?provider_filter:_
-      ?(require_tool_choice_support = false)
-      ?(require_tool_support = false)
-      ?runtime_mcp_policy
+      ?require_tool_choice_support:_
+      ?require_tool_support:_
+      ?runtime_mcp_policy:_
       ~runtime_id:_
       ()
   =
   (* RFC-0206 single-binding: runtime catalog resolution removed. The providers
-     are the default runtime's single provider_config, passed through the same
-     required tool-use gate so require_tool_support is honored (a non-tool
-     default is filtered out, not silently used). [provider_filter] is moot with
-     one provider. *)
+     are the default runtime's single provider_config. Tool-use provider
+     filtering is removed; runtime-MCP transport checks happen at lane
+     resolution, where they can inspect the concrete tool surface. *)
   match Runtime.get_default_runtime () with
   | None -> Error "no default runtime configured"
-  | Some rt ->
-    Ok
-      (Provider_tool_support.apply_required_tool_use_filter
-         ?runtime_mcp_policy
-         ~require_tool_choice_support
-         ~require_tool_support
-         ~label:rt.Runtime.id
-         [ rt.Runtime.provider_config ])
+  | Some rt -> Ok [ rt.Runtime.provider_config ]
 
 let keeper_agent_name_opt (keeper_name : string) =
   let keeper_name = String.trim keeper_name in
@@ -157,22 +149,18 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
    2. [Tool_lane_unsupported] — [resolve_tool_lane_for_oas_tools]
       returned [Error], typically transport/auth/capability mismatch
       surfaced by [Runtime_agent].
-   3. [Required_tool_use { reason }] — the inline-tool-choice / runtime
-       MCP capability gate from [Provider_tool_support]. Re-uses the
-       existing [rejection_reason] so dashboards stay consistent with
-      [masc_runtime_filter_rejection_total]. *)
+   Runtime tool-use gates were removed; only concrete runtime-MCP transport
+   and declared capability-profile mismatches reject a provider here. *)
 type filter_rejection_reason =
   | Capability_profile_mismatch of string
   | Codex_keeper_bound_actor_required
   | Tool_lane_unsupported
-  | Required_tool_use of Provider_tool_support.rejection_reason
 
 let filter_rejection_reason_label = function
   | Capability_profile_mismatch profile ->
     Printf.sprintf "capability_profile_mismatch:%s" profile
   | Codex_keeper_bound_actor_required -> "codex_keeper_bound_actor_required"
   | Tool_lane_unsupported -> "tool_lane_unsupported"
-  | Required_tool_use r -> Provider_tool_support.rejection_reason_label r
 
 let codex_keeper_bound_skip_seen : (string, float) Hashtbl.t = Hashtbl.create 16
 let codex_keeper_bound_skip_seen_mutex = Mutex.create ()
@@ -201,7 +189,7 @@ let codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason 
          (Provider_tool_support.provider_debug_label provider_cfg)
          keeper_name
          (filter_rejection_reason_label reason))
-  | Capability_profile_mismatch _ | Tool_lane_unsupported | Required_tool_use _ -> None
+  | Capability_profile_mismatch _ | Tool_lane_unsupported -> None
 
 let log_codex_keeper_bound_skip ~label ~keeper_name provider_cfg reason =
   match codex_keeper_bound_skip_log_message ~label ~keeper_name provider_cfg reason with
@@ -247,9 +235,6 @@ let classify_filter_rejection
         runtime_mcp_policy
     then Some Codex_keeper_bound_actor_required
     else (
-      let normalized_runtime_mcp_policy =
-        runtime_mcp_policy_for_provider ~keeper_name ~provider_cfg runtime_mcp_policy
-      in
       let tool_lane_supported =
         match tools with
         | [] -> true
@@ -268,18 +253,7 @@ let classify_filter_rejection
            | Ok _ -> true
            | Error _ -> false)
       in
-      if not tool_lane_supported
-      then Some Tool_lane_unsupported
-      else (
-        match
-          Provider_tool_support.classify_rejection
-            ?runtime_mcp_policy:normalized_runtime_mcp_policy
-            ~require_tool_choice_support
-            ~require_tool_support
-            provider_cfg
-        with
-        | Some reason -> Some (Required_tool_use reason)
-        | None -> None))
+      if not tool_lane_supported then Some Tool_lane_unsupported else None)
 
 (* #11060: runtime-empty WARN dedupe.
 

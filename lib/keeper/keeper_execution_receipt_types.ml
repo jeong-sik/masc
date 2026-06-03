@@ -130,10 +130,10 @@ let runtime_outcome_to_string = function
         CompletionContractViolation), [Contract_not_dispatched]
         (turn_helpers pre-dispatch), [Contract_no_tool_capable_provider]
         (run_tools no-provider escape).
-     3. Seven outcomes mirrored from
+     3. Six outcomes mirrored from
         [Keeper_contract_classifier.contract_status_label]:
-        [Contract_tool_surface_mismatch], [Contract_missing_required_tool_use],
-        [Contract_claim_only_after_owned_task], [Contract_needs_execution_progress],
+        [Contract_tool_surface_mismatch], [Contract_claim_only_after_owned_task],
+        [Contract_needs_execution_progress],
         [Contract_passive_only], [Contract_satisfied_completion],
         [Contract_satisfied_execution].
    JSON wire form is the lowercase string via
@@ -146,7 +146,6 @@ type tool_contract_result =
   | Contract_violated
   | Contract_tool_surface_mismatch
   | Contract_no_tool_capable_provider
-  | Contract_missing_required_tool_use
   | Contract_claim_only_after_owned_task
   | Contract_needs_execution_progress
   | Contract_passive_only
@@ -159,7 +158,6 @@ let tool_contract_result_to_string = function
   | Contract_violated -> "violated"
   | Contract_tool_surface_mismatch -> "tool_surface_mismatch"
   | Contract_no_tool_capable_provider -> "no_tool_capable_provider"
-  | Contract_missing_required_tool_use -> "missing_required_tool_use"
   | Contract_claim_only_after_owned_task -> "claim_only_after_owned_task"
   | Contract_needs_execution_progress -> "needs_execution_progress"
   | Contract_passive_only -> "passive_only"
@@ -175,7 +173,6 @@ let tool_contract_result_of_contract_status
   : Keeper_contract_classifier.contract_status -> tool_contract_result
   = function
   | Tool_surface_mismatch _ -> Contract_tool_surface_mismatch
-  | Missing_required_tool_use -> Contract_missing_required_tool_use
   | Claim_only_after_owned_task -> Contract_claim_only_after_owned_task
   | Needs_execution_progress -> Contract_needs_execution_progress
   | Passive_only -> Contract_passive_only

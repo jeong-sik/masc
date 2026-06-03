@@ -408,7 +408,7 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
   let dir_a = Filename.concat root_dir "a-scope" in
   let dir_z = Filename.concat root_dir "z-scope" in
   let keeper_name = "shared-dashboard-keeper" in
-  let make_meta ~tool_access name =
+  let make_meta name =
     match
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
@@ -416,9 +416,6 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
             ("name", `String name);
             ("agent_name", `String name);
             ("trace_id", `String ("trace-" ^ name));
-            ( "tool_access",
-              Lib.Keeper_meta_tool_access.tool_access_to_json
-                tool_access );
           ])
     with
     | Ok meta -> meta
@@ -439,10 +436,10 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
       let config_z = Workspace_utils.default_config dir_z in
       ignore
         (Lib.Keeper_registry.register ~base_path:config_a.base_path keeper_name
-           (make_meta ~tool_access:[ "keeper_board_vote" ] keeper_name));
+           (make_meta keeper_name));
       ignore
         (Lib.Keeper_registry.register ~base_path:config_z.base_path keeper_name
-           (make_meta ~tool_access:[ "keeper_board_post" ] keeper_name));
+           (make_meta keeper_name));
       let briefs =
         Lib.Dashboard_briefing_assembly.build_keeper_briefs config_a
           [

@@ -81,11 +81,10 @@ let write_only_tools = [ "Edit" ]
 
 let shell_bridge_tools = [ "Execute" ]
 
-let test_core_tools_visible_with_empty_tool_access () =
+let test_core_tools_visible_without_legacy_grants () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-empty-access" ()) with
-      tool_access = [];
       tool_denylist = [] }
   in
   (* Precondition: direct write tools ARE in unfiltered core *)
@@ -96,7 +95,7 @@ let test_core_tools_visible_with_empty_tool_access () =
   let filtered = filter_core_by_visibility meta in
   List.iter (fun t ->
     if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s must stay visible without tool_access grants" t)
+      fail (Printf.sprintf "%s must stay visible without legacy grants" t)
   ) (write_only_tools @ shell_bridge_tools);
   (* Core always-tools must survive *)
   List.iter (fun t ->
@@ -104,17 +103,16 @@ let test_core_tools_visible_with_empty_tool_access () =
       fail (Printf.sprintf "core_always %s must survive visibility filter" t)
   ) Keeper_tool_registry.core_always_tools
 
-let test_core_tools_visible_with_narrow_tool_access () =
+let test_core_tools_visible_with_only_denylist () =
   ignore (init_registry ());
   let meta =
     { (make_meta ~name:"test-read-only-access" ()) with
-      tool_access = [ "tool_read_file"; "tool_search_files" ];
       tool_denylist = [] }
   in
   let filtered = filter_core_by_visibility meta in
   List.iter (fun t ->
     if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s must stay visible despite narrow tool_access" t)
+      fail (Printf.sprintf "%s must stay visible without a legacy allowlist" t)
   ) (write_only_tools @ shell_bridge_tools)
 
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
@@ -262,10 +260,10 @@ let () =
     [
       ( "tool_visibility_projection",
         [
-          test_case "empty tool_access keeps descriptor-backed core tools visible" `Quick
-            test_core_tools_visible_with_empty_tool_access;
-          test_case "narrow tool_access keeps descriptor-backed core tools visible" `Quick
-            test_core_tools_visible_with_narrow_tool_access;
+          test_case "core tools stay visible without legacy grants" `Quick
+            test_core_tools_visible_without_legacy_grants;
+          test_case "core tools stay visible with only denylist policy" `Quick
+            test_core_tools_visible_with_only_denylist;
         ] );
       ( "atomic_agent_json",
         [

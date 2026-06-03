@@ -344,8 +344,7 @@ let operator_disposition (receipt : t)
     Disp_pause_human, Reason_provider_runtime_error
   | Keeper_terminal_reason.Completion_contract_violation _ ->
     (* The downstream completion-contract layer has already decided the turn
-       violated [require_tool_use] (or another contract sub-clause) and emits
-       [terminal_reason="completion_contract_violation:<sub_clause>"]. The
+       emitted a completion-contract terminal reason. The
        earlier-layer [tool_contract_result] can show [satisfied_completion]
        from a separate classifier that judged the same turn locally OK; the
        two-layer disagreement was the unmapped fall-through that #11651
@@ -418,7 +417,6 @@ let operator_disposition (receipt : t)
             [ Contract_violated
             ; Contract_unknown
             ; Contract_needs_execution_progress
-            ; Contract_missing_required_tool_use
             ; Contract_passive_only
             ; Contract_claim_only_after_owned_task
             ; Contract_tool_surface_mismatch
@@ -442,21 +440,7 @@ let operator_disposition (receipt : t)
       then Disp_pass_next_model, Reason_tool_route_recoverable_failure
       else Disp_pause_human, Reason_tool_route_recoverable_failure
     else if tool_gate_unsatisfied
-    then (
-      if receipt.tool_contract_result = Contract_missing_required_tool_use
-      then
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string ContractViolations)
-          ~labels:
-            [ "keeper_name", receipt.keeper_name
-            ; "kind", "missing_required_tool_use"
-            ; "signal"
-            , (if receipt.tools_used = []
-               then "no_tools_used"
-               else "partial_tools_used")
-            ]
-          ();
-      Disp_pause_human, Reason_tool_required_unsatisfied)
+    then Disp_pause_human, Reason_tool_required_unsatisfied
     else if
       receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
     then Disp_fail_open_next_runtime, Reason_degraded_retry

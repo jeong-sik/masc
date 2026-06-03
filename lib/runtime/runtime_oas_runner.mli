@@ -85,7 +85,6 @@ type filter_rejection_reason =
   | Capability_profile_mismatch of string
   | Codex_keeper_bound_actor_required
   | Tool_lane_unsupported
-  | Required_tool_use of Provider_tool_support.rejection_reason
 (** Why a provider was rejected by the runtime filter.  Order mirrors the
     filter's short-circuit priority. *)
 

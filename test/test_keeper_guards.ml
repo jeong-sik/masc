@@ -23,9 +23,6 @@ let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
     ("name", `String name);
     ("agent_name", `String name);
     ("trace_id", `String "keeper-guards-test");
-    ("tool_access",
-      Masc.Keeper_meta_tool_access.tool_access_to_json
-        ([]));
   ] in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> ref meta

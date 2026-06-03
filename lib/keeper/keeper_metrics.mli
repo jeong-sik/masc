@@ -99,7 +99,6 @@ type t =
   | RecordingErrorDedup
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
-  | RequireToolUseViolations
   | ToolCallTotal
   | ProfileConfigConflicts
   | OasTimeoutClassifications

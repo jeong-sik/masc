@@ -75,25 +75,19 @@ let test_agent_identity ~uuid ~session_key : Masc.Client_identity.t =
     metadata = [];
   }
 
-let make_keeper_meta ?agent_name ?tool_access name =
+let make_keeper_meta ?agent_name name =
   let agent_name =
     Option.value agent_name
       ~default:(Keeper_identity.keeper_agent_name name)
   in
-  let tool_access_fields =
-    match tool_access with
-    | Some access -> [ ("tool_access", access) ]
-    | None -> []
-  in
   let json =
     `Assoc
-      ([
+      [
          ("name", `String name);
          ("agent_name", `String agent_name);
          ("trace_id", `String ("trace-test-" ^ name));
          ("goal", `String "test goal");
        ]
-       @ tool_access_fields)
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
@@ -1998,13 +1992,9 @@ let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_interna
       Keeper_registry.clear ();
       let keeper_name = "sangsu" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
-      let tool_access =
-        `List [ `String "tool_execute"; `String "keeper_time_now" ]
-      in
       ignore
         (Keeper_registry.register ~base_path keeper_name
-           (make_keeper_meta ~agent_name:keeper_agent_name ~tool_access
-              keeper_name));
+           (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let token = Masc.Auth.ensure_internal_keeper_token base_path in
       let request = Yojson.Safe.to_string (`Assoc [

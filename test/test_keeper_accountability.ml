@@ -38,9 +38,6 @@ let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent
                ("name", `String name);
                ("agent_name", `String agent_name);
                ("trace_id", `String "test-trace-accountability");
-               ( "tool_access",
-                 Keeper_meta_tool_access.tool_access_to_json
-                   ([]) );
              ])
   with
   | Ok meta -> meta
@@ -675,7 +672,6 @@ let test_summary_json_memoizes_window_across_agents () =
 
 module A = Masc.Attribution
 module Keeper_meta_contract = Masc.Keeper_meta_contract
-module Keeper_meta_tool_access = Masc.Keeper_meta_tool_access
 module KA = Masc.Keeper_accountability
 
 let outcome_kind = function

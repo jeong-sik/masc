@@ -7,7 +7,6 @@
     4. Empty commands are rejected *)
 
 module Workspace = Masc.Workspace
-module Keeper_meta_tool_access = Masc.Keeper_meta_tool_access
 module Exec_core = Masc.Exec_core
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
 module Keeper_registry = Masc.Keeper_registry
@@ -798,20 +797,8 @@ let make_readonly_meta name =
   { meta with goal = "readonly hint test" }
 
 let make_write_enabled_meta name =
-  let json =
-    `Assoc
-      [
-        ("name", `String name);
-        ("agent_name", `String ("agent-" ^ name));
-        ("trace_id", `String ("trace-" ^ name));
-        ( "tool_access",
-          Keeper_meta_tool_access.tool_access_to_json
-            (["tool_edit_file"; "tool_write_file"]) );
-      ]
-  in
-  match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> { meta with goal = "write-enabled Execute test" }
-  | Error err -> Alcotest.fail ("make_write_enabled_meta failed: " ^ err)
+  let meta = make_base_meta ~context:"make_write_enabled_meta" name in
+  { meta with goal = "write-enabled Execute test" }
 
 let parse_hint raw =
   Yojson.Safe.from_string raw

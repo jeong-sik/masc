@@ -46,13 +46,7 @@ let read_file path =
   Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
   really_input_string ic (in_channel_length ic)
 
-let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?tool_access () =
-  let tool_access =
-    match tool_access with
-    | Some value -> value
-    | None ->
-        []
-  in
+let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -62,8 +56,6 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
           ("trace_id", `String "keeper-exec-tools-trace");
           ("allowed_paths", `List [ `String "*" ]);
           ("policy_voice_enabled", `Bool policy_voice_enabled);
-          ( "tool_access",
-            Masc.Keeper_meta_tool_access.tool_access_to_json tool_access );
         ])
   with
   | Ok meta -> meta
@@ -72,7 +64,7 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
 let make_ctx () =
   Masc.Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 
-let with_exec_fixture ?tool_access name fn =
+let with_exec_fixture name fn =
   let dir = temp_dir name in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -80,7 +72,7 @@ let with_exec_fixture ?tool_access name fn =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Masc.Workspace.default_config dir in
-      let meta = make_meta ?tool_access () in
+      let meta = make_meta () in
       ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
       Fun.protect
         ~finally:(fun () ->
@@ -165,9 +157,8 @@ let test_malformed_json_like_payload_detected () =
       (Printf.sprintf "expected malformed_structured, got %s"
          (payload_kind other))
 
-let test_registered_descriptor_bypasses_tool_access_allowlist () =
+let test_registered_descriptor_reaches_file_runtime () =
   with_exec_fixture
-    ~tool_access:([ "keeper_tools_list" ])
     "keeper_tool_dispatch_runtime_descriptor_bypass"
     (fun ~config ~meta ~ctx_work ->
       let result =
@@ -182,7 +173,7 @@ let test_registered_descriptor_bypasses_tool_access_allowlist () =
       check string "runtime payload shape" "structured_error"
         (payload_kind result.payload_shape);
       let json = Yojson.Safe.from_string result.raw_output in
-      check bool "did not stop at tool_access allowlist gate" false
+      check bool "did not stop at legacy allowlist gate" false
         Yojson.Safe.Util.(member "error" json |> to_string = "tool_not_allowed");
       check bool "reached file runtime" true
         (contains_substring
@@ -198,13 +189,11 @@ let counter_for_tool_not_allowed ~keeper ~tool ~reason =
 (* #13xxx: tool_not_allowed Prometheus counter *)
 let test_tool_not_allowed_increments_counter_for_unknown_tool () =
   (* Unknown names are still rejected by the descriptor/registry existence
-     gate. Registered tools are not rejected merely because tool_access is
-     narrow or empty. *)
+     gate. Registered tools are not rejected by a keeper-local allowlist. *)
   let keeper = "test-exec-tools-not-allowed-a" in
   let tool = "keeper_not_a_real_tool" in
   let reason = "not_in_candidate_set" in
   with_exec_fixture
-    ~tool_access:([ "keeper_tools_list" ])
     "keeper_tool_dispatch_runtime_not_allowed_counter"
     (fun ~config ~meta ~ctx_work ->
       let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
@@ -226,8 +215,8 @@ let test_tool_not_allowed_denied_by_policy_counter () =
   let keeper = "test-exec-tools-not-allowed-b" in
   let tool = "keeper_board_post" in
   let reason = "denied_by_policy" in
-  (* Build meta that has board_post in the allowlist but also on the denylist
-     so dispatch rejects it via the deny-set path. *)
+  (* Build meta with board_post on the denylist so dispatch rejects it via the
+     deny-set path. *)
   let meta_with_deny =
     match
       Masc_test_deps.meta_of_json_fixture
@@ -236,9 +225,6 @@ let test_tool_not_allowed_denied_by_policy_counter () =
           ; ("agent_name", `String keeper)
           ; ("trace_id", `String "test-not-allowed-b")
           ; ("allowed_paths", `List [ `String "*" ])
-          ; ( "tool_access"
-            , Masc.Keeper_meta_tool_access.tool_access_to_json
-                ([ "keeper_board_post" ]) )
           ; ( "tool_denylist"
             , `List [ `String "keeper_board_post" ] )
           ])
@@ -296,16 +282,6 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   let meta =
     make_meta
       ~policy_voice_enabled:true
-      ~tool_access:
-        (
-           [ "keeper_board_post";
-             "keeper_board_fake";
-             "keeper_voice_speak";
-             "keeper_task_claim";
-             "tool_search_files";
-             "tool_read_file";
-             "keeper_memory_search";
-           ])
       ()
   in
   let json = Yojson.Safe.from_string (KES.keeper_tools_list_json ~meta) in
@@ -587,8 +563,8 @@ let () =
         test_malformed_json_like_payload_detected;
     ]);
     ("execute_keeper_tool_call_with_outcome", [
-      test_case "registered descriptor bypasses tool_access allowlist" `Quick
-        test_registered_descriptor_bypasses_tool_access_allowlist;
+      test_case "registered descriptor reaches file runtime" `Quick
+        test_registered_descriptor_reaches_file_runtime;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick

@@ -90,9 +90,6 @@ let make_meta ?(name = "keeper-tool-matrix") () =
           ("agent_name", `String name);
           ("trace_id", `String "keeper-tool-matrix-trace");
           ("allowed_paths", `List [ `String "*" ]);
-          ( "tool_access",
-            Masc.Keeper_meta_tool_access.tool_access_to_json
-              ([] ) );
         ])
   with
   | Ok meta -> meta

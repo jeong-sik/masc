@@ -50,9 +50,6 @@ let make_meta ~name ~sandbox =
         ("agent_name", `String name);
         ("trace_id", `String "test-trace-containment");
         ("policy_voice_enabled", `Bool false);
-        ( "tool_access",
-          Keeper_meta_tool_access.tool_access_to_json
-            ([]) );
         ("sandbox_profile",
          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox));
       ]

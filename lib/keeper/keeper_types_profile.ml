@@ -267,10 +267,6 @@ let persona_operator_todo_placeholder_fields
       ("keeper.short_goal", defaults.short_goal);
       ("keeper.mid_goal", defaults.mid_goal);
       ("keeper.long_goal", defaults.long_goal);
-      ("keeper.will", defaults.will);
-      ("keeper.needs", defaults.needs);
-      ("keeper.desires", defaults.desires);
-      ("keeper.instructions", defaults.instructions);
     ]
 
 let keeper_toml_path_opt name =
@@ -331,10 +327,10 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   long_goal =
                     normalize_goal_horizon_opt
                       (Safe_ops.json_string_opt "long_goal" keeper_json);
-                  will = Safe_ops.json_string_opt "will" keeper_json;
-                  needs = Safe_ops.json_string_opt "needs" keeper_json;
-                  desires = Safe_ops.json_string_opt "desires" keeper_json;
-                  instructions = Safe_ops.json_string_opt "instructions" keeper_json;
+                  will = None;
+                  needs = None;
+                  desires = None;
+                  instructions = None;
                   autoboot_enabled = None;
                   mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
                   proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;

@@ -32,7 +32,7 @@ module StringMap = Set_util.StringMap
 (* -- System_internal membership set (O(log n) lookup) -- *)
 
 let system_internal_set : StringSet.t =
-  let tools = Tool_catalog_surfaces.system_internal_surface_tools in
+  let tools = Tool_catalog_surfaces.system_internal_hidden in
   List.fold_left (fun s name -> StringSet.add name s) StringSet.empty tools
 
 let is_system_internal name = StringSet.mem name system_internal_set

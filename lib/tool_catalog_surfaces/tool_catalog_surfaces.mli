@@ -1,68 +1,42 @@
 
-(** Tool_catalog_surfaces — SSOT for tool-name surface membership.
+(** Tool_catalog_surfaces — SSOT for curated tool-name lists.
 
-    Each {!surface} variant maps to a curated string list of tool
-    names visible at that surface.  Cross-cutting consumers (auth
-    gate, dashboard catalog, telemetry, OAS
-    hooks) read membership through {!tools_for_surface} or
-    {!is_on_surface}.
+    Flat, consumer-owned tool-name lists.  The [surface] actor-classification
+    type and its dispatch/reverse-lookup machinery were deleted in the
+    surface-cut refactor: tools are a flat list, and each consumer projects
+    the subset it needs by referencing the named list directly.
 
-    {b Why centralize}: 8+ modules consume surface-membership
-    decisions (verified by [rg "tools_for_surface"]).  Keeping
-    every list inside one .ml + .mli pair prevents the same tool
-    name from drifting across two consumers' definitions.
+    {b Why centralize}: keeping every list in one .ml + .mli pair prevents
+    the same tool name from drifting across two consumers' definitions. *)
 
-    Internal: \[surface_sets\] (Hashtbl-backed reverse index used
-    by {!is_on_surface} / {!surfaces_for_tool}) stays private —
-    consumers reach the data through the public functions. *)
-
-(** {1 Tool name lists (per surface)} *)
+(** {1 Curated tool-name lists} *)
 
 val public_mcp_surface_tools : string list
-val system_internal_surface_tools : string list
+(** Externally reachable MCP tools — the public surface. *)
+
+val spawned_agent_surface_tools : string list
+(** Tools visible to spawned worker agents. *)
+
+val local_worker_surface_tools : string list
+(** Local worker container tools. *)
+
+val session_min_surface_tools : string list
+(** Minimum session tools (initialization only). *)
+
+val admin_surface_tools : string list
+(** Admin / operator tools, excluded from autonomous agents. *)
+
 val workspace_role_tools : string list
 val execution_role_tools : string list
 
-(** {1 Surface variant} *)
+(** {1 System-internal visibility list} *)
 
-(** Tool catalog surface — each variant identifies a curated
-    visibility scope. *)
-type surface =
-  | Public_mcp
-      (** Externally reachable MCP — most restrictive. *)
-  | Spawned_agent
-      (** Tools visible to spawned worker agents. *)
-  | Local_worker
-      (** Local worker container surface. *)
-  | Session_min
-      (** Minimum session surface (initialization tools only). *)
-  | Admin
-      (** Admin / operator dashboard surface. *)
-  | Agent_internal
-      (** Agent-internal surface. Concrete agent runtimes install their own
-          allowed tools behind their runtime boundary. *)
-  | System_internal
-      (** System-internal surface (telemetry, fixtures). *)
+val system_internal_hidden : string list
+(** Tools hidden from the public Full profile but callable directly and
+    scoped for tool-usage logging.  A flat visibility list, not an actor
+    surface; consumers project it via {!is_system_internal_hidden}.
+    Formerly the [System_internal] surface variant. *)
 
-val tools_for_surface : surface -> string list
-(** [tools_for_surface s] returns the tool-name list registered for
-    [s].  Each variant maps to one of the [*_surface_tools]
-    constants exposed above. *)
-
-val all_surfaces : surface list
-(** Static list of every {!surface} constructor in declaration
-    order.  Used by tests and the dashboard catalog index. *)
-
-val is_on_surface : surface -> string -> bool
-(** [is_on_surface s name] is [List.mem name (tools_for_surface s)]
-    via the internal hashtable index — O(1) amortised. *)
-
-val surfaces_for_tool : string -> surface list
-(** [surfaces_for_tool name] returns every {!surface} whose tool
-    list contains [name].  Used by the dashboard "where is this
-    tool visible" view. *)
-
-val surface_to_string : surface -> string
-(** Stable human-readable label per {!surface} constructor —
-    pinned at the contract seam so dashboard / log output stays
-    stable across refactors. *)
+val is_system_internal_hidden : string -> bool
+(** [is_system_internal_hidden name] is O(1) membership against
+    {!system_internal_hidden}. *)

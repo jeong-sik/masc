@@ -43,11 +43,13 @@ let runtime_mcp_policy_of_tool_names
       (tool_names : string list)
   : Llm_provider.Llm_transport.runtime_mcp_policy option
   =
+  (* [allow_agent_internal] is retained as a no-op parameter: the
+     Agent_internal surface was empty (agent_internal_surface_tools = []), so
+     no tool was ever a member.  Surface deleted in the surface-cut refactor;
+     the [has_agent_internal] gate is now always [false]. *)
+  ignore (allow_agent_internal : bool);
   let tool_names = dedupe_preserve_order tool_names in
-  let has_agent_internal =
-    List.exists (Tool_catalog.is_on_surface Tool_catalog.Agent_internal) tool_names
-  in
-  if not (Mcp_tool_classifier.tool_names_are_runtime_mcp ~allow_agent_internal tool_names)
+  if not (Mcp_tool_classifier.tool_names_are_runtime_mcp tool_names)
   then None
   else (
     let agent_name = Option.bind agent_name String_util.trim_nonempty in
@@ -55,12 +57,7 @@ let runtime_mcp_policy_of_tool_names
     let internal_keeper_token =
       Mcp_policy_helpers.first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ]
     in
-    if
-      has_agent_internal
-      && (Option.is_none keeper_name || Option.is_none internal_keeper_token)
-    then None
-    else (
-      let masc_headers =
+    let masc_headers =
         match keeper_name, internal_keeper_token with
         | Some keeper_name, Some token ->
           let agent_header =
@@ -120,7 +117,7 @@ let runtime_mcp_policy_of_tool_names
         ; allowed_tool_names = tool_names
         ; strict = true
         ; disable_builtin_tools = true
-        }))
+        })
 ;;
 
 let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string list)

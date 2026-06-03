@@ -26,13 +26,8 @@ let public_mcp_tool_requires_bound_actor tool_name =
   Tool_catalog.is_public_mcp tool_name && runtime_mcp_tool_requires_bound_actor tool_name
 ;;
 
-let tool_names_are_runtime_mcp ?(allow_agent_internal = false) (tool_names : string list)
-  =
-  tool_names <> []
-  && List.for_all
-       (fun tool_name ->
-          Tool_catalog.is_public_mcp tool_name
-          || (allow_agent_internal
-              && Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool_name))
-       tool_names
+(* The Agent_internal surface was empty, so runtime-MCP eligibility reduces to
+   public-MCP membership.  Surface deleted in the surface-cut refactor. *)
+let tool_names_are_runtime_mcp (tool_names : string list) =
+  tool_names <> [] && List.for_all Tool_catalog.is_public_mcp tool_names
 ;;

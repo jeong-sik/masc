@@ -66,9 +66,8 @@ val lookup_schemas_by_name_exn :
 (** {1 Spawned-agent surface} *)
 
 val spawned_agent_public_tool_names : string list
-(** SSOT: {!Tool_catalog.tools_for_surface}
-    {!Tool_catalog.Spawned_agent}.  The small set of tools a
-    spawned scripting agent can use. *)
+(** SSOT: {!Tool_catalog_surfaces.spawned_agent_surface_tools}.  The small
+    set of tools a spawned scripting agent can use. *)
 
 val spawned_agent_prefixed_tools : string list
 (** [spawned_agent_public_tool_names] with each name prefixed by
@@ -77,8 +76,7 @@ val spawned_agent_prefixed_tools : string list
 (** {1 Local-worker surface} *)
 
 val local_worker_public_tool_names : string list
-(** SSOT: {!Tool_catalog.tools_for_surface}
-    {!Tool_catalog.Local_worker}. *)
+(** SSOT: {!Tool_catalog_surfaces.local_worker_surface_tools}. *)
 
 val local_worker_contract_schemas : Masc_domain.tool_schema list
 (** Re-export of {!Sdk_tool_contract.sdk_tool_schemas}. *)
@@ -125,9 +123,8 @@ val local_worker_tool_schemas :
 (** {1 Admin surface} *)
 
 val admin_tool_names : string list
-(** SSOT: {!Tool_catalog.tools_for_surface}
-    {!Tool_catalog.Admin}.  Admin tools that should be excluded
-    from autonomous agents. *)
+(** SSOT: {!Tool_catalog_surfaces.admin_surface_tools}.  Admin tools that
+    should be excluded from autonomous agents. *)
 
 (** {1 Role-catalogue} *)
 

@@ -76,31 +76,21 @@ let tool_schemas_for_profile ?(include_hidden = false)
     match profile with
     | Full ->
         let show_all = include_hidden || Tool_catalog.full_surface_override () in
-        let agent_internal_schemas =
-          if not include_agent_internal then []
-          else
-            Tool_shard.all_keeper_tool_schemas
-            |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-                   Tool_catalog.is_on_surface Tool_catalog.Agent_internal
-                     schema.name
-                   && Tool_catalog.is_visible ~include_hidden:true schema.name)
-        in
+        (* The Agent_internal surface was empty (agent_internal_surface_tools =
+           []), so no schema was ever agent-internal.  Surface deleted in the
+           surface-cut refactor; [include_agent_internal] no longer adds any
+           schema and the per-schema agent-internal branch is unreachable. *)
         let all =
           Config.visible_tool_schemas
             ~include_hidden:(show_all || include_agent_internal)
             ()
-          @ agent_internal_schemas
           |> dedupe_tool_schemas_by_name
         in
         let full_profile_tools =
           List.filter
             (fun (schema : Masc_domain.tool_schema) ->
-              let is_agent_internal =
-                Tool_catalog.is_on_surface Tool_catalog.Agent_internal schema.name
-              in
-              (not (Tool_catalog.is_on_surface Tool_catalog.System_internal schema.name))
-              && (if is_agent_internal then include_agent_internal
-                  else show_all || Tool_catalog.is_public_mcp schema.name))
+              (not (Tool_catalog_surfaces.is_system_internal_hidden schema.name))
+              && (show_all || Tool_catalog.is_public_mcp schema.name))
             all
         in
         full_profile_tools
@@ -121,19 +111,20 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
     tool_name =
   match profile with
   | Full ->
-      if Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool_name then
-        internal_keeper_runtime
-      else
-        (* Equivalent to [List.mem tool_name (names from
-           visible_tool_schemas ~include_hidden:true)]: that helper
-           composes raw schemas → dedupe → canonicalize → filter
-           is_visible.  Dedupe and
-           canonicalize do not change the name set, so the name set is
-           exactly { n | n ∈ raw_all_tool_schemas.names ∧ is_visible n }.
-           Two O(1) checks replace ~150 schema canonicalizations + a
-           List.mem per dispatch. *)
-        Config.is_raw_tool_name tool_name
-        && Tool_catalog.is_visible ~include_hidden:true tool_name
+      (* The Agent_internal surface was empty, so no tool was ever
+         agent-internal; [internal_keeper_runtime] no longer gates anything.
+         Surface deleted in the surface-cut refactor.
+         Equivalent to [List.mem tool_name (names from
+         visible_tool_schemas ~include_hidden:true)]: that helper
+         composes raw schemas → dedupe → canonicalize → filter
+         is_visible.  Dedupe and
+         canonicalize do not change the name set, so the name set is
+         exactly { n | n ∈ raw_all_tool_schemas.names ∧ is_visible n }.
+         Two O(1) checks replace ~150 schema canonicalizations + a
+         List.mem per dispatch. *)
+      ignore (internal_keeper_runtime : bool);
+      Config.is_raw_tool_name tool_name
+      && Tool_catalog.is_visible ~include_hidden:true tool_name
   | Managed_agent ->
       Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent

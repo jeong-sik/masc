@@ -75,13 +75,13 @@ let lookup_schemas_by_name_exn ~label all_schemas values =
   requested |> List.filter_map (Hashtbl.find_opt by_name)
 
 let spawned_agent_public_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent
+  Tool_catalog_surfaces.spawned_agent_surface_tools
 
 let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names spawned_agent_public_tool_names
 
 let local_worker_public_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Local_worker
+  Tool_catalog_surfaces.local_worker_surface_tools
 
 let local_worker_contract_schemas : Masc_domain.tool_schema list =
   Sdk_tool_contract.sdk_tool_schemas
@@ -159,9 +159,9 @@ let local_worker_tool_schemas ?names () :
   | Some values -> resolve_named_schemas all_schemas values
 
 (** Admin tool names that should be excluded from autonomous agents.
-    SSOT: Tool_catalog.Admin surface. *)
+    SSOT: Tool_catalog_surfaces.admin_surface_tools. *)
 let admin_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Admin
+  Tool_catalog_surfaces.admin_surface_tools
 
 (** Role-catalog candidates for workspace leads and fleet leaders.
     SSOT: Tool_catalog_surfaces.workspace_role_tools.

@@ -109,13 +109,3 @@ let visible_tool_schemas ?(include_hidden = false) () :
   Capability_registry.visible_public_tool_schemas_from ~include_hidden
     front_door_tool_schemas
 
-let surface_tool_schemas ?(include_hidden = false) () :
-    Masc_domain.tool_schema list =
-  visible_tool_schemas ~include_hidden ()
-  |> List.filter (fun (s : Masc_domain.tool_schema) ->
-       Tool_scope.classify ~name:s.name = Tool_scope.Surface)
-
-let agent_internal_tool_schemas () : Masc_domain.tool_schema list =
-  visible_tool_schemas ~include_hidden:true ()
-  |> List.filter (fun (s : Masc_domain.tool_schema) ->
-       Tool_scope.classify ~name:s.name = Tool_scope.Agent_internal)

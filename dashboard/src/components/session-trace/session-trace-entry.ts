@@ -334,9 +334,9 @@ function hasTraceRouteContext(context: MutableTraceRouteContext): boolean {
 
 function traceRouteSurface(event: UnifiedTraceEvent): string {
   if (event.kind === 'tool_call') return 'Tool'
-  if (event.kind === 'oas_tool') return 'OAS Tool'
-  if (event.kind === 'oas_turn') return 'OAS Turn'
-  if (event.kind === 'oas_context') return 'OAS Context'
+  if (event.kind === 'oas_tool') return 'Tool'
+  if (event.kind === 'oas_turn') return 'Turn'
+  if (event.kind === 'oas_context') return 'Context'
   return KIND_STYLES[event.kind]?.label ?? event.kind
 }
 
@@ -585,7 +585,7 @@ function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
 function OasDetail({ event }: { event: UnifiedTraceEvent }) {
   const d = event.detail
 
-  // ── OAS tool call ──
+  // ── Tool call ──
   if (event.kind === 'oas_tool') {
     const phase = typeof d.phase === 'string' ? d.phase : ''
     const toolName = typeof d.tool_name === 'string' ? d.tool_name : 'unknown'
@@ -605,7 +605,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     `
   }
 
-  // ── OAS turn ──
+  // ── Turn ──
   if (event.kind === 'oas_turn') {
     const phase = typeof d.phase === 'string' ? d.phase : ''
     const turn = d.turn

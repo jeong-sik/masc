@@ -79,7 +79,7 @@ describe('RuntimeMonitor', () => {
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runtime_lane_deadbeef1234') ?? false,
-      'runtime provider lane',
+      'runtime lane',
     )
 
     expect(container.textContent).toContain('runtime_lane_deadbeef1234')

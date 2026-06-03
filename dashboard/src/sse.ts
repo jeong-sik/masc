@@ -561,13 +561,13 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_phase_changed':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Phase: ${event.prev_phase ?? '?'} → ${event.new_phase ?? '?'} (${event.event ?? '?'})`,
+        `KSM phase: ${event.prev_phase ?? '?'} → ${event.new_phase ?? '?'} (${event.event ?? '?'})`,
         'keepers',
         'keeper_phase_changed',
         {
           severity: isCrashedPhase(event.new_phase) ? 'error' : 'info',
           source: event.source,
-          narrativeText: `${actorLabel(event.name ?? agent)}의 상태가 ${event.prev_phase ?? '?'}에서 ${event.new_phase ?? '?'}로 전이되었습니다`,
+          narrativeText: `${actorLabel(event.name ?? agent)}의 KSM phase가 ${event.prev_phase ?? '?'}에서 ${event.new_phase ?? '?'}로 변경되었습니다`,
         },
       )
       break
@@ -715,13 +715,13 @@ function handleEvent(event: SSEEvent): void {
       const phase = type === 'oas:agent_started' ? 'started' : 'completed'
       addTypedJournalEntry(
         agentName,
-        `OAS agent ${phase}${taskId ? ` · ${taskId}` : ''}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}`,
+        `Agent run ${phase}${taskId ? ` · ${taskId}` : ''}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}`,
         'oas',
         'oas_event',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(agentName)} OAS agent ${phase}${taskId ? ` (${taskId})` : ''}`,
+          narrativeText: `${actorLabel(agentName)} agent run ${phase}${taskId ? ` (${taskId})` : ''}`,
           preview: taskId,
           ...envelopeFromEvent(event),
         },
@@ -736,13 +736,13 @@ function handleEvent(event: SSEEvent): void {
       const error = asString(p.error)
       addTypedJournalEntry(
         agentName,
-        `OAS agent failed${taskId ? ` · ${taskId}` : ''}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}${error ? ` · ${error}` : ''}`,
+        `Agent run failed${taskId ? ` · ${taskId}` : ''}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}${error ? ` · ${error}` : ''}`,
         'oas',
         'oas_event',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(agentName)} OAS agent failed${taskId ? ` (${taskId})` : ''}${error ? `: ${error}` : ''}`,
+          narrativeText: `${actorLabel(agentName)} agent run failed${taskId ? ` (${taskId})` : ''}${error ? `: ${error}` : ''}`,
           preview: taskId ?? error,
           ...envelopeFromEvent(event),
         },
@@ -757,13 +757,13 @@ function handleEvent(event: SSEEvent): void {
       const phase = type === 'oas:tool_called' ? 'called' : 'completed'
       addTypedJournalEntry(
         agentName,
-        `OAS tool ${phase}: ${toolName}`,
+        `Tool ${phase}: ${toolName}`,
         'oas',
         'oas_tool',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(agentName)} OAS 도구 ${phase}: ${toolName}`,
+          narrativeText: `${actorLabel(agentName)} 도구 ${phase}: ${toolName}`,
         },
       )
       break
@@ -778,13 +778,13 @@ function handleEvent(event: SSEEvent): void {
       const phase = type === 'oas:handoff_requested' ? 'requested' : 'completed'
       addTypedJournalEntry(
         fromAgent,
-        `OAS handoff ${phase} · ${fromAgent}→${toAgent}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}${reason ? ` · ${reason}` : ''}`,
+        `Handoff ${phase} · ${fromAgent}→${toAgent}${elapsed != null ? ` · ${elapsed.toFixed(1)}s` : ''}${reason ? ` · ${reason}` : ''}`,
         'oas',
         'oas_event',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `OAS handoff ${phase}: ${actorLabel(fromAgent)} → ${actorLabel(toAgent)}${reason ? ` (${reason})` : ''}`,
+          narrativeText: `Handoff ${phase}: ${actorLabel(fromAgent)} → ${actorLabel(toAgent)}${reason ? ` (${reason})` : ''}`,
           preview: `${fromAgent}→${toAgent}`,
           ...envelopeFromEvent(event),
         },
@@ -799,13 +799,13 @@ function handleEvent(event: SSEEvent): void {
       const phase = type === 'oas:turn_started' ? 'started' : 'completed'
       addTypedJournalEntry(
         agentName,
-        `OAS turn ${phase}${turn != null ? ` · T${turn}` : ''}`,
+        `Turn ${phase}${turn != null ? ` · T${turn}` : ''}`,
         'oas',
         'oas_turn',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(agentName)} OAS turn ${phase}${turn != null ? ` (T${turn})` : ''}`,
+          narrativeText: `${actorLabel(agentName)} turn ${phase}${turn != null ? ` (T${turn})` : ''}`,
         },
       )
       break
@@ -836,13 +836,13 @@ function handleEvent(event: SSEEvent): void {
       const toState = asString(p.to_state)
       addTypedJournalEntry(
         taskId,
-        `OAS task ${taskId}${fromState || toState ? ` · ${fromState ?? '?'}→${toState ?? '?'}` : ''}`,
+        `Task ${taskId}${fromState || toState ? ` · ${fromState ?? '?'}→${toState ?? '?'}` : ''}`,
         'oas',
         'oas_task',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `OAS task 상태 전이 ${taskId}${fromState || toState ? ` (${fromState ?? '?'} → ${toState ?? '?'})` : ''}`,
+          narrativeText: `Task 상태 변경 ${taskId}${fromState || toState ? ` (${fromState ?? '?'} → ${toState ?? '?'})` : ''}`,
         },
       )
       break

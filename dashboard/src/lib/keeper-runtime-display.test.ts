@@ -199,7 +199,7 @@ describe('keeperPauseDisplay', () => {
 describe('keeperRuntimeBlockerLabel', () => {
   it('labels backend-emitted terminal keeper failure classes', () => {
     expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe(
-      'Provider 런타임 오류',
+      '런타임 호출 오류',
     )
     expect(keeperRuntimeBlockerLabel('tool_required_unsatisfied')).toBe(
       '필수 도구 미충족',
@@ -226,13 +226,13 @@ describe('keeperRuntimeBlockerLabel', () => {
 })
 
 describe('keeperRuntimeBlockerHint', () => {
-  it('explains provider runtime terminal failures when no summary is available', () => {
+  it('explains runtime terminal failures when no summary is available', () => {
     expect(
       keeperRuntimeBlockerHint(makeKeeper({
         runtime_blocker_class: 'provider_runtime_error',
         runtime_blocker_summary: 'provider_runtime_error',
       })),
-    ).toBe('Provider, adapter, or runtime가 keeper 진행 전에 실패했습니다.')
+    ).toBe('런타임 호출 경계가 keeper 진행 전에 실패했습니다.')
   })
 
   it('explains unsatisfied required tool terminal failures when no summary is available', () => {

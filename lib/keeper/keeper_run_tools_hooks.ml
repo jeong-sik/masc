@@ -246,7 +246,8 @@ let assemble_hooks
              ~keeper_id:acc.meta.name
              ~turn_id
              ~output_text
-             ~tool_name))
+             ~tool_name
+             ~success))
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard
         ()
     in

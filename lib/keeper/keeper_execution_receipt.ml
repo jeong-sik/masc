@@ -203,6 +203,7 @@ type operator_disposition_reason =
   | Reason_preflight_config_error
   | Reason_degraded_retry
   | Reason_runtime_fallback
+  | Reason_transient_runtime_retry
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_required_unsatisfied
@@ -219,6 +220,7 @@ let operator_disposition_reason_to_string = function
   | Reason_preflight_config_error -> "preflight_config_error"
   | Reason_degraded_retry -> "degraded_retry"
   | Reason_runtime_fallback -> "runtime_fallback"
+  | Reason_transient_runtime_retry -> "transient_runtime_retry"
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_tool_required_unsatisfied -> "tool_required_unsatisfied"
@@ -326,8 +328,18 @@ let operator_disposition (receipt : t)
        liveness intent) and, since [needs_operator_broadcast] is [false] for
        that disposition, emits NO page. The structural OAS budget timeout
        carries a distinct wire code and is NOT transient, so it still pauses
-       via the fall-through below. *)
-    Disp_fail_open_next_runtime, Reason_runtime_fallback
+       via the fall-through below.
+
+       The reason is [Reason_transient_runtime_retry], NOT
+       [Reason_runtime_fallback]: this arm is reached only AFTER the
+       runtime-fallback arm above excluded [runtime_fallback_applied] /
+       [Runtime_passed_to_next_model], so by construction no cross-runtime
+       fallback happened — the turn recovered via the SAME runtime's in-turn
+       retry. [operator_disposition_reason] is serialised into receipt JSON
+       unconditionally (dashboard-visible), so collapsing this onto the
+       fallback label would mislabel every transient-recovery turn as a
+       genuine fallback. *)
+    Disp_fail_open_next_runtime, Reason_transient_runtime_retry
   | _ when provider_runtime_failure ->
     Disp_pause_human, Reason_provider_runtime_error
   | Keeper_terminal_reason.Completion_contract_violation _ ->

@@ -498,7 +498,7 @@ let () =
      must NOT page a human. *)
   List.iter
     (fun code ->
-       let disposition, _reason =
+       let disposition, reason =
          R.operator_disposition (bare_provider_runtime_receipt code)
        in
        check
@@ -507,6 +507,16 @@ let () =
          (match disposition with
           | R.Disp_fail_open_next_runtime | R.Disp_pass_next_model -> true
           | _ -> false);
+       (* The reason must be the dedicated transient label, NOT
+          [Reason_runtime_fallback] — this arm fires precisely because no
+          cross-runtime fallback occurred (same-runtime in-turn retry). The
+          reason is serialised into receipt JSON, so the distinct label keeps
+          transient-recovery turns separable from genuine fallback turns on
+          the dashboard. *)
+       check
+         (Printf.sprintf "transient-reason: %s -> %s" code
+            (R.operator_disposition_reason_to_string reason))
+         (reason = R.Reason_transient_runtime_retry);
        check
          (Printf.sprintf "transient-no-broadcast: %s" code)
          (not (R.needs_operator_broadcast disposition)))

@@ -77,6 +77,69 @@ let ensure_dir = Keeper_fs.ensure_dir
 (* ── TOML parsing, normalizers, merge, discover ──────────────────── *)
 include Keeper_types_profile_toml
 
+(* ── Persona defaults loading ──────────────────────────────────────────── *)
+
+let load_persona_defaults ~name : keeper_profile_defaults option =
+  let persona_dir_opt () =
+    try
+      Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
+      Config_dir_resolver.personas_dir_opt ()
+    with
+    | Sys_error _ -> None
+    | exn ->
+      Log.Keeper.warn
+        "load_persona_defaults personas_dir_opt unexpected: %s"
+        (Printexc.to_string exn);
+      None
+  in
+  match persona_dir_opt () with
+  | None -> None
+  | Some root ->
+      let profile_path =
+        Filename.concat (Filename.concat root name) "profile.json"
+      in
+      if not (Fs_compat.file_exists profile_path)
+      then None
+      else
+        (match
+           Safe_ops.read_json_file_logged ~label:"load_persona_defaults" profile_path
+         with
+         | None -> None
+         | Some json ->
+             let instructions =
+               let agent_md_path =
+                 Filename.concat (Filename.concat root name) "AGENT.md"
+               in
+               if Fs_compat.file_exists agent_md_path
+               then
+                 (match Safe_ops.read_file_safe agent_md_path with
+                  | Error _ -> None
+                  | Ok content ->
+                      let trimmed = String.trim content in
+                      if String.length trimmed = 0 then None else Some trimmed)
+               else None
+             in
+             let keeper_json = Json_util.assoc_member_opt "keeper" json in
+             let keeper_str key =
+               match keeper_json with
+               | Some (`Assoc fields) ->
+                 (match List.assoc_opt key fields with
+                  | Some (`String s) -> Some s
+                  | _ -> None)
+               | _ -> None
+             in
+             Some
+               {
+                 empty_keeper_profile_defaults with
+                 persona_name = Some name;
+                 instructions;
+                 will = keeper_str "will";
+                 needs = keeper_str "needs";
+                 desires = keeper_str "desires";
+                 social_model = keeper_str "social_model";
+               })
+;;
+
 (* ── JSON workspace-seq helpers ───────────────────────────────────────── *)
 
 let workspace_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
@@ -193,82 +256,96 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
            | None -> ());
           match keeper_json with
           | `Assoc _ ->
-              {
-                id = Some (Ids.Keeper_id.generate ~name ~path);
-                manifest_path = Some path;
-                persona_name = Some name;
-                goal = Safe_ops.json_string_opt "goal" keeper_json;
-                short_goal =
-                  normalize_goal_horizon_opt
-                    (Safe_ops.json_string_opt "short_goal" keeper_json);
-                mid_goal =
-                  normalize_goal_horizon_opt
-                    (Safe_ops.json_string_opt "mid_goal" keeper_json);
-                long_goal =
-                  normalize_goal_horizon_opt
-                    (Safe_ops.json_string_opt "long_goal" keeper_json);
-                will = Safe_ops.json_string_opt "will" keeper_json;
-                needs = Safe_ops.json_string_opt "needs" keeper_json;
-                desires = Safe_ops.json_string_opt "desires" keeper_json;
-                instructions = Safe_ops.json_string_opt "instructions" keeper_json;
-                autoboot_enabled = None;
-                mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
-                proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
-                proactive_idle_sec = Safe_ops.json_int_opt "proactive_idle_sec" keeper_json;
-                proactive_cooldown_sec = Safe_ops.json_int_opt "proactive_cooldown_sec" keeper_json;
-                shards =
-                  (match Safe_ops.json_string_list "shards" keeper_json with
-                   | [] -> None
-                   | xs -> Some xs);
-                (* Persona profiles are not allowed to own execution allowlists.
-                   Keep these in keeper TOML / runtime config only. *)
-                allowed_paths = None;
-                sandbox_profile = None;
-                sandbox_image = None;
-                network_mode = None;
-                tool_access = None;
-                tool_denylist =
-                  normalize_name_list_opt
-                    (Safe_ops.json_string_list "tool_denylist" keeper_json);
-                active_goal_ids = None;
-                telemetry_feedback_enabled =
-                  Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
-                telemetry_feedback_window_hours =
-                  Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
-                per_provider_timeout_state;
-                per_provider_timeout;
-                always_approve =
-                  Safe_ops.json_bool_opt "always_approve" keeper_json;
-                max_turns_per_call =
-                  Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
-                max_turns_per_call_scheduled_autonomous =
-                  Safe_ops.json_int_opt
-                    "max_turns_per_call_scheduled_autonomous" keeper_json;
-                social_model =
-                  (match
-                     normalize_social_model_opt
-                       (Safe_ops.json_string_opt "social_model" keeper_json)
-                   with
-                  | Some _ as normalized -> normalized
-                  | None -> (
-                      match
-                        Safe_ops.json_string_opt "social_model" keeper_json
-                      with
-                      | Some raw ->
-                          Log.Keeper.warn
-                            "persona profile %s has invalid social_model '%s'; ignoring"
-                            path raw;
-                          None
-                      | None -> None));
-                (* oas_env lives only in keeper TOML, not persona JSON —
-                   persona profiles are a design-time artifact whereas
-                   transport env is an ops-time toggle. *)
-                oas_env = [];
-                (* Persona JSON has no [keeper] TOML; nothing to flag. *)
-                unknown_toml_keys = [];
-                persona_ref = Safe_ops.json_string_opt "persona_ref" keeper_json;
-                runtime_ref = Safe_ops.json_string_opt "runtime_ref" keeper_json;
-              }
+              let base_defaults =
+                {
+                  id = Some (Ids.Keeper_id.generate ~name ~path);
+                  manifest_path = Some path;
+                  persona_name = Some name;
+                  goal = Safe_ops.json_string_opt "goal" keeper_json;
+                  short_goal =
+                    normalize_goal_horizon_opt
+                      (Safe_ops.json_string_opt "short_goal" keeper_json);
+                  mid_goal =
+                    normalize_goal_horizon_opt
+                      (Safe_ops.json_string_opt "mid_goal" keeper_json);
+                  long_goal =
+                    normalize_goal_horizon_opt
+                      (Safe_ops.json_string_opt "long_goal" keeper_json);
+                  will = Safe_ops.json_string_opt "will" keeper_json;
+                  needs = Safe_ops.json_string_opt "needs" keeper_json;
+                  desires = Safe_ops.json_string_opt "desires" keeper_json;
+                  instructions = Safe_ops.json_string_opt "instructions" keeper_json;
+                  autoboot_enabled = None;
+                  mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
+                  proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
+                  proactive_idle_sec = Safe_ops.json_int_opt "proactive_idle_sec" keeper_json;
+                  proactive_cooldown_sec = Safe_ops.json_int_opt "proactive_cooldown_sec" keeper_json;
+                  shards =
+                    (match Safe_ops.json_string_list "shards" keeper_json with
+                     | [] -> None
+                     | xs -> Some xs);
+                  (* Persona profiles are not allowed to own execution allowlists.
+                     Keep these in keeper TOML / runtime config only. *)
+                  allowed_paths = None;
+                  sandbox_profile = None;
+                  sandbox_image = None;
+                  network_mode = None;
+                  tool_access = None;
+                  tool_denylist =
+                    normalize_name_list_opt
+                      (Safe_ops.json_string_list "tool_denylist" keeper_json);
+                  active_goal_ids = None;
+                  telemetry_feedback_enabled =
+                    Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
+                  telemetry_feedback_window_hours =
+                    Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
+                  per_provider_timeout_state;
+                  per_provider_timeout;
+                  always_approve =
+                    Safe_ops.json_bool_opt "always_approve" keeper_json;
+                  max_turns_per_call =
+                    Safe_ops.json_int_opt "max_turns_per_call" keeper_json;
+                  max_turns_per_call_scheduled_autonomous =
+                    Safe_ops.json_int_opt
+                      "max_turns_per_call_scheduled_autonomous" keeper_json;
+                  social_model =
+                    (match
+                       normalize_social_model_opt
+                         (Safe_ops.json_string_opt "social_model" keeper_json)
+                     with
+                    | Some _ as normalized -> normalized
+                    | None -> (
+                        match
+                          Safe_ops.json_string_opt "social_model" keeper_json
+                        with
+                        | Some raw ->
+                            Log.Keeper.warn
+                              "persona profile %s has invalid social_model '%s'; ignoring"
+                              path raw;
+                            None
+                        | None -> None));
+                  (* oas_env lives only in keeper TOML, not persona JSON —
+                     persona profiles are a design-time artifact whereas
+                     transport env is an ops-time toggle. *)
+                  oas_env = [];
+                  (* Persona JSON has no [keeper] TOML; nothing to flag. *)
+                  unknown_toml_keys = [];
+                  persona_ref = Safe_ops.json_string_opt "persona_ref" keeper_json;
+                  runtime_ref = Safe_ops.json_string_opt "runtime_ref" keeper_json;
+                }
+              in
+              begin
+                match base_defaults.persona_ref with
+                | None -> base_defaults
+                | Some persona_name ->
+                    match load_persona_defaults ~name:persona_name with
+                    | None -> base_defaults
+                    | Some persona_defaults ->
+                        merge_keeper_profile_defaults
+                          ~agent_name:""
+                          ~base:persona_defaults
+                          ~overlay:base_defaults
+              end
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 
 

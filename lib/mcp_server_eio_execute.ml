@@ -80,10 +80,10 @@ let execute_tool_eio
   in
   let identity = Client_registry_eio.get_or_create_identity ?mcp_session_id arguments in
   Log.Mcp.debug "[Identity] %s" (Client_identity.to_display_string identity);
-  let record_mcp_session_agent agent_name =
+  let record_mcp_session_agent ~is_ephemeral agent_name =
     match mcp_session_id with
     | None -> ()
-    | Some sid -> Client_registry_eio.set_resolved_name sid agent_name
+    | Some sid -> Client_registry_eio.set_resolved_name sid agent_name ~is_ephemeral
   in
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
@@ -98,8 +98,11 @@ let execute_tool_eio
   in
   let owner_keeper_identity = caller_identity.owner_keeper_identity in
   let mode_gate_error = caller_identity.mode_gate_error in
-  (* Cache resolved agent_name for this session (Fix 4). *)
-  record_mcp_session_agent agent_name;
+  (* Cache resolved agent_name for this session (Fix 4), carrying the
+     ephemerality decided from the typed origin so a later call reads it
+     back without a substring re-probe. *)
+  record_mcp_session_agent ~is_ephemeral:caller_identity.agent_name_is_ephemeral
+    agent_name;
   let is_system_internal_tool =
     Tool_catalog_surfaces.is_system_internal_hidden name
   in
@@ -349,7 +352,12 @@ let execute_tool_eio
                      ; clock
                      ; arguments = coerced_args
                      ; mcp_session_id
-                     ; record_mcp_session_agent
+                     ; (* The inline-dispatch surface caches under the
+                          already-resolved session identity, so carry the
+                          ephemerality decided above. *)
+                       record_mcp_session_agent =
+                         record_mcp_session_agent
+                           ~is_ephemeral:caller_identity.agent_name_is_ephemeral
                      ; wait_for_message =
                          (fun registry ~agent_name ~timeout ->
                            wait_for_message_eio ~clock registry ~agent_name ~timeout)

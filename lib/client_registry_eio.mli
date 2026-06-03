@@ -35,10 +35,25 @@ val get_or_create_identity : ?mcp_session_id:string -> Yojson.Safe.t -> Client_i
 val get_by_name : string -> Client_identity.t option
 val get_by_session : string -> Client_identity.t option
 
-(** {1 Resolved Agent Name Cache} *)
+(** {1 Resolved Agent Name Cache}
 
-val get_resolved_name : string -> string option
-val set_resolved_name : string -> string -> unit
+    The cache carries the resolved name together with the ephemerality
+    decided at mint time. Storing only the [string] previously laundered
+    that origin away, forcing the auth-fallback consumer to re-derive it
+    with a [String.starts_with name ~prefix:"agent-"] substring probe.
+    Carrying the bit lets the consumer match on a typed origin instead. *)
+
+val get_resolved_name : string -> (string * bool) option
+(** [get_resolved_name sid] returns [Some (name, is_ephemeral)] for a
+    cached MCP session, or [None]. [is_ephemeral] is [true] when the
+    cached name was system-minted (own generated fallback or a
+    [`System_fallback] identity), [false] for a caller-supplied or
+    externally resolved name. *)
+
+val set_resolved_name : string -> string -> is_ephemeral:bool -> unit
+(** [set_resolved_name sid name ~is_ephemeral] caches [name] for [sid]
+    along with the ephemerality decided at the call site (no substring
+    re-derivation on read). *)
 
 (** {1 Statistics} *)
 

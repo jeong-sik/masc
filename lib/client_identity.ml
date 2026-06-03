@@ -135,11 +135,35 @@ let channel_of_yojson = function
             or 2-element tagged list [\"External\"|\"Unknown\"; <label>], got %s"
            (Json_util.kind_name other))
 
+(** Provenance of [agent_name]: whether the caller supplied it or the
+    system minted a fallback.
+
+    Carried so the auth-fallback gate in
+    [Mcp_server_eio_caller_identity] can decide ephemerality from a
+    typed origin instead of re-probing the name string with
+    [String.starts_with name ~prefix:"agent-"]. The string [agent_name]
+    field laundered this provenance away: by read time a
+    system-generated ["agent-…"] fallback and an externally resolved
+    name are both bare strings, so the only way to recover the origin
+    was a substring probe. Deciding the origin once, here at the mint
+    site, removes that probe.
+
+    A mandatory field on [t] forces every record constructor to declare
+    the provenance, so a new mint path cannot silently default to
+    [`Supplied]. *)
+type agent_name_origin =
+  [ `Supplied        (** [_agent_name]/[agent_name] was provided by the caller. *)
+  | `System_fallback (** No name given; this module minted a fallback. *)
+  ]
+[@@deriving to_yojson]
+
 (** Agent identity - extracted from session/request context *)
 type t = {
   uuid : string;                  (** Permanent unique identifier (UUIDv4 or hash) *)
   session_key : string;           (** Unique session identifier *)
   agent_name : string;            (** Display name (e.g., "agent_llm_a-agent-001") *)
+  agent_name_origin : agent_name_origin;
+      (** Provenance of [agent_name] (see {!agent_name_origin}). *)
   channel : channel option;       (** Source channel if known *)
   user_id : string option;        (** User ID from channel (e.g., telegram user id) *)
   capabilities : string list;     (** Declared agent capabilities *)
@@ -184,9 +208,10 @@ let from_mcp_params params =
         if String.equal k "" then generate_session_key () else k
     | None -> generate_session_key ()
   in
-  let agent_name = match get_opt "_agent_name", get_opt "agent_name" with
-    | Some n, _ | _, Some n -> n
-    | None, None -> fallback_agent_name session_key
+  let agent_name, agent_name_origin =
+    match get_opt "_agent_name", get_opt "agent_name" with
+    | Some n, _ | _, Some n -> (n, `Supplied)
+    | None, None -> (fallback_agent_name session_key, `System_fallback)
   in
   let channel = match get_opt "_channel" with
     | Some c -> Some (channel_of_string c)
@@ -199,6 +224,7 @@ let from_mcp_params params =
     uuid = generate_uuid ~agent_name;
     session_key;
     agent_name;
+    agent_name_origin;
     channel;
     user_id;
     capabilities;
@@ -216,6 +242,9 @@ let anonymous () =
     uuid = generate_uuid ~agent_name:name;
     session_key = key;
     agent_name = name;
+    (* [anonymous] mints its own ["anon-…"] name; the caller supplied
+       nothing, so the provenance is a system fallback. *)
+    agent_name_origin = `System_fallback;
     channel = None;
     user_id = None;
     capabilities = [];

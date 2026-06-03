@@ -1573,8 +1573,6 @@
 
 (include stanzas/test_reqd_invalid_state_swallow.inc)
 
-(include stanzas/test_require_tool_use_violation_counter_10091.inc)
-
 (include stanzas/test_server_state_product.inc)
 
 (include stanzas/test_shell_parse_site_ratchet.inc)

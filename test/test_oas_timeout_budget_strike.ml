@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 module KH = Keeper_heartbeat_loop
 module KFP = Keeper_failure_policy

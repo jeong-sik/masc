@@ -1,7 +1,7 @@
 open Alcotest
 
-module Fsm = Masc_mcp.Keeper_social_model_magentic_ledger_fsm
-module KSM = Masc_mcp.Keeper_social_model
+module Fsm = Masc.Keeper_social_model_magentic_ledger_fsm
+module KSM = Masc.Keeper_social_model
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")

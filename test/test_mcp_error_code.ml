@@ -7,7 +7,7 @@
     that switch on the integer code. *)
 
 open Alcotest
-module C = Masc_mcp.Mcp_error_code
+module C = Masc.Mcp_error_code
 
 (* JSON-RPC 2.0 §5.1: implementation-defined codes live in
    [-32000, -32099]; the well-known set occupies -32700, -32600..-32603. *)

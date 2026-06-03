@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 
 let with_test_env f =
   let tmp_dir = Filename.concat (Filename.get_temp_dir_name ())

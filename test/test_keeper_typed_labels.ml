@@ -17,7 +17,7 @@
     - [Keeper_contract_classifier.pp_contract_status] surfaces missing list
 *)
 
-open Masc_mcp
+open Masc
 
 (* ── Helpers ─────────────────────────────────────────────────── *)
 

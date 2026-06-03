@@ -1,6 +1,6 @@
 open Alcotest
 
-module WS = Masc_mcp.Keeper_working_state
+module WS = Masc.Keeper_working_state
 
 let evidence ?(kind = "pr") target = WS.make_evidence_ref ~kind ~target
 
@@ -110,13 +110,13 @@ let test_json_roundtrip () =
 
 let test_projector_maps_snapshot_items_to_active_loops () =
   let snapshot =
-    { Masc_mcp.Keeper_memory_policy.empty_keeper_state_snapshot with
+    { Masc.Keeper_memory_policy.empty_keeper_state_snapshot with
       next_items = [ "finish PR"; " "; "finish PR" ]
     ; open_questions = [ "check CI?" ]
     }
   in
   let state =
-    Masc_mcp.Keeper_working_state_projector.of_state_snapshot
+    Masc.Keeper_working_state_projector.of_state_snapshot
       ~keeper_name:"keeper-a"
       ~trace_id:"trace-1"
       ~keeper_turn_id:7

@@ -18,10 +18,10 @@ type token_source =
       (** [MASC_INTERNAL_MCP_TOKEN] resolved without the hash file
           present; legacy / startup-bootstrap path. *)
   | Mcp_bearer_env
-      (** [MASC_MCP_TOKEN] env, last-resort. *)
+      (** [MASC_TOKEN] env, last-resort. *)
   | Per_keeper_token_file
       (** [<base_path>/.masc/auth/<agent_name>.token] raw token; used as
-          a fallback when [MASC_MCP_TOKEN] is unset (e.g. CLI subprocesses
+          a fallback when [MASC_TOKEN] is unset (e.g. CLI subprocesses
           like cli_tool_a/cli_tool_b/cli_tool_c that callback into masc
           but do not inherit the parent process env). Phase A F1. *)
   | Provider_api_key_env of { var_name : string }
@@ -57,7 +57,7 @@ val resolve :
     Resolution order:
     1. If [keeper_id = Some k] AND [policy_requires_runtime_mcp]: try
        [internal_keeper.token.hash] presence; pull the raw token from
-       [MASC_INTERNAL_MCP_TOKEN] (preferred) or [MASC_MCP_TOKEN].
+       [MASC_INTERNAL_MCP_TOKEN] (preferred) or [MASC_TOKEN].
        Hash-file absence yields [Token_hash_missing].
     2. If [provider_kind] is an HTTP variant with a default api-key
        env, resolve from that env.  Missing env yields
@@ -66,7 +66,7 @@ val resolve :
        [policy_requires_runtime_mcp = false] (a degenerate combo we
        still classify), yield [Bound_actor_provider_mismatch].
     4. CLI providers (Cli_tool_d/Cli_tool_b/Cli_tool_c) without a
-       runtime-mcp policy fall through to [MASC_MCP_TOKEN] env. *)
+       runtime-mcp policy fall through to [MASC_TOKEN] env. *)
 
 val emit_resolution_trace :
   runtime:string ->

@@ -7,7 +7,7 @@
    selection fiber in keeper_run_tools.ml — this test pins the
    name surface only. *)
 
-module KK = Masc_mcp.Keeper_metrics
+module KK = Masc.Keeper_metrics
 
 let test_metric_names_stable () =
   Alcotest.(check string)

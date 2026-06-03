@@ -34,8 +34,8 @@
 
 open Alcotest
 
-module M = Masc_mcp.Memory_oas_bridge
-module Prom = Masc_mcp.Prometheus
+module M = Masc.Memory_oas_bridge
+module Prom = Masc.Prometheus
 
 let kind value = M.error_kind_of_string value
 

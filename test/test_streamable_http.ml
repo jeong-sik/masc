@@ -1,6 +1,6 @@
 (** Tests for Streamable HTTP Transport *)
 
-module SH = Masc_mcp.Streamable_http
+module SH = Masc.Streamable_http
 
 let test_session_create () =
   let session = SH.Session.create ~transport:SH.Streamable_HTTP in

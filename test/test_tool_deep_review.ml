@@ -1,6 +1,6 @@
 open Alcotest
 
-module TDR = Masc_mcp.Tool_deep_review
+module TDR = Masc.Tool_deep_review
 
 let contains_substring text pattern =
   let pat_len = String.length pattern in

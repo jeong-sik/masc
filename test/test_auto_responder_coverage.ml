@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Auto_responder = Masc_mcp.Auto_responder
+module Auto_responder = Masc.Auto_responder
 
 let file_contains_pattern file_rel pattern =
   let source_root =

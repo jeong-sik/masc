@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let test_agent_name_for_channel_actor () =
   let agent_name =

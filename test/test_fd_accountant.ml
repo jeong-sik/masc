@@ -9,8 +9,8 @@
       [Fd_accountant.with_slot ~kind:Docker_spawn]. *)
 
 open Alcotest
-module FA = Masc_mcp.Fd_accountant
-module DST = Masc_mcp.Docker_spawn_throttle
+module FA = Masc.Fd_accountant
+module DST = Masc.Docker_spawn_throttle
 module DP = Domain_pool
 
 let tmpdir prefix =
@@ -45,8 +45,8 @@ let test_configured_within_bounds () =
 let test_fd_limit_reuses_keeper_pressure_cache () =
   let expected = 4242 in
   Atomic.set
-    Masc_mcp.Keeper_fd_pressure.nofile_soft_limit_cache
-    (Masc_mcp.Keeper_fd_pressure.Resolved (Some expected));
+    Masc.Keeper_fd_pressure.nofile_soft_limit_cache
+    (Masc.Keeper_fd_pressure.Resolved (Some expected));
   let snapshot = FA.fd_snapshot () in
   check int "fd_limit from Keeper_fd_pressure cache" expected snapshot.fd_limit
 
@@ -123,7 +123,7 @@ let test_snapshot_shape () =
             (FA.kind_to_string k))
     FA.all_kinds ;
   (* pressure_active matches Keeper_fd_pressure.active *)
-  let expected = Masc_mcp.Keeper_fd_pressure.active () in
+  let expected = Masc.Keeper_fd_pressure.active () in
   check bool "pressure_active mirrors Keeper_fd_pressure" expected
     s.pressure_active
 
@@ -170,11 +170,11 @@ let test_with_slot_reentrant_same_kind () =
 
 let test_with_slot_nested_cross_kind_under_fd_pressure () =
   Eio_main.run @@ fun _env ->
-  Masc_mcp.Keeper_fd_pressure.reset_for_tests () ;
+  Masc.Keeper_fd_pressure.reset_for_tests () ;
   Fun.protect
-    ~finally:Masc_mcp.Keeper_fd_pressure.reset_for_tests
+    ~finally:Masc.Keeper_fd_pressure.reset_for_tests
     (fun () ->
-      Masc_mcp.Keeper_fd_pressure.note ~site:"fd_accountant_test"
+      Masc.Keeper_fd_pressure.note ~site:"fd_accountant_test"
         ~detail:"too many open files" () ;
       FA.with_slot ~kind:FA.Docker_spawn (fun () ->
           check int "outer docker slot held" 1
@@ -187,11 +187,11 @@ let test_with_slot_nested_cross_kind_under_fd_pressure () =
 
 let test_forked_child_reenters_pressure_gate_after_parent_slot () =
   Eio_main.run @@ fun env ->
-  Masc_mcp.Keeper_fd_pressure.reset_for_tests () ;
+  Masc.Keeper_fd_pressure.reset_for_tests () ;
   Fun.protect
-    ~finally:Masc_mcp.Keeper_fd_pressure.reset_for_tests
+    ~finally:Masc.Keeper_fd_pressure.reset_for_tests
     (fun () ->
-      Masc_mcp.Keeper_fd_pressure.note ~site:"fd_accountant_test"
+      Masc.Keeper_fd_pressure.note ~site:"fd_accountant_test"
         ~detail:"too many open files" () ;
       let clock = Eio.Stdenv.clock env in
       let child_go = Atomic.make false in
@@ -362,16 +362,16 @@ let test_bg_task_uses_sandbox_lifetime_slot () =
 let test_bg_task_lifetime_serializes_under_fd_pressure () =
   Eio_main.run @@ fun env ->
   Eio_guard.enable () ;
-  Masc_mcp.Keeper_fd_pressure.reset_for_tests () ;
+  Masc.Keeper_fd_pressure.reset_for_tests () ;
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_fd_pressure.reset_for_tests () ;
+      Masc.Keeper_fd_pressure.reset_for_tests () ;
       Bg_task.reset_lifetime_guard_for_testing () ;
       Eio_guard.disable ())
     (fun () ->
       Bg_task.reset_lifetime_guard_for_testing () ;
       FA.install_bg_sandbox_exec_guard () ;
-      Masc_mcp.Keeper_fd_pressure.note ~site:"fd_accountant_test"
+      Masc.Keeper_fd_pressure.note ~site:"fd_accountant_test"
         ~detail:"too many open files" () ;
       let clock = Eio.Stdenv.clock env in
       let first =

@@ -72,15 +72,15 @@ let resolve ~base_path ~keeper_id ~provider_kind
   if policy_requires_runtime_mcp then
     match keeper_id with
     | None -> (
-        match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
+        match first_nonempty_env [ "MASC_TOKEN" ] with
         | Some (raw, _) -> Ok { raw; source = Mcp_bearer_env }
-        | None -> Error (Api_key_env_unset { var_name = "MASC_MCP_TOKEN" }))
+        | None -> Error (Api_key_env_unset { var_name = "MASC_TOKEN" }))
     | Some _ ->
         let hash_path = internal_keeper_token_hash_file ~base_path in
         if Sys.file_exists hash_path then
           match
             first_nonempty_env
-              [ "MASC_INTERNAL_MCP_TOKEN"; "MASC_MCP_TOKEN" ]
+              [ "MASC_INTERNAL_MCP_TOKEN"; "MASC_TOKEN" ]
           with
           | Some (raw, "MASC_INTERNAL_MCP_TOKEN") ->
               Ok { raw; source = Internal_keeper_env }
@@ -93,7 +93,7 @@ let resolve ~base_path ~keeper_id ~provider_kind
     match Runtime_provider_credentials.api_key_env_var_for_kind provider_kind with
     | None ->
         (* Providers requiring per-keeper bridging cannot accept the shared
-           [MASC_MCP_TOKEN] fallback: their bound-actor runtime MCP tools need
+           [MASC_TOKEN] fallback: their bound-actor runtime MCP tools need
            a per-keeper raw bearer. Dispatch by local tool-delivery policy,
            not by provider name. RFC-0058 §2.4: capability, not match. *)
         if
@@ -102,9 +102,9 @@ let resolve ~base_path ~keeper_id ~provider_kind
             provider_kind
         then Error (Bound_actor_provider_mismatch { provider_kind })
         else (
-          match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
+          match first_nonempty_env [ "MASC_TOKEN" ] with
           | Some (raw, _) -> Ok { raw; source = Mcp_bearer_env }
-          | None -> Error (Api_key_env_unset { var_name = "MASC_MCP_TOKEN" }))
+          | None -> Error (Api_key_env_unset { var_name = "MASC_TOKEN" }))
     | Some var_name -> (
         match first_nonempty_env [ var_name ] with
         | Some (raw, _) ->

@@ -6,7 +6,7 @@
     2. A write to a read-only directory returns [Error _], not an
        exception. *)
 
-open Masc_mcp
+open Masc
 open Alcotest
 
 module CP = Runtime_oas_checkpoint

@@ -8,7 +8,7 @@ module Types = Masc_domain
     is best-effort — claim must succeed even when the hook raises. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 module CH = Workspace_hooks
 
 let failure_metric_value ~site ~agent_name =

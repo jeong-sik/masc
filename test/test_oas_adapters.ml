@@ -5,7 +5,7 @@
     from tests (installed opam masc may lack it). Tests go through the
     public Context_manager API which delegates to Context_compact_oas. *)
 
-open Masc_mcp
+open Masc
 
 let ctx_messages = Keeper_context_runtime.messages_of_context
 let ctx_system_prompt = Keeper_context_runtime.system_prompt_of_context

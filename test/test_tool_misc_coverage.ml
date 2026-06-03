@@ -1,6 +1,6 @@
 (** Coverage tests for Tool_misc *)
 
-open Masc_mcp
+open Masc
 
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()

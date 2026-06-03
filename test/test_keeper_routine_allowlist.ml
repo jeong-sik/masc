@@ -1,9 +1,9 @@
 (** Tests for Keeper_routine_allowlist — narrow auto-approval for keeper
     task lifecycle. *)
 
-module RA = Masc_mcp.Keeper_routine_allowlist
-module RL = Masc_mcp.Keeper_approval_queue
-module Workspace = Masc_mcp.Workspace
+module RA = Masc.Keeper_routine_allowlist
+module RL = Masc.Keeper_approval_queue
+module Workspace = Masc.Workspace
 
 let transition_input action =
   `Assoc [ ("action", `String action); ("task_id", `String "task-1") ]

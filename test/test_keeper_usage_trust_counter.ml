@@ -9,9 +9,9 @@
    counters here surface the anomaly rate so operators can alert
    while that fix is in-flight. *)
 
-module UM = Masc_mcp.Keeper_unified_metrics
-module UT = Masc_mcp.Keeper_usage_trust
-module Prom = Masc_mcp.Prometheus
+module UM = Masc.Keeper_unified_metrics
+module UT = Masc.Keeper_usage_trust
+module Prom = Masc.Prometheus
 
 let outcome_for ~keeper ~outcome =
   Prom.metric_value_or_zero

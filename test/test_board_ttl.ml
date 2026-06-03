@@ -1,6 +1,6 @@
 (** test_board_ttl.ml - Board TTL, permanent post, and post_kind classification tests *)
 
-open Masc_mcp.Board
+open Masc.Board
 
 (* #9903 test isolation: [create_post] now persists through
    [Env_config_core.base_path ()], which raises [Config_error] in test
@@ -31,7 +31,7 @@ let test_default_ttl () =
    fail compilation, and the count assertion below catches list/Variant
    drift in [all_visibilities]. *)
 let test_visibility_witness_in_enum () =
-  let module C = Masc_mcp.Board_core_classify in
+  let module C = Masc.Board_core_classify in
   let witness s =
     let actual = C.visibility_to_string s in
     if not (List.mem actual C.valid_visibility_strings) then
@@ -45,7 +45,7 @@ let test_visibility_witness_in_enum () =
     (List.length C.valid_visibility_strings)
 
 let test_visibility_strings_complete () =
-  let strs = Masc_mcp.Board_core_classify.valid_visibility_strings in
+  let strs = Masc.Board_core_classify.valid_visibility_strings in
   List.iter (fun expected ->
     Alcotest.(check bool) (Printf.sprintf "%s present" expected) true
       (List.mem expected strs)
@@ -55,7 +55,7 @@ let test_visibility_strings_complete () =
    Witness covers all 5 variants; adding a 6th constructor will fail
    compilation in [sort_order_to_string]. *)
 let test_sort_order_witness_in_enum () =
-  let module D = Masc_mcp.Board_dispatch in
+  let module D = Masc.Board_dispatch in
   let witness s =
     let actual = D.sort_order_to_string s in
     if not (List.mem actual D.valid_sort_order_strings) then
@@ -70,7 +70,7 @@ let test_sort_order_witness_in_enum () =
     (List.length D.valid_sort_order_strings)
 
 let test_sort_order_legacy_aliases_rejected () =
-  let module D = Masc_mcp.Board_dispatch in
+  let module D = Masc.Board_dispatch in
   let rejected label raw =
     Alcotest.(check (option string)) label None
       (D.sort_order_of_string_opt raw |> Option.map D.sort_order_to_string)

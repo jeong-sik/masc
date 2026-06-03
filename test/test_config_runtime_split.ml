@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let () =
   (* Test 1: Seed round-trip — minimal JSON should parse + serialize *)

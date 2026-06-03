@@ -5,7 +5,7 @@
     Budget_strategy.reduce_for_budget Emergency-phase compaction, which
     uses the summarizer injected via Builder.with_summarizer. *)
 
-module KS = Masc_mcp.Keeper_summarizer
+module KS = Masc.Keeper_summarizer
 
 let read_file path =
   let ic = open_in path in

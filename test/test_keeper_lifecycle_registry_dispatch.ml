@@ -1,17 +1,17 @@
 open Alcotest
 
-module KEC = Masc_mcp.Keeper_context_runtime
-module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
-module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
-module Keeper_types_profile = Masc_mcp.Keeper_types_profile
-module KT = Masc_mcp.Keeper_types
-module KR = Masc_mcp.Keeper_registry
-module KHB = Masc_mcp.Keeper_heartbeat_snapshot
-module KHS = Masc_mcp.Keeper_keepalive_signal
-module KST = Masc_mcp.Keeper_state_machine
-module KFS = Masc_mcp.Keeper_fs
-module KTS = Masc_mcp.Keeper_types_support
-module P = Masc_mcp.Prometheus
+module KEC = Masc.Keeper_context_runtime
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module Keeper_types_profile = Masc.Keeper_types_profile
+module KT = Masc.Keeper_types
+module KR = Masc.Keeper_registry
+module KHB = Masc.Keeper_heartbeat_snapshot
+module KHS = Masc.Keeper_keepalive_signal
+module KST = Masc.Keeper_state_machine
+module KFS = Masc.Keeper_fs
+module KTS = Masc.Keeper_types_support
+module P = Masc.Prometheus
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -77,7 +77,7 @@ let ensure_test_runtime =
           try Sys.remove path with
           | Sys_error _ -> ())
         (fun () ->
-          match Masc_mcp.Runtime.init_default ~config_path:path with
+          match Masc.Runtime.init_default ~config_path:path with
           | Ok () -> initialized := true
           | Error msg -> fail msg))
 
@@ -143,7 +143,7 @@ let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Workspace.default_config base_dir in
+      let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-phase-regression" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
@@ -165,7 +165,7 @@ let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Workspace.default_config base_dir in
+      let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-outcome-regression" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
@@ -210,7 +210,7 @@ let test_post_turn_compaction_runs_from_failing_health_lane () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Workspace.default_config base_dir in
+      let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-failing-compaction" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
@@ -269,15 +269,15 @@ let test_compaction_completion_without_started_is_nonfatal () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Workspace.default_config base_dir in
+      let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-missing-compaction-start" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       let labels =
         [ ("keeper", meta.name); ("event", "compaction_completed(42->21)") ]
       in
       let before =
-        Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+        Masc.Prometheus.get_metric_value
+          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -303,8 +303,8 @@ let test_compaction_completion_without_started_is_nonfatal () =
         ~keeper_name:meta.name
         lifecycle;
       let after =
-        Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+        Masc.Prometheus.get_metric_value
+          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -325,7 +325,7 @@ let test_post_turn_compaction_restarts_after_done_stage () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Workspace.default_config base_dir in
+      let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-repeat-compaction" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       let lifecycle before_tokens after_tokens =
@@ -379,15 +379,15 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Workspace.default_config base_dir in
+      let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-origin-guard" () in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       let labels =
         [ ("keeper", meta.name); ("event", "compaction_started") ]
       in
       let before =
-        Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+        Masc.Prometheus.get_metric_value
+          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -396,8 +396,8 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
         ~keeper_name:meta.name
         KST.Compaction_started;
       let after =
-        Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+        Masc.Prometheus.get_metric_value
+          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -415,13 +415,13 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Masc_mcp.Workspace.default_config base_dir in
+      let config = Masc.Workspace.default_config base_dir in
       let labels =
         [ ("keeper", "missing-keeper"); ("event", "compaction_started") ]
       in
       let before =
-        Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+        Masc.Prometheus.get_metric_value
+          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -430,8 +430,8 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         ~keeper_name:"missing-keeper"
         KST.Compaction_started;
       let after =
-        Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+        Masc.Prometheus.get_metric_value
+          Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -448,7 +448,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       Eio.Switch.run @@ fun sw ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Workspace.default_config base_dir in
+      let config = Masc.Workspace.default_config base_dir in
       let ctx : _ Keeper_types_profile.context =
         {
           config;
@@ -463,8 +463,8 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         [ ("keeper", "missing-keeper"); ("reason", "invalid_transition") ]
       in
       let before =
-        Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
+        Masc.Prometheus.get_metric_value
+          Masc.Keeper_metrics.(to_string DispatchEventFailures)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -473,8 +473,8 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         ~keeper_name:"missing-keeper"
         KST.Compaction_started;
       let after =
-        Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
+        Masc.Prometheus.get_metric_value
+          Masc.Keeper_metrics.(to_string DispatchEventFailures)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -492,8 +492,8 @@ let test_heartbeat_history_fallback_counts_malformed_rows () =
       Eio.Switch.run @@ fun sw ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       KR.clear ();
-      let config = Masc_mcp.Workspace.default_config base_dir in
-      ignore (Masc_mcp.Workspace.init config ~agent_name:None);
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:None);
       let meta =
         make_keeper_meta
           ~name:"keeper-heartbeat-history-drop"
@@ -502,7 +502,7 @@ let test_heartbeat_history_fallback_counts_malformed_rows () =
       in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       let trace_id =
-        Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id
       in
       let history_path = KTS.keeper_history_path config trace_id in
       write_lines history_path

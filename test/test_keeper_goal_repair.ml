@@ -2,7 +2,7 @@
 
 let test_goal_title_of_purpose () =
   let open Alcotest in
-  let module KGR = Masc_mcp.Keeper_goal_repair in
+  let module KGR = Masc.Keeper_goal_repair in
   let short = KGR.goal_title_of_purpose "do things" in
   check string "short" "do things (auto)" short;
   let empty = KGR.goal_title_of_purpose "" in
@@ -18,7 +18,7 @@ let test_goal_title_of_purpose () =
 
 let test_repair_source_to_string () =
   let open Alcotest in
-  let module KGR = Masc_mcp.Keeper_goal_repair in
+  let module KGR = Masc.Keeper_goal_repair in
   check string "created" "created" (KGR.repair_source_to_string `Created);
   check string "reused"  "reused"  (KGR.repair_source_to_string `Reused)
 

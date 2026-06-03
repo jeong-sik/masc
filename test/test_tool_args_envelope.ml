@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let parse_json label payload =
   try Yojson.Safe.from_string payload with

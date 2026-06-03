@@ -33,19 +33,19 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module M = Masc_mcp.Keeper_unified_metrics
-module Prom = Masc_mcp.Prometheus
+module M = Masc.Keeper_unified_metrics
+module Prom = Masc.Prometheus
 
 let bucket_count ~keeper ~bucket =
   Prom.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string TurnLatencyBucket)
+    Masc.Keeper_metrics.(to_string TurnLatencyBucket)
     ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
     ()
 
 let model_bucket_count ~keeper ~channel ~provider_kind ~model_used
     ~resolved_model_id ~runtime_profile ~bucket =
   Prom.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string TurnLatencyByModelBucket)
+    Masc.Keeper_metrics.(to_string TurnLatencyByModelBucket)
     ~labels:
       [ ("keeper", keeper)
       ; ("channel", channel)

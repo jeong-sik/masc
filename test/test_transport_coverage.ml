@@ -13,8 +13,8 @@
 
 open Alcotest
 
-module Transport = Masc_mcp.Transport
-module Sdk_tool_contract = Masc_mcp.Sdk_tool_contract
+module Transport = Masc.Transport
+module Sdk_tool_contract = Masc.Sdk_tool_contract
 
 (* ============================================================
    protocol Tests
@@ -660,7 +660,7 @@ let test_rest_generate_openapi_document () =
   let open Yojson.Safe.Util in
   let doc = Transport.Rest.generate_openapi_document () in
   check string "openapi version" "3.1.0" (doc |> member "openapi" |> to_string);
-  check string "info.version matches repo version" Masc_mcp.Version.version
+  check string "info.version matches repo version" Masc.Version.version
     (doc |> member "info" |> member "version" |> to_string);
   check string "bearer security scheme type" "http"
     (doc |> member "components" |> member "securitySchemes"

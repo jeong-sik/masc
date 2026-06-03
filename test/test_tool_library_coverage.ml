@@ -9,7 +9,7 @@
     temp directory with the expected structure.
 *)
 
-module Tool_library = Masc_mcp.Tool_library
+module Tool_library = Masc.Tool_library
 
 let msg_contains ~needle haystack =
   let lc = String.lowercase_ascii haystack in

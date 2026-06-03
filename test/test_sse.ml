@@ -19,7 +19,7 @@ let run_domains_together count fn =
   List.iter Domain.join domains
 
 let test_unregister_if_current () =
-  let open Masc_mcp.Sse in
+  let open Masc.Sse in
   let session_id = "test_session" in
   let _noop _ = () in
 
@@ -40,7 +40,7 @@ let test_unregister_if_current () =
   ()
 
 let test_cleanup_stale_respects_touch () =
-  let open Masc_mcp.Sse in
+  let open Masc.Sse in
   let stale_sid = "stale_session_" ^ string_of_int (Random.int 1000000) in
   let alive_sid = "alive_session_" ^ string_of_int (Random.int 1000000) in
   let _noop _ = () in
@@ -60,7 +60,7 @@ let test_cleanup_stale_respects_touch () =
 let test_concurrent_register_unregister () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let open Masc_mcp.Sse in
+  let open Masc.Sse in
   let n = 50 in
   let prefix = "conc_" ^ string_of_int (Random.int 1000000) ^ "_" in
   let _noop _ = () in
@@ -80,7 +80,7 @@ let test_concurrent_register_unregister () =
   check int "count restored" count_before count_after
 
 let test_client_count_linearized_under_domain_contention () =
-  let open Masc_mcp.Sse in
+  let open Masc.Sse in
   let worker_count = 24 in
   let prefix = "count_linearized_" ^ string_of_int (Random.int 1_000_000) ^ "_" in
   let _noop _ = () in

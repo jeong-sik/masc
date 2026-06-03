@@ -514,7 +514,7 @@ clear_repo_local_config_for_explicit_base_path() {
 for env_name in \
     MASC_STORAGE_TYPE \
     MASC_KEEPER_BOOTSTRAP_ENABLED \
-    MASC_MCP_PORT \
+    MASC_PORT \
     MASC_HOST \
     MASC_BASE_PATH \
     MASC_SIDECAR_ROOT \
@@ -543,7 +543,7 @@ fi
 for env_name in \
     MASC_STORAGE_TYPE \
     MASC_KEEPER_BOOTSTRAP_ENABLED \
-    MASC_MCP_PORT \
+    MASC_PORT \
     MASC_HOST \
     MASC_BASE_PATH \
     MASC_SIDECAR_ROOT \
@@ -641,11 +641,11 @@ if [ -z "${MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM+x}" ]; then
 fi
 
 # Default arguments
-PORT="${MASC_MCP_PORT:-8935}"
+PORT="${MASC_PORT:-8935}"
 PORT_EXPLICIT=0
 PRINT_PORT_ONLY=0
 WORKTREE_PORT_HINT=""
-HTTP_MODE="${MASC_MCP_HTTP:-true}"
+HTTP_MODE="${MASC_HTTP:-true}"
 DEFAULT_BASE_PATH="$(default_base_path)"
 BASE_PATH="${MASC_BASE_PATH:-$DEFAULT_BASE_PATH}"
 SIDECAR_ROOT="${MASC_SIDECAR_ROOT:-}"
@@ -653,7 +653,7 @@ HOST="${MASC_HOST:-127.0.0.1}"
 # NOTE: Eio is now the default runtime (Lwt deprecated since 2026-01)
 EIO_MODE="true"
 
-if [ -n "${MASC_MCP_PORT:-}" ]; then
+if [ -n "${MASC_PORT:-}" ]; then
     PORT_EXPLICIT=1
 fi
 
@@ -725,7 +725,7 @@ fi
 if [ "$PORT_EXPLICIT" != "1" ]; then
     PORT="$(default_port_for_path "$SCRIPT_DIR")"
     if [ "$PORT" != "8935" ]; then
-        WORKTREE_PORT_HINT="Using worktree-derived default port $PORT for $(basename "$SCRIPT_DIR") (override with MASC_MCP_PORT or --port)."
+        WORKTREE_PORT_HINT="Using worktree-derived default port $PORT for $(basename "$SCRIPT_DIR") (override with MASC_PORT or --port)."
     fi
 fi
 
@@ -979,7 +979,7 @@ if [ "$HTTP_MODE" = "true" ]; then
         existing_cmd=$(ps -p "$existing_pid" -o comm= 2>/dev/null || echo "unknown")
         echo "Error: port $PORT already in use by PID $existing_pid ($existing_cmd)." >&2
         echo "  Kill it first:  kill $existing_pid" >&2
-        echo "  Or use another port:  MASC_MCP_PORT=8936 $0" >&2
+        echo "  Or use another port:  MASC_PORT=8936 $0" >&2
         exit 1
     fi
 fi

@@ -10,7 +10,7 @@ module Types = Masc_domain
     loop integration tests (which require Eio fibers + Workspace I/O). *)
 
 open Alcotest
-module HS = Masc_mcp.Keeper_heartbeat_smart
+module HS = Masc.Keeper_heartbeat_smart
 
 (* ── agent_status derivation from keeper_meta fields ─── *)
 
@@ -131,7 +131,7 @@ let test_decision_to_string_skip_idle () =
    returning true. These tests codify the correct mapping: Skip_busy
    debounces the broadcast but must NEVER skip the cycle itself. *)
 
-module KK = Masc_mcp.Keeper_keepalive
+module KK = Masc.Keeper_keepalive
 
 let test_cycle_continues_on_skip_busy () =
   check bool "Skip_busy cycle continues" true
@@ -202,7 +202,7 @@ let test_visibility_gate_preserves_busy () =
    concrete. Sibling of #10078 which closed the same hole for
    Skip_busy. *)
 
-module KKS = Masc_mcp.Keeper_keepalive_signal
+module KKS = Masc.Keeper_keepalive_signal
 
 let test_board_wakeup_selection_caps_generic_activity () =
   let selected, dropped =
@@ -324,19 +324,19 @@ let test_after_wake_emit_unchanged () =
    be registered (no dead series), accept a [keeper] label, and increment
    monotonically. *)
 
-module Prom = Masc_mcp.Prometheus
+module Prom = Masc.Prometheus
 
 let test_skip_idle_wake_resumed_metric_registered () =
   let labels = [ ("keeper", "test_keeper_a") ] in
   let before =
     Prom.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ()
+      Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ()
   in
   Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ();
+    Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ();
   let after =
     Prom.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ()
+      Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels ()
   in
   check (float 0.001) "counter increments by 1" 1.0 (after -. before)
 
@@ -348,15 +348,15 @@ let test_skip_idle_wake_resumed_label_isolation () =
   let lb = [ ("keeper", "test_keeper_iso_b") ] in
   let b_before =
     Prom.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:lb ()
+      Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:lb ()
   in
   Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:la ();
+    Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:la ();
   Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:la ();
+    Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:la ();
   let b_after =
     Prom.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:lb ()
+      Masc.Keeper_metrics.(to_string SkipIdleWakeResumed) ~labels:lb ()
   in
   check (float 0.001) "keeper_b counter unchanged" 0.0
     (b_after -. b_before)

@@ -1,6 +1,6 @@
 (** test_observability_redact — Contract tests for observability redaction. *)
 
-open Masc_mcp
+open Masc
 
 let test_api_key_redacted () =
   let input = {|{"api_key": "sk-proj-abc123xyz456def789ghi012jkl345"}|} in

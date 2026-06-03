@@ -11,7 +11,7 @@
     [unspecified] sentinel so rows stay queryable. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 module Oas = Agent_sdk
 

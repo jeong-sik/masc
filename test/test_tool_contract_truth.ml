@@ -1,8 +1,8 @@
 open Alcotest
 
-module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Config = Masc_mcp.Config
-module Workspace = Masc_mcp.Workspace
+module Mcp_eio = Masc.Mcp_server_eio
+module Config = Masc.Config
+module Workspace = Masc.Workspace
 
 let temp_dir () =
   let dir = Filename.temp_file "test_tool_contract_truth_" "" in

@@ -17,8 +17,8 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 ;;
 
-module Prom = Masc_mcp.Prometheus
-module Judge = Masc_mcp.Dashboard_governance_judge
+module Prom = Masc.Prometheus
+module Judge = Masc.Dashboard_governance_judge
 
 let metric_name = "masc_governance_response_model_empty_total"
 

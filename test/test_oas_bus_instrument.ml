@@ -13,7 +13,7 @@
 
 open Alcotest
 
-module I = Masc_mcp.Agent_sdk_metrics_bridge
+module I = Masc.Agent_sdk_metrics_bridge
 
 let mk_bus () = Agent_sdk.Event_bus.create ()
 
@@ -115,19 +115,19 @@ let test_publish_updates_counters () =
   run_eio (fun ~sw:_ ~env:_ ->
     let bus = mk_bus () in
     let before_total =
-      Masc_mcp.Prometheus.metric_value_or_zero "masc_oas_bus_publish_total" ()
+      Masc.Prometheus.metric_value_or_zero "masc_oas_bus_publish_total" ()
     in
     let before_block =
-      Masc_mcp.Prometheus.metric_value_or_zero
+      Masc.Prometheus.metric_value_or_zero
         "masc_oas_bus_publish_block_seconds_total" ()
     in
     I.publish bus (mk_custom_event "x");
     I.publish bus (mk_custom_event "y");
     let after_total =
-      Masc_mcp.Prometheus.metric_value_or_zero "masc_oas_bus_publish_total" ()
+      Masc.Prometheus.metric_value_or_zero "masc_oas_bus_publish_total" ()
     in
     let after_block =
-      Masc_mcp.Prometheus.metric_value_or_zero
+      Masc.Prometheus.metric_value_or_zero
         "masc_oas_bus_publish_block_seconds_total" ()
     in
     check bool "publish_total incremented by at least 2"

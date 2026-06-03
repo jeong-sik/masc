@@ -4,7 +4,7 @@
     and audit bookkeeping cannot be bypassed. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 open Workspace_types
 
 let temp_dir () =

@@ -11,8 +11,8 @@
                     [context_overflow] set so operators can
                     escalate). *)
 
-module EC = Masc_mcp.Keeper_context_runtime
-module Prom = Masc_mcp.Prometheus
+module EC = Masc.Keeper_context_runtime
+module Prom = Masc.Prometheus
 
 let counter_for ~keeper ~outcome =
   Prom.metric_value_or_zero

@@ -14,15 +14,15 @@
 #   --dry-run          Print what would happen, do not write
 #
 # Env:
-#   MASC_MCP_VERSION   Same as --version
-#   MASC_MCP_PREFIX    Same as --prefix
-#   MASC_MCP_REPO      Override repo (default: jeong-sik/masc)
+#   MASC_VERSION   Same as --version
+#   MASC_PREFIX    Same as --prefix
+#   MASC_REPO      Override repo (default: jeong-sik/masc)
 
 set -euo pipefail
 
-REPO="${MASC_MCP_REPO:-jeong-sik/masc}"
-VERSION="${MASC_MCP_VERSION:-}"
-PREFIX="${MASC_MCP_PREFIX:-$HOME/.local/bin}"
+REPO="${MASC_REPO:-jeong-sik/masc}"
+VERSION="${MASC_VERSION:-}"
+PREFIX="${MASC_PREFIX:-$HOME/.local/bin}"
 BASE_PATH=""
 SEED_CONFIG=1
 FORCE=0

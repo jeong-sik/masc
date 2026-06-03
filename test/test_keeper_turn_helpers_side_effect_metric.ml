@@ -1,7 +1,7 @@
 open Alcotest
 
-module Helpers = Masc_mcp.Keeper_turn_helpers
-module Prometheus = Masc_mcp.Prometheus
+module Helpers = Masc.Keeper_turn_helpers
+module Prometheus = Masc.Prometheus
 
 let test_side_effect_issue_increments_failure_metric () =
   let keeper_name = "side-effect-metric-keeper-0507" in
@@ -10,12 +10,12 @@ let test_side_effect_issue_increments_failure_metric () =
   in
   let before =
     Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
+      Masc.Keeper_metrics.(to_string DispatchEventFailures)
       ~labels
       ()
   in
   let config =
-    Masc_mcp.Workspace.default_config
+    Masc.Workspace.default_config
       (Filename.concat (Filename.get_temp_dir_name ())
          "masc-side-effect-metric-0507")
   in
@@ -26,7 +26,7 @@ let test_side_effect_issue_increments_failure_metric () =
     "test failure";
   let after =
     Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
+      Masc.Keeper_metrics.(to_string DispatchEventFailures)
       ~labels
       ()
   in

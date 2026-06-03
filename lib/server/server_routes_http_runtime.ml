@@ -94,7 +94,7 @@ let agent_card_json request =
   `Assoc
     [
       ("schema", `String "masc.agent_card.v1");
-      ("name", `String "MASC-MCP");
+      ("name", `String "MASC");
       ("description", `String "MASC multi-agent workspace MCP server");
       ("url", `String base_url);
       ("version", `String build.release_version);

@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let expected_invalid_timeout timeout_s =
   Invalid_argument

@@ -1,4 +1,4 @@
-(** Timeout policy SSOT for MASC-MCP.
+(** Timeout policy SSOT for MASC.
 
     Consolidates the layered wall-clock deadline matrix enumerated in
     https://github.com/jeong-sik/masc/issues/9639, and provides a typed

@@ -15,7 +15,7 @@ open Alcotest
 let jsonrpc_notification method_name =
   `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
 
-module Sse = Masc_mcp.Sse
+module Sse = Masc.Sse
 
 let run_domains_together count fn =
   let ready = Atomic.make 0 in
@@ -137,7 +137,7 @@ let test_register_uses_successful_commit_time_after_retry () =
         (Some (fun () ->
            if Atomic.compare_and_set forced_retry false true then begin
              ignore
-               (Masc_mcp.Lockfree_atomic.update_with_commit Sse.clients (fun state ->
+               (Masc.Lockfree_atomic.update_with_commit Sse.clients (fun state ->
                     {
                       next_state = { state with count = state.count };
                       result = ();
@@ -268,7 +268,7 @@ let test_buffer_event_timestamps_successful_commit_after_retry () =
         (Some (fun () ->
            if Atomic.compare_and_set forced_retry false true then begin
              ignore
-               (Masc_mcp.Lockfree_atomic.update_with_commit Sse.event_buffer (fun buffer ->
+               (Masc.Lockfree_atomic.update_with_commit Sse.event_buffer (fun buffer ->
                     {
                       next_state = List.map (fun item -> item) buffer;
                       result = ();

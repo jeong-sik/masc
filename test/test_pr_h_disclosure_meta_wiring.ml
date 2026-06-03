@@ -82,8 +82,8 @@ let test_disclosure_strategy_none_default_round_trips () =
      PR-G OAS bridge leaves the disclosure level unchanged
      (None → SDK default Full_schema, no builder mutation). *)
   let bridged =
-    Masc_mcp.Keeper_disclosure_strategy.to_oas_disclosure_level
-      Masc_mcp.Keeper_disclosure_strategy.Full
+    Masc.Keeper_disclosure_strategy.to_oas_disclosure_level
+      Masc.Keeper_disclosure_strategy.Full
   in
   (check bool)
     "Keeper_disclosure_strategy.Full maps to None (SDK default \

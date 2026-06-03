@@ -4,7 +4,7 @@
     filesystem backend, or any Eio context: key formatters, the
     [event_type] string mapping, and the [workspace_state] JSON round-trip. *)
 
-open Masc_mcp
+open Masc
 module CE = Workspace_eio
 
 let check_string label expected actual =

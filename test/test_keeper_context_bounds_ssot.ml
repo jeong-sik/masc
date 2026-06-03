@@ -7,7 +7,7 @@
    must thread both through [Keeper_config]; new code that builds
    context caps must do the same. *)
 
-module KC = Masc_mcp.Keeper_config
+module KC = Masc.Keeper_config
 
 let test_min_matches_64k () =
   Alcotest.(check int) "min keeper context tokens" 64_000

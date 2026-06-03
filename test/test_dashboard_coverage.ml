@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Dashboard = Masc_mcp.Dashboard
+module Dashboard = Masc.Dashboard
 
 (* ============================================================
    Constants Tests

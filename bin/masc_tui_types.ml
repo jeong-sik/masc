@@ -1,5 +1,5 @@
 [@@@warning "-32-69"]
-module Tui_decode = Masc_mcp.Tui_decode
+module Tui_decode = Masc.Tui_decode
 
 (** TUI shared types — split from masc_tui.ml (#3808) *)
 

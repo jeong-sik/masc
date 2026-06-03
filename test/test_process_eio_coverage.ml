@@ -1,6 +1,6 @@
 open Alcotest
 
-module M = Masc_mcp
+module M = Masc
 
 let contains haystack needle =
   let len_h = String.length haystack and len_n = String.length needle in

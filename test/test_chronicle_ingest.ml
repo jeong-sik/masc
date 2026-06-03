@@ -4,8 +4,8 @@
 
 open Alcotest
 
-module CI = Masc_mcp.Chronicle_ingest
-module CM = Masc_mcp.Chronicle_memory
+module CI = Masc.Chronicle_ingest
+module CM = Masc.Chronicle_memory
 
 (* --- parse_git_log tests --- *)
 

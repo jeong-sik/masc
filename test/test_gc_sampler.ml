@@ -1,6 +1,6 @@
 (** Gc_sampler smoke tests (PR-0.2.D).
 
-    Verifies that {!Masc_mcp.Gc_sampler.sample_once} writes the GC
+    Verifies that {!Masc.Gc_sampler.sample_once} writes the GC
     gauges, including [masc_memory_usage_bytes], so
     [Prometheus.metric_value_or_zero] returns
     non-zero values for the cumulative word counters after a single
@@ -11,8 +11,8 @@
 
 open Alcotest
 
-module Prometheus = Masc_mcp.Prometheus
-module Gc_sampler = Masc_mcp.Gc_sampler
+module Prometheus = Masc.Prometheus
+module Gc_sampler = Masc.Gc_sampler
 
 let metrics_to_check =
   [

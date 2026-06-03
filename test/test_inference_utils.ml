@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let test_elapsed_duration_ms_rounds_positive_sub_ms_to_one () =
   check int "positive sub-ms" 1 (Inference_utils.elapsed_duration_ms 0.0004)

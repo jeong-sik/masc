@@ -8,7 +8,7 @@
     - T1-D: [nofile_soft_limit_cache] 3-state variant gives one [Resolved]
             answer regardless of concurrent first-touches *)
 
-module FD = Masc_mcp.Keeper_fd_pressure
+module FD = Masc.Keeper_fd_pressure
 
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with

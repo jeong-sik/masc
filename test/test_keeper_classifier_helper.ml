@@ -1,7 +1,7 @@
 (** test_keeper_classifier_helper — coverage for the structured actionable
     signal classifier used for advisory world-state labels. *)
 
-open Masc_mcp
+open Masc
 module C = Keeper_contract_classifier
 
 let s = Alcotest.testable

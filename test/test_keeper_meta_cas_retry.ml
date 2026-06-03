@@ -8,7 +8,7 @@
         [is_version_conflict_error] *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 

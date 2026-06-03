@@ -21,7 +21,7 @@
        agents are skipped.
     5. {b evidence_of_metadata_gaps caps at 2} per section. *)
 
-module G = Masc_mcp.Briefing_gaps
+module G = Masc.Briefing_gaps
 
 let json_string s = `String s
 

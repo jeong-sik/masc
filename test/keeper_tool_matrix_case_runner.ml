@@ -47,8 +47,8 @@ let () =
   | Some schema ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      Masc_mcp.Mcp_server_eio.set_net (Eio.Stdenv.net env);
-      Masc_mcp.Mcp_server_eio.set_clock (Eio.Stdenv.clock env);
+      Masc.Mcp_server_eio.set_net (Eio.Stdenv.net env);
+      Masc.Mcp_server_eio.set_clock (Eio.Stdenv.clock env);
       let clock = Eio.Stdenv.clock env in
       let proc_mgr = Eio.Stdenv.process_mgr env in
       let fs = Eio.Stdenv.fs env in

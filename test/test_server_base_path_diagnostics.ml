@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let with_env name value f =
   let saved = Sys.getenv_opt name in

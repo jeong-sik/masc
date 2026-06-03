@@ -1,7 +1,7 @@
 open Alcotest
 
-module KTO = Masc_mcp.Keeper_tool_observation
-module KTP = Masc_mcp.Keeper_tool_progress
+module KTO = Masc.Keeper_tool_observation
+module KTP = Masc.Keeper_tool_progress
 
 let required_tool_call name input : Agent_sdk.Completion_contract.tool_call =
   { name; input; tool = None }
@@ -108,7 +108,7 @@ let test_required_tool_satisfaction_ignores_satisfying_tools_hint () =
 ;;
 
 let test_satisfying_tools_for_turn_computes_from_affordances () =
-  let module Surface = Masc_mcp.Keeper_agent_tool_surface in
+  let module Surface = Masc.Keeper_agent_tool_surface in
   let tools =
     Surface.satisfying_tools_for_turn
       ~turn_affordances:[ "board_post_or_comment" ]

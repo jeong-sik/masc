@@ -19,11 +19,11 @@
     3. Projection: [of_termination_code] is deterministic and total
        over [Keeper_turn_terminal_code.t]. *)
 
-module D = Masc_mcp.Keeper_turn_disposition
-module Code = Masc_mcp.Keeper_turn_terminal_code
-module Legacy = Masc_mcp.Keeper_turn_terminal
-module Registry = Masc_mcp.Keeper_registry
-module Unified_types = Masc_mcp.Keeper_unified_turn_types
+module D = Masc.Keeper_turn_disposition
+module Code = Masc.Keeper_turn_terminal_code
+module Legacy = Masc.Keeper_turn_terminal
+module Registry = Masc.Keeper_registry
+module Unified_types = Masc.Keeper_unified_turn_types
 
 (* ===== Byte-compat oracle ====================================== *)
 (* For every legacy wire code, build the corresponding disposition,

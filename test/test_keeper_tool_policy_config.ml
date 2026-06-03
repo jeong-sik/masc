@@ -1,6 +1,6 @@
 open Alcotest
 
-module KTPC = Masc_mcp.Keeper_tool_policy_config
+module KTPC = Masc.Keeper_tool_policy_config
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in

@@ -5,8 +5,8 @@
     each test that exercises concurrent access. *)
 
 open Alcotest
-module PLD = Masc_mcp.Keeper_passive_loop_detector
-module P = Masc_mcp.Prometheus
+module PLD = Masc.Keeper_passive_loop_detector
+module P = Masc.Prometheus
 
 (* ── Helpers ──────────────────────────────────────────────────────── *)
 
@@ -39,8 +39,8 @@ let test_claim_context_increments_streak () =
     (PLD.current_streak ~keeper_name:"k1")
 
 let test_terminal_reason_maps_required_tool_failures () =
-  let module D = Masc_mcp.Keeper_turn_disposition in
-  let module Code = Masc_mcp.Keeper_turn_terminal_code in
+  let module D = Masc.Keeper_turn_disposition in
+  let module Code = Masc.Keeper_turn_terminal_code in
   check (option string) "no tool call maps to detector class"
     (Some "required_tool_no_call")
     (PLD.progress_class_of_disposition D.Required_tool_use_no_tool_call);
@@ -60,12 +60,12 @@ let test_required_tool_no_call_fires_metric_at_three () =
   in
   let before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
+      Masc.Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
       ~labels ()
   in
   let zombie_before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
+      Masc.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
       ~labels:[("keeper_name", "k-required-no-call")]
       ()
   in
@@ -77,7 +77,7 @@ let test_required_tool_no_call_fires_metric_at_three () =
     (PLD.current_streak ~keeper_name:"k-required-no-call");
   check (float 0.001) "no metric before threshold" before
     (P.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
+       Masc.Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
        ~labels ());
   PLD.record_turn ~keeper_name:"k-required-no-call"
     ~progress_class:"required_tool_no_call";
@@ -86,12 +86,12 @@ let test_required_tool_no_call_fires_metric_at_three () =
   check (float 0.001) "required-tool metric increments once"
     (before +. 1.0)
     (P.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
+       Masc.Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
        ~labels ());
   check (float 0.001) "Observe zombie-loop metric increments once"
     (zombie_before +. 1.0)
     (P.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
+       Masc.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
        ~labels:[("keeper_name", "k-required-no-call")]
        ())
 
@@ -148,12 +148,12 @@ let test_detection_fires_metric_at_threshold () =
   (* Default threshold is 5. Fire exactly 5 passive turns and check metric. *)
   let before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
+      Masc.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
       ~labels:[("keeper", "k-metric")] ()
   in
   let zombie_before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
+      Masc.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
       ~labels:[("keeper_name", "k-metric")] ()
   in
   for _ = 1 to 5 do
@@ -161,12 +161,12 @@ let test_detection_fires_metric_at_threshold () =
   done;
   let after =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
+      Masc.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
       ~labels:[("keeper", "k-metric")] ()
   in
   let zombie_after =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
+      Masc.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
       ~labels:[("keeper_name", "k-metric")] ()
   in
   check bool "metric incremented at threshold" true (after > before);
@@ -178,12 +178,12 @@ let test_detection_latch_does_not_double_fire () =
   setup ();
   let before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
+      Masc.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
       ~labels:[("keeper", "k-latch")] ()
   in
   let zombie_before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
+      Masc.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
       ~labels:[("keeper_name", "k-latch")] ()
   in
   (* Fire well above threshold — latch should prevent repeated increments *)
@@ -192,7 +192,7 @@ let test_detection_latch_does_not_double_fire () =
   done;
   let after =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
+      Masc.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
       ~labels:[("keeper", "k-latch")] ()
   in
   check (float 0.001) "latch: counter increments exactly once per episode"
@@ -201,7 +201,7 @@ let test_detection_latch_does_not_double_fire () =
     "latch: Observe zombie-loop counter increments exactly once per episode"
     (zombie_before +. 1.0)
     (P.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
+       Masc.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
        ~labels:[("keeper_name", "k-latch")] ())
 
 let test_reset_clears_state () =
@@ -296,7 +296,7 @@ let test_nudge_message_contains_streak_count () =
 
 (* ── record_turn_effect tests (task-555) ──────────────────────────── *)
 
-module TD = Masc_mcp.Keeper_tool_progress
+module TD = Masc.Keeper_tool_progress
 
 let test_turn_effect_streak_increment () =
   Eio_main.run @@ fun _env ->

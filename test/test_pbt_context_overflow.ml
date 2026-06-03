@@ -26,9 +26,9 @@
       not call OAS repair_dangling_tool_calls, which fabricates synthetic
       ToolResult messages for dangling tool uses. *)
 
-module UT = Masc_mcp.Keeper_unified_turn
-module EC = Masc_mcp.Keeper_error_classify
-module KC = Masc_mcp.Keeper_context_core
+module UT = Masc.Keeper_unified_turn
+module EC = Masc.Keeper_error_classify
+module KC = Masc.Keeper_context_core
 
 (* ── Generators ──────────────────────────────────────────── *)
 

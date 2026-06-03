@@ -21,13 +21,13 @@
 
 open Alcotest
 
-module Workspace = Masc_mcp.Workspace
-module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
-module Keeper_meta_store = Masc_mcp.Keeper_meta_store
-module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
-module KR = Masc_mcp.Keeper_runtime
-module KT = Masc_mcp.Keeper_types
-module Reg = Masc_mcp.Keeper_registry
+module Workspace = Masc.Workspace
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module KR = Masc.Keeper_runtime
+module KT = Masc.Keeper_types
+module Reg = Masc.Keeper_registry
 
 let rec rm_rf path =
   if Sys.file_exists path then

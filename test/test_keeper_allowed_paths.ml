@@ -1,8 +1,8 @@
 open Alcotest
 
-module KAP = Masc_mcp.Keeper_alerting_path
-module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
-module KTU = Masc_mcp.Keeper_turn_up_args
+module KAP = Masc.Keeper_alerting_path
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module KTU = Masc.Keeper_turn_up_args
 
 let make_meta ?(allowed_paths = []) ~name () =
   let json =

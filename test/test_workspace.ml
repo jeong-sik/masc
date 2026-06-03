@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** Tests for Workspace module *)
 
-open Masc_mcp
+open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 

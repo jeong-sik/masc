@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let fixture_cases repo_root =
   Filename.concat repo_root "benchmark/tool_call_quality_cases.json"

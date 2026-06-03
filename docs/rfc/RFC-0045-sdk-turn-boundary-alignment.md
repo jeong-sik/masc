@@ -18,21 +18,21 @@ Production keeper crashed with an `Assert_failure` from
 [2026-05-08 20:58:22] [ERROR] [Misc] oas_worker oas-primary: execution exception:
 File "lib/keeper/keeper_registry.ml", line 775, characters 7-13: Assertion failed
 Backtrace:
-  Masc_mcp__Keeper_registry.validate_turn_phase_transition
-  Masc_mcp__Keeper_fsm_guard_runtime.wrap_unit
-  Masc_mcp__Keeper_registry.set_turn_runtime_state
-  Masc_mcp__Keeper_registry.update_current_turn
-  Masc_mcp__Keeper_registry.update_entry.loop
-  Masc_mcp__Keeper_registry.set_turn_runtime_state
-  Masc_mcp__Keeper_run_tools.prepare_agent_setup.(fun)
-  Masc_mcp__Memory_hooks.compose_before_turn_params.(fun)
+  Masc__Keeper_registry.validate_turn_phase_transition
+  Masc__Keeper_fsm_guard_runtime.wrap_unit
+  Masc__Keeper_registry.set_turn_runtime_state
+  Masc__Keeper_registry.update_current_turn
+  Masc__Keeper_registry.update_entry.loop
+  Masc__Keeper_registry.set_turn_runtime_state
+  Masc__Keeper_run_tools.prepare_agent_setup.(fun)
+  Masc__Memory_hooks.compose_before_turn_params.(fun)
   Agent_sdk_base__Hooks.invoke_validated
   ...
   Agent_sdk__Pipeline.run_turn
   Agent_sdk__Agent.run_turn_core
   Agent_sdk__Agent.run_loop.(fun).loop          ← multi-turn boundary
   ...
-  Masc_mcp__Oas_worker_exec.run
+  Masc__Oas_worker_exec.run
 
 [2026-05-08 20:58:52] [INFO] [Keeper] executor: auto-resume blocked;
     runtime retired_tool_profile is unhealthy

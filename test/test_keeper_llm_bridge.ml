@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let contains_substring text needle =
   let text_len = String.length text in

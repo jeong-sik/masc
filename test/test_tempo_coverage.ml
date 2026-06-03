@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Tempo = Masc_mcp.Tempo
+module Tempo = Masc.Tempo
 module Types = Masc_domain
 
 (* ============================================================

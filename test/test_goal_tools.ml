@@ -3,7 +3,7 @@ module Types = Masc_domain
 (** Goal tool coverage — shared Goal Store surface through Tool_workspace. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 open Workspace_types
 open Tool_workspace
 

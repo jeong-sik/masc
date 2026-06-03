@@ -1,7 +1,7 @@
 open Alcotest
 
-module D = Masc_mcp.Keeper_deliberation
-module Keeper_types = Masc_mcp.Keeper_types
+module D = Masc.Keeper_deliberation
+module Keeper_types = Masc.Keeper_types
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.deliberation.md")
@@ -21,7 +21,7 @@ let repo_root () =
 let () =
   let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
-  Masc_mcp.Prompt_defaults.init ()
+  Masc.Prompt_defaults.init ()
 
 (* ---------- Triage tests ---------- *)
 

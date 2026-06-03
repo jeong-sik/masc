@@ -5,11 +5,11 @@
 
 open Alcotest
 
-module Config = Masc_mcp.Config
-module Auth = Masc_mcp.Auth
+module Config = Masc.Config
+module Auth = Masc.Auth
 module Tool_catalog = Tool_catalog
-module Tool_help_registry = Masc_mcp.Tool_help_registry
-module Tool_shard = Masc_mcp.Tool_shard
+module Tool_help_registry = Masc.Tool_help_registry
+module Tool_shard = Masc.Tool_shard
 module Types = Masc_domain
 
 let dummy_schema name : Masc_domain.tool_schema =

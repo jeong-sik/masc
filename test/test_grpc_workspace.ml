@@ -6,7 +6,7 @@
     Wire format: protobuf binary (not JSON). Tests verify roundtrip
     serialization/deserialization via of_bytes/to_bytes. *)
 
-module T = Masc_mcp.Masc_grpc_types
+module T = Masc.Masc_grpc_types
 
 let malformed_protobuf = "\x0a\x05ab"
 
@@ -161,7 +161,7 @@ let test_subscribe_request_roundtrip () =
       ; since_seq = 100L
       }
   in
-  let bytes = Masc_mcp.Masc_grpc_types.SubscribeRequest_serde.to_bytes req in
+  let bytes = Masc.Masc_grpc_types.SubscribeRequest_serde.to_bytes req in
   let decoded = T.SubscribeRequest.of_bytes bytes in
   Alcotest.(check string) "agent_name" "test" decoded.agent_name;
   Alcotest.(check (list string)) "event_types" [ "message"; "task" ] decoded.event_types;
@@ -262,13 +262,13 @@ let test_service_name () =
   Alcotest.(check string)
     "service name"
     "masc.workspace.v1.MascWorkspace"
-    Masc_mcp.Masc_grpc_service.service_name
+    Masc.Masc_grpc_service.service_name
 ;;
 
 (* ====== gRPC server config tests ====== *)
 
 let test_grpc_default_port () =
-  Alcotest.(check int) "default port" 8936 Masc_mcp.Masc_grpc_server.default_port
+  Alcotest.(check int) "default port" 8936 Masc.Masc_grpc_server.default_port
 ;;
 
 let test_grpc_stream_max_buffer_default () =
@@ -286,7 +286,7 @@ let test_grpc_stream_max_buffer_default () =
        Alcotest.(check int)
          "default is 48"
          48
-         (Masc_mcp.Masc_grpc_service.stream_max_buffer ()))
+         (Masc.Masc_grpc_service.stream_max_buffer ()))
 ;;
 
 let test_grpc_stream_max_buffer_env_override () =
@@ -302,7 +302,7 @@ let test_grpc_stream_max_buffer_env_override () =
        Alcotest.(check int)
          "env override applied"
          12
-         (Masc_mcp.Masc_grpc_service.stream_max_buffer ()))
+         (Masc.Masc_grpc_service.stream_max_buffer ()))
 ;;
 
 let test_grpc_default_on_enablement () =
@@ -311,15 +311,15 @@ let test_grpc_default_on_enablement () =
   (match was_set with
    | Some _ -> Unix.putenv "MASC_GRPC_ENABLED" ""
    | None -> ());
-  let result = Masc_mcp.Masc_grpc_server.is_enabled () in
+  let result = Masc.Masc_grpc_server.is_enabled () in
   Alcotest.(check bool) "enabled by default" true result;
   (* Verify explicit enable still works. *)
   Unix.putenv "MASC_GRPC_ENABLED" "1";
-  let enabled = Masc_mcp.Masc_grpc_server.is_enabled () in
+  let enabled = Masc.Masc_grpc_server.is_enabled () in
   Alcotest.(check bool) "enabled via env" true enabled;
   (* Verify explicit disable still works. *)
   Unix.putenv "MASC_GRPC_ENABLED" "0";
-  let disabled = Masc_mcp.Masc_grpc_server.is_enabled () in
+  let disabled = Masc.Masc_grpc_server.is_enabled () in
   Alcotest.(check bool) "disabled via env" false disabled;
   (* Restore *)
   match was_set with
@@ -342,8 +342,8 @@ let test_grpc_server_registers_health_service () =
        with_temp_dir "masc-grpc-health" (fun dir ->
          let workspace_config = Workspace_utils.default_config dir in
          let server =
-           Masc_mcp.Masc_grpc_server.create_server
-             ~port:Masc_mcp.Masc_grpc_server.default_port
+           Masc.Masc_grpc_server.create_server
+             ~port:Masc.Masc_grpc_server.default_port
              ~workspace_config
              ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
              ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
@@ -353,7 +353,7 @@ let test_grpc_server_registers_health_service () =
          Alcotest.(check bool)
            "workspace service registered"
            true
-           (List.mem Masc_mcp.Masc_grpc_service.service_name services);
+           (List.mem Masc.Masc_grpc_service.service_name services);
          Alcotest.(check bool)
            "reflection v1 service registered"
            true
@@ -374,16 +374,16 @@ let test_get_status_projects_backlog_tasks () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_temp_dir "masc-grpc-status" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
-    ignore (Masc_mcp.Workspace.init workspace_config ~agent_name:(Some "alpha"));
+    ignore (Masc.Workspace.init workspace_config ~agent_name:(Some "alpha"));
     ignore
-      (Masc_mcp.Workspace.add_task
+      (Masc.Workspace.add_task
          workspace_config
          ~title:"Fix stale projection"
          ~priority:1
          ~description:"Use backlog SSOT for gRPC status");
-    ignore (Masc_mcp.Workspace.claim_next workspace_config ~agent_name:"alpha");
+    ignore (Masc.Workspace.claim_next workspace_config ~agent_name:"alpha");
     let service =
-      Masc_mcp.Masc_grpc_service.create_service
+      Masc.Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
         ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
@@ -498,7 +498,7 @@ let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
   with_temp_dir "masc-grpc-invalid-tool-call" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
     let service =
-      Masc_mcp.Masc_grpc_service.create_service
+      Masc.Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
         ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
@@ -522,7 +522,7 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
   with_temp_dir "masc-grpc-invalid-subscribe" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
     let service =
-      Masc_mcp.Masc_grpc_service.create_service
+      Masc.Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
         ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
@@ -549,7 +549,7 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
   with_temp_dir "masc-grpc-invalid-heartbeat" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
     let service =
-      Masc_mcp.Masc_grpc_service.create_service
+      Masc.Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
         ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->

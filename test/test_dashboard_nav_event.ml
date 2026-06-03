@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let parse_ok json_str =
   match Dashboard_nav_event.parse_event_json (Yojson.Safe.from_string json_str) with

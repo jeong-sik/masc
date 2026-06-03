@@ -12,7 +12,7 @@
     assertions below — which still pin the wire label values — are the
     correct regression coverage for the swap-over. *)
 
-open Masc_mcp
+open Masc
 
 let counter_value ~event_family ~event_kind =
   Prometheus.metric_value_or_zero

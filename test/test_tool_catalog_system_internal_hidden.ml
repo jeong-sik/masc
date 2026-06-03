@@ -17,7 +17,7 @@ open Alcotest
 
 module Tool_catalog = Tool_catalog
 module Tool_catalog_surfaces = Tool_catalog_surfaces
-module TP = Masc_mcp.Mcp_server_eio_tool_profile
+module TP = Masc.Mcp_server_eio_tool_profile
 
 let system_internal_hidden = Tool_catalog_surfaces.system_internal_hidden
 
@@ -27,7 +27,7 @@ let system_internal_hidden = Tool_catalog_surfaces.system_internal_hidden
 let dual_status_tool = "masc_get_metrics"
 
 let full_profile_tool_names () =
-  let state = Masc_mcp.Mcp_server.create_state ~base_path:"/tmp/masc-surface-cut-test" in
+  let state = Masc.Mcp_server.create_state ~base_path:"/tmp/masc-surface-cut-test" in
   TP.tool_schemas_for_profile state TP.Full
   |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
 

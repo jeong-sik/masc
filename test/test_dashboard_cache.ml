@@ -3,7 +3,7 @@
     These tests run inside [Eio_main.run] so that [Eio.Mutex] and
     [Eio.Condition] are fully operational. *)
 
-open Masc_mcp
+open Masc
 
 module Dashboard_projection_cache = Dashboard_projection_cache
 

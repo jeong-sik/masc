@@ -4,7 +4,7 @@
     [keeper_runtime.ml] is covered indirectly via build-time exhaustive
     match on [record_outcome]. *)
 
-module R = Masc_mcp.Keeper_reconcile_state
+module R = Masc.Keeper_reconcile_state
 
 let setup_test () = R.reset_all_for_test ()
 

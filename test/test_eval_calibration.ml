@@ -5,8 +5,8 @@
     Dated_jsonl mutex safety. *)
 
 open Alcotest
-module Cal = Masc_mcp.Eval_calibration
-module AR = Masc_mcp.Anti_rationalization
+module Cal = Masc.Eval_calibration
+module AR = Masc.Anti_rationalization
 
 let test_counter = ref 0
 
@@ -308,7 +308,7 @@ let test_calibration_stats_cross_model_mix () =
     make_result ~runtime:"verifier" ~gen_runtime:"verifier" () in
   let cross_a =
     make_result ~runtime:"verifier"
-      ~gen_runtime:(Masc_mcp.Keeper_config.default_runtime_id ()) () in
+      ~gen_runtime:(Masc.Keeper_config.default_runtime_id ()) () in
   let cross_b =
     make_result ~runtime:"cross_verifier" ~gen_runtime:"local_only" () in
   let no_generator = make_result ~runtime:"verifier" () in

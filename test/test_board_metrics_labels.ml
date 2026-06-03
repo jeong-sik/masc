@@ -11,9 +11,9 @@
    string hooks passed, so this test fails if any future variant change
    drifts a Prometheus label. *)
 
-module BPH = Masc_mcp.Board_prometheus_hooks
-module BMH = Masc_mcp.Board_metrics_hooks
-module BCC = Masc_mcp.Board_core_classify
+module BPH = Masc.Board_prometheus_hooks
+module BMH = Masc.Board_metrics_hooks
+module BCC = Masc.Board_core_classify
 module RDR = Read_drop_reason
 
 let check_label name expected actual =

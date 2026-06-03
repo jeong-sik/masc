@@ -1,6 +1,6 @@
 (** Tests for Model_inference_metrics — per-model aggregate inference stats. *)
 
-module M = Masc_mcp.Model_inference_metrics
+module M = Masc.Model_inference_metrics
 
 open Alcotest
 

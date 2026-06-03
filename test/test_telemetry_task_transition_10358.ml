@@ -1,6 +1,6 @@
 (** Regression coverage for #10358 task lifecycle telemetry attrition. *)
 
-open Masc_mcp
+open Masc
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in

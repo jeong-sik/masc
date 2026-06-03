@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 open Test_operator_control_support
 
 let test_confirm_rejects_expired_token () =

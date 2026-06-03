@@ -17,8 +17,8 @@
       code with production, so a priority-order regression in production is
       caught here. *)
 
-module R = Masc_mcp.Keeper_execution_receipt
-module Tr = Masc_mcp.Keeper_terminal_reason
+module R = Masc.Keeper_execution_receipt
+module Tr = Masc.Keeper_terminal_reason
 
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
@@ -176,9 +176,9 @@ let frozen_operator_disposition (receipt : R.t)
     in
     let generic_claim_context_progress =
       List.exists
-        Masc_mcp.Keeper_tool_progress.is_claim_context_tool_name
+        Masc.Keeper_tool_progress.is_claim_context_tool_name
         (List.map
-           Masc_mcp.Keeper_tool_resolution.canonical_tool_name
+           Masc.Keeper_tool_resolution.canonical_tool_name
            used_tool_names)
     in
     let ok_followup_progress =
@@ -188,7 +188,7 @@ let frozen_operator_disposition (receipt : R.t)
       && generic_claim_context_progress
     in
     let tool_gate_unsatisfied =
-      receipt.tool_surface.tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required
+      receipt.tool_surface.tool_requirement = Masc.Keeper_agent_tool_surface.Required
       && (List.mem
             receipt.tool_contract_result
             [ R.Contract_violated
@@ -248,9 +248,9 @@ let frozen_operator_disposition (receipt : R.t)
 (* ------------------------------------------------------------------ *)
 
 let base_tool_surface : R.tool_surface =
-  { turn_lane = Masc_mcp.Keeper_agent_tool_surface.Lane_tool_required
-  ; tool_surface_class = Masc_mcp.Keeper_agent_tool_surface.Surface_public_only
-  ; tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required
+  { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_required
+  ; tool_surface_class = Masc.Keeper_agent_tool_surface.Surface_public_only
+  ; tool_requirement = Masc.Keeper_agent_tool_surface.Required
   ; visible_tool_count = 3
   ; tool_gate_enabled = true
   ; tool_surface_fallback_used = false
@@ -281,9 +281,9 @@ let base_receipt : R.t =
   ; tools_used = []
   ; tool_contract_result = R.Contract_unknown
   ; tool_surface = base_tool_surface
-  ; sandbox_kind = Masc_mcp.Keeper_types_profile_sandbox.Local
+  ; sandbox_kind = Masc.Keeper_types_profile_sandbox.Local
   ; sandbox_root = None
-  ; network_mode = Masc_mcp.Keeper_types_profile_sandbox.Network_none
+  ; network_mode = Masc.Keeper_types_profile_sandbox.Network_none
   ; approval_profile = None
   ; approval_profile_derived = false
   ; runtime_id = "runtime-1"

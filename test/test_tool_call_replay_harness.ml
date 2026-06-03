@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 open Alcotest
 
 let source_root () =

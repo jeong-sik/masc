@@ -1,7 +1,7 @@
 (** Unit tests for Intentional_projection (RFC-0035 PR-2,
     Master Report Dim01 #6). *)
 
-open Masc_mcp.Intentional_projection
+open Masc.Intentional_projection
 
 let approx_eq a b = Float.abs (a -. b) <= 0.0001
 

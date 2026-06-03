@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let test_resolve_commit_prefers_env () =
   let probe_called = ref false in

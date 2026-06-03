@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let test_elapsed_duration_ms_rounds_positive_sub_ms_to_one () =
   check int "positive sub-ms interval" 1

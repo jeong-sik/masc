@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 module Types = Masc_domain
 

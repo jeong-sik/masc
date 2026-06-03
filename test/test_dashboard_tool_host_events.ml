@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir () =
   let dir = Filename.temp_file "test_dashboard_tool_host_events_" "" in

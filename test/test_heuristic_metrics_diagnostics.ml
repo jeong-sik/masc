@@ -4,7 +4,7 @@
    Related: #7718 reopen (instrumentation theatre regression — 51 records
    all [("post_tool_use_failure", 1.0, 0.0, true)]). *)
 
-open Masc_mcp
+open Masc
 module D = Heuristic_metrics_diagnostics
 
 let fail msg = failwith msg

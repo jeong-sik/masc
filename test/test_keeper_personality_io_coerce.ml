@@ -1,7 +1,7 @@
 (** Tests for [Keeper_personality_io.coerce] — samchon harness commit 2. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let p_eq =
   testable

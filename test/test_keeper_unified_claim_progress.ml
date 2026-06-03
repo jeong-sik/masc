@@ -1,7 +1,7 @@
 open Alcotest
 
-module KAR = Masc_mcp.Keeper_agent_run
-module KTP = Masc_mcp.Keeper_tool_progress
+module KAR = Masc.Keeper_agent_run
+module KTP = Masc.Keeper_tool_progress
 
 let test_claim_tool_classification_covers_supported_claim_tools () =
   check
@@ -37,7 +37,7 @@ let test_claim_contract_result_counts_initial_claim_as_execution () =
       ~missing_visible_required:[]
       ~had_owned_active_task_at_turn_start
       ~actual_keeper_tool_names:tools
-    |> Masc_mcp.Keeper_execution_receipt.tool_contract_result_to_string
+    |> Masc.Keeper_execution_receipt.tool_contract_result_to_string
   in
   check
     string

@@ -1,7 +1,7 @@
 (** Per-call OAS telemetry collector backing the [/oas/telemetry] dashboard.
 
     Layer 4 collector for {b I1 Telemetry pipeline} (#11924, Phase 1, Track T1)
-    of the [Meta] MASC-MCP × OAS root improvement plan (#11923).
+    of the [Meta] MASC × OAS root improvement plan (#11923).
 
     Per-call signals are recorded so the dashboard can derive TTFB
     distribution, throughput, cost, cache-hit ratio, and the bimodal

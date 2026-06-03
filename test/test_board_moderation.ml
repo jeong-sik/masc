@@ -12,7 +12,7 @@
 *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 module BM = Board_moderation
 
 external unsetenv : string -> unit = "masc_test_unsetenv"

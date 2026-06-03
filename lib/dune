@@ -1,6 +1,6 @@
 (include_subdirs unqualified)
 (library
- (name masc_mcp)
+ (name masc)
  (public_name masc)
  (foreign_stubs
   (language c)
@@ -405,7 +405,7 @@
    ;; masc namespace. Unblocks Wave A keeper/server godfile extractions
    ;; (PR-1+) by removing the parent ↔ sub-lib cycle on `Trajectory.X`.
    ;; (wrapped false) preserves the bare `Trajectory` identifier; only
-   ;; wrapped-pattern callers (Masc_mcp.Trajectory.X in tests) drop prefix.
+   ;; wrapped-pattern callers (Masc.Trajectory.X in tests) drop prefix.
    masc.trajectory
    ;; RFC-0056 Phase 1B — Keeper_skill_routing leaf utility extracted to
    ;; lib/keeper_skill_routing/. 215 LoC, only stdlib + masc_core deps.

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Lsp = Masc_mcp.Server_ide_lsp_proxy.For_testing
+module Lsp = Masc.Server_ide_lsp_proxy.For_testing
 
 let member key = function
   | `Assoc fields -> List.assoc_opt key fields

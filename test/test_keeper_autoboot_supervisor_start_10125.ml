@@ -24,7 +24,7 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module R = Masc_mcp.Keeper_runtime
+module R = Masc.Keeper_runtime
 
 (* Fresh base_path: the running predicate must say [false]
    so [start_supervisor_sweep] can take the "actually start

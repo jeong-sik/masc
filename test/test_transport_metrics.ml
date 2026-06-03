@@ -3,8 +3,8 @@
 
 open Alcotest
 
-module TM = Masc_mcp.Transport_metrics
-module Prometheus = Masc_mcp.Prometheus
+module TM = Masc.Transport_metrics
+module Prometheus = Masc.Prometheus
 module U = Yojson.Safe.Util
 
 let temp_dir () =
@@ -233,14 +233,14 @@ let test_ws_enabled_blank_env_matches_runtime () =
     check bool "transport metrics treats blank as enabled" true
       (TM.ws_enabled ());
     check bool "runtime server treats blank as enabled" true
-      (Masc_mcp.Server_ws_standalone.is_enabled ()))
+      (Masc.Server_ws_standalone.is_enabled ()))
 
 let test_ws_enabled_normalized_env_matches_runtime () =
   with_env "MASC_WS_ENABLED" (Some " FALSE ") (fun () ->
     check bool "transport metrics normalizes false env" false
       (TM.ws_enabled ());
     check bool "runtime server normalizes false env" false
-      (Masc_mcp.Server_ws_standalone.is_enabled ()))
+      (Masc.Server_ws_standalone.is_enabled ()))
 
 let test_ws_runtime_listening_cache () =
   TM.set_ws_runtime_listening true;
@@ -315,18 +315,18 @@ let test_agent_stale_counter () =
 let test_transport_health_json () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  ignore (Masc_mcp.Sse.close_all_clients ());
+  ignore (Masc.Sse.close_all_clients ());
   let base_dir = temp_dir () in
-  let config = Masc_mcp.Workspace.default_config base_dir in
-  ignore (Masc_mcp.Workspace.init config ~agent_name:(Some "tester"));
+  let config = Masc.Workspace.default_config base_dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
   ignore
-    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer "observer-session"
+    (Masc.Sse.register ~kind:Masc.Sse.Observer "observer-session"
        ~last_event_id:0);
   ignore
-    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Agent_stream "agent_stream-session"
+    (Masc.Sse.register ~kind:Masc.Sse.Agent_stream "agent_stream-session"
        ~last_event_id:0);
   ignore
-    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Presence "presence-session"
+    (Masc.Sse.register ~kind:Masc.Sse.Presence "presence-session"
        ~last_event_id:0);
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
@@ -339,7 +339,7 @@ let test_transport_health_json () =
     ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
   Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
-  Prometheus.inc_counter Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+  Prometheus.inc_counter Masc.Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();
   let hello_latency_sum_before =
     Prometheus.metric_total Prometheus.metric_ws_dashboard_hello_latency_seconds
@@ -349,7 +349,7 @@ let test_transport_health_json () =
       (Prometheus.metric_ws_dashboard_hello_latency_seconds ^ "_count")
   in
   TM.observe_ws_dashboard_hello_latency ~success:true 0.125;
-  Masc_mcp.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
+  Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   let json = TM.transport_health_json ~config in
   let sse_json = json |> U.member "sse" in
   let streamable_json = json |> U.member "streamable_http" in
@@ -482,7 +482,7 @@ let test_transport_health_json () =
       | `Int i -> float_of_int i
       | _ -> 0.0)
      >= hello_latency_sum_before +. 0.125);
-  ignore (Masc_mcp.Sse.close_all_clients ());
+  ignore (Masc.Sse.close_all_clients ());
   cleanup_dir base_dir
 
 (* ============================================================

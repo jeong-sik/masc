@@ -18,8 +18,8 @@
 
 open Alcotest
 
-module Base = Masc_mcp.Tool_shard_types_schemas_base
-module Board = Masc_mcp.Tool_shard_types_schemas_board
+module Base = Masc.Tool_shard_types_schemas_base
+module Board = Masc.Tool_shard_types_schemas_board
 
 let find_tool_schema schemas name =
   List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name) schemas

@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let write_file path contents =
   Fs_compat.mkdir_p (Filename.dirname path);

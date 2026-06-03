@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
 

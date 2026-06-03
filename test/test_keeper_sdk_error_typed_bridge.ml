@@ -14,9 +14,9 @@
     - all 7 top-level non-Agent / non-Api wrappers (Mcp / Config /
       Serialization / Io / Orchestration / A2a / Internal) *)
 
-module AE = Masc_mcp.Keeper_agent_error
-module Code = Masc_mcp.Keeper_turn_terminal_code
-module EC = Masc_mcp.Keeper_error_classify
+module AE = Masc.Keeper_agent_error
+module Code = Masc.Keeper_turn_terminal_code
+module EC = Masc.Keeper_error_classify
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
 module Http = Llm_provider.Http_client

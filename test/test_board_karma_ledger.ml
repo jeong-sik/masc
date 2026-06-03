@@ -5,7 +5,7 @@
     auditability via {!Board.build_karma_ledger}, and the
     rebuild/replay consistency invariant. *)
 
-open Masc_mcp
+open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()

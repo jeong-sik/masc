@@ -9,8 +9,8 @@
 
 open Alcotest
 
-module Handover_eio = Masc_mcp.Handover_eio
-module Prometheus = Masc_mcp.Prometheus
+module Handover_eio = Masc.Handover_eio
+module Prometheus = Masc.Prometheus
 
 let persistence_surface = "handover_eio"
 

@@ -161,8 +161,8 @@ filter down to a self-contained block in the scrape output.
 ### One-shot
 
 ```bash
-TOKEN="$MASC_MCP_TOKEN"   # bearer token; see ~/.zshenv / keychain
-PORT="${MASC_MCP_PORT:-8935}"
+TOKEN="$MASC_TOKEN"   # bearer token; see ~/.zshenv / keychain
+PORT="${MASC_PORT:-8935}"
 curl -fsS -H "Authorization: Bearer $TOKEN" \
   "http://127.0.0.1:$PORT/metrics" \
   | grep -E '^masc_auth_(bare_alias|archive)'
@@ -194,8 +194,8 @@ Regression signature — any of:
 "dashboard" without any UI layer:
 
 ```bash
-watch -n 5 'curl -fsS -H "Authorization: Bearer $MASC_MCP_TOKEN" \
-  "http://127.0.0.1:${MASC_MCP_PORT:-8935}/metrics" \
+watch -n 5 'curl -fsS -H "Authorization: Bearer $MASC_TOKEN" \
+  "http://127.0.0.1:${MASC_PORT:-8935}/metrics" \
   | grep -E "^masc_auth_(bare_alias|archive)" \
   | column -t'
 ```

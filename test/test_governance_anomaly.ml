@@ -1,7 +1,7 @@
 (** Tests for Governance_anomaly — behavioral baseline & deviation detection. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let agent_id = "test-agent"
 

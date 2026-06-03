@@ -1,7 +1,7 @@
 (** Tests for Client_identity module *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 open Types_core
 
 let identity_for ?session_key agent_name =

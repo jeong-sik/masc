@@ -9,10 +9,10 @@
 open Alcotest
 
 let classify =
-  Masc_mcp.Worker_dev_tools.classify_destructive
+  Masc.Worker_dev_tools.classify_destructive
 
 let class_to_string =
-  Masc_mcp.Worker_dev_tools.destructive_class_to_string
+  Masc.Worker_dev_tools.destructive_class_to_string
 
 let class_name_of_cmd cmd =
   match classify cmd with
@@ -20,7 +20,7 @@ let class_name_of_cmd cmd =
   | None -> "no_match"
 
 let test_all_patterns_classify () =
-  let patterns = Masc_mcp.Eval_gate.destructive_patterns in
+  let patterns = Masc.Eval_gate.destructive_patterns in
   List.iter (fun (pat, desc) ->
     match classify pat with
     | Some _ -> ()
@@ -46,7 +46,7 @@ let test_no_match_for_benign () =
   check string "ls benign" "no_match" (class_name_of_cmd "ls -la")
 
 let test_class_names_stable () =
-  let open Masc_mcp.Worker_dev_tools in
+  let open Masc.Worker_dev_tools in
   check string "recursive_delete" "recursive_delete"
     (destructive_class_to_string Recursive_delete);
   check string "forced_git_mutation" "forced_git_mutation"
@@ -56,7 +56,7 @@ let test_class_names_stable () =
 
 let test_coverage_count () =
   (* Plan Phase 5 cites 19 destructive patterns. *)
-  let patterns = Masc_mcp.Eval_gate.destructive_patterns in
+  let patterns = Masc.Eval_gate.destructive_patterns in
   check int "19 destructive patterns" 19 (List.length patterns)
 
 let () =

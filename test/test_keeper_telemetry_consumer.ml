@@ -18,7 +18,7 @@
     a yield; PR #14499 restored cooperative behaviour; RFC-0063 §7-D
     classifies this style of harness as "partial coverage, low cost". *)
 
-module KTC = Masc_mcp.Keeper_telemetry_consumer
+module KTC = Masc.Keeper_telemetry_consumer
 
 let target_iters = 5
 let inter_sleep_s = 0.02

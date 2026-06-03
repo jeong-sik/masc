@@ -1,10 +1,10 @@
 open Alcotest
 
-module TL = Masc_mcp.Keeper_toml_loader
-module KTP = Masc_mcp.Keeper_types_profile
-module KPA = Masc_mcp.Keeper_persona_authoring
-module KEP = Masc_mcp.Keeper_tool_persona_runtime
-module Runtime = Masc_mcp.Server_routes_http_runtime
+module TL = Masc.Keeper_toml_loader
+module KTP = Masc.Keeper_types_profile
+module KPA = Masc.Keeper_persona_authoring
+module KEP = Masc.Keeper_tool_persona_runtime
+module Runtime = Masc.Server_routes_http_runtime
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -900,7 +900,7 @@ let test_persona_resolver_omits_unspecified_tool_access () =
 }
 |};
   match
-    Masc_mcp.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
+    Masc.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
       (`Assoc [ ("persona_name", `String "probe") ])
   with
   | Error e -> fail ("resolver failed: " ^ e)
@@ -1031,7 +1031,7 @@ let test_persona_resolver_rejects_non_public_social_model_arg () =
 }
 |};
   match
-    Masc_mcp.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
+    Masc.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1058,7 +1058,7 @@ let test_persona_resolver_preserves_autoboot_enabled_arg () =
 }
 |};
   match
-    Masc_mcp.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
+    Masc.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1087,11 +1087,11 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
 }
 |};
   let expected_tool_access =
-    Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+    Masc.Keeper_meta_tool_access.tool_access_to_json
       ([ "masc_status" ])
   in
   match
-    Masc_mcp.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
+    Masc.Keeper_tool_persona_runtime.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1225,10 +1225,10 @@ let test_persona_authoring_social_model_choices_follow_variant_ssot () =
     |> List.map Yojson.Safe.Util.to_string
   in
   check (list string) "persona schema social_model choices"
-    Masc_mcp.Keeper_social_model.valid_model_id_strings
+    Masc.Keeper_social_model.valid_model_id_strings
     choices;
   check (list string) "profile parser social_model choices"
-    Masc_mcp.Keeper_social_model.valid_model_id_strings
+    Masc.Keeper_social_model.valid_model_id_strings
     KTP.valid_social_model_strings
 
 let test_persona_authoring_allowed_keeper_fields_follow_catalog () =
@@ -1586,8 +1586,8 @@ typo_field = 42
 |};
   close_out oc;
   let unknown_metric () =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_config_unknown_keys_ignored
+    Masc.Prometheus.metric_value_or_zero
+      Masc.Prometheus.metric_config_unknown_keys_ignored
       ~labels:[("file_path", tmp)]
       ()
   in
@@ -1655,8 +1655,8 @@ base = "base.toml"
 legacy_scope = "removed"
 |};
   let unknown_metric () =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_config_unknown_keys_ignored
+    Masc.Prometheus.metric_value_or_zero
+      Masc.Prometheus.metric_config_unknown_keys_ignored
       ~labels:[("file_path", Filename.concat keepers_dir "alpha.toml")]
       ()
   in

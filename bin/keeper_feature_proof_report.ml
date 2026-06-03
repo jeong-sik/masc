@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let usage =
   {|Usage: masc-keeper-feature-proof [OPTIONS]

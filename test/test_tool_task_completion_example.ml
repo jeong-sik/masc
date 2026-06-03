@@ -6,7 +6,7 @@
     now always embed [completion_notes_example] so small-LLM keepers
     see the expected density. See #8688. *)
 
-module TT = Masc_mcp.Tool_task
+module TT = Masc.Tool_task
 
 let contains needle haystack =
   let nlen = String.length needle in

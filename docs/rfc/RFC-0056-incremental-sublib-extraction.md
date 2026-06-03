@@ -67,7 +67,7 @@ A directory `lib/<X>/` may be promoted to a wrapped sub-library if and only if a
 | **G2: No `.mli` change** | Public interfaces of moved modules remain byte-identical. Phase 0 may not narrow or widen any signature. | `git diff --stat lib/**/<X>*.mli == 0` |
 | **G3: No caller rename** | Callers of moved modules continue to write `Foo` (not `Bar.Foo`). Achieved via `(wrapped false)` on the new library. | `git diff lib/ test/ bin/` shows no `open` / module-prefix changes outside the moved files |
 | **G4: Build green on `@check`** | `dune build @check` succeeds locally and on CI Fundamental. | CI status |
-| **G5: Caller delta budget** | Number of files outside the candidate directory that change is bounded. The only allowed caller change in Phase 0 is **redundant-qualifier removal of moved modules** — when a caller previously wrote `Masc_mcp.X` it must rewrite to `X`, because `X` no longer lives inside the wrapped `masc` library. Anything beyond `s/Masc_mcp\.<Module>/<Module>/g` (signature changes, `open` additions, semantic accommodations) violates G5 and means the candidate is not a leaf. Phase 1+ may state larger budgets per-PR with explicit justification. | `git diff` outside `lib/<X>/` shows only the qualifier-removal pattern |
+| **G5: Caller delta budget** | Number of files outside the candidate directory that change is bounded. The only allowed caller change in Phase 0 is **redundant-qualifier removal of moved modules** — when a caller previously wrote `Masc.X` it must rewrite to `X`, because `X` no longer lives inside the wrapped `masc` library. Anything beyond `s/Masc\.<Module>/<Module>/g` (signature changes, `open` additions, semantic accommodations) violates G5 and means the candidate is not a leaf. Phase 1+ may state larger budgets per-PR with explicit justification. | `git diff` outside `lib/<X>/` shows only the qualifier-removal pattern |
 
 Failure of any gate → reject. No "WORKAROUND:" override path; reject means the candidate is not yet a leaf.
 
@@ -134,7 +134,7 @@ Add `masc.cdal` to the existing `(libraries ...)` list.
 
 Add `(re_export masc.cdal)` mirroring the existing `(re_export masc.cdal_runtime)` line — so test modules referencing `Cdal_types`, `Adversarial_eval`, `Labeling` keep resolving.
 
-**Caller delta after PoC build:** 9 files (1 in `bin/`, 8 in `test/`), each a single-line `s/Masc_mcp\.Cdal_types/Cdal_types/g` or `s/Masc_mcp\.Labeling/Labeling/g` — the qualifier-removal pattern G5 explicitly permits. The 11 callers that already wrote unprefixed `Cdal_types` / `Adversarial_eval` / `Labeling` (the unwrapped-import style) needed no change. `tool_deep_review.ml` (`Adversarial_eval` consumer) was unchanged. `lib/dune` adds one library to its deps; `test/deps/dune` adds one `re_export`; `bin/dune` adds the new sub-library to `cdal_label`'s deps so its qualifier removal still resolves.
+**Caller delta after PoC build:** 9 files (1 in `bin/`, 8 in `test/`), each a single-line `s/Masc\.Cdal_types/Cdal_types/g` or `s/Masc\.Labeling/Labeling/g` — the qualifier-removal pattern G5 explicitly permits. The 11 callers that already wrote unprefixed `Cdal_types` / `Adversarial_eval` / `Labeling` (the unwrapped-import style) needed no change. `tool_deep_review.ml` (`Adversarial_eval` consumer) was unchanged. `lib/dune` adds one library to its deps; `test/deps/dune` adds one `re_export`; `bin/dune` adds the new sub-library to `cdal_label`'s deps so its qualifier removal still resolves.
 
 ### 3.4 Phase 1+ (out of this RFC's scope)
 
@@ -148,7 +148,7 @@ After Phase 0 passes the gate on `main`, future RFCs propose extractions in prio
 | `dune runtest` for `test/test_cdal_*` | unchanged pass count | TBD on CI |
 | Number of dune files modified outside `lib/cdal/` | 3 (`lib/dune`, `bin/dune`, `test/deps/dune`) | 3 |
 | Number of `.ml` / `.mli` semantic changes (non-rename) | 0 | 0 |
-| Number of `Masc_mcp\.<Moved>` qualifier removals | 9 (allowed by G5) | 9 (8 tests + 1 bin) |
+| Number of `Masc\.<Moved>` qualifier removals | 9 (allowed by G5) | 9 (8 tests + 1 bin) |
 | Number of `open` additions in callers | 0 | 0 |
 
 Failure of any of these → Phase 0 rejected, RFC body amended with the actual cycle and re-submitted.
@@ -157,7 +157,7 @@ Failure of any of these → Phase 0 rejected, RFC body amended with the actual c
 
 Two findings the gate surfaced that audit-only analysis missed:
 
-1. **`Masc_mcp.Cdal_types` access pattern (9 callers).** Pre-PoC fan-in measurement counted unprefixed references only. The wrapped-library access pattern `Masc_mcp.<Module>` is invisible to a `\b<Module>\b` grep. The `dune build` failure forced their enumeration: `bin/cdal_label.ml` plus `test/test_{labeling, cdal_types, cdal_eval_v1, cdal_friction_projection, cdal_judge, cdal_verdict_gate, operator_control_actions}.ml`. **Lesson for future extraction audits**: grep both bare and `Masc_mcp.` patterns.
+1. **`Masc.Cdal_types` access pattern (9 callers).** Pre-PoC fan-in measurement counted unprefixed references only. The wrapped-library access pattern `Masc.<Module>` is invisible to a `\b<Module>\b` grep. The `dune build` failure forced their enumeration: `bin/cdal_label.ml` plus `test/test_{labeling, cdal_types, cdal_eval_v1, cdal_friction_projection, cdal_judge, cdal_verdict_gate, operator_control_actions}.ml`. **Lesson for future extraction audits**: grep both bare and `Masc.` patterns.
 
 2. **`String_util` ambiguity in `lib/`.** Two files exist (`lib/exec/string_util.ml` inside wrapped `masc_exec`, `lib/core/string_util.ml` inside wrapped-false `masc_core`). The latter wins for unprefixed callers. PoC dependency declaration only needed `masc_core`, not `masc_exec`. **Lesson**: when a moved module references a top-level identifier, the dep is the wrapped-false sub-library that exports it, not every sub-library that contains a same-named file.
 

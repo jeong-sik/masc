@@ -14,8 +14,8 @@
 
 open Alcotest
 
-module KP = Masc_mcp.Keeper_prompt
-module KSBP = Masc_mcp.Keeper_state_block_prompt
+module KP = Masc.Keeper_prompt
+module KSBP = Masc.Keeper_state_block_prompt
 
 (* Local substring check to avoid a dep on a specific [String_util] surface
    from this leaf test.  Linear scan is fine for the small fixtures here. *)

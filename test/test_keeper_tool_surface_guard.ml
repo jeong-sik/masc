@@ -1,7 +1,7 @@
 open Alcotest
-module KTO = Masc_mcp.Keeper_tool_observation
-module Resolution = Masc_mcp.Keeper_tool_resolution
-module Surface = Masc_mcp.Keeper_agent_tool_surface
+module KTO = Masc.Keeper_tool_observation
+module Resolution = Masc.Keeper_tool_resolution
+module Surface = Masc.Keeper_agent_tool_surface
 
 let test_unexpected_tool_names_accepts_keeper_surface () =
   check

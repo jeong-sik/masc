@@ -6,8 +6,8 @@
     rejections with no wire-level rewrite. Each active category now
     carries an explicit Good:/Bad: example; this test locks that in. *)
 
-module Shell = Masc_mcp.Keeper_tool_command_runtime
-module Worker = Masc_mcp.Worker_dev_tools
+module Shell = Masc.Keeper_tool_command_runtime
+module Worker = Masc.Worker_dev_tools
 
 let contains needle haystack =
   let nlen = String.length needle in
@@ -48,7 +48,7 @@ let test_unknown_category_falls_back () =
 
 let tool_suggestion_of_diagnosis = function
   | None -> None
-  | Some diagnosis -> diagnosis.Masc_mcp.Exec_core.tool_suggestion
+  | Some diagnosis -> diagnosis.Masc.Exec_core.tool_suggestion
 
 let test_block_reason_diagnoses_use_public_tool_suggestions () =
   Alcotest.(check (option string))

@@ -5,7 +5,7 @@
     Config_dir_resolver locates via [_build/] proximity) and yields
     non-empty bodies. *)
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in

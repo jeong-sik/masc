@@ -1,7 +1,7 @@
 module Types = Masc_domain
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir () =
   let dir = Filename.temp_file "test_workspace_state_recovery_" "" in

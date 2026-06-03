@@ -6,7 +6,7 @@
       [Authorization]/internal-keeper headers via:
       1. [MASC_INTERNAL_MCP_TOKEN] env + keeper-name when a
          [Agent_internal] surface tool is requested, OR
-      2. [MASC_MCP_TOKEN] env, falling back to the per-keeper raw
+      2. [MASC_TOKEN] env, falling back to the per-keeper raw
          token at [<base_path>/.masc/auth/<agent_name>.token]
          (Phase A F1: CLI-spawned subprocesses without parent env).
       Returns [None] when the tools aren't runtime-MCP-eligible, or
@@ -75,8 +75,8 @@ let runtime_mcp_policy_of_tool_names
           :: ("x-masc-keeper-name", keeper_name)
           :: agent_header
         | _ ->
-          let env_token = Mcp_policy_helpers.first_nonempty_env [ "MASC_MCP_TOKEN" ] in
-          (* Phase A F1: when MASC_MCP_TOKEN is unset, fall back to the
+          let env_token = Mcp_policy_helpers.first_nonempty_env [ "MASC_TOKEN" ] in
+          (* Phase A F1: when MASC_TOKEN is unset, fall back to the
              per-keeper raw token at <base_path>/.masc/auth/<agent_name>.token.
              This wires CLI-spawned subprocesses that callback to masc tools
              but do not inherit the parent process env. *)
@@ -93,7 +93,7 @@ let runtime_mcp_policy_of_tool_names
             | None, Some raw ->
               Ok { Auth_resolve.raw; source = Auth_resolve.Per_keeper_token_file }
             | None, None ->
-              Error (Auth_resolve.Api_key_env_unset { var_name = "MASC_MCP_TOKEN" })
+              Error (Auth_resolve.Api_key_env_unset { var_name = "MASC_TOKEN" })
           in
           Auth_resolve.emit_resolution_trace
             ~runtime:"runtime_mcp_policy"

@@ -1,13 +1,13 @@
 (** Tests for the autonomy liberation refactoring (Phases 2-5). *)
 
-module Keeper_tool_surfaces = Masc_mcp.Keeper_tool_surfaces
-module Keeper_deliberation = Masc_mcp.Keeper_deliberation
-module Prometheus = Masc_mcp.Prometheus
+module Keeper_tool_surfaces = Masc.Keeper_tool_surfaces
+module Keeper_deliberation = Masc.Keeper_deliberation
+module Prometheus = Masc.Prometheus
 
-(* New modules may not be visible via Masc_mcp wrapper in large libraries
+(* New modules may not be visible via Masc wrapper in large libraries
    due to dune's incremental wrapper compilation. Use internal names. *)
-module Team_context = Masc_mcp__Team_context
-module Prompt_composer = Masc_mcp__Prompt_composer
+module Team_context = Masc__Team_context
+module Prompt_composer = Masc__Prompt_composer
 
 (** Substring search helper. *)
 let contains_s haystack needle =

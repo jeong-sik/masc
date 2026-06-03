@@ -4,7 +4,7 @@
    and preserves every other row — including near-misses that differ
    in any single field. *)
 
-module HM = Masc_mcp.Heuristic_metrics
+module HM = Masc.Heuristic_metrics
 
 let make_row ~site ~raw ~threshold ~triggered =
   Printf.sprintf

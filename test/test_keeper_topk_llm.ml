@@ -5,7 +5,7 @@
 
     @since 2.255.0 — PR-4: TopK_llm activation *)
 
-open Masc_mcp
+open Masc
 
 (* ── Helpers ─────────────────────────────────────────────── *)
 

@@ -1,7 +1,7 @@
 (** Tests for Tool_token — private type, mint validation, dispatch integration. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ================================================================ *)
 (* Helpers                                                           *)

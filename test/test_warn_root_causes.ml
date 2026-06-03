@@ -4,7 +4,7 @@
     2. Atomic agent JSON writes: no empty-file race condition *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ── Helpers ──────────────────────────────────────────────────── *)
 

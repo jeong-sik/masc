@@ -239,7 +239,7 @@ let cluster_name () =
     Defined here (above [masc_http_base_url]) so the constant is in scope
     before first use. *)
 let http_base_url_env_key = "MASC_HTTP_BASE_URL"
-let mcp_url_env_key = "MASC_MCP_URL"
+let mcp_url_env_key = "MASC_URL"
 
 let rec masc_http_base_url () =
   match masc_http_base_url_result () with

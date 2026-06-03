@@ -8,23 +8,23 @@
     [Keeper_sandbox_read_backend] — proof that control reached the docker
     route. *)
 
-module Workspace = Masc_mcp.Workspace
-module Keeper_meta_contract = Masc_mcp.Keeper_meta_contract
-module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
-module Keeper_meta_tool_access = Masc_mcp.Keeper_meta_tool_access
-module Keeper_tool_command_runtime = Masc_mcp.Keeper_tool_command_runtime
-module Keeper_tool_dispatch_runtime = Masc_mcp.Keeper_tool_dispatch_runtime
-module Keeper_registry = Masc_mcp.Keeper_registry
-module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_sandbox_exec_failure = Masc_mcp.Keeper_sandbox_exec_failure
-module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
-module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
-module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
-module Keeper_tool_execute_command_semantics = Masc_mcp.Keeper_tool_execute_command_semantics
-module Keeper_tool_execute_command_words = Masc_mcp.Keeper_tool_execute_command_words
-module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
+module Workspace = Masc.Workspace
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
+module Keeper_meta_tool_access = Masc.Keeper_meta_tool_access
+module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
+module Keeper_tool_dispatch_runtime = Masc.Keeper_tool_dispatch_runtime
+module Keeper_registry = Masc.Keeper_registry
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_sandbox_exec_failure = Masc.Keeper_sandbox_exec_failure
+module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
+module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
+module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
+module Keeper_tool_execute_command_semantics = Masc.Keeper_tool_execute_command_semantics
+module Keeper_tool_execute_command_words = Masc.Keeper_tool_execute_command_words
+module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
+module Keeper_types = Masc.Keeper_types
+module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
@@ -259,13 +259,13 @@ let with_tool_policy_config f =
   let config_dir = Filename.concat project_root "config" in
   let reset () =
     Config_dir_resolver.reset ();
-    Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ()
+    Masc.Keeper_tool_policy.reset_policy_config_for_test ()
   in
   reset ();
   with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
   reset ();
   Fun.protect ~finally:reset @@ fun () ->
-  match Masc_mcp.Keeper_tool_policy.init_policy_config ~base_path:project_root with
+  match Masc.Keeper_tool_policy.init_policy_config ~base_path:project_root with
   | Ok () -> f ()
   | Error msg -> Alcotest.failf "init_policy_config failed: %s" msg
 
@@ -1242,7 +1242,7 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
       Filename.concat (Filename.concat config.Workspace.base_path Common.masc_dirname) "config"
     in
     let container_config_dir =
-      Masc_mcp.Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+      Masc.Keeper_sandbox_runtime.container_masc_config_dir ~container_root
     in
     Alcotest.(check bool) "MASC config mounted read-only" true
       (contains_substring
@@ -1286,7 +1286,7 @@ let run_docker_shell_command ~config ~(meta : Keeper_meta_contract.keeper_meta) 
   (match Sys.getenv_opt "MASC_TEST_FAKE_DOCKER_PATH" with
    | Some expected ->
        Alcotest.(check string) "fake docker command selected" expected
-         (Masc_mcp.Keeper_sandbox_runtime.docker_command ())
+         (Masc.Keeper_sandbox_runtime.docker_command ())
    | None -> ());
   match
     Keeper_sandbox_docker.run_docker_shell_command_with_status

@@ -5,7 +5,7 @@
     previous_state carried across turns by BDI speech v1 cannot grow
     monotonically when speech_act=Stay_silent preserves state. *)
 
-module T = Masc_mcp.Keeper_social_model_types
+module T = Masc.Keeper_social_model_types
 
 let long n = String.make n 'x'
 

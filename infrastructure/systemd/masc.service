@@ -30,7 +30,7 @@ WorkingDirectory=/opt/masc
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Environment=MASC_BASE_PATH=/var/lib/masc
 Environment=MASC_CONFIG_DIR=/opt/masc/config
-Environment=MASC_MCP_PORT=8080
+Environment=MASC_PORT=8080
 Environment=MASC_SHUTDOWN_CLEANUP_TIMEOUT=10
 Environment=MASC_SHUTDOWN_FORCE_TIMEOUT=60
 

@@ -14,7 +14,7 @@
    and the reconcile change-detector cannot disagree by construction. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 module KMC = Keeper_meta_contract
 
 (* ---- temp config-dir + keeper TOML fixtures

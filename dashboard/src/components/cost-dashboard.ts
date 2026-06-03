@@ -36,7 +36,7 @@ import {
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
-import { formatCost, formatPct1 } from '../lib/format-number'
+import { formatCost, formatPct1, formatTokens } from '../lib/format-number'
 import { unixSecondsToDate } from '../lib/format-time'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import { replaceRoute, route } from '../router'
@@ -293,6 +293,8 @@ const modelTotals = computed(() => {
   let totalCost = 0
   let totalIn = 0
   let totalOut = 0
+  let totalCache = 0
+  let totalReasoning = 0
   let p50Sum = 0
   let p50Count = 0
   let p95Max = 0
@@ -300,6 +302,8 @@ const modelTotals = computed(() => {
     totalCost += m.total_cost_usd ?? 0
     totalIn += m.total_input_tokens ?? 0
     totalOut += m.total_output_tokens ?? 0
+    totalCache += m.total_cache_read_tokens ?? 0
+    totalReasoning += m.total_reasoning_tokens ?? 0
     if (m.p50_latency_ms != null) {
       p50Sum += m.p50_latency_ms
       p50Count += 1
@@ -307,7 +311,9 @@ const modelTotals = computed(() => {
     if (m.p95_latency_ms != null && m.p95_latency_ms > p95Max) p95Max = m.p95_latency_ms
   }
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
-  return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length }
+  const cacheRatio = totalIn > 0 ? totalCache / totalIn : null
+  const reasoningRatio = totalOut > 0 ? totalReasoning / totalOut : null
+  return { totalCost, totalIn, totalOut, totalCache, totalReasoning, cacheRatio, reasoningRatio, p50Avg, p95Max, count: data.length }
 })
 
 const keeperTotals = computed(() => {
@@ -338,6 +344,31 @@ function ThRight({ children }: { children: unknown }) {
   return html`<th scope="col" class="px-2 py-1.5 text-right">${children}</th>`
 }
 
+function cacheRatioColor(ratio: number | null): string {
+  if (ratio == null) return ''
+  if (ratio >= 0.8) return 'text-[var(--color-status-ok)]'
+  if (ratio >= 0.5) return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--color-status-err)]'
+}
+
+function reasoningRatioColor(ratio: number | null): string {
+  if (ratio == null) return ''
+  if (ratio >= 0.5) return 'text-[var(--color-status-warn)]'
+  return ''
+}
+
+function coverageBadgeClass(status: string | null | undefined): string {
+  if (status === 'full') return 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'
+  if (status === 'partial') return 'bg-[var(--color-status-warn)]/15 text-[var(--color-status-warn)]'
+  return 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]'
+}
+
+function usageTrustBadge(trust: string | null | undefined): { label: string; cls: string } {
+  if (trust === 'trusted') return { label: 'trusted', cls: 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]' }
+  if (trust === 'untrusted') return { label: 'untrusted', cls: 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]' }
+  return { label: 'missing', cls: 'bg-[var(--color-bg-surface)] text-text-muted' }
+}
+
 function ModelRow({
   model, maxCost, maxP95,
 }: {
@@ -348,11 +379,24 @@ function ModelRow({
   const cost = model.total_cost_usd ?? 0
   const inTok = model.total_input_tokens ?? 0
   const outTok = model.total_output_tokens ?? 0
+  const cacheRead = model.total_cache_read_tokens ?? null
+  const reasoning = model.total_reasoning_tokens ?? null
+  const thinkingFrac = model.thinking_fraction ?? null
+  const coverage = model.coverage_status ?? null
   const p50 = model.p50_latency_ms ?? null
   const p95 = model.p95_latency_ms ?? null
   const costPct = maxCost > 0 ? (cost / maxCost) * 100 : 0
   const p95Pct = maxP95 > 0 && p95 != null ? (p95 / maxP95) * 100 : 0
   const overBudget = p95 != null && p95 > 8000
+
+  const cacheRatio = inTok > 0 && cacheRead != null ? cacheRead / inTok : null
+  const reasoningRatio = outTok > 0 && reasoning != null ? reasoning / outTok : null
+
+  // Derive latest usage_trust from recent_entries
+  const latestTrust = model.recent_entries?.length
+    ? (model.recent_entries[model.recent_entries.length - 1]?.usage_trust ?? null)
+    : null
+  const trustBadge = usageTrustBadge(latestTrust)
 
   return html`
     <tr class="border-b border-[var(--color-border-default)]/40 align-baseline">
@@ -361,6 +405,15 @@ function ModelRow({
       </th>
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(inTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(outTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${cacheRatioColor(cacheRatio)}">
+        ${cacheRatio != null ? formatPct1(cacheRatio) : html`<span class="text-text-disabled">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${reasoningRatioColor(reasoningRatio)}">
+        ${reasoning != null ? html`${formatTokens(reasoning)}${reasoningRatio != null ? html` <span class="text-text-muted">(${formatPct1(reasoningRatio)})</span>` : ''}` : html`<span class="text-text-disabled">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">
+        ${thinkingFrac != null ? formatPct1(thinkingFrac) : html`<span class="text-text-disabled">—</span>`}
+      </td>
       <td class="px-2 py-1.5 text-right font-mono text-xs text-[var(--color-accent-fg)]">
         ${formatCost(cost)}
       </td>
@@ -382,6 +435,14 @@ function ModelRow({
             style=${`width: ${p95Pct.toFixed(1)}%`}
           ></div>
         </div>
+      </td>
+      <td class="px-2 py-1.5 text-center">
+        ${coverage != null
+          ? html`<span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${coverageBadgeClass(coverage)}">${coverage}</span>`
+          : html`<span class="text-text-disabled text-2xs">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-center">
+        <span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${trustBadge.cls}">${trustBadge.label}</span>
       </td>
     </tr>
   `
@@ -1222,7 +1283,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
         />
 
         ${t ? html`
-          <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div class="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-6">
             <${StatTile}
               label="Total Cost"
               value=${formatCost(t.totalCost)}
@@ -1233,6 +1294,17 @@ function CostDashboardContent({ view }: { view: CostView }) {
               label="Tokens In / Out"
               value=${`${formatCostTokens(t.totalIn)} / ${formatCostTokens(t.totalOut)}`}
               delta=${{ direction: 'flat', text: 'aggregated window' }}
+            />
+            <${StatTile}
+              label="Cache Hit Ratio"
+              value=${mode === 'model' && modelTotals.value?.cacheRatio != null ? formatPct1(modelTotals.value.cacheRatio) : '—'}
+              status=${mode === 'model' && modelTotals.value?.cacheRatio != null ? (modelTotals.value.cacheRatio >= 0.8 ? 'ok' : modelTotals.value.cacheRatio >= 0.5 ? 'warn' : 'crit') : undefined}
+              delta=${{ direction: 'flat', text: mode === 'model' && modelTotals.value ? `${formatTokens(modelTotals.value.totalCache)} cached` : 'keeper view' }}
+            />
+            <${StatTile}
+              label="Reasoning Ratio"
+              value=${mode === 'model' && modelTotals.value?.reasoningRatio != null ? formatPct1(modelTotals.value.reasoningRatio) : '—'}
+              delta=${{ direction: 'flat', text: mode === 'model' && modelTotals.value ? `${formatTokens(modelTotals.value.totalReasoning)} total` : 'keeper view' }}
             />
             <${StatTile}
               label="p50 Latency (avg)"
@@ -1275,11 +1347,20 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   <th scope="col" class="px-2 py-1.5 text-left">${mode === 'model' ? 'runtime' : 'keeper'}</th>
                   <${ThRight}>in tok</${ThRight}>
                   <${ThRight}>out tok</${ThRight}>
+                  ${mode === 'model' ? html`
+                    <${ThRight}>cache%</${ThRight}>
+                    <${ThRight}>reason</${ThRight}>
+                    <${ThRight}>think%</${ThRight}>
+                  ` : null}
                   <${ThRight}>$ cost</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">cost</th>
                   <${ThRight}>p50</${ThRight}>
                   <${ThRight}>p95</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">p95 trend</th>
+                  ${mode === 'model' ? html`
+                    <${ThRight}>coverage</${ThRight}>
+                    <${ThRight}>trust</${ThRight}>
+                  ` : null}
                   ${mode === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">runtime cost</th>` : null}
                 </tr>
               </thead>

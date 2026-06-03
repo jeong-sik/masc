@@ -2,7 +2,6 @@ open Alcotest
 module KTO = Masc_mcp.Keeper_tool_observation
 module Resolution = Masc_mcp.Keeper_tool_resolution
 module Surface = Masc_mcp.Keeper_agent_tool_surface
-module KTS = Masc_mcp.Keeper_tool_selection
 
 let test_unexpected_tool_names_accepts_keeper_surface () =
   check
@@ -40,8 +39,8 @@ let test_unexpected_tool_names_accepts_public_alias_surface () =
     "public alias accepts internal handler"
     []
     (KTO.unexpected_tool_names
-       ~allowed_tool_names:[ "Execute"; "Read"; "masc_board_post" ]
-       ~tool_names:[ "tool_execute"; "tool_read_file"; "keeper_board_post" ])
+       ~allowed_tool_names:[ "Execute"; "Read" ]
+       ~tool_names:[ "tool_execute"; "tool_read_file" ])
 ;;
 
 let test_final_keeper_tool_names_accepts_public_alias_surface () =
@@ -61,7 +60,7 @@ let test_public_alias_guidance_blocks_internal_bash () =
     "internal bash guidance"
     (Some
        "tool_execute is an internal keeper implementation tool name, not a \
-        model-facing tool. Use Execute instead.")
+        schema-visible tool. Use Execute instead.")
     (Resolution.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "Execute"; "Read" ]
        "tool_execute")
@@ -81,7 +80,7 @@ let test_public_alias_guidance_prefers_visible_edit_alias () =
   let expected =
     Some
       "tool_edit_file is an internal keeper implementation tool name, not a \
-       model-facing tool. Use Edit instead."
+       schema-visible tool. Use Edit instead."
   in
   check
     (option string)
@@ -98,7 +97,7 @@ let test_public_alias_guidance_reports_alias_not_visible () =
     "alias not visible"
     (Some
        "tool_execute is an internal keeper implementation tool name, not a \
-        model-facing tool. No public alias for it is visible in this turn; do \
+        schema-visible tool. No public alias for it is visible in this turn; do \
         not invent internal tool names. Wait for a visible tool or report the \
         blocker. Public alias: Execute.")
     (Resolution.public_alias_guidance_for_internal_call
@@ -150,153 +149,6 @@ let test_has_valid_tool_call_false_when_empty () =
     "empty tool list returns false"
     false
     (KTO.has_valid_tool_call ~unexpected_tool_names:[] ~tool_names:[])
-;;
-
-(* --- contract_enforcement_filter tests --- *)
-
-(* Use real canonical tool names. Passive_status tools must have
-   Tool_catalog.effect_domain = Some Read_only so classify_tool_progress
-   classifies them through catalog-backed capabilities. *)
-
-let passive_tool = "keeper_tasks_list"
-let passive_tool_alt = "keeper_context_status"
-let execution_tool = "keeper_task_claim"
-let completion_tool = "keeper_stay_silent"
-let claim_tool = "masc_claim_next"
-let mixed_tools = [ passive_tool; execution_tool; completion_tool; claim_tool ]
-
-(* Streak below threshold: no filtering regardless of signal. *)
-let test_contract_filter_below_threshold () =
-  check
-    (list string)
-    "all tools preserved"
-    mixed_tools
-    (KTS.contract_enforcement_filter
-       ~passive_streak:2
-       ~streak_threshold:3
-       ~actionable_signal:true
-       mixed_tools)
-;;
-
-(* At threshold but no actionable signal: no filtering. *)
-let test_contract_filter_no_signal () =
-  check
-    (list string)
-    "all tools preserved"
-    mixed_tools
-    (KTS.contract_enforcement_filter
-       ~passive_streak:5
-       ~streak_threshold:3
-       ~actionable_signal:false
-       mixed_tools)
-;;
-
-(* At threshold WITH actionable signal: passive tools stripped. *)
-let test_contract_filter_strips_passive () =
-  let filtered =
-    KTS.contract_enforcement_filter
-      ~passive_streak:5
-      ~streak_threshold:3
-      ~actionable_signal:true
-      mixed_tools
-  in
-  check bool "passive tool removed" false (List.mem passive_tool filtered);
-  check bool "execution preserved" true (List.mem execution_tool filtered);
-  check bool "completion preserved" true (List.mem completion_tool filtered);
-  check bool "claim preserved" true (List.mem claim_tool filtered);
-  check int "3 tools remain" 3 (List.length filtered)
-;;
-
-(* Only passive tools in input: filter returns empty. *)
-let test_contract_filter_all_passive () =
-  check
-    (list string)
-    "empty result"
-    []
-    (KTS.contract_enforcement_filter
-       ~passive_streak:5
-       ~streak_threshold:3
-       ~actionable_signal:true
-       [ passive_tool; passive_tool_alt ])
-;;
-
-(* Empty input: empty output. *)
-let test_contract_filter_empty_input () =
-  check
-    (list string)
-    "empty in empty out"
-    []
-    (KTS.contract_enforcement_filter
-       ~passive_streak:5
-       ~streak_threshold:3
-       ~actionable_signal:true
-       [])
-;;
-
-let test_actionable_signal_requests_tool_gate () =
-  check
-    bool
-    "claimable signal with claim tool requests gate"
-    true
-    (Surface.actionable_signal_requires_tool_gate
-       ~actionable_signal:true
-       ~claim_context_allowed:true
-       ~turn_affordances:[ "task_claim" ]
-       ~allowed_tool_names:[ "Read"; "Grep"; "keeper_task_claim"; "Edit" ]);
-  check
-    bool
-    "no actionable signal does not request gate"
-    false
-    (Surface.actionable_signal_requires_tool_gate
-       ~actionable_signal:false
-       ~claim_context_allowed:true
-       ~turn_affordances:[ "task_claim" ]
-       ~allowed_tool_names:[ "Edit" ]);
-  check
-    bool
-    "owned task does not request gate for claim-only tools"
-    false
-    (Surface.actionable_signal_requires_tool_gate
-       ~actionable_signal:true
-       ~claim_context_allowed:false
-       ~turn_affordances:[ "task_claim" ]
-       ~allowed_tool_names:[ "keeper_task_claim"; "masc_claim_next" ]);
-  check
-    bool
-    "no-claim task verification does not require owned-task completion"
-    false
-    (Surface.actionable_signal_requires_tool_gate
-       ~actionable_signal:true
-       ~claim_context_allowed:true
-       ~turn_affordances:[ "task_verify" ]
-       ~allowed_tool_names:[ "keeper_task_submit_for_verification"; "keeper_task_done" ]);
-  check
-    bool
-    "owned task verification can require completion progress"
-    true
-    (Surface.actionable_signal_requires_tool_gate
-       ~actionable_signal:true
-       ~claim_context_allowed:false
-       ~turn_affordances:[ "task_verify" ]
-       ~allowed_tool_names:[ "keeper_task_submit_for_verification" ]);
-  check
-    bool
-    "missing signal-specific tool does not fall back to workspace mutation"
-    false
-    (Surface.actionable_signal_requires_tool_gate
-       ~actionable_signal:true
-       ~claim_context_allowed:true
-       ~turn_affordances:[ "board_post_or_comment" ]
-       ~allowed_tool_names:[ "Edit"; "Write" ]);
-  check
-    bool
-    "board signal requests gate when board tool is visible"
-    true
-    (Surface.actionable_signal_requires_tool_gate
-       ~actionable_signal:true
-       ~claim_context_allowed:true
-       ~turn_affordances:[ "board_post_or_comment" ]
-       ~allowed_tool_names:[ "keeper_board_comment" ])
 ;;
 
 let test_actionable_gate_tools_match_claim_context () =
@@ -421,25 +273,8 @@ let () =
             `Quick
             test_has_valid_tool_call_false_when_empty
         ] )
-    ; ( "contract_enforcement_filter"
-      , [ test_case
-            "below threshold: no filtering"
-            `Quick
-            test_contract_filter_below_threshold
-        ; test_case "no signal: no filtering" `Quick test_contract_filter_no_signal
-        ; test_case
-            "strips passive at threshold with signal"
-            `Quick
-            test_contract_filter_strips_passive
-        ; test_case "all passive: returns empty" `Quick test_contract_filter_all_passive
-        ; test_case "empty input: empty output" `Quick test_contract_filter_empty_input
-        ] )
     ; ( "actionable_gate"
       , [ test_case
-            "actionable signal requests tool gate"
-            `Quick
-            test_actionable_signal_requests_tool_gate
-        ; test_case
             "tools match claim context"
             `Quick
             test_actionable_gate_tools_match_claim_context

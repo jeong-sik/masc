@@ -210,15 +210,6 @@ val actionable_tool_gate_guidance :
   allowed_tool_names:string list ->
   string
 
-(** Whether an actionable world signal should promote the turn to the same
-    actionable-tool gate that post-run validation already checks. *)
-val actionable_signal_requires_tool_gate :
-  actionable_signal:bool ->
-  claim_context_allowed:bool ->
-  turn_affordances:string list ->
-  allowed_tool_names:string list ->
-  bool
-
 (** Find the active task ID a keeper currently owns. *)
 val owned_active_task_id_for_meta :
   config:Workspace.config ->

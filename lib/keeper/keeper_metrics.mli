@@ -191,7 +191,6 @@ type t =
   | LivenessRecoveryOutcomes
   | PassiveLoopDetectedTotal
   | PassiveLoopStreak
-  | PassiveLoopStreakExceeded
   | RequiredToolLoopDetectedTotal
   | ZombieLoopDetectedTotal
   | RequiredToolGateSuppressedTotal

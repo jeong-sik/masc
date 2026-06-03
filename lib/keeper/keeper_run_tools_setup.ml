@@ -33,7 +33,6 @@ let prepare_agent_setup
       ~(gemini_mcp_disabled : bool)
       ~(approval_mode_effective : string option)
       ~(approval_mode_derived : bool)
-      ?(actionable_signal = false)
       ?max_cost_usd
       ~(trajectory_acc : Trajectory.accumulator option)
       ~(tool_overlay : Agent_sdk.Tool_op.t ref option)
@@ -512,7 +511,6 @@ let prepare_agent_setup
         ~messages
         ~current_tool_choice
         ~decay_discovered
-        ?(actionable_signal = false)
         ()
     : computed_tool_surface
     =
@@ -723,40 +721,16 @@ let prepare_agent_setup
     let passive_streak =
       Keeper_passive_loop_detector.current_streak ~keeper_name:meta.name
     in
-    let streak_threshold = 3 in
     Prometheus.set_gauge
       Keeper_metrics.(to_string PassiveLoopStreak)
       ~labels:[ "keeper", meta.name ]
       (float_of_int passive_streak);
-    let turn_visible_tool_names =
-      Keeper_tool_selection.contract_enforcement_filter
-        ~passive_streak
-        ~streak_threshold
-        ~actionable_signal
-        turn_visible_tool_names
-    in
-    if passive_streak >= streak_threshold && actionable_signal
-    then
-      Prometheus.inc_counter
-        Keeper_metrics.(to_string PassiveLoopStreakExceeded)
-        ~labels:[ "keeper", meta.name ]
-        ()
-    else ();
-    let actionable_signal_tool_gate_requested =
-      (not is_last_turn)
-      && actionable_signal_requires_tool_gate
-           ~actionable_signal
-           ~claim_context_allowed
-           ~turn_affordances
-           ~allowed_tool_names:turn_visible_tool_names
-    in
     let tool_gate_requested =
-      actionable_signal_tool_gate_requested
-      || tool_gate_requested_for_turn
-           ~current_tool_choice
-           ~is_last_turn
-           ~claim_context_allowed
-           ~allowed_tool_names:turn_visible_tool_names
+      tool_gate_requested_for_turn
+        ~current_tool_choice
+        ~is_last_turn
+        ~claim_context_allowed
+        ~allowed_tool_names:turn_visible_tool_names
     in
     let turn_visible_tool_names =
       tool_names_for_actionable_gate_surface
@@ -844,6 +818,6 @@ let prepare_agent_setup
     ~runtime_id_string ~is_retry ~turn_affordances
     ~config_root ~runtime_config_path
     ~gemini_mcp_disabled ~approval_mode_effective
-    ~approval_mode_derived ~actionable_signal
+    ~approval_mode_derived
     ?max_cost_usd ~trajectory_acc
     ?runtime_manifest_context ?runtime_manifest_append ()

@@ -259,7 +259,11 @@ let is_registered name = Hashtbl.mem registry name
     Known tool names map to module tags through a compile-time match or the
     tag registry. Handler registration does not authorize tool names. *)
 
-type module_tag =
+(* PR-S2 (tool⊥domain cut): [module_tag] is defined in the zero-dep leaf
+   [Tool_tag_types] so the domain side ([Tool_name.Domain_tool]) can produce it.
+   Re-exported here by type-equality, so external [Tool_dispatch.Mod_*] call
+   sites and [tool_dispatch.mli] are unchanged. *)
+type module_tag = Tool_tag_types.module_tag =
   | Mod_plan | Mod_operator
   | Mod_local_runtime
   | Mod_run
@@ -275,18 +279,11 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
   | Tool_name.Masc m ->
     let open Tool_name.Masc in
     match m with
-    (* Domain tool-NAME groups collapse to a single tag each: the substrate no
-       longer enumerates the per-operation names. Tag alignment proof (PR-S1):
-       every member of each domain submodule mapped to the same tag before the
-       partition, so [| Domain _ ->] is exact, not a downgrade.
-         Task     -> Mod_task     (was 7 arms, all Mod_task)
-         Board    -> Mod_inline   (was 20 Board_* arms, all Mod_inline)
-         Goal     -> Mod_state    (was 4 Goal_* arms, all Mod_state)
-         Operator -> Mod_operator (was 4 Operator_* arms, all Mod_operator) *)
-    | Task _ -> Some Mod_task
-    | Board _ -> Some Mod_inline
-    | Goal _ -> Some Mod_state
-    | Operator _ -> Some Mod_operator
+    (* Domain tool names are carried behind one neutral arm; the domain side
+       owns the per-domain tag. The substrate no longer enumerates any domain
+       constructor (Task/Board/Goal/Operator). Per-domain tags are unchanged:
+       Task->Mod_task, Board->Mod_inline, Goal->Mod_state, Operator->Mod_operator. *)
+    | Domain d -> Some (Tool_name.Domain_tool.module_tag d)
     | Agent_fitness
     | Agent_card
     | Agent_update

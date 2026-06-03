@@ -16,11 +16,12 @@ let append_event ~base_dir ~partition ~(event : ide_event) =
   in
   let path = Filename.concat dir file_name in
   let json = ide_event_to_json event in
-  let line = Yojson.Safe.to_string json in
-  let oc = open_out_gen [ Open_creat; Open_append; Open_text ] 0o644 path in
-  output_string oc line;
-  output_char oc '\n';
-  close_out oc
+  (* Use Fs_compat.append_jsonl for per-path mutex protection.
+     Safe for concurrent calls from parallel Eio fibers (Eio.Fiber.List.map)
+     and async agent spawns. Fs_compat uses Stdlib.Mutex.protect per path,
+     so writes to the same file are serialized; writes to different files
+     can proceed concurrently. *)
+  Fs_compat.append_jsonl path json
 
 let ingest_tool_event
     ~base_path
@@ -163,15 +164,12 @@ let parse_pr_url_from_output (output : string) : (int * string) option =
   match find_prefix 0 with
   | None -> None
   | Some start ->
-    (* Extract the path after "https://github.com/" *)
     let path_start = start + prefix_len in
     let path_len = output_len - path_start in
     let path = String.sub output path_start path_len in
-    (* path = "owner/repo/pull/123..." or "owner/repo/pull/123/files..." *)
     let parts = String.split_on_char '/' path in
     (match parts with
      | owner :: repo :: "pull" :: number_str :: _ ->
-       (* Trim any trailing whitespace/newlines from the number *)
        let number_str = String.trim number_str in
        (try
           let number = int_of_string number_str in
@@ -179,6 +177,124 @@ let parse_pr_url_from_output (output : string) : (int * string) option =
           Some (number, url)
         with Failure _ -> None)
      | _ -> None)
+
+(** Extract command_descriptor from tool result JSON.
+    Returns [Some descriptor] if the result contains a valid descriptor field. *)
+let extract_descriptor_from_output (output_text : string) : Ide_event_types.command_descriptor option =
+  try
+    let json = Yojson.Safe.from_string output_text in
+    match Yojson.Safe.Util.member "command_descriptor" json with
+    | `Assoc _ as descriptor_json ->
+      let kind = Yojson.Safe.Util.member "kind" descriptor_json |> Yojson.Safe.Util.to_string in
+      (match kind with
+       | "gh_pr_create" ->
+         let title = Yojson.Safe.Util.member "title" descriptor_json |> Yojson.Safe.Util.to_string in
+         let base = Yojson.Safe.Util.member "base" descriptor_json |> Yojson.Safe.Util.to_string in
+         let draft = Yojson.Safe.Util.member "draft" descriptor_json |> Yojson.Safe.Util.to_bool in
+         Some (Ide_event_types.Gh_pr_create { title; base; draft })
+       | "gh_pr_merge" ->
+         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
+         let squash = Yojson.Safe.Util.member "squash" descriptor_json |> Yojson.Safe.Util.to_bool in
+         Some (Ide_event_types.Gh_pr_merge { pr_number; squash })
+       | "gh_pr_comment" ->
+         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
+         let body = Yojson.Safe.Util.member "body" descriptor_json |> Yojson.Safe.Util.to_string in
+         Some (Ide_event_types.Gh_pr_comment { pr_number; body })
+       | "gh_pr_close" ->
+         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
+         Some (Ide_event_types.Gh_pr_close { pr_number })
+       | "gh_pr_edit" ->
+         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
+         let title = Yojson.Safe.Util.to_option Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "title" descriptor_json) in
+         Some (Ide_event_types.Gh_pr_edit { pr_number; title })
+       | "gh_pr_review" ->
+         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
+         Some (Ide_event_types.Gh_pr_review { pr_number })
+       | "git_push" ->
+         let remote = Yojson.Safe.Util.member "remote" descriptor_json |> Yojson.Safe.Util.to_string in
+         let branch = Yojson.Safe.Util.member "branch" descriptor_json |> Yojson.Safe.Util.to_string in
+         let force = Yojson.Safe.Util.member "force" descriptor_json |> Yojson.Safe.Util.to_bool in
+         Some (Ide_event_types.Git_push { remote; branch; force })
+       | _ -> None)
+    | _ -> None
+  with _ -> None
+
+(** Ingest PR event from command_descriptor (deterministic).
+    Falls back to heuristic output parsing if descriptor is not available. *)
+let ingest_pr_event_from_descriptor
+    ~base_path
+    ~keeper_id
+    ~turn_id
+    ~output_text
+    ~tool_name
+  =
+  if String.equal tool_name "execute" then
+    match extract_descriptor_from_output output_text with
+    | Some (Ide_event_types.Gh_pr_create { title; base = _; draft = _ }) ->
+      (* PR was created — try to get PR number from output URL *)
+      let pr_number, pr_url = match parse_pr_url_from_output output_text with
+        | Some (n, url) -> (n, url)
+        | None -> (0, "")
+      in
+      ingest_pr_event
+        ~base_path ~pr_number ~pr_url ~pr_title:title
+        ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
+        ~comment_count:0 ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | Some (Ide_event_types.Gh_pr_merge { pr_number; squash = _ }) ->
+      ingest_pr_event
+        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~pr_state:"merged" ~repo:"" ~keeper_id ~turn_id
+        ~comment_count:0 ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | Some (Ide_event_types.Gh_pr_close { pr_number }) ->
+      ingest_pr_event
+        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~pr_state:"closed" ~repo:"" ~keeper_id ~turn_id
+        ~comment_count:0 ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | Some (Ide_event_types.Gh_pr_comment { pr_number; body = _ }) ->
+      ingest_pr_event
+        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
+        ~comment_count:1 ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | Some (Ide_event_types.Gh_pr_edit { pr_number; title = _ }) ->
+      ingest_pr_event
+        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
+        ~comment_count:0 ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | Some (Ide_event_types.Gh_pr_review { pr_number }) ->
+      ingest_pr_event
+        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
+        ~comment_count:0 ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Generic)
+    | None ->
+      (* Not a PR operation — fall back to heuristic output parsing *)
+      if String.equal tool_name "execute" then
+        match parse_pr_url_from_output output_text with
+        | Some (pr_number, pr_url) ->
+          let repo =
+            let prefix = "https://github.com/" in
+            let prefix_len = String.length prefix in
+            let url_len = String.length pr_url in
+            if url_len > prefix_len then
+              let path = String.sub pr_url prefix_len (url_len - prefix_len) in
+              let parts = String.split_on_char '/' path in
+              match parts with
+              | owner :: repo_name :: _ -> owner ^ "/" ^ repo_name
+              | _ -> "unknown"
+            else "unknown"
+          in
+          ingest_pr_event
+            ~base_path ~pr_number ~pr_url ~pr_title:""
+            ~pr_state:"open" ~repo ~keeper_id ~turn_id
+            ~comment_count:0 ~review_status:None
+            ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+        | None -> ()
 
 (** Try to detect PR creation from Execute tool output and ingest a PR event.
     Only fires when [tool_name = "execute"] and output contains a GitHub PR URL.

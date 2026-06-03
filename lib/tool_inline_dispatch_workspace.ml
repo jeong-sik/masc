@@ -52,7 +52,7 @@ let inline_err_workflow ~tool_name ~start_time msg : Tool_result.result =
 ;;
 
 let masc_add_task_name =
-  Tool_name.Masc.to_string (Tool_name.Masc.Task Tool_name.Task_name.Add_task)
+  Tool_name.Task_name.to_string Tool_name.Task_name.Add_task
 
 (** Argument extraction helpers bound to ctx.arguments. *)
 let arg_get_string ctx key default =

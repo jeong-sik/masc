@@ -93,7 +93,6 @@ type thinking_control_format =
     duplicated here, to avoid two-SSOT drift. *)
 type model_capabilities =
   { max_output_tokens : int option
-  ; supports_parallel_tool_calls : bool
   ; supports_tool_choice : bool
   ; supports_extended_thinking : bool
   ; supports_reasoning_budget : bool
@@ -118,7 +117,6 @@ type model_capabilities =
 
 let model_capabilities_default =
   { max_output_tokens = None
-  ; supports_parallel_tool_calls = false
   ; supports_tool_choice = false
   ; supports_extended_thinking = false
   ; supports_reasoning_budget = false

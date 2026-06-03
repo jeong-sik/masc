@@ -168,32 +168,33 @@ let classify_structured_shell_op args =
 
 let classify_masc_tool (tool : Tool_name.Masc.t) =
   let open Tool_name.Masc in
-  (* PR-S1: domain tool names moved to Task/Board/Goal/Operator submodules.
-     Resource classification is NON-uniform across each domain (e.g.
-     Board_post is Board_write but Board_list is Ungated), so this match stays
-     flat over [Masc.t] with each domain constructor mechanically wrapped —
-     bucket groupings are byte-for-byte unchanged from before the partition,
-     and the compiler still enforces exhaustiveness over every variant. *)
+  let open Tool_name.Domain_tool in
+  (* PR-S2: domain tool names are carried behind one neutral [Domain] arm
+     ([Domain (Board _)] etc.). Resource classification is NON-uniform across
+     each domain (e.g. Board_post is Board_write but Board_list is Ungated), so
+     this consumer reaches the domain members through the neutral carrier and
+     keeps its flat per-member buckets — byte-for-byte unchanged behavior, with
+     the compiler still enforcing exhaustiveness over every variant. *)
   match tool with
   | Web_fetch | Web_search -> Web
-  | Board Board_post
-  | Board Board_cleanup
-  | Board Board_comment
-  | Board Board_comment_vote
-  | Board Board_curation_submit
-  | Board Board_delete
-  | Board Board_reaction
-  | Board Board_sub_board_create
-  | Board Board_sub_board_delete
-  | Board Board_sub_board_update
-  | Board Board_vote -> Board_write
-  | Task Add_task
-  | Task Batch_add_tasks
-  | Task Claim_next
+  | Domain (Board Board_post)
+  | Domain (Board Board_cleanup)
+  | Domain (Board Board_comment)
+  | Domain (Board Board_comment_vote)
+  | Domain (Board Board_curation_submit)
+  | Domain (Board Board_delete)
+  | Domain (Board Board_reaction)
+  | Domain (Board Board_sub_board_create)
+  | Domain (Board Board_sub_board_delete)
+  | Domain (Board Board_sub_board_update)
+  | Domain (Board Board_vote) -> Board_write
+  | Domain (Task Add_task)
+  | Domain (Task Batch_add_tasks)
+  | Domain (Task Claim_next)
   | Deliver
-  | Goal Goal_transition
-  | Goal Goal_upsert
-  | Goal Goal_verify
+  | Domain (Goal Goal_transition)
+  | Domain (Goal Goal_upsert)
+  | Domain (Goal Goal_verify)
   | Heartbeat
   | Note_add
   | Plan_clear_task
@@ -203,46 +204,46 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Reset
   | Tool_grant
   | Tool_revoke
-  | Task Transition
-  | Task Update_priority -> Workspace_write
+  | Domain (Task Transition)
+  | Domain (Task Update_priority) -> Workspace_write
   | Agent_update
   | Broadcast
   | Cleanup_zombies
   | Gc
-  | Operator Operator_action
-  | Operator Operator_confirm
+  | Domain (Operator Operator_action)
+  | Domain (Operator Operator_confirm)
   | Tool_admin_update -> Generic_write
   | Agent_card
   | Agent_fitness
   | Agents
   | Approval_get
   | Approval_pending
-  | Board Board_curation_read
-  | Board Board_get
-  | Board Board_hearths
-  | Board Board_list
-  | Board Board_profile
-  | Board Board_search
-  | Board Board_stats
-  | Board Board_sub_board_get
-  | Board Board_sub_board_list
+  | Domain (Board Board_curation_read)
+  | Domain (Board Board_get)
+  | Domain (Board Board_hearths)
+  | Domain (Board Board_list)
+  | Domain (Board Board_profile)
+  | Domain (Board Board_search)
+  | Domain (Board Board_stats)
+  | Domain (Board Board_sub_board_get)
+  | Domain (Board Board_sub_board_list)
   | Check
   | Config
   | Dashboard
   | Get_metrics
-  | Goal Goal_list
+  | Domain (Goal Goal_list)
   | Mcp_session
   | Messages
-  | Operator Operator_digest
-  | Operator Operator_snapshot
+  | Domain (Operator Operator_digest)
+  | Domain (Operator Operator_snapshot)
   | Pause
   | Plan_get
   | Plan_get_task
   | Resume
   | Start
   | Status
-  | Task Task_history
-  | Task Tasks
+  | Domain (Task Task_history)
+  | Domain (Task Tasks)
   | Tool_admin_snapshot
   | Tool_help
   | Tool_list

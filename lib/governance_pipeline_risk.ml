@@ -145,30 +145,36 @@ let classify_name name =
 
 let risk_of_masc (m : Tool_name.Masc.t) : risk_level =
   let open Tool_name.Masc in
-  (* PR-S1: domain tool names moved to Task/Board/Goal/Operator submodules.
-     Risk classification is NON-uniform across each domain (e.g. Board_delete
-     is Critical but Board_list is Low), so this match stays flat over
-     [Masc.t] with each domain constructor mechanically wrapped — the bucket
-     groupings are byte-for-byte unchanged from before the partition, and the
-     compiler still enforces exhaustiveness over every variant. *)
+  let open Tool_name.Domain_tool in
+  (* PR-S2: domain tool names are carried behind one neutral [Domain] arm
+     ([Domain (Board _)] etc.). Risk classification is NON-uniform across each
+     domain (e.g. Board_delete is Critical but Board_list is Low), so this
+     consumer reaches the domain members through the neutral carrier and keeps
+     its flat per-member buckets — byte-for-byte unchanged behavior, with the
+     compiler still enforcing exhaustiveness over every variant. *)
   match m with
-  | Task Add_task | Agent_fitness | Agent_card | Agents | Task Batch_add_tasks
-  | Board Board_cleanup | Board Board_comment | Board Board_comment_vote | Board Board_curation_read
-  | Board Board_curation_submit | Board Board_get | Board Board_hearths | Board Board_list | Board Board_post
-  | Board Board_profile | Board Board_reaction | Board Board_search | Board Board_stats | Board Board_vote
-  | Board Board_sub_board_get | Board Board_sub_board_list | Broadcast | Check
-  | Cleanup_zombies | Dashboard | Deliver | Goal Goal_list | Goal Goal_transition
-  | Heartbeat | Messages | Note_add | Operator Operator_action | Operator Operator_digest
-  | Operator Operator_snapshot | Plan_clear_task | Plan_get | Plan_get_task | Plan_init
-  | Plan_set_task | Status | Task Task_history | Task Tasks | Tool_grant | Tool_help
-  | Tool_list | Tool_revoke | Task Transition | Web_fetch | Web_search
+  | Domain (Task Add_task) | Agent_fitness | Agent_card | Agents | Domain (Task Batch_add_tasks)
+  | Domain (Board Board_cleanup) | Domain (Board Board_comment) | Domain (Board Board_comment_vote)
+  | Domain (Board Board_curation_read)
+  | Domain (Board Board_curation_submit) | Domain (Board Board_get) | Domain (Board Board_hearths)
+  | Domain (Board Board_list) | Domain (Board Board_post)
+  | Domain (Board Board_profile) | Domain (Board Board_reaction) | Domain (Board Board_search)
+  | Domain (Board Board_stats) | Domain (Board Board_vote)
+  | Domain (Board Board_sub_board_get) | Domain (Board Board_sub_board_list) | Broadcast | Check
+  | Cleanup_zombies | Dashboard | Deliver | Domain (Goal Goal_list) | Domain (Goal Goal_transition)
+  | Heartbeat | Messages | Note_add | Domain (Operator Operator_action) | Domain (Operator Operator_digest)
+  | Domain (Operator Operator_snapshot) | Plan_clear_task | Plan_get | Plan_get_task | Plan_init
+  | Plan_set_task | Status | Domain (Task Task_history) | Domain (Task Tasks) | Tool_grant | Tool_help
+  | Tool_list | Tool_revoke | Domain (Task Transition) | Web_fetch | Web_search
   | Approval_pending | Approval_get | Config | Gc | Get_metrics | Mcp_session
   | Tool_admin_snapshot | Tool_stats -> Low
-  | Task Claim_next | Goal Goal_upsert | Goal Goal_verify | Operator Operator_confirm
+  | Domain (Task Claim_next) | Domain (Goal Goal_upsert) | Domain (Goal Goal_verify)
+  | Domain (Operator Operator_confirm)
   | Pause | Resume | Start -> Medium
-  | Agent_update | Board Board_sub_board_create | Board Board_sub_board_update | Plan_update
-  | Task Update_priority | Tool_admin_update -> High
-  | Board Board_delete | Board Board_sub_board_delete | Reset -> Critical
+  | Agent_update | Domain (Board Board_sub_board_create) | Domain (Board Board_sub_board_update)
+  | Plan_update
+  | Domain (Task Update_priority) | Tool_admin_update -> High
+  | Domain (Board Board_delete) | Domain (Board Board_sub_board_delete) | Reset -> Critical
 ;;
 
 let risk_of_typed : Tool_name.t -> risk_level = function
@@ -343,7 +349,7 @@ let baseline_risk ~tool_name ~input =
         goal_transition_risk input
       else if
         String.equal tool_name
-          (Tool_name.Masc.to_string (Tool_name.Masc.Task Tool_name.Task_name.Transition))
+          (Tool_name.Task_name.to_string Tool_name.Task_name.Transition)
       then (
         (* transition risk depends on the action verb, not the tool name *)
         match transition_action input with

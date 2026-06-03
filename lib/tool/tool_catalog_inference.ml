@@ -13,7 +13,11 @@ module List = Stdlib.List
     Moving it out shrinks the facade and isolates churn when new
     [Tool_name] variants are added. *)
 
-type effect_domain =
+(* PR-S2 (tool⊥domain cut): [effect_domain] is defined in the zero-dep leaf
+   [Tool_tag_types] so the domain side ([Tool_name.Domain_tool]) can produce it.
+   Re-exported here by type-equality so the facade [Tool_catalog] and the public
+   [tool_catalog.mli] / this module's [.mli] are unchanged. *)
+type effect_domain = Tool_tag_types.effect_domain =
   | Read_only
   | Masc_workspace
   | Playground_write
@@ -28,81 +32,44 @@ let effect_domain_to_string = function
 module TN = Tool_name
 module TM = Tool_name.Masc
 
-(* PR-S1: domain tool names live in these submodules; [TM.Task]/[TM.Board]/
-   [TM.Goal]/[TM.Operator] wrap them into [Masc.t]. *)
-module TTask = Tool_name.Task_name
-module TBoard = Tool_name.Board_name
-module TGoal = Tool_name.Goal_name
-module TOp = Tool_name.Operator_name
-
-(* PR-S1: NON-uniform across each domain (Board members split Read_only vs
-   Masc_workspace; Operator members split three ways), so this match stays flat
-   over [Masc.t] with each domain constructor mechanically wrapped — bucket
-   groupings unchanged, exhaustiveness still enforced. *)
+(* PR-S2: domain tool names are carried behind one neutral [TM.Domain] arm; the
+   per-member effect classification (NON-uniform: Board splits Read_only vs
+   Masc_workspace; Operator splits three ways) is owned domain-side by
+   [Tool_name.Domain_tool.effect_domain]. The substrate no longer enumerates any
+   domain constructor (Task/Board/Goal/Operator). The flat admin/lifecycle/misc
+   names keep their explicit buckets here. *)
 let inferred_effect_domain_of_typed_tool_name = function
+  | TN.Masc (TM.Domain d) -> Some (Tool_name.Domain_tool.effect_domain d)
   | TN.Masc TM.Deliver
-  | TN.Masc (TM.Operator TOp.Operator_action)
   | TN.Masc TM.Start ->
       Some Host_repo_write
   | TN.Masc TM.Agent_fitness
   | TN.Masc TM.Agent_card
   | TN.Masc TM.Agents
-  | TN.Masc (TM.Board TBoard.Board_get)
-  | TN.Masc (TM.Board TBoard.Board_curation_read)
-  | TN.Masc (TM.Board TBoard.Board_hearths)
-  | TN.Masc (TM.Board TBoard.Board_list)
-  | TN.Masc (TM.Board TBoard.Board_profile)
-  | TN.Masc (TM.Board TBoard.Board_search)
-  | TN.Masc (TM.Board TBoard.Board_stats)
   | TN.Masc TM.Check
   | TN.Masc TM.Config
   | TN.Masc TM.Dashboard
   | TN.Masc TM.Get_metrics
-  | TN.Masc (TM.Goal TGoal.Goal_list)
   | TN.Masc TM.Mcp_session
   | TN.Masc TM.Messages
-  | TN.Masc (TM.Operator TOp.Operator_digest)
-  | TN.Masc (TM.Operator TOp.Operator_snapshot)
   | TN.Masc TM.Plan_get
   | TN.Masc TM.Plan_get_task
   | TN.Masc TM.Status
-  | TN.Masc (TM.Task TTask.Task_history)
-  | TN.Masc (TM.Task TTask.Tasks)
   | TN.Masc TM.Tool_admin_snapshot
   | TN.Masc TM.Tool_help
   | TN.Masc TM.Tool_list
   | TN.Masc TM.Tool_stats
   | TN.Masc TM.Web_fetch
   | TN.Masc TM.Web_search
-  | TN.Masc (TM.Board TBoard.Board_sub_board_get)
-  | TN.Masc (TM.Board TBoard.Board_sub_board_list)
   | TN.Masc TM.Approval_pending
   | TN.Masc TM.Approval_get ->
       Some Read_only
-  | TN.Masc (TM.Task TTask.Add_task)
   | TN.Masc TM.Agent_update
-  | TN.Masc (TM.Task TTask.Batch_add_tasks)
-  | TN.Masc (TM.Board TBoard.Board_cleanup)
-  | TN.Masc (TM.Board TBoard.Board_comment)
-  | TN.Masc (TM.Board TBoard.Board_comment_vote)
-  | TN.Masc (TM.Board TBoard.Board_curation_submit)
-  | TN.Masc (TM.Board TBoard.Board_delete)
-  | TN.Masc (TM.Board TBoard.Board_post)
-  | TN.Masc (TM.Board TBoard.Board_reaction)
-  | TN.Masc (TM.Board TBoard.Board_sub_board_create)
-  | TN.Masc (TM.Board TBoard.Board_sub_board_delete)
-  | TN.Masc (TM.Board TBoard.Board_sub_board_update)
-  | TN.Masc (TM.Board TBoard.Board_vote)
   | TN.Masc TM.Broadcast
-  | TN.Masc (TM.Task TTask.Claim_next)
   | TN.Masc TM.Cleanup_zombies
   | TN.Masc TM.Gc
-  | TN.Masc (TM.Goal TGoal.Goal_transition)
-  | TN.Masc (TM.Goal TGoal.Goal_upsert)
-  | TN.Masc (TM.Goal TGoal.Goal_verify)
   | TN.Masc TM.Heartbeat
   | TN.Masc TM.Note_add
-  | TN.Masc (TM.Operator TOp.Operator_confirm)
   | TN.Masc TM.Pause
   | TN.Masc TM.Plan_clear_task
   | TN.Masc TM.Plan_init
@@ -112,9 +79,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Resume
   | TN.Masc TM.Tool_admin_update
   | TN.Masc TM.Tool_grant
-  | TN.Masc TM.Tool_revoke
-  | TN.Masc (TM.Task TTask.Transition)
-  | TN.Masc (TM.Task TTask.Update_priority) ->
+  | TN.Masc TM.Tool_revoke ->
       Some Masc_workspace
 let inferred_effect_domain name =
   match Tool_name.of_string name with

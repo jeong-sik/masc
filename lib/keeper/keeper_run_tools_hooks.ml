@@ -240,8 +240,8 @@ let assemble_hooks
              ~duration_ms
              ~output_text
              ~input;
-           (* IDE Bridge: detect PR creation from Execute output *)
-           Ide_bridge.ingest_pr_event_from_hook
+           (* IDE Bridge: detect PR creation from command_descriptor *)
+           Ide_bridge.ingest_pr_event_from_descriptor
              ~base_path:config.base_path
              ~keeper_id:acc.meta.name
              ~turn_id

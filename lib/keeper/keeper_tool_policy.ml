@@ -193,9 +193,7 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
      author/voter fields. Exposing both leads to the LLM calling the raw
      masc_* variant without the required author, causing "author is required". *)
   let has_keeper_board_wrapper name =
-    let eq v =
-      String.equal name (Tool_name.Masc.to_string (Tool_name.Masc.Board v))
-    in
+    let eq v = String.equal name (Tool_name.Board_name.to_string v) in
     eq Tool_name.Board_name.Board_comment
     || eq Tool_name.Board_name.Board_curation_submit
     || eq Tool_name.Board_name.Board_post

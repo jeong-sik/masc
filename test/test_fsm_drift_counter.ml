@@ -10,7 +10,7 @@
    Layering: [masc_workspace] (home of [Workspace_task]) sits below
    [masc.Prometheus] in the library dep graph, so the emit
    runs through [Workspace_hooks.fsm_drift_observer_fn] which
-   [lib/workspace.ml] wires to [Masc.Workspace.record_fsm_drift].  This test
+   [Workspace_prometheus_hooks.install] wires to [record_fsm_drift].  This test
    exercises the wired pair — [record_fsm_drift] directly for
    counter mechanics, and [Workspace_task.drift_variant_label]
    for the enum→label mapping that keeps Grafana rules
@@ -18,7 +18,7 @@
 
 let counter_for ~variant ~force =
   Masc.Prometheus.metric_value_or_zero
-    Masc.Workspace.fsm_drift_metric
+    Masc.Workspace_prometheus_hooks.fsm_drift_metric
     ~labels:[
       ("variant", variant);
       ("force", if force then "true" else "false");
@@ -29,7 +29,7 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "fsm drift canonical metric name"
     "masc_task_fsm_drift_total"
-    Masc.Workspace.fsm_drift_metric
+    Masc.Workspace_prometheus_hooks.fsm_drift_metric
 
 (* Exhaustive enum → label mapping.  Adding a new
    [Workspace_task_lifecycle.drift] variant forces the reviewer to
@@ -49,7 +49,7 @@ let test_record_increments_variant_and_force () =
   in
   let before_false = counter_for ~variant ~force:false in
   let before_true = counter_for ~variant ~force:true in
-  Masc.Workspace.record_fsm_drift ~variant ~force:false;
+  Masc.Workspace_prometheus_hooks.record_fsm_drift ~variant ~force:false;
   Alcotest.(check (float 0.0001))
     "force=false +1"
     (before_false +. 1.0)
@@ -58,7 +58,7 @@ let test_record_increments_variant_and_force () =
     "force=true unchanged"
     before_true
     (counter_for ~variant ~force:true);
-  Masc.Workspace.record_fsm_drift ~variant ~force:true;
+  Masc.Workspace_prometheus_hooks.record_fsm_drift ~variant ~force:true;
   Alcotest.(check (float 0.0001))
     "force=true +1"
     (before_true +. 1.0)
@@ -72,7 +72,7 @@ let test_label_isolation () =
   in
   let unknown = "unused_test_variant_9795" in
   let before_known = counter_for ~variant:known ~force:false in
-  Masc.Workspace.record_fsm_drift ~variant:unknown ~force:false;
+  Masc.Workspace_prometheus_hooks.record_fsm_drift ~variant:unknown ~force:false;
   Alcotest.(check (float 0.0001))
     "known variant counter unchanged"
     before_known

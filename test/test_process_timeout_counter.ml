@@ -12,15 +12,15 @@
 
    Layering: [masc_process] sits below [masc.Prometheus]
    in the library dep graph, so the emit runs through
-   [Process_eio.process_timeout_observer_fn] which [lib/workspace.ml]
-   wires to [Masc.Workspace.record_process_timeout].  This test
+   [Process_eio.process_timeout_observer_fn] which [Workspace_prometheus_hooks.install]
+   wires to [Masc.Workspace_prometheus_hooks.record_process_timeout].  This test
    exercises the wired pair — [record_process_timeout]
    directly for counter mechanics, and [Process_eio.argv_program]
    for the cardinality-bounding helper. *)
 
 let counter_for ?(origin = Timeout_origin.Command) ~program ~timeout_sec () =
   Masc.Prometheus.metric_value_or_zero
-    Masc.Workspace.process_timeout_metric
+    Masc.Workspace_prometheus_hooks.process_timeout_metric
     ~labels:
       [ "program", program
       ; ("timeout_bucket", Masc.Timeout_bucket.(to_label (of_seconds timeout_sec)))
@@ -33,7 +33,7 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "process timeout canonical metric name"
     Masc.Prometheus.metric_process_timeout
-    Masc.Workspace.process_timeout_metric
+    Masc.Workspace_prometheus_hooks.process_timeout_metric
 ;;
 
 let test_metric_registered_at_init () =
@@ -75,12 +75,12 @@ let test_record_increments () =
   let timeout_sec = 15.0 in
   let origin = Timeout_origin.Command in
   let before = counter_for ~program ~timeout_sec ~origin () in
-  Masc.Workspace.record_process_timeout ~program ~timeout_sec ~origin;
+  Masc.Workspace_prometheus_hooks.record_process_timeout ~program ~timeout_sec ~origin;
   Alcotest.(check (float 0.0001))
     "+1 on call"
     (before +. 1.0)
     (counter_for ~program ~timeout_sec ~origin ());
-  Masc.Workspace.record_process_timeout ~program ~timeout_sec ~origin;
+  Masc.Workspace_prometheus_hooks.record_process_timeout ~program ~timeout_sec ~origin;
   Alcotest.(check (float 0.0001))
     "+1 again"
     (before +. 2.0)
@@ -94,7 +94,7 @@ let test_program_isolation () =
   let prog_b = "isolation_b_9632" in
   let origin = Timeout_origin.Command in
   let before_a = counter_for ~program:prog_a ~timeout_sec ~origin () in
-  Masc.Workspace.record_process_timeout ~program:prog_b ~timeout_sec ~origin;
+  Masc.Workspace_prometheus_hooks.record_process_timeout ~program:prog_b ~timeout_sec ~origin;
   Alcotest.(check (float 0.0001))
     "program A unchanged"
     before_a
@@ -107,7 +107,7 @@ let test_timeout_sec_isolation () =
   let origin = Timeout_origin.Command in
   let before_15 = counter_for ~program ~timeout_sec:15.0 ~origin () in
   let before_60 = counter_for ~program ~timeout_sec:60.0 ~origin () in
-  Masc.Workspace.record_process_timeout ~program ~timeout_sec:15.0 ~origin;
+  Masc.Workspace_prometheus_hooks.record_process_timeout ~program ~timeout_sec:15.0 ~origin;
   Alcotest.(check (float 0.0001))
     "15s budget +1"
     (before_15 +. 1.0)
@@ -128,7 +128,7 @@ let test_stage_isolation () =
   let before_spawn =
     counter_for ~program ~timeout_sec ~origin:Timeout_origin.Spawn ()
   in
-  Masc.Workspace.record_process_timeout
+  Masc.Workspace_prometheus_hooks.record_process_timeout
     ~program
     ~timeout_sec
     ~origin:Timeout_origin.Spawn;

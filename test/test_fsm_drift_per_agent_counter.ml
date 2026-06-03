@@ -8,7 +8,7 @@
 
 let counter_for_per_agent ~variant ~agent_name ~force =
   Masc.Prometheus.metric_value_or_zero
-    Masc.Workspace.fsm_drift_per_agent_metric
+    Masc.Workspace_prometheus_hooks.fsm_drift_per_agent_metric
     ~labels:[
       ("variant", variant);
       ("agent_name", agent_name);
@@ -18,7 +18,7 @@ let counter_for_per_agent ~variant ~agent_name ~force =
 
 let counter_for_variant ~variant ~force =
   Masc.Prometheus.metric_value_or_zero
-    Masc.Workspace.fsm_drift_metric
+    Masc.Workspace_prometheus_hooks.fsm_drift_metric
     ~labels:[
       ("variant", variant);
       ("force", if force then "true" else "false");
@@ -29,7 +29,7 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "per-agent canonical name"
     "masc_task_fsm_drift_per_agent_total"
-    Masc.Workspace.fsm_drift_per_agent_metric
+    Masc.Workspace_prometheus_hooks.fsm_drift_per_agent_metric
 
 let test_emits_both_counters () =
   let variant =
@@ -41,7 +41,7 @@ let test_emits_both_counters () =
   let before_per_agent =
     counter_for_per_agent ~variant ~agent_name:agent ~force:false
   in
-  Masc.Workspace.record_fsm_drift_with_agent
+  Masc.Workspace_prometheus_hooks.record_fsm_drift_with_agent
     ~variant ~force:false ~agent_name:agent;
   Alcotest.(check (float 0.0001))
     "variant counter +1"
@@ -63,7 +63,7 @@ let test_per_agent_isolation () =
   let before_a =
     counter_for_per_agent ~variant ~agent_name:agent_a ~force:false
   in
-  Masc.Workspace.record_fsm_drift_with_agent
+  Masc.Workspace_prometheus_hooks.record_fsm_drift_with_agent
     ~variant ~force:false ~agent_name:agent_b;
   Alcotest.(check (float 0.0001))
     "agent_a counter unchanged when agent_b drifts"
@@ -81,7 +81,7 @@ let test_force_label_isolation () =
   let before_true =
     counter_for_per_agent ~variant ~agent_name:agent ~force:true
   in
-  Masc.Workspace.record_fsm_drift_with_agent
+  Masc.Workspace_prometheus_hooks.record_fsm_drift_with_agent
     ~variant ~force:false ~agent_name:agent;
   Alcotest.(check (float 0.0001))
     "force=true counter unchanged when force=false event lands"

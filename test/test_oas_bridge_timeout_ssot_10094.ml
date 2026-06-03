@@ -62,7 +62,7 @@ let test_intentional_budgets_preserved () =
       Cfg.Keeper_persona_authoring, 120.0;
       Cfg.Server_openai_compat, 120.0;
       Cfg.Tool_deep_review, 180.0;
-      Cfg.Task.Anti_rationalization, 180.0;
+      Cfg.Anti_rationalization, 180.0;
     ]
   in
   List.iter

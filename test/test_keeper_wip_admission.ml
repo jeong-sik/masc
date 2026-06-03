@@ -117,7 +117,7 @@ let test_scope_of_task_uses_repo_goal_and_title_category () =
          ~title:"refactor(keeper): split claim gate"
          "task-001")
   in
-  check string "repo" "masc-mcp" scope.repo;
+  check string "repo" "masc" scope.repo;
   check (option string) "goal" (Some "goal-a") scope.goal_id;
   check string "category" "refactor" (Admission.category_to_string scope.category)
 

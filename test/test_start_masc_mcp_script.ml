@@ -6,7 +6,7 @@ let source_root () =
   | None -> Sys.getcwd ()
 
 let script_path () =
-  Filename.concat (source_root ()) "start-masc-mcp.sh"
+  Filename.concat (source_root ()) "start-masc.sh"
 
 let loopback_script_path () =
   Filename.concat (source_root ()) "scripts/start-loopback.sh"
@@ -313,7 +313,7 @@ exit 0
 |}
 let test_explicit_env_overrides_repo_env_files () =
   with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       write_file (Filename.concat dir ".env.local")
         "MASC_STORAGE_TYPE=memory\n";
@@ -346,7 +346,7 @@ let test_explicit_env_overrides_repo_env_files () =
 
 let test_fd_hotspot_headworkspace_override_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
       let capture = Filename.concat dir "captured-fd-hotspot.txt" in
@@ -370,7 +370,7 @@ let test_fd_hotspot_headworkspace_override_is_preserved () =
 let test_realtime_transports_default_to_base_path_config_and_preserve_override ()
     =
   with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       ignore (make_config_root dir);
       make_fake_eio_exe dir;
@@ -432,7 +432,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
 
 let test_bootstraps_base_path_config_from_repo_when_unset () =
   with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       ignore (make_config_root dir);
       make_fake_eio_exe dir;
@@ -463,7 +463,7 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
 
 let test_default_base_path_requires_explicit_base_path () =
   with_temp_dir "start-masc-script-no-home-default" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       ignore (make_config_root dir);
       make_fake_eio_exe dir;
@@ -493,7 +493,7 @@ let test_default_base_path_requires_explicit_base_path () =
 
 let test_absolute_env_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
       let stale_root = Filename.concat dir "stale-root" in
@@ -523,13 +523,13 @@ let test_absolute_env_base_path_is_preserved () =
 let test_absolute_parent_project_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
-      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc" in
       let home_dir = Filename.concat dir "empty-home" in
       mkdir_p repo;
       mkdir_p home_dir;
       mkdir_p (Filename.concat parent Common.masc_dirname);
       mkdir_p (Filename.concat repo Common.masc_dirname);
-      let script = Filename.concat repo "start-masc-mcp.sh" in
+      let script = Filename.concat repo "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-parent-sanitized.txt" in
@@ -553,11 +553,11 @@ let test_absolute_parent_project_base_path_is_preserved () =
 
 let test_cli_sidecar_root_is_exported () =
   with_temp_dir "start-masc-script-sidecar-root" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
       let base_path = Filename.concat dir "runtime-root" in
-      let sidecar_root = Filename.concat dir "workspace/yousleepwhen/masc-mcp" in
+      let sidecar_root = Filename.concat dir "workspace/yousleepwhen/masc" in
       mkdir_p base_path;
       mkdir_p sidecar_root;
       let capture = Filename.concat dir "captured-sidecar-root.txt" in
@@ -589,7 +589,7 @@ let test_cli_sidecar_root_is_exported () =
 let test_zshenv_absolute_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
-      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc" in
       let home_dir = Filename.concat dir "home" in
       mkdir_p repo;
       mkdir_p home_dir;
@@ -597,7 +597,7 @@ let test_zshenv_absolute_base_path_is_preserved () =
       mkdir_p (Filename.concat repo Common.masc_dirname);
       write_file (Filename.concat home_dir ".zshenv")
         (Printf.sprintf "export MASC_BASE_PATH=%s\n" parent);
-      let script = Filename.concat repo "start-masc-mcp.sh" in
+      let script = Filename.concat repo "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-zshenv-sanitized.txt" in
@@ -620,7 +620,7 @@ let test_zshenv_absolute_base_path_is_preserved () =
 
 let test_shared_root_env_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
       let inherited_root = Filename.concat dir "shared-root" in
@@ -652,13 +652,13 @@ let test_worktree_prefers_local_build_over_workspace_build () =
       let repo_root = Filename.concat dir "repo-root" in
       let worktree = Filename.concat repo_root ".worktrees/fix-transport" in
       mkdir_p worktree;
-      let script = Filename.concat worktree "start-masc-mcp.sh" in
+      let script = Filename.concat worktree "start-masc.sh" in
       copy_script (script_path ()) script;
       let local_exe =
         Filename.concat worktree "_build/default/bin/main_eio.exe"
       in
       let workspace_exe =
-        Filename.concat repo_root "_build/default/masc-mcp/bin/main_eio.exe"
+        Filename.concat repo_root "_build/default/masc/bin/main_eio.exe"
       in
       write_fake_eio_exe local_exe ~marker:"local";
       write_fake_eio_exe workspace_exe ~marker:"workspace";
@@ -682,13 +682,13 @@ let test_worktree_prefers_local_build_over_workspace_build () =
 let test_explicit_base_path_execs_from_base_path () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
-      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc" in
       let home_dir = Filename.concat dir "empty-home" in
       mkdir_p repo;
       mkdir_p home_dir;
       mkdir_p (Filename.concat parent Common.masc_dirname);
       mkdir_p (Filename.concat repo Common.masc_dirname);
-      let script = Filename.concat repo "start-masc-mcp.sh" in
+      let script = Filename.concat repo "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-explicit-cwd.txt" in
@@ -713,7 +713,7 @@ let test_explicit_base_path_execs_from_base_path () =
 let test_explicit_base_path_ignores_repo_local_config_from_zshenv () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
-      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc" in
       let home_dir = Filename.concat dir "home" in
       mkdir_p repo;
       mkdir_p home_dir;
@@ -723,7 +723,7 @@ let test_explicit_base_path_ignores_repo_local_config_from_zshenv () =
            "export MASC_CONFIG_DIR=%s\nexport MASC_PERSONAS_DIR=%s\n"
            (Filename.concat repo "config")
            (Filename.concat repo "config/personas"));
-      let script = Filename.concat repo "start-masc-mcp.sh" in
+      let script = Filename.concat repo "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-explicit-base-config.txt" in
@@ -752,10 +752,10 @@ let test_explicit_base_path_ignores_repo_local_config_from_zshenv () =
 let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
-      let repo = Filename.concat parent "workspace/yousleepwhen/masc-mcp" in
+      let repo = Filename.concat parent "workspace/yousleepwhen/masc" in
       mkdir_p repo;
       ignore (make_config_root repo);
-      let script = Filename.concat repo "start-masc-mcp.sh" in
+      let script = Filename.concat repo "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe repo;
       let capture = Filename.concat dir "captured-explicit-parent-env.txt" in
@@ -783,7 +783,7 @@ let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
 
 let test_explicit_http_port_derives_sidecar_ports () =
   with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe dir;
       let capture = Filename.concat dir "captured-sidecar-ports.txt" in
@@ -807,7 +807,7 @@ let test_explicit_http_port_derives_sidecar_ports () =
 
 let test_grpc_direct_banner_is_preserved_in_stderr () =
   with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe_with_stderr dir;
       let code, stdout, stderr =
@@ -831,7 +831,7 @@ let test_grpc_direct_banner_is_preserved_in_stderr () =
 let test_stale_dune_artifacts_are_cleaned_and_retried () =
   with_temp_dir "start-masc-script-stale-dune" (fun dir ->
       with_temp_dir "start-masc-stale-dune-fake-bin" (fun fake_bin ->
-          let script = Filename.concat dir "start-masc-mcp.sh" in
+          let script = Filename.concat dir "start-masc.sh" in
           let scripts_dir = Filename.concat dir "scripts" in
           let dune_state = Filename.concat dir "dune-build-count.txt" in
           let clean_marker = Filename.concat dir "dune-clean-ran.txt" in
@@ -890,7 +890,7 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
 let test_dune_cache_temp_error_retries_with_cache_disabled () =
   with_temp_dir "start-masc-script-cache-temp-dune" (fun dir ->
       with_temp_dir "start-masc-cache-temp-fake-bin" (fun fake_bin ->
-          let script = Filename.concat dir "start-masc-mcp.sh" in
+          let script = Filename.concat dir "start-masc.sh" in
           let scripts_dir = Filename.concat dir "scripts" in
           let dune_state = Filename.concat dir "dune-build-count.txt" in
           let clean_marker = Filename.concat dir "dune-clean-ran.txt" in
@@ -948,7 +948,7 @@ let test_dune_cache_temp_error_retries_with_cache_disabled () =
 let test_stale_executable_requires_build_lock () =
   with_temp_dir "start-masc-script-build-lock" (fun dir ->
       with_temp_dir "start-masc-build-lock-fake-bin" (fun fake_bin ->
-          let script = Filename.concat dir "start-masc-mcp.sh" in
+          let script = Filename.concat dir "start-masc.sh" in
           let lock_dir = Filename.concat dir "masc-build.lock" in
           let capture = Filename.concat dir "captured-stale-lock.txt" in
           let source = Filename.concat dir "bin/main_eio.ml" in
@@ -987,7 +987,7 @@ let test_stale_executable_requires_build_lock () =
 
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       let scripts_dir = Filename.concat dir "scripts" in
       let fake_bin = Filename.concat dir "fake-bin" in
       let dashboard_marker = Filename.concat dir "dashboard-build-ran.txt" in
@@ -1035,7 +1035,7 @@ exit 0
 
 let test_http_preflight_waits_for_port_to_clear_before_build () =
   with_temp_dir "start-masc-script-port-wait" (fun dir ->
-      let script = Filename.concat dir "start-masc-mcp.sh" in
+      let script = Filename.concat dir "start-masc.sh" in
       let fake_bin = Filename.concat dir "fake-bin" in
       let lsof_seen = Filename.concat dir "lsof-seen" in
       let capture = Filename.concat dir "captured-port-wait.txt" in
@@ -1087,7 +1087,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
       let repo_root = Filename.concat dir "repo-root" in
       let scripts_dir = Filename.concat repo_root "scripts" in
       mkdir_p scripts_dir;
-      let start_script = Filename.concat repo_root "start-masc-mcp.sh" in
+      let start_script = Filename.concat repo_root "start-masc.sh" in
       let loopback_script = Filename.concat scripts_dir "start-loopback.sh" in
       copy_script (script_path ()) start_script;
       copy_script (loopback_script_path ()) loopback_script;

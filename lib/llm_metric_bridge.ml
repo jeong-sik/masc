@@ -1,4 +1,4 @@
-(** Bridge between OAS Llm_provider.Metrics.t and the masc-mcp
+(** Bridge between OAS Llm_provider.Metrics.t and the masc
     Prometheus counter registry.
 
     OAS exposes a set of callback hooks on every LLM HTTP call

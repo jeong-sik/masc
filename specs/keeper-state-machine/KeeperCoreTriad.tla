@@ -16,7 +16,7 @@
 \*   S5 PhaseDecisionConsistency: active turn => runtime selected
 \*
 \* Bug model: BugSelectRuntime removes phase-aware routing, reproducing
-\* the Groq max_tokens ceiling violation (masc-mcp#6686).
+\* the Groq max_tokens ceiling violation (masc#6686).
 \*
 \* Mirrors: lib/keeper/keeper_turn_driver_try_runtime.ml (SelectRuntime action)
 \*          lib/runtime/runtime_inference.ml (CapabilityGate action)
@@ -479,7 +479,7 @@ CapabilityNeverDeadlocks ==
     turn_status = "executing" ~> turn_status \in {"done", "idle", "selecting", "retrying"}
 
 \* ── Bug Model ────────────────────────────────────────────
-\* Reproduces masc-mcp#6686: phase-unaware runtime selection
+\* Reproduces masc#6686: phase-unaware runtime selection
 \* sends 65536 max_tokens to a provider with 40960 ceiling.
 
 BugSelectRuntime ==

@@ -14,7 +14,7 @@
 
     Rollout: additive JSON field. Gated by [MASC_BASH_SEMANTIC_EXIT]
     env flag during the bake-in window (see
-    [planning/agent_llm_a-plans/20m-me-workspace-yousleepwhen-masc-mcp-graceful-panda.md]
+    [planning/agent_llm_a-plans/20m-me-workspace-yousleepwhen-masc-graceful-panda.md]
     Phase 1). *)
 
 type t =

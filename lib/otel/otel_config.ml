@@ -14,4 +14,4 @@ let endpoint =
 
 let service_name =
   Sys.getenv_opt "OTEL_SERVICE_NAME"
-  |> Option.value ~default:"masc-mcp"
+  |> Option.value ~default:"masc"

@@ -148,7 +148,7 @@ end
 
 **단점:**
 - OCaml functor는 run-time application 비용 (각 `run_named` 호출마다 functor 인스턴스화).
-- masc_mcp 코드베이스에 functor 사용 사례 많지 않음 — stylistic mismatch.
+- masc 코드베이스에 functor 사용 사례 많지 않음 — stylistic mismatch.
 - record/struct 옵션 A와 표현력 차이 거의 없는데 ceremony만 늘어남.
 
 **위험도:** 🟡 medium-high (codebase convention과 어긋남)
@@ -333,7 +333,7 @@ PR-3a 머지 후 OpenTelemetry span name 변동을 *허용하지 않는다*. 새
   - RFC-0046 keeper-detail FSM hub SSOT (trace boundary 영향)
 - **메모리 (운영 규칙)**:
   - `feedback_audit_matrix_decays_with_main_drift` — 사전 측정 fresh-grep 의무
-  - `feedback_masc_mcp_admin_merge_fast_track` — Draft 유지 + 사용자 라벨 대기
+  - `feedback_masc_admin_merge_fast_track` — Draft 유지 + 사용자 라벨 대기
   - `feedback_check_open_prs_before_fixing_pasted_build_error` — PR 시작 전 active PR sweep
   - `feedback_split_brain_rfc_0022_pr_2_pr3_overlap` — 동일 영역 동시 PR 차단
   - 워크어라운드 거부 기준 §1 (AGENT-LLM-A.md `software-development.md`) — 옵션 D 단독 채택 거부 근거

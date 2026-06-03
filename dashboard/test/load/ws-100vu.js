@@ -1,4 +1,4 @@
-// k6 WebSocket load harness — masc-mcp dashboard
+// k6 WebSocket load harness — masc dashboard
 //
 // Tracks: PR-0.2.G (sibling of PR-0.2.B WS histogram #12015, PR-0.2.F
 // perf-baseline.yml). IMPLEMENTATION-QUEUE Q-P1-7 (Track C C-5).

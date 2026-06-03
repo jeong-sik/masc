@@ -44,7 +44,7 @@ implementation_prs: [16929, 17316, 17336]
 
 ## 1. Goal
 
-masc-mcp 코드베이스의 4 개 *code-smell* 지표를 CI 에서
+masc 코드베이스의 4 개 *code-smell* 지표를 CI 에서
 monotone-decreasing baseline 으로 ratchet 한다. 새 PR 은 baseline 위로
 지표를 *증가*시킬 수 없다. *감소*시키는 PR 은 baseline 을 자동으로
 갱신한다. 절대 임계치 (예: `LoC < 1000`) 가 아니라 *방향성* (recent commit

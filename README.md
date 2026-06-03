@@ -302,7 +302,7 @@ External 채널 어댑터의 경계는 Channel Gate:
 
 ## IDE Surface
 
-지난 1000 PR 의 48 건이 `feat(ide)` / `fix(ide)` 였습니다. `lib/ide/` 가 `masc_mcp.ide` sub-library 로 분리되어 있고, dashboard 쪽 IDE 패널과 backend 가 다음을 공유합니다.
+지난 1000 PR 의 48 건이 `feat(ide)` / `fix(ide)` 였습니다. `lib/ide/` 가 `masc.ide` sub-library 로 분리되어 있고, dashboard 쪽 IDE 패널과 backend 가 다음을 공유합니다.
 
 - 파일 트리 / breadcrumb 에 어떤 keeper 가 어떤 파일을 보고 있는지 (file focus)
 - CodeMirror 6 기반 multi-keeper cursor overlay

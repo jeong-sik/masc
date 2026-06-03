@@ -30,7 +30,7 @@
  *
  * Adding 'pending' to the union now fails the build at this line until the
  * new case is handled. Mirror of the OCaml `_ -> false` catch-all hunt fixed
- * in masc-mcp PR #16747 (FSM Sparse Match anti-pattern, see
+ * in masc PR #16747 (FSM Sparse Match anti-pattern, see
  * software-development.md §"AI 코드 생성 안티패턴" §4).
  *
  * The runtime `throw` is the never-reached fallback: TypeScript's type system

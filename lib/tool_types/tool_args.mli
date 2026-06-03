@@ -136,7 +136,7 @@ val ( let*! ) :
     deterministic self-correction.
 
     @since 2.170.0
-    @see <https://github.com/jeong-sik/masc-mcp/issues/4963> *)
+    @see <https://github.com/jeong-sik/masc/issues/4963> *)
 
 type field_constraint =
   | Required           (** Field must be present. *)

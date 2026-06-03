@@ -162,7 +162,7 @@ RFC-0149 (Counter-as-Fix sunset) 가 이미 *같은 audit 사이클* 에서 tele
 
 ```ocaml
 (** Closed-sum classification of operating-system / runtime error surfaces
-    that the masc-mcp fleet reacts to today (FD storm, disk pressure, …).
+    that the masc fleet reacts to today (FD storm, disk pressure, …).
     Adds new variants only when a backend reactor and a canonical RFC both
     exist for the failure mode — see §3.3 below. *)
 

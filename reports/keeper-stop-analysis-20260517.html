@@ -264,7 +264,7 @@
   <a href="#main" class="skip-link">본문으로 건너뛰기</a>
   <header>
     <h1>MASC/OAS Keeper Stop &amp; Silent Failure Analysis</h1>
-    <p>대상: <code>/Users/dancer/me/workspace/yousleepwhen/masc-mcp</code> 와 인접 <code>oas</code> 런타임. 코드 레벨 정적 분석으로 Keeper가 멈추거나 멈춘 것처럼 보이는 경로, 그리고 silent/low-visibility failure를 순서도 단위로 정리했다.</p>
+    <p>대상: <code>/Users/dancer/me/workspace/yousleepwhen/masc</code> 와 인접 <code>oas</code> 런타임. 코드 레벨 정적 분석으로 Keeper가 멈추거나 멈춘 것처럼 보이는 경로, 그리고 silent/low-visibility failure를 순서도 단위로 정리했다.</p>
     <div class="meta">
       <span class="pill">작성일: 2026-05-17 Asia/Seoul</span>
       <span class="pill">As-of commit: <code style="background:rgba(255,255,255,0.12);color:#e5edf7;border:none">6c4a9598a1</code> (fix(tool_keeper): observe env-var parse fallback #15954)</span>
@@ -692,7 +692,7 @@ tool requires approval
       <h2>Implementation Addendum (2026-05-17 21:37 KST)</h2>
       <p>
         본 분석서 기준 P0 일부를 코드로 착수했다. 변경은 root checkout이 아니라 worktree-first 원칙대로
-        <code>masc-mcp/.worktrees/fix-keeper-admission-observability</code>와
+        <code>masc/.worktrees/fix-keeper-admission-observability</code>와
         <code>oas/.worktrees/fix-approval-required-fail-closed</code>에 분리되어 있다.
       </p>
       <h3>MASC P0: launch/admission silent failure 제거</h3>
@@ -719,7 +719,7 @@ tool requires approval
         <li>설계 SSOT: <code>docs/rfc/RFC-OAS-021-approval-required-missing-callback-policy.md</code>.</li>
       </ul>
       <h3>현재 검증</h3>
-      <pre class="flow"># masc-mcp worktree
+      <pre class="flow"># masc worktree
 scripts/dune-local.sh build test/test_keeper_registry.exe test/test_types.exe
 ./_build/default/test/test_keeper_registry.exe   # 106 tests passed
 ./_build/default/test/test_types.exe             # 115 tests passed
@@ -738,7 +738,7 @@ git diff --check</pre>
       <p>본 보고서의 모든 라인 인용은 <code>as-of commit 6c4a9598a1</code> 기준. 라인 drift 시 다음 단계로 재확인.</p>
       <h3>라인 인용 재확인 (예시)</h3>
       <pre class="flow"># 1. As-of commit 기준 정합 확인 (보고서 commit ↔ 현재 main 비교)
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 git log --oneline 6c4a9598a1..origin/main -- lib/keeper/ | head
 
 # 2. 함수 단위 재탐색 (라인 번호가 흔들리면 심볼로 찾기)
@@ -771,27 +771,27 @@ gh pr list --search 'RFC-0106 in:title' --state merged</pre>
     <section class="section">
       <h2>Evidence References</h2>
       <ul class="refs">
-        <li><code>masc-mcp/lib/keeper/keeper_state_machine.ml:6-19</code> phase set</li>
-        <li><code>masc-mcp/lib/keeper/keeper_state_machine.ml:321-405</code> transitions and executable phases</li>
-        <li><code>masc-mcp/lib/keeper/keeper_state_machine.ml:473-541</code> phase derivation priority</li>
-        <li><code>masc-mcp/lib/keeper/keeper_registry_types.ml:64-96</code> failure_reason ADT</li>
-        <li><code>masc-mcp/lib/keeper/keeper_registry.ml:65-89</code>, <code>135-179</code> orphan update handling</li>
-        <li><code>masc-mcp/lib/keeper/keeper_registry.ml:1200-1210</code> spawn/admission slots</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:117-218</code> presence heartbeat failures</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:437-455</code> runtime backpressure</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:560-676</code> OAS budget strike/crash path</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:789-1218</code> unified keepalive turn scheduling</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:1304-1512</code> smart heartbeat gate</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:1734-1743</code> heartbeat threshold crash</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:244-400</code> normal exit vs crash handling</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:604-665</code> supervise_keepalive launch gate</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:1216-1380</code> auto-pause handlers</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:1382-1963</code> sweep/recover/restart/dead</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:2027-2380</code> liveness and alive-but-stuck recovery</li>
-        <li><code>masc-mcp/lib/keeper/keeper_stale_watchdog.ml:7-24</code>, <code>428-881</code> stale classes and kill path</li>
-        <li><code>masc-mcp/lib/keeper/keeper_turn_slot.ml:538-560</code>, <code>955-1079</code> semaphore wait timeout</li>
-        <li><code>masc-mcp/lib/keeper_fd_pressure.ml:199-215</code>, <code>421-460</code> FD probe/admission</li>
-        <li><code>masc-mcp/lib/keeper_disk_pressure.ml:235-267</code> disk admission</li>
+        <li><code>masc/lib/keeper/keeper_state_machine.ml:6-19</code> phase set</li>
+        <li><code>masc/lib/keeper/keeper_state_machine.ml:321-405</code> transitions and executable phases</li>
+        <li><code>masc/lib/keeper/keeper_state_machine.ml:473-541</code> phase derivation priority</li>
+        <li><code>masc/lib/keeper/keeper_registry_types.ml:64-96</code> failure_reason ADT</li>
+        <li><code>masc/lib/keeper/keeper_registry.ml:65-89</code>, <code>135-179</code> orphan update handling</li>
+        <li><code>masc/lib/keeper/keeper_registry.ml:1200-1210</code> spawn/admission slots</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:117-218</code> presence heartbeat failures</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:437-455</code> runtime backpressure</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:560-676</code> OAS budget strike/crash path</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:789-1218</code> unified keepalive turn scheduling</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:1304-1512</code> smart heartbeat gate</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:1734-1743</code> heartbeat threshold crash</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:244-400</code> normal exit vs crash handling</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:604-665</code> supervise_keepalive launch gate</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:1216-1380</code> auto-pause handlers</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:1382-1963</code> sweep/recover/restart/dead</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:2027-2380</code> liveness and alive-but-stuck recovery</li>
+        <li><code>masc/lib/keeper/keeper_stale_watchdog.ml:7-24</code>, <code>428-881</code> stale classes and kill path</li>
+        <li><code>masc/lib/keeper/keeper_turn_slot.ml:538-560</code>, <code>955-1079</code> semaphore wait timeout</li>
+        <li><code>masc/lib/keeper_fd_pressure.ml:199-215</code>, <code>421-460</code> FD probe/admission</li>
+        <li><code>masc/lib/keeper_disk_pressure.ml:235-267</code> disk admission</li>
         <li><code>oas/lib/agent/agent.ml:64-85</code> loop guard</li>
         <li><code>oas/lib/agent/agent.ml:228-279</code> callbacks and max execution timeout</li>
         <li><code>oas/lib/agent/agent_trace.ml:119-211</code> trace/finalization behavior</li>

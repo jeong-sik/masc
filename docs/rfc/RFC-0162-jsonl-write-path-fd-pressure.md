@@ -273,7 +273,7 @@ let append_jsonl path json =
 
 **fd budget 분석**:
 
-- macOS default `RLIMIT_NOFILE` = 256 (soft) / unlimited (hard). masc-mcp 가 256 root 안에서 운영.
+- macOS default `RLIMIT_NOFILE` = 256 (soft) / unlimited (hard). masc 가 256 root 안에서 운영.
 - 4 writer (system_log / trajectory / oas-events / reaction-ledger) × 평균 1 active path = 4 fd baseline.
 - Day rollover 시 어제 path 도 evict 전까지 남음 → 최대 8 fd.
 - Dashboard read-side, network connection 등 합쳐 ~30 fd. fd_cache_max=32 는 safe margin.
@@ -340,7 +340,7 @@ RFC-0089 (substring classifier closure) family 의 *infrastructure-level extensi
 | 항목 | 이유 |
 |---|---|
 | `Fd_pressure_blocked` typed variant 추가 | §3.5 별도 RFC |
-| Cross-process flock | RFC-0108 §6 와 같음 — masc-mcp 단일 프로세스 전제 |
+| Cross-process flock | RFC-0108 §6 와 같음 — masc 단일 프로세스 전제 |
 | Per-record fsync | RFC-0108 §6 와 같음 — durability 별도 design space |
 | Dashboard refresh interval 자체 변경 | UX 결정. Phase 0b 가 효과적이면 interval 유지 가능 |
 

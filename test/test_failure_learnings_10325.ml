@@ -1,7 +1,7 @@
 (** Failure learning emit produces structured per-failure data, not a
     generic boilerplate string.
 
-    Regression for masc-mcp #10325: 97% of [outcome=failure] entries in
+    Regression for masc #10325: 97% of [outcome=failure] entries in
     [.masc/institution_episodes.jsonl] previously contained the same
     placeholder ("persist failed keeper turns ...").  This defeated the
     institution-memory contract that downstream readers (governance

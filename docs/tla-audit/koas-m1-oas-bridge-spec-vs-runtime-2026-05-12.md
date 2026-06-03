@@ -38,7 +38,7 @@ iter 58 KRL was *design-ground without runtime*.  KOAS is the same gap shape, bu
 |--------|-------------------|--------------------|
 | Spec LOC | 327 | 252 |
 | Runtime LOC matching | 91 (event queue) + 3037 (unified turn), 0 spec-concept hits | ~30 (error_phase enum) + small compat/checkpoint, 0 spec-concept hits |
-| Bug-Model fixture | one buggy cfg, no verified counter-example documented | **paired and verified**: `KeeperOASAdvanced-buggy.cfg` with `CancelledNeverAbsorbed` invariant; operator-local memory note `reference_masc_mcp_integrated_improvement_design_audit.md` (not in-repo) records "Clean 56 states/no error. Buggy: invariant violated in 3 steps" |
+| Bug-Model fixture | one buggy cfg, no verified counter-example documented | **paired and verified**: `KeeperOASAdvanced-buggy.cfg` with `CancelledNeverAbsorbed` invariant; operator-local memory note `reference_masc_integrated_improvement_design_audit.md` (not in-repo) records "Clean 56 states/no error. Buggy: invariant violated in 3 steps" |
 | Spec discipline | leads-to properties only | bug-model + safety + liveness all paired |
 | Implementation tracking | MASC task-134 (explicit) | none cited |
 

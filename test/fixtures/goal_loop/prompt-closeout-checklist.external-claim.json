@@ -84,7 +84,7 @@
       "criterion_id": "startup_policy_fail_closed",
       "gap": null,
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13801"
+        "https://github.com/jeong-sik/masc/pull/13801"
       ]
     },
     {
@@ -105,7 +105,7 @@
       "criterion_id": "startup_policy_fail_closed",
       "gap": null,
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13719"
+        "https://github.com/jeong-sik/masc/pull/13719"
       ]
     },
     {
@@ -126,7 +126,7 @@
       "criterion_id": "post_act_verify_complete",
       "gap": null,
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13630"
+        "https://github.com/jeong-sik/masc/pull/13630"
       ]
     },
     {
@@ -143,9 +143,9 @@
       "criterion_id": "autoboot_warmup_fairness_complete",
       "gap": null,
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13119",
-        "https://github.com/jeong-sik/masc-mcp/pull/13156",
-        "https://github.com/jeong-sik/masc-mcp/pull/13167"
+        "https://github.com/jeong-sik/masc/pull/13119",
+        "https://github.com/jeong-sik/masc/pull/13156",
+        "https://github.com/jeong-sik/masc/pull/13167"
       ]
     },
     {
@@ -165,7 +165,7 @@
       "criterion_id": "post_act_verify_complete",
       "gap": null,
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13624"
+        "https://github.com/jeong-sik/masc/pull/13624"
       ]
     },
     {
@@ -186,7 +186,7 @@
       "criterion_id": "post_act_verify_complete",
       "gap": null,
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13630"
+        "https://github.com/jeong-sik/masc/pull/13630"
       ]
     },
     {
@@ -212,8 +212,8 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Engine and triage exist, but only 19 of 206 strict rows are itemized.",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ]
     },
     {
@@ -228,7 +228,7 @@
       ],
       "status": "PASS",
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13655"
+        "https://github.com/jeong-sik/masc/pull/13655"
       ]
     },
     {
@@ -254,11 +254,11 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Reference integrity exists. Draft implementation PR #13664 adds anti-stagnation SLA state, but ownership workflow and automatic queueing are not merged/live.",
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13664"
+        "https://github.com/jeong-sik/masc/pull/13664"
       ],
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13611",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13611",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ]
     },
     {
@@ -273,8 +273,8 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Known ACTs are mapped; not every still-present row can have ACT proof until the missing 187 rows exist.",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ]
     },
     {
@@ -289,11 +289,11 @@
       "criterion_id": "post_act_verify_complete",
       "gap": "Closeout verifier exists. Draft implementation PR #13657 adds explicit unit/regression/TLA/log/metric/orient gates, but it is not merged and still requires real production inputs for closeout.",
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13657"
+        "https://github.com/jeong-sik/masc/pull/13657"
       ],
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13610",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13610",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ]
     },
     {
@@ -308,14 +308,14 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Branch semantics exist. Draft implementation PR #13657 adds the Verify pipeline gate contract, and draft PR #13507 adds the post-ACT live replay runner. Complete-corpus Verify remains blocked until those PRs are merged/live-replayed and the 206-row corpus exists.",
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13507",
-        "https://github.com/jeong-sik/masc-mcp/pull/13657"
+        "https://github.com/jeong-sik/masc/pull/13507",
+        "https://github.com/jeong-sik/masc/pull/13657"
       ],
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13505",
-        "https://github.com/jeong-sik/masc-mcp/issues/13610",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13505",
+        "https://github.com/jeong-sik/masc/issues/13610",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ]
     },
     {
@@ -332,7 +332,7 @@
       ],
       "status": "PASS",
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13655"
+        "https://github.com/jeong-sik/masc/pull/13655"
       ]
     },
     {
@@ -346,11 +346,11 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Reference integrity exists. Draft implementation PR #13664 adds SLA timers and escalation detection, but it is not merged/live and strict-corpus ACT coverage remains blocked.",
       "implementation_pr_refs": [
-        "https://github.com/jeong-sik/masc-mcp/pull/13664"
+        "https://github.com/jeong-sik/masc/pull/13664"
       ],
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13611",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13611",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ]
     },
     {
@@ -364,8 +364,8 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "No measured convergence claim is valid without the strict corpus and live SLO proof.",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ]
     },
     {
@@ -382,8 +382,8 @@
       "criterion_id": "strict_row_level_catalog_complete",
       "gap": "Discovery records FULL_ROW_CORPUS_NOT_FOUND with 19 of 206 strict rows itemized and 187 missing; the source-doc candidate extractor finds only 132 explicit row candidates across 5 source files, with 7 checked prompt files yielding zero explicit candidates. Those 7 files still contain 897 unstructured requirement markers tracked by #13265 and #13636, but they are not stable strict-corpus rows. Candidate corpora must also bind row source paths and line refs to the audit catalog external_sources. This is not the required 206-row strict corpus.",
       "tracking_issue_refs": [
-        "https://github.com/jeong-sik/masc-mcp/issues/13265",
-        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+        "https://github.com/jeong-sik/masc/issues/13265",
+        "https://github.com/jeong-sik/masc/issues/13636"
       ]
     }
   ],

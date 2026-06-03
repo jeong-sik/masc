@@ -66,8 +66,8 @@ Sub-library 추출 비율: 12/~300 = 4%.
 
 ### 2.4 Circular Dependencies
 
-`masc_mcp.ml` wrapper module이 모든 sub-library를 re-export하는 facade.
-새 모듈 추가 시 masc_mcp.ml + lib/dune에서 additive conflict이 항상 발생한다 (memory: masc-module-conflict-hotspot).
+`masc.ml` wrapper module이 모든 sub-library를 re-export하는 facade.
+새 모듈 추가 시 masc.ml + lib/dune에서 additive conflict이 항상 발생한다 (memory: masc-module-conflict-hotspot).
 
 ### 2.5 Configuration Sprawl
 
@@ -161,7 +161,7 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 5. Server (transport, protocol)
 6. Dashboard (frontend build pipeline 분리)
 7. OAS Bridge (facade 정리)
-8. Cleanup (masc_mcp.ml facade 축소, dead re-export 제거)
+8. Cleanup (masc.ml facade 축소, dead re-export 제거)
 
 ---
 
@@ -187,7 +187,7 @@ lib/workspace/        lib/time_compat/ lib/types/
 | 대상 | 현재 | 목표 | 설계 상태 |
 |------|------|------|----------|
 | lib/ flat files | 294개 | Sub-library 기반 조직 | 7-Team Design으로 매핑 완료 |
-| masc_mcp.ml facade | 전체 re-export | Team별 facade | drift 문제 해소 필요 |
+| masc.ml facade | 전체 re-export | Team별 facade | drift 문제 해소 필요 |
 
 ### .mli 추가 우선순위
 

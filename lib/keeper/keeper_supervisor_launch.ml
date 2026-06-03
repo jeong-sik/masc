@@ -350,7 +350,7 @@ let launch_supervised_fiber
            Eio.Cancel.Cancelled, which propagates during concurrent fiber
            teardown) would be re-wrapped by [Fun.protect] as
            [Fun.Finally_raised], masking the original body exception and
-           crashing the server (see masc-mcp crash 2026-04-17). Swallow
+           crashing the server (see masc crash 2026-04-17). Swallow
            everything and log — cleanup is advisory, state-machine events
            already fired on the body's happy/error paths. *)
           try

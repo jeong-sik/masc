@@ -5,7 +5,7 @@
 **Builds on**: [RFC-0109](./RFC-0109-cdal-goal-integration-contract.md) (typed CDAL verdict gate)
 **Related**: [RFC-0088](./RFC-0088-counter-as-fix-result-propagation.md) §"String/Substring 분류기" anti-pattern (이 RFC 가 정확히 해소하는 영역)
 **Tracking issue**: #19129
-**Memory anchors**: `project_masc_mcp_cdal_evidence_gate_internal_antipatterns_2026_05_27`
+**Memory anchors**: `project_masc_cdal_evidence_gate_internal_antipatterns_2026_05_27`
 
 ## Context
 

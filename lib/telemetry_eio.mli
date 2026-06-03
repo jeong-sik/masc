@@ -178,7 +178,7 @@ val track_task_completed :
 (* track_handoff intentionally not exposed: 0 production callers as
    of #10358 (c2) audit. The Handoff_triggered variant remains in
    [event] above for wire-schema compatibility but no public emitter
-   exists. Add a new emitter only when masc-mcp introduces a real
+   exists. Add a new emitter only when masc introduces a real
    runtime-routing handoff concept. *)
 
 val track_error :

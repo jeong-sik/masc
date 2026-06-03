@@ -195,7 +195,7 @@ let create_handler
     () =
   let handler =
     Handler.create
-      ~name:"masc-mcp"
+      ~name:"masc"
       ~version:Version.version
       ~instructions:(instructions_for_profile profile)
       ()

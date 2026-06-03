@@ -221,5 +221,5 @@ for the formal migration remains in §5.
   bind / map / to_option / Cancellation-reraise (Alcotest + Eio_main).
 - `lib/tool_keeper.ml` `cache_ttl_seconds` migrated as demonstration
   site #1. Predecessor counter preserved (per §7).
-- `lib/dune` adds `masc_mcp.parse_outcome` to the main library
+- `lib/dune` adds `masc.parse_outcome` to the main library
   dependency list.

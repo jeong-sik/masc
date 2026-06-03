@@ -168,12 +168,12 @@ let test_config_agent_projection_docker () =
   let visible =
     Filename.concat
       (Keeper_sandbox.container_root agent_name)
-      "repos/masc-mcp/lib/foo.ml"
+      "repos/masc/lib/foo.ml"
   in
   let expected =
     Filename.concat
       config.Workspace.base_path
-      ".masc/playground/docker/sangsu/repos/masc-mcp/lib/foo.ml"
+      ".masc/playground/docker/sangsu/repos/masc/lib/foo.ml"
   in
   Alcotest.(check string)
     "sandbox-visible path maps to backend-scoped host path"

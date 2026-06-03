@@ -5,7 +5,7 @@
 | Status | Draft |
 | Related | RFC-0166 (server big-bang sweep rev2), RFC-0167 (agent-code omission-dedup + Llama discovery) |
 | Scope | `dashboard/design-system/tokens/source.ts`, all generated token outputs, `dashboard/src/styles/tokens.css`, `dashboard/src/components/ide/overlay-runtime.solid.test.tsx` |
-| Repos | masc-mcp |
+| Repos | masc |
 
 ## 1. Problem
 

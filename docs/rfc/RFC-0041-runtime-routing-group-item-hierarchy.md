@@ -12,7 +12,7 @@ code_refs:
 
 **Status**: Draft
 **Date**: 2026-05-08
-**Scope**: `masc-mcp` runtime selection and fallback mechanism
+**Scope**: `masc` runtime selection and fallback mechanism
 **One sentence**: runtime를 단순 문자열 이름에서 group/item 계층 구조로 재설계하고, health-aware per-turn routing으로 keeper를 runtime 실패로부터 격리한다.
 
 ## Related Documents

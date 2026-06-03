@@ -24,7 +24,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_keeper_livelock_state)
+ (name masc_keeper_livelock_state)
  (public_name masc.keeper_livelock_state)
  (wrapped false)
  (libraries masc.bounded_event_dedupe))

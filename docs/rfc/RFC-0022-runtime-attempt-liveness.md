@@ -463,7 +463,7 @@ Phase C (default `enforce` everywhere):
   / `MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC`; `min_useful_run` is the
   RFC/test minimum useful post-admission provider run window.
 - Provider-side cost metrics (covered by RFC-0009 Phase 3).
-- Wholesale replacement of OAS HTTP single-bulk-read with chunked. That is `feedback_oas_execution_uncancellable_mid_turn` ("masc-mcp 단독 fix 영역 zero").
+- Wholesale replacement of OAS HTTP single-bulk-read with chunked. That is `feedback_oas_execution_uncancellable_mid_turn` ("masc 단독 fix 영역 zero").
 - Per-keeper liveness override (deferred — start with per-candidate
   living budgets).
 

@@ -11,7 +11,7 @@ implementation_prs: []
 - **Status**: Active (frontmatter SSOT)
 - **Created**: 2026-05-20
 - **Owner**: keeper observability
-- **Predecessors**: masc-mcp #16389, masc-mcp #16470
+- **Predecessors**: masc #16389, masc #16470
 - **Evidence base**: `~/me/.tmp/pr-audit-2026-05-20/AUDIT-REPORT.md` §Cluster E
 
 ## 1. Motivation
@@ -67,8 +67,8 @@ PR #16470 retry dedup applies uniformly to *all* tool retry failures. Its root-f
 
 | 추가 항목 | PR | 시그니처 | Override 부여 | removal target |
 |---|---|---|---|---|
-| `tool_call_pair_fabrication` counter | masc-mcp#15792 | Repair / Sanitize | Counter retroactive sunset | RFC-0145 §5 PR-1 머지 후 |
-| `compact_audit_drain_burst` counter | masc-mcp#15808 | Telemetry-as-fix | Counter retroactive sunset | RFC-0145 §5 PR-2 머지 후 |
+| `tool_call_pair_fabrication` counter | masc#15792 | Repair / Sanitize | Counter retroactive sunset | RFC-0145 §5 PR-1 머지 후 |
+| `compact_audit_drain_burst` counter | masc#15808 | Telemetry-as-fix | Counter retroactive sunset | RFC-0145 §5 PR-2 머지 후 |
 
 ## 4. Sunset criteria
 

@@ -1,7 +1,7 @@
 (** RFC-0084 §2.1 — Tool dispatch telemetry 4-tuple emission SSOT.
 
     Every tool dispatch must emit a 4-tuple [(Span, Audit, Metric, Trace_id)].
-    This module wraps the three existing emission surfaces in masc-mcp:
+    This module wraps the three existing emission surfaces in masc:
 
     - [Otel_spans.with_span] for the OTel trace span
     - [Prometheus.inc_counter "tool_dispatch_total"] for the metric

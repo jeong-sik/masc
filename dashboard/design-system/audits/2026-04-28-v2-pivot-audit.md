@@ -15,7 +15,7 @@ Iter 0 of the v2 pivot loop. Establish ground truth before Iter 1 (`tokens-drift
 
 Three deliverables:
 
-1. Map v2 plan against the **prior `20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md` plan** (Phase 2 closure #11580) to mark absorbed / overlapping / net-new scope.
+1. Map v2 plan against the **prior `20m-me-workspace-yousleepwhen-masc-h-curious-dusk.md` plan** (Phase 2 closure #11580) to mark absorbed / overlapping / net-new scope.
 2. Inventory **238 active worktrees** by taxonomy and flag those that intersect Iter 1~14.
 3. Correct the v2 plan's hex/token estimates using Phase 0 audit (`2026-04-28-production-css-drift.md`) as authoritative source.
 
@@ -30,7 +30,7 @@ This file is the SSOT entry point for v2 Iter 0. Subsequent iter audits append t
 | Phase 2 closure (G/C/O/K/I plane) | ✅ shipped 2026-04-29 | `audits/2026-04-29-phase2-closure.md` (#11580) |
 | Frontend remaining after closure | **0** until backend issues land | same |
 | Backend RFC issues filed | 11 (#11568–#11578) | same |
-| E1–E5 Code IDE plane | 🔴 explicitly **deferred** by user 2026-04-28 in prior plan §A | `~/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md:32` |
+| E1–E5 Code IDE plane | 🔴 explicitly **deferred** by user 2026-04-28 in prior plan §A | `~/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-h-curious-dusk.md:32` |
 | **E1–E5 reactivation** | 🟢 user approved 2026-04-28 (today) via v2 plan Iter 21–26 | `~/me/planning/claude-plans/20m-keen-giraffe.md` |
 | DS-Drift Phase 0 hex audit | ✅ complete (90 unique hex, 75.6% token ratio) | `audits/2026-04-28-production-css-drift.md` |
 | Orphan re-triage | ✅ all 7 "orphans" reclassified live via `global.css @import` | `audits/2026-04-28-orphan-triage.md` |
@@ -98,7 +98,7 @@ For each prefix family, mark whether subsequent v2 iters must align.
 Before each Iter PR push:
 
 1. `gh pr list --state all --limit 50 --search "<keyword>"` for the iter's distinctive token (`bg-white`, `tokens-drift`, `headless`, `Drawer`, etc.) — both dash and underscore variants.
-2. `git -C ~/me/workspace/yousleepwhen/masc-mcp/.worktrees/<sibling> log --oneline main..HEAD` for the most-likely-overlapping worktrees from §4.1.
+2. `git -C ~/me/workspace/yousleepwhen/masc/.worktrees/<sibling> log --oneline main..HEAD` for the most-likely-overlapping worktrees from §4.1.
 3. If a sibling has uncommitted v2-overlapping work, broadcast and pause — do not race.
 
 ---

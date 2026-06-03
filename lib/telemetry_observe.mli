@@ -1,6 +1,6 @@
 (** Silent-failure wrapper for [try ... with _ -> ()] anti-patterns.
 
-    The masc-mcp codebase has accumulated several "P1/P2 silent-failure
+    The masc codebase has accumulated several "P1/P2 silent-failure
     fix" comments where IO/network/cancel-adjacent failures were
     silently swallowed and only a counter incremented.  This module
     provides a typed alternative so the choice between {b silently

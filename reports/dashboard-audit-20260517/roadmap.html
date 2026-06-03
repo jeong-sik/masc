@@ -204,7 +204,7 @@ curl -fsS -H "Authorization: Bearer $MASC_MCP_TOKEN" -H "X-MASC-Agent: dashboard
   | jq '{counts, auth, configured_keepers, projection_diagnostics}'
 
 curl -fsS -H "Authorization: Bearer $MASC_MCP_TOKEN" -H "X-MASC-Agent: dashboard" \
-  'http://127.0.0.1:8935/api/v1/ide/annotations?repo_id=masc-mcp&amp;file_path=README.md' \
+  'http://127.0.0.1:8935/api/v1/ide/annotations?repo_id=masc&amp;file_path=README.md' \
   | jq '{ok, count: (.data | length)}'</pre>
     </section>
   </main>

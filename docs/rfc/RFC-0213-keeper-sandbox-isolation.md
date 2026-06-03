@@ -21,7 +21,7 @@ implementation_prs: []
 - **Currency caveat (evidence policy):** §3 competitive comparison is from model
   knowledge (cutoff Jan 2026), NOT freshly verified — the web-research pass for
   this RFC was lost to a session limit. Treat §3 as a design lens to re-verify,
-  not as current product fact. §1–§2 (current masc-mcp model) are code-grounded.
+  not as current product fact. §1–§2 (current masc model) are code-grounded.
 
 ## 0. Summary
 
@@ -32,7 +32,7 @@ all exec there (`sandbox_repo_not_ready`). The immediate fix is the git
 provisioning model (§4-A). The deeper question — what isolation the `local`
 profile actually provides — is the durable design (§4-B): today `local` is a
 path-string gate on the host, not OS-level containment. The binding constraint
-on the durable answer is that masc-mcp runs on **macOS (M3 Max)**, where the
+on the durable answer is that masc runs on **macOS (M3 Max)**, where the
 Linux microVM/namespace primitives most agent-sandbox products use are
 unavailable.
 
@@ -41,9 +41,9 @@ unavailable.
 Production log (2026-06-03), keeper `umberto`:
 
 ```
-tool=Execute (ls repos/masc-mcp/.worktrees/task-630)
-error: sandbox_repo_not_ready: sandbox path is under repos/masc-mcp, but
-  /Users/.../.masc/playground/umberto/repos/masc-mcp/.worktrees/task-630
+tool=Execute (ls repos/masc/.worktrees/task-630)
+error: sandbox_repo_not_ready: sandbox path is under repos/masc, but
+  /Users/.../.masc/playground/umberto/repos/masc/.worktrees/task-630
   is not an independent git checkout (git_toplevel=<none>). Repair or reclone.
 then: shell_ir path_reject keeper=umberto reason=sandbox_repo_not_ready
 ```
@@ -96,7 +96,7 @@ Boundary classification (per CLAUDE.md product-boundary discipline):
 | macOS `sandbox-exec` (seatbelt) | kernel SBPL profile | host FS, profile-scoped | kernel FS/network deny | **yes (native, API deprecated but functional)** |
 
 **Key constraint:** the strongest isolation in the ecosystem (Firecracker, gVisor,
-namespaces) is **Linux-only**. On the masc-mcp host (macOS M3 Max) the only
+namespaces) is **Linux-only**. On the masc host (macOS M3 Max) the only
 *native* OS confinement is `sandbox-exec`/seatbelt; everything else requires
 either a Docker-provided Linux VM (heavy, per-keeper) or moving keepers to a
 remote Linux fleet.

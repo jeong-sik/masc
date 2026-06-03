@@ -16,7 +16,7 @@ withdrawn_reason: "Provider-C provider ships via provider_adapter.ml + transport
 
 ## 1. Problem
 
-Provider-C (Provider-B AI) has 3 distinct API surfaces, but masc-mcp only integrates 2:
+Provider-C (Provider-B AI) has 3 distinct API surfaces, but masc only integrates 2:
 
 | Provider | Endpoint | Type | Status |
 |---|---|---|---|

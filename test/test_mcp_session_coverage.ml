@@ -18,7 +18,7 @@ module Auth = Masc_mcp.Auth
 
 let setup_test_workspace () =
   let unique_id =
-    Printf.sprintf "masc-mcp-session-coverage-%d-%d"
+    Printf.sprintf "masc-session-coverage-%d-%d"
       (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))
   in
   let tmp = Filename.concat (Filename.get_temp_dir_name ()) unique_id in

@@ -248,5 +248,5 @@ atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `eve
 본 PR (A0.1-PR-0) 머지 후:
 
 1. 사용자 §8 3개 결정
-2. atdgen 의존성 dune 검증 (`opam list atdgen` + masc-mcp dune-project)
+2. atdgen 의존성 dune 검증 (`opam list atdgen` + masc dune-project)
 3. PR-1 진입 — atd schema + AgentStarted 1 event round-trip 검증 → 16 variant skeleton

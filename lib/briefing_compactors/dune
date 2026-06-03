@@ -1,5 +1,5 @@
 ; RFC-0056 Phase 1D — extract Briefing_compactors leaf module from flat
-; masc_mcp namespace. Stacked on Phase 1C (host_config).
+; masc namespace. Stacked on Phase 1C (host_config).
 ;
 ; Briefing_compactors is dependency-leaf: stdlib (Float, List, Option,
 ; Printf, String) + Yojson + Masc_domain (already its own sub-library
@@ -16,7 +16,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_briefing_compactors)
+ (name masc_briefing_compactors)
  (public_name masc.briefing_compactors)
  (wrapped false)
  (flags (:standard -w +4))

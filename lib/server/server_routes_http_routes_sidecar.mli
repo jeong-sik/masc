@@ -39,7 +39,7 @@ val dir_exists : string -> bool
 (** [Sys.file_exists]+[is_directory] guarded against EACCES. *)
 
 val project_root_from_executable : unit -> string option
-(** Resolve the masc-mcp project root from [Sys.executable_name];
+(** Resolve the masc project root from [Sys.executable_name];
     [None] for installed binaries that live outside a checkout. *)
 
 val sidecar_root : unit -> string option

@@ -327,7 +327,7 @@ let record_fsm_drift ~variant ~force =
 
 (* #9795 follow-up: per-agent breakout so operators can identify
    which keepers most often skip [in_progress] before [done].
-   Cardinality is bounded by fleet size (~10 keepers in masc-mcp),
+   Cardinality is bounded by fleet size (~10 keepers in masc),
    keeping the additional series count safe for Prometheus.  Emit
    the variant-only counter alongside so existing dashboards keep
    working — the new metric is purely additive. *)

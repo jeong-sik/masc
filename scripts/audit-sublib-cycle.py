@@ -4,7 +4,7 @@
 Purpose
 -------
 Verify that designated *leaf* / domain sub-libraries do NOT depend
-(transitively) on the mega-library ``masc_mcp``. A leaf that pulls the
+(transitively) on the mega-library ``masc``. A leaf that pulls the
 mega-lib back into its ``requires`` closure is a boundary violation: either
 the extraction never actually severed the coupling, or a later change
 re-coupled it.
@@ -17,7 +17,7 @@ leaf's transitive requires closure, which the OCaml compiler itself computed.
 
 Why this gate exists
 --------------------
-The flat ``masc_mcp`` library ((wrapped false) + (include_subdirs unqualified))
+The flat ``masc`` library ((wrapped false) + (include_subdirs unqualified))
 disables OCaml's acyclic-library DAG guarantee for ~2.6k modules. Extracting a
 domain into its own library (e.g. ``masc_goal``) restores that guarantee - but
 only as long as nobody adds the mega-lib to the leaf's ``(libraries ...)``.
@@ -50,15 +50,15 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Union
 
-MEGA_LIB = "masc_mcp"
+MEGA_LIB = "masc"
 
 # Leaf / domain libraries that MUST NOT depend on the mega-library.
 # Extend as each domain is extracted (RFC-0056 / boundary campaign).
 DEFAULT_LEAVES: tuple[str, ...] = (
-    "masc_mcp.masc_goal",
+    "masc.masc_goal",
     # PR-S3 (LANE 2): Tool dispatch substrate. The gate enforces that the
     # Tool layer cannot pull keeper/runtime/telemetry back in via the mega-lib.
-    "masc_mcp.masc_tool_dispatch",
+    "masc.masc_tool_dispatch",
 )
 
 # Recursive s-expression value: an atom (str) or a list of values.
@@ -259,20 +259,20 @@ def load_describe(root: str, describe_file: "str | None") -> Sexp:
 def self_test() -> int:
     """RFC-0001 / TLA bug-model homolog: a gate is only valid if it PASSES on a
     clean graph AND FAILS on a graph with the bug injected. Both must hold."""
-    mega = Library(name="masc_mcp", uid="MEGA", requires=("LEAF", "OTHER"))
+    mega = Library(name="masc", uid="MEGA", requires=("LEAF", "OTHER"))
     neutral = Library(name="masc_core", uid="CORE", requires=())
     # clean: leaf depends only on neutral; mega depends on leaf (allowed direction)
-    clean_leaf = Library(name="masc_mcp.masc_goal", uid="LEAF", requires=("CORE",))
+    clean_leaf = Library(name="masc.masc_goal", uid="LEAF", requires=("CORE",))
     clean = [mega, neutral, clean_leaf]
     # buggy: leaf re-couples to the mega-lib (direct)
-    buggy_leaf = Library(name="masc_mcp.masc_goal", uid="LEAF", requires=("CORE", "MEGA"))
+    buggy_leaf = Library(name="masc.masc_goal", uid="LEAF", requires=("CORE", "MEGA"))
     buggy = [mega, neutral, buggy_leaf]
     # buggy-transitive: leaf -> mid -> mega
-    mid = Library(name="masc_mcp.mid", uid="MID", requires=("MEGA",))
-    trans_leaf = Library(name="masc_mcp.masc_goal", uid="LEAF", requires=("MID",))
+    mid = Library(name="masc.mid", uid="MID", requires=("MEGA",))
+    trans_leaf = Library(name="masc.masc_goal", uid="LEAF", requires=("MID",))
     buggy_trans = [mega, neutral, mid, trans_leaf]
 
-    leaves = ("masc_mcp.masc_goal",)
+    leaves = ("masc.masc_goal",)
     ok = True
 
     v_clean = check(clean, leaves)

@@ -261,17 +261,17 @@ let test_validate_path_access_playground_repos_root_ignores_base_repo () =
         { (sample_repo "me") with name = "me"; local_path = base_path }
       in
       let masc_path =
-        Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
+        Filename.concat base_path "workspace/yousleepwhen/masc"
       in
       ensure_dir masc_path;
       let masc_repo =
-        { (sample_repo "masc-mcp") with
-          name = "masc-mcp";
+        { (sample_repo "masc") with
+          name = "masc";
           local_path = masc_path;
         }
       in
       write_repositories base_path [ root_repo; masc_repo ];
-      write_mapping base_path "nick0cave" [ "masc-mcp" ];
+      write_mapping base_path "nick0cave" [ "masc" ];
       let path =
         Filename.concat base_path ".masc/playground/docker/nick0cave/repos"
       in
@@ -292,12 +292,12 @@ let test_validate_path_access_playground_repo_uses_registered_name () =
         { (sample_repo "me") with name = "me"; local_path = base_path }
       in
       let masc_path =
-        Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
+        Filename.concat base_path "workspace/yousleepwhen/masc"
       in
       ensure_dir masc_path;
       let masc_repo =
         { (sample_repo "repo-masc") with
-          name = "masc-mcp";
+          name = "masc";
           local_path = masc_path;
         }
       in
@@ -305,7 +305,7 @@ let test_validate_path_access_playground_repo_uses_registered_name () =
       write_mapping base_path "nick0cave" [ "repo-masc" ];
       let path =
         Filename.concat base_path
-          ".masc/playground/docker/nick0cave/repos/masc-mcp/lib"
+          ".masc/playground/docker/nick0cave/repos/masc/lib"
       in
       ensure_dir path;
       match
@@ -324,13 +324,13 @@ let test_validate_path_access_playground_repo_uses_url_basename () =
         { (sample_repo "me") with name = "me"; local_path = base_path }
       in
       let masc_path =
-        Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
+        Filename.concat base_path "workspace/yousleepwhen/masc"
       in
       ensure_dir masc_path;
       let masc_repo =
         { (sample_repo "masc") with
           name = "masc";
-          url = "https://github.com/jeong-sik/masc-mcp.git";
+          url = "https://github.com/jeong-sik/masc.git";
           local_path = Filename.concat base_path ".masc/repos/masc";
         }
       in
@@ -338,7 +338,7 @@ let test_validate_path_access_playground_repo_uses_url_basename () =
       write_mapping base_path "executor" [ "masc" ];
       let path =
         Filename.concat base_path
-          ".masc/playground/docker/executor/repos/masc-mcp/lib"
+          ".masc/playground/docker/executor/repos/masc/lib"
       in
       ensure_dir path;
       match
@@ -359,7 +359,7 @@ let test_validate_path_access_playground_unique_clone_uses_git_remote () =
       let masc_repo =
         { (sample_repo "masc") with
           name = "masc";
-          url = "https://github.com/jeong-sik/masc-mcp.git";
+          url = "https://github.com/jeong-sik/masc.git";
           local_path = Filename.concat base_path ".masc/repos/masc";
         }
       in
@@ -371,7 +371,7 @@ let test_validate_path_access_playground_unique_clone_uses_git_remote () =
       in
       let path = Filename.concat repo_root "docs/proof.md" in
       ensure_dir (Filename.dirname path);
-      write_git_origin repo_root "https://github.com/jeong-sik/masc-mcp.git";
+      write_git_origin repo_root "https://github.com/jeong-sik/masc.git";
       match
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
@@ -390,7 +390,7 @@ let test_validate_path_access_playground_gitdir_relative_uses_git_remote () =
       let masc_repo =
         { (sample_repo "masc") with
           name = "masc";
-          url = "https://github.com/jeong-sik/masc-mcp.git";
+          url = "https://github.com/jeong-sik/masc.git";
           local_path = Filename.concat base_path ".masc/repos/masc";
         }
       in
@@ -406,7 +406,7 @@ let test_validate_path_access_playground_gitdir_relative_uses_git_remote () =
       write_gitdir_origin repo_root
         ~gitdir_ref:"../linked-worktree-gitdir"
         ~gitdir_path
-        ~url:"https://github.com/jeong-sik/masc-mcp.git";
+        ~url:"https://github.com/jeong-sik/masc.git";
       match
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
@@ -425,7 +425,7 @@ let test_validate_path_access_playground_gitdir_absolute_under_sandbox_uses_git_
       let masc_repo =
         { (sample_repo "masc") with
           name = "masc";
-          url = "https://github.com/jeong-sik/masc-mcp.git";
+          url = "https://github.com/jeong-sik/masc.git";
           local_path = Filename.concat base_path ".masc/repos/masc";
         }
       in
@@ -441,7 +441,7 @@ let test_validate_path_access_playground_gitdir_absolute_under_sandbox_uses_git_
       write_gitdir_origin repo_root
         ~gitdir_ref:gitdir_path
         ~gitdir_path
-        ~url:"https://github.com/jeong-sik/masc-mcp.git";
+        ~url:"https://github.com/jeong-sik/masc.git";
       match
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
@@ -460,7 +460,7 @@ let test_validate_path_access_playground_gitdir_escape_denied () =
       let masc_repo =
         { (sample_repo "masc") with
           name = "masc";
-          url = "https://github.com/jeong-sik/masc-mcp.git";
+          url = "https://github.com/jeong-sik/masc.git";
           local_path = Filename.concat base_path ".masc/repos/masc";
         }
       in
@@ -476,7 +476,7 @@ let test_validate_path_access_playground_gitdir_escape_denied () =
       write_gitdir_origin repo_root
         ~gitdir_ref:outside_gitdir
         ~gitdir_path:outside_gitdir
-        ~url:"https://github.com/jeong-sik/masc-mcp.git";
+        ~url:"https://github.com/jeong-sik/masc.git";
       match
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
@@ -494,7 +494,7 @@ let test_validate_path_access_playground_dot_git_symlink_denied () =
       let masc_repo =
         { (sample_repo "masc") with
           name = "masc";
-          url = "https://github.com/jeong-sik/masc-mcp.git";
+          url = "https://github.com/jeong-sik/masc.git";
           local_path = Filename.concat base_path ".masc/repos/masc";
         }
       in
@@ -508,7 +508,7 @@ let test_validate_path_access_playground_dot_git_symlink_denied () =
       let path = Filename.concat repo_root "docs/proof.md" in
       ensure_dir (Filename.dirname path);
       write_file (Filename.concat outside_gitdir "config")
-        "[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc-mcp.git\n";
+        "[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc.git\n";
       Unix.symlink outside_gitdir (Filename.concat repo_root ".git");
       match
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
@@ -525,7 +525,7 @@ let test_validate_path_access_playground_gitdir_symlink_denied () =
       let masc_repo =
         { (sample_repo "masc") with
           name = "masc";
-          url = "https://github.com/jeong-sik/masc-mcp.git";
+          url = "https://github.com/jeong-sik/masc.git";
           local_path = Filename.concat base_path ".masc/repos/masc";
         }
       in
@@ -540,7 +540,7 @@ let test_validate_path_access_playground_gitdir_symlink_denied () =
       let path = Filename.concat repo_root "docs/proof.md" in
       ensure_dir (Filename.dirname path);
       write_file (Filename.concat outside_gitdir "config")
-        "[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc-mcp.git\n";
+        "[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc.git\n";
       Unix.symlink outside_gitdir symlink_gitdir;
       write_file (Filename.concat repo_root ".git")
         (Printf.sprintf "gitdir: %s\n" symlink_gitdir);
@@ -559,7 +559,7 @@ let test_validate_path_access_playground_gitdir_parent_symlink_escape_denied () 
       let masc_repo =
         { (sample_repo "masc") with
           name = "masc";
-          url = "https://github.com/jeong-sik/masc-mcp.git";
+          url = "https://github.com/jeong-sik/masc.git";
           local_path = Filename.concat base_path ".masc/repos/masc";
         }
       in
@@ -575,7 +575,7 @@ let test_validate_path_access_playground_gitdir_parent_symlink_escape_denied () 
       let path = Filename.concat repo_root "docs/proof.md" in
       ensure_dir (Filename.dirname path);
       write_file (Filename.concat outside_gitdir "config")
-        "[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc-mcp.git\n";
+        "[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc.git\n";
       Unix.symlink outside_parent symlink_parent;
       write_file (Filename.concat repo_root ".git")
         "gitdir: ../escape-parent/gitdir\n";
@@ -594,7 +594,7 @@ let test_validate_path_access_playground_large_git_config_denied () =
       let masc_repo =
         { (sample_repo "masc") with
           name = "masc";
-          url = "https://github.com/jeong-sik/masc-mcp.git";
+          url = "https://github.com/jeong-sik/masc.git";
           local_path = Filename.concat base_path ".masc/repos/masc";
         }
       in
@@ -609,7 +609,7 @@ let test_validate_path_access_playground_large_git_config_denied () =
       ensure_dir (Filename.concat repo_root ".git");
       write_file (Filename.concat repo_root ".git/config")
         (String.make (70 * 1024) 'x'
-         ^ "\n[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc-mcp.git\n");
+         ^ "\n[remote \"origin\"]\n\turl = https://github.com/jeong-sik/masc.git\n");
       match
         Keeper_repo_mapping.validate_path_access ~keeper_id:"executor"
           ~base_path ~path
@@ -625,17 +625,17 @@ let test_validate_path_access_playground_unknown_repo_denied () =
         { (sample_repo "me") with name = "me"; local_path = base_path }
       in
       let masc_path =
-        Filename.concat base_path "workspace/yousleepwhen/masc-mcp"
+        Filename.concat base_path "workspace/yousleepwhen/masc"
       in
       ensure_dir masc_path;
       let masc_repo =
-        { (sample_repo "masc-mcp") with
-          name = "masc-mcp";
+        { (sample_repo "masc") with
+          name = "masc";
           local_path = masc_path;
         }
       in
       write_repositories base_path [ root_repo; masc_repo ];
-      write_mapping base_path "nick0cave" [ "masc-mcp" ];
+      write_mapping base_path "nick0cave" [ "masc" ];
       let path =
         Filename.concat base_path
           ".masc/playground/docker/nick0cave/repos/unknown/lib"

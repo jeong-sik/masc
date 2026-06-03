@@ -154,7 +154,7 @@ type init_error =
 
 ## §5 Alternatives
 
-| 접근법 | 강점 | 약점 | masc-mcp 적합도 |
+| 접근법 | 강점 | 약점 | masc 적합도 |
 |---|---|---|---|
 | OCaml Phantom Types | Zero runtime cost, 익숙한 문법, Jane Street 검증 | Move semantics 없음, signature 추상화 필수 | **높음** — boot phase 2-3 상태에 최적 |
 | Parse Don't Validate (newtype) | 정보 보존, 중복 검증 제거 | OCaml은 typeclass 없어 string-like 사용 불편 | **높음** — `Keeper_identity` canonicalization에 직접 적용 |

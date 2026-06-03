@@ -114,13 +114,13 @@ let block_reason_to_string = function
   | Chain_or_redirect ->
     "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. Run ONE command \
      per call. To change directory, use the `cwd` argument instead of `cd` - Good: \
-     cwd='repos/masc-mcp', cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc-mcp && dune \
+     cwd='repos/masc', cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc && dune \
      build'. For pipelines like `rg foo | wc -l`, run the primary command and process \
      output at the LLM layer. To write files, use Write."
   | Injection ->
     "Shell injection syntax (;, &&, standalone &, `, $) not allowed. Run ONE command per \
-     call. To change directory, use the `cwd` argument - Good: cwd='repos/masc-mcp', \
-     cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc-mcp && dune build' or cmd='cmd1 ; cmd2'. \
+     call. To change directory, use the `cwd` argument - Good: cwd='repos/masc', \
+     cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc && dune build' or cmd='cmd1 ; cmd2'. \
      Relative paths resolve from `cwd` (defaults to playground root). For file writes, \
      use Edit or Write."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."

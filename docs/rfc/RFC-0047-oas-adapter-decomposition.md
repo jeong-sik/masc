@@ -44,7 +44,7 @@ Closed across 10 PRs:
 
 ## 1. Problem
 
-`masc-mcp/lib/` carries an `oas_*` prefix family of 16 source files
+`masc/lib/` carries an `oas_*` prefix family of 16 source files
 (11,249 LOC across `.ml` + `.mli`) that *aspirationally* names them as
 "the OAS layer", but in fact:
 
@@ -55,14 +55,14 @@ Closed across 10 PRs:
   `Briefing_*`, `Board_*`. The repo boundary already enforces "OAS knows
   nothing about MASC".
 
-- `masc-mcp/lib/oas_*.ml` is **not** OAS. It is MASC's consumer/adapter
-  layer for OAS. masc-mcp is a *consumer* of `agent_sdk`, nothing more.
+- `masc/lib/oas_*.ml` is **not** OAS. It is MASC's consumer/adapter
+  layer for OAS. masc is a *consumer* of `agent_sdk`, nothing more.
 
 - The 16 files mix three concerns into a single dumping ground:
 
   | Concern | Belongs in |
   |---|---|
-  | A. Pure `agent_sdk` invocation (build prompt, run loop, parse response) | `agent_sdk` library or thin wrapper in masc-mcp |
+  | A. Pure `agent_sdk` invocation (build prompt, run loop, parse response) | `agent_sdk` library or thin wrapper in masc |
   | B. Runtime strategy (provider rotation, retry decision, exhaustion classification) | `lib/runtime/` |
   | C. Keeper bookkeeping (status updates, observation lifecycle, FSM transitions) | `lib/keeper/` |
 
@@ -351,7 +351,7 @@ to Phase 4, when its dependents are dissolved.
 - Add CI check: `! rg -l '^module Oas_' lib/` (no top-level OAS-prefixed
   modules outside agent_sdk repo).
 - Update `instructions/software-development.md` with a new entry under
-  AI 코드 생성 안티패턴 #5: "OAS prefix in masc-mcp consumer code".
+  AI 코드 생성 안티패턴 #5: "OAS prefix in masc consumer code".
   Reference RFC-0047.
 - Update `agent_delegation` subsystem list in `~/me/AGENT-LLM-A.md` to
   include runtime/agent_sdk_call as RFC-required scopes.
@@ -389,7 +389,7 @@ to Phase 4, when its dependents are dissolved.
 ## 9. Open questions
 
 1. Should Phase 2 also rename the `.opam` package name visible to
-   downstream consumers? (Currently masc-mcp does not export these.) —
+   downstream consumers? (Currently masc does not export these.) —
    *Tentative answer*: No. Keep package surface unchanged.
 2. Phase 4 introduces `lib/keeper/keeper_turn_driver.ml`. Does this
    interact with the existing `lib/keeper/keeper_unified_turn.ml`? — Need
@@ -434,7 +434,7 @@ follow-up RFC:
 
 - **Splitting `agent_sdk` itself.** OAS repo is already clean (0 MASC
   refs). No changes to `~/me/workspace/yousleepwhen/oas`.
-- **Dune sub-library introduction.** Single `masc_mcp` library retained.
+- **Dune sub-library introduction.** Single `masc` library retained.
   Sub-library conversion is a separate RFC if/when desired.
 - **Keeper sub-library extraction.** That work is tracked separately
   (memory `project_keeper_sublib_extraction_analysis.md`) and is

@@ -15,7 +15,7 @@ implementation_prs: [15722,15725]
 
 ## 1. Summary
 
-masc-mcp 의 streaming infrastructure 는 4 layer (llama-server SSE,
+masc 의 streaming infrastructure 는 4 layer (llama-server SSE,
 runtime transport `complete_stream`, OAS streaming hooks,
 `llm_metric_bridge` Prometheus emission) 모두 코드 수준에 정착돼 있으나,
 **`Custom_openai_compat` runtime binding 을 사용하는 provider
@@ -23,9 +23,9 @@ runtime transport `complete_stream`, OAS streaming hooks,
 emit 하지 않는다**. 동일 global metric sink 에서 `provider-k` provider 는 정상
 emit (5332 chunks observed). 본 RFC 는 격차를 진단하고 wire-up 을 정리한다.
 
-## 2. Evidence (measured 2026-05-17, masc-mcp 0.19.17 build 84d1cd8fb6)
+## 2. Evidence (measured 2026-05-17, masc 0.19.17 build 84d1cd8fb6)
 
-`/metrics` (Prometheus exposition, masc-mcp dashboard port 8935):
+`/metrics` (Prometheus exposition, masc dashboard port 8935):
 
 | Provider label | Model label | first_chunk_count | inter_chunk_count |
 |---|---|---:|---:|
@@ -39,7 +39,7 @@ fallback bucket 으로 떨어지며 chunk count = 0.
 
 **서버 SSE 자체 동작은 별도 검증됨**: 동일 endpoint 에 `curl` 로
 `stream: true` 직접 송신 시 llama-server 는 `delta:{content:"1"}` 형식의
-SSE chunk 를 정상 송출. 즉 *서버는 streaming 가능*, *masc-mcp 가 runtime
+SSE chunk 를 정상 송출. 즉 *서버는 streaming 가능*, *masc 가 runtime
 경로에서 그 path 를 발화시키지 않음*.
 
 ## 3. Background — current streaming pipeline
@@ -172,7 +172,7 @@ Fix 자체는 **production-impacting**. 다음 안전망 적용:
 - llama-server `--np 1 → N` slot 확장 (MTP 제약 — `--np 1` mandatory).
   별도 RFC 후보.
 - Agent SDK upstream patch (외부 opam dep, version-pinned). 본 RFC 는
-  *masc-mcp 측 wire-up* 만 다룬다.
+  *masc 측 wire-up* 만 다룬다.
 - provider-k provider streaming 성능 튜닝 — 이미 정상 동작.
 - Dashboard 가 user 에게 streaming SSE 를 직접 노출하는 UX. 본 RFC 는
   provider wire-up 만 다룬다.
@@ -197,7 +197,7 @@ Fix 자체는 **production-impacting**. 다음 안전망 적용:
 
 ## 11. References
 
-- Evidence dump timestamp: 2026-05-17 KST, masc-mcp uptime 31 분 단계
+- Evidence dump timestamp: 2026-05-17 KST, masc uptime 31 분 단계
   Prometheus metric snapshot.
 - RFC-0047 (OAS adapter decomposition) — file-rename scope, 본 RFC 와
   직교.

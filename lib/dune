@@ -402,7 +402,7 @@
    ;; Attribution, Violation_record) are resolved.
    masc.cdal
    ;; RFC-0056 Phase 1A — Trajectory leaf module promoted out of flat
-   ;; masc_mcp namespace. Unblocks Wave A keeper/server godfile extractions
+   ;; masc namespace. Unblocks Wave A keeper/server godfile extractions
    ;; (PR-1+) by removing the parent ↔ sub-lib cycle on `Trajectory.X`.
    ;; (wrapped false) preserves the bare `Trajectory` identifier; only
    ;; wrapped-pattern callers (Masc_mcp.Trajectory.X in tests) drop prefix.
@@ -565,7 +565,7 @@
    masc.masc_exec_command_gate
    ;; Board types (extracted sub-library — first step toward board isolation)
    masc_board
-   ;; Random identifier helper — shared between masc_workspace and masc_mcp
+   ;; Random identifier helper — shared between masc_workspace and masc
    ;; so the vrf-/p-/c-/fn- generation algorithm lives in one place.
    masc_random_id
    ;; Workspace workspace (extracted sub-library)

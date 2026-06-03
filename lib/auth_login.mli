@@ -1,5 +1,5 @@
 (** Auth_login — bearer-token mint and login-report rendering for
-    [masc-mcp login].
+    [masc login].
 
     Single mint entry point ({!mint}) that:
     1. Initialises the Mirage RNG idempotently.
@@ -16,7 +16,7 @@
 
     All internal helpers (URL encoding, shell quoting, RNG init,
     config-flip, token persistence) stay private — the four entry
-    points cover every documented [masc-mcp login] consumer (CLI,
+    points cover every documented [masc login] consumer (CLI,
     JSON API, shell-export).
 
     The server is client-agnostic: the caller (CLI / API consumer)

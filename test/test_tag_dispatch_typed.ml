@@ -8,7 +8,7 @@ open Alcotest
     [Tool_dispatch.lookup_tag] + [Keeper_tool_shared_runtime.tag_dispatch_fn]
     handle tools that didn't resolve through the handler registry.
 
-    With this PR, ALL THREE dispatch entries in masc-mcp emit the
+    With this PR, ALL THREE dispatch entries in masc emit the
     4-tuple (Span / Metric / trace_id / Audit slot via existing
     audit hooks). RFC-0084 §2.1 North Star reaches 100% propagation.
 

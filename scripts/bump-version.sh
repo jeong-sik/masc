@@ -41,9 +41,9 @@ sedi -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
 echo "  README.md badge updated"
 
 # 3) opam metadata (if tracked)
-if [ -f "$ROOT_DIR/masc_mcp.opam" ]; then
-  "$ROOT_DIR/scripts/dune-local.sh" build masc_mcp.opam
-  echo "  masc_mcp.opam updated (via scripts/dune-local.sh)"
+if [ -f "$ROOT_DIR/masc.opam" ]; then
+  "$ROOT_DIR/scripts/dune-local.sh" build masc.opam
+  echo "  masc.opam updated (via scripts/dune-local.sh)"
 fi
 
 # 4) CHANGELOG stub (prepend if missing)
@@ -105,5 +105,5 @@ echo "  4) pre-1.0 lane: use 0.y.0 for promise trains, 0.y.z for stabilization"
 echo ""
 echo "Next:"
 echo "  dune build --root ."
-echo "  git add dune-project README.md CHANGELOG.md masc_mcp.opam ROADMAP.md docs/PRODUCT-OPERATING-PLAN.md docs/spec/SPEC-INDEX.md"
+echo "  git add dune-project README.md CHANGELOG.md masc.opam ROADMAP.md docs/PRODUCT-OPERATING-PLAN.md docs/spec/SPEC-INDEX.md"
 echo "  git commit -m \"chore(release): bump version to $NEW_VERSION\""

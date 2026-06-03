@@ -1,4 +1,4 @@
-(** Prometheus-Compatible Metrics for masc-mcp
+(** Prometheus-Compatible Metrics for masc
 
     Provides lightweight metrics collection and Prometheus text format export.
 
@@ -140,7 +140,7 @@ include Prometheus_policy_metric_names
    the per-keeper drop count crosses [orphan_drop_threshold] inside
    [orphan_drop_window_sec]. Together they let operators tell a
    harmless single-update race from a stuck orphan fiber emitting 30+
-   drops per turn. See masc-mcp 2026-05-07 verifier-loop incident. *)
+   drops per turn. See masc 2026-05-07 verifier-loop incident. *)
 (* Self-healing circuit breaker: incremented each time [sweep_and_recover]
    auto-resumes a keeper after its back-off timer has elapsed.  A rate >0
    means the system is self-healing; a zero rate while keepers accumulate
@@ -187,7 +187,7 @@ let metric_oas_bus_capacity = "masc_oas_bus_capacity"
    for OAS payload variants that have not yet received an explicit
    arm in this consumer.  A non-zero rate per [kind] label means an
    upstream OAS pin bump shipped a new payload variant before the
-   masc-mcp consumer was migrated; SSE subscribers receive only a
+   masc consumer was migrated; SSE subscribers receive only a
    kind-only placeholder payload until the explicit arm is added. *)
 let metric_oas_bridge_unmigrated_payload_kind =
   "masc_oas_bridge_unmigrated_payload_kind_total"

@@ -291,7 +291,7 @@ cleanup 트랙에 추가 가능.
 |---|------------|------|------|
 | 16 | 36 keeper 동시 실행 테스트 | TBD | infra 결정 |
 | 17 | 부하 테스트 36×1000 concurrent | TBD | 측정 환경 |
-| 18 | TLA+ proof: 36-keeper liveness | **C** | 진짜 가치 — masc-mcp 가 이미 다수의 TLA+ spec 을 보유하고 있어 토대가 단단함 (재현 명령: `find specs -name '*.tla' \| wc -l`, 작성 시점 89). 25 라는 직전 추정치는 audit 자체 인용이며 본 응답에서는 `specs/INDEX.md` 의 실제 카운트로 대체했음 |
+| 18 | TLA+ proof: 36-keeper liveness | **C** | 진짜 가치 — masc 가 이미 다수의 TLA+ spec 을 보유하고 있어 토대가 단단함 (재현 명령: `find specs -name '*.tla' \| wc -l`, 작성 시점 89). 25 라는 직전 추정치는 audit 자체 인용이며 본 응답에서는 `specs/INDEX.md` 의 실제 카운트로 대체했음 |
 
 ## 7. 분류 합산
 

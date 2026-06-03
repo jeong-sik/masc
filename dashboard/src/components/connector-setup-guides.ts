@@ -33,7 +33,7 @@ export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
       { text: 'Bot 탭 → Privileged Gateway Intents → Message Content Intent 활성화.' },
       { text: 'OAuth2 → URL Generator → scope: bot, permissions: Send Messages / Embed Links / Read Message History.' },
       { text: '생성된 URL을 열어 봇을 길드에 초대.' },
-      { text: 'masc-mcp 서버를 재기동 — 부팅 시 자동으로 Discord Gateway 에 연결됩니다.' },
+      { text: 'masc 서버를 재기동 — 부팅 시 자동으로 Discord Gateway 에 연결됩니다.' },
     ],
     references: [
       { href: 'https://discord.com/developers/docs/topics/gateway#gateway-intents', label: 'Gateway Intents' },

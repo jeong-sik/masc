@@ -89,14 +89,14 @@ describe('ConfigResolutionPanel', () => {
           status: 'warn',
           warnings: [
             'Runtime build commit (deadbee) differs from server repo HEAD (feedbee).',
-            'Server binary checkout (/tmp/masc-mcp) differs from dashboard workspace/base path (/tmp/workspace / /tmp/workspace).',
+            'Server binary checkout (/tmp/masc) differs from dashboard workspace/base path (/tmp/workspace / /tmp/workspace).',
           ],
           base_path: { path: '/tmp/runtime-input', exists: true, source: 'input' },
           workspace_path: { path: '/tmp/workspace', exists: true, source: 'workspace' },
           resolved_base_path: { path: '/tmp/workspace', exists: true, source: 'resolved_base' },
           data_root: { path: '/tmp/workspace/.masc', exists: true, source: 'runtime_data' },
           prompt_markdown_dir: { path: '/tmp/shared/prompts', exists: true, source: 'prompt_registry' },
-          server_repo_path: { path: '/tmp/masc-mcp', exists: true, source: 'server_binary' },
+          server_repo_path: { path: '/tmp/masc', exists: true, source: 'server_binary' },
           server_repo_git_commit: 'feedbee',
           workspace_git_commit: 'cafef00d',
           resolved_base_git_commit: 'cafef00d',
@@ -147,14 +147,14 @@ describe('ConfigResolutionPanel', () => {
     expect(container.textContent).toContain('invalid env')
     expect(container.textContent).toContain('/tmp/workspace/.masc')
     expect(container.textContent).toContain('/tmp/shared/prompts')
-    expect(container.textContent).toContain('/tmp/masc-mcp')
+    expect(container.textContent).toContain('/tmp/masc')
     expect(container.textContent).toContain('server repo head')
     expect(container.textContent).toContain('feedbee')
     expect(container.textContent).toContain('source mismatch')
     expect(container.textContent).toContain('server/workspace mismatch')
     expect(container.textContent).toContain('SIGTERM')
     expect(container.textContent).toContain('Runtime build commit (deadbee) differs from server repo HEAD (feedbee).')
-    expect(container.textContent).toContain('Server binary checkout (/tmp/masc-mcp) differs from dashboard workspace/base path')
+    expect(container.textContent).toContain('Server binary checkout (/tmp/masc) differs from dashboard workspace/base path')
     expect(container.textContent).toContain('ollama warm / kv probe')
     expect(container.textContent).toContain('kv likely reused')
     expect(container.textContent).toContain('qwen3.5:35b-a3b-coding-nvfp4')

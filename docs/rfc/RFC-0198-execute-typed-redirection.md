@@ -8,7 +8,7 @@
 
 ## Context
 
-`masc-mcp` 의 `Execute` tool 은 RFC-0091 PR-1 에서 *typed argv schema* (execve semantic) 로 narrow 했다. `agent_tool_execute_typed_input.mli:13-20` 가 design constraint 를 명시:
+`masc` 의 `Execute` tool 은 RFC-0091 PR-1 에서 *typed argv schema* (execve semantic) 로 narrow 했다. `agent_tool_execute_typed_input.mli:13-20` 가 design constraint 를 명시:
 
 > Each token in `argv` is passed verbatim to the child process; the implementation invokes the executable directly (no `/bin/sh -c "..."` wrapping). Therefore shell metacharacters like `*`, `?`, `|`, `&`, `;`, `>`, `<`, `` ` ``, `$` inside an argv token are *literal characters*, not shell operators.
 

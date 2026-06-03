@@ -19,7 +19,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_keeper_recording_error_state)
+ (name masc_keeper_recording_error_state)
  (public_name masc.keeper_recording_error_state)
  (wrapped false)
  (libraries masc.bounded_event_dedupe))

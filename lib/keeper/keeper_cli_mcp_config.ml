@@ -3,7 +3,7 @@
    (OAS_CLAUDE_MCP_CONFIG) is unset.
 
    Without this fallback, affected CLI providers launch with no [mcpServers]
-   entry and the keeper cannot reach the masc-mcp HTTP
+   entry and the keeper cannot reach the masc HTTP
    endpoint; tool calls surface as "tool not in session's tool
    registry". See #10049 for the full root-cause analysis and the
    cli_tool_a sibling path in [server_runtime_bootstrap.sync_codex_mcp_config].

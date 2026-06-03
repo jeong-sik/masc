@@ -138,7 +138,7 @@ describe('IdeKeeperWorkPanel', () => {
           branch: 'feat/keeper-queue',
           path: '/workspace/.worktrees/keeper-queue',
           git_root: '/workspace',
-          repo_name: 'masc-mcp',
+          repo_name: 'masc',
         },
         execution_links: {
           session_id: 'sess-next',
@@ -219,7 +219,7 @@ function taskFixture(partial: Partial<Task> = {}): Task {
       branch: 'fix/runtime',
       path: '/workspace/.worktrees/fix-runtime',
       git_root: '/workspace',
-      repo_name: 'masc-mcp',
+      repo_name: 'masc',
     },
     ...partial,
   }

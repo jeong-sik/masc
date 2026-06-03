@@ -61,7 +61,7 @@ val build_checkpoint :
     When [checkpoint_sidecar] is supplied, builds the checkpoint
     via [Agent_sdk.Agent_checkpoint.build_checkpoint] threading the
     sidecar JSON through as the [working_context]; this path is
-    used when masc-mcp wants to attach extra worker-side state
+    used when masc wants to attach extra worker-side state
     that the SDK's default capture does not include. *)
 
 val partial_response_of_stop :

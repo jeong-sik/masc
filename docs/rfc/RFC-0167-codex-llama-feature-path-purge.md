@@ -6,7 +6,7 @@
 | Supersedes-in-part | RFC-0166 §9 (deferred items) |
 | Related | RFC-0165 (auth client-agnostic), RFC-0166 (big-bang sweep rev1+rev2) |
 | Scope | `lib/runtime/runtime_transport_codex_omission_dedup.{ml,mli}`, `lib/runtime/runtime_transport.{ml,mli}` facade + caller, `lib/runtime/runtime_config_provider_filter.ml`, `lib/runtime/runtime_metrics.{ml,mli}`, `test/test_cli-tool-a_omission_dedup_10097.ml` |
-| Repos | masc-mcp |
+| Repos | masc |
 
 ## 1. Problem
 

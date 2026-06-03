@@ -1324,7 +1324,7 @@ class GoalLoopCompletionAuditTest(unittest.TestCase):
         first = requirements[0]
         assert isinstance(first, dict)
         first["implementation_pr_refs"] = [
-            "https://github.com/jeong-sik/masc-mcp/issues/13630",
+            "https://github.com/jeong-sik/masc/issues/13630",
             "https://github.com/other/repo/pull/1",
         ]
 

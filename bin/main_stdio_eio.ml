@@ -45,7 +45,7 @@ let run_cmd base_path =
 
 let cmd =
   let doc = "MASC MCP Server (stdio, Eio)" in
-  let info = Cmd.info "masc-mcp-stdio" ~version:Masc_mcp.Version.version ~doc in
+  let info = Cmd.info "masc-stdio" ~version:Masc_mcp.Version.version ~doc in
   Cmd.v info Term.(const run_cmd $ base_path)
 
 let () = exit (Cmd.eval cmd)

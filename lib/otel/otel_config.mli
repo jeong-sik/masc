@@ -11,4 +11,4 @@ val endpoint : string
     back to {!Masc_network_defaults.otel_default_url}. *)
 
 val service_name : string
-(** [OTEL_SERVICE_NAME] or ["masc-mcp"]. *)
+(** [OTEL_SERVICE_NAME] or ["masc"]. *)

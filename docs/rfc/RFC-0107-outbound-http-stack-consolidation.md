@@ -29,11 +29,11 @@ Prior Art 는 `~/me/knowledge/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.
   > *"cohttp-eio 6.1.1 does not reliably close the underlying TCP socket fd when the Eio.Switch exits (observed on macOS). This module intercepts the connection factory via [make_generic] to capture the raw socket and close it explicitly on switch release."*
 - **현재 워크어라운드**: `make_closing_client` 는 cohttp-eio 의 `make_generic` factory 를 가로채 `tracked_flows: Eio.Resource.t list ref` 에 모든 socket flow 를 등록한 뒤, `Switch.on_release` 시점에 명시적으로 close. 정교한 우회 trick 이지만 *Eio 공식 권고 위반* — Eio issue #244 에서 Eio 팀이 "라이브러리의 자동 리소스 정리에 맡기고 명시적 close 하지 말 것" 권고했음에도, 우리는 cohttp-eio 의 부족을 우회하기 위해 어쩔 수 없이 명시적 close 를 추가.
 - **결과**: 매 호출 `connection: close` 강제 → keep-alive 0건 → runtime 마다 N socket burst.
-- **상위 issue**: [`ocaml-cohttp#85`](https://github.com/mirage/ocaml-cohttp/issues/85) "Support HTTP Keep-Alive" — 2014-01 개설, Closed (milestone "1.0 Stable API"), 결과적으로 abandoned/out-of-scope. masc-mcp 의 워크어라운드는 그 gap 의 lower bound.
+- **상위 issue**: [`ocaml-cohttp#85`](https://github.com/mirage/ocaml-cohttp/issues/85) "Support HTTP Keep-Alive" — 2014-01 개설, Closed (milestone "1.0 Stable API"), 결과적으로 abandoned/out-of-scope. masc 의 워크어라운드는 그 gap 의 lower bound.
 
-### 1.2 Connection pool 부재 — masc-mcp + oas 양쪽
+### 1.2 Connection pool 부재 — masc + oas 양쪽
 
-- **masc-mcp**: `lib/masc_http_client/masc_http_client.ml` 가 매 호출 fresh `Eio.Switch.run` → `Client.make` → 1 request → switch release → tracked socket close.
+- **masc**: `lib/masc_http_client/masc_http_client.ml` 가 매 호출 fresh `Eio.Switch.run` → `Client.make` → 1 request → switch release → tracked socket close.
 - **oas**: `oas/lib/llm_provider/http_client.ml:380-410` 의 `get_sync` / `post_sync` 가 동일 패턴.
 - **RFC-0100 (Streamable HTTP)** 가 명시적으로 connection pooling 을 *out-of-scope* 로 명시 (line 20).
 - **Runtime 영향**: 12+ keeper 가 runtime 재시도 안에서 매 호출 새 TCP+TLS 를 염. runtime 1 turn 에 5~12 fd burst (provider probe + runtime attempt + tool call HTTP).
@@ -156,7 +156,7 @@ sandbox_exec
 
 ## 4. Implementation phases
 
-본 RFC 의 phase 구성은 plan `~/me/planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-oas-vast-moonbeam.md` 와 동기화. 요약:
+본 RFC 의 phase 구성은 plan `~/me/planning/claude-plans/me-workspace-yousleepwhen-masc-oas-vast-moonbeam.md` 와 동기화. 요약:
 
 | Phase | Scope | Critical path? |
 |---|---|---|

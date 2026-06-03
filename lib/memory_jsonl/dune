@@ -1,5 +1,5 @@
 ; RFC-0056 Phase 1F — extract Memory_jsonl leaf module from flat
-; masc_mcp namespace. Stacked on Phase 1E (dashboard_eval_feed).
+; masc namespace. Stacked on Phase 1E (dashboard_eval_feed).
 ;
 ; Memory_jsonl is dependency-leaf: stdlib + Yojson + Eio + Agent_sdk
 ; (external) + Fs_compat / Time_compat / masc_log (existing
@@ -11,7 +11,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_memory_jsonl)
+ (name masc_memory_jsonl)
  (public_name masc.memory_jsonl)
  (wrapped false)
  (flags (:standard -w +4))

@@ -607,7 +607,7 @@
         <p class="data">
           <b>.masc/runtime_audit/2026-04/*.jsonl</b><br/>
           fields: <em>configured_labels</em> (~13 model 후보), <em>primary_model</em>, <em>selected_model</em>, <em>fallback_hops</em>, <em>fallback_events.reason</em><br/>
-          decisions에서 본 runtime: <em>runtime_id=keeper_unified</em>, <em>candidate_models=[cli-tool-d:auto, cli-tool-c:model-c-coding]</em>, error <em>runtime_exhausted</em>
+          decisions에서 본 runtime: <em>runtime_id=keeper_unified</em>, <em>candidate_models=[runtime-adapter-a:auto, runtime-adapter-b:capability-tier-b-coding]</em>, error <em>runtime_exhausted</em>
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
@@ -652,11 +652,11 @@
           <h3 class="ztitle">Cost Ledger</h3>
           <span class="zkind">observability</span>
         </div>
-        <p class="lead">기존 KPI에만 있던 cost를 풀 ledger로 — provider × model × agent.</p>
+        <p class="lead">기존 KPI에만 있던 cost를 풀 ledger로 — runtime slot x capability tier × agent.</p>
         <p class="lbl">Real data</p>
         <p class="data">
           <b>.masc/costs.jsonl</b> · 1634 rows<br/>
-          fields: <em>agent</em>, <em>provider</em>, <em>model</em> (model-c-coding…), <em>input/output_tokens</em>, <em>cost_usd</em>, <em>request_latency_ms</em>
+          fields: <em>agent</em>, <em>provider</em>, <em>model</em> (capability-tier-b-coding…), <em>input/output_tokens</em>, <em>cost_usd</em>, <em>request_latency_ms</em>
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">

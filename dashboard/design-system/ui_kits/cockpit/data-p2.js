@@ -1,4 +1,6 @@
-// data-p2.js — Phase 2 seed data, sourced from real .masc/* records.
+// data-p2.js — Phase 2 synthetic seed data.
+// Do not derive this file from .masc records, provider catalogs, keeper
+// prompts, decision logs, auth state, or operator transcripts.
 // Single window namespace MASC_P2 keeps each track-file's imports tidy.
 
 window.MASC_P2 = (function () {
@@ -85,7 +87,7 @@ window.MASC_P2 = (function () {
     },
   };
 
-  // ─── C1 · BOARD (real posts) ─────────────────────────────────────
+  // ─── C1 · BOARD (synthetic posts) ────────────────────────────────
   const boardPosts = [
     { id:"p-cced9ed9", author:"issue_king", title:"✅ task-040 Complete: PR #9712 regression verified — already merged via #9729", kind:"direct",     hearth:"merge-blocker", votes_up:0, votes_down:0, replies:0, body:"## Result\n\nPR #9712 was CLOSED but its changes are already in main via PR #9729.\n\n### Evidence\n- PR #9712 commit: 51f062b9a\n- PR #9729 commit: da11b0632\n- Both modify the same 2 files with identical changes\n- da11b0632 is in main (verified via git branch --contains)", at:"3m", expires:null },
     { id:"p-3ceeff9d", author:"sangsu",     title:"Explicit title", kind:"automation", hearth:null,            votes_up:0, votes_down:0, replies:0, body:"Visible line", state_block:"[STATE]\nGoal: keep context\n[/STATE]", at:"7m", expires:"7d" },
@@ -117,7 +119,7 @@ window.MASC_P2 = (function () {
     { seq:294, workspace:"merge-blockers",from:"qa-king", kind:"broadcast", at:"16:31:17Z", body:"suite-merge-blockers · 3 FAIL / 47 PASS. flake suspected on test_runtime_retry.", mentions:[], state:null },
     { seq:293, workspace:"default", from:"taskmaster",    kind:"broadcast", at:"16:30:55Z", body:"task-038 was a duplicate of task-031. cancelled. open-task limit per-goal=3.", mentions:[], state:null },
     { seq:292, workspace:"default", from:"masc-improver", kind:"dm",        at:"16:30:18Z", body:"@sangsu plan for keeper.claim() — split decision tree from invocation. ok?", mentions:["sangsu"], state:null },
-    { seq:291, workspace:"runtime", from:"ramarama",      kind:"broadcast", at:"16:29:50Z", body:"runtime hit @step=2 — provider-a→provider-b, 1.24s. logging in research/runtime-step2.", mentions:[], state:null },
+    { seq:291, workspace:"runtime", from:"ramarama",      kind:"broadcast", at:"16:29:50Z", body:"runtime hit @step=2 — runtime-slot-a→runtime-slot-b, 1.24s. logging in research/runtime-step2.", mentions:[], state:null },
     { seq:290, workspace:"default", from:"scholar",       kind:"broadcast", at:"16:29:22Z", body:"verifier keeper still not in masc_keeper_status. cross_verifier flag blocking registration.", mentions:[], state:null },
     { seq:289, workspace:"default", from:"janitor",       kind:"broadcast", at:"16:28:30Z", body:"pruned 4 expired posts. board live count: 78.", mentions:[], state:null },
   ];
@@ -126,31 +128,31 @@ window.MASC_P2 = (function () {
   const runtimeAudit = [
     {
       id:"ca-7f29", at:"16:31:27Z", runtime:"keeper_unified", trigger:"sangsu turn",
-      configured: ["cli-tool-d:auto","cli-tool-c:model-c-coding","cli-tool-d:opus","cli-tool-d:sonnet-4-6","cli-tool-c:provider-b-model-c","provider-d:model-d-mini","provider-d:model-d","provider-e:model-e","provider-a:model-a-haiku","provider-i:model-llama-large","ollama:model-llama","ollama:provider-h-2.5","provider-j:model-provider-j"],
-      primary:"cli-tool-d:auto", selected:null,
+      configured: ["runtime-adapter-a:auto","runtime-adapter-b:capability-tier-b-coding","runtime-adapter-a:capability-tier-a-plus","runtime-adapter-b:runtime-slot-b-capability-tier-b","runtime-slot-c:capability-tier-c","runtime-slot-d:capability-tier-d","runtime-slot-a:capability-tier-a","runtime-slot-e:capability-tier-local-large","local-runtime:capability-tier-local","runtime-slot-f:capability-tier-f"],
+      primary:"runtime-adapter-a:auto", selected:null,
       hops: [
-        { i:0, model:"cli-tool-d:auto",      status:"miss", ms:1065690, reason:"error_max_turns (15)" },
-        { i:1, model:"cli-tool-c:model-c-coding", status:"miss", ms:48161, reason:"provider-c exited code 1 — auth/config" },
+        { i:0, model:"runtime-adapter-a:auto",      status:"miss", ms:1065690, reason:"error_max_turns (15)" },
+        { i:1, model:"runtime-adapter-b:capability-tier-b-coding", status:"miss", ms:48161, reason:"runtime-slot-b exited code 1 — auth/config" },
         { i:2, model:"—",                     status:"exhausted", ms:0, reason:"runtime_exhausted" },
       ],
       total_ms: 1113851, outcome:"error", error_category:"internal_error",
     },
     {
       id:"ca-3f19", at:"16:29:50Z", runtime:"keeper_unified", trigger:"ramarama turn",
-      configured:["provider-a:model-a-haiku","cli-tool-c:provider-b-model-c","provider-d:model-d-mini"],
-      primary:"provider-a:model-a-haiku", selected:"cli-tool-c:provider-b-model-c",
+      configured:["runtime-slot-a:capability-tier-a","runtime-adapter-b:runtime-slot-b-capability-tier-b","runtime-slot-c:capability-tier-c"],
+      primary:"runtime-slot-a:capability-tier-a", selected:"runtime-adapter-b:runtime-slot-b-capability-tier-b",
       hops:[
-        { i:0, model:"provider-a:model-a-haiku", status:"miss", ms:820, reason:"rate-limit.soft" },
-        { i:1, model:"cli-tool-c:provider-b-model-c",  status:"hit",  ms:420, reason:"ok" },
+        { i:0, model:"runtime-slot-a:capability-tier-a", status:"miss", ms:820, reason:"rate-limit.soft" },
+        { i:1, model:"runtime-adapter-b:runtime-slot-b-capability-tier-b",  status:"hit",  ms:420, reason:"ok" },
       ],
       total_ms: 1240, outcome:"ok",
     },
     {
-      id:"ca-1c08", at:"16:14:02Z", runtime:"tool_use_strict", trigger:"sangsu turn",
-      configured:["cli-tool-d:auto","cli-tool-c:model-c-coding"],
-      primary:"cli-tool-d:auto", selected:"cli-tool-d:auto",
+      id:"ca-1c08", at:"16:14:02Z", runtime:"descriptor-strict", trigger:"sangsu turn",
+      configured:["runtime-adapter-a:auto","runtime-adapter-b:capability-tier-b-coding"],
+      primary:"runtime-adapter-a:auto", selected:"runtime-adapter-a:auto",
       hops:[
-        { i:0, model:"cli-tool-d:auto", status:"hit", ms:1740, reason:"ok" },
+        { i:0, model:"runtime-adapter-a:auto", status:"hit", ms:1740, reason:"ok" },
       ],
       total_ms: 1740, outcome:"ok",
     },
@@ -166,7 +168,7 @@ window.MASC_P2 = (function () {
     { ts:"16:31:17Z", kind:"tool.called",     actor:"qa-king",       subject:"test_runtime_retry",               duration:1230, payload:{tool:"keeper_test", outcome:"flake"} },
     { ts:"16:30:55Z", kind:"task.cancelled", actor:"taskmaster",     subject:"task-038",                          duration:0,    payload:{reason:"duplicate"} },
     { ts:"16:30:18Z", kind:"message.dm",      actor:"masc-improver", subject:"sangsu",                            duration:0,    payload:{seq:292, kind:"dm"} },
-    { ts:"16:29:50Z", kind:"runtime.hit",     actor:"ramarama",      subject:"keeper_unified@step=2",             duration:1240, payload:{model:"model-c"} },
+    { ts:"16:29:50Z", kind:"runtime.hit",     actor:"ramarama",      subject:"keeper_unified@step=2",             duration:1240, payload:{model:"capability-tier-b"} },
     { ts:"16:29:22Z", kind:"keeper.flag",     actor:"scholar",       subject:"verifier keeper missing",           duration:0,    payload:{} },
     { ts:"16:28:30Z", kind:"board.pruned",    actor:"janitor",       subject:"4 posts",                           duration:74,   payload:{remaining:78} },
     { ts:"16:28:11Z", kind:"operator.nudge",  actor:"operator",      subject:"sangsu — L187 drift",               duration:0,    payload:{channel:"hint"} },
@@ -209,17 +211,17 @@ window.MASC_P2 = (function () {
       { agent:"adversary",     in_tok:  44100, out_tok:  1800, cost:  0.32, p50_ms: 30997,p95_ms: 41200 },
       { agent:"taskmaster",    in_tok: 122000, out_tok:  4900, cost:  0.98, p50_ms:  840, p95_ms: 2010 },
     ],
-    matrix: { // provider × model → cost
-      providers: ["provider-a","cli-tool-c","provider-d","provider-e"],
-      models:    ["model-a-haiku","model-a-sonnet-6","model-c-coding","provider-b-model-c","model-d-mini","model-e"],
+    matrix: { // runtime slot x capability tier → cost
+      providers: ["runtime-slot-a","runtime-adapter-b","runtime-slot-c","runtime-slot-d"],
+      models:    ["capability-tier-a","capability-tier-a-plus","capability-tier-b-coding","runtime-slot-b-capability-tier-b","capability-tier-c","capability-tier-d"],
       grid: [
-        // provider-a
+        // runtime-slot-a
         [1.94, 18.42, 0,   0,   0,   0],
-        // cli-tool-c
+        // runtime-adapter-b
         [0,    0,     8.91,1.42,0,   0],
-        // provider-d
+        // runtime-slot-c
         [0,    0,     0,   0,   2.18,0],
-        // provider-e
+        // runtime-slot-d
         [0,    0,     0,   0,   0,   0.84],
       ],
     },
@@ -254,7 +256,7 @@ window.MASC_P2 = (function () {
     { agent:"executor",      kind:"stale_claim",    count:1, workspace:"default", at:"15:08:00Z" },
   ];
 
-  // ─── K1 · KEEPER INSPECTOR (BDI etc, real values from sangsu.json) ─
+  // ─── K1 · KEEPER INSPECTOR (synthetic BDI-style values) ──────────
   const keepersFull = [
     { id:"sangsu",        role:"Analyst/Coder",
       will:"추측보다 실행, 말보다 검증을 우선한다.",
@@ -263,7 +265,7 @@ window.MASC_P2 = (function () {
       short_goal:"지금 필요한 코드 변경을 바로 만들고 결과를 확인한다.",
       mid_goal:"세션 전반에서 계획보다 실행과 검증의 비중을 높인다.",
       long_goal:"작업이 항상 재현, 수정, 검증의 짧은 루프로 끝나게 만든다.",
-      runtime:"tool_use_strict", tools_preset:"coding", mention:["sangsu","코딩","developer","coder"],
+      runtime:"descriptor-strict", tools_preset:"coding", mention:["sangsu","코딩","developer","coder"],
       sandbox:"docker", network:"inherit", auto_handoff:true, handoff_threshold:0.85,
       tokens:{in:966400, out:29800}, last_handoff:"15:51:27Z", workspace_seq:296,
       proactive_idle_sec:120, social_model:"bdi_speech_v1",
@@ -312,9 +314,9 @@ window.MASC_P2 = (function () {
 
   // K2 · DECISIONS stream (compressed from sangsu.decisions.jsonl)
   const decisions = [
-    { id:"dec-1776922a",ts:"16:31:27Z", keeper:"sangsu", channel:"turn",  outcome:"error", speech_act:"defer", surface:"silent", belief:"mentions=1; scope=131; unclaimed=4; failed=15; idle=386s", desire:null, intention:null, blocker:"runtime_exhausted (agent-llm-a exited code 1)", latency_ms:1074371 },
+    { id:"dec-1776922a",ts:"16:31:27Z", keeper:"sangsu", channel:"turn",  outcome:"error", speech_act:"defer", surface:"silent", belief:"mentions=1; scope=131; unclaimed=4; failed=15; idle=386s", desire:null, intention:null, blocker:"runtime_exhausted (agent-runtime-a exited code 1)", latency_ms:1074371 },
     { id:"dec-1776921e",ts:"16:09:55Z", keeper:"sangsu", channel:"turn",  outcome:"error", speech_act:"defer", surface:"silent", belief:"mentions=1; scope=132; unclaimed=4; failed=15; idle=1585s", desire:null, intention:null, blocker:"runtime_exhausted (max_turns 15)", latency_ms:421106 },
-    { id:"dec-1776920e",ts:"16:01:42Z", keeper:"sangsu", channel:"scheduled_autonomous", outcome:"error", speech_act:"defer", surface:"silent", belief:"unclaimed=4; failed=15; idle=1466s", desire:null, intention:null, blocker:"cli-tool-c rejected (exit 1)", latency_ms:48161 },
+    { id:"dec-1776920e",ts:"16:01:42Z", keeper:"sangsu", channel:"scheduled_autonomous", outcome:"error", speech_act:"defer", surface:"silent", belief:"unclaimed=4; failed=15; idle=1466s", desire:null, intention:null, blocker:"runtime-adapter-b rejected (exit 1)", latency_ms:48161 },
     { id:"dec-1776919e",ts:"15:54:12Z", keeper:"qa-king", channel:"turn", outcome:"failure",speech_act:"report",surface:"broadcast",belief:"suite=merge-blockers; n=50",      desire:"green-suite", intention:"re-run flake test", blocker:null, latency_ms:23800 },
     { id:"dec-1776918e",ts:"15:32:00Z", keeper:"taskmaster", channel:"turn", outcome:"success",speech_act:"propose",surface:"broadcast",belief:"task-038 dup of task-031", desire:"backlog hygiene", intention:"cancel duplicate", blocker:null, latency_ms:412 },
     { id:"dec-1776917e",ts:"14:42:18Z", keeper:"masc-improver", channel:"turn", outcome:"success",speech_act:"propose",surface:"dm",belief:"keeper.claim() coupling=high", desire:"separation of concerns", intention:"split decision tree from invocation", blocker:null, latency_ms:1180 },

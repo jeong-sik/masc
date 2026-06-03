@@ -1,7 +1,7 @@
 (include_subdirs no)
 (library
  (name masc_backend)
- (public_name masc_mcp.masc_backend)
+ (public_name masc.masc_backend)
  (wrapped false)
  (modules
   backend_types
@@ -13,7 +13,7 @@
  (libraries
  masc_types
   masc_core
-  masc_mcp.config
+  masc.config
   masc_process
   masc_compression
   masc_log

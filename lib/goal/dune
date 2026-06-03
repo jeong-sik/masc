@@ -8,7 +8,7 @@
 ;; only on neutral libraries below.
 (library
  (name masc_goal)
- (public_name masc_mcp.masc_goal)
+ (public_name masc.masc_goal)
  (wrapped false)
  (libraries
   masc_types

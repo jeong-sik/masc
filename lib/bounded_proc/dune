@@ -2,7 +2,7 @@
 
 (library
  (name bounded_proc)
- (public_name masc_mcp.bounded_proc)
+ (public_name masc.bounded_proc)
  (modules bounded_proc)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags

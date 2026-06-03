@@ -1,7 +1,7 @@
 (include_subdirs no)
 (library
  (name masc_board)
- (public_name masc_mcp.masc_board)
+ (public_name masc.masc_board)
  (wrapped false)
  (modules board_types)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
@@ -13,5 +13,5 @@
    re.pcre
    eio
    masc_random_id
-   masc_mcp.config)
+   masc.config)
  (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_tla)))

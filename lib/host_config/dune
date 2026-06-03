@@ -12,7 +12,7 @@
 
 (library
  (name masc_mcp_host_config)
- (public_name masc_mcp.host_config)
+ (public_name masc.host_config)
  (wrapped false)
  (flags (:standard -w +4))
  (preprocess (pps ppx_deriving.show ppx_deriving.eq))
@@ -24,9 +24,9 @@
   ; dep was unused (audit 2026-05-15) so it is dropped here, making
   ; Host_config a true leaf below masc_workspace.  Reverse migration of
   ; workspace_utils_backend_setup callers becomes possible because
-  ; masc_workspace can now depend on masc_mcp.host_config without cycling.
-  masc_mcp.config
+  ; masc_workspace can now depend on masc.host_config without cycling.
+  masc.config
   ; RFC-0121: derive .masc/<sub> paths via Common helpers. We cannot
-  ; depend on masc_mcp.config_dir_resolver here because the resolver
+  ; depend on masc.config_dir_resolver here because the resolver
   ; itself depends on host_config for test-mode + env reads.
   masc_core))

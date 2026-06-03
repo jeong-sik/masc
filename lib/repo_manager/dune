@@ -2,7 +2,7 @@
 
 (library
  (name repo_manager)
- (public_name masc_mcp.repo_manager)
+ (public_name masc.repo_manager)
  (modules
    field_resolution
    repo_manager_types
@@ -15,12 +15,12 @@
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
  (flags (:standard -w +4))
  (libraries
-   masc_mcp.config
-   masc_mcp.config_dir_resolver
-   masc_mcp.fs_compat
-   masc_mcp.masc_exec
-   masc_mcp.masc_log
-   masc_mcp.masc_process
+   masc.config
+   masc.config_dir_resolver
+   masc.fs_compat
+   masc.masc_exec
+   masc.masc_log
+   masc.masc_process
    digestif
    yojson
    otoml

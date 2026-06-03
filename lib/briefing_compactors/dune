@@ -3,7 +3,7 @@
 ;
 ; Briefing_compactors is dependency-leaf: stdlib (Float, List, Option,
 ; Printf, String) + Yojson + Masc_domain (already its own sub-library
-; lib/types/, dune name masc_mcp.masc_types). 174+21 LoC, fan-in 2 (1
+; lib/types/, dune name masc.masc_types). 174+21 LoC, fan-in 2 (1
 ; lib caller + 1 test).
 ;
 ; Note: was previously listed in parent (private_modules) — promoting to
@@ -17,11 +17,11 @@
 
 (library
  (name masc_mcp_briefing_compactors)
- (public_name masc_mcp.briefing_compactors)
+ (public_name masc.briefing_compactors)
  (wrapped false)
  (flags (:standard -w +4))
  (libraries
   yojson
   masc_core
-  masc_mcp.masc_types
-  masc_mcp.dashboard_utils))
+  masc.masc_types
+  masc.dashboard_utils))

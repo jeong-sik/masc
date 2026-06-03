@@ -14,7 +14,7 @@
 
 (library
  (name masc_mcp_compaction_trigger)
- (public_name masc_mcp.compaction_trigger)
+ (public_name masc.compaction_trigger)
  (wrapped false)
  (flags (:standard -w +4))
  (libraries

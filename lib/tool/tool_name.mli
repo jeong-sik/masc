@@ -74,12 +74,29 @@ module Operator_name : sig
   val pp : Stdlib.Format.formatter -> t -> unit
 end
 
-module Masc : sig
+(** Domain_tool — single domain-owned grouping of Task/Board/Goal/Operator tool
+    names plus the substrate classifications ([module_tag]/[effect_domain]) each
+    domain attaches. This is the only module that enumerates the domain
+    constructors; the substrate consumes it through these functions without
+    spelling any domain constructor. *)
+module Domain_tool : sig
   type t =
     | Task of Task_name.t
     | Board of Board_name.t
     | Goal of Goal_name.t
     | Operator of Operator_name.t
+
+  val to_string : t -> string
+  val of_string : string -> t option
+  val is_board : t -> bool
+  val module_tag : t -> Tool_tag_types.module_tag
+  val effect_domain : t -> Tool_tag_types.effect_domain
+  val pp : Stdlib.Format.formatter -> t -> unit
+end
+
+module Masc : sig
+  type t =
+    | Domain of Domain_tool.t
     | Agent_fitness
     | Agent_update
     | Agent_card

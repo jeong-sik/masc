@@ -501,12 +501,11 @@ let start_keeper_loops
   Keeper_subprocess_registry.register_default_cleanup_hook ();
   (* Build read-only tool surface shared by both judges. *)
   let judge_tool_names =
-    List.map
-      Tool_name.Masc.to_string
-      Tool_name.Masc.
-        [ Status; Task Tool_name.Task_name.Tasks; Agents
-        ; Board Tool_name.Board_name.Board_list
-        ]
+    [ Tool_name.Masc.to_string Tool_name.Masc.Status
+    ; Tool_name.Task_name.to_string Tool_name.Task_name.Tasks
+    ; Tool_name.Masc.to_string Tool_name.Masc.Agents
+    ; Tool_name.Board_name.to_string Tool_name.Board_name.Board_list
+    ]
   in
   let judge_masc_tools =
     match Keeper_tool_surfaces.local_worker_tool_schemas ~names:judge_tool_names () with

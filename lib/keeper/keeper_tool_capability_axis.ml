@@ -28,7 +28,7 @@ let candidate_names name =
 ;;
 
 let claim_task_tool_names =
-  [ "keeper_task_claim"; masc_name (Tool_name.Masc.Task Tool_name.Task_name.Claim_next) ]
+  [ "keeper_task_claim"; Tool_name.Task_name.to_string Tool_name.Task_name.Claim_next ]
 ;;
 
 let board_activity_tool_names =

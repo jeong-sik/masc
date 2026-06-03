@@ -17,7 +17,6 @@ let empty_links : T.task_execution_links = {
 let empty_contract : T.task_contract = {
   strict = false;
   completion_contract = [];
-  required_tools = [];
   required_evidence = [];
   inspect_gate_evidence = [];
   verify_gate_evidence = [];

@@ -38,7 +38,6 @@ let make_task
 let make_contract
       ?(strict = false)
       ?(completion_contract = [])
-      ?(required_tools = [])
       ?(required_evidence = [])
       ?(inspect_gate_evidence = [])
       ?(verify_gate_evidence = [])
@@ -47,7 +46,6 @@ let make_contract
   =
   { strict
   ; completion_contract
-  ; required_tools
   ; required_evidence
   ; inspect_gate_evidence
   ; verify_gate_evidence

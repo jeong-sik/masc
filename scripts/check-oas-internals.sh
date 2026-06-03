@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Guard masc-mcp from reaching past the agent_sdk public surface.
+# Guard masc from reaching past the agent_sdk public surface.
 #
 # Symmetric counterpart to OAS's scripts/check-sdk-independence.sh
-# (oas does not depend on masc-mcp; masc-mcp does not reach into
+# (oas does not depend on masc; masc does not reach into
 # oas internals).
 #
 # Tiers:

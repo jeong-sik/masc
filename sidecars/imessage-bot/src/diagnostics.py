@@ -331,7 +331,7 @@ async def check_gate_reachable() -> Check:
             severity=Severity.error,
             detail=url,
             message=f"연결 실패: {exc}",
-            hint="MASC 서버 기동 여부 확인 (./start-masc-mcp.sh)",
+            hint="MASC 서버 기동 여부 확인 (./start-masc.sh)",
         )
     except httpx.HTTPError as exc:
         return Check(

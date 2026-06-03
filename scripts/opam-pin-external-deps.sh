@@ -22,7 +22,7 @@
 # footgun: after bumping a SHA and re-running this script you will see
 # "pinned successfully" and conclude the new code is live, when in fact
 # the installed binary is still the OLD commit. Symptoms include "my
-# feat is staged in OAS but `masc-mcp` never sees it" and "the function
+# feat is staged in OAS but `masc` never sees it" and "the function
 # exists in the pinned source tree but `dune build` links against an
 # older copy".
 #

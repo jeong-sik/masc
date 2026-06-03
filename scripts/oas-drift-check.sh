@@ -51,7 +51,7 @@ resolve_source_dir() {
 
   # Candidate local repo paths, checked in order:
   #   1. $AGENT_SDK_LOCAL_REPO (explicit opt-in)
-  #   2. Sibling checkout: <masc-mcp-parent>/oas
+  #   2. Sibling checkout: <masc-parent>/oas
   # Each must be a git checkout at the pinned SHA to qualify.
   local masc_parent
   masc_parent="$(cd "${REPO_ROOT}/.." && pwd)"

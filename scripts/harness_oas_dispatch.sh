@@ -3,13 +3,13 @@
 #
 # Plan reference: ~/me/planning/claude-plans/wise-nibbling-lerdorf.md §"Phase B"
 #
-# Scope: scrape the running masc-mcp server's /metrics endpoint and emit a
+# Scope: scrape the running masc server's /metrics endpoint and emit a
 # CSV row per OAS hot path histogram. Workload driving is the operator's
 # responsibility — run scripts/harness_tool_call_quality.sh --live or
 # whatever workload matches the comparison you want, then invoke this
 # script to capture the histogram values.
 #
-# Caveat: masc-mcp's [Prometheus.observe_histogram] currently tracks the
+# Caveat: masc's [Prometheus.observe_histogram] currently tracks the
 # cumulative sum and _count only (no buckets). Quantiles (p50/p95/p99)
 # therefore require either an external Prometheus scraper with proper
 # bucketing or a raw-sample collection mode (out of scope for Phase B
@@ -31,7 +31,7 @@ Usage:
 
 Modes:
   scrape (default)
-      Reads /metrics from the running masc-mcp server and writes a CSV row
+      Reads /metrics from the running masc server and writes a CSV row
       per OAS dispatch histogram (sum, count, avg).
       Defaults: --port 8935 --out benchmarks/results/oas-baseline-<ts>.csv
       Optional --label TAG annotates the CSV row (e.g. "memo-off", "memo-on",

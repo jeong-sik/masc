@@ -26,7 +26,7 @@
 #
 # Cross-reference:
 #   - lib/telemetry_observe.{ml,mli}
-#   - planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-hashed-pretzel.md (Step 0b)
+#   - planning/claude-plans/me-workspace-yousleepwhen-masc-hashed-pretzel.md (Step 0b)
 
 set -euo pipefail
 

@@ -21,7 +21,7 @@ NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_
 After pushing a prepared branch for assigned code work, create or update the remote PR through Execute as an ordinary typed-argv CLI call from scoped repo cwd. PR creation is not a keeper-native tool concept.
 Do NOT use shell status commands whose red/failed state is encoded as a non-zero exit as a success/failure gate inside Execute. Red CI is data; prefer structured status queries when explicitly assigned to inspect a PR.
 Do NOT use shell redirects or chaining. Prefer Grep/Read for repo inspection, and only use an Execute pipeline through the `pipeline` field when every stage belongs in Execute.
-Do NOT use Execute for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `Grep { pattern: "term", path: "lib", glob: "*.ml" }` when Grep is visible, with `cwd` set only for tools that support it.
+Do NOT use Execute for grep/rg pipelines such as `cd repos/masc && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `Grep { pattern: "term", path: "lib", glob: "*.ml" }` when Grep is visible, with `cwd` set only for tools that support it.
 Do NOT run repo-wide Execute scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use Grep with a scoped repo path, or run `git log --oneline -5 --grep=term` from the target repo cwd.
 ## Tool error grammar (how to read a failed tool result)
 
@@ -42,21 +42,21 @@ Short form: hint → fix args → retry once → if still stuck, judgment reques
 
 Public tool examples:
   BAD:  raw shell text: "git log --oneline | head -5"
-  GOOD: Execute executable="git" argv=["log","--oneline","-5"] cwd=repos/masc-mcp
+  GOOD: Execute executable="git" argv=["log","--oneline","-5"] cwd=repos/masc
   BAD:  raw shell text: "cd repos && ls"
   GOOD: Execute executable="ls" argv=["repos"]
   BAD:  raw shell text: "find /home/keeper -name \"board\" 2>/dev/null"
   GOOD: Execute executable="find" argv=[".","-maxdepth","3","-name","board"]
-  BAD:  raw shell text: "find repos/masc-mcp/lib -name nickname*"
-  GOOD: Grep pattern="nickname" path=repos/masc-mcp/lib glob="*.ml"
-  BAD:  raw shell text: "rg -n \"foo\\|bar\" repos/masc-mcp/lib 2>/dev/null | head -20"
-  GOOD: Grep pattern="foo|bar" path=repos/masc-mcp/lib
-  BAD:  raw shell text: "cd repos/masc-mcp && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
+  BAD:  raw shell text: "find repos/masc/lib -name nickname*"
+  GOOD: Grep pattern="nickname" path=repos/masc/lib glob="*.ml"
+  BAD:  raw shell text: "rg -n \"foo\\|bar\" repos/masc/lib 2>/dev/null | head -20"
+  GOOD: Grep pattern="foo|bar" path=repos/masc/lib
+  BAD:  raw shell text: "cd repos/masc && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
   GOOD: Grep pattern="exec_semantic" path=lib glob="*.ml"
   BAD:  raw shell text: "git log --oneline --all --grep=\"15731\" 2>/dev/null | head -5"
-  GOOD: Execute executable="git" argv=["log","--oneline","-5","--grep=15731"] cwd=repos/masc-mcp
+  GOOD: Execute executable="git" argv=["log","--oneline","-5","--grep=15731"] cwd=repos/masc
   BAD:  raw shell text: "rg \"add_comment\" repos/ --include '*.ml' --include '*.mli' -l"
-  GOOD: Grep pattern="add_comment" path=repos/masc-mcp/lib glob="*.ml"
+  GOOD: Grep pattern="add_comment" path=repos/masc/lib glob="*.ml"
   BAD:  raw shell text: "cat file 2>/dev/null || echo missing"
   GOOD: Read file_path=file                                 (let the tool error explain missing files)
   BAD:  raw shell text: "ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
@@ -84,7 +84,7 @@ File operations:
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:
   - `mind/` — notes, drafts, scratchpads
-  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default repository workspace
+  - `repos/` — git clones (one per repo, e.g. `repos/masc/`) — this is your default repository workspace
   - `.` — general sandbox files
 - All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
 - Clones: use the exact tool listed in your active schema. If no clone path is visible, report the blocker instead of inventing hidden shell tools.

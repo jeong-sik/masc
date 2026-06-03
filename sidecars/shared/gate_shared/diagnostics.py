@@ -211,7 +211,7 @@ def render_pretty(
     4. 조치 항목 — warn/error 에서 나온 hint + auto-fix 를 번호 목록으로
     5. 합계 — 한글 카운트
 
-    Note: `masc-mcp diagnostics all` 이 섹션마다 ``====`` divider 를 넣으므로,
+    Note: `masc diagnostics all` 이 섹션마다 ``====`` divider 를 넣으므로,
     사이드카 제목도 동일한 underline 을 써서 단독/통합 실행 양쪽에서
     시각적으로 자연스럽게 이어지도록 한다 (이전의 markdown ``#`` 접두 제거).
     """

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # scripts/start-masc-supervised.sh
-# Process-level supervisor for masc-mcp.
+# Process-level supervisor for masc.
 #
-# Wraps start-masc-mcp.sh with auto-restart and a crash-loop circuit
+# Wraps start-masc.sh with auto-restart and a crash-loop circuit
 # breaker.  Satisfies the operator durability requirement described in
 # issue #10828 while respecting the <launchd> policy from ~/me/CLAUDE.md
 # (script-based, no system-level daemon registration).
 #
 # Usage:
-#   scripts/start-masc-supervised.sh [args forwarded to start-masc-mcp.sh]
+#   scripts/start-masc-supervised.sh [args forwarded to start-masc.sh]
 #
 # Environment knobs:
 #   MASC_SUPERVISOR_LOG             — log file path
@@ -51,10 +51,10 @@ log() {
 }
 
 log "process supervisor starting (window=${WINDOW_SEC}s max_restarts=${MAX_RESTARTS} cooldown=${COOLDOWN_SEC}s)"
-log "wrapping: $REPO_ROOT/start-masc-mcp.sh${*:+ $*}"
+log "wrapping: $REPO_ROOT/start-masc.sh${*:+ $*}"
 
-if [ ! -x "$REPO_ROOT/start-masc-mcp.sh" ]; then
-  log "ERROR: start-masc-mcp.sh not found or not executable at $REPO_ROOT/start-masc-mcp.sh"
+if [ ! -x "$REPO_ROOT/start-masc.sh" ]; then
+  log "ERROR: start-masc.sh not found or not executable at $REPO_ROOT/start-masc.sh"
   exit 1
 fi
 
@@ -63,15 +63,15 @@ fi
 restart_timestamps=()
 
 while true; do
-  log "starting masc-mcp"
+  log "starting masc"
   start_epoch=$(date +%s)
 
-  "$REPO_ROOT/start-masc-mcp.sh" "$@" || true
+  "$REPO_ROOT/start-masc.sh" "$@" || true
   exit_code=$?
   end_epoch=$(date +%s)
   uptime_s=$((end_epoch - start_epoch))
 
-  log "masc-mcp exited code=$exit_code uptime=${uptime_s}s"
+  log "masc exited code=$exit_code uptime=${uptime_s}s"
 
   # Trim restart_timestamps to the sliding window.
   cutoff=$((end_epoch - WINDOW_SEC))
@@ -89,7 +89,7 @@ while true; do
 
   if [[ "$window_count" -ge "$MAX_RESTARTS" ]]; then
     log "ABORT: $window_count exits in ${WINDOW_SEC}s window (limit $MAX_RESTARTS) — not restarting"
-    log "Investigate root cause then restart manually with: $REPO_ROOT/start-masc-mcp.sh $*"
+    log "Investigate root cause then restart manually with: $REPO_ROOT/start-masc.sh $*"
     exit 1
   fi
 

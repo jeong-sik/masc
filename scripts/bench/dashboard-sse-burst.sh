@@ -31,7 +31,7 @@ server_up() {
 }
 
 if ! server_up; then
-  echo "masc-mcp server is not responding on :8935."
+  echo "masc server is not responding on :8935."
   echo "start it in another shell, then re-run:"
   echo "  dune exec masc_mcp_server -- --foreground"
   exit 1

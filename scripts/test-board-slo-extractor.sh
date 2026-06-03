@@ -58,8 +58,8 @@ cat >"$masc_dir/logs/system_log_${today}.jsonl" <<JSONL
 JSONL
 
 mkdir -p \
-  "$masc_dir/playground/docker/verifier/repos/masc-mcp/.worktrees/task-a" \
-  "$masc_dir/playground/docker/verifier/repos/masc-mcp/.worktrees/task-b"
+  "$masc_dir/playground/docker/verifier/repos/masc/.worktrees/task-a" \
+  "$masc_dir/playground/docker/verifier/repos/masc/.worktrees/task-b"
 
 cat >"$masc_dir/tool_calls/$tool_month/$tool_day.jsonl" <<JSONL
 {"ts":$now,"tool":"keeper_board_post","success":true,"semantic_success":true,"duration_ms":10}

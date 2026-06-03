@@ -94,7 +94,7 @@ fi
 
 # Accept both bare floor [(agent_sdk (>= X.Y.Z))] and capped floor
 # [(agent_sdk (and (>= X.Y.Z) (< W.V.U)))]. Cap is allowed because the
-# OAS pin SHA may transiently exceed the previous minor while masc-mcp
+# OAS pin SHA may transiently exceed the previous minor while masc
 # opts into a forward upper bound. Floor must remain exact.
 if ! grep -Eq "\\(agent_sdk (\\(>= ${min_version_re}\\)|\\(and \\(>= ${min_version_re}\\))" "${REPO_ROOT}/dune-project"; then
   echo "dune-project agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2

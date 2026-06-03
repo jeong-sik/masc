@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Phase 1a-1: direct Ollama API bench (no masc-mcp involvement).
+# Phase 1a-1: direct Ollama API bench (no masc involvement).
 #
 # Purpose: isolate "1-hour trap" cause - is it (a) Ollama cold start, or
-# (b) masc-mcp routing overhead? Measure (a) first, then layer (b) in
+# (b) masc routing overhead? Measure (a) first, then layer (b) in
 # Phase 1a-2.
 #
 # Inputs:  $1 = model id (e.g. "qwen3.6:27b-coding-nvfp4")

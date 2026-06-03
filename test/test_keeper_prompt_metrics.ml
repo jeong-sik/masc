@@ -409,6 +409,7 @@ let test_ctx_composition_splits_history_and_residual () =
                 content = "Fetched board post body";
                 is_error = false;
                 json = None;
+                content_blocks = None;
               };
           ];
         name = None;

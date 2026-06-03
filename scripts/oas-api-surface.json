@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "9598bc9962b1b5e1bdf4fc97fd2d0b3ac6b32c87",
-  "pinned_version": "v0.200.10",
+  "pinned_sha": "5b00a166718616e363998c058c64683db8090285",
+  "pinned_version": "v0.200.13",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -22,34 +22,6 @@
       "TurnCompleted",
       "TurnReady",
       "TurnStarted"
-    ],
-    "inference_telemetry_fields": [
-      "agent_name",
-      "turn",
-      "provider",
-      "model",
-      "prompt_tokens",
-      "completion_tokens",
-      "prompt_ms",
-      "decode_ms",
-      "decode_tok_s"
-    ],
-    "api_usage_fields": [
-      "input_tokens",
-      "output_tokens",
-      "cache_creation_input_tokens",
-      "cache_read_input_tokens",
-      "cost_usd"
-    ],
-    "inference_telemetry_response_fields": [
-      "reasoning_tokens",
-      "reasoning_tokens_estimated",
-      "prompt_n",
-      "prompt_ms",
-      "prompt_per_second",
-      "predicted_n",
-      "predicted_ms",
-      "predicted_per_second"
     ],
     "http_error_variants": [
       "AcceptRejected",

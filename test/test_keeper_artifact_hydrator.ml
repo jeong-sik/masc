@@ -43,7 +43,8 @@ let store_a_blob store payload =
   | O.Inline _ -> failwith "expected Stored"
 
 let tool_result_block ~tool_use_id ~content : T.content_block =
-  T.ToolResult { tool_use_id; content; is_error = false; json = None }
+  T.ToolResult
+    { tool_use_id; content; is_error = false; json = None; content_blocks = None }
 
 let make_tool_message ~tool_use_id ~content : T.message =
   {

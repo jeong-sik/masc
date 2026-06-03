@@ -76,7 +76,7 @@ let record_failure_and_maybe_escalate
         true
       | Error sync_err ->
         let auto_pause_kind =
-          if runtime_auto_paused then "runtime" else "tool_contract"
+          if runtime_auto_paused then "runtime" else "completion_contract"
         in
         Log.Keeper.error
           "%s: %s auto-pause sync failed: %s (persistent failure remains on the crash path)"
@@ -90,7 +90,7 @@ let record_failure_and_maybe_escalate
             ; ( "site"
               , if runtime_auto_paused
                 then "auto_pause"
-                else "tool_contract_auto_pause" )
+                else "completion_contract_auto_pause" )
             ]
           ();
         false)

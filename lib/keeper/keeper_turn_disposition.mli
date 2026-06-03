@@ -91,8 +91,8 @@ val next_action : t -> string option
     - [External_cancel] → ["external_cancel"]
     - [Turn_wall_clock_timeout] → ["turn_wall_clock_timeout"]
     - [Runtime_attempts_exhausted] → ["runtime_attempts_exhausted"]
-    - [Tool_contract_no_tool_call] → ["tool_contract_no_tool_call"]
-    - [Tool_contract_unsatisfied] → ["tool_contract_unsatisfied"]
+    - [Completion_contract_no_progress] → ["completion_contract_no_progress"]
+    - [Completion_contract_unsatisfied] → ["completion_contract_unsatisfied"]
     - [Post_commit_ambiguous] → ["post_commit_ambiguous"]
     - [Provider_error code] → [Keeper_turn_terminal_code.to_wire code]
     - [Unknown { raw_error = "" }] → ["unknown_error"]
@@ -103,7 +103,7 @@ val to_wire : t -> string
     exactly. Unrecognised strings first try
     [Keeper_turn_terminal_code.of_wire]; if that succeeds, the result
     is wrapped via [of_termination_code] (which may itself collapse to
-    a non-Provider_error disposition such as [Tool_contract_unsatisfied]).
+    a non-Provider_error disposition such as [Completion_contract_unsatisfied]).
     Otherwise [Unknown { raw_error = wire }] is returned. *)
 val of_wire : string -> t
 
@@ -114,7 +114,7 @@ val of_wire : string -> t
 
     A runtime cause maps to a non-[Provider_error] disposition only
     when the runtime classification fully determines the operator
-    action (e.g., [Tool_required_unsatisfied → Tool_contract_unsatisfied]).
+    action (e.g., [Tool_required_unsatisfied → Completion_contract_unsatisfied]).
     Otherwise the runtime cause is preserved by wrapping with
     [Provider_error] so dashboards keep the typed runtime trace. *)
 val of_termination_code : Keeper_turn_terminal_code.t -> t

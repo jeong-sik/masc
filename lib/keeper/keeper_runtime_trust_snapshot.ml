@@ -22,16 +22,16 @@ let terminal_reason_from_receipt receipt =
     json_string_opt_member "operator_disposition_reason" receipt
     |> Option.map String.lowercase_ascii
   in
-  let tool_contract_result =
-    json_string_opt_member "tool_contract_result" receipt
+  let completion_contract_result =
+    json_string_opt_member "completion_contract_result" receipt
     |> Option.map String.lowercase_ascii
   in
   let receipt_requires_tool_attention =
-    match operator_disposition, operator_disposition_reason, tool_contract_result with
+    match operator_disposition, operator_disposition_reason, completion_contract_result with
     | _, Some "tool_route_recoverable_failure", _
     | _, _, Some "needs_execution_progress"
-    | _, _, Some "tool_surface_mismatch"
-    | _, _, Some "no_tool_capable_provider"
+    | _, _, Some "surface_mismatch"
+    | _, _, Some "no_capable_provider"
     | _, _, Some "passive_only"
     | _, _, Some "violated" ->
         true
@@ -43,13 +43,13 @@ let terminal_reason_from_receipt receipt =
                        || String.equal code "success") ->
       Some
         (Keeper_turn_terminal.of_code ~source:"execution_receipt"
-           "tool_contract_unsatisfied")
+           "completion_contract_unsatisfied")
   | Some code ->
       Some (Keeper_turn_terminal.of_code ~source:"execution_receipt" code)
   | None when receipt_requires_tool_attention ->
       Some
         (Keeper_turn_terminal.of_code ~source:"execution_receipt"
-           "tool_contract_unsatisfied")
+           "completion_contract_unsatisfied")
   | None -> None
 
 (* JSON-deserialization boundary: maps a runtime_blocker_class wire
@@ -73,7 +73,7 @@ let disposition_of_runtime_blocker_class raw_blocker_class =
       Keeper_turn_disposition.Post_commit_ambiguous
   | "sdk_input_required" ->
       Keeper_turn_disposition.Input_required
-  | ("runtime_exhausted" | "no_tool_capable_provider"
+  | ("runtime_exhausted" | "no_capable_provider"
      | "provider_runtime_error") as cls ->
       Keeper_turn_disposition.Provider_error
         (Keeper_turn_terminal_code.Provider_runtime_error cls)
@@ -494,8 +494,8 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
         |> json_string_opt_member "sandbox_root"
     | None -> None
   in
-  let tool_contract_result =
-    Option.bind latest_receipt (json_string_opt_member "tool_contract_result")
+  let completion_contract_result =
+    Option.bind latest_receipt (json_string_opt_member "completion_contract_result")
   in
   let requested_tools =
     match latest_receipt with
@@ -538,7 +538,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | json -> json_string_opt_member "selected_model" json
   in
   let mutation_guard_summary =
-    match tool_contract_result with
+    match completion_contract_result with
     | Some "violated" -> "mutation_contract_violated"
     | Some ("satisfied" | "satisfied_execution" | "satisfied_completion") ->
         "mutation_contract_satisfied"
@@ -547,9 +547,9 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
   in
   `Assoc
     [
-      ("tool_contract_result", Json_util.string_opt_to_json tool_contract_result);
+      ("completion_contract_result", Json_util.string_opt_to_json completion_contract_result);
       ( "runtime_proof_status",
-        Json_util.string_opt_to_json tool_contract_result );
+        Json_util.string_opt_to_json completion_contract_result );
       ("requested_tools", Json_util.json_string_list requested_tools);
       ("tools_used", Json_util.json_string_list tools_used);
       ("unexpected_tools", Json_util.json_string_list unexpected_tools);

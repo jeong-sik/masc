@@ -4,7 +4,7 @@ type actionable_signal =
   | No_actionable_signal
 
 type contract_status =
-  | Tool_surface_mismatch of { missing : string list }
+  | Surface_mismatch of { missing : string list }
   | Claim_only_after_owned_task
   | Needs_execution_progress
   | Passive_only
@@ -17,7 +17,7 @@ let actionable_signal_label = function
   | No_actionable_signal -> "no_actionable_signal"
 
 let contract_status_label = function
-  | Tool_surface_mismatch _ -> "tool_surface_mismatch"
+  | Surface_mismatch _ -> "surface_mismatch"
   | Claim_only_after_owned_task -> "claim_only_after_owned_task"
   | Needs_execution_progress -> "needs_execution_progress"
   | Passive_only -> "passive_only"
@@ -25,8 +25,8 @@ let contract_status_label = function
   | Satisfied_execution -> "satisfied_execution"
 
 let pp_contract_status fmt = function
-  | Tool_surface_mismatch { missing } ->
-      Format.fprintf fmt "tool_surface_mismatch(missing=[%s])"
+  | Surface_mismatch { missing } ->
+      Format.fprintf fmt "surface_mismatch(missing=[%s])"
         (String.concat ", " missing)
   | other -> Format.pp_print_string fmt (contract_status_label other)
 

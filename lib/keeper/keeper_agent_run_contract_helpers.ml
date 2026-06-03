@@ -54,17 +54,17 @@ let no_progress_success_tool_names_for_contract
   keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok_no_progress"
 ;;
 
-let observed_tool_contract_status
+let observed_completion_contract_status
       ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
-  : Keeper_execution_receipt.tool_contract_result
+  : Keeper_execution_receipt.completion_contract_result
   =
-  Keeper_agent_run_turn_helpers.tool_contract_result_for_observed_tools
+  Keeper_agent_run_turn_helpers.completion_contract_result_for_progress_evidence
     ~had_owned_active_task_at_turn_start
     ~actual_keeper_tool_names
 ;;
 
 let text_only_violation_contract_status ~actual_keeper_tool_names ~fallback
-  : Keeper_execution_receipt.tool_contract_result
+  : Keeper_execution_receipt.completion_contract_result
   =
   if actual_keeper_tool_names = []
   then Contract_violated

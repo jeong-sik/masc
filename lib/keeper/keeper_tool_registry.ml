@@ -244,15 +244,15 @@ let reconcile_safe_tools =
       ; Task_done
       ]
   @ List.map
-      Tool_name.to_string
-      Tool_name.
-        [ Masc (Masc.Board Board_name.Board_post)
-        ; Masc (Masc.Board Board_name.Board_comment)
-        ; Masc (Masc.Board Board_name.Board_vote)
-        ; Masc (Masc.Board Board_name.Board_comment_vote)
-        ; Masc (Masc.Board Board_name.Board_curation_submit)
-        ; Masc Broadcast
+      Tool_name.Board_name.to_string
+      Tool_name.Board_name.
+        [ Board_post
+        ; Board_comment
+        ; Board_vote
+        ; Board_comment_vote
+        ; Board_curation_submit
         ]
+  @ [ Tool_name.to_string (Tool_name.Masc Tool_name.Masc.Broadcast) ]
 ;;
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =

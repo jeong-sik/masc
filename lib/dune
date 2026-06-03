@@ -156,7 +156,6 @@
    keeper_tool_dispatch_runtime
   keeper_status_metrics
   keeper_status_runtime
-  provider_tool_support
   voice_runtime_overlay
   keeper_status_detail_observability
   keeper_status_detail
@@ -195,8 +194,9 @@
   keeper_run_tools_search
   keeper_run_tools_setup
   voice_bridge_transport
-  ;; Runtime/OAS provider projection boundary.
+  ;; Runtime/OAS provider projection/support boundary.
   provider_runtime_projection
+  provider_tool_support
   runtime_oas_checkpoint
   runtime_observation_query_operation
   keeper_turn_driver_provider_attempt

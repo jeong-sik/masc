@@ -428,7 +428,6 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
            let operation_id = task_operation_id task in
            let updated_at = task_operation_updated_at task in
            let severity = task_operation_severity task in
-           let stage = Option.map Task_stage.to_string task.stage in
            let linked_session_id =
              Option.bind links.session_id (fun value -> String_util.trim_to_option value)
            in
@@ -448,7 +447,6 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                      ("operation_id", `String operation_id);
                      ("status", `String status);
                      ("task_status", `String (Masc_domain.task_status_to_string task.task_status));
-                     ("stage", Json_util.string_opt_to_json stage);
                      ("objective", `String task.title);
                      ("updated_at", `String updated_at);
                      ("source", `String "task_contract");

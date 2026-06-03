@@ -27,7 +27,6 @@ let make_task
   ; created_at = "2026-05-26T00:00:00Z"
   ; created_by = None
   ; goal_id = None
-  ; stage = None
   ; contract
   ; handoff_context
   ; cycle_count = 0

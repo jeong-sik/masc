@@ -15,7 +15,6 @@ let make_task ~id ~goal_id ~status =
   ; created_at = "2026-06-03T00:00:00Z"
   ; created_by = None
   ; goal_id
-  ; stage = None
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0

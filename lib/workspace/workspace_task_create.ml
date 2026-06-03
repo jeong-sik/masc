@@ -101,7 +101,6 @@ let add_task
              ; files = []
              ; created_at = now_iso ()
              ; created_by
-             ; stage = None
              ; contract
              ; handoff_context = None
              ; cycle_count = 0
@@ -181,7 +180,6 @@ let batch_add_tasks_internal ?created_by config tasks =
                 ; files = []
                 ; created_at = now_iso ()
                 ; created_by
-                ; stage = None
                 ; contract
                 ; handoff_context = None
                 ; cycle_count = 0

@@ -43,7 +43,7 @@ let emergency_compact_ratio_threshold : float =
      get_float ~default collapses (1) and (3) into the same float value,
      making operator typos (e.g. "foo" or "0,9" with comma) indistinguishable
      from the unset case. The subsequent Float.equal raw default_value check
-     then suppresses the warn path entirely. (Codex P2 review of PR #15782.) *)
+     then suppresses the warn path entirely. (Review on PR #15782.) *)
   let effective =
     match Sys.getenv_opt env_var with
     | None -> default_value

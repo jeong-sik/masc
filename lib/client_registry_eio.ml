@@ -45,7 +45,12 @@ module SMap = Set_util.StringMap
 type state = {
   registry : Client_identity.Registry.registry;
   session_map : string SMap.t;   (** mcp_session_id → session_key *)
-  resolved_map : string SMap.t;  (** mcp_session_id → resolved agent_name *)
+  resolved_map : (string * bool) SMap.t;
+      (** mcp_session_id → (resolved agent_name, is_ephemeral).
+
+          [is_ephemeral] is decided at the write site from the typed
+          origin (identity provenance / own generated fallback), not
+          re-derived from the name string on read. *)
 }
 
 let make_state () = {
@@ -176,9 +181,9 @@ let get_by_session session_key =
 let get_resolved_name sid =
   with_state_ro (fun s -> SMap.find_opt sid s.resolved_map)
 
-let set_resolved_name sid name =
+let set_resolved_name sid name ~is_ephemeral =
   with_state_rw (fun s ->
-    s := { !s with resolved_map = SMap.add sid name (!s).resolved_map }
+    s := { !s with resolved_map = SMap.add sid (name, is_ephemeral) (!s).resolved_map }
   )
 
 (** {1 Statistics} *)

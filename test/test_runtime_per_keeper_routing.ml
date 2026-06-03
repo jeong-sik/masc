@@ -43,6 +43,20 @@ let write_file path content =
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
 ;;
 
+let string_contains haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else
+    let rec loop index =
+      index + needle_len <= haystack_len
+      &&
+      (String.equal (String.sub haystack index needle_len) needle
+       || loop (index + 1))
+    in
+    loop 0
+;;
+
 (* Point MASC_CONFIG_DIR at an isolated temp dir and reset the resolver cache so
    the new value takes effect; restore the prior value on exit. *)
 let with_config_dir f =
@@ -121,14 +135,18 @@ max-concurrent = 1
 |}
 ;;
 
-let with_runtime_initialized f =
+let with_runtime_file f =
   with_temp_dir "runtime-per-keeper-routing-runtime" @@ fun dir ->
-  let path = Filename.concat dir "keeper_runtime.toml" in
+  let path = Filename.concat dir "runtime.toml" in
   write_file path runtime_config;
   (match Runtime.init_default ~config_path:path with
    | Ok () -> ()
    | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
-  f ()
+  f path
+;;
+
+let with_runtime_initialized f =
+  with_runtime_file (fun _path -> f ())
 ;;
 
 (* ---- the per-keeper selection actually reaches the dispatcher ---- *)
@@ -140,6 +158,70 @@ let test_assignment_drives_runtime_id_of_meta () =
       "assigned keeper dispatches to its runtime.toml assignment, not the global default"
       "openai.gpt"
       (KMC.runtime_id_of_meta (make_meta "routingtest")))
+;;
+
+let test_runtime_assignment_writer_updates_runtime_toml () =
+  with_runtime_file (fun path ->
+    (match
+       Runtime.set_runtime_id_for_keeper
+         ~runtime_config_path:path
+         ~keeper_name:"routingtest"
+         ~runtime_id:"runpod_mtp.qwen"
+         ()
+     with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "set_runtime_id_for_keeper failed: %s" msg);
+    Alcotest.(check bool)
+      "runtime.toml assignment rewritten"
+      true
+      (string_contains
+         (Fs_compat.load_file path)
+         "\"routingtest\" = \"runpod_mtp.qwen\"");
+    Alcotest.(check (option string))
+      "in-process assignment cache refreshed"
+      (Some "runpod_mtp.qwen")
+      (Runtime.runtime_id_for_keeper "routingtest");
+    Alcotest.(check string)
+      "meta runtime resolver sees updated assignment"
+      "runpod_mtp.qwen"
+      (KMC.runtime_id_of_meta (make_meta "routingtest")))
+;;
+
+let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match
+       Runtime.set_runtime_id_for_keeper
+         ~runtime_config_path:path
+         ~keeper_name:"routingtest"
+         ~runtime_id:"missing.runtime"
+         ()
+     with
+     | Ok () -> Alcotest.fail "expected unknown runtime assignment to fail"
+     | Error msg ->
+       Alcotest.(check bool)
+         "error mentions unresolved assignment"
+         true
+         (string_contains msg "missing.runtime"));
+    Alcotest.(check string)
+      "runtime.toml unchanged after validation failure"
+      before
+      (Fs_compat.load_file path);
+    Alcotest.(check (option string))
+      "in-process assignment cache unchanged"
+      (Some "openai.gpt")
+      (Runtime.runtime_id_for_keeper "routingtest"))
+;;
+
+let test_runtime_id_tool_arg_is_not_removed_keeper_arg () =
+  match
+    Keeper_types_profile.reject_removed_keeper_input_keys
+      ~tool_name:"masc_keeper_up"
+      (`Assoc [ "runtime_id", `String "openai.gpt" ])
+  with
+  | Ok () -> ()
+  | Error msg ->
+    Alcotest.failf "runtime_id dashboard patch arg should be accepted: %s" msg
 ;;
 
 let test_undeclared_keeper_falls_to_default () =
@@ -235,6 +317,18 @@ let () =
             "unassigned keeper falls to [runtime].default"
             `Quick
             test_undeclared_keeper_falls_to_default
+        ; Alcotest.test_case
+            "dashboard runtime assignment writes runtime.toml and refreshes cache"
+            `Quick
+            test_runtime_assignment_writer_updates_runtime_toml
+        ; Alcotest.test_case
+            "unknown assignment is rejected before runtime.toml write"
+            `Quick
+            test_runtime_assignment_writer_rejects_unknown_runtime_without_write
+        ; Alcotest.test_case
+            "runtime_id API arg is not rejected as a removed keeper arg"
+            `Quick
+            test_runtime_id_tool_arg_is_not_removed_keeper_arg
         ] )
     ; ( "driver lookup"
       , [ Alcotest.test_case

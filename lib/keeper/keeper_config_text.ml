@@ -57,7 +57,6 @@ let prompt_render_max_bytes = 320
 let removed_keeper_input_key_names =
   [
     "models";
-    "runtime_id";
     "allowed_models";
     "active_model";
     "trigger_mode";

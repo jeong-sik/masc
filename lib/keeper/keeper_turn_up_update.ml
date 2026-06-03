@@ -318,14 +318,40 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
              p.name err;
            tool_result_error err
        | Ok () ->
-      (match write_meta ctx.config updated with
-       | Error e ->
-           Prometheus.inc_counter
-             Keeper_metrics.(to_string WriteMetaFailures)
-             ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
-             ();
-           tool_result_error e
-       | Ok () ->
-         stop_keepalive ~base_path:ctx.config.base_path updated.name;
-         start_keepalive ctx updated;
-         tool_result_ok (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated))))
+         let runtime_assignment_result =
+           match p.runtime_id_opt with
+           | None -> Ok ()
+           | Some runtime_id ->
+             Runtime.set_runtime_id_for_keeper
+               ~keeper_name:p.name
+               ~runtime_id
+               ()
+         in
+         (match runtime_assignment_result with
+          | Error err ->
+            Prometheus.inc_counter
+              Keeper_metrics.(to_string TurnUpUpdateFailures)
+              ~labels:
+                [ ( "keeper", p.name )
+                ; ( "site"
+                  , Keeper_turn_up_update_failure_site.(to_label Runtime_assignment)
+                  )
+                ]
+              ();
+            Log.Keeper.warn
+              "update_keeper failed runtime assignment for %s: %s"
+              p.name
+              err;
+            tool_result_error err
+          | Ok () ->
+            (match write_meta ctx.config updated with
+             | Error e ->
+                 Prometheus.inc_counter
+                   Keeper_metrics.(to_string WriteMetaFailures)
+                   ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
+                   ();
+                 tool_result_error e
+             | Ok () ->
+               stop_keepalive ~base_path:ctx.config.base_path updated.name;
+               start_keepalive ctx updated;
+               tool_result_ok (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated)))))

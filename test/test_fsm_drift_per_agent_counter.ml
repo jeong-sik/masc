@@ -2,13 +2,37 @@
 
    Pins the canonical metric name + label shape for the
    per-agent breakout, and verifies that
-   [record_fsm_drift_with_agent] emits to BOTH the existing
+   [Workspace_hooks.fsm_drift_observer_fn] emits to BOTH the existing
    variant-only counter and the new per-agent counter without
    double-counting either side. *)
 
+let () = Masc.Workspace_prometheus_hooks.install ()
+
+let fsm_drift_metric = "masc_task_fsm_drift_total"
+let fsm_drift_per_agent_metric = "masc_task_fsm_drift_per_agent_total"
+
+let record_fsm_drift_with_agent ~variant ~force ~agent_name =
+  (Atomic.get Workspace_hooks.fsm_drift_observer_fn) ~variant ~force ~agent_name
+;;
+
+let str_contains haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else (
+    let found = ref false in
+    let i = ref 0 in
+    while !i <= haystack_len - needle_len && not !found do
+      if String.sub haystack !i needle_len = needle then found := true;
+      incr i
+    done;
+    !found)
+;;
+
 let counter_for_per_agent ~variant ~agent_name ~force =
   Masc.Prometheus.metric_value_or_zero
-    Masc.Workspace.fsm_drift_per_agent_metric
+    fsm_drift_per_agent_metric
     ~labels:[
       ("variant", variant);
       ("agent_name", agent_name);
@@ -18,7 +42,7 @@ let counter_for_per_agent ~variant ~agent_name ~force =
 
 let counter_for_variant ~variant ~force =
   Masc.Prometheus.metric_value_or_zero
-    Masc.Workspace.fsm_drift_metric
+    fsm_drift_metric
     ~labels:[
       ("variant", variant);
       ("force", if force then "true" else "false");
@@ -26,10 +50,15 @@ let counter_for_variant ~variant ~force =
     ()
 
 let test_metric_name_stable () =
-  Alcotest.(check string)
-    "per-agent canonical name"
-    "masc_task_fsm_drift_per_agent_total"
-    Masc.Workspace.fsm_drift_per_agent_metric
+  let text = Masc.Prometheus.to_prometheus_text () in
+  Alcotest.(check bool)
+    "per-agent HELP registered"
+    true
+    (str_contains text ("# HELP " ^ fsm_drift_per_agent_metric));
+  Alcotest.(check bool)
+    "per-agent TYPE registered"
+    true
+    (str_contains text ("# TYPE " ^ fsm_drift_per_agent_metric ^ " counter"))
 
 let test_emits_both_counters () =
   let variant =
@@ -41,8 +70,7 @@ let test_emits_both_counters () =
   let before_per_agent =
     counter_for_per_agent ~variant ~agent_name:agent ~force:false
   in
-  Masc.Workspace.record_fsm_drift_with_agent
-    ~variant ~force:false ~agent_name:agent;
+  record_fsm_drift_with_agent ~variant ~force:false ~agent_name:agent;
   Alcotest.(check (float 0.0001))
     "variant counter +1"
     (before_variant +. 1.0)
@@ -63,8 +91,7 @@ let test_per_agent_isolation () =
   let before_a =
     counter_for_per_agent ~variant ~agent_name:agent_a ~force:false
   in
-  Masc.Workspace.record_fsm_drift_with_agent
-    ~variant ~force:false ~agent_name:agent_b;
+  record_fsm_drift_with_agent ~variant ~force:false ~agent_name:agent_b;
   Alcotest.(check (float 0.0001))
     "agent_a counter unchanged when agent_b drifts"
     before_a
@@ -81,8 +108,7 @@ let test_force_label_isolation () =
   let before_true =
     counter_for_per_agent ~variant ~agent_name:agent ~force:true
   in
-  Masc.Workspace.record_fsm_drift_with_agent
-    ~variant ~force:false ~agent_name:agent;
+  record_fsm_drift_with_agent ~variant ~force:false ~agent_name:agent;
   Alcotest.(check (float 0.0001))
     "force=true counter unchanged when force=false event lands"
     before_true

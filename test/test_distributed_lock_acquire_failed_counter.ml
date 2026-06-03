@@ -7,9 +7,15 @@
    observed [tasks:.backlog] starvation under 16-keeper load —
    the counter lets operators rate-alert without log scraping. *)
 
+let () = Masc.Workspace_prometheus_hooks.install ()
+
+let record_distributed_lock_acquire_failed ~key ~attempts =
+  (Atomic.get Workspace_hooks.distributed_lock_acquire_failed_fn) ~key ~attempts
+;;
+
 let counter_for ~key ~attempts =
   Masc.Prometheus.metric_value_or_zero
-    Masc.Workspace.distributed_lock_acquire_failed_metric
+    Masc.Prometheus.metric_distributed_lock_acquire_failed
     ~labels:[ ("key", key); ("attempts", string_of_int attempts) ]
     ()
 
@@ -17,14 +23,13 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "distributed lock acquire failed canonical name"
     Masc.Prometheus.metric_distributed_lock_acquire_failed
-    Masc.Workspace.distributed_lock_acquire_failed_metric
+    Masc.Prometheus.metric_distributed_lock_acquire_failed
 
 let test_record_increments () =
   let key = "tasks:.backlog-9645-test" in
   let attempts = 50 in
   let before = counter_for ~key ~attempts in
-  Masc.Workspace.record_distributed_lock_acquire_failed
-    ~key ~attempts;
+  record_distributed_lock_acquire_failed ~key ~attempts;
   Alcotest.(check (float 0.0001))
     "+1 after record"
     (before +. 1.0)
@@ -37,8 +42,7 @@ let test_key_isolation () =
   let key_a = "tasks:.backlog-iso-9645" in
   let key_b = "keepers:state-iso-9645" in
   let before_a = counter_for ~key:key_a ~attempts in
-  Masc.Workspace.record_distributed_lock_acquire_failed
-    ~key:key_b ~attempts;
+  record_distributed_lock_acquire_failed ~key:key_b ~attempts;
   Alcotest.(check (float 0.0001))
     "key_a counter unaffected by key_b record"
     before_a
@@ -50,8 +54,7 @@ let test_attempts_label_carried () =
      stay in distinct series. *)
   let key = "tasks:.backlog-attempts-iso-9645" in
   let before_50 = counter_for ~key ~attempts:50 in
-  Masc.Workspace.record_distributed_lock_acquire_failed
-    ~key ~attempts:20;
+  record_distributed_lock_acquire_failed ~key ~attempts:20;
   Alcotest.(check (float 0.0001))
     "50-attempt counter unaffected by 20-attempt record"
     before_50

@@ -355,6 +355,48 @@ let push_task_event_fn
   : (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
   = Atomic.make (fun ~event_type:_ ~details:_ -> ())
 
+let verification_submit_request_fn
+  : (Workspace_utils_backend_setup.config ->
+     task:Masc_domain.task ->
+     assignee:string ->
+     verification_id:string ->
+     evidence_refs:string list ->
+     (unit, string) result) Atomic.t
+  = Atomic.make
+      (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
+         Ok ())
+
+let verification_record_verdict_fn
+  : (Workspace_utils_backend_setup.config ->
+     task_id:string ->
+     verifier:string ->
+     verification_id:string ->
+     decision:[ `Approve of string | `Reject of string ] ->
+     (unit, string) result) Atomic.t
+  = Atomic.make
+      (fun _config ~task_id:_ ~verifier:_ ~verification_id:_ ~decision:_ ->
+         Ok ())
+
+let verification_notify_submit_fn
+  : (Workspace_utils_backend_setup.config ->
+     task:Masc_domain.task ->
+     assignee:string ->
+     verification_id:string ->
+     evidence_refs:string list ->
+     unit) Atomic.t
+  = Atomic.make
+      (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
+         ())
+
+let verification_notify_verdict_fn
+  : (task_id:string ->
+     verifier:string ->
+     verification_id:string ->
+     decision:[ `Approve of string | `Reject of string ] ->
+     unit) Atomic.t
+  = Atomic.make
+      (fun ~task_id:_ ~verifier:_ ~verification_id:_ ~decision:_ -> ())
+
 let is_admin_agent_fn
   : (base_path:string -> agent_name:string -> bool) Atomic.t
   = Atomic.make (fun ~base_path:_ ~agent_name:_ -> false)
@@ -379,7 +421,6 @@ let cdal_evidence_gate_decide_fn
         unit ->
         evidence_gate_verdict)
        Atomic.t)
-
 
 
 

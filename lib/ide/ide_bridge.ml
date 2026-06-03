@@ -223,6 +223,28 @@ let extract_descriptor_from_output (output_text : string) : Ide_event_types.comm
          let branch = Yojson.Safe.Util.member "branch" descriptor_json |> Yojson.Safe.Util.to_string in
          let force = Yojson.Safe.Util.member "force" descriptor_json |> Yojson.Safe.Util.to_bool in
          Some (Ide_event_types.Git_push { remote; branch; force })
+       | "git_commit" ->
+         let message = Yojson.Safe.Util.member "message" descriptor_json |> Yojson.Safe.Util.to_string in
+         Some (Ide_event_types.Git_commit { message })
+       | "pipe_chain" ->
+         let first_cmd = Yojson.Safe.Util.member "first_cmd" descriptor_json |> Yojson.Safe.Util.to_string in
+         let last_cmd = Yojson.Safe.Util.member "last_cmd" descriptor_json |> Yojson.Safe.Util.to_string in
+         let length = Yojson.Safe.Util.member "length" descriptor_json |> Yojson.Safe.Util.to_int in
+         Some (Ide_event_types.Pipe_chain { first_cmd; last_cmd; length })
+       | "gh_api_pr_create" ->
+         let repo = Yojson.Safe.Util.member "repo" descriptor_json |> Yojson.Safe.Util.to_string in
+         let title = Yojson.Safe.Util.member "title" descriptor_json |> Yojson.Safe.Util.to_string in
+         let base = Yojson.Safe.Util.member "base" descriptor_json |> Yojson.Safe.Util.to_string in
+         Some (Ide_event_types.Gh_api_pr_create { repo; title; base })
+       | "gh_api_pr_merge" ->
+         let repo = Yojson.Safe.Util.member "repo" descriptor_json |> Yojson.Safe.Util.to_string in
+         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
+         Some (Ide_event_types.Gh_api_pr_merge { repo; pr_number })
+       | "gh_api_pr_comment" ->
+         let repo = Yojson.Safe.Util.member "repo" descriptor_json |> Yojson.Safe.Util.to_string in
+         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
+         let body = Yojson.Safe.Util.member "body" descriptor_json |> Yojson.Safe.Util.to_string in
+         Some (Ide_event_types.Gh_api_pr_comment { repo; pr_number; body })
        | _ -> None)
     | _ -> None
   with _ -> None

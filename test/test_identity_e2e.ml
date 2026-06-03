@@ -74,6 +74,7 @@ let test_display_string () =
   let identity = Client_identity.({
     uuid = "agent-test123456"; session_key = "12345678-abcd-efgh-ijkl-123456789abc";
     agent_name = "test-display-agent";
+    agent_name_origin = `Supplied;
     channel = Some (Client_identity.External "telegram");
     user_id = Some "tg-user-99";
     capabilities = ["code"; "search"];

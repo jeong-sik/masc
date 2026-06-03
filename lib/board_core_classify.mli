@@ -67,7 +67,10 @@ val post_kind_of_string : string -> post_kind option
 
 (** {1 Author classification (RFC-0089 §4-3 G2)} *)
 
-type automation_label =
+(** Re-export of {!Board_types.automation_label} (relocated there so the
+    board metric hook surface can reference it without a dependency
+    cycle). The type equation keeps existing users compiling unchanged. *)
+type automation_label = Board_types.automation_label =
   | Auto_prefixed       (** Author starts with ["auto-"]. *)
   | Qa_prefixed         (** Author starts with ["qa-"]. *)
   | Researcher_named    (** Author contains ["researcher"]. *)

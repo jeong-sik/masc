@@ -2,12 +2,10 @@
 
 include Board_core
 
-let post_meta_json_persistence_surface = "board_post_meta_json"
-
 let record_post_meta_json_read_drop () =
   Board_metrics_hooks.inc_persistence_read_drop
-    ~surface:post_meta_json_persistence_surface
-    ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+    ~surface:Board_metrics_hooks.Board_post_meta_json
+    ~reason:Read_drop_reason.Invalid_payload
 ;;
 
 let visibility_of_string = Board_core_classify.visibility_of_string

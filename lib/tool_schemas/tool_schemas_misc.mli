@@ -49,10 +49,18 @@ val config_category_enum_strings : string list
 
 val schemas : Masc_domain.tool_schema list
 (** [schemas] is the [Masc_domain.tool_schema list] for the
-    [masc_config], [masc_dashboard], and [masc_misc_admin]
-    tools.  Consumed by {!Config.visible_tool_schemas} via
-    {!Tools.schemas}.  The schema [enum] fields derive from
+    MCP-facing misc tools. Keeper-only web backend tools
+    ([masc_web_search] / [masc_web_fetch]) are intentionally
+    excluded from this public schema inventory. Consumed by
+    {!Config.visible_tool_schemas} via {!Tools.schemas}. The
+    schema [enum] fields derive from
     {!admin_section_enum_strings} /
     {!dashboard_scope_enum_strings} /
     {!config_category_enum_strings} so adding a value updates
     the schema automatically. *)
+
+val internal_handler_schemas : Masc_domain.tool_schema list
+(** [internal_handler_schemas] keeps the full generated misc schema
+    set for Tool_spec/tag registration. It may contain internal backend
+    tool names that are callable by keeper descriptors but absent from
+    the MCP-facing [schemas] list. *)

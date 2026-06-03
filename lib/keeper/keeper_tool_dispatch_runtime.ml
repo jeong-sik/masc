@@ -417,11 +417,11 @@ let execute_keeper_tool_call_with_outcome
        | Some raw_output -> make_executed_tool_result raw_output
        | None ->
        (* Descriptor-backed dispatch did not recognize this name. Check
-          registered remote MCP tools before returning a suggestion-enriched
+          registered backend tools before returning a suggestion-enriched
           unknown-tool error. *)
        let unknown_name = name in
          (match
-            Keeper_tool_remote_mcp_runtime.handle_registered_remote_tool
+            Keeper_tool_registered_runtime.handle_registered_tool
               ~config
               ~keeper_name:meta.name
               ~name:unknown_name

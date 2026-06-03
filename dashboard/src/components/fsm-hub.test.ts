@@ -246,9 +246,9 @@ describe('fsm-hub derived state', () => {
 })
 
 describe('inferTransitionReason', () => {
-  it('attributes KTC idle→executing to turn start', () => {
+  it('attributes KTC idle→executing to runtime call start', () => {
     expect(inferTransitionReason('KTC', 'idle', 'executing'))
-      .toBe('턴이 시작되었습니다 — OAS worker 호출 진행')
+      .toBe('턴이 시작되었습니다 — runtime 호출 진행')
   })
 
   it('attributes KDP undecided→gate_rejected to gate block', () => {
@@ -257,9 +257,9 @@ describe('inferTransitionReason', () => {
     expect(reason).toMatch(/게이트 차단/)
   })
 
-  it('attributes KCL idle→trying to provider call', () => {
+  it('attributes KCL idle→trying to runtime call', () => {
     expect(inferTransitionReason('KCL', 'idle', 'trying'))
-      .toMatch(/provider/)
+      .toMatch(/runtime/)
   })
 
   it('returns null for unattributable transitions', () => {

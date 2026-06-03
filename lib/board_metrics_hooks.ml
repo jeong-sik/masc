@@ -1,15 +1,35 @@
 (** Board-owned metric hooks.
 
     Board core modules call this neutral hook surface instead of reaching into
-    Prometheus directly. The composition layer installs the concrete observer. *)
+    Prometheus directly. The composition layer installs the concrete observer.
+
+    Label dimensions are typed closed sums so the compiler checks every label
+    value at each call site. The variant -> Prometheus label string mapping
+    lives only in the adapter (board_prometheus_hooks.ml). [author] on
+    {!inc_legacy_migrate_post_kind} is deliberately left as [string]: it is an
+    unbounded external-identity label (a raw actor name), out of scope for this
+    closed-sum pass. *)
+
+(** Persistence surface that recorded a read drop. Single value today; the
+    sum keeps the dimension typed and adding a surface a compile obligation.
+    This is a board-persistence-row surface, unrelated to the deleted
+    Tool-layer [surface] type (#19854). *)
+type board_persist_surface = Board_post_meta_json
+
+(** Outcome of an attempt to start the board dispatch flusher actor. *)
+type flusher_outcome =
+  | Switch_finished  (** Switch was already finished when startup ran. *)
+  | Cas_exhausted    (** CAS contention exhausted the retry budget. *)
 
 type observer = {
   observe_persist_lock_acquire_sec : float -> unit;
   observe_persist_lock_held_sec : float -> unit;
-  inc_dispatch_flusher_start_outcome : outcome:string -> unit;
+  inc_dispatch_flusher_start_outcome : outcome:flusher_outcome -> unit;
   inc_vote_fixture_detected : count:int -> unit;
-  inc_persistence_read_drop : surface:string -> reason:string -> unit;
-  inc_legacy_migrate_post_kind : author:string -> automation_label:string -> unit;
+  inc_persistence_read_drop :
+    surface:board_persist_surface -> reason:Read_drop_reason.t -> unit;
+  inc_legacy_migrate_post_kind :
+    author:string -> automation_label:Board_types.automation_label -> unit;
 }
 
 let noop_observer = {

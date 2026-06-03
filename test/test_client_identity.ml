@@ -174,6 +174,7 @@ let test_to_display_string () =
   let identity = Client_identity.({
     uuid = "agent-test123456"; session_key = "12345678-1234-1234-1234-123456789abc";
     agent_name = "test-agent";
+    agent_name_origin = `Supplied;
     channel = Some (Client_identity.External "telegram");
     user_id = Some "user123";
     capabilities = [];
@@ -190,6 +191,7 @@ let test_to_display_string_empty_session_key () =
     uuid = "agent-emptykey";
     session_key = "";
     agent_name = "empty-key-agent";
+    agent_name_origin = `Supplied;
     channel = Some Client_identity.Api;
     user_id = None;
     capabilities = [];

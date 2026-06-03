@@ -2,7 +2,7 @@
 status: runbook
 last_verified: 2026-04-17
 code_refs:
-  - lib/keeper/keeper_tool_remote_mcp_runtime.ml
+  - lib/keeper/keeper_tool_registered_runtime.ml
   - lib/runtime/
   - lib/mcp_server.ml
 ---

@@ -66,6 +66,7 @@ let test_agent_identity ~uuid ~session_key : Masc_mcp.Client_identity.t =
     uuid;
     session_key;
     agent_name = "";
+    agent_name_origin = `System_fallback;
     channel = None;
     user_id = None;
     capabilities = [];
@@ -1326,7 +1327,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
   let resolve arguments =
     Masc_mcp.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_bind" ~arguments ~identity
-      ~cached_resolved_agent:(Some "cached-stale-nickname")
+      ~cached_resolved_agent:(Some ("cached-stale-nickname", false))
       ~auth_token:None ~internal_keeper_runtime:false
       ~workspace_initialized:(fun () -> false)
       ~log_mcp_exn:(fun ~label:_ _ -> ())

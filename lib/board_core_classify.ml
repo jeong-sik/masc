@@ -73,13 +73,9 @@ let take = List.take
     pattern-match on [author_kind] — adding a new automation label or
     system actor fails compilation at every match site. *)
 
-type automation_label =
-  | Auto_prefixed       (** "auto-" prefix *)
-  | Qa_prefixed         (** "qa-" prefix *)
-  | Researcher_named    (** contains "researcher" *)
-  | Harness_named       (** contains "harness" *)
-  | Smoke_named         (** contains "smoke" *)
-  | Probe_named         (** contains "probe" *)
+(* [automation_label] relocated to Board_types; supplied here via
+   [include Board_types] above so constructors (Auto_prefixed, ...)
+   resolve unchanged. *)
 
 type system_actor =
   | Ecosystem
@@ -118,17 +114,11 @@ let classify_author (author : string) : author_kind =
        | Some label -> Automation_author label
        | None -> Human_author)
 
-(** Render the legacy author classification as a stable metric/log token.
-    Kept narrow — *not* a parser
-    inverse (no [_of_string]); the typed variant flows in only one
-    direction (boundary parse -> internal use -> string for log). *)
-let automation_label_token = function
-  | Auto_prefixed -> "auto-prefix"
-  | Qa_prefixed -> "qa-prefix"
-  | Researcher_named -> "researcher"
-  | Harness_named -> "harness"
-  | Smoke_named -> "smoke"
-  | Probe_named -> "probe"
+(* The automation-label -> metric-string rendering moved to the
+   Prometheus adapter (board_prometheus_hooks.ml,
+   [automation_label_to_label]). The hook now carries the typed
+   [Board_types.automation_label] so the compiler checks every label
+   value and the string lives only at the emission boundary. *)
 
 let meta_source = function
   | Some (`Assoc fields) -> (
@@ -210,14 +200,16 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
   | Automation_author label ->
       (* #9919 audit follow-up: emit a labelled metric hook so operators can
          see which legacy authors still drive the migration path.
-         The typed [automation_label] flows through
-         [automation_label_token] to keep label cardinality bounded (6
-         values) alongside the per-author label.  Both labels emitted so
-         existing dashboards (keyed on raw [author]) keep working while
-         operators gain a bounded breakdown. *)
+         The typed [automation_label] flows through unchanged (the
+         metric-string rendering lives in the Prometheus adapter) to keep
+         label cardinality bounded (6 values) alongside the per-author
+         label.  Both labels emitted so existing dashboards (keyed on raw
+         [author]) keep working while operators gain a bounded breakdown.
+         [author] stays a raw string: it is an unbounded external-identity
+         label, out of scope for this closed-sum pass. *)
       Board_metrics_hooks.inc_legacy_migrate_post_kind
         ~author
-        ~automation_label:(automation_label_token label);
+        ~automation_label:label;
       Automation_post
   | Human_author -> Human_post
 

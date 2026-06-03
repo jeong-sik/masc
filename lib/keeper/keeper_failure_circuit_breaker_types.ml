@@ -26,7 +26,8 @@ let classify_path_rejection_prefix (error_msg : string) : error_class option =
   | Some
       (Path_rejection.Absolute_path_rejected _
       | Path_rejection.Outside_project_root _
-      | Path_rejection.Outside_sandbox _) -> Some Path_not_allowed
+      | Path_rejection.Outside_sandbox _
+      | Path_rejection.Task_state_file_path_blocked _) -> Some Path_not_allowed
   | Some
       (Path_rejection.Path_required
       | Path_rejection.Allowed_paths_normalized_empty _

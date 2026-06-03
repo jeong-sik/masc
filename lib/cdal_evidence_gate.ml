@@ -114,14 +114,15 @@ let handoff_supplies_evidence
       (fun ref_ -> String.trim ref_ |> String.length > 0)
       hc.evidence_refs
 
-(* Evidence-substantiveness gate: task/goal completion is verified by the
-   presence of references the verifier keeper / human reviewer can inspect
-   downstream, not by an internal proof/verdict pipeline. A contracted task
-   passes when *every* required_evidence entry is mentioned in notes/handoff
-   AND the keeper supplied at least one of: substantive notes, or a handoff
-   evidence reference (file path, PR number, commit hash, trace id, or any
-   reference URL). Empty notes with empty required_evidence still rejects,
-   since that carries no evidence at all. *)
+(* Evidence-substantiveness gate for explicit verification submissions. Normal
+   task completion is LLM-reviewed before it reaches [Done]; this gate only
+   checks that a caller putting a task into AwaitingVerification supplied
+   evidence a reviewer can inspect downstream. A contracted task passes when
+   *every* required_evidence entry is mentioned in notes/handoff AND the caller
+   supplied at least one of: substantive notes, or a handoff evidence reference
+   (file path, PR number, commit hash, trace id, or any reference URL). Empty
+   notes with empty required_evidence still rejects, since that carries no
+   evidence at all. *)
 let evidence_is_substantive
     ~notes
     ~(handoff_context : Masc_domain.task_handoff_context option)

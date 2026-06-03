@@ -118,11 +118,14 @@ val find_excuse_pattern : string -> (string * string) option
     [excuse_advisory], when supplied, injects a
     [<gate2_advisory>] section that surfaces a substring-detected
     avoidance phrase to the LLM as a heuristic signal rather than
-    a verdict — see #10113.  Exposed so tests can pin the prompt
+    a verdict — see #10113. [completion_contract], when supplied,
+    injects a [<verification_contract>] section that the LLM must
+    judge against completion notes. Exposed so tests can pin the prompt
     contract without standing up an OAS runtime. *)
 val build_prompt :
   ?few_shot_block:string ->
   ?excuse_advisory:string * string ->
+  ?completion_contract:string list ->
   review_request -> string
 
 (** Parse LLM text output into a verdict (lenient fallback path).

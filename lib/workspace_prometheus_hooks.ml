@@ -648,5 +648,52 @@ let install () =
     | Cdal_evidence_gate.Reject { reason; rule_id; hint; payload_json } ->
       Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
   in
-  Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide_hook
+  Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide_hook;
+  Atomic.set Workspace_hooks.verification_create_submit_request_fn
+    (fun ~config ~task ~assignee ~verification_id ~evidence_refs ->
+      Verification_protocol.create_submit_request
+        ~config
+        ~task
+        ~assignee
+        ~verification_id
+        ~evidence_refs);
+  Atomic.set Workspace_hooks.verification_record_verdict_fn
+    (fun ~config ~task ~verifier ~verification_id ~decision ->
+      match decision with
+      | `Approve notes ->
+        Verification_protocol.record_approve_verification
+          ~config
+          ~task_id:task.id
+          ~verifier
+          ~verification_id
+          ~notes
+      | `Reject reason ->
+        Verification_protocol.record_reject_verification
+          ~config
+          ~task_id:task.id
+          ~verifier
+          ~verification_id
+          ~reason);
+  Atomic.set Workspace_hooks.verification_notify_submit_fn
+    (fun ~config ~task ~assignee ~verification_id ~evidence_refs ->
+      Verification_protocol.notify_submit_for_verification
+        ~config
+        ~task
+        ~assignee
+        ~verification_id
+        ~evidence_refs);
+  Atomic.set Workspace_hooks.verification_notify_approve_fn
+    (fun ~task_id ~verifier ~verification_id ~notes ->
+      Verification_protocol.notify_approve_verification
+        ~task_id
+        ~verifier
+        ~verification_id
+        ~notes);
+  Atomic.set Workspace_hooks.verification_notify_reject_fn
+    (fun ~task_id ~verifier ~verification_id ~reason ->
+      Verification_protocol.notify_reject_verification
+        ~task_id
+        ~verifier
+        ~verification_id
+        ~reason)
 ;;

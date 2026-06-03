@@ -522,6 +522,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
         Board_prometheus_hooks.install ();
         Workspace_prometheus_hooks.install ();
         Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
+        Atomic.set Workspace_hooks.task_event_lines_read_fn read_event_lines;
         Atomic.set Task.Handlers.record_verdict_fn (fun ~task_id ~req ~result () ->
           Eval_calibration.record_verdict ~task_id ~req ~result ());
         Atomic.set Task.Handlers.sse_broadcast_fn Sse.broadcast;

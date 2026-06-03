@@ -1,10 +1,9 @@
 (** Cdal_evidence_gate — evidence-substantiveness decision tests.
 
-    The gate verifies task/goal completion by the presence of evidence the
-    verifier keeper / human reviewer can inspect downstream: substantive
-    notes plus the contract's required_evidence, or a handoff reference.
-    There is no verdict ledger; the gate consults only the task + notes +
-    handoff. *)
+    The gate verifies explicit verification submissions by the presence of
+    evidence a reviewer can inspect downstream: substantive notes plus the
+    contract's required_evidence, or a handoff reference. There is no verdict
+    ledger; the gate consults only the task + notes + handoff. *)
 
 open Alcotest
 open Masc

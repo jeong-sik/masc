@@ -104,13 +104,13 @@ let with_test_workspace f =
     the notification path fires the [task] eprintf. *)
 let test_tool_task_done_nonexistent_logs () =
   with_test_workspace @@ fun config ->
-  let ctx : Task.Tool.context = { config; agent_name = "test-agent"; sw = None } in
+  let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
   let args = `Assoc [
     ("task_id", `String "task-does-not-exist-xyz");
     ("notes", `String "");
   ] in
   let output = capture_stderr (fun () ->
-    ignore (Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx args)
+    ignore (Tool_task.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx args)
   ) in
   check bool "stderr contains [Task] prefix for done on missing task"
     true (str_contains output "[Task]")
@@ -118,13 +118,13 @@ let test_tool_task_done_nonexistent_logs () =
 (** handle_cancel with a task_id that does not exist → "[task]" eprintf. *)
 let test_tool_task_cancel_nonexistent_logs () =
   with_test_workspace @@ fun config ->
-  let ctx : Task.Tool.context = { config; agent_name = "test-agent"; sw = None } in
+  let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
   let args = `Assoc [
     ("task_id", `String "task-phantom-abc");
     ("reason", `String "test cancel");
   ] in
   let output = capture_stderr (fun () ->
-    ignore (Task.Tool.handle_cancel_task ~tool_name:"test_tool" ~start_time:0.0 ctx args)
+    ignore (Tool_task.handle_cancel_task ~tool_name:"test_tool" ~start_time:0.0 ctx args)
   ) in
   check bool "stderr contains [Task] prefix for cancel on missing task"
     true (str_contains output "[Task]")

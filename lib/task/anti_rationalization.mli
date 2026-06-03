@@ -29,6 +29,14 @@ type verdict =
   | Approve
   | Reject of string
 
+type excuse_pattern_decision =
+  | Terminal_reject
+  | Advisory_to_llm
+  | Advisory_safety_net_reject
+  | Advisory_safety_net_reject_runtime_dead
+
+val excuse_pattern_decision_to_string : excuse_pattern_decision -> string
+
 val verdict_constructor_name : verdict -> string
 (** Issue #8436: canonical UPPERCASE name (without payload) for a
     [verdict] — used as the witness function for schema enum SSOT. *)
@@ -129,7 +137,8 @@ val parse_verdict : string -> (verdict, string) result
     @since 2.223.0 *)
 val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 
-val excuse_pattern_observer_fn : (pattern:string -> decision:string -> unit) Atomic.t
+val excuse_pattern_observer_fn :
+  (pattern:string -> outcome:excuse_pattern_decision -> unit) Atomic.t
 val fallback_observer_fn : (mode:string -> runtime:string -> unit) Atomic.t
 val run_llm_reviewer_fn :
   (?sw:Eio.Switch.t ->

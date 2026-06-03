@@ -29,9 +29,23 @@ type verdict =
   | Approve
   | Reject of string
 
+type excuse_pattern_decision =
+  | Terminal_reject
+  | Advisory_to_llm
+  | Advisory_safety_net_reject
+  | Advisory_safety_net_reject_runtime_dead
+
+let excuse_pattern_decision_to_string = function
+  | Terminal_reject -> "terminal_reject"
+  | Advisory_to_llm -> "advisory_to_llm"
+  | Advisory_safety_net_reject -> "advisory_safety_net_reject"
+  | Advisory_safety_net_reject_runtime_dead ->
+    "advisory_safety_net_reject_runtime_dead"
+;;
+
 let excuse_pattern_observer_fn
-  : (pattern:string -> decision:string -> unit) Atomic.t
-  = Atomic.make (fun ~pattern:_ ~decision:_ -> ())
+  : (pattern:string -> outcome:excuse_pattern_decision -> unit) Atomic.t
+  = Atomic.make (fun ~pattern:_ ~outcome:_ -> ())
 
 let fallback_observer_fn
   : (mode:string -> runtime:string -> unit) Atomic.t
@@ -603,7 +617,7 @@ let review
     let excuse_match = find_excuse_pattern notes_trimmed in
     match excuse_match with
     | Some (pattern, reason) when Env_config.AntiRationalization.gate2_fail_closed ->
-      (Atomic.get excuse_pattern_observer_fn) ~pattern ~decision:"terminal_reject";
+      (Atomic.get excuse_pattern_observer_fn) ~pattern ~outcome:Terminal_reject;
       Log.Task.info
         ~keeper_name:req.task_id
         "[anti-rationalization] agent=%s task=%s excuse_pattern=%s \
@@ -629,7 +643,7 @@ let review
         match excuse_match with
         | None -> None
         | Some (pattern, reason) ->
-          (Atomic.get excuse_pattern_observer_fn) ~pattern ~decision:"advisory_to_llm";
+          (Atomic.get excuse_pattern_observer_fn) ~pattern ~outcome:Advisory_to_llm;
           Log.Task.info
         ~keeper_name:req.task_id
             "[anti-rationalization] agent=%s task=%s excuse_pattern=%s (advisory; \
@@ -793,7 +807,9 @@ let review
                  active substring advisory and continue to approve. *)
               match excuse_advisory with
               | Some (pattern, reason) ->
-                (Atomic.get excuse_pattern_observer_fn) ~pattern ~decision:"advisory_safety_net_reject_runtime_dead";
+                (Atomic.get excuse_pattern_observer_fn)
+                  ~pattern
+                  ~outcome:Advisory_safety_net_reject_runtime_dead;
                 Log.Task.error
         ~keeper_name:req.task_id
                   "[anti-rationalization] runtime %s permanently dead AND gate-2 \
@@ -857,7 +873,9 @@ let review
           with the substring detector. *)
               match excuse_advisory, mode with
               | Some (pattern, reason), _ ->
-                (Atomic.get excuse_pattern_observer_fn) ~pattern ~decision:"advisory_safety_net_reject";
+                (Atomic.get excuse_pattern_observer_fn)
+                  ~pattern
+                  ~outcome:Advisory_safety_net_reject;
                 Log.Task.warn
         ~keeper_name:req.task_id
                   "[anti-rationalization] LLM unavailable + gate-2 advisory pattern=%s \

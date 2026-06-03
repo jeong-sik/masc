@@ -13,9 +13,40 @@ open Alcotest
 module Task = Masc.Keeper_tool_task_runtime
 module Dispatch = Masc.Keeper_tool_dispatch_runtime
 module Boundary = Masc.Keeper_tools_oas_failure_boundary
+module U = Yojson.Safe.Util
 (* Tool_result lives in the leaf [masc_tool_types] lib (wrapped false), so
    it is referenced bare — not under [Masc.] — matching existing tests. *)
 module TR = Tool_result
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_task_create_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.is_directory path then begin
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let meta_with_active_goals goal_ids =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "keeper-task-create-test"
+        ; "agent_name", `String "keeper-task-create-test"
+        ; "trace_id", `String "trace-task-create-test"
+        ; ( "active_goal_ids"
+          , `List (List.map (fun goal_id -> `String goal_id) goal_ids) )
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
 
 (* The error a keeper sees when it sends a non-object contract — the residual
    validation case after D1 makes an OMITTED contract [Ok None]. *)
@@ -50,6 +81,37 @@ let test_gate2_still_counts_validation () =
     "Gate#2 does not treat validation as workflow_rejection (still counts)"
     false classified.Boundary.is_workflow_rejection
 
+let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = meta_with_active_goals [ "goal-a"; "goal-b" ] in
+       let payload =
+         Task.handle_keeper_task_tool
+           ~config
+           ~meta
+           ~name:"keeper_task_create"
+           ~args:
+             (`Assoc
+               [ "title", `String "Unscoped task"
+               ; "description", `String "Should not require a disambiguating goal_id"
+               ; "priority", `Int 3
+               ])
+       in
+       let json = Yojson.Safe.from_string payload in
+       check bool "task create succeeds" true (json |> U.member "ok" |> U.to_bool);
+       check bool "task create returns null goal_id" true
+         (json |> U.member "goal_id" = `Null);
+       match Masc.Workspace.get_tasks_raw config with
+       | [ task ] ->
+           check (option string) "persisted task is unscoped" None
+             task.Masc_domain.goal_id
+       | tasks ->
+           failf "expected exactly one persisted task, got %d" (List.length tasks))
+
 let () =
   run "keeper validation breaker exemption"
     [ ( "validation_failure_class"
@@ -59,5 +121,9 @@ let () =
             test_gate1_exempts_validation_but_counts_unclassified
         ; test_case "Gate#2 still counts validation (no over-exempt)" `Quick
             test_gate2_still_counts_validation
+        ; test_case
+            "keeper_task_create treats ambiguous active_goal_ids as advisory"
+            `Quick
+            test_task_create_multi_active_goals_without_goal_id_is_unscoped
         ] )
     ]

@@ -213,13 +213,68 @@ let test_masc_add_task_schema () =
   match find_registered_tool "masc_add_task" with
   | None -> Alcotest.fail "masc_add_task not found"
   | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
-          Alcotest.(check bool) "has priority" true (List.mem_assoc "priority" props);
-          Alcotest.(check bool) "has description" true (List.mem_assoc "description" props);
-          Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props)
-      | None -> Alcotest.fail "masc_add_task missing properties"
+      (match get_json_assoc "properties" schema.input_schema with
+       | Some props ->
+           Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
+           Alcotest.(check bool) "has priority" true (List.mem_assoc "priority" props);
+           Alcotest.(check bool) "has description" true (List.mem_assoc "description" props);
+           Alcotest.(check bool) "has goal_id" true (List.mem_assoc "goal_id" props);
+           Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props);
+           (match List.assoc_opt "goal_id" props with
+            | Some goal_id_schema ->
+                let description =
+                  Option.value ~default:"" (get_json_string "description" goal_id_schema)
+                in
+                Alcotest.(check bool) "goal_id is optional in prose" true
+                  (contains_substring ~needle:"Optional structured goal link" description);
+                Alcotest.(check bool) "goal_id does not reference prompt markers" false
+                  (contains_substring ~needle:"<available_goals>" description);
+                Alcotest.(check bool) "goal_id does not label omitted links orphaned" false
+                  (contains_substring ~needle:"orphaned" description)
+            | None -> Alcotest.fail "masc_add_task missing goal_id property")
+       | None -> Alcotest.fail "masc_add_task missing properties");
+      (match get_json_list "required" schema.input_schema with
+       | Some reqs ->
+           Alcotest.(check bool) "title required" true
+             (List.mem (`String "title") reqs);
+           Alcotest.(check bool) "goal_id not required" false
+             (List.mem (`String "goal_id") reqs)
+       | None -> Alcotest.fail "masc_add_task missing required field")
+
+let test_masc_batch_add_tasks_schema () =
+  match find_registered_tool "masc_batch_add_tasks" with
+  | None -> Alcotest.fail "masc_batch_add_tasks not found"
+  | Some schema ->
+      (match get_json_assoc "properties" schema.input_schema with
+       | Some props ->
+           (match List.assoc_opt "tasks" props with
+            | Some tasks_schema ->
+                (match get_json_assoc "items" tasks_schema with
+                 | Some item_fields ->
+                     (match List.assoc_opt "properties" item_fields with
+                      | Some (`Assoc item_props) ->
+                          Alcotest.(check bool) "item has title" true
+                            (List.mem_assoc "title" item_props);
+                          Alcotest.(check bool) "item has goal_id" true
+                            (List.mem_assoc "goal_id" item_props)
+                      | _ -> Alcotest.fail "masc_batch_add_tasks item missing properties");
+                     (match List.assoc_opt "required" item_fields with
+                      | Some (`List item_reqs) ->
+                          Alcotest.(check bool) "item title required" true
+                            (List.mem (`String "title") item_reqs);
+                          Alcotest.(check bool) "item goal_id not required" false
+                            (List.mem (`String "goal_id") item_reqs)
+                      | _ -> Alcotest.fail "masc_batch_add_tasks item missing required")
+                 | None -> Alcotest.fail "masc_batch_add_tasks tasks missing items")
+            | None -> Alcotest.fail "masc_batch_add_tasks missing tasks property")
+       | None -> Alcotest.fail "masc_batch_add_tasks missing properties");
+      (match get_json_list "required" schema.input_schema with
+       | Some reqs ->
+           Alcotest.(check bool) "tasks required" true
+             (List.mem (`String "tasks") reqs);
+           Alcotest.(check bool) "top-level goal_id not required" false
+             (List.mem (`String "goal_id") reqs)
+       | None -> Alcotest.fail "masc_batch_add_tasks missing required field")
 
 let test_masc_goal_list_schema () =
   match find_registered_tool "masc_goal_list" with
@@ -825,6 +880,8 @@ let () =
       Alcotest.test_case "masc_broadcast" `Quick test_masc_broadcast_schema;
       Alcotest.test_case "masc_transition" `Quick test_masc_transition_schema;
       Alcotest.test_case "masc_add_task" `Quick test_masc_add_task_schema;
+      Alcotest.test_case "masc_batch_add_tasks" `Quick
+        test_masc_batch_add_tasks_schema;
       Alcotest.test_case "masc_board_post supports judgment" `Quick
         test_masc_board_post_schema_supports_judgment;
       Alcotest.test_case "remote_operator_action_strict" `Quick

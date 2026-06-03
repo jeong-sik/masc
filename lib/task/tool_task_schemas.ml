@@ -35,7 +35,7 @@ Tasks default to an advisory verification contract with completion/evidence requ
 Normal status flow is todo → claimed → awaiting_verification → done/cancelled when verification FSM is enabled. \
 Priority 1=urgent, 5=low (default 3). \
 Returns task-XXX ID for tracking. \
-Example: %s({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description: 'Users cannot login with SSO'})"
+Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot login with SSO'})"
       masc_add_task_name;
     input_schema = `Assoc [
       ("type", `String "object");
@@ -55,7 +55,7 @@ Example: %s({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description:
         ]);
         ("goal_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "REQUIRED for goal rollup visibility. Set this to one of the active_goal_ids from your system prompt <available_goals> block. Tasks without a goal_id are orphaned and do not contribute to goal progress tracking.");
+          ("description", `String "Optional structured goal link for rollups. If omitted, scoped keepers may auto-link a single active goal; otherwise the task remains unscoped.");
         ]);
         ("contract", `Assoc [
           ("type", `String "object");
@@ -76,7 +76,7 @@ Example: %s({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description:
           ]);
         ]);
       ]);
-      ("required", `List [`String "title"; `String "goal_id"]);
+      ("required", `List [`String "title"]);
     ];
   };
   {
@@ -86,7 +86,7 @@ Example: %s({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description:
 Use when: loading sprint backlog, importing from JIRA, creating related tasks. \
 Tasks default to the same advisory verification contract/evidence requirements as %s. \
 Each task gets unique ID (task-XXX). Atomic: all succeed or all fail. \
-Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', priority: 2}, {title: 'Task B', goal_id: 'g-124'}]})"
+Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: 'Task B', goal_id: 'g-124'}]})"
       masc_add_task_name
       masc_add_task_name;
     input_schema = `Assoc [
@@ -113,7 +113,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', prior
               ]);
               ("goal_id", `Assoc [
                 ("type", `String "string");
-                ("description", `String "REQUIRED for goal rollup visibility. Set this to one of the active_goal_ids from your system prompt <available_goals> block. Tasks without a goal_id are orphaned and do not contribute to goal progress tracking.");
+                ("description", `String "Optional structured goal link for rollups. If omitted, scoped keepers may auto-link a single active goal; otherwise the task remains unscoped.");
               ]);
               ("contract", `Assoc [
                 ("type", `String "object");
@@ -126,7 +126,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', prior
                 ]);
               ]);
             ]);
-            ("required", `List [`String "title"; `String "goal_id"]);
+            ("required", `List [`String "title"]);
           ]);
           ("description", `String "List of tasks to add");
         ]);

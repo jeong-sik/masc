@@ -111,11 +111,7 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
        | [] -> Ok None
        | [ goal_id ] ->
            validate_goal_id config goal_id |> Result.map Option.some
-       | goal_ids ->
-           Error
-             (Printf.sprintf
-                "goal_id is required when keeper has multiple active_goal_ids: [%s]"
-                (String.concat ", " goal_ids)))
+       | _ :: _ :: _ -> Ok None)
 ;;
 
 (* RFC-0034.v2: per-goal task creation cap moved to

@@ -158,7 +158,7 @@ val degraded_retry_after_recoverable_error :
 
     [fallback_hint], when provided, is prepended to the candidate list so
     that single-provider profiles can declare an immediate escalation
-    target via [keeper_runtime.toml]. The hint is normalized and deduplicated like
+    target via [runtime.toml]. The hint is normalized and deduplicated like
     any other candidate; if it duplicates the effective runtime or has
     already been attempted, the next legal candidate is returned.
     @since 0.174.0 *)

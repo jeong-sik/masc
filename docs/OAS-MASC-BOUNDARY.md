@@ -54,7 +54,7 @@ OAS  ──does not know──→ MASC
 
 ## Config Ownership
 
-- `config/keeper_runtime.toml`은 **MASC runtime contract**다. On-disk
+- `config/runtime.toml`은 **MASC runtime contract**다. On-disk
   `runtime.json`은 retired compatibility input이며 더 이상 생성/소비하지 않는다. (MASC는 TOML에서 in-memory JSON representation을 렌더해 dashboard 등 소비자에게 제공한다.)
 - MASC owns keeper-facing logical runtime policy: named runtime/profile,
   required capabilities, tool visibility, health/capacity gates, and
@@ -263,7 +263,7 @@ Use this checklist when reviewing boundary-touching PRs:
 3. **문서 truth가 코드 truth와 일치하는가?**
    - 특히 runtime labels, runtime-health semantics, boundary-audit snapshot은 구현과 SSOT 문서가 함께 갱신되어야 한다.
 4. **Checked-in runtime labels are explicit enough for stable review**
-   - repository-default `config/keeper_runtime.toml` entries should pin explicit provider/model labels when review stability depends on an exact model. `provider:auto` is acceptable only when the adapter-level default is itself the intended checked-in contract.
+   - repository-default `config/runtime.toml` entries should pin explicit provider/model labels when review stability depends on an exact model. `provider:auto` is acceptable only when the adapter-level default is itself the intended checked-in contract.
 
 ## Boundary Rules for Future Work
 

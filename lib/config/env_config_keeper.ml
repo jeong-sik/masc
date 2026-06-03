@@ -1,7 +1,7 @@
 (** Env_config_keeper — keeper runtime parameters from environment.
 
     All [MASC_KEEPER_*] env vars in this module can also be set
-    declaratively in [<resolved config root>/keeper_runtime.toml].
+    declaratively in [<resolved config root>/runtime.toml].
     The TOML loader ({!Keeper_runtime_config.load_and_apply}) runs at
     server startup and records unset values in the process-local boot
     override store before this module initializes.
@@ -331,7 +331,7 @@ module KeeperKeepalive = struct
       Default: 900 (15 minutes), lifted from 600 in PR #13861's
       RFC-0012/0022 update permitting per-runtime turn_timeout_sec
       overrides. Local-LLM runtimes that legitimately run 27 B turns
-      ≥600 s can now opt in via env or the upcoming keeper_runtime.toml
+      ≥600 s can now opt in via env or the upcoming runtime.toml
       override; remote runtimes stay at the global default 600.
 
       Promotion to 1 800 s requires a follow-up RFC plus one week of
@@ -746,7 +746,7 @@ end
 (** {1 Runtime Runtime Overrides}
 
     Runtime-only narrowing of the MASC runtime provider set. The underlying
-    runtime profile (loaded from [keeper_runtime.toml]) is unchanged; this filter is
+    runtime profile (loaded from [runtime.toml]) is unchanged; this filter is
     applied by the named-runtime execution path via [~provider_filter] on every
     keeper turn, so switching between full runtime and a single-provider
     fallback is a pure env-var change with no file or code edit.

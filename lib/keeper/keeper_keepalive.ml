@@ -7,7 +7,7 @@
 
     [MASC_KEEPER_*] env vars read here (semaphore timeout, concurrency,
     fairness cooldown, autoboot max) can also be set in
-    [<resolved config root>/keeper_runtime.toml].
+    [<resolved config root>/runtime.toml].
     See {!Keeper_runtime_config} and [docs/BOOT-ENV-STATE-INVENTORY.md]
     section 1.3.
 

@@ -83,10 +83,10 @@ Keeper 런타임은 12-state FSM과 turn/post-turn sub-FSM으로 구성된다. `
 노드 기반 실행 파이프라인 엔진(`lib/chain/`)은 purge됐다. `Chain`, `Node`, `Node Type`(23 variant), `Chain Result` 같은 세부 용어도 같이 제거. 현재 execution은 OAS swarm + keeper FSM + verifier 조합이다.
 
 **Runtime**
-LLM 모델 호출의 폴백 순서를 정의하는 설정. live authoring source는 `<base-path>/.masc/config/keeper_runtime.toml` 또는 명시적 `MASC_CONFIG_DIR/keeper_runtime.toml`이고, 체크인된 `config/keeper_runtime.toml`은 default/example fallback source다. 실제 순서는 route/runtime 설정을 따른다. `-> docs/runtime/README.md`, `-> lib/runtime/runtime_runtime.mli`
+LLM 모델 호출의 폴백 순서를 정의하는 설정. live authoring source는 `<base-path>/.masc/config/runtime.toml` 또는 명시적 `MASC_CONFIG_DIR/runtime.toml`이고, 체크인된 `config/runtime.toml`은 default/example fallback source다. 실제 순서는 route/runtime 설정을 따른다. `-> docs/runtime/README.md`, `-> lib/runtime/runtime_runtime.mli`
 
 **Runtime Inference**
-keeper_runtime.toml에서 runtime 이름별 추론 파라미터(temperature, max_tokens)를 읽어 해결하는 모듈. 해결 순서: runtime별 값 -> default 값 -> 호출자 fallback. `-> lib/runtime_inference.mli`
+runtime.toml에서 runtime 이름별 추론 파라미터(temperature, max_tokens)를 읽어 해결하는 모듈. 해결 순서: runtime별 값 -> default 값 -> 호출자 fallback. `-> lib/runtime_inference.mli`
 
 **Layer (Architecture Layer)**
 MASC 아키텍처의 계층 구조. HTTP Server(L0) -> MCP Protocol(L1) -> Tool Dispatch(L2) -> Domain Logic(L3) -> Storage(L4) -> OAS Integration(L5) 순으로 구성된다.
@@ -382,7 +382,7 @@ MASC가 에이전트 실행에 사용하는 SDK 라이브러리. 프로젝트: `
 MASC에서 OAS 기반 모델 호출을 수행하는 통합 진입점. runtime_id 또는 model_label로 모델을 지정하고, OAS Agent.run을 통해 실행한다. 결과로 `run_result`(response, checkpoint, session_id, turns, trace_ref)를 반환한다. 여기서 `turns`는 OAS SDK turn count이며 keeper turn count가 아니다. `-> lib/oas_worker.mli`
 
 **Runtime Config**
-`config/keeper_runtime.toml`에 정의된 runtime 이름별 모델 리스트와 추론 파라미터. OAS Provider와 MASC 모두에서 사용된다. `-> config/keeper_runtime.toml`
+`config/runtime.toml`에 정의된 runtime 이름별 모델 리스트와 추론 파라미터. OAS Provider와 MASC 모두에서 사용된다. `-> config/runtime.toml`
 
 **Provider Kind**
 OAS에서 LLM 제공자를 구분하는 타입. MASC에서는 `llama`(local), `provider-k`(Provider-K Cloud), `agent-llm-a`, `provider-f` 등이 사용된다.

@@ -175,7 +175,7 @@ type run_result = {
 
 `run_named`가 runtime 이름 기반 MODEL 호출을 제공한다:
 
-1. `keeper_runtime.toml`의 `[routes.*]` 대상 또는 호출자가 지정한 runtime 이름을 active runtime config에서 해석한다.
+1. `runtime.toml`의 `[routes.*]` 대상 또는 호출자가 지정한 runtime 이름을 active runtime config에서 해석한다.
 2. 대상은 `[tier.<name>]` / `[runtime.<name>]` / binding alias로 resolve되고, runtime resolution이 ordered weighted entries를 `Provider_config.t list`로 변환한다.
 3. MASC가 `Runtime_fsm.decide`로 runtime FSM을 직접 구동한다.
 4. 각 provider에 대해 OAS single-provider `Agent.run`을 호출한다.
@@ -187,11 +187,11 @@ type run_result = {
 - `raw_trace`에는 아직 provider attempt record가 없으므로 raw-trace만으로는 opaque 하다
 - 따라서 attempt details source는 `oas_metrics_callbacks` 또는 `no_oas_observation`처럼 경계를 명시한다
 
-Runtime failsafe fallback (keeper_runtime.toml 없을 때):
+Runtime failsafe fallback (runtime.toml 없을 때):
 - `llama:{MASC_DEFAULT_MODEL}` (로컬)
 - `provider-k:auto` (ZAI_API_KEY 존재 시)
 
-이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/keeper_runtime.toml`
+이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/runtime.toml`
 기본값과 동일시하지 않는다.
 
 ### 4.6 Termination Semantics
@@ -262,7 +262,7 @@ generic execution contracts; they are not the MASC runtime plane.
 
 ```
 runtime_id (e.g. "keeper", "verifier", "context_router")
-  -> config/keeper_runtime.toml [routes] / profile lookup
+  -> config/runtime.toml [routes] / profile lookup
   -> MASC runtime labels
   -> MASC/OAS adapter resolves labels against OAS Provider_registry
   -> Provider_config.t list (ordered by MASC policy)
@@ -276,7 +276,7 @@ servers, or non-interactive subscription CLI runtimes.
 
 ### 6.2 Runtime Inference Parameters
 
-`runtime_inference.ml`이 keeper_runtime.toml에서 per-runtime 추론 파라미터를 읽는다:
+`runtime_inference.ml`이 runtime.toml에서 per-runtime 추론 파라미터를 읽는다:
 
 ```json
 {
@@ -528,7 +528,7 @@ Detailed implementation checklist lives in
 1. **의존 방향은 단방향이다**: MASC -> OAS. OAS 코드에 MASC import가 존재하면 설계 위반이다.
 2. **MASC는 OAS Agent.run을 사용한다**: 에이전트 생명주기를 자체 재구현하지 않는다. `Runtime.call` 직접 사용은 금지.
 3. **Message 타입은 공유한다**: `Agent_sdk.Types.message`가 MASC와 OAS 모두의 메시지 타입이다. 변환 레이어 없음.
-4. **Runtime name이 model을 추상화한다**: MASC policy code에 구체적 provider/model 이름이 하드코딩되지 않는다. runtime_id -> keeper_runtime.toml runtime config -> Provider_registry 체인.
+4. **Runtime name이 model을 추상화한다**: MASC policy code에 구체적 provider/model 이름이 하드코딩되지 않는다. runtime_id -> runtime.toml runtime config -> Provider_registry 체인.
 5. **Event_bus prefix는 `masc:`이다**: MASC 이벤트는 반드시 이 prefix를 사용한다. SSE bridge가 이 prefix로 필터링한다.
 6. **Verifier는 read-only를 건너뛴다**: read/grep/search/status 류 도구는 MODEL 호출 없이 Pass를 반환한다.
 7. **Checkpoint는 session_id로 네임스페이스된다**: 동일 agent의 다른 세션 checkpoint와 충돌하지 않는다.
@@ -546,7 +546,7 @@ Detailed implementation checklist lives in
 | `MASC_MEMORY_OAS_DEFAULT_IMPORTANCE` | 5 | OAS Memory store 기본 importance |
 | `ZAI_API_KEY` | (없음) | Provider-K Cloud runtime fallback 활성화 |
 
-keeper_runtime.toml 기반 변수는 환경변수가 아니라 config 파일에서 관리된다.
+runtime.toml 기반 변수는 환경변수가 아니라 config 파일에서 관리된다.
 
 ---
 

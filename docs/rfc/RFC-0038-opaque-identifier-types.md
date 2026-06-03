@@ -20,7 +20,7 @@ code as **bare string literals** scattered across modules:
 |-----------------|---------------|---------------------|---------------------------------|
 | Provider name (e.g. "ollama") | legacy `Provider_adapter` provider-name constant | `keeper_status_detail.ml:199`, `runtime_config.ml:277`, `server_routes_http_routes_runtime.ml:16` | 20+ across 14 files |
 | Runtime name (e.g. "primary") | `Keeper_runtime_profile.t` variant | `runtime_routes.ml:65-94`, `runtime_config_loader.ml`, `runtime_routes.mli` | 5 files |
-| Model id (e.g. "qwen3-coder:30b") | `keeper_runtime.toml` (data) | scattered string equality checks across runtime resolvers, telemetry tags |  highly variable |
+| Model id (e.g. "qwen3-coder:30b") | `runtime.toml` (data) | scattered string equality checks across runtime resolvers, telemetry tags |  highly variable |
 
 These identifiers are **external to the codebase** — they come from
 provider catalogs, runtime configurations, and external model registries
@@ -58,7 +58,7 @@ that says `"ollama"` (the registry).
   established that registration is a compile-time event; this RFC
   doesn't change that. What we do is enforce *use sites* to go
   through the registry rather than re-spelling.
-- **Not** touching `keeper_runtime.toml` — operators still see provider
+- **Not** touching `runtime.toml` — operators still see provider
   names as strings in their config files.
 - **Not** an SDK boundary refactor — the agent_sdk layer keeps its
   current types.

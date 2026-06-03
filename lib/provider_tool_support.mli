@@ -18,7 +18,7 @@
     Distinct from {!Llm_provider.Capabilities.capabilities}: this
     record collapses [supports_tools && supports_tool_choice] into a
     single [supports_inline_tool_choice] and adds runtime-MCP HTTP
-    headers as a first-class field (queried via keeper_runtime.toml provider
+    headers as a first-class field (queried via runtime.toml provider
     capabilities and OAS runtime bindings). *)
 type capabilities =
   { supports_inline_tools : bool
@@ -65,7 +65,7 @@ val oas_capabilities_of_config
     - [supports_runtime_mcp_tools] / [supports_runtime_tool_events]:
       passthrough.
     - [supports_runtime_mcp_http_headers]: queried via the local
-      keeper_runtime.toml provider-tool policy projection. *)
+      runtime.toml provider-tool policy projection. *)
 val capabilities_of_config
   :  ?override:runtime_capabilities_override
   -> Llm_provider.Provider_config.t

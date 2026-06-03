@@ -19,7 +19,7 @@ Phase 2 closes both gaps without giving the trust loop authority to silently rew
 
 | Principle | Application |
 |---|---|
-| Live-only persist | Only `<base-path>/.masc/config/keeper_runtime.toml` is touched; `config/keeper_runtime.toml` (repo seed) is never written to by the trust loop. |
+| Live-only persist | Only `<base-path>/.masc/config/runtime.toml` is touched; `config/runtime.toml` (repo seed) is never written to by the trust loop. |
 | Opt-in by default | `MASC_RUNTIME_TRUST_PERSIST=1` (or `=dry`) gates everything in this RFC. Default-off for the first release. |
 | Observation over action | Phase 2a (operator recommendation) is observation-only. Phase 2b (persist) is a separate feature flag and a separate PR. |
 | No self-reload loops | Hot-reload must skip files the trust loop just wrote; otherwise each persist triggers a reload triggers a re-emit. |
@@ -61,11 +61,11 @@ val low_trust_recommendations :
 
 `suggested_action` is one of:
 
-- `Reduce_weight` — trust ∈ [0.1, 0.3): degrade in keeper_runtime.toml
+- `Reduce_weight` — trust ∈ [0.1, 0.3): degrade in runtime.toml
 - `Disable` — trust < 0.1 or `same_fingerprint_count >= 5`: remove from runtime
 - `Investigate` — trust < 0.3 with very high `events_in_window`: probably a config bug
 
-Rendered on the dashboard as a card with a copy-friendly JSON snippet showing the suggested keeper_runtime.toml diff. **No auto-apply.**
+Rendered on the dashboard as a card with a copy-friendly JSON snippet showing the suggested runtime.toml diff. **No auto-apply.**
 
 ### Acceptance for 2a
 
@@ -81,7 +81,7 @@ Rendered on the dashboard as a card with a copy-friendly JSON snippet showing th
 |---|---|
 | unset (default) | No persist. Trust is in-memory only, reset on restart. |
 | `dry` | Compute the would-be diff every hour, append to `runtime_trust/applied/<date>.jsonl` with `mode=dry`, no file write. |
-| `1` | Same diff, plus atomic write to `<base-path>/.masc/config/keeper_runtime.toml`. |
+| `1` | Same diff, plus atomic write to `<base-path>/.masc/config/runtime.toml`. |
 
 ### Persist algorithm
 
@@ -89,11 +89,11 @@ Every `MASC_RUNTIME_TRUST_PERSIST_INTERVAL_SEC` (default 3600s):
 
 1. Snapshot `Runtime_health_tracker.global` providers with `events_in_window > 0` AND age of `last_failure_at` < 24h (skip stale).
 2. For each provider, compute target weight: `round(trust_score * 2) / 2` (0.5-step granularity, range [0.5, ceiling × current_weight]).
-3. Diff against current `<base-path>/.masc/config/keeper_runtime.toml` weights.
+3. Diff against current `<base-path>/.masc/config/runtime.toml` weights.
 4. If diff is empty → emit `mode=skip_no_change` audit event; return.
 5. Atomic write via `lib/atomic_write.ml`:
-   - `keeper_runtime.toml.tmp` → fsync → rename
-   - Backup previous: `<base-path>/.masc/config/.backup/keeper_runtime.toml.YYYYMMDD-HHMMSS`
+   - `runtime.toml.tmp` → fsync → rename
+   - Backup previous: `<base-path>/.masc/config/.backup/runtime.toml.YYYYMMDD-HHMMSS`
    - Top-of-file marker comment: `# auto-tuned by trust_persist at <timestamp>; do not edit by hand within 5s`
 
 ### Hot-reload loop guard
@@ -110,7 +110,7 @@ Recommendation: mtime threshold + a process-local flag (`Atomic.t` with timestam
 
 ### Repo seed pre-write guard
 
-`Runtime_trust_persist.persist_now` must hard-fail if the resolved write target equals `<repo_root>/config/keeper_runtime.toml`. Path comparison via `Unix.realpath` on both sides (per `feedback_security-gate-realpath-invariants.md`).
+`Runtime_trust_persist.persist_now` must hard-fail if the resolved write target equals `<repo_root>/config/runtime.toml`. Path comparison via `Unix.realpath` on both sides (per `feedback_security-gate-realpath-invariants.md`).
 
 ### Acceptance for 2b
 

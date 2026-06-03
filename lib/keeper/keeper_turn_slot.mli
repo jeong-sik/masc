@@ -35,7 +35,7 @@ val keeper_turn_throttle_source : throttle_source
 (** Source of {!keeper_turn_throttle_limit}.
     - [Env_override] — [MASC_KEEPER_AUTOBOOT_MAX] was set in the process
       environment; it takes precedence over TOML.
-    - [Toml] — the value came from [keeper_runtime.toml].
+    - [Toml] — the value came from [runtime.toml].
     - [Default] — neither env nor TOML supplied a value; the hardcoded
       default (32) is in effect.
 

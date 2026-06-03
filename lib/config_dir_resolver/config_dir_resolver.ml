@@ -4,7 +4,7 @@ module StringSet = Set_util.StringSet
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
 let tool_policy_toml_filename = "tool_policy.toml"
-let keeper_runtime_toml_filename = "keeper_runtime.toml"
+let keeper_runtime_toml_filename = "runtime.toml"
 
 type source =
   | Env

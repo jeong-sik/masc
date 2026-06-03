@@ -1,7 +1,7 @@
 (** Env_config_keeper — keeper runtime parameters from environment.
 
     All [MASC_KEEPER_*] env vars in this module can also be set
-    declaratively in [<resolved config root>/keeper_runtime.toml].
+    declaratively in [<resolved config root>/runtime.toml].
     Precedence: process env > TOML > hardcoded default.
 
     Surface flows through [include Env_config_keeper] in

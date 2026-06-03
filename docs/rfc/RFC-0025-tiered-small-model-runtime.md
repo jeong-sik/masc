@@ -3,7 +3,7 @@
 - **Status**: Draft
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-03
-- **Related**: RFC-0024 (Ollama integration), oas_worker_named_runtime.ml, runtime_fsm.ml, config/keeper_runtime.toml
+- **Related**: RFC-0024 (Ollama integration), oas_worker_named_runtime.ml, runtime_fsm.ml, config/runtime.toml
 
 ## 1. Problem
 
@@ -87,7 +87,7 @@ request → detect_complexity → select tier profile → resolve_runtime_provid
 | File | Change | Priority |
 |------|--------|----------|
 | `lib/oas_worker_named_runtime.ml` | Complexity detection + tier routing | High |
-| `config/keeper_runtime.toml` | `[tier_small]`, `[tier_medium]` 프로파일 | High |
+| `config/runtime.toml` | `[tier_small]`, `[tier_medium]` 프로파일 | High |
 | `lib/runtime/runtime_config.ml` | Tier 설정 스키마 | Medium |
 | `lib/oas_worker_named.ml` | Tier metadata 전달 | Medium |
 

@@ -82,21 +82,21 @@ The checked-in versioned seed config tree currently contains:
 
 | Path | Purpose |
 | --- | --- |
-| `config/keeper_runtime.toml` | Provider/model runtime and routing defaults. |
+| `config/runtime.toml` | Provider/model runtime and routing defaults. |
 | `config/tool_policy.toml` | Tool group policy and allow/deny rules. |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
 | `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |
 | `config/excuse_patterns.json` | Auxiliary config used by selected flows. |
 
-`keeper_runtime.toml` is not checked into the repo seed tree. It is an optional
-active-root file at `<active config root>/keeper_runtime.toml`.
+`runtime.toml` is not checked into the repo seed tree. It is an optional
+active-root file at `<active config root>/runtime.toml`.
 
-### 1.3 keeper_runtime.toml — per-base-path startup keeper env seeding
+### 1.3 runtime.toml — per-base-path startup keeper env seeding
 
 All live startup-scoped `MASC_KEEPER_*` keeper runtime variables wired through
 `Env_config_keeper` / `Keeper_config` can be set declaratively in
-`<active config root>/keeper_runtime.toml`. The TOML file is loaded at server
+`<active config root>/runtime.toml`. The TOML file is loaded at server
 startup by `Keeper_runtime_config.load_and_apply` (called from
 `server_runtime_bootstrap.ml`) before any module that reads these env
 vars initializes.
@@ -109,7 +109,7 @@ Operational contract:
 
 **Precedence** (highest first):
 1. Process env var (caller/CI override — never overwritten by TOML)
-2. TOML value from `keeper_runtime.toml`
+2. TOML value from `runtime.toml`
 3. Hardcoded default in `Env_config_keeper` / `Keeper_keepalive`
 
 Missing file is not an error (returns 0 overrides, uses env/defaults).
@@ -137,7 +137,7 @@ canonical process env var is already set.
 | `[alert]` | 17 | `slack_enabled`, `slack_dm_user_id`, `github_enabled`, `github_min_score` |
 | `[debug]` | 1 | `enabled` |
 
-**Example** (`<active config root>/keeper_runtime.toml`):
+**Example** (`<active config root>/runtime.toml`):
 
 ```toml
 [autonomous]
@@ -432,7 +432,7 @@ Current log sink observed today:
 
 - `curl -fsS http://127.0.0.1:8935/health`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
 - `pgrep -fl main_eio`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
-- `test -f /Users/dancer/me/.masc/config/keeper_runtime.toml`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
+- `test -f /Users/dancer/me/.masc/config/runtime.toml`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
 
 ## 5. Operator Checklist for Root Drift
 
@@ -451,7 +451,7 @@ Current log sink observed today:
    - `<runtime_root>/keepers/<name>/`
    - `<runtime_root>/traces/`
    - `<active config root>/tool_policy.toml`
-   - `<active config root>/keeper_runtime.toml`
+   - `<active config root>/runtime.toml`
 
 ## Appendix A. Centralized Environment Inventory
 

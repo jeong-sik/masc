@@ -31,7 +31,7 @@ Use this document together with
 | --- | --- | --- |
 | `boot_static` | Requires process restart | socket bind, config root resolution, startup seeding |
 | `sweep_dynamic` | Applied on next supervisor sweep or periodic reconcile | running keeper declarative profile sync |
-| `request_dynamic` | Applied on next request/turn/lookup | `keeper_runtime.toml` resolve path, some runtime getters |
+| `request_dynamic` | Applied on next request/turn/lookup | `runtime.toml` resolve path, some runtime getters |
 | `immediate_dynamic` | Applied immediately inside the running process | `Runtime_params.set`, in-process override mutation |
 
 ## Default Policy
@@ -62,7 +62,7 @@ should be treated as restart-required.
 | Runtime root and config roots | `MASC_BASE_PATH`, `MASC_CONFIG_DIR`, `MASC_PERSONAS_DIR`, `HOME` | `Config_dir_resolver` caches the resolved root for the life of the process |
 | Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_WS_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED`, `MASC_WEBRTC_ENABLED` | listeners and advertised base URLs are fixed during server startup |
 | Backend/bootstrap wiring | `MASC_STORAGE_TYPE`, `MASC_STARTUP_WATCHDOG_SEC` | boot-time filesystem storage enforcement and watchdog setup |
-| Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `keeper_runtime.toml` | TOML is loaded once and injected into the process env during boot |
+| Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded once and injected into the process env during boot |
 | Startup-loaded policy | tool policy related env plus `tool_policy.toml`-driven behavior | tool groups are loaded once at startup |
 
 Representative code paths:

@@ -242,7 +242,7 @@ Reference path proven on 2026-05-23 via direct ElevenLabs probe (HTTP 200, 81KB 
 ## §7 Non-goals
 
 - No new voice features. No new tools. No protocol changes. No realtime bidirectional session bridge (the empty `session.endpoints` slot stays empty *and removed*).
-- No keeper_runtime.toml restructuring (separate concern; sangsu's runtime tier is not touched by this RFC).
+- No runtime.toml restructuring (separate concern; sangsu's runtime tier is not touched by this RFC).
 - No persona prompt rewrites beyond the optional one-line voice guidance for sangsu in §6.2.
 
 ## §8 Risks

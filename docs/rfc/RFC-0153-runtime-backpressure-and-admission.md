@@ -139,7 +139,7 @@ let rec try_runtime candidates ... =
 
 - Provider health probe redesign (RFC-0127).
 - `transient_http_status` 분류 수정.
-- `keeper_runtime.toml` runtime 멤버 선택 전략.
+- `runtime.toml` runtime 멤버 선택 전략.
 - last_blocker 경로 (RFC-0082, BLOCKED).
 - 새 wire-format / API surface (Phase A는 *추가만*).
 
@@ -314,8 +314,8 @@ PR #17013 (`feat(runtime): wire tier admission into keeper attempts`, merged 202
 
 | 측면 | §4.2 원래 design | PR #17013 실제 구현 |
 |---|---|---|
-| Admission unit | per-runtime (keeper_runtime.toml `[runtime.X]`) | **per-runtime-name** (`tier_admission_id = runtime_id`) |
-| Capacity 설정 | keeper_runtime.toml `max_inflight = 8` per group | 단일 `Runtime_tier_admission.create ()` (default cap 8) |
+| Admission unit | per-runtime (runtime.toml `[runtime.X]`) | **per-runtime-name** (`tier_admission_id = runtime_id`) |
+| Capacity 설정 | runtime.toml `max_inflight = 8` per group | 단일 `Runtime_tier_admission.create ()` (default cap 8) |
 | Policy 결정 | caller site 매핑 (§4.2 본문 테이블) | **per-priority** (`runtime_tier_admission_policy_of_priority : Request_priority.t -> admission_policy`) — Proactive→Required, Background→Bypass |
 | Env flag | (별도) | A.2 와 공유: `MASC_RUNTIME_SATURATION_SIGNAL_ENABLED` |
 
@@ -324,17 +324,17 @@ PR #17013 (`feat(runtime): wire tier admission into keeper attempts`, merged 202
 **Trade-off**:
 - ✅ §4.2.2 의 5+ caller chain plumbing 부담 제거. wire-in 3 파일로 완료 (lib/keeper/keeper_turn_driver.{ml,mli} + test).
 - ⚠️ per-runtime cap (RFC §4.2 의 원래 motivation) 미실현. 한 runtime_id 안 여러 runtime 이 같은 counter 공유 → tier 간 *상호 starvation* 가능.
-- ⚠️ priority 분류가 keeper_runtime.toml tier 구조와 *직교* — 한 runtime_id 안 Proactive + Background 가 같은 admission counter 공유.
+- ⚠️ priority 분류가 runtime.toml tier 구조와 *직교* — 한 runtime_id 안 Proactive + Background 가 같은 admission counter 공유.
 - ⚠️ `MASC_CLIENT_CAPACITY` (§4.2.1 inner layer) 와 cap 값 정합성 검증 부재.
 
 **Future work**:
 - per-runtime granularity 가 측정상 진짜 필요한지 6개월 데이터로 결정 (§5 Phase E).
 - 필요 시 §4.2.2 plumbing 의 3 옵션 중 (c) `Runtime_runtime_candidate.t.tier_id` 가 가장 저비용 (build site 한 곳만 변경).
-- keeper_runtime.toml `max_inflight` 스키마는 *deferred* — 우선 모든 runtime default 8 로 운영하며 saturation signal 분포 측정.
+- runtime.toml `max_inflight` 스키마는 *deferred* — 우선 모든 runtime default 8 로 운영하며 saturation signal 분포 측정.
 
-§11 Phased Rollout 의 B.2 단계가 PR #17013 으로 *partial-fulfilled*. keeper_runtime.toml 스키마 + per-runtime cap 는 future work.
+§11 Phased Rollout 의 B.2 단계가 PR #17013 으로 *partial-fulfilled*. runtime.toml 스키마 + per-runtime cap 는 future work.
 
-**keeper_runtime.toml 스키마 확장** (deferred per §4.2.3):
+**runtime.toml 스키마 확장** (deferred per §4.2.3):
 
 ```toml
 [runtime.strict_tool_candidates]
@@ -408,7 +408,7 @@ D.1 머지 + 2주 운영 후 측정:
 | tier 의미 | backup 순위 | 병렬 capacity pool |
 | hedged request | 불가능 | 2배 capacity로 p99 절감 |
 | deadline propagation | 없음 | top-level deadline 전파 |
-| 구현 비용 | — | 고 (keeper_runtime.toml 의미 변경, transition 필요) |
+| 구현 비용 | — | 고 (runtime.toml 의미 변경, transition 필요) |
 
 §7 세 framework 모두 scheduler 추상 부재 → Phase E는 *MASC novel + 외부 검증 없는* 대형 변경. Phase A-C 머지 + 6개월 운영 데이터 후 별도 RFC.
 
@@ -574,7 +574,7 @@ Phase B/C/E는 세 framework 모두 안 함. **완화**: tower::limit::Concurren
 | "보이지 않는" 거절률 증가 | Medium | Medium | typed signal + dashboard |
 | RFC-0152 의미 충돌 | Low | Medium | D.1을 RFC-0152 명세 채우기로 위치 |
 | 운영자가 "300s 늘리고 싶음" | High | Low | env override |
-| keeper_runtime.toml 스키마 break | Low | High | default 값 + 미설정 시 현 동작 |
+| runtime.toml 스키마 break | Low | High | default 값 + 미설정 시 현 동작 |
 | RFC 번호 race | Medium | Medium | Draft PR 즉시 push + git fetch 검증 |
 | MASC novel territory (B/C/E) | Medium | Medium | incremental rollout + env flag + 2주 운영 게이트 |
 

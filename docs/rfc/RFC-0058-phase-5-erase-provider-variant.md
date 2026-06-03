@@ -41,7 +41,7 @@ The provider name leaks into call sites in three forms:
 - Remove closed `provider_id` variant types from public dispatch surfaces.
 - Eliminate every literal vendor runtime prefix from OCaml under `lib/`.
 - Move per-vendor capability/liveness/pricing/concurrency knobs out of
-  OCaml into `config/keeper_runtime.toml` (the Phase 4 SSOT).
+  OCaml into `config/runtime.toml` (the Phase 4 SSOT).
 - After Phase 5, adding a vendor that uses an existing `api_format` is
   TOML-only.
 
@@ -110,7 +110,7 @@ resolved budget used for the attempt.
 ### Phase 5.5 — Validator hardens R11 globally
 
 - Promote `validate_strict` (introduced in Phase 5.2a alongside R11)
-  to be the default validator used by every keeper_runtime.toml load site.
+  to be the default validator used by every runtime.toml load site.
   Legacy `validate` removed once test fixtures all carry
   `max-concurrent`.
 
@@ -162,7 +162,7 @@ For each Phase 5.N PR:
   shrinks monotonically. Phase 5.3 must zero them out under `lib/` (test
   fixtures and migration tools excluded).
 - G3: `dune build --root .` and `dune test` pass. Test fixtures may be
-  amended in the same PR but production keeper_runtime.toml schema does not change.
+  amended in the same PR but production runtime.toml schema does not change.
 - G4: New TOML fields (`[providers.<p>.capabilities]`, provider `aliases`)
   ship with parser + R-rule validator coverage. Provider liveness classes
   remain absent.

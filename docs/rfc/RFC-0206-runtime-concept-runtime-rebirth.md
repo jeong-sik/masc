@@ -19,7 +19,7 @@ runtime는 다중 provider failover 프레임워크였다: `runtime_id`/`routes`
 
 Runtime은 하나의 완전히 materialize된 (Provider × Model × Binding) triple과, dispatch 대상인 hot-path `Llm_provider.Provider_config.t`다. resolution graph의 노드가 아니라 **독립 값**이다.
 
-- 시스템은 `config/keeper_runtime.toml`(파일명 rename은 deferred)을 flat `Runtime.t list` + 정확히 1개 default `Runtime.t`로 로드한다. default는 `[runtime].default = "provider.model"` 키로 선택한다.
+- 시스템은 `config/runtime.toml`(파일명 rename은 deferred)을 flat `Runtime.t list` + 정확히 1개 default `Runtime.t`로 로드한다. default는 `[runtime].default = "provider.model"` 키로 선택한다.
 - `runtime_id` 없음, `routes`/`logical_use` enum 없음, tier escalation 없음, profile 간접 없음. 각 binding 셀이 곧 하나의 Runtime이며 `"provider.model"` 문자열 키로 식별된다.
 - 소비자는 list와 default를 직접 받아 `runtime.provider_config`를 LLM에 넘긴다. in-band routing 0.
 - 다중후보 failover(Selecting/Trying 루프, weighted-random, round-robin, fallback chain)는 제거된다. Runtime은 단일 사전선택 provider를 나타내며 atomic하게 성공/실패한다. cross-runtime 재시도가 필요하면 그것은 in-turn FSM이 아니라 명시적 상위 supervisor 결정이다.
@@ -86,7 +86,7 @@ runtime 5-state(`Idle/Selecting/Trying/Done/Exhausted`)는 다중후보 selectio
 | Phase | 목표 | 파일 | unblocks |
 |-------|------|------|----------|
 | **P1** | `runtime_schema.ml(.mli)` 10 type group + defaults + provider_of_id/model_of_id/binding_key. 삭제 모듈 의존 0. `open Runtime_declarative_types` 대체 | ~4 | Runtime.t가 자립 타입으로 컴파일; P2 타깃 스키마 확보 |
-| **P2** | `runtime_toml.ml`(Otoml→config), `runtime_adapter.ml`(binding→Provider_config.t). load_list/of_binding 배선. keeper_runtime.toml fixture + no-default fixture(Error) 검증 | ~7 | load_list end-to-end; init_default; startup fail-fast |
+| **P2** | `runtime_toml.ml`(Otoml→config), `runtime_adapter.ml`(binding→Provider_config.t). load_list/of_binding 배선. runtime.toml fixture + no-default fixture(Error) 검증 | ~7 | load_list end-to-end; init_default; startup fail-fast |
 | **P3** | singleton 경계 결정. ref 기반 유지 + `"tool_strict"` fallback 삭제(uninit→fail loud). eager-init crash 회피(lazy/explicit + test fixture) | ~5 | 90 사이트 안전 re-home |
 | **P4** | keeper 소비자 re-home(dominant 77파일). Runtime_name/runner/error_classify/catalog_runtime → raw id, get_default_runtime_id, keeper_meta_contract, keeper_turn_phase. 5파일 batch | ~16 batch | 844 dangling 대부분 해소 |
 | **P5** | 주변 소비자: config_diagnostic, dashboard runtime lens, admission_queue, server, otel, operator. dune deps에서 runtime lib 제거 | ~21 | full build green; dangling 0 |
@@ -104,7 +104,7 @@ runtime 5-state(`Idle/Selecting/Trying/Done/Exhausted`)는 다중후보 selectio
 ## 8. 검증
 
 - P1: `dune build lib/runtime/ --root .` 통과 (keeper broken 무관하게 runtime lib 자립 컴파일)
-- P2: keeper_runtime.toml fixture 로드 성공 + no-default fixture → `Error`
+- P2: runtime.toml fixture 로드 성공 + no-default fixture → `Error`
 - P6: fail-fast mutation-test (default 누락/오류 시 반드시 Error)
 - 최종: full build green + `rg -w 'Runtime_[A-Za-z_]+' lib bin` = 0
 

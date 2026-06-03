@@ -60,7 +60,7 @@ The keeper persona TOML already carries the per-keeper runtime selection:
   change-detector and the dashboard status override view.
 
 An earlier draft of this RFC added a *second* surface (`[llm_runtime.<keeper>]`
-in the shared `keeper_runtime.toml`). That was rejected: it duplicated the
+in the shared `runtime.toml`). That was rejected: it duplicated the
 existing persona field, split per-keeper data across two files, and — because
 the dispatcher read one surface while the reconcile/status layer read the other
 with the opposite precedence — created a split-brain that would flag `runtime`
@@ -118,7 +118,7 @@ Zero config migration for Part A. The eight keepers already declare
 `model = "ollama_cloud.deepseek-v4-pro"`; once the new binary is deployed, the
 dispatcher honours it and routes those keepers to `ollama_cloud` immediately.
 The `ollama_cloud.deepseek-v4-pro` binding already materializes in
-`keeper_runtime.toml` (`[providers.ollama_cloud]` + `[models.deepseek-v4-pro]` +
+`runtime.toml` (`[providers.ollama_cloud]` + `[models.deepseek-v4-pro]` +
 `[ollama_cloud.deepseek-v4-pro]`).
 
 ## 6. Part B — ordered failover (deferred)

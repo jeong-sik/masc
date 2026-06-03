@@ -21,8 +21,8 @@ let no_progress_success_tool_names_for_contract =
   Contract_helpers.no_progress_success_tool_names_for_contract
 ;;
 
-let tool_contract_result_for_observed_tools =
-  Turn_helpers.tool_contract_result_for_observed_tools
+let completion_contract_result_for_progress_evidence =
+  Turn_helpers.completion_contract_result_for_progress_evidence
 
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
@@ -677,7 +677,7 @@ let run_turn
                  if valid_tool_calls_present then acc.keeper_surface_tool_used <- true;
                  if unexpected_tool_names <> [] && not valid_tool_calls_present
                  then (
-                   acc.receipt_tool_contract_result <-
+                   acc.receipt_completion_contract_result <-
                      Keeper_execution_receipt.Contract_violated;
                    Error
                      (Keeper_agent_run_tool_surface_violation.to_sdk_error
@@ -732,14 +732,14 @@ let run_turn
                        ~history_messages
                        ~actual_input_tokens:(Some usage.input_tokens)
                    in
-                   let tool_contract_status ()
-                       : Keeper_execution_receipt.tool_contract_result =
-                     Contract_helpers.observed_tool_contract_status
+                   let completion_contract_status ()
+                       : Keeper_execution_receipt.completion_contract_result =
+                     Contract_helpers.observed_completion_contract_status
                        ~had_owned_active_task_at_turn_start
                        ~actual_keeper_tool_names:progress_keeper_tool_names
                    in
                    let text_result =
-                     acc.receipt_tool_contract_result <- tool_contract_status ();
+                     acc.receipt_completion_contract_result <- completion_contract_status ();
                      Ok (`Provider_text text)
                    in
                    match text_result with

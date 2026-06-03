@@ -54,9 +54,9 @@ let test_turn_state_labels_cover_every_variant () =
     ; F.Any (F.Failed (F.Failure_runtime_error "x")), "failed:runtime_error"
     ; ( F.Any
           (F.Failed
-             (F.Failure_no_tool_capable_provider
+             (F.Failure_no_capable_provider
                 { runtime_id = "tools"; detail = "no candidate supports tools" }))
-      , "failed:no_tool_capable_provider" )
+      , "failed:no_capable_provider" )
     ; F.Any (F.Cancelled F.Cancelled_phase_gate_close), "cancelled:phase_gate_close"
     ]
   in
@@ -104,7 +104,7 @@ let test_transition_actions_cover_tla_next () =
     ~from_state:F.Runtime_routing
     ~to_state:
       (F.Failed
-         (F.Failure_no_tool_capable_provider
+         (F.Failure_no_capable_provider
             { runtime_id = "tools"; detail = "no provider supports requested tool surface" }));
   check_action
     F.ProviderError
@@ -123,7 +123,7 @@ let test_transition_actions_cover_tla_next () =
     F.ContractViolation
     ~from_state:F.Streaming
     ~to_state:
-      (F.Failed (F.Failure_tool_contract_violation { reason_code = "tool_contract" }));
+      (F.Failed (F.Failure_completion_contract_violation { reason_code = "completion_contract" }));
   check_action
     F.ReceiptLost
     ~from_state:F.Streaming
@@ -143,7 +143,7 @@ let test_transition_actions_cover_tla_next () =
     F.ContractViolation
     ~from_state:F.Completing
     ~to_state:
-      (F.Failed (F.Failure_tool_contract_violation { reason_code = "passive_only" }));
+      (F.Failed (F.Failure_completion_contract_violation { reason_code = "passive_only" }));
   check_action
     F.ReceiptLost
     ~from_state:F.Completing
@@ -355,11 +355,11 @@ let test_failure_reason_labels_documented () =
   let pairs : (F.failure_reason * string) list =
     [ ( F.Failure_runtime_unavailable { base = "ollama:7b"; resolved = None }
       , "runtime_unavailable" )
-    ; ( F.Failure_no_tool_capable_provider
+    ; ( F.Failure_no_capable_provider
           { runtime_id = "tools"; detail = "no candidate supports tools" }
-      , "no_tool_capable_provider" )
+      , "no_capable_provider" )
     ; F.Failure_provider_error { kind = "k"; detail = "d" }, "provider_error"
-    ; F.Failure_tool_contract_violation { reason_code = "rc" }, "tool_contract_violation"
+    ; F.Failure_completion_contract_violation { reason_code = "rc" }, "completion_contract_violation"
     ; F.Failure_receipt_lost { primary_error = "e"; fallback_path = None }, "receipt_lost"
     ; ( F.Failure_turn_livelock_blocked { reason = "stuck_after_sec" }
       , "turn_livelock_blocked" )

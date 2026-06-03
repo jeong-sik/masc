@@ -370,8 +370,8 @@ let operator_disposition (receipt : t)
        match exhaustive without a wildcard. *)
     let tool_route_failure =
       List.mem
-        receipt.tool_contract_result
-        [ Contract_tool_surface_mismatch; Contract_no_tool_capable_provider ]
+        receipt.completion_contract_result
+        [ Contract_surface_mismatch; Contract_no_capable_provider ]
     in
     if tool_route_failure
     then
@@ -392,7 +392,7 @@ let operator_disposition (receipt : t)
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = Runtime_not_dispatched
-      && receipt.tool_contract_result = Contract_not_dispatched
+      && receipt.completion_contract_result = Contract_not_dispatched
       &&
       (match terminal_reason with
        | Keeper_terminal_reason.Pre_dispatch_success _ -> true
@@ -438,12 +438,12 @@ let operator_disposition (receipt : t)
           ();
         Log.Keeper.warn
           "operator_disposition: unmapped (outcome=%s runtime_outcome=%s \
-           terminal_reason=%s tool_contract_result=%s error_kind=%s) — investigate \
+           terminal_reason=%s completion_contract_result=%s error_kind=%s) — investigate \
            regression of #11651 silent-path fix"
           (outcome_kind_to_string receipt.outcome)
           (runtime_outcome_to_string receipt.runtime_outcome)
           receipt.terminal_reason_code
-          (tool_contract_result_to_string receipt.tool_contract_result)
+          (completion_contract_result_to_string receipt.completion_contract_result)
           (Option.value
              (Option.map error_kind_to_string receipt.error_kind)
              ~default:"<none>");
@@ -532,8 +532,8 @@ let to_json (receipt : t) =
     ; "unexpected_tools", list_json receipt.unexpected_tools
     ; "tools_used", list_json receipt.tools_used
     ; "tool_descriptor_summary", tool_descriptor_summary_json receipt
-    ; ( "tool_contract_result"
-      , `String (tool_contract_result_to_string receipt.tool_contract_result) )
+    ; ( "completion_contract_result"
+      , `String (completion_contract_result_to_string receipt.completion_contract_result) )
     ; ( "tool_surface"
       , `Assoc
           [ ( "turn_lane"
@@ -731,8 +731,8 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "response_text_present", `Bool receipt.response_text_present
     ; "runtime_id", `String (receipt.runtime_id)
     ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
-    ; ( "tool_contract_result"
-      , `String (tool_contract_result_to_string receipt.tool_contract_result) )
+    ; ( "completion_contract_result"
+      , `String (completion_contract_result_to_string receipt.completion_contract_result) )
     ; ( "last_tool_name", string_opt_json (last_tool_name receipt) )
     ; "tools_used", list_json receipt.tools_used
     ; ( "contract_violation_detail"
@@ -744,26 +744,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
             ; "called_tools", list_json called
             ; "satisfying_tools", list_json satisfying
             ] )
-    ; ( "tool_contract"
-      , `Assoc
-          [ ( "result"
-            , `String (tool_contract_result_to_string receipt.tool_contract_result) )
-          ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
-          ; ( "tool_requirement"
-            , Keeper_agent_tool_surface.tool_requirement_to_yojson
-                receipt.tool_surface.tool_requirement )
-          ; ( "turn_lane"
-            , Keeper_agent_tool_surface.turn_lane_to_yojson
-                receipt.tool_surface.turn_lane )
-          ; ( "tool_surface_class"
-            , Keeper_agent_tool_surface.tool_surface_class_to_yojson
-                receipt.tool_surface.tool_surface_class )
-          ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
-          ; ( "tool_surface_fallback_used"
-            , `Bool receipt.tool_surface.tool_surface_fallback_used )
-          ; ( "materialized_tools"
-            , list_json receipt.tool_surface.materialized_tools )
-          ] )
     ; ( "sandbox"
       , `Assoc
           [ "kind", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)

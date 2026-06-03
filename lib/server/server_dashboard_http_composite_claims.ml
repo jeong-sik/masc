@@ -190,7 +190,7 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~keeper_name =
       ; "operator_disposition_reason", `Null
       ; "model_used", `Null
       ; "stop_reason", `Null
-      ; "tool_contract_result", `Null
+      ; "completion_contract_result", `Null
       ; "duration_ms", `Null
       ; "error", `Null
       ; "runtime", `Null
@@ -213,8 +213,8 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~keeper_name =
         )
       ; "model_used", `Null
       ; "stop_reason", Json_util.string_opt_to_json (json_string "stop_reason" receipt)
-      ; ( "tool_contract_result"
-        , Json_util.string_opt_to_json (json_string "tool_contract_result" receipt) )
+      ; ( "completion_contract_result"
+        , Json_util.string_opt_to_json (json_string "completion_contract_result" receipt) )
       ; ( "unexpected_tools"
         , Json_util.json_string_list (Json_util.get_string_list receipt "unexpected_tools") )
       ; ( "unexpected_tool_count"
@@ -292,9 +292,9 @@ let composite_snapshot_is_idle snapshot =
 
 let composite_execution_tool_route_blocked execution =
   string_opt_is_any
-    (json_string "tool_contract_result" execution)
-    [ "tool_surface_mismatch"
-    ; "no_tool_capable_provider"
+    (json_string "completion_contract_result" execution)
+    [ "surface_mismatch"
+    ; "no_capable_provider"
     ]
   || string_opt_is_any
        (json_string "operator_disposition_reason" execution)

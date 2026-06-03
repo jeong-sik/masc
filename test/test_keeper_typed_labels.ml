@@ -60,9 +60,9 @@ let test_cancel_reason_labels_unique () =
 let all_failure_reasons : Keeper_turn_fsm.failure_reason list =
   [
     Failure_runtime_unavailable { base = "x"; resolved = None };
-    Failure_no_tool_capable_provider { runtime_id = "x"; detail = "d" };
+    Failure_no_capable_provider { runtime_id = "x"; detail = "d" };
     Failure_provider_error { kind = "k"; detail = "d" };
-    Failure_tool_contract_violation { reason_code = "rc" };
+    Failure_completion_contract_violation { reason_code = "rc" };
     Failure_receipt_lost { primary_error = "e"; fallback_path = None };
     Failure_runtime_error "msg";
     Failure_unexpected_exception { exn = "exn"; backtrace = None };
@@ -208,7 +208,7 @@ let test_is_actionable_matches_variants () =
 let all_contract_statuses
     : Keeper_contract_classifier.contract_status list =
   [
-    Tool_surface_mismatch { missing = [ "x" ] };
+    Surface_mismatch { missing = [ "x" ] };
     Claim_only_after_owned_task;
     Needs_execution_progress;
     Passive_only;
@@ -227,7 +227,7 @@ let test_contract_status_labels_unique () =
 let test_pp_contract_status_surfaces_missing_list () =
   let s =
     format_to_string Keeper_contract_classifier.pp_contract_status
-      (Tool_surface_mismatch { missing = [ "keeper_task_claim"; "masc_claim_next" ] })
+      (Surface_mismatch { missing = [ "keeper_task_claim"; "masc_claim_next" ] })
   in
   Alcotest.(check bool)
     "pp_contract_status surfaces first missing tool"

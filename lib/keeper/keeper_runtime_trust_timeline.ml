@@ -347,8 +347,8 @@ let receipt_timeline_event receipt =
           json_string_opt_member "outcome" receipt
           |> Option.value ~default:"unknown"
         in
-        let tool_contract_result =
-          json_string_opt_member "tool_contract_result" receipt
+        let completion_contract_result =
+          json_string_opt_member "completion_contract_result" receipt
           |> Option.value ~default:"unknown"
         in
         let runtime_outcome =
@@ -365,7 +365,7 @@ let receipt_timeline_event receipt =
           match error_kind with
           | Some _ -> "bad"
           | None ->
-              if String.equal tool_contract_result "violated" then "bad"
+              if String.equal completion_contract_result "violated" then "bad"
               else if
                 String.equal runtime_outcome "passed_to_next_model"
                 || (receipt |> json_member "runtime"
@@ -383,8 +383,8 @@ let receipt_timeline_event receipt =
              ~ts_unix ~kind:"execution_receipt"
              ~title:"Execution Receipt"
              ~summary:
-               (Printf.sprintf "%s · tool_contract=%s · runtime=%s"
-                  outcome tool_contract_result runtime_outcome)
+               (Printf.sprintf "%s · completion_contract=%s · runtime=%s"
+                  outcome completion_contract_result runtime_outcome)
              ~severity ())
 
 let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id

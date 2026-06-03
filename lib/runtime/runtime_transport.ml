@@ -6,9 +6,8 @@
 
 let provider_effective_max_turns _kind requested = requested
 
-(* RFC-0167: the client-named omission-dedup module
-   [Runtime_transport_codex_omission_dedup] (#10097) was removed in
-   the big-bang sweep. The structural omission of keeper-bound runtime
+(* RFC-0167: the client-named omission-dedup module (#10097) was removed
+   in the big-bang sweep. The structural omission of keeper-bound runtime
    MCP tools (when the runtime adapter requires per-keeper bridging
    but no per-keeper bearer is available) is still detected and
    reported through the [Error (invalid_runtime_config ...)] path
@@ -157,11 +156,10 @@ let resolve_tool_lane_for_oas_tools
     | _ -> []
   in
   (* RFC-0167: previously routed [omitted_keeper_bound_actor_tools] through
-     [Runtime_transport_codex_omission_dedup.record_cli_tool_a_omission_for_agent]
-     for WARN-dedup + per-tool counter. The dedup module was a
-     client-named adapter (cli_tool_a wire-quirk) and is removed; the
-     omission is now silently reflected only in the [Error
-     (invalid_runtime_config ...)] returned below. *)
+     a client-named dedup adapter for WARN-dedup + per-tool counter.
+     The dedup module was a client-named adapter (cli_tool_a wire-quirk)
+     and is removed; the omission is now silently reflected only in the
+     [Error (invalid_runtime_config ...)] returned below. *)
   if tool_requirement = `Required && omitted_keeper_bound_actor_tools <> []
   then (
     let detail =

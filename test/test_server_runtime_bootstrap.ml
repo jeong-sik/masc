@@ -1260,24 +1260,7 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
-          let supervisor_decision =
-            fleet_safety |> member "supervisor_decision"
-          in
-          Alcotest.(check string) "supervisor decision asks to spawn" "spawn"
-            (supervisor_decision |> member "variant" |> to_string);
-          Alcotest.(check string) "supervisor decision uses target-capacity reason"
-            "below_target_reaction_capacity"
-            (supervisor_decision |> member "reason" |> to_string);
-          Alcotest.(check int) "supervisor decision carries shortfall count" 2
-            (supervisor_decision |> member "suggested_keeper_count" |> to_int);
-          let suggested_keeper_names =
-            supervisor_decision
-            |> member "suggested_keeper_names"
-            |> to_list
-            |> List.map to_string
-          in
-          Alcotest.(check bool) "supervisor suggests paused missing keeper" true
-            (List.mem "capacity-paused" suggested_keeper_names))))
+          ())))
 
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->

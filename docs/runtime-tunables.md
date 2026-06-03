@@ -194,8 +194,6 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED` | feature_flag | Policies | operator | 23 | Fleet capacity supervisor execution loop (RFC-0130 PR-4). When enabled, the server periodically converts the typed fl... |
-| `MASC_FLEET_CAPACITY_SUPERVISOR_TICK_SEC` | typed:float | Timeouts | operator | 32 | Interval between fleet capacity supervisor execution ticks. Default: 30s. Clamped to >= 10s to avoid a tight boot ret... |
 | `MASC_KEEPER_ALIVE_BUT_STUCK_DEDUP_TTL_SEC` | typed:float | Timeouts | operator | 173 | Per-keeper dedup window (seconds): once a keeper is flagged the counter is incremented at most once per window, even ... |
 | `MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED` | typed:bool | Policies | operator | 139 | Signal for alive-but-stuck keepers (#12838): keepers that are not Dead/Zombie and not paused, but whose [proactive_rt... |
 | `MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED` | typed:bool | Policies | operator | 148 | Queue a bounded recovery wakeup when [alive_but_stuck_scan] emits. The recovery uses the Event Layer queue plus [fibe... |
@@ -263,9 +261,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_FULL_HEALTH_CRITICAL_FAILURE_THRESHOLD` | typed:int | unclassified | unclassified | 807 | Number of consecutive [/health?full=1] cache-refresh failures that must accumulate before [masc_full_health_refresh_c... |
 | `MASC_FULL_HEALTH_REFRESH_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 795 | Full-health snapshot proactive refresh timeout (seconds). Caps a single [/health?full=1] cache refresh attempt in [Se... |
 | `MASC_FULL_SURFACE` | feature_flag | n/a | n/a | 516 | Full tool surface override. Default: false. Re-readable within the process; callers should still document the effecti... |
-| `MASC_GOAL_JANITOR_AUTO_STAGNATE_DAYS` | typed:int | unclassified | unclassified | 389 | Stagnate threshold (days) for auto-generated goals.  Default: 7. Auto-generated = title suffix [" (auto)"] from [Keep... |
-| `MASC_GOAL_JANITOR_ENABLED` | typed:bool | unclassified | unclassified | 375 | Enable the periodic goal_janitor sweep fiber.  Default: true. Set MASC_GOAL_JANITOR_ENABLED=false to disable when deb... |
-| `MASC_GOAL_JANITOR_INTERVAL_SEC` | typed:float | unclassified | unclassified | 381 | Sweep interval in seconds.  Default: 3600 (1 hour). Goal stagnation is measured in days, so the cadence does not need... |
 | `MASC_GRPC_ENABLED` | feature_flag | n/a | n/a | 284 | Whether gRPC transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at boot. |
 | `MASC_GRPC_PORT` | string_literal | n/a | n/a | 280 | gRPC server port. Default: 8936. |
 | `MASC_GRPC_TARGET` | string_literal | n/a | n/a | 288 | gRPC client target address. Derived from grpc_port when unset. |

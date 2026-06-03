@@ -107,7 +107,7 @@ let test_required_tool_streak_does_not_inherit_passive_streak () =
   check int "required-tool family starts its own streak" 1
     (PLD.current_streak ~keeper_name:"k-family")
 
-let test_required_tool_nudge_mentions_real_tool_call () =
+let test_required_tool_nudge_is_advisory () =
   Eio_main.run @@ fun _env ->
   setup ();
   for _ = 1 to 3 do
@@ -119,8 +119,8 @@ let test_required_tool_nudge_mentions_real_tool_call () =
   | Some msg ->
       check bool "nudge names required tool loop" true
         (Re.execp (Re.compile (Re.str "REQUIRED TOOL LOOP")) msg);
-      check bool "nudge requires real keeper tool" true
-        (Re.execp (Re.compile (Re.str "real tool call")) msg);
+      check bool "nudge is advisory" true
+        (Re.execp (Re.compile (Re.str "REVIEW SUGGESTED")) msg);
       check_absent "nudge avoids tool_search_files" "tool_search_files" msg;
       check_absent "nudge avoids tool_execute" "tool_execute" msg;
       check_absent "nudge avoids tool_read_file" "tool_read_file" msg
@@ -353,8 +353,8 @@ let () =
         test_required_tool_no_call_fires_metric_at_three;
       test_case "required-tool streak is separate from passive streak" `Quick
         test_required_tool_streak_does_not_inherit_passive_streak;
-      test_case "required-tool nudge asks for real tool" `Quick
-        test_required_tool_nudge_mentions_real_tool_call;
+      test_case "required-tool nudge is advisory" `Quick
+        test_required_tool_nudge_is_advisory;
       test_case "execution resets streak" `Quick
         test_execution_resets_streak;
       test_case "completion resets streak" `Quick

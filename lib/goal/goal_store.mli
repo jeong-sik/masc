@@ -19,7 +19,7 @@
       that gates entry into [Goal_phase.Completed].
 
     Every type is exposed concretely because external
-    callers ([test/test_dashboard_goals], [test_goal_janitor],
+    callers ([test/test_dashboard_goals],
     [test_keeper_task_dispatch],
     [lib/workspace_goals],
     [lib/server/server_dashboard_http]) construct goal records

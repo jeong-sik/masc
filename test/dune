@@ -784,7 +784,6 @@
   test_verification_fsm
   test_governance_yojson_roundtrip
   test_eval_calibration
-  test_goal_janitor
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
@@ -970,7 +969,6 @@
   test_verification_fsm
   test_governance_yojson_roundtrip
   test_eval_calibration
-  test_goal_janitor
   test_goal_tools
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
@@ -1340,7 +1338,6 @@
 
 (include stanzas/test_feature_flag_registry.inc)
 
-(include stanzas/test_fleet_capacity_supervisor.inc)
 
 (include stanzas/test_fs_atomic_orphan_sweep_10130.inc)
 

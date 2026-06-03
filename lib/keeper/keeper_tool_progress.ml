@@ -261,10 +261,6 @@ let is_owned_task_progress_tool_name name =
       | Some Tool_catalog.Masc_workspace | Some Tool_catalog.Read_only | None -> false))
 ;;
 
-let is_actionable_signal_progress_tool_name name =
-  (not (is_stay_silent_tool_name name)) && tool_name_can_satisfy_required_contract name
-;;
-
 let is_passive_status_tool_name name =
   match classify_tool_progress name with
   | Passive_status -> true
@@ -298,95 +294,4 @@ let record_require_tool_use_violation
       ; "contract_status", contract_status
       ]
     ()
-;;
-
-let actionable_signal_context_phrase = function
-  | Keeper_contract_classifier.No_actionable_signal_context -> None
-  | Keeper_contract_classifier.Turn_affordance_requires_tool ->
-    Some "actionable keeper tool gate (turn_affordance_requires_tool)"
-  | Keeper_contract_classifier.Keeper_world_signal signal ->
-    Some
-      (Printf.sprintf
-         "actionable keeper signal (%s)"
-         (Keeper_contract_classifier.actionable_signal_label signal))
-;;
-
-(* [stay_silent_has_no_work_proof] resolves the stay_silent split-brain
-   (constraint-trap escape, RFC-0211 / diagnostic w80pyf4eo):
-   [is_completion_tool_name keeper_stay_silent]
-   accepts the turn as satisfied (line ~142), yet under an actionable signal the
-   arm below re-rejected stay_silent demanding a "typed no-work proof" that the
-   empty-object schema made unconstructable. The proof is now a real, optional
-   typed signal: the keeper_stay_silent handler emits
-   [Keeper_tool_outcome.No_progress { reason = No_work_available }] when the model
-   supplies a recognized [no_work_reason], and the call site derives this bool
-   from the stay_silent call's typed_outcome. A bare stay_silent (no proof) is
-   still rejected, so reflexive silence under signal stays blocked while
-   deliberate "I looked, no fit" silence completes the turn. *)
-let actionable_tool_contract_violation_reason
-      ?(stay_silent_has_no_work_proof : bool = false)
-      ~(claim_context_allowed : bool)
-      ~(actionable_signal_context :
-          Keeper_contract_classifier.actionable_signal_context)
-      ~(tool_names : string list)
-      ()
-  : string option
-  =
-  match actionable_signal_context_phrase actionable_signal_context with
-  | None -> None
-  | Some context_phrase ->
-    (match tool_names with
-     | [] ->
-       Some
-         (Printf.sprintf "%s was present, but the model called no keeper tools"
-            context_phrase)
-     | names
-       when List.exists
-              (if claim_context_allowed
-               then is_actionable_signal_progress_tool_name
-               else is_owned_task_progress_tool_name)
-              names -> None
-     | names
-       when (not claim_context_allowed)
-            && not (List.exists is_owned_task_progress_tool_name names) ->
-       Some
-         (Printf.sprintf
-            "%s was present for an owned active task, but the model only used \
-             passive/claim/stay_silent tools without execution progress: %s"
-            context_phrase
-            (String.concat ", " names))
-     | names when List.exists is_stay_silent_tool_name names ->
-       (* Constructable escape: a stay_silent call carrying a typed no-work proof
-          completes the turn even under an actionable signal. Without the proof
-          the turn is still a contract violation (reflexive silence stays
-          blocked). Branch in-body rather than guarding the [when] so the
-          proof case is an explicit [None] and never falls through to the
-          passive/claim arms below. *)
-       if stay_silent_has_no_work_proof
-       then None
-       else
-         Some
-           (Printf.sprintf
-              "%s was present, but the model used keeper_stay_silent without typed \
-               no-work proof: %s"
-              context_phrase
-              (String.concat ", " names))
-     | names
-       when List.for_all
-              (fun name -> not (tool_name_can_satisfy_required_contract name))
-              names ->
-       Some
-         (Printf.sprintf
-            "%s was present, but the model only used passive status/read tools: %s"
-            context_phrase
-            (String.concat ", " names))
-     | names
-       when (not claim_context_allowed) && List.for_all is_claim_context_tool_name names ->
-       Some
-         (Printf.sprintf
-            "%s was present, but the model only used claim/context tools without \
-             execution progress: %s"
-            context_phrase
-            (String.concat ", " names))
-     | _ -> None)
 ;;

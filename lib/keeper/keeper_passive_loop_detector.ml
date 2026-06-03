@@ -197,26 +197,19 @@ let current_streak ~keeper_name =
 let nudge_message_text ~streak ~progress_class =
   if is_required_tool_progress_class progress_class then
     Printf.sprintf
-      ("ACTION REQUIRED — REQUIRED TOOL LOOP DETECTED: You have failed %d"
-       ^^ " consecutive actionable turns without satisfying the required"
-       ^^ " keeper-tool contract (%s). This turn MUST emit a real tool call"
-       ^^ " from the active schema that advances the active goal/task, such as"
-       ^^ " Execute/Read/Write when listed, keeper_board_post,"
-       ^^ " keeper_board_comment, keeper_task_claim, or keeper_task_done."
-       ^^ " If no action is actually possible, call keeper_stay_silent only"
-       ^^ " with a typed no-work proof instead of returning plain text or"
-       ^^ " an empty response.")
+      ("REVIEW SUGGESTED — REQUIRED TOOL LOOP DETECTED: %d consecutive turns"
+       ^^ " ended without satisfying the explicit required-tool contract (%s)."
+       ^^ " Review the current context and use an appropriate visible tool when"
+       ^^ " there is concrete work to perform; otherwise end the turn with"
+       ^^ " keeper_stay_silent.")
       streak progress_class
   else
     Printf.sprintf
-      ("ACTION REQUIRED — PASSIVE LOOP DETECTED: You have completed %d"
+      ("REVIEW SUGGESTED — PASSIVE LOOP DETECTED: You have completed %d"
        ^^ " consecutive turns using only read-only or status tools without any"
-       ^^ " execution or completion action. This violates the keeper turn"
-       ^^ " contract. You MUST call an execution or completion tool this turn"
-       ^^ " (e.g. keeper_task_done, keeper_task_claim, Execute/Write when"
-       ^^ " listed, keeper_board_post with a concrete update, or another"
-       ^^ " write tool)."
-       ^^ " Do not call read-only tools again without first taking an action.")
+       ^^ " execution or completion action. Review the current context and use"
+       ^^ " an appropriate visible tool when there is concrete work to perform;"
+       ^^ " otherwise end the turn with keeper_stay_silent.")
       streak
 
 let nudge_message ~keeper_name =

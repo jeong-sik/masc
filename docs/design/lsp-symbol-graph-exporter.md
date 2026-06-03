@@ -1,7 +1,7 @@
 ---
 status: design
 last_verified: 2026-05-18
-issue: https://github.com/jeong-sik/masc-mcp/issues/16083
+issue: https://github.com/jeong-sik/masc/issues/16083
 masc_goal: goal-refactor-lsp-atlas-20260518
 masc_task: task-386
 code_refs:
@@ -175,7 +175,7 @@ The first artifact uses `masc.symbol_graph.v1`:
 ```json
 {
   "schema_version": "masc.symbol_graph.v1",
-  "repo": "masc-mcp",
+  "repo": "masc",
   "base_commit": "7dda94cd4f",
   "generated_at": "2026-05-18T00:00:00Z",
   "source": {

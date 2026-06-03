@@ -483,7 +483,7 @@ Do not borrow blindly:
 
 ## 9. Verification Performed
 
-- Read-only code inspection of MASC worktree: `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-agent-runtime-flow-20260512`.
+- Read-only code inspection of MASC worktree: `/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/audit-agent-runtime-flow-20260512`.
 - Read-only code inspection of sibling OAS checkout: `/Users/dancer/me/workspace/yousleepwhen/oas`.
 - Official/primary external docs opened for Agent-LLM-A, ADK, Provider-D Agents SDK, OpenClaw, and Hermes.
 - No build/test command was run because this is a documentation-only audit.

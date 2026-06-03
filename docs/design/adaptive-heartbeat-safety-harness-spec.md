@@ -213,7 +213,7 @@ Assertions:
 
 Purpose:
 
-- validate transport-only phi enforcement per [adaptive-heartbeat-phi-enforcement-rfc.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-phi-enforcement-rfc.md)
+- validate transport-only phi enforcement per [adaptive-heartbeat-phi-enforcement-rfc.md](/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-phi-enforcement-rfc.md)
 
 Assertions:
 

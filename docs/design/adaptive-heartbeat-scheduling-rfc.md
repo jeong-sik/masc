@@ -11,7 +11,7 @@ code_refs:
 **Status**: Draft
 **Date**: 2026-03-29
 **Scope**: Keeper keepalive, Keeper supervisor, Keeper registry, Workspace resilience, Runtime inference
-**Tracking**: [#3635](https://github.com/jeong-sik/masc-mcp/issues/3635)
+**Tracking**: [#3635](https://github.com/jeong-sik/masc/issues/3635)
 **One sentence**: 키퍼 하트비트를 work-as-heartbeat 기반 적응형으로 전환하고, restart 경로에 mass-failure 억제를 추가하며, runtime 레벨 스케줄링 방향을 제시한다.
 
 ## Related Documents

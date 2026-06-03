@@ -9,7 +9,7 @@ code_refs:
 
 # OAS Boundary Health Check - 2026-03-31
 
-Scope: `masc-mcp` to OAS boundary health snapshot on commit `aade21ba7402baede95e565c503d3e38a923558b`
+Scope: `masc` to OAS boundary health snapshot on commit `aade21ba7402baede95e565c503d3e38a923558b`
 
 ## Verdict
 

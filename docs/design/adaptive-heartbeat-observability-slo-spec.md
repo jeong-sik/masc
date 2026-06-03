@@ -120,7 +120,7 @@ Canonical naming rule:
 
 ### 6.1 Global SLO
 
-Global API/SSE requirements are inherited unchanged from [PERFORMANCE-SLO.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/docs/PERFORMANCE-SLO.md).
+Global API/SSE requirements are inherited unchanged from [PERFORMANCE-SLO.md](/Users/dancer/me/workspace/yousleepwhen/masc/docs/PERFORMANCE-SLO.md).
 
 Promotion is blocked if the candidate breaches any published MCP/REST/SSE threshold.
 

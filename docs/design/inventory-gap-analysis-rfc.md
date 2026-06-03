@@ -40,7 +40,7 @@ code_refs:
 
 ## 1. Problem Statement
 
-masc-mcp는 95.2% 구현율(spec/C-implementation-status.md)을 보고하지만, 이 수치는 "코드가 존재하는가"를 측정한다.
+masc는 95.2% 구현율(spec/C-implementation-status.md)을 보고하지만, 이 수치는 "코드가 존재하는가"를 측정한다.
 "코드가 production 경로에 연결되어 작동하는가"는 별개 질문이다.
 
 분석 결과:

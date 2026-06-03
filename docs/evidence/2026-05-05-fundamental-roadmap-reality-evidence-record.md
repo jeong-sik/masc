@@ -50,5 +50,5 @@
 ## 다음 액션
 
 - Sprint 0 PR(이 worktree, branch `chore/sprint-0-roadmap-reset`)에 audit + CI workflow + 본 record 함께 머지
-- masc-mcp `.gitignore:144`가 `memory/`를 ignore하므로 본 record는 `docs/evidence/`에 보관. 사본 동기화는 사용자 요청 시 `~/me/memory/procedural-memory/`로
+- masc `.gitignore:144`가 `memory/`를 ignore하므로 본 record는 `docs/evidence/`에 보관. 사본 동기화는 사용자 요청 시 `~/me/memory/procedural-memory/`로
 - Sprint 0 dogfood에서 발견된 gap #6(`provider_adapter.ml` 모델 리스트)는 audit §1·§8에 추가 기록됨

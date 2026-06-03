@@ -15,7 +15,7 @@ code_refs:
 
 ## 1. Problem Statement
 
-masc-mcp exposes 4 API surfaces (HTTP REST, MCP JSON-RPC, gRPC, WebSocket).
+masc exposes 4 API surfaces (HTTP REST, MCP JSON-RPC, gRPC, WebSocket).
 MCP and gRPC have version negotiation. HTTP REST and Tool Schemas do not.
 
 When a breaking change ships:

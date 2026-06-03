@@ -14,7 +14,7 @@ code_refs:
 
 ## Purpose
 
-Every open issue in `masc-mcp` and `oas` should be classifiable into one or more of seven categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (see `~/me/memory/handoff-2026-04-19-issue-close-sweep.md` for the 0/17 triage hallucination incident).
+Every open issue in `masc` and `oas` should be classifiable into one or more of seven categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (see `~/me/memory/handoff-2026-04-19-issue-close-sweep.md` for the 0/17 triage hallucination incident).
 
 The rubric is applied two ways:
 

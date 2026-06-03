@@ -321,9 +321,12 @@ let validate_goal_completion_ready config ~goal_id ~override_note =
   match override_note with
   | Some note when not (String.equal (String.trim note) "") -> Ok ()
   | _ ->
+    let index =
+      Workspace_goal_index.build_goal_task_index
+        (Workspace_query.get_tasks_safe config)
+    in
     let linked_tasks =
-      Workspace_query.get_tasks_safe config
-      |> List.filter (task_has_goal_id ~goal_id)
+      Workspace_goal_index.tasks_for_goal index ~goal_id
     in
     let open_count =
       linked_tasks

@@ -78,7 +78,7 @@ val tool_schemas_for_profile :
       deduped by name.  [include_agent_internal] is a retained no-op:
       the Agent_internal surface was empty and was deleted in the
       surface-cut refactor, so it adds no schema.
-    - [Managed_agent]: SDK tool contract +
+    - [Managed_agent]: SDK tool descriptor +
       [managed_agent_passthrough_tool_names] subset.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].
 

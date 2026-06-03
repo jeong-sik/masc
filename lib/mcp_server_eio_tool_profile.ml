@@ -67,7 +67,7 @@ WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_ve
 WORKFLOW: masc_status → masc_transition(claim) → work in a repo-local worktree → masc_transition(done). \
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work. \
-Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
+Use masc_tool_help to inspect tool descriptors and prefer the smallest useful surface."
 
 let tool_schemas_for_profile ?(include_hidden = false)
     ?(include_agent_internal = false) _state

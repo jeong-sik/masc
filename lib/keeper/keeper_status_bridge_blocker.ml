@@ -149,7 +149,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       (* TEL-OK: string literal in blocker classification summary, not an action handler *)
       if summary = ""
       then
-        "Provider response violated the required completion/tool contract after dispatch."
+        "Provider response violated completion/surface rules after dispatch."
       else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)

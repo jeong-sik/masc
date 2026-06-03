@@ -47,7 +47,7 @@ type grader =
 
 type tool_expectation = {
   tool_name : string;            (** Expected tool to be called *)
-  required : bool;               (** Must this tool be called? *)
+  required : bool;               (** Must this expected call be observed? *)
   max_calls : int option;        (** Max times this tool should be called *)
   args_contain : string option;  (** Args should contain this substring *)
 }
@@ -176,7 +176,7 @@ let check_tool_expectations
     let passed = required_ok && max_ok in
     let detail =
       if not required_ok then
-        Printf.sprintf "required tool '%s' was not called" exp.tool_name
+        Printf.sprintf "expected tool call '%s' was not observed" exp.tool_name
       else if not max_ok then
         Printf.sprintf "tool '%s' called %d times (max: %d)"
           exp.tool_name call_count (Option.value ~default:0 exp.max_calls)

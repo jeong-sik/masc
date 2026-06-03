@@ -66,7 +66,7 @@ let of_process_status = function
     { raw = Unix.WEXITED 127; code = 127;
       category = Not_found;
       label = "command_not_found";
-      hint = "Command not found in PATH. Check spelling or install the required tool." }
+      hint = "Command not found in PATH. Check spelling or install the required command." }
   | Unix.WEXITED n when n = 124 ->
     { raw = Unix.WEXITED n; code = n;
       category = Timeout;

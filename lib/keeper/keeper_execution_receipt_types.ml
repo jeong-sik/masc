@@ -1,5 +1,5 @@
 (* Keeper_execution_receipt_types — receipt type definitions,
-   outcome/runtime/slot classification, tool contract types, and
+   outcome/runtime/slot classification, tool-surface types, and
    JSON helpers. Extracted from keeper_execution_receipt.ml during
    godfile decomposition. *)
 

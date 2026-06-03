@@ -391,7 +391,7 @@ let case_for_name name =
       expectation = keeper_expectation_for_name name;
     }
   else
-    failwith ("missing keeper tool contract for " ^ name)
+    failwith ("missing keeper tool matrix case for " ^ name)
 
 let fatal_fragments =
   Generic.fatal_fragments @ keeper_matrix_guard_fragments

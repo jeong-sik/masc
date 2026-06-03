@@ -17,7 +17,7 @@
    them through [Keeper_execution_receipt]). A turn cut off by the
    per-call turn cap ([MaxTurnsExceeded]), the wall-clock ceiling
    ([AgentExecutionTimeout]), or the progress-aware idle watchdog
-   ([AgentExecutionIdleTimeout]) did NOT violate the tool contract — it
+   ([AgentExecutionIdleTimeout]) did NOT violate completion/surface rules — it
    never reached a verdict; the supervisor auto-resumes from the
    checkpoint. *)
 let terminal_prefix_max_turns_exceeded = "agent_error_max_turns_exceeded"

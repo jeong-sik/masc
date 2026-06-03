@@ -200,7 +200,7 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(projection.tone).toBe('bad')
   })
 
-  it('does not turn a stale execution receipt tool contract into current attention', () => {
+  it('does not turn a stale execution receipt tool surface into current attention', () => {
     const projection = deriveKeeperRuntimeProjection({
       keeper: keeper(),
       composite: composite({

@@ -93,7 +93,7 @@ VARIABLES
     \* for one joint invariant; the detailed transitions belong to
     \* their owning specs (KeeperRuntimeAttemptFSM,
     \* KeeperPostTurnOrchestration). Tool-surface details are modeled here
-    \* only as a readiness ghost; there is no required-tool sub-spec.
+    \* only as a readiness ghost; tool calls are not a lifecycle contract.
 
     kcaf_attempt_phase, \* B1 (KeeperRuntimeAttemptFSM) projection.
                         \* Values: "idle", "attempting", "terminal".

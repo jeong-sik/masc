@@ -279,6 +279,28 @@ let ingest_pr_event_from_descriptor
         ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | Some (Ide_event_types.Gh_api_pr_create { repo; title; base = _ }) ->
+      let pr_number, pr_url = match parse_pr_url_from_output output_text with
+        | Some (n, url) -> (n, url)
+        | None -> (0, "")
+      in
+      ingest_pr_event
+        ~base_path ~pr_number ~pr_url ~pr_title:title
+        ~pr_state:"open" ~repo ~keeper_id ~turn_id
+        ~comment_count:0 ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | Some (Ide_event_types.Gh_api_pr_merge { repo; pr_number }) ->
+      ingest_pr_event
+        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~pr_state:"merged" ~repo ~keeper_id ~turn_id
+        ~comment_count:0 ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | Some (Ide_event_types.Gh_api_pr_comment { repo; pr_number; body = _ }) ->
+      ingest_pr_event
+        ~base_path ~pr_number ~pr_url:"" ~pr_title:""
+        ~pr_state:"open" ~repo ~keeper_id ~turn_id
+        ~comment_count:1 ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Generic)
     | None ->
       (* Not a PR operation — fall back to heuristic output parsing *)

@@ -238,13 +238,13 @@ let test_escape_applescript_mixed () =
    agent_emoji Tests
    ============================================================ *)
 
-let test_agent_emoji_claude () =
+let test_agent_emoji_llm_a () =
   check string "agent_llm_a" "🟣" (Notify.agent_emoji "agent_llm_a")
 
-let test_agent_emoji_gemini () =
+let test_agent_emoji_f () =
   check string "provider_f" "🔵" (Notify.agent_emoji "provider_f")
 
-let test_agent_emoji_codex () =
+let test_agent_emoji_a () =
   check string "agent_code" "🟢" (Notify.agent_emoji "agent_code")
 
 let test_agent_emoji_llama () =
@@ -415,9 +415,9 @@ let () =
       test_case "mixed" `Quick test_escape_applescript_mixed;
     ];
     "agent_emoji", [
-      test_case "agent_llm_a" `Quick test_agent_emoji_claude;
-      test_case "provider_f" `Quick test_agent_emoji_gemini;
-      test_case "agent_code" `Quick test_agent_emoji_codex;
+      test_case "agent_llm_a" `Quick test_agent_emoji_llm_a;
+      test_case "provider_f" `Quick test_agent_emoji_f;
+      test_case "agent_code" `Quick test_agent_emoji_a;
       test_case "llama" `Quick test_agent_emoji_llama;
       test_case "system" `Quick test_agent_emoji_system;
       test_case "unknown" `Quick test_agent_emoji_unknown;

@@ -24,7 +24,7 @@
       SSOT is the runtime clock snapshot taken when the event is emitted.
 
     - {b Layer 3 — Lineage}: [event_kind], [tool_lineage] (6 stages:
-      searched / visible / materialized / emitted / executed / verified).
+      searched / visible / materialized / emitted / executed / final_observed).
       Tracks the tool lifecycle.  SSOT is the tool dispatch pipeline.
 
     - {b Layer 4 — Payload}: [payload_role] ([Model_input],
@@ -127,7 +127,7 @@ val tool_lineage :
   ?materialized_tool_names:string list ->
   ?emitted_tool_names:string list ->
   ?executed_tool_names:string list ->
-  ?verified_tool_names:string list ->
+  ?final_observed_tool_names:string list ->
   unit ->
   Yojson.Safe.t
 

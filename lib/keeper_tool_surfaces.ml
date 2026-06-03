@@ -102,7 +102,7 @@ let select_public_local_worker_schemas () =
     (Tool_board.tools
     @ Tool_schemas_workspace_core.schemas
     @ Tool_schemas_workspace_extra.schemas
-    @ Tool_task_schemas.schemas
+    @ Task.Schemas.schemas
     @ Tool_schemas_agent.schemas
     @ local_worker_run_schemas)
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->

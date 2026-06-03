@@ -60,7 +60,7 @@ include Keeper_turn_runtime_budget    (* 952 LOC *)
 
 | 그룹 | 함수 | LOC (대략) |
 |------|------|-----|
-| **A. Error/disposition classification** | `registry_failure_reason_of_terminal_reason` (line 25), `should_auto_pause_required_tool_contract_violation` (line 53), `sdk_error_of_retry_slot_reacquire_timeout` (line 109) | ~85 |
+| **A. Error/disposition classification** | `registry_failure_reason_of_terminal_reason` (line 25), `should_auto_pause_action_effect_no_progress` (line 53), `sdk_error_of_retry_slot_reacquire_timeout` (line 109) | ~85 |
 | **B. Tool-event tracker** (state struct + 7 ops) | `type turn_tool_event_tracker` (line 128), `create_turn_tool_event_tracker` (line 134), `turn_tool_event_integrity_error` (line 141), `committed_mutating_tools_from_events` (line 143), `push_turn_tool_input` (line 147), `pop_turn_tool_input` (line 159), `record_unmatched_tool_completed` (line 165), `record_turn_tool_events` (line 198) | ~110 |
 | **C. Pre-dispatch observation** | `record_streaming_cancelled_observation` (line 64) | ~45 |
 | **D. Turn cycle orchestration** (godfile core) | `run_keeper_cycle` (line 239), `run_unified_turn = run_keeper_cycle` (line 3037, 알리아스) | **~2800** |
@@ -125,7 +125,7 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 | `summarize_turn_event_bus` | 0 | 2 (test_keeper_unified.ml:6705, 11899) |
 | `create_turn_tool_event_tracker` | 0 | 3 (test_keeper_unified.ml:7320, 7362, 7396) |
 | `next_fail_open_runtime_for_turn` | 0 | (테스트만) |
-| `should_auto_pause_required_tool_contract_violation` | 0 | (테스트만) |
+| `should_auto_pause_action_effect_no_progress` | 0 | (테스트만) |
 | `record_streaming_cancelled_observation` | 0 | (테스트만) |
 | `bounded_oas_timeout_for_turn_budget` | 0 | (테스트만) |
 

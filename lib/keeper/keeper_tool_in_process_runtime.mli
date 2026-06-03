@@ -88,8 +88,8 @@ val handle_masc_board : name:string -> args:Yojson.Safe.t -> string
 (** RFC-0182 §3.1 — [handle_masc_task] is the descriptor-projection
     cluster handler for [masc_task_*] tools (add_task / batch_add_tasks /
     claim_next / task_history / tasks / transition / update_priority).
-    Constructs a [Tool_task_handlers.context] from
-    [config + meta.name + sw=None] and calls [Tool_task.dispatch]. *)
+    Constructs a [Task.Handlers.context] from
+    [config + meta.name + sw=None] and calls [Task.Tool.dispatch]. *)
 val handle_masc_task
   :  config:Workspace.config
   -> meta:keeper_meta

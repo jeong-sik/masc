@@ -39,5 +39,5 @@ val classes_json : failure_table -> string -> Yojson.Safe.t
 val keeper_evidence_json :
   (string, tool_keeper_stat) Hashtbl.t ->
   keeper_names:string list ->
-  required_tools:string list ->
+  probe_tools:string list ->
   Yojson.Safe.t

@@ -18,7 +18,7 @@ let mutex_registry_mu = Stdlib.Mutex.create ()
 (* Resolve ["." ] and [".."] segments without requiring file existence
    (so [open_writer] can canonicalize before the file is created).
    Relative paths are anchored at the process cwd at call time. This
-   collapses the common spelling variants flagged by Codex review of
+   collapses the common spelling variants flagged by review of
    PR #15906; symlink resolution is intentionally out of scope (would
    need [realpath] which fails on missing paths). *)
 let canonicalize_path path =
@@ -64,7 +64,7 @@ let open_writer ~sw ~fs ~path =
      [Eio.Path.mkdirs] on the fs-scoped path matches how [open_out]
      below resolves the same path. The previous [Unix.mkdir] sibling
      resolved against process cwd, which is wrong for scoped fs
-     handles (flagged by Codex review of PR #15906). *)
+     handles (flagged by review of PR #15906). *)
   let dir = Filename.dirname path in
   if dir <> "" && dir <> "." && dir <> "/" then begin
     let eio_dir = Eio.Path.(fs / dir) in

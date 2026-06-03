@@ -28,10 +28,35 @@ let raw_schemas : tool_schema list =
      (Tool_schemas_misc.schemas chain) via RFC-0057 PR-2 *)
   @ Tool_schemas_agent.schemas
   @ Tool_run.schemas
-  @ Tool_task.schemas
+  @ Task.Tool.schemas
   @ Tool_library.schemas
 
 let all_schemas : tool_schema list = raw_schemas
+
+let task_tool_spec_read_only = [ "masc_task_history"; "masc_tasks" ]
+
+let task_tool_required_permission = function
+  | "masc_tasks" | "masc_task_history" -> Some Masc_domain.CanReadState
+  | "masc_add_task" | "masc_batch_add_tasks" -> Some Masc_domain.CanAddTask
+  | "masc_claim_next" -> Some Masc_domain.CanClaimTask
+  | "masc_transition" | "masc_update_priority" -> Some Masc_domain.CanCompleteTask
+  | _ -> None
+
+let () =
+  List.iter
+    (fun (s : Masc_domain.tool_schema) ->
+       Tool_spec.register
+         (Tool_spec.create
+            ~name:s.name
+            ~description:s.description
+            ~module_tag:Tool_dispatch.Mod_task
+            ~input_schema:s.input_schema
+            ~handler_binding:Tag_dispatch
+            ~is_read_only:(List.mem s.name task_tool_spec_read_only)
+            ~is_idempotent:(List.mem s.name task_tool_spec_read_only)
+            ?required_permission:(task_tool_required_permission s.name)
+            ()))
+    Task.Tool.schemas
 
 (** All schemas including config-dependent module schemas *)
 let all_schemas_extended =

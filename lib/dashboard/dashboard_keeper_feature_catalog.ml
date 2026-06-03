@@ -1,7 +1,7 @@
 type feature_spec = {
   id : string;
   label : string;
-  required_tools : string list;
+  probe_tools : string list;
   next_action : string;
 }
 
@@ -10,7 +10,7 @@ let tool_features =
     {
       id = "base_tools";
       label = "Base context tools";
-      required_tools = [
+      probe_tools = [
         "keeper_time_now";
         "keeper_context_status";
         "keeper_memory_search";
@@ -21,7 +21,7 @@ let tool_features =
     {
       id = "board_tools";
       label = "Board tools";
-      required_tools = [
+      probe_tools = [
         "keeper_board_get";
         "keeper_board_list";
         "keeper_board_post";
@@ -34,7 +34,7 @@ let tool_features =
     {
       id = "filesystem_tools";
       label = "Filesystem tools";
-      required_tools = [
+      probe_tools = [
         "tool_read_file";
         "tool_edit_file";
         "tool_write_file";
@@ -45,7 +45,7 @@ let tool_features =
     {
       id = "search_files_tools";
       label = "Grep tools";
-      required_tools = [
+      probe_tools = [
         "tool_search_files";
         "tool_execute";
       ];
@@ -55,7 +55,7 @@ let tool_features =
     {
       id = "library_tools";
       label = "Library tools";
-      required_tools = [
+      probe_tools = [
         "keeper_library_search";
         "keeper_library_read";
       ];
@@ -65,7 +65,7 @@ let tool_features =
     {
       id = "web_search_tools";
       label = "Web search tools";
-      required_tools = [
+      probe_tools = [
         "masc_web_search";
       ];
       next_action =
@@ -74,7 +74,7 @@ let tool_features =
     {
       id = "web_fetch_tools";
       label = "Web fetch tools";
-      required_tools = [
+      probe_tools = [
         "masc_web_fetch";
       ];
       next_action =
@@ -83,7 +83,7 @@ let tool_features =
     {
       id = "taskboard_tools";
       label = "Taskboard tools";
-      required_tools = [
+      probe_tools = [
         "keeper_tasks_list";
         "keeper_tasks_audit";
         "keeper_task_claim";
@@ -98,7 +98,7 @@ let tool_features =
     {
       id = "approval_tools";
       label = "Approval pending queue read tool";
-      required_tools = [
+      probe_tools = [
         "masc_approval_pending";
       ];
       next_action =
@@ -107,7 +107,7 @@ let tool_features =
     {
       id = "goal_tools";
       label = "Goal and planning tools";
-      required_tools = [
+      probe_tools = [
         "masc_goal_list";
         "masc_goal_upsert";
         "masc_goal_transition";

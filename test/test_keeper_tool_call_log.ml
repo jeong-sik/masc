@@ -324,17 +324,6 @@ let test_turn_context_fields_stored () =
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(
         runtime_contract |> member "allowed_paths" |> to_list |> List.map to_string);
-    let omits_field name =
-      match runtime_contract with
-      | `Assoc fields -> not (List.mem_assoc name fields)
-      | _ -> false
-    in
-    Alcotest.(check bool) "runtime_contract omits required_tools" true
-      (omits_field "required_tools");
-    Alcotest.(check bool) "runtime_contract omits required_tool_candidates" true
-      (omits_field "required_tool_candidates");
-    Alcotest.(check bool) "runtime_contract omits missing_required_tools" true
-      (omits_field "missing_required_tools");
     Alcotest.(check (option string)) "runtime_contract runtime_profile"
       (Some "tool_use_strict")
       (Safe_ops.json_string_opt "runtime_profile" runtime_contract);

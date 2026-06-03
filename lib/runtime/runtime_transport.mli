@@ -12,8 +12,8 @@ val provider_effective_max_turns :
    ([cli_tool_a_omission_fingerprint], [cli_tool_a_omission_fingerprint_seen],
    [record_cli_tool_a_omission], [record_cli_tool_a_omission_for_agent],
    [reset_cli_tool_a_omission_dedup_for_tests]) were removed in the
-   big-bang sweep along with [Runtime_transport_codex_omission_dedup].
-   Structural omission detection remains in the resolver below. *)
+   big-bang sweep. Structural omission detection remains in the
+   resolver below. *)
 
 (** Failure modes for {!resolve_provider_config_of_label}. *)
 type label_resolution_error =
@@ -92,12 +92,12 @@ val cli_tool_a_can_auth_keeper_bound_runtime_mcp :
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   bool
 (** [true] when [agent_name] maps to a keeper with a persisted raw bearer
-    token and [policy] contains actor-bound runtime MCP tools.  Codex CLI
-    can carry that token via OAS [bearer_token_env_var] without placing it in
-    argv. *)
+    token and [policy] contains actor-bound runtime MCP tools.  The
+    cli_tool_a transport can carry that token via OAS [bearer_token_env_var]
+    without placing it in argv. *)
 
 (** Provider-specific shaping of the runtime MCP policy.  For Cli_tool_a the
-    policy is stripped to Codex-safe headers: [Authorization: Bearer ...]
+    policy is stripped to client-safe headers: [Authorization: Bearer ...]
     plus non-secret MASC identity headers.  Other providers receive the policy
     with [runtime_mcp_policy_with_masc_agent_name] applied when [agent_name] is
     non-empty. *)

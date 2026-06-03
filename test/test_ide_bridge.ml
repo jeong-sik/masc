@@ -59,7 +59,8 @@ let test_ingest_tool_event () =
       ~latency_ms:150
       ~summary:"Wrote 50 lines to test.ml"
       ~file_path:(Some "lib/test.ml")
-      ~timestamp_ms:1717400000000L;
+      ~timestamp_ms:1717400000000L
+      ();
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "tool_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
@@ -108,7 +109,8 @@ let test_ingest_multiple_events () =
       ~latency_ms:100
       ~summary:"first"
       ~file_path:None
-      ~timestamp_ms:1000L;
+      ~timestamp_ms:1000L
+      ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
       ~tool_name:"execute"
@@ -119,7 +121,8 @@ let test_ingest_multiple_events () =
       ~latency_ms:200
       ~summary:"second"
       ~file_path:None
-      ~timestamp_ms:2000L;
+      ~timestamp_ms:2000L
+      ();
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
@@ -336,7 +339,8 @@ let test_concurrent_ingest () =
           ~latency_ms:i
           ~summary:(Printf.sprintf "event %d" i)
           ~file_path:None
-          ~timestamp_ms:(Int64.of_int (1000 + i)))
+          ~timestamp_ms:(Int64.of_int (1000 + i))
+          ())
     in
     (* Run all fibers concurrently via Eio *)
     Eio_main.run (fun _env ->

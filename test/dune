@@ -1515,6 +1515,8 @@
 
 (include stanzas/test_oas_worker_exec_checkpoint.inc)
 
+(include stanzas/test_runtime_provider_projection_boundary.inc)
+
 (include stanzas/test_openapi_api_e2e.inc)
 
 (include stanzas/test_masc_oas_bridge_cancel_boundary.inc)

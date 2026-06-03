@@ -423,17 +423,17 @@ let () =
     let ctx = make_test_ctx () in
     let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
     let task_ctx =
-      { Tool_task.config = ctx.config; agent_name = ctx.agent_name; sw = None }
+      { Task.Tool.config = ctx.config; agent_name = ctx.agent_name; sw = None }
     in
     let _ =
-      Tool_task.handle_add_task
+      Task.Tool.handle_add_task
         ~tool_name:"test_tool"
         ~start_time:0.0
         task_ctx
         (`Assoc [ "title", `String "Check transition claim" ])
     in
     let _ =
-      Tool_task.handle_transition
+      Task.Tool.handle_transition
         ~tool_name:"test_tool"
         ~start_time:0.0
         task_ctx
@@ -466,17 +466,17 @@ let () =
     let ctx = make_test_ctx () in
     let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
     let task_ctx =
-      { Tool_task.config = ctx.config; agent_name = ctx.agent_name; sw = None }
+      { Task.Tool.config = ctx.config; agent_name = ctx.agent_name; sw = None }
     in
     let _ =
-      Tool_task.handle_add_task
+      Task.Tool.handle_add_task
         ~tool_name:"test_tool"
         ~start_time:0.0
         task_ctx
         (`Assoc [ "title", `String "Check claim next" ])
     in
     let _ =
-      Tool_task.handle_claim_next
+      Task.Tool.handle_claim_next
         ~tool_name:"test_tool"
         ~start_time:0.0
         task_ctx

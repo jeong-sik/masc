@@ -32,6 +32,18 @@
   routes (`/api/v1/gate/message` etc.) remain unchanged and continue
   to serve the other external connectors.
 
+## [0.19.36] - 2026-06-04
+
+### Changed
+- Bumped the OAS pin to `v0.200.10` and the package metadata to
+  `0.19.36`, keeping `dune-project` and the generated opam metadata on
+  the same release train.
+
+### Fixed
+- Restored release truth alignment across the roadmap, product operating
+  plan, and specification index so CI version/doc guards use the current
+  package baseline.
+
 ## [0.19.35] - 2026-05-27
 
 ### Added
@@ -236,13 +248,13 @@
 ### Changed
 - Bumped the downstream OAS `agent_sdk` pin to `main@5f8e07b7` (`v0.194.1`) and raised the dependency floor to `agent_sdk >= 0.194.1`.
 - Moved the OAS pin note out of the older 0.19.20 changelog section so release history matches merge chronology.
-- Captured the follow-on runtime wave: required-tool candidate hotfix, force-done/release schema-audit enforcement, dashboard A0.2 atdts PoC, current goal-loop verify fixture, and chunked first-flush for POST `/mcp` JSON responses.
+- Captured the follow-on runtime wave: tool-candidate hotfix, force-done/release schema-audit enforcement, dashboard A0.2 atdts PoC, current goal-loop verify fixture, and chunked first-flush for POST `/mcp` JSON responses.
 
 ## [0.19.21] - 2026-05-17
 
 ### Added
 - `lib/server/`: SSE close frames and `Session_lifecycle` publisher hook for the RFC-0099 session close path.
-- `lib/keeper/`: required-tool candidate surfacing, Docker sandbox workspace-state exposure, and disk-pressure circuit breaker support for the keeper resource-gate lane.
+- `lib/keeper/`: tool-candidate surfacing, Docker sandbox workspace-state exposure, and disk-pressure circuit breaker support for the keeper resource-gate lane.
 - `lib/admission/`: Tool-resource-gate snapshots are exposed through the admission queue for the PR-6 resource-gate lane.
 - `scripts/`: lint coverage for OCaml block-comment terminator traps so `_*)`-style failures are caught before PR merge.
 
@@ -253,7 +265,7 @@
 - RFC-0004 docs now record Phase A0.1 completion and add the Phase A0.2 implementation plan while additional SSE event arms move onto typed emitters.
 
 ### Fixed
-- Keeper/tool gates: lane semaphores, generic required-tool gate behavior, typed handoff-context vocabulary, and tool-input validation exception qualification.
+- Keeper/tool gates: lane semaphores, generic tool-surface gate behavior, typed handoff-context vocabulary, and tool-input validation exception qualification.
 - Process/tool task reliability: background task reserve/release wiring into spawn, stale `pr_url` blob cleanup, and the OCaml comment terminator regression in `tool_task`.
 - Transport/runtime visibility: runtime HTTP probe silent JSON parse drops now warn/count, and board-post validation stays at the correct boundary.
 
@@ -275,7 +287,7 @@
 - `lib/keeper/keeper_agent_run.ml`: captured CDAL proof files are persisted into keeper run outputs.
 - `lib/server/server_mcp_transport_ws.ml`: silent websocket JSON parse drops now increment metrics and emit warnings.
 - Runtime base-path handling no longer falls back to `ME_ROOT`.
-- Release notes now cover the completed world-reactivity closeout wave, including Runtime Lens proof surfacing, required-tool route failure splitting, Reaction Ledger health, and CDAL proof persistence.
+- Release notes now cover the completed world-reactivity closeout wave, including Runtime Lens proof surfacing, tool-route failure splitting, Reaction Ledger health, and CDAL proof persistence.
 
 ## [0.19.19] - 2026-05-17
 
@@ -906,11 +918,11 @@ Keeper fleet reliability release: empty `active_goal_ids` now auto-repairs via p
 - `scripts/ocaml-structure-baseline.json` updated: `keeper_mli_missing: 21`, `lib_dune_lines: 954`.
 
 
-## [0.18.7] - 2026-04-27 — patch: keeper contract fix (require_tool_use stay_silent) + dashboard KpiStrip canonical sweep + observability + auth fail-closed
+## [0.18.7] - 2026-04-27 — patch: legacy mandatory-use stay_silent fix + dashboard KpiStrip canonical sweep + observability + auth fail-closed
 
 Aggregate of 17 commits since v0.18.6 (11 feat / 4 fix / 1 test / 1 chore). No breaking API changes.
 
-Operational keeper-contract correctness release: `require_tool_use` contract now accepts `keeper_stay_silent` as a satisfied turn (decisive no-op), eliminating a contract-vs-prompt mismatch that rejected ~40% of post-runtime-fix turns. Plus dashboard StatCard retirement (3-sweep migration into KpiStrip) and observability surface emissions for substrate visibility.
+Operational legacy mandatory-use correctness release: `keeper_stay_silent` now counts as a satisfied decisive no-op, eliminating a prompt mismatch that rejected ~40% of post-runtime-fix turns. Plus dashboard StatCard retirement (3-sweep migration into KpiStrip) and observability surface emissions for substrate visibility.
 
 ### Added (observability + structural)
 - `#11125` observability — emit `[substrate:tool_surface]` log + SSE on TurnReady (per-turn tool surface visibility)
@@ -929,7 +941,7 @@ Operational keeper-contract correctness release: `require_tool_use` contract now
 - `#11131` design-system — add 4 raw tokens + migrate bonsai flame_*
 
 ### Fixed (keeper contract correctness)
-- `#11124` keeper — classify `keeper_stay_silent` as `Completion` to satisfy `require_tool_use` contract (decisive no-op recognition; abuse defence retained via `keeper_stay_silent_loop_detector`)
+- `#11124` keeper — classify `keeper_stay_silent` as `Completion` for the legacy mandatory-use path (decisive no-op recognition; abuse defence retained via `keeper_stay_silent_loop_detector`)
 - `#11132` server-auth — fail-closed on `Ok None` instead of silent dashboard rewrite (security hardening)
 - `#11117` scripts — resolve log path via lsof on running server, eliminate $HOME drift
 - `#11123` keeper — raise compact_ratio default 0.5 → 0.85 (#11111 follow-up, fewer premature compactions)
@@ -1135,7 +1147,7 @@ Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of ke
 
 ### Fixed (keeper / fleet hot path)
 - `keeper-watchdog`: suppress idle-stale events during an active turn; add a separate turn-timeout (default 600s) so watchdog stops misclassifying mid-turn LLM waits as stalls (#10940).
-- `keeper`: cap runtime rotation at 1 for `required_tool_contract_violation` so a single proactive contract miss can't cycle through every provider (#10851).
+- `keeper`: cap runtime rotation at 1 for action-effect no-progress so a single proactive miss can't cycle through every provider (#10851).
 - `workspace/task`: emit warn when a task crosses the 5-cycle oscillation threshold so operators see escalation candidates (#10719, #10920).
 - `server/autoboot`: per-task boot guard so a single hung lazy task can't block keeper boot — restore_sessions now degrades gracefully instead of hanging the boot pipeline (#10857).
 - `boot`: start `Runtime_legacy_runner` actor consumer fiber that was dropped in a refactor and left the runtime actor without a reader (#10895).
@@ -1322,7 +1334,7 @@ Aggregate of 206 commits since v0.15.0 (95 fix / 38 perf / 21 feat / 13 chore / 
 Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-docs / 10 chore / 26 misc). No breaking API changes.
 
 ### Added (feat)
-- Keeper observability counters: per-keeper turn-latency buckets (#10124), livelock observer (#10123), context_max drift (#10122), require_tool_use violations (#10099), proactive skip-reason (#10060), compaction outcome (#10011), usage-trust Prometheus (#10021), Hebbian per-outcome edge (#10048), metric-emit drops (#10053).
+- Keeper observability counters: per-keeper turn-latency buckets (#10124), livelock observer (#10123), context_max drift (#10122), legacy mandatory-use violations (#10099), proactive skip-reason (#10060), compaction outcome (#10011), usage-trust Prometheus (#10021), Hebbian per-outcome edge (#10048), metric-emit drops (#10053).
 - Keeper runtime: affordance-tool intersection at `Require_tool_use` gate (#10141), Ollama `keep_alive`/`num_ctx` forwarding from keeper_runtime.toml (#9985), wire `Gh_exit_class` into docker sandbox (#9974), persona authoring wizard (#9940).
 - Workspace/FSM: per-agent FSM drift counter (#10152), Prometheus task FSM drift (#10082).
 - Dashboard: gRPC `events_dropped` strip (#10114), WS delivery counters (#10106, #10107), WS-only cutover flag (#10102), websocket route slice expansion (#9963), a11y high-contrast + forced-colors support (#10080).
@@ -1413,7 +1425,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   stderr text matching when the working directory is not itself a Git
   checkout. It now resolves repo context structurally from the current task's
   worktree git root and fails with a typed error when that context is missing.
-- `require_tool_use` completion enforcement now latches across the full keeper
+- Legacy mandatory-use completion enforcement now latches across the full keeper
   run and only treats actual keeper-surface tool calls as satisfying the
   contract. A final optional turn can no longer mask an earlier tool-required
   turn that never used tools.
@@ -1433,8 +1445,8 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 
 ### Changed
 
-- **Strict required-tool contracts now use typed tool effects.** MASC passes
-  an input-aware required-tool satisfaction predicate into OAS, so passive
+- **Strict legacy action-effect scoring now uses typed tool effects.** MASC passes
+  an input-aware action-effect predicate into OAS, so passive
   observation tools such as `masc_status` and `keeper_tasks_list` no longer
   satisfy required productive action. The OAS dependency floor is raised to
   `agent_sdk >= 0.171.0` for the new contract hook.
@@ -1892,7 +1904,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 ### Context
 
 Observed empirically via `~/me/.masc/logs/system_log_2026-04-18.jsonl`:
-104 `Completion contract [require_tool_use] violated` entries in a single
+104 legacy mandatory-use violation entries in a single
 day, with +12 new violations accumulating in the 25 minutes between
 observation and fix — silent cost of the pre-fix contract shape.
 

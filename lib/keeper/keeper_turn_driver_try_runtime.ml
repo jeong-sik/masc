@@ -119,7 +119,6 @@ let emit_attempt_finished ctx candidate ~started_at result checkpoint_after =
 
 let run
       ?(on_success = fun ~provider_key:_ -> ())
-      ?(pre_dispatch_required_tool_rejections_rev = [])
       ?resume_checkpoint
       ?per_provider_timeout_s
       ?last_capacity_source:_
@@ -129,8 +128,7 @@ let run
       last_err
   =
   let _ =
-    ( pre_dispatch_required_tool_rejections_rev
-    , ctx.candidate_count
+    ( ctx.candidate_count
     , ctx.configured_labels
     , ctx.error_selected_model_raw
     , ctx.capture

@@ -342,10 +342,10 @@ let empty_stat_json tool =
 let keeper_evidence_json
       (table : (string, tool_keeper_stat) Hashtbl.t)
       ~keeper_names
-      ~required_tools
+      ~probe_tools
   =
   let observed_keepers =
-    required_tools
+    probe_tools
     |> List.filter_map (Hashtbl.find_opt table)
     |> List.concat_map (fun (stat : tool_keeper_stat) -> stat.successful_keepers)
     |> List.sort_uniq String.compare
@@ -357,7 +357,7 @@ let keeper_evidence_json
     |> List.sort_uniq String.compare
   in
   let per_tool =
-    required_tools
+    probe_tools
     |> List.map (fun tool ->
       match Hashtbl.find_opt table tool with
       | Some stat -> stat_json stat

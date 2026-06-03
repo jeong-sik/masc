@@ -20,8 +20,8 @@
 (* Keeper turn lifecycle (registered in init, incremented in
    keeper_unified_turn.ml). *)
 
-(** #10530: keeper required-tool-contract violations (passive-only or
-    text-only turns rejected by the keeper agent loop).
+(** #10530: keeper no-progress turn rejections (passive-only or text-only
+    turns rejected by the keeper agent loop).
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and

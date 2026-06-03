@@ -186,7 +186,7 @@ let tool_assigned_fn
 
     Issue #10449 documented that 16 task done transitions over 3
     days saw only 1 (6.25%) traverse the [awaiting_verification]
-    gate. The [verifier-gate redirect] in [Tool_task] only fires
+    gate. The [verifier-gate redirect] in [Task.Tool] only fires
     when [task.contract] has a non-empty [completion_contract] or
     [required_evidence] list, so tasks created without contracts
     bypass verification entirely.
@@ -315,3 +315,119 @@ let observe_claim_post_provision_failure ~site ~agent_name ~task_id exn =
     Log.TaskState.warn
       "claim_post_provision failed site=%s agent=%s task=%s err=%s"
       site agent_name task_id error)
+
+let workspace_telemetry_drop_fn
+  : (Workspace_telemetry_drop_event.t -> unit) Atomic.t
+  = Atomic.make (fun _ -> ())
+
+let active_agents_change_fn
+  : ([ `Inc | `Dec ] -> unit) Atomic.t
+  = Atomic.make (fun _ -> ())
+
+let telemetry_observe_failure_fn
+  : (string -> unit) Atomic.t
+  = Atomic.make (fun _ -> ())
+
+let get_default_runtime_id_fn
+  : (unit -> string) Atomic.t
+  = Atomic.make (fun () -> failwith "Workspace_hooks: get_default_runtime_id_fn not connected")
+
+let record_task_metric_fn
+  : (Workspace_utils_backend_setup.config ->
+     agent_id:string ->
+     task_id:string ->
+     started_at:float ->
+     completed_at:float option ->
+     success:bool ->
+     error_message:string option ->
+     collaborators:string list ->
+     handoff_from:string option ->
+     handoff_to:string option ->
+     unit) Atomic.t
+  = Atomic.make (fun _config ~agent_id:_ ~task_id:_ ~started_at:_ ~completed_at:_ ~success:_ ~error_message:_ ~collaborators:_ ~handoff_from:_ ~handoff_to:_ -> ())
+
+let record_thompson_result_fn
+  : (agent_name:string -> success:bool -> reason:string option -> unit) Atomic.t
+  = Atomic.make (fun ~agent_name:_ ~success:_ ~reason:_ -> ())
+
+let push_task_event_fn
+  : (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
+  = Atomic.make (fun ~event_type:_ ~details:_ -> ())
+
+let is_admin_agent_fn
+  : (base_path:string -> agent_name:string -> bool) Atomic.t
+  = Atomic.make (fun ~base_path:_ ~agent_name:_ -> false)
+
+type evidence_gate_verdict =
+  | Pass
+  | Reject of { reason : string; rule_id : string; hint : string; payload_json : Yojson.Safe.t }
+
+let cdal_evidence_gate_decide_fn
+  : (task_id:string ->
+     task_opt:Masc_domain.task option ->
+     notes:string ->
+     handoff:Yojson.Safe.t option ->
+     unit ->
+     evidence_gate_verdict)
+    Atomic.t
+  = (Atomic.make (fun ~task_id:_ ~task_opt:_ ~notes:_ ~handoff:_ () -> Pass)
+     : (task_id:string ->
+        task_opt:Masc_domain.task option ->
+        notes:string ->
+        handoff:Yojson.Safe.t option ->
+        unit ->
+        evidence_gate_verdict)
+       Atomic.t)
+
+let verification_create_submit_request_fn
+  : (Workspace_utils_backend_setup.config ->
+     task:Masc_domain.task ->
+     assignee:string ->
+     verification_id:string ->
+     evidence_refs:string list ->
+     (unit, string) result)
+    Atomic.t
+  = Atomic.make (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
+      Ok ())
+
+let verification_record_approve_fn
+  : (Workspace_utils_backend_setup.config ->
+     task_id:string ->
+     verifier:string ->
+     verification_id:string ->
+     notes:string ->
+     (unit, string) result)
+    Atomic.t
+  = Atomic.make (fun _config ~task_id:_ ~verifier:_ ~verification_id:_ ~notes:_ -> Ok ())
+
+let verification_record_reject_fn
+  : (Workspace_utils_backend_setup.config ->
+     task_id:string ->
+     verifier:string ->
+     verification_id:string ->
+     reason:string ->
+     (unit, string) result)
+    Atomic.t
+  = Atomic.make (fun _config ~task_id:_ ~verifier:_ ~verification_id:_ ~reason:_ -> Ok ())
+
+let verification_notify_submit_fn
+  : (Workspace_utils_backend_setup.config ->
+     task:Masc_domain.task ->
+     assignee:string ->
+     verification_id:string ->
+     evidence_refs:string list ->
+     unit)
+    Atomic.t
+  = Atomic.make (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> ())
+
+let verification_notify_approve_fn
+  : (task_id:string -> verifier:string -> verification_id:string -> notes:string -> unit)
+    Atomic.t
+  = Atomic.make (fun ~task_id:_ ~verifier:_ ~verification_id:_ ~notes:_ -> ())
+
+let verification_notify_reject_fn
+  : (task_id:string -> verifier:string -> verification_id:string -> reason:string -> unit)
+    Atomic.t
+  = Atomic.make (fun ~task_id:_ ~verifier:_ ~verification_id:_ ~reason:_ -> ())
+
+

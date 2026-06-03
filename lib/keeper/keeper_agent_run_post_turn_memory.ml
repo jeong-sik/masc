@@ -9,7 +9,7 @@ let run
   ~turn
   ~oas_turn_count
   ~response_text
-  ~actual_tools
+  ~final_observed_tools
   ~state_snapshot
   ~post_turn_t0
   ?provider_filter
@@ -129,7 +129,7 @@ let run
          ~assistant_reply:(Some response_text)
      in
      let used_search =
-       List.exists (fun t -> t = "keeper_memory_search") actual_tools
+       List.exists (fun t -> t = "keeper_memory_search") final_observed_tools
      in
      let recall_eval =
        if used_search
@@ -184,7 +184,7 @@ let run
           ; "oas_turn_count", `Int oas_turn_count
           ; "goal_alignment", `Float goal_score
           ; ( "observed_tool_count"
-            , `Int (List.length actual_tools) )
+            , `Int (List.length final_observed_tools) )
           ; "used_memory_search", `Bool used_search
           ; "post_turn_ms", `Float post_turn_ms
           ]

@@ -46,10 +46,10 @@ type runtime_capabilities_override =
     + Provider/model/catalog capability truth via OAS
       [Provider_runtime_binding].
     + CLI-agent normalisation: adapters with
-      [runtime_kind = Cli_agent] (Claude Code / Codex CLI / Gemini CLI /
-      Anthropic CLI) force [supports_tools = false],
-      [supports_tool_choice = false], [supports_runtime_mcp_tools = true],
-      and [supports_runtime_tool_events = true]. *)
+      [runtime_kind = Cli_agent] (Anthropic CLI) force
+      [supports_tools = false], [supports_tool_choice = false],
+      [supports_runtime_mcp_tools = true], and
+      [supports_runtime_tool_events = true]. *)
 val oas_capabilities_of_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Capabilities.capabilities

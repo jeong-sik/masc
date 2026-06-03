@@ -9,7 +9,7 @@
     detail (byte offsets, file paths, payload fragments from
     [Yojson.Json_error]; per-syscall context from [Unix.Unix_error]; raw
     [Failure] messages) so each distinct exception instance created a new
-    Prometheus time-series. Codex P1 flagged this as unbounded label
+    Prometheus time-series. Review on PR #15781 flagged this as unbounded label
     cardinality / balloonable in-process metric memory.
 
     [classify] is a *constructor-level* pattern match on the OCaml [exn]

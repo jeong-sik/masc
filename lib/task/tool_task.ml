@@ -37,35 +37,30 @@ and handle_cancel_task ~tool_name ~start_time ctx args =
    | Ok _ ->
        sync_owner_current_task_binding ctx;
        sync_planning_current_task_with_owned_task ctx;
-       let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
-         agent_id = ctx.agent_name;
-         task_id;
-         started_at = started_at_actual;
-         completed_at = Some (Time_compat.now ());
-         success = false;
-         error_message = Some (if String.equal reason "" then "Cancelled" else reason);
-         collaborators = [];
-         handoff_from = None;
-         handoff_to = None;
-       } in
-       (try let _ = Metrics_store_eio.record ctx.config metric in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record(cancel) failed: %s" (Stdlib.Printexc.to_string exn));
+       (Atomic.get Workspace_hooks.record_task_metric_fn)
+         ctx.config
+         ~agent_id:ctx.agent_name
+         ~task_id
+         ~started_at:started_at_actual
+         ~completed_at:(Some (Time_compat.now ()))
+         ~success:false
+         ~error_message:(Some (if String.equal reason "" then "Cancelled" else reason))
+         ~collaborators:[]
+         ~handoff_from:None
+         ~handoff_to:None;
        (* Feed failure into Thompson Sampling quality signal *)
-       Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
-       Thompson_sampling.record_quality_signal
+       (Atomic.get Workspace_hooks.record_thompson_result_fn)
          ~agent_name:ctx.agent_name
-         ~verdict:(Post_verifier.Fail "task_cancelled");
-       (* Prometheus: record task failure *)
-       Prometheus.record_task_failed ();
+         ~success:false
+         ~reason:(Some "task_cancelled");
        (* Notification harness: push cancel event to all active sessions *)
-       Subscriptions.push_event_to_sessions (`Assoc [
-         ("type", `String "masc/task_cancelled");
-         ("task_id", `String task_id);
-         ("agent_name", `String ctx.agent_name);
-         ("reason", `String reason);
-         ("timestamp", `Float (Time_compat.now ()));
-       ])
+       (Atomic.get Workspace_hooks.push_task_event_fn)
+         ~event_type:"masc/task_cancelled"
+         ~details:[
+           ("task_id", `String task_id);
+           ("agent_name", `String ctx.agent_name);
+           ("reason", `String reason);
+         ]
    | Error err ->
        Log.Task.error ~keeper_name:task_id "metrics record failed: %s" (Masc_domain.masc_error_to_string err));
   result_to_response ~tool_name ~start_time result
@@ -206,12 +201,12 @@ and handle_transition ~tool_name ~start_time ctx args =
   (* force=true requires admin privilege: initial_admin or Admin role *)
   let force =
     if force_raw then
-      match Auth.read_initial_admin ctx.config.base_path with
-      | Some admin when String.equal ctx.agent_name admin -> true
-      | _ ->
+      if (Atomic.get Workspace_hooks.is_admin_agent_fn) ~base_path:ctx.config.base_path ~agent_name:ctx.agent_name then true
+      else (
         Log.Task.warn ~keeper_name:task_id "[anti-rationalization] force=true rejected: agent=%s lacks admin privilege"
           ctx.agent_name;
         false
+      )
     else false
   in
   let tasks = Workspace.get_tasks_raw ctx.config in
@@ -371,17 +366,17 @@ and handle_transition ~tool_name ~start_time ctx args =
       | Masc_domain.Reject_verification ->
         false
     in
-    if not needs_gate then Cdal_evidence_gate.Pass
+    if not needs_gate then Workspace_hooks.Pass
     else
-      Cdal_evidence_gate.decide
+      (Atomic.get Workspace_hooks.cdal_evidence_gate_decide_fn)
         ~task_id
         ~task_opt
         ~notes
-        ~handoff_context
+        ~handoff:(Option.map Masc_domain.task_handoff_context_to_yojson handoff_context)
         ()
   in
   match evidence_decision with
-  | Cdal_evidence_gate.Reject { reason; rule_id; hint; payload_json } ->
+  | Workspace_hooks.Reject { reason; rule_id; hint; payload_json } ->
     let extra_fields =
       match payload_json with
       | `Null -> []
@@ -397,7 +392,7 @@ and handle_transition ~tool_name ~start_time ctx args =
          ~scope_policy:"block_scope"
          ~extra_fields
          reason)
-  | Cdal_evidence_gate.Pass ->
+  | Workspace_hooks.Pass ->
   let action =
     match requested_action, task_opt with
     | ( Masc_domain.Submit_for_verification
@@ -439,8 +434,8 @@ and handle_transition ~tool_name ~start_time ctx args =
     | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
       Some
         (fun ~task ~assignee ~verification_id ~evidence_refs ->
-           Verification_protocol.create_submit_request
-             ~config:ctx.config
+           (Atomic.get Workspace_hooks.verification_create_submit_request_fn)
+             ctx.config
              ~task
              ~assignee
              ~verification_id
@@ -462,15 +457,15 @@ and handle_transition ~tool_name ~start_time ctx args =
         (fun ~(task : Masc_domain.task) ~verifier ~verification_id ~decision ->
            match decision with
            | `Approve notes ->
-             Verification_protocol.record_approve_verification
-               ~config:ctx.config
+             (Atomic.get Workspace_hooks.verification_record_approve_fn)
+               ctx.config
                ~task_id:task.id
                ~verifier
                ~verification_id
                ~notes
            | `Reject reason ->
-             Verification_protocol.record_reject_verification
-               ~config:ctx.config
+             (Atomic.get Workspace_hooks.verification_record_reject_fn)
+               ctx.config
                ~task_id:task.id
                ~verifier
                ~verification_id
@@ -534,14 +529,14 @@ and handle_transition ~tool_name ~start_time ctx args =
   (* Notify A2A subscribers on successful transition *)
   (match result with
    | Ok _ ->
-       (* Notification harness: push task transition to all active sessions *)
-       Subscriptions.push_event_to_sessions (`Assoc [
-         ("type", `String "masc/task_transition");
-         ("task_id", `String task_id);
-         ("action", `String action_s);
-         ("agent_name", `String ctx.agent_name);
-         ("timestamp", `Float (Time_compat.now ()));
-       ]);
+        (* Notification harness: push task transition to all active sessions *)
+        (Atomic.get Workspace_hooks.push_task_event_fn)
+          ~event_type:"masc/task_transition"
+          ~details:[
+            ("task_id", `String task_id);
+            ("action", `String action_s);
+            ("agent_name", `String ctx.agent_name);
+          ];
        (match action with
         | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
           let tasks = Workspace.get_tasks_raw ctx.config in
@@ -550,8 +545,12 @@ and handle_transition ~tool_name ~start_time ctx args =
              let evidence_refs = verification_evidence_refs_for_task task in
              (match task.task_status with
               | Masc_domain.AwaitingVerification { verification_id; assignee; _ } ->
-                Verification_protocol.notify_submit_for_verification
-                  ~config:ctx.config ~task ~assignee ~verification_id ~evidence_refs
+                (Atomic.get Workspace_hooks.verification_notify_submit_fn)
+                  ctx.config
+                  ~task
+                  ~assignee
+                  ~verification_id
+                  ~evidence_refs
               | Masc_domain.Todo | Masc_domain.Claimed _ | Masc_domain.InProgress _
               | Masc_domain.Done _ | Masc_domain.Cancelled _ -> ())
            | None -> ())
@@ -571,7 +570,7 @@ and handle_transition ~tool_name ~start_time ctx args =
                "approve_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->
-             Verification_protocol.notify_approve_verification
+             (Atomic.get Workspace_hooks.verification_notify_approve_fn)
                ~task_id ~verifier:ctx.agent_name ~verification_id ~notes)
         | Masc_domain.Reject_verification ->
           let reason = if not (String.equal notes "") then notes else reason in
@@ -582,7 +581,7 @@ and handle_transition ~tool_name ~start_time ctx args =
                "reject_verification action for task %s without verification_id_before (skipping notify)"
                task_id
            | Some verification_id ->
-             Verification_protocol.notify_reject_verification
+             (Atomic.get Workspace_hooks.verification_notify_reject_fn)
                ~task_id ~verifier:ctx.agent_name ~verification_id ~reason)
         | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel | Masc_domain.Release -> ())
    | Error err ->
@@ -590,45 +589,39 @@ and handle_transition ~tool_name ~start_time ctx args =
   (* Record metrics *)
   (match result, action with
    | Ok _, Masc_domain.Done_action ->
-       let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
-         agent_id = ctx.agent_name;
-         task_id;
-         started_at = started_at_actual;
-         completed_at = Some (Time_compat.now ());
-         success = true;
-         error_message = None;
-         collaborators = collaborators_from_task;
-         handoff_from = None;
-         handoff_to = None;
-       } in
-       (try let _ = Metrics_store_eio.record ctx.config metric in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record(transition-done) failed: %s" (Stdlib.Printexc.to_string exn));
-       Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
-       Thompson_sampling.record_quality_signal
-         ~agent_name:ctx.agent_name
-         ~verdict:Post_verifier.Pass;
-       Prometheus.record_task_completed ()
+       (Atomic.get Workspace_hooks.record_task_metric_fn)
+         ctx.config
+         ~agent_id:ctx.agent_name
+         ~task_id
+         ~started_at:started_at_actual
+         ~completed_at:(Some (Time_compat.now ()))
+         ~success:true
+         ~error_message:None
+         ~collaborators:collaborators_from_task
+         ~handoff_from:None
+         ~handoff_to:None;
+        (Atomic.get Workspace_hooks.record_thompson_result_fn)
+          ~agent_name:ctx.agent_name
+          ~success:true
+          ~reason:None;
+        ()
    | Ok _, Masc_domain.Cancel ->
-       let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
-         agent_id = ctx.agent_name;
-         task_id;
-         started_at = started_at_actual;
-         completed_at = Some (Time_compat.now ());
-         success = false;
-         error_message = Some (if String.equal reason "" then "Cancelled" else reason);
-         collaborators = collaborators_from_task;
-         handoff_from = None;
-         handoff_to = None;
-       } in
-       (try let _ = Metrics_store_eio.record ctx.config metric in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record(transition-cancel) failed: %s" (Stdlib.Printexc.to_string exn));
-       Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
-       Thompson_sampling.record_quality_signal
-         ~agent_name:ctx.agent_name
-         ~verdict:(Post_verifier.Fail "task_cancelled");
-       Prometheus.record_task_failed ()
+       (Atomic.get Workspace_hooks.record_task_metric_fn)
+         ctx.config
+         ~agent_id:ctx.agent_name
+         ~task_id
+         ~started_at:started_at_actual
+         ~completed_at:(Some (Time_compat.now ()))
+         ~success:false
+         ~error_message:(Some (if String.equal reason "" then "Cancelled" else reason))
+         ~collaborators:collaborators_from_task
+         ~handoff_from:None
+         ~handoff_to:None;
+        (Atomic.get Workspace_hooks.record_thompson_result_fn)
+          ~agent_name:ctx.agent_name
+          ~success:false
+          ~reason:(Some "task_cancelled");
+        ()
    | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
             | Masc_domain.Submit_pr_evidence
             | Masc_domain.Approve_verification | Masc_domain.Reject_verification | Masc_domain.Release)
@@ -650,9 +643,57 @@ let handle_tasks ~tool_name ~start_time ctx args =
   in
   Tool_result.ok ~tool_name ~start_time (Workspace.list_tasks ctx.config ~include_done ~include_cancelled ?status)
 
+let read_event_lines config ~limit =
+  let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
+  if not (Sys.file_exists events_dir) then []
+  else
+    let month_dirs =
+      Sys.readdir events_dir |> Array.to_list |> List.sort compare |> List.rev
+    in
+    let collected = ref [] in
+    let remaining = ref limit in
+    let read_lines path =
+      let content = Fs_compat.load_file path in
+      String.split_on_char '\n' content |> List.filter (fun s -> s <> "")
+    in
+    let add_lines path =
+      if !remaining <= 0
+      then ()
+      else (
+        let lines = read_lines path in
+        let rec take = function
+          | [] -> ()
+          | line :: rest ->
+            if !remaining > 0
+            then (
+              collected := line :: !collected;
+              decr remaining;
+              take rest)
+        in
+        take (List.rev lines))
+    in
+    List.iter
+      (fun month ->
+         if !remaining > 0
+         then (
+           let month_path = Filename.concat events_dir month in
+           if Sys.file_exists month_path && Sys.is_directory month_path
+           then
+             Sys.readdir month_path
+             |> Array.to_list
+             |> List.sort compare
+             |> List.rev
+             |> List.iter (fun file ->
+               if !remaining > 0
+               then (
+                 let path = Filename.concat month_path file in
+                 if Sys.file_exists path then add_lines path))))
+      month_dirs;
+    List.rev !collected
+
 let task_history_events_json (config : Workspace.config) ~task_id ~limit =
   let scan_limit = min 500 (limit * 5) in
-  let lines = Mcp_server.read_event_lines config ~limit:scan_limit in
+  let lines = read_event_lines config ~limit:scan_limit in
   let (parsed, _malformed) =
     Fs_compat.parse_jsonl_lines ~source:"task_events" lines
   in
@@ -691,35 +732,3 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | "masc_tasks" -> Some (handle_tasks ~tool_name:name ~start_time:start ctx args)
   | "masc_task_history" -> Some (handle_task_history ~tool_name:name ~start_time:start ctx args)
   | _ -> None
-
-(* ================================================================ *)
-(* Tool_spec registration                                           *)
-(* ================================================================ *)
-
-let tool_spec_read_only = [ "masc_task_history"; "masc_tasks" ]
-let tool_required_permission = function
-  | "masc_tasks" | "masc_task_history" ->
-      Some Masc_domain.CanReadState
-  | "masc_add_task" | "masc_batch_add_tasks" ->
-      Some Masc_domain.CanAddTask
-  | "masc_claim_next" ->
-      Some Masc_domain.CanClaimTask
-  | "masc_transition" | "masc_update_priority" ->
-      Some Masc_domain.CanCompleteTask
-  | _ -> None
-
-let () =
-  List.iter
-    (fun (s : Masc_domain.tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_task
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name tool_spec_read_only)
-           ?required_permission:(tool_required_permission s.name)
-           ()))
-    schemas

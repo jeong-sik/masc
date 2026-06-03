@@ -389,7 +389,7 @@ let prepare_agent_setup
   let observed_tool_names_ref : string list ref = ref [] in
   let canonical_tool_names_ref : string list ref = ref [] in
   let unexpected_tool_names_ref : string list ref = ref [] in
-  let actual_keeper_tool_names_ref : string list ref = ref [] in
+  let final_observed_tool_names_ref : string list ref = ref [] in
   let receipt_turn_count_ref : int option ref = ref None in
   let receipt_model_used_ref : string option ref = ref None in
   let receipt_stop_reason_ref : Runtime_agent.stop_reason option ref =
@@ -739,7 +739,7 @@ let prepare_agent_setup
     ; observed_tool_names_ref
     ; canonical_tool_names_ref
     ; unexpected_tool_names_ref
-    ; actual_keeper_tool_names_ref
+    ; final_observed_tool_names_ref
     ; receipt_turn_count_ref
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref

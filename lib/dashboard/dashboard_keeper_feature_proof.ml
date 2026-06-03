@@ -141,7 +141,7 @@ let meta_feature_json
     ("label", `String label);
     ("status", `String (status_to_string status));
     ("summary", `String summary);
-    ("required_tools", `List []);
+    ("probe_tools", `List []);
     ("passing_tools", `List []);
     ("weak_tools", `List []);
     ("missing_tools", `List []);
@@ -263,7 +263,7 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
           (List.length observed) total
           Decision.persistent_turn_window_hours
           Decision.recent_turn_max_age_hours));
-    ("required_tools", `List []);
+    ("probe_tools", `List []);
     ("passing_tools", `List []);
     ("weak_tools", `List []);
     ("missing_tools", `List []);
@@ -440,7 +440,7 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
           (match window_hours with
            | Some hours -> Printf.sprintf " in the last %.1fh" hours
            | None -> "")));
-    ("required_tools", `List []);
+    ("probe_tools", `List []);
     ("passing_tools", `List []);
     ("weak_tools", `List []);
     ("missing_tools", `List []);
@@ -473,7 +473,7 @@ let tool_feature_json
       (spec : Dashboard_keeper_feature_catalog.feature_spec)
   =
   let passing, weak, missing =
-    spec.required_tools
+    spec.probe_tools
     |> List.fold_left (fun (passing, weak, missing) tool_name ->
       match Hashtbl.find_opt tool_stats tool_name with
       | Some (keeper_stat : Failure.tool_keeper_stat)
@@ -489,9 +489,9 @@ let tool_feature_json
   let passing = List.rev passing in
   let weak = List.rev weak in
   let missing = List.rev missing in
-  let required_count = List.length spec.required_tools in
+  let probe_count = List.length spec.probe_tools in
   let status =
-    if required_count > 0 && List.length passing = required_count then Pass
+    if probe_count > 0 && List.length passing = probe_count then Pass
     else if passing <> [] || weak <> [] then Warn
     else Fail
   in
@@ -502,16 +502,16 @@ let tool_feature_json
     ("summary",
      `String
        (Printf.sprintf
-          "%d/%d required tools meet %.1f%% success threshold%s; %d weak; %d missing"
+          "%d/%d probe tools meet %.1f%% success threshold%s; %d weak; %d missing"
           (List.length passing)
-          required_count
+          probe_count
           success_threshold_pct
           (if accepts_latest_recovery spec
            then " or latest-success recovery"
            else "")
           (List.length weak)
           (List.length missing)));
-    ("required_tools", Json_util.json_string_list spec.required_tools);
+    ("probe_tools", Json_util.json_string_list spec.probe_tools);
     ("passing_tools", `List (List.map tool_stat_json passing));
     ( "weak_tools",
       `List
@@ -524,7 +524,7 @@ let tool_feature_json
     ("missing_tools", Json_util.json_string_list missing);
     ( "keeper_evidence",
       Failure.keeper_evidence_json tool_stats
-        ~keeper_names ~required_tools:spec.required_tools );
+        ~keeper_names ~probe_tools:spec.probe_tools );
     ( "evidence_refs",
       `List [
         route_evidence "/api/v1/dashboard/tool-quality";

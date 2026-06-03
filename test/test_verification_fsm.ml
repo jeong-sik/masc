@@ -36,8 +36,8 @@ let with_temp_config ~fsm_enabled f =
   Unix.mkdir dir 0o755;
   let config = Workspace.default_config dir in
   ignore (Workspace.init config ~agent_name:(Some "worker"));
-  Task_dispatch.reset_for_test ();
-  Task_dispatch.init_jsonl ();
+  Task.Dispatch.reset_for_test ();
+  Task.Dispatch.init_jsonl ();
   Fun.protect ~finally:(fun () ->
       let rec rm path =
         if Sys.file_exists path then

@@ -396,7 +396,7 @@ let run_turn
     let observed_tool_names_ref = s.Keeper_run_tools.observed_tool_names_ref in
     let canonical_tool_names_ref = s.Keeper_run_tools.canonical_tool_names_ref in
     let unexpected_tool_names_ref = s.Keeper_run_tools.unexpected_tool_names_ref in
-    let actual_keeper_tool_names_ref = s.Keeper_run_tools.actual_keeper_tool_names_ref in
+    let final_observed_tool_names_ref = s.Keeper_run_tools.final_observed_tool_names_ref in
     let materialized_tool_names_ref : string list ref = ref [] in
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
@@ -671,13 +671,13 @@ let run_turn
                         continues; valid tools present)"
                        meta.name
                        (String.concat ", " unexpected_tool_names);
-                   let actual_keeper_tool_names =
+                   let final_observed_tool_names =
                      Keeper_tool_observation.final_keeper_tool_names
                        ~reported_tool_names
                        ~observed_tool_names
                        ~allowed_tool_names:acc.requested_tool_names
                    in
-                   actual_keeper_tool_names_ref := actual_keeper_tool_names;
+                   final_observed_tool_names_ref := final_observed_tool_names;
                    let usage = Keeper_context_runtime.usage_of_response result.response in
                    let ctx_composition =
                      build_ctx_composition_metrics
@@ -698,7 +698,7 @@ let run_turn
                      (match
                         Keeper_tool_response.normalize_response_text
                           ~text
-                          ~tool_names:actual_keeper_tool_names
+                          ~tool_names:final_observed_tool_names
                           ()
                       with
                       | Error e -> Error (Agent_sdk.Error.Internal e)
@@ -707,7 +707,7 @@ let run_turn
                           ~config ~meta ~generation ~manifest_keeper_turn_id
                           ~trace_id ~session ~append_manifest ~model
                           ~acc ~memory
-                          ~actual_keeper_tool_names ~actual_keeper_tool_names_ref
+                          ~final_observed_tool_names ~final_observed_tool_names_ref
                           ~result ~checkpoint_persistence_error
                           ~post_turn_t0 ?provider_filter ~runtime_id_string
                           ~prompt_metrics ~ctx_composition ~usage
@@ -749,6 +749,6 @@ let run_turn
          ~observed_tool_names_ref
          ~canonical_tool_names_ref
          ~unexpected_tool_names_ref
-         ~actual_keeper_tool_names_ref
+         ~final_observed_tool_names_ref
          ~materialized_tool_names_ref
          ())

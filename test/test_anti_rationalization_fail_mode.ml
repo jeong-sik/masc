@@ -1,7 +1,7 @@
 (** #9794: regression tests for [Env_config.AntiRationalization.fail_mode_of_string].
 
     The fail_mode config decides whether the verifier-unavailable path in
-    [Anti_rationalization.review] approves (liveness-favored, original
+    [Task.Anti_rationalization.review] approves (liveness-favored, original
     behavior) or rejects (safety-favored). This test pins the parsing
     contract — synonyms, casing, defaulting — so a future refactor that
     accidentally narrows or widens the recognized aliases surfaces here

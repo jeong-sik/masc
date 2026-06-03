@@ -469,8 +469,13 @@ let render_keeper_logs (state : state) =
             | _ -> Ansi.dim ^ "   --" ^ Ansi.reset
           in
           let tools_str =
-            if List.length e.le_tools_used > 0 then
-              " " ^ Ansi.dim ^ (String.concat "," (List.filteri (fun i _ -> i < 2) e.le_tools_used)) ^ Ansi.reset
+            if List.length e.le_observed_tool_names > 0 then
+              " "
+              ^ Ansi.dim
+              ^ String.concat
+                  ","
+                  (List.filteri (fun i _ -> i < 2) e.le_observed_tool_names)
+              ^ Ansi.reset
             else ""
           in
           let guardrail_str =

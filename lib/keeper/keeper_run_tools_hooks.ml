@@ -29,7 +29,7 @@ type agent_setup =
   ; observed_tool_names_ref : string list ref
   ; canonical_tool_names_ref : string list ref
   ; unexpected_tool_names_ref : string list ref
-  ; actual_keeper_tool_names_ref : string list ref
+  ; final_observed_tool_names_ref : string list ref
   }
 
 type ctx =
@@ -50,7 +50,7 @@ type ctx =
   ; observed_tool_names_ref : string list ref
   ; canonical_tool_names_ref : string list ref
   ; unexpected_tool_names_ref : string list ref
-  ; actual_keeper_tool_names_ref : string list ref
+  ; final_observed_tool_names_ref : string list ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -97,7 +97,7 @@ let assemble_hooks
   let observed_tool_names_ref = ctx.observed_tool_names_ref in
   let canonical_tool_names_ref = ctx.canonical_tool_names_ref in
   let unexpected_tool_names_ref = ctx.unexpected_tool_names_ref in
-  let actual_keeper_tool_names_ref = ctx.actual_keeper_tool_names_ref in
+  let final_observed_tool_names_ref = ctx.final_observed_tool_names_ref in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
@@ -706,6 +706,6 @@ let assemble_hooks
       ; observed_tool_names_ref
       ; canonical_tool_names_ref
       ; unexpected_tool_names_ref
-      ; actual_keeper_tool_names_ref
+      ; final_observed_tool_names_ref
       }
 ;;

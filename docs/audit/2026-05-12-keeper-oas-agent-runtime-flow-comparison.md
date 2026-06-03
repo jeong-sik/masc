@@ -198,7 +198,8 @@ flowchart TD
 - Tool discovery is not only "search". Search is a tool in the surface: `keeper_tool_search` uses `local_search_fn_ref`, which queries `Agent_sdk.Tool_index.retrieve`, partitions core/visible/discoverable/policy-filtered hits, and adds discovered names to `Keeper_discovered_tools`.
 - The actual visible surface is recomputed every OAS SDK turn in `BeforeTurnParams`.
 - LLM rerank is a hint layer, not a hard dependency. If rerank runtime resolution, health filtering, or `Tool_selector.select_names` fails, the surface falls back to core + BM25 prefilter + discovered tools.
-- Required tools can come from the active task contract and per-call `required_tool_names`.
+- Keeper tool visibility now comes from the per-turn visible surface; there is
+  no per-call mandatory tool list.
 - The hook sets both `Guardrails.AllowList turn_visible_tool_names` and `tool_choice`. This is important: `AllowList` constrains execution, while `tool_choice` nudges or forces provider-side tool use.
 - OAS later dispatches only `ToolUse` blocks. Parallelism is handled in OAS `execute_tools` via sequential/exclusive/parallel batches.
 - MASC does not trust only the final assistant blocks. It reconciles reported tool names from response content, registry-observed names, hook-observed names, canonical aliases, and unexpected names before writing the receipt.

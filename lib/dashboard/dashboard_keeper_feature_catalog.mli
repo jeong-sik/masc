@@ -3,7 +3,7 @@
 type feature_spec = {
   id : string;
   label : string;
-  required_tools : string list;
+  probe_tools : string list;
   next_action : string;
 }
 

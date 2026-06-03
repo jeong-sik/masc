@@ -39,7 +39,7 @@ S3/S4/S5는 *runtime routing failure* 또는 *resilience executor 부재* 같은
 - 12:01Z garnet/imseonghan auto-paused (S3 or S4)
 - 12:55Z rondo/ramarama auto-paused
 - 13:18Z executor/lifecycle-worker/nick0cave/qa-king/sangsu/umberto 동시 auto-paused (runtime_exhausted)
-- 20:11Z analyst auto-paused (required-tool contract violation, S4)
+- 20:11Z analyst auto-paused (action-effect no-progress, S4)
 - 21:05Z albini auto-paused (same)
 
 → S3/S4/S5 pauses 누적 13명이 자정 직전까지 paused. ENFILE storm 회복 후에도 keeper들은 *수동 unpause* 없이는 깨어나지 않음. 2026-05-20에는 verifier 1명만 활성 (turn 1616/1616).

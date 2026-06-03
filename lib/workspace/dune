@@ -5,6 +5,8 @@
  (wrapped false)
  (flags (:standard -w +4))
  (modules
+  workspace_core
+  telemetry_observe
   workspace_backlog
   workspace_bootstrap
   workspace_broadcast

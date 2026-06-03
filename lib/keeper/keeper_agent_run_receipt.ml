@@ -73,7 +73,7 @@ let finalize
     ~observed_tool_names_ref
     ~canonical_tool_names_ref
     ~unexpected_tool_names_ref
-    ~actual_keeper_tool_names_ref
+    ~final_observed_tool_names_ref
     ~materialized_tool_names_ref
     () =
   (match turn_result with
@@ -319,7 +319,7 @@ let finalize
          ~materialized_tool_names:!materialized_tool_names_ref
          ~emitted_tool_names:!reported_tool_names_ref
          ~executed_tool_names:!observed_tool_names_ref
-         ~verified_tool_names:!actual_keeper_tool_names_ref
+         ~final_observed_tool_names:!final_observed_tool_names_ref
          ())
     Keeper_runtime_manifest.Tool_lineage_recorded;
   append_receipt_manifest

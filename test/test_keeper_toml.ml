@@ -1380,7 +1380,7 @@ persona_name = "analyst"
 [keeper.oas_env]
 OAS_CLAUDE_STRICT_MCP = "1"
 OAS_GEMINI_NO_MCP = "1"
-OAS_CODEX_CONFIG = "mcp_servers={}"
+OAS_CLAUDE_MCP_CONFIG = "mcp_servers={}"
 MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
 |} in
   match TL.parse_toml input with
@@ -1394,8 +1394,8 @@ MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
         "1" (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
       check string "no_mcp value"
         "1" (List.assoc "OAS_GEMINI_NO_MCP" d.oas_env);
-      check string "codex_config value"
-        "mcp_servers={}" (List.assoc "OAS_CODEX_CONFIG" d.oas_env);
+      check string "claude_mcp_config value"
+        "mcp_servers={}" (List.assoc "OAS_CLAUDE_MCP_CONFIG" d.oas_env);
       check string "unified max tokens value"
         "8192" (List.assoc "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS" d.oas_env);
       check (option int) "unified max tokens override"
@@ -1509,7 +1509,7 @@ let test_oas_env_coerces_bool_to_string () =
 persona_name = "analyst"
 [keeper.oas_env]
 OAS_CLAUDE_STRICT_MCP = true
-OAS_CODEX_SKIP_GIT = false
+OAS_GEMINI_NO_MCP = false
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1520,7 +1520,7 @@ OAS_CODEX_SKIP_GIT = false
       check string "true → 1" "1"
         (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
       check string "false → 0" "0"
-        (List.assoc "OAS_CODEX_SKIP_GIT" d.oas_env)
+        (List.assoc "OAS_GEMINI_NO_MCP" d.oas_env)
 
 let test_load_keeper_toml_captures_unknown_keys_on_profile () =
   let tmp = Filename.temp_file "keeper_unknown" ".toml" in

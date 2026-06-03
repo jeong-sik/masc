@@ -211,7 +211,7 @@ describe('keeper runtime trace', () => {
           tool_surface: {
             requested_tools: ['read_file'],
             materialized_tools: ['read_file'],
-            terminal_status: 'missing_required_tool',
+            terminal_status: 'tool_materialization_gap',
           },
           provider_lane: {
             resolved: false,
@@ -249,9 +249,9 @@ describe('keeper runtime trace', () => {
             lane: 'tool_runtime',
             label: 'Tool Runtime',
             event_count: 1,
-            terminal_status: 'missing_required_tool',
+            terminal_status: 'tool_materialization_gap',
             completeness: 'complete',
-            gap_codes: ['required_tool_not_materialized'],
+            gap_codes: ['tool_not_materialized'],
           },
         },
         clock_edges: [
@@ -295,7 +295,7 @@ describe('keeper runtime trace', () => {
         ],
         gaps: [
           {
-            code: 'required_tool_not_materialized',
+            code: 'tool_not_materialized',
             severity: 'bad',
             lane: 'tool_runtime',
             detail: 'tool surface mismatch: keeper_task_done',
@@ -331,7 +331,7 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.clock_groups[0]?.closed).toBe(true)
     expect(result.runtime_lens.clock_groups[0]?.terminal_events).toEqual(['provider_attempt_finished'])
     expect(result.runtime_lens.gaps.map(gap => gap.code)).toEqual([
-      'required_tool_not_materialized',
+      'tool_not_materialized',
       'clock_provider_attempt_unfinished',
     ])
   })

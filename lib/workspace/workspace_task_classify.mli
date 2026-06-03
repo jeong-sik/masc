@@ -27,7 +27,7 @@ val drift_variant_label : Workspace_task_lifecycle.drift -> string
     - ["empty_contract"] — contract record present but both
       [completion_contract] and [required_evidence] are empty lists
     - ["with_contract"] — at least one of those lists is non-empty,
-      so the verifier-gate redirect in [Tool_task] would fire on a
+      so the verifier-gate redirect in [Task.Tool] would fire on a
       [Done_action]
 
     Used as the [contract_state] label of

@@ -424,10 +424,10 @@ type decision = {
             <td>Runtime has no callable providers. Fix config or credentials.</td>
           </tr>
           <tr>
-            <td><code>required_tool_contract</code></td>
-            <td>turn/tool contract</td>
+            <td><code>action_effect_no_progress</code></td>
+            <td>turn progress observation</td>
             <td><span class="warn">pause current work possible</span></td>
-            <td>required tool is impossible for the active keeper/provider surface</td>
+            <td>the turn cannot produce an execution/progress signal through the active surface</td>
             <td>Required tool contract cannot be satisfied. Adjust provider/tool policy.</td>
           </tr>
           <tr>

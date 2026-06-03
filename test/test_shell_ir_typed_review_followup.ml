@@ -1,5 +1,5 @@
 (** test_shell_ir_typed_review_followup — invariants enforced by the
-    Codex review on PR #14240.
+    review on PR #14240.
 
     Each test below pins one of the three contracts that the review
     surfaced:

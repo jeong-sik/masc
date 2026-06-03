@@ -63,7 +63,8 @@
  dashboard_keeper_feature_proof
  dashboard_keeper_tool_failure_proof
   board_prometheus_hooks
- dashboard_execution_helpers
+  workspace_prometheus_hooks
+  dashboard_execution_helpers
  dashboard_execution_fixture
  dashboard_execution_sessions
  dashboard_execution_builders
@@ -193,8 +194,9 @@
   keeper_run_tools_hooks
   keeper_run_tools_search
   keeper_run_tools_setup
-  provider_runtime_projection
   voice_bridge_transport
+  ;; Runtime/OAS provider projection boundary.
+  provider_runtime_projection
   runtime_oas_checkpoint
   runtime_observation_query_operation
   keeper_turn_driver_provider_attempt
@@ -295,7 +297,6 @@
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
-  tool_task_schemas
   tool_board_schemas
   tool_board_format
   tool_board_cache
@@ -554,6 +555,8 @@
    masc_board
    ;; Decoupled board handlers
    masc.board_handlers
+   ;; Decoupled task handlers
+   masc.task_handlers
    ;; Random identifier helper — shared between masc_workspace and masc
    ;; so the vrf-/p-/c-/fn- generation algorithm lives in one place.
    masc_random_id

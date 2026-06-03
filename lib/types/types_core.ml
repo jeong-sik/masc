@@ -470,13 +470,12 @@ type task_execution_links = {
     parses legacy [required_evidence] strings (RFC-0199 open question), not a
     silently-empty parallel field.
 
-    A [required_tools : string list] field was also removed (2026-06-03,
-    same fan-in-0 pattern): it was deprecated and ignored by task claim
-    routing, always normalized to [[]] by [Workspace_task_classify], had no
-    production reader, and the keeper turn layer rejects the [required_tools]
-    key outright (#19806, [Keeper_config_text]). The same-named fields on
-    [Tool_call_quality_benchmark] and [Dashboard_keeper_feature_catalog] are
-    unrelated types and are untouched. *)
+    A legacy tool-list field was also removed (2026-06-03, same fan-in-0
+    pattern): it was deprecated and ignored by task claim routing, always
+    normalized to [[]] by [Workspace_task_classify], had no production reader,
+    and the keeper turn layer rejects that retired key outright (#19806,
+    [Keeper_config_text]). Similar fields on [Tool_call_quality_benchmark] and
+    [Dashboard_keeper_feature_catalog] are unrelated types and are untouched. *)
 type task_contract = {
   strict : bool; [@default false]
   completion_contract : string list; [@default []]

@@ -690,7 +690,7 @@ let task_descriptor id name description ~readonly =
    plan / run / agent / workspace). The masc_board_descriptor lives above
    (registry-driven); these helpers follow the same projection pattern
    but use hardcoded id+description because their dispatchers
-   (Tool_task / Tool_plan / Tool_run / Tool_agent / Tool_workspace) are not
+   (Task.Tool / Tool_plan / Tool_run / Tool_agent / Tool_workspace) are not
    schema-registry-backed. The handler routes by descriptor.internal_name
    through the existing typed dispatcher. *)
 let masc_task_descriptor id name description ~readonly =

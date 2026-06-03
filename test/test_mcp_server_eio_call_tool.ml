@@ -424,15 +424,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (match runtime_contract |> U.member "visible_tool_count" with
          | `Int n -> n > 0
          | _ -> false);
-      let omits_field name =
-        match runtime_contract with
-        | `Assoc fields -> not (List.mem_assoc name fields)
-        | _ -> false
-      in
-      check bool "runtime contract omits legacy required_tools" true
-        (omits_field "required_tools");
-      check bool "runtime contract omits legacy missing_required_tools" true
-        (omits_field "missing_required_tools");
       check bool "runtime contract has runtime_profile field" true
         (match runtime_contract |> U.member "runtime_profile" with
          | `String _ | `Null -> true

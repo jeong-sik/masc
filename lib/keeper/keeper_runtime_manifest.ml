@@ -313,7 +313,7 @@ let tool_lineage_stage ~stage ~tool_names ~count () : Yojson.Safe.t =
 
 let tool_lineage ?searched_tool_names ?visible_tool_names
     ?materialized_tool_names ?emitted_tool_names ?executed_tool_names
-    ?verified_tool_names () : Yojson.Safe.t =
+    ?final_observed_tool_names () : Yojson.Safe.t =
   let stage name tools =
     match tools with
     | Some names -> Some (tool_lineage_stage ~stage:name ~tool_names:names ~count:(List.length names) ())
@@ -328,7 +328,7 @@ let tool_lineage ?searched_tool_names ?visible_tool_names
          "materialized", stage "materialized" materialized_tool_names;
          "emitted", stage "emitted" emitted_tool_names;
          "executed", stage "executed" executed_tool_names;
-         "verified", stage "verified" verified_tool_names;
+         "final_observed", stage "final_observed" final_observed_tool_names;
        ])
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id

@@ -14,6 +14,8 @@ val ingest_tool_event :
   summary:string ->
   file_path:string option ->
   timestamp_ms:int64 ->
+  ?command_descriptor:command_descriptor ->
+  unit ->
   unit
 
 val ingest_turn_event :

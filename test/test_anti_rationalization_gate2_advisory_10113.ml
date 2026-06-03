@@ -37,7 +37,7 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module AR = Masc.Anti_rationalization
+module AR = Masc.Task.Anti_rationalization
 module Prom = Masc.Prometheus
 
 let metric = Prom.metric_anti_rationalization_excuse_pattern

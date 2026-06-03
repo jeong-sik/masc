@@ -470,7 +470,7 @@ describe('RuntimeLensSection', () => {
             tool_surface_class: 'runtime_mcp',
             visible_tool_count: 1,
             tool_surface_fallback_used: false,
-            terminal_status: 'missing_required_tool',
+            terminal_status: 'tool_materialization_gap',
           },
           provider_lane: {
             resolved: true,
@@ -561,7 +561,7 @@ describe('RuntimeLensSection', () => {
           masc_policy_runtime: lane('masc_policy_runtime', 'MASC Runtime', 1, 'error'),
           oas_agent: lane('oas_agent', 'OAS', 2, 'checkpoint_saved'),
           provider: lane('provider', 'Provider', 2, 'timeout'),
-          tool_runtime: lane('tool_runtime', 'Tool Runtime', 1, 'missing_required_tool', ['required_tool_not_materialized']),
+          tool_runtime: lane('tool_runtime', 'Tool Runtime', 1, 'tool_materialization_gap', ['tool_not_materialized']),
           memory_context: lane('memory_context', 'Memory/Context', 3, 'flushed'),
         },
         clock_edges: [
@@ -616,7 +616,7 @@ describe('RuntimeLensSection', () => {
         ],
         gaps: [
           {
-            code: 'required_tool_not_materialized',
+            code: 'tool_not_materialized',
             severity: 'bad',
             lane: 'tool_runtime',
             detail: 'tool surface mismatch: keeper_task_done',
@@ -783,7 +783,7 @@ describe('RuntimeLensSection', () => {
     expect(screen.getAllByText('keeper_task_done').length).toBeGreaterThan(0)
     expect(screen.getByText('Provider')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
-    expect(screen.getAllByText('required_tool_not_materialized').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('tool_not_materialized').length).toBeGreaterThan(0)
   })
 
   it('renders an empty state while runtime trace is unavailable', () => {

@@ -6,9 +6,8 @@
 
 let provider_effective_max_turns _kind requested = requested
 
-(* RFC-0167: the client-named omission-dedup module
-   [Runtime_transport_codex_omission_dedup] (#10097) was removed in
-   the big-bang sweep. The structural omission of keeper-bound runtime
+(* RFC-0167: the client-named omission-dedup module (#10097) was removed
+   in the big-bang sweep. The structural omission of keeper-bound runtime
    MCP tools (when the runtime adapter requires per-keeper bridging
    but no per-keeper bearer is available) is still detected and
    reported through the [Error (invalid_runtime_config ...)] path

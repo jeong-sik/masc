@@ -816,7 +816,7 @@ function formatLensList(values: string[], emptyLabel = 'none'): string {
 
 function formatToolLineage(lineage: KeeperRuntimeLensToolLineageAxis): string {
   if (!lineage.recorded) return 'not recorded'
-  const stages = ['searched', 'visible', 'materialized', 'emitted', 'executed', 'verified']
+  const stages = ['searched', 'visible', 'materialized', 'emitted', 'executed', 'final_observed']
   const parts: string[] = []
   for (const key of stages) {
     const stage = lineage.decision?.[key]

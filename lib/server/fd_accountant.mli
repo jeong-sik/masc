@@ -29,10 +29,10 @@ type kind =
           ([Eio.Net.with_tcp_connect] + TLS state). One slot per
           in-flight call. *)
   | Provider_cli
-      (** Outbound LLM provider subprocess attempt (Claude Code,
-          Gemini CLI, Codex CLI, Anthropic CLI). OAS owns the subprocess
-          implementation; MASC accounts the call at the transport
-          boundary so CLI fan-out shares FD-pressure backpressure. *)
+      (** Outbound LLM provider subprocess attempt (Anthropic CLI). OAS
+          owns the subprocess implementation; MASC accounts the call at
+          the transport boundary so CLI fan-out shares FD-pressure
+          backpressure. *)
   | Sandbox_exec
       (** Inner shell exec inside a sandbox container (popen pipes
           stdin/out/err + cgroup FD). Distinct from [Docker_spawn]

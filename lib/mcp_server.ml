@@ -428,7 +428,7 @@ let task_fsm_transitions : (string * string list * string * string option) list 
     ("submit_for_verification", ["claimed"; "in_progress"],                "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + verifier-FSM only");
     ("approve",                 ["awaiting_verification"],                 "done",                   Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
     ("reject",                  ["awaiting_verification"],                 "in_progress",            Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
-    ("submit_pr_evidence",      ["todo"],                                  "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + no required-tool gate");
+    ("submit_pr_evidence",      ["todo"],                                  "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + no tool claim gate");
   ]
 
 let task_fsm_transition_to_json (action, froms, to_, gate) =
@@ -520,6 +520,15 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
         Log.Backend.info "Board: JSONL default backend";
         Board_agent_effect_hooks.install ();
         Board_prometheus_hooks.install ();
+        Workspace_prometheus_hooks.install ();
+        Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
+        Atomic.set Task.Handlers.record_verdict_fn (fun ~task_id ~req ~result () ->
+          Eval_calibration.record_verdict ~task_id ~req ~result ());
+        Atomic.set Task.Handlers.sse_broadcast_fn Sse.broadcast;
+        Atomic.set Task.Handlers.push_event_to_sessions_fn Subscriptions.push_event_to_sessions;
+        Atomic.set Task.Handlers.get_few_shot_block_fn (fun () ->
+          Eval_calibration.format_few_shot_block
+            (Eval_calibration.select_examples ~max_examples:3));
         Board_dispatch.init_jsonl ())
       base_path
   in

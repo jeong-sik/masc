@@ -14,7 +14,7 @@
 
 val default_case_set_path : repo_root:string -> string
 (** [default_case_set_path ~repo_root] returns
-    [<repo_root>/benchmark/tool_call_quality_cases.json].
+    [<repo_root>/benchmarks/data/tool_call_quality_cases.json].
     Pinned at the contract seam — operator runbooks reference
     the exact relative path; a future case-set move requires
     synchronized runbook + benchmark-runner updates. *)
@@ -45,10 +45,10 @@ val load_cases_from_file :
     - [max_tool_calls] >= 0
 
     Plus optional fields with documented defaults:
-    - [category] defaults to [["tool_required"]] when absent;
+    - [category] defaults to [["tool_expected"]] when absent;
       unknown categories return [Error "unknown tool-call-quality
       category: <other>"]
-    - [forbidden_tools] / [required_tools] / [arg_checks]
+    - [forbidden_tools] / [expected_tools] / [arg_checks]
       default to empty lists
     - [recovery_policy] defaults to [None] (case has no recovery
       requirement)

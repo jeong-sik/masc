@@ -79,7 +79,7 @@ type agent_setup =
   ; observed_tool_names_ref : string list ref
   ; canonical_tool_names_ref : string list ref
   ; unexpected_tool_names_ref : string list ref
-  ; actual_keeper_tool_names_ref : string list ref
+  ; final_observed_tool_names_ref : string list ref
   }
 
 val prepare_agent_setup

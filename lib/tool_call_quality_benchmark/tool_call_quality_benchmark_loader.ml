@@ -18,7 +18,7 @@ module Float = Stdlib.Float
 open Tool_call_quality_benchmark_types
 
 let default_case_set_path ~repo_root =
-  Filename.concat repo_root "benchmark/tool_call_quality_cases.json"
+  Filename.concat repo_root "benchmarks/data/tool_call_quality_cases.json"
 
 let default_evidence_path ~repo_root =
   Filename.concat repo_root "test/fixtures/tool_call_quality_benchmark/evidence_runs.json"
@@ -49,7 +49,7 @@ let run_status_of_string raw =
 
 let case_category_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
-  | "tool_required" -> Ok Tool_required
+  | "tool_expected" -> Ok Tool_expected
   | "tool_forbidden" -> Ok Tool_forbidden
   | "recovery_required" -> Ok Recovery_required
   | "multi_step" -> Ok Multi_step
@@ -137,11 +137,11 @@ let benchmark_case_of_yojson json =
     else Ok ()
   in
   let* prompt = required_string_field json "prompt" in
-  let* required_tools = string_list_field json "required_tools" in
+  let* expected_tools = string_list_field json "expected_tools" in
   let* forbidden_tools = string_list_field json "forbidden_tools" in
   let* category =
     Json_util.get_string json "category"
-    |> Option.value ~default:"tool_required"
+    |> Option.value ~default:"tool_expected"
     |> case_category_of_string
   in
   let* arg_check_items = list_field json "arg_checks" in
@@ -156,7 +156,7 @@ let benchmark_case_of_yojson json =
     prompt;
     category;
     keeper_profiles;
-    required_tools;
+    expected_tools;
     forbidden_tools;
     max_tool_calls;
     success_checks;

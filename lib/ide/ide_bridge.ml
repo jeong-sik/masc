@@ -34,6 +34,8 @@ let ingest_tool_event
     ~summary
     ~file_path
     ~timestamp_ms
+    ?command_descriptor
+    ()
   =
   let truncated_summary =
     if String.length summary > 200 then String.sub summary 0 200 ^ "..."
@@ -49,6 +51,7 @@ let ingest_tool_event
       ; latency_ms
       ; summary = truncated_summary
       ; file_path
+      ; command_descriptor
       ; timestamp_ms
       }
   in
@@ -114,76 +117,6 @@ let ingest_pr_event
    with exn ->
      Printf.eprintf "Ide_bridge.ingest_pr_event error: %s\n%!" (Printexc.to_string exn))
 
-(** Extract tool event parameters from raw hook data and ingest.
-    This is the function called from [keeper_run_tools_hooks.on_tool_executed].
-    Separated for direct testability. *)
-let ingest_tool_event_from_hook
-    ~base_path
-    ~tool_name
-    ~keeper_id
-    ~turn_id
-    ~outcome
-    ~typed_outcome_str
-    ~duration_ms
-    ~output_text
-    ~(input : Yojson.Safe.t)
-  =
-  let file_path =
-    match Yojson.Safe.Util.member "path" input with
-    | `String p -> Some p
-    | _ ->
-      match Yojson.Safe.Util.member "file_path" input with
-      | `String p -> Some p
-      | _ -> None
-  in
-  let summary =
-    if String.length output_text > 200 then String.sub output_text 0 200
-    else output_text
-  in
-  ingest_tool_event
-    ~base_path
-    ~tool_name
-    ~keeper_id
-    ~turn_id
-    ~outcome
-    ~typed_outcome:typed_outcome_str
-    ~latency_ms:(int_of_float duration_ms)
-    ~summary
-    ~file_path
-    ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
-
-let parse_pr_url_from_output (output : string) : (int * string) option =
-  let prefix = "https://github.com/" in
-  let prefix_len = String.length prefix in
-  let output_len = String.length output in
-  let rec find_prefix i =
-    if i + prefix_len > output_len then None
-    else if String.sub output i prefix_len = prefix then Some i
-    else find_prefix (i + 1)
-  in
-  match find_prefix 0 with
-  | None -> None
-  | Some start ->
-    let path_start = start + prefix_len in
-    let path_len = output_len - path_start in
-    let path = String.sub output path_start path_len in
-    let parts = String.split_on_char '/' path in
-    (match parts with
-     | owner :: repo :: "pull" :: number_str :: _ ->
-       (* Extract leading digits from number_str — handles URLs followed by
-          non-numeric characters (e.g., JSON quotes, path segments) *)
-       let number_digits =
-         let buf = Buffer.create 8 in
-         String.iter (fun c -> if c >= '0' && c <= '9' then Buffer.add_char buf c else ()) number_str;
-         Buffer.contents buf
-       in
-       (match int_of_string_opt number_digits with
-        | Some number when number > 0 ->
-          let url = Printf.sprintf "https://github.com/%s/%s/pull/%d" owner repo number in
-          Some (number, url)
-        | _ -> None)
-     | _ -> None)
-
 (** Extract command_descriptor from tool result JSON.
     Returns [Some descriptor] if the result contains a valid descriptor field. *)
 let extract_descriptor_from_output (output_text : string) : Ide_event_types.command_descriptor option =
@@ -248,6 +181,79 @@ let extract_descriptor_from_output (output_text : string) : Ide_event_types.comm
        | _ -> None)
     | _ -> None
   with _ -> None
+
+(** Extract tool event parameters from raw hook data and ingest.
+    This is the function called from [keeper_run_tools_hooks.on_tool_executed].
+    Separated for direct testability. *)
+let ingest_tool_event_from_hook
+    ~base_path
+    ~tool_name
+    ~keeper_id
+    ~turn_id
+    ~outcome
+    ~typed_outcome_str
+    ~duration_ms
+    ~output_text
+    ~(input : Yojson.Safe.t)
+  =
+  let file_path =
+    match Yojson.Safe.Util.member "path" input with
+    | `String p -> Some p
+    | _ ->
+      match Yojson.Safe.Util.member "file_path" input with
+      | `String p -> Some p
+      | _ -> None
+  in
+  let summary =
+    if String.length output_text > 200 then String.sub output_text 0 200
+    else output_text
+  in
+  let command_descriptor = extract_descriptor_from_output output_text in
+  ingest_tool_event
+    ~base_path
+    ~tool_name
+    ~keeper_id
+    ~turn_id
+    ~outcome
+    ~typed_outcome:typed_outcome_str
+    ~latency_ms:(int_of_float duration_ms)
+    ~summary
+    ~file_path
+    ?command_descriptor
+    ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    ()
+
+let parse_pr_url_from_output (output : string) : (int * string) option =
+  let prefix = "https://github.com/" in
+  let prefix_len = String.length prefix in
+  let output_len = String.length output in
+  let rec find_prefix i =
+    if i + prefix_len > output_len then None
+    else if String.sub output i prefix_len = prefix then Some i
+    else find_prefix (i + 1)
+  in
+  match find_prefix 0 with
+  | None -> None
+  | Some start ->
+    let path_start = start + prefix_len in
+    let path_len = output_len - path_start in
+    let path = String.sub output path_start path_len in
+    let parts = String.split_on_char '/' path in
+    (match parts with
+     | owner :: repo :: "pull" :: number_str :: _ ->
+       (* Extract leading digits from number_str — handles URLs followed by
+          non-numeric characters (e.g., JSON quotes, path segments) *)
+       let number_digits =
+         let buf = Buffer.create 8 in
+         String.iter (fun c -> if c >= '0' && c <= '9' then Buffer.add_char buf c else ()) number_str;
+         Buffer.contents buf
+       in
+       (match int_of_string_opt number_digits with
+        | Some number when number > 0 ->
+          let url = Printf.sprintf "https://github.com/%s/%s/pull/%d" owner repo number in
+          Some (number, url)
+        | _ -> None)
+     | _ -> None)
 
 (** Ingest PR event from command_descriptor (deterministic).
     Falls back to heuristic output parsing if descriptor is not available. *)

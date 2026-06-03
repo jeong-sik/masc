@@ -95,3 +95,87 @@ val claim_post_provision_failed_fn :
    unit) Atomic.t
 val observe_claim_post_provision_failure :
   site:string -> agent_name:string -> task_id:string -> exn -> unit
+
+val workspace_telemetry_drop_fn : (Workspace_telemetry_drop_event.t -> unit) Atomic.t
+val active_agents_change_fn : ([ `Inc | `Dec ] -> unit) Atomic.t
+val telemetry_observe_failure_fn : (string -> unit) Atomic.t
+val get_default_runtime_id_fn : (unit -> string) Atomic.t
+
+val record_task_metric_fn :
+  (Workspace_utils_backend_setup.config ->
+   agent_id:string ->
+   task_id:string ->
+   started_at:float ->
+   completed_at:float option ->
+   success:bool ->
+   error_message:string option ->
+   collaborators:string list ->
+   handoff_from:string option ->
+   handoff_to:string option ->
+   unit) Atomic.t
+
+val record_thompson_result_fn :
+  (agent_name:string -> success:bool -> reason:string option -> unit) Atomic.t
+
+val push_task_event_fn :
+  (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
+
+val is_admin_agent_fn :
+  (base_path:string -> agent_name:string -> bool) Atomic.t
+
+type evidence_gate_verdict =
+  | Pass
+  | Reject of { reason : string; rule_id : string; hint : string; payload_json : Yojson.Safe.t }
+
+val cdal_evidence_gate_decide_fn :
+  (task_id:string ->
+   task_opt:Masc_domain.task option ->
+   notes:string ->
+   handoff:Yojson.Safe.t option ->
+   unit ->
+   evidence_gate_verdict)
+  Atomic.t
+
+val verification_create_submit_request_fn :
+  (Workspace_utils_backend_setup.config ->
+   task:Masc_domain.task ->
+   assignee:string ->
+   verification_id:string ->
+   evidence_refs:string list ->
+   (unit, string) result)
+  Atomic.t
+
+val verification_record_approve_fn :
+  (Workspace_utils_backend_setup.config ->
+   task_id:string ->
+   verifier:string ->
+   verification_id:string ->
+   notes:string ->
+   (unit, string) result)
+  Atomic.t
+
+val verification_record_reject_fn :
+  (Workspace_utils_backend_setup.config ->
+   task_id:string ->
+   verifier:string ->
+   verification_id:string ->
+   reason:string ->
+   (unit, string) result)
+  Atomic.t
+
+val verification_notify_submit_fn :
+  (Workspace_utils_backend_setup.config ->
+   task:Masc_domain.task ->
+   assignee:string ->
+   verification_id:string ->
+   evidence_refs:string list ->
+   unit)
+  Atomic.t
+
+val verification_notify_approve_fn :
+  (task_id:string -> verifier:string -> verification_id:string -> notes:string -> unit)
+  Atomic.t
+
+val verification_notify_reject_fn :
+  (task_id:string -> verifier:string -> verification_id:string -> reason:string -> unit)
+  Atomic.t

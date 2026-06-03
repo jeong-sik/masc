@@ -400,17 +400,19 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
              | Some (`Assoc _) -> true
              | _ -> false
            in
-           let has_verified =
-             match Json_util.assoc_member_opt "verified" decision with
+           let has_final_observed =
+             match Json_util.assoc_member_opt "final_observed" decision with
              | Some (`Assoc _) -> true
              | _ -> false
            in
-           if has_executed && not has_verified
+           if has_executed && not has_final_observed
            then
-             { code = "tool_execution_unverified"
+             { code = "tool_execution_without_final_observation"
              ; severity = "warn"
              ; lane = "tool_runtime"
-             ; detail = Some "tool lineage shows executed stage but no verified stage"
+             ; detail =
+                 Some
+                   "tool lineage shows executed stage but no final_observed stage"
              }
              :: gaps
            else gaps

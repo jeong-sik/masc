@@ -174,6 +174,8 @@ type keeper_profile_defaults =
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;
   oas_env : (string * string) list;
+  persona_ref : string option;
+  runtime_ref : string option;
   unknown_toml_keys : string list;
 }
 val empty_keeper_profile_defaults : keeper_profile_defaults

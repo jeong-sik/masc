@@ -82,7 +82,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
         ; "materialized"
         ; "emitted"
         ; "executed"
-        ; "verified"
+        ; "final_observed"
         ]
       in
       List.filter_map

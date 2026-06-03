@@ -58,6 +58,7 @@ and tool_event =
   ; latency_ms : int
   ; summary : string
   ; file_path : string option
+  ; command_descriptor : command_descriptor option
   ; timestamp_ms : int64
   }
 

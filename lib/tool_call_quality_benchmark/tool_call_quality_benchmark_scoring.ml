@@ -98,7 +98,7 @@ let tool_used tool_name (run : evidence_run) =
   List.exists (fun call -> String.equal call.tool_name tool_name) run.tool_calls
 
 (* Build a name-keyed set over [run.tool_calls] in one pass.  Used by
-   [required_tool_score] and [forbidden_tool_used] to replace
+   [expected_tool_score] and [forbidden_tool_used] to replace
    O(R × C) repeated linear scans with O(C + R) build + lookup. *)
 let tool_call_name_set (run : evidence_run) =
   let tbl = Hashtbl.create (List.length run.tool_calls) in
@@ -126,18 +126,18 @@ let arg_check_passes (run : evidence_run) (check : arg_check) =
 let tool_sequence (run : evidence_run) =
   run.tool_calls |> List.map (fun call -> call.tool_name)
 
-let required_tool_score (benchmark_case : benchmark_case) (run : evidence_run) =
+let expected_tool_score (benchmark_case : benchmark_case) (run : evidence_run) =
   match benchmark_case.category with
   | Tool_forbidden ->
       if Stdlib.List.length run.tool_calls = 0 then 1.0 else 0.0
   | _ ->
-      (match benchmark_case.required_tools with
+      (match benchmark_case.expected_tools with
        | [] -> 1.0
-       | required_tools ->
+       | expected_tools ->
            (* Build the run's tool-name set once; replaces R × O(C) scans
               with O(C) build + R × O(1) lookups. *)
            let used = tool_call_name_set run in
-           required_tools
+           expected_tools
            |> List.map (fun tool_name ->
                   if Hashtbl.mem used tool_name then 1.0 else 0.0)
            |> avg_float)
@@ -146,7 +146,7 @@ let forbidden_tool_used (benchmark_case : benchmark_case) (run : evidence_run) =
   match benchmark_case.category with
   | Tool_forbidden -> Stdlib.List.length run.tool_calls > 0
   | _ ->
-      (* Same shape as [required_tool_score]: one O(C) build, F lookups. *)
+      (* Same shape as [expected_tool_score]: one O(C) build, F lookups. *)
       let used = tool_call_name_set run in
       List.exists
         (fun tool_name -> Hashtbl.mem used tool_name)
@@ -244,9 +244,9 @@ let score_run ~cases (run : evidence_run) =
         if not (List.mem run.keeper_profile benchmark_case.keeper_profiles) then None
         else
           let task_pass = task_pass_score benchmark_case run in
-          let required_score = required_tool_score benchmark_case run in
+          let expected_score = expected_tool_score benchmark_case run in
           let tool_selection =
-            if forbidden_tool_used benchmark_case run then 0.0 else required_score
+            if forbidden_tool_used benchmark_case run then 0.0 else expected_score
           in
           let arg_validity = arg_validity_score benchmark_case run in
           let recovery = recovery_score benchmark_case run task_pass in

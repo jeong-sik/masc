@@ -148,7 +148,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "keeper_runtime.toml") "# repo runtime seed\n";
+  write_file (Filename.concat config "runtime.toml") "# repo runtime seed\n";
   config
 
 let write_fake_eio_exe exe_path ~marker =
@@ -376,7 +376,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
       make_fake_eio_exe dir;
       let ignored_dir = Filename.concat dir "ignored" in
       mkdir_p (Filename.concat ignored_dir "config/prompts");
-      write_file (Filename.concat ignored_dir "config/keeper_runtime.toml") "";
+      write_file (Filename.concat ignored_dir "config/runtime.toml") "";
       let bootstrapped_config =
         Filename.concat (canonical_path dir) ".masc/config"
       in
@@ -404,7 +404,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
         (contains_substring captured_default
            ("MASC_CONFIG_DIR=" ^ bootstrapped_config));
       check bool "base path config bootstrapped" true
-        (Sys.file_exists (Filename.concat bootstrapped_config "keeper_runtime.toml"));
+        (Sys.file_exists (Filename.concat bootstrapped_config "runtime.toml"));
       let capture_override = Filename.concat dir "captured-override.txt" in
       let code_override, stdout_override, stderr_override =
         run_script ~cwd:dir script
@@ -459,7 +459,7 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
         (contains_substring captured
            ("MASC_CONFIG_DIR=" ^ bootstrapped_config));
       check bool "repo config copied to base path config" true
-        (Sys.file_exists (Filename.concat bootstrapped_config "keeper_runtime.toml")))
+        (Sys.file_exists (Filename.concat bootstrapped_config "runtime.toml")))
 
 let test_default_base_path_requires_explicit_base_path () =
   with_temp_dir "start-masc-script-no-home-default" (fun dir ->

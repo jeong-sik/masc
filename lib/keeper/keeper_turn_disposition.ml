@@ -78,9 +78,8 @@ let to_wire = function
    A runtime cause maps directly to a non-[Provider_error] arm only
    when the runtime classification fully determines the operator
    action. Stale_turn_timeout_* are operator-equivalent to the
-   "wall-clock timeout" disposition; Tool_required_unsatisfied is
-   operator-equivalent to "required tool use unsatisfied"; the
-   Ambiguous_partial_commit_* pair both indicate post-commit ambiguity.
+   "wall-clock timeout" disposition; the Ambiguous_partial_commit_* pair both
+   indicate post-commit ambiguity.
    All other runtime causes are wrapped so the typed cause is
    preserved for diagnostics. *)
 let of_termination_code (c : Code.t) : t =

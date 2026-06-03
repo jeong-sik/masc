@@ -794,8 +794,6 @@ Keeper가 응답하지 않을 때, `diagnostic.quiet_reason`을 확인:
 | `keeper_supervisor` | sweep Phase 1 (entries 스캔) | in-memory, I/O 없음 |
 | `keeper_supervisor` | sweep Phase 2·3·3.5 (keeper_names 순회) | 메타 파일 읽기 포함 |
 | `keeper_supervisor` | `reconcile_keepalive_keepers` | 메타 파일 읽기 포함 |
-| `keeper_supervisor` | `liveness_recovery_scan` | 레지스트리 스캔 |
-| `keeper_supervisor` | `alive_but_stuck` 스캔 | in-memory |
 
 ### 의도적으로 적용하지 않은 범위
 

@@ -224,7 +224,7 @@ copy_install_smoke() {
   cp "$BINARY" "$installed_bin"
   chmod +x "$installed_bin"
   cp config/tool_policy.toml "$base_path/.masc/config/tool_policy.toml"
-  cat >"$base_path/.masc/config/keeper_runtime.toml" <<'EOF'
+  cat >"$base_path/.masc/config/runtime.toml" <<'EOF'
 [runtime]
 default = "release_evidence.smoke"
 

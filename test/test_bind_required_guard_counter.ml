@@ -1,6 +1,6 @@
 (* #9770: pin canonical metric name + label vocabulary for the
    bind_required guard counter.  The execute path emits this
-   counter whenever an agent calls a bind-required tool without
+   counter whenever an agent calls a bind-gated tool without
    first calling [masc_bind] (or [masc_start]).
 
    Test exercises the counter directly — the guard's surrounding

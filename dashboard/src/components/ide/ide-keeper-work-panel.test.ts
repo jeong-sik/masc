@@ -29,7 +29,7 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).toContain('KEEPER WORK')
     expect(container.textContent).toContain('task-151')
     expect(container.textContent).toContain('Fix agent-code runtime config')
-    expect(container.textContent).toContain('tool_required_unsatisfied')
+    expect(container.textContent).toContain('tool_route_recoverable_failure')
     expect(container.textContent).toContain('inspect_provider_tool_contract')
     expect(container.textContent).toContain('masc_claim_next')
   })
@@ -199,12 +199,12 @@ function keeperFixture(): Keeper {
     trust: {
       needs_attention: true,
       latest_terminal_reason: {
-        code: 'tool_required_unsatisfied',
+        code: 'tool_route_recoverable_failure',
         summary: 'actionable keeper signal was present, but no keeper tools were called',
         next_action: 'inspect_provider_tool_contract',
       },
     },
-    recent_output_preview: 'required tool contract violated',
+    recent_output_preview: 'tool route recoverable failure',
     recent_tool_names: ['masc_claim_next', 'masc_board_list'],
   } as Keeper
 }

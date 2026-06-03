@@ -25,7 +25,6 @@ let stimulus_urgency_to_string = function
 let stimulus_class_to_string = function
   | Keeper_event_queue.Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
-  | Alive_but_stuck_recovery -> "alive_but_stuck_recovery"
   | Stay_silent_recovery -> "stay_silent_recovery"
   | Unsupported _ -> "unsupported"
 ;;
@@ -89,17 +88,6 @@ let consume_single_heartbeat_stimulus
     Log.Keeper.info
       "turn entry: bootstrap stimulus consumed (keeper=%s)"
       meta_after_triage.name;
-    []
-  | Alive_but_stuck_recovery ->
-    Log.Keeper.info
-      "turn entry: alive-but-stuck recovery stimulus consumed post_id=%s \
-       (keeper=%s)"
-      stim.post_id
-      meta_after_triage.name;
-    record_recovery_stimulus_turn_started
-      ~ctx
-      ~keeper_name:meta_after_triage.name
-      stim;
     []
   | Stay_silent_recovery ->
     Log.Keeper.info

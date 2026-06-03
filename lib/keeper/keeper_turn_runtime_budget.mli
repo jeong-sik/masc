@@ -25,11 +25,8 @@ val next_fail_open_runtime_for_turn :
   attempted_runtimes:string list ->
   Agent_sdk.Error.sdk_error ->
   EC.degraded_retry option
-(** Required-tool retries do not fall through to the generic keeper-assignable
-    rotation catalog. They stay on the base runtime, the configured
-    [routes.tool_required] target, or an explicit [fallback_runtime] hint so
-    request-scoped runtime-MCP turns cannot degrade into manual CLI lanes that
-    cannot carry the request-scoped tool policy. *)
+(** Same-turn retries use the generic keeper-assignable rotation catalog plus
+    any explicit [fallback_runtime] hint. *)
 
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 

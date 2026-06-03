@@ -13,9 +13,9 @@ val unexpected_tool_partial_warn_mu : Eio.Mutex.t
 val should_log_unexpected_tool_partial_once :
   keeper_name:string -> unexpected_tool_names:string list -> bool
 
-(** Whether tools are required, optional, or absent for this turn. *)
+(** Whether tools are available or absent for this turn.
+    Tool calls are never mandatory; the visible tool surface is advisory. *)
 type tool_requirement =
-  | Required
   | Optional
   | No_tools
 
@@ -24,9 +24,9 @@ val tool_requirement_of_string : string -> tool_requirement option
 val tool_requirement_to_yojson : tool_requirement -> Yojson.Safe.t
 
 (** Per-turn lane classification.  Closed sum type; the OCaml side
-    pins the alphabet emitted at keeper_run_tools.ml:963-973
-    ({"text_only", "tool_required", "tool_optional", "tool_disabled",
-    "retry"}).  Plain to_string/of_string (no [@@deriving tla] — that
+    pins the alphabet emitted by keeper_run_tools
+    ({"text_only", "tool_optional", "tool_disabled", "retry"}).
+    Plain to_string/of_string (no [@@deriving tla] — that
     derives module-level all_symbols which is already bound to
     [tool_surface_class] below).  A future RFC-0065 spec extension
     can add a TurnLaneSet catalog and lift this to deriving. *)
@@ -37,7 +37,6 @@ type turn_lane =
           never produced by the per-turn lane logic at
           keeper_run_tools.ml:963-973. *)
   | Lane_text_only
-  | Lane_tool_required
   | Lane_tool_optional
   | Lane_tool_disabled
   | Lane_retry

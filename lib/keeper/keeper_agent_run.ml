@@ -596,13 +596,7 @@ let run_turn
                     ?per_provider_timeout_s
                     ())
               in
-              (match
-                 Keeper_agent_run_contract_retry.run_with_single_retry
-                   ~keeper_name:meta.name
-                   ~acc
-                   ~history_messages
-                   ~call_run_named
-               with
+              (match call_run_named ~initial_messages:history_messages with
                | Error e -> Error e
                | Ok result ->
                  let post_turn_t0 = Time_compat.now () in
@@ -741,7 +735,6 @@ let run_turn
                    let tool_contract_status ()
                        : Keeper_execution_receipt.tool_contract_result =
                      Contract_helpers.observed_tool_contract_status
-                       ~missing_visible_required:[]
                        ~had_owned_active_task_at_turn_start
                        ~actual_keeper_tool_names:progress_keeper_tool_names
                    in

@@ -4,7 +4,7 @@ module StringSet = Set_util.StringSet
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
 let tool_policy_toml_filename = "tool_policy.toml"
-let keeper_runtime_toml_filename = "runtime.toml"
+let runtime_toml_filename = "runtime.toml"
 
 type source =
   | Env
@@ -185,13 +185,13 @@ let to_json (resolution : resolution) =
     ]
 
 let config_signature_exists config_dir =
-  let keeper_runtime_toml = Filename.concat config_dir keeper_runtime_toml_filename in
+  let runtime_toml = Filename.concat config_dir runtime_toml_filename in
   let tool_policy_toml = Filename.concat config_dir tool_policy_toml_filename in
   let prompts = Filename.concat config_dir "prompts" in
   let keepers = Filename.concat config_dir "keepers" in
   let personas = Filename.concat config_dir "personas" in
   existing_dir config_dir
-  && (existing_file keeper_runtime_toml
+  && (existing_file runtime_toml
      || existing_file tool_policy_toml
      || existing_dir prompts || existing_dir keepers
      || existing_dir personas)

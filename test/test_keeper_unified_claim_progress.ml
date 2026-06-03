@@ -34,7 +34,6 @@ let test_claim_tool_classification_covers_supported_claim_tools () =
 let test_claim_contract_result_counts_initial_claim_as_execution () =
   let result ?(had_owned_active_task_at_turn_start = false) tools =
     KAR.tool_contract_result_for_observed_tools
-      ~missing_visible_required:[]
       ~had_owned_active_task_at_turn_start
       ~actual_keeper_tool_names:tools
     |> Masc.Keeper_execution_receipt.tool_contract_result_to_string

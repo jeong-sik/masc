@@ -1,8 +1,6 @@
 (** Pin the {!Env_config_keeper.KeeperPollIntervals} default table and
-    env override behaviour. Mirrors the pattern used for
-    {!Env_config_keeper.KeeperWatchdog} after #10740 — hardcoded
-    timing inside fiber loops becomes operator-visible config when
-    extracted into a typed module.
+    env override behaviour. Hardcoded timing inside fiber loops becomes
+    operator-visible config when extracted into a typed module.
 
     Three properties:
 

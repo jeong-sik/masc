@@ -209,7 +209,6 @@ let all_contract_statuses
     : Keeper_contract_classifier.contract_status list =
   [
     Tool_surface_mismatch { missing = [ "x" ] };
-    Missing_required_tool_use;
     Claim_only_after_owned_task;
     Needs_execution_progress;
     Passive_only;

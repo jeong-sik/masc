@@ -336,10 +336,6 @@ let register
      per breach window). Labeled by name."
     `Counter;
   add
-    Keeper_metrics.(to_string StaleWatchdogTickFailures)
-    "Total stale watchdog tick failures suppressed during poll. Labeled by keeper."
-    `Counter;
-  add
     Keeper_metrics.(to_string SkipIdleWakeResumed)
     "Total cycles where an external wakeup_keeper / board signal cut a Skip_idle backoff \
      sleep short and the heartbeat cycle was resumed (cycle_continues_after_wake -> \
@@ -361,7 +357,7 @@ let register
   add
     Keeper_metrics.(to_string StimulusConsumed)
     "Total stimuli consumed at turn entry, classified by stimulus_class. Labels: keeper, \
-     class (board_signal|bootstrap|alive_but_stuck_recovery|unsupported). Pairs with \
+     class (board_signal|bootstrap|unsupported). Pairs with \
      masc_keeper_unsupported_stimulus_total for unsupported-only drill-down with payload \
      prefix."
     `Counter;
@@ -417,15 +413,5 @@ let register
     Keeper_metrics.(to_string RestartOutcomes)
     "Total supervisor restart outcomes. Labeled by keeper and bounded \
      outcome=started|meta_unavailable."
-    `Counter;
-  add
-    Keeper_metrics.(to_string LivenessRecoveryAttempts)
-    "#12801 Total Liveness Recovery Supervisor attempts to auto-recover Dead keepers \
-     whose root cause has cleared. Labeled by keeper."
-    `Counter;
-  add
-    Keeper_metrics.(to_string LivenessRecoveryOutcomes)
-    "#12801 Total Liveness Recovery Supervisor outcomes. Labeled by keeper and \
-     outcome=started|not_running|meta_missing|meta_read_failed|meta_write_failed."
     `Counter;
 ;;

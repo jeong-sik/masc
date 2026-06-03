@@ -26,6 +26,7 @@ now contract checked.
 | keeper turn success rate | `masc_keeper_turn_completed_total`, `masc_keeper_turn_scheduled_total` | `GoalLoopKeeperTurnSuccessRateCritical` |
 | keeper semaphore wait p99 | `masc_keeper_semaphore_wait_seconds_bucket` | `GoalLoopKeeperSemaphoreWaitP99Critical` |
 | starvation rate | `masc_keeper_semaphore_wait_timeout_total`, `masc_keeper_turn_scheduled_total` | `GoalLoopKeeperStarvationRateCritical` |
+| keeper zombie loop | `masc_keeper_zombie_loop_detected_total` | `GoalLoopKeeperZombieLoopCritical` |
 | provider health probe skipped | `masc_provider_health_probe_skipped_total` | `GoalLoopProviderHealthProbeSkippedWarning` |
 | provider actual health status | `masc_provider_actual_health_status` | `GoalLoopProviderActualHealthUnhealthyCritical` |
 | pricing catalog miss | `masc_pricing_catalog_miss_total` | `GoalLoopPricingCatalogMissCritical` |

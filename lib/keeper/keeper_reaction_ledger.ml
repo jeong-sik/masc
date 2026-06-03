@@ -6,7 +6,6 @@ type cursor =
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | Alive_but_stuck_recovery
   | Stay_silent_recovery
   | Unknown of string
 
@@ -24,7 +23,6 @@ let schema = "keeper.reaction_ledger.v1"
 let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
-  | Alive_but_stuck_recovery -> "alive_but_stuck_recovery"
   | Stay_silent_recovery -> "stay_silent_recovery"
   | Unknown value -> value
 ;;
@@ -86,7 +84,6 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   match Keeper_event_queue.classify stimulus with
   | Board_signal -> Board_signal
   | Bootstrap -> Bootstrap
-  | Alive_but_stuck_recovery -> Alive_but_stuck_recovery
   | Stay_silent_recovery -> Stay_silent_recovery
   | Unsupported prefix -> Unknown prefix
 ;;
@@ -146,11 +143,11 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
   let board_updated_at =
     match kind with
     | Board_signal -> payload_float_field "updated_at_unix" stimulus.payload
-    | Bootstrap | Alive_but_stuck_recovery | Stay_silent_recovery | Unknown _ -> None
+    | Bootstrap | Stay_silent_recovery | Unknown _ -> None
   in
   let parse_error =
     match kind with
-    | Board_signal | Alive_but_stuck_recovery | Stay_silent_recovery ->
+    | Board_signal | Stay_silent_recovery ->
       payload_parse_error stimulus.payload
     | Bootstrap | Unknown _ -> None
   in
@@ -493,7 +490,6 @@ let summarize_rows ~keeper_name ~limit rows =
   let note_stimulus_kind = function
     | Some "board_signal"
     | Some "bootstrap"
-    | Some "alive_but_stuck_recovery"
     | Some "stay_silent_recovery" -> ()
     | Some _ | None -> incr unsupported_stimulus_count
   in

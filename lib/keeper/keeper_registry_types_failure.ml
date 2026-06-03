@@ -187,7 +187,7 @@ let failure_reason_cohort_key = function
   | None -> "unknown"
 ;;
 
-let stale_watchdog_failure_reason ~prior ~kill_class =
+let stale_kill_failure_reason ~prior ~kill_class =
   match prior with
   | Some
       ( Provider_timeout_loop _

@@ -121,13 +121,13 @@ describe('normalizeExecutionQueueItem', () => {
       target_type: 'keeper',
       target_id: 'sangsu',
       runtime_blocker_class: 'no_tool_capable_provider',
-      runtime_blocker_summary: 'no provider can satisfy required tools',
+      runtime_blocker_summary: 'no provider can satisfy tool surface',
       attention_reason: 'tool_contract_failed',
     })).toMatchObject({
       stop_cause: {
         code: 'no_tool_capable_provider',
         source: 'runtime_blocker_class',
-        summary: 'no provider can satisfy required tools',
+        summary: 'no provider can satisfy tool surface',
       },
     })
   })

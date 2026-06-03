@@ -319,7 +319,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
        config
        ~title:"Needs execution tools"
        ~priority:1
-       ~description:"exercise runtime MCP required tool logging");
+       ~description:"exercise runtime MCP tool logging");
   let meta =
     make_keeper_meta
       ~current_task_id:"task-001"
@@ -439,9 +439,9 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         | `Assoc fields -> not (List.mem_assoc name fields)
         | _ -> false
       in
-      check bool "runtime contract omits required tools" true
+      check bool "runtime contract omits legacy required_tools" true
         (omits_field "required_tools");
-      check bool "runtime contract omits missing required tools" true
+      check bool "runtime contract omits legacy missing_required_tools" true
         (omits_field "missing_required_tools");
       check bool "runtime contract has runtime_profile field" true
         (match runtime_contract |> U.member "runtime_profile" with

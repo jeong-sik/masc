@@ -384,8 +384,6 @@ let handle ~(config : Workspace.config) args : tool_result =
   else
     let limit = get_int args "limit" 100 |> max 0 |> min 500 in
     let include_ok = get_bool args "include_ok" true in
-    let repair = get_bool args "repair" false in
-    let dry_run_repair = get_bool args "dry_run_repair" false in
     let audited_items = names |> take limit |> List.map (item ~config) in
     let returned_items =
       if include_ok then audited_items
@@ -396,13 +394,6 @@ let handle ~(config : Workspace.config) args : tool_result =
             | `Bool true -> false
             | _ -> true)
           audited_items
-    in
-    let repair_result =
-      if repair || dry_run_repair then
-        Some
-          (if dry_run_repair then Keeper_goal_repair.dry_run config
-           else Keeper_goal_repair.run config)
-      else None
     in
     let resolution = Config_dir_resolver.resolve () in
     let roots =
@@ -427,11 +418,4 @@ let handle ~(config : Workspace.config) args : tool_result =
         ("items", `List returned_items);
       ]
     in
-    let response_fields =
-      match repair_result with
-      | Some r ->
-          ("goal_repair", Keeper_goal_repair.repair_result_to_yojson r)
-          :: base_fields
-      | None -> base_fields
-    in
-    tool_result_ok (ok_response response_fields)
+    tool_result_ok (ok_response base_fields)

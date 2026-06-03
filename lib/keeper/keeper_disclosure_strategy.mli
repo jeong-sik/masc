@@ -54,7 +54,7 @@ val to_string : t -> string
 (** [of_toml ~strategy ~full_names ~demote_on_error] constructs a [t]
     from raw TOML fields.  Returns [Error msg] when [strategy] is
     unknown or when [Hybrid] is requested without [full_names].
-    Used by [keeper_runtime_toml] (follow-up activation PR) when
+    Used by [runtime_toml] (follow-up activation PR) when
     parsing the [[disclosure]] section. *)
 val of_toml
   :  strategy:string

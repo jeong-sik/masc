@@ -507,30 +507,6 @@ let start_supervisor_sweep ctx =
                ();
              Log.Keeper.error "supervisor sweep failed: %s"
                (Printexc.to_string exn));
-          (* #12801 Liveness Recovery Supervisor: attempt to auto-recover Dead
-             keepers whose root cause has cleared.  Runs after sweep_and_recover
-             so any newly-crashed keepers are processed by sweep first. *)
-          (try Keeper_supervisor.liveness_recovery_scan ctx
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Prometheus.inc_counter
-               Keeper_metrics.(to_string SupervisorSweepFailures)
-               ~labels:[("origin", "liveness_recovery")]
-               ();
-             Log.Keeper.error "liveness recovery scan failed: %s"
-               (Printexc.to_string exn));
-          (* #12838 Alive-but-stuck detector: emit a Prometheus counter
-             (and a warn log) for keepers that are alive in every other
-             health metric but have a frozen [proactive_rt.last_ts] while
-             autonomous turns keep advancing.  Running keepers also receive
-             a deduped Event Layer recovery wakeup; no restart is triggered. *)
-          (try Keeper_supervisor.alive_but_stuck_scan ctx
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Prometheus.inc_counter
-               Keeper_metrics.(to_string SupervisorSweepFailures)
-               ~labels:[("origin", "alive_but_stuck")]
-               ();
-             Log.Keeper.error "alive-but-stuck scan failed: %s"
-               (Printexc.to_string exn));
           (* TOML hot-reload: re-sync declarative fields for running keepers.
              Runs after sweep_and_recover so TOML edits take effect within
              one sweep cycle (~30s) without server restart. *)

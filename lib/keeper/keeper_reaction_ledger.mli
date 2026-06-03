@@ -13,7 +13,6 @@ type cursor =
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | Alive_but_stuck_recovery
   | Stay_silent_recovery
   | Unknown of string
 

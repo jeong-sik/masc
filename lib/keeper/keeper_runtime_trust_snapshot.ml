@@ -28,11 +28,8 @@ let terminal_reason_from_receipt receipt =
   in
   let receipt_requires_tool_attention =
     match operator_disposition, operator_disposition_reason, tool_contract_result with
-    | Some "pause_human", Some "tool_required_unsatisfied", _
-    | _, Some "tool_required_unsatisfied", _
     | _, Some "tool_route_recoverable_failure", _
     | _, _, Some "needs_execution_progress"
-    | _, _, Some "missing_required_tool_use"
     | _, _, Some "tool_surface_mismatch"
     | _, _, Some "no_tool_capable_provider"
     | _, _, Some "passive_only"
@@ -46,13 +43,13 @@ let terminal_reason_from_receipt receipt =
                        || String.equal code "success") ->
       Some
         (Keeper_turn_terminal.of_code ~source:"execution_receipt"
-           "required_tool_use_unsatisfied")
+           "tool_contract_unsatisfied")
   | Some code ->
       Some (Keeper_turn_terminal.of_code ~source:"execution_receipt" code)
   | None when receipt_requires_tool_attention ->
       Some
         (Keeper_turn_terminal.of_code ~source:"execution_receipt"
-           "required_tool_use_unsatisfied")
+           "tool_contract_unsatisfied")
   | None -> None
 
 (* JSON-deserialization boundary: maps a runtime_blocker_class wire
@@ -66,7 +63,7 @@ let terminal_reason_from_receipt receipt =
    "provider_error" literal. *)
 let disposition_of_runtime_blocker_class raw_blocker_class =
   match raw_blocker_class with
-  | "completion_contract_violation" | "tool_required_unsatisfied" ->
+  | "completion_contract_violation" ->
       Keeper_turn_disposition.Provider_error (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
   | "turn_timeout"
   | "turn_timeout_after_queue_wait"

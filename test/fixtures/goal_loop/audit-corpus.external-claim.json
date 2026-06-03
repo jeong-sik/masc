@@ -18,7 +18,7 @@
       "sha256": "b63b928da93d952b822ef50f62551481a777b6d1b38773b488126d24ad9413bb",
       "line_count": 606,
       "line_refs": [4, 9, 331, 334, 335, 336, 337, 340, 348, 352, 359, 382, 402, 529, 531, 589],
-      "claim": "Claims 206 baseline audit findings plus 8 live-log NEW_FINDING items and itemizes 19 finding IDs, but does not contain the full 206-row corpus."
+      "claim": "Claims 206 baseline audit findings plus 8 live-log NEW_FINDING items and itemizes 18 finding IDs, but does not provide complete row-level evidence."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
@@ -39,7 +39,7 @@
       "sha256": "104fbd66def4a27f302091fe2dba527a41da57b61d9990cbe73c465b153640fa",
       "line_count": 1935,
       "line_refs": [3, 1934],
-      "claim": "Claims the roadmap is based on 206 audit findings, but does not contain the full 206-row corpus."
+      "claim": "Claims the roadmap is based on 206 audit findings, but does not provide complete row-level evidence."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
@@ -269,15 +269,6 @@
       "actionability": "actionable",
       "decision_id": "D-EMERGENCY-1",
       "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [353, 382]}
-    },
-    {
-      "finding_id": "NF-3",
-      "title": "alive_but_stuck_no_recovery",
-      "severity": "critical",
-      "patterns": ["alive_but_stuck"],
-      "actionability": "actionable",
-      "decision_id": null,
-      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [354]}
     },
     {
       "finding_id": "NF-4",

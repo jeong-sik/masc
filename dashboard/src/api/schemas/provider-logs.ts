@@ -1,7 +1,7 @@
 // Provider logs schema — schema-at-boundary for
 // `GET /api/v1/dashboard/provider-logs` and `/provider-logs/tail`.
 //
-// Paths come from keeper_runtime.toml only. The tail endpoint never accepts an
+// Paths come from runtime.toml only. The tail endpoint never accepts an
 // arbitrary path from the browser.
 
 import {

@@ -30,7 +30,7 @@ val attach_to_details : Yojson.Safe.t -> t -> Yojson.Safe.t
 val find_in_json : Yojson.Safe.t -> t option
 
 val tool_host_failure :
-  agent_name:string ->
+  agent_name:string option ->
   client_name:string ->
   tool_name:string ->
   transport:string ->

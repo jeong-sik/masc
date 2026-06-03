@@ -16,7 +16,12 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 
 type report = {
-  agent_name : string;
+  agent_name : string option;
+      (** [None] when no agent is involved — the client called the tool
+          directly without keeper mediation. Previously this silently
+          collapsed to [client_name] via [Option.value ~default:],
+          making direct calls indistinguishable from keeper-mediated
+          calls downstream. *)
   client_name : string;
   tool_name : string;
   transport : string;
@@ -69,10 +74,10 @@ let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
             Option.bind (stringish_member_opt json "agent_name") String_util.trim_to_option
           in
           let fallback_agent = Option.bind fallback_agent String_util.trim_to_option in
-          let agent_name =
-            match explicit_agent with
-            | Some value -> value
-            | None -> Option.value ~default:client_name fallback_agent
+          (* No silent collapse to client_name — None means "no agent involved". *)
+          let agent_name = match explicit_agent with
+            | Some _ as v -> v
+            | None -> fallback_agent
           in
           let transport =
             Option.value ~default:"mcp_http"
@@ -136,7 +141,11 @@ let record ?fs config (report : report) =
   Log.client_tool_host_error
     ~module_name:Failure_envelope.tool_host_log_module_name ~details
     (ring_message report);
-  Audit_log.log_client_tool_host_failure config ~agent_id:report.agent_name
+  Audit_log.log_client_tool_host_failure config
+    ~agent_id:
+      (* Audit requires attribution; when no agent is involved the client
+         is the actor. This is an explicit choice, not a silent collapse. *)
+      (Option.value ~default:report.client_name report.agent_name)
     ~client_name:report.client_name ~tool_name:report.tool_name
     ~transport:report.transport ~message:report.message ?phase:report.phase
     ?request_id:report.request_id ?session_id:report.session_id

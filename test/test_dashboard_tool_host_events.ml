@@ -29,7 +29,7 @@ let test_report_of_yojson_defaults () =
   match Dashboard_tool_host_events.report_of_yojson ~fallback_agent:"agent_code" json with
   | Error err -> fail err
   | Ok report ->
-      check string "agent defaulted from fallback" "agent_code" report.agent_name;
+      check (option string) "agent defaulted from fallback" (Some "agent_code") report.agent_name;
       check string "client defaulted from fallback" "agent_code" report.client_name;
       check string "transport default" "mcp_http" report.transport;
       check (option string) "phase missing" None report.phase
@@ -65,7 +65,7 @@ let test_record_writes_audit_ring_and_telemetry () =
       let config = Workspace.default_config base_dir in
       let report =
         {
-          Dashboard_tool_host_events.agent_name = "agent_code";
+          Dashboard_tool_host_events.agent_name = Some "agent_code";
           client_name = "agent_code";
           tool_name = "masc_keeper_msg";
           transport = "mcp_http";
@@ -138,7 +138,7 @@ let test_generic_failure_envelope_is_retryable_without_operator_action () =
   let details =
     Dashboard_tool_host_events.details_json
       {
-        agent_name = "agent_code";
+        agent_name = Some "agent_code";
         client_name = "agent_code";
         tool_name = "masc_keeper_msg";
         transport = "mcp_http";
@@ -162,7 +162,7 @@ let test_blank_entity_id_is_normalized_out () =
   let details =
     Dashboard_tool_host_events.details_json
       {
-        agent_name = "agent_code";
+        agent_name = Some "agent_code";
         client_name = "agent_code";
         tool_name = "masc_keeper_msg";
         transport = "mcp_http";

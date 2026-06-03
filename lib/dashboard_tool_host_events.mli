@@ -20,7 +20,7 @@
     rows, so a future "let's rename agent_name to actor_name" change
     must touch this contract explicitly. *)
 type report = {
-  agent_name : string;
+  agent_name : string option;
   client_name : string;
   tool_name : string;
   transport : string;
@@ -41,10 +41,9 @@ val report_of_yojson :
 
     Optional fields default with operator-visible literals:
     - [client_name]: [fallback_agent] (trimmed) or "tool-host"
-    - [agent_name]: explicit [agent_name] field, then [fallback_agent],
-      then [client_name].  The three-level fallback is deliberate so a
-      single-keeper deployment never reports an empty agent_name in
-      audit logs.
+    - [agent_name]: explicit [agent_name] field, then [fallback_agent].
+      [None] when no agent is involved (direct client tool call without
+      keeper mediation). Previously this silently collapsed to [client_name].
     - [transport]: "mcp_http"
 
     Returns [Error] for non-object payloads ("request body must be a

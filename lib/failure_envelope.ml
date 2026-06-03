@@ -77,7 +77,7 @@ let summary_for_tool_host ~client_name ~tool_name ~transport = function
         transport
   | _ -> Printf.sprintf "%s %s failed on %s" client_name tool_name transport
 
-let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
+let tool_host_failure ~agent_name:(agent_name : string option) ~client_name ~tool_name ~transport ?phase
     ?request_id ?session_id ?trace_id ?timeout_ms ~message () =
   let cause_code = tool_host_cause_code ?timeout_ms message in
   {
@@ -98,7 +98,7 @@ let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
         (List.filter_map
            Fun.id
            [
-             Some ("agent_name", `String agent_name);
+             Option.map (fun value -> ("agent_name", `String value)) agent_name;
              Some ("client_name", `String client_name);
              Some ("tool_name", `String tool_name);
              Some ("transport", `String transport);

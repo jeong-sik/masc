@@ -1,7 +1,8 @@
-(** Keeper_tool_policy — tool access control and allowed-tool resolution.
+(** Keeper_tool_policy — keeper tool surface and denylist resolution.
 
     Group definitions are loaded from [config/tool_policy.toml] at startup
-    via {!Keeper_tool_policy_config}.  See that module for the config format.
+    via {!Keeper_tool_policy_config} for legacy/recovery surfaces. They do not
+    form the runtime execution allowlist for descriptor-backed keeper tools.
 
     Consumes [Keeper_tool_registry] for candidate aggregation and core tools.
     Produces the access-policy types and functions used by the dispatch layer. *)
@@ -228,15 +229,26 @@ let keeper_maintenance_only_tools =
 let is_keeper_maintenance_only_tool name =
   List.mem name keeper_maintenance_only_tools
 
-(* ── Candidate aggregation (config-driven) ────────────────────── *)
+(* ── Candidate aggregation (descriptor/registry-driven) ───────── *)
+
+let tool_schema_names schemas =
+  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas
+
+let descriptor_candidate_tool_names () =
+  Keeper_tool_descriptor.all_descriptors ()
+  |> List.concat_map (fun descriptor ->
+       descriptor.Keeper_tool_descriptor.public_name
+       :: Keeper_tool_descriptor.internal_names descriptor)
+  |> dedupe_tool_names
 
 let keeper_base_candidate_tool_names () =
-  let config_tools =
-    with_policy_config_or ~accessor:"keeper_base_candidate_tool_names"
-      ~default:[] Keeper_tool_policy_config.all_group_tools
-  in
+  (* Candidate existence is registry/descriptor driven. [tool_access] and
+     tool_policy.toml groups must not be a second execution allowlist for
+     keeper-owned tools. *)
   dedupe_tool_names
-    ( config_tools
+    ( effective_core_tools ()
+    @ tool_schema_names Tool_shard.all_keeper_tool_schemas
+    @ descriptor_candidate_tool_names ()
     @ keeper_internal_candidate_tool_names
     @ injected_masc_tool_names () )
   |> List.filter (fun name -> not (is_keeper_maintenance_only_tool name))
@@ -290,9 +302,10 @@ let tool_name_set names =
   List.fold_left (fun acc name -> StringSet.add name acc) StringSet.empty names
 
 let tool_access_lookup_of_meta (meta : keeper_meta) =
-  (* keeper_base_candidate_tool_names pulls [groups.voice] from
-     tool_policy.toml via all_group_tools — voice tools are present iff
-     the keeper's allowlist includes the voice group. No per-keeper gate. *)
+  (* [allow_set] is retained for compatibility/telemetry consumers that still
+     inspect the field. Runtime execution uses candidate_set - deny_set so
+     empty or narrow [tool_access] cannot hide descriptor-backed board/voice
+     tools. *)
   let base = keeper_base_candidate_tool_names () in
   let candidate_names = dedupe_tool_names base in
   let candidate_set = tool_name_set candidate_names in
@@ -312,7 +325,6 @@ let tool_access_lookup_of_meta (meta : keeper_meta) =
 
 let filter_by_access ~(lookup : tool_access_lookup) (name : string) : bool =
   StringSet.mem name lookup.candidate_set
-  && StringSet.mem name lookup.allow_set
   && not (StringSet.mem name lookup.deny_set)
 
 (** Universe check: candidate minus denied, ignoring policy allowlist.
@@ -321,7 +333,8 @@ let filter_by_universe ~(lookup : tool_access_lookup) (name : string) : bool =
   StringSet.mem name lookup.candidate_set
   && not (StringSet.mem name lookup.deny_set)
 
-(** Execution gate: core tools bypass policy, others require policy allowlist.
+(** Execution gate: core tools bypass candidate_set; all other tools must be
+    registered candidates and not denied.
     All tools must exist in candidate_set — rejects hallucinated tool names. *)
 let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
   if Keeper_tool_registry.is_core_always_tool name then
@@ -330,7 +343,7 @@ let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
   else if not (StringSet.mem name lookup.candidate_set) then
     false
   else
-    filter_by_access ~lookup name
+    filter_by_universe ~lookup name
 
 (* ── Public query functions ───────────────────────────────────── *)
 
@@ -428,19 +441,14 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
   in
   dedupe_tool_names (from_candidates @ from_core)
 
-(** Scoped tool universe: explicit [tool_access] + core_always - denied.
-    Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
-    to improve signal-to-noise ratio: a narrowly scoped keeper indexes fewer
-    tools instead of the full universe.  Execution gate still uses the full universe so
-    externally-granted tools (tool_overlay) remain callable.
-    See #4637 (Samchon harness: absence > prohibition). *)
+(** Search scope: registered candidates + core_always - denied.
+    Kept separate from [keeper_universe_tool_names] for call-site clarity;
+    it intentionally does not treat [tool_access] as an execution allowlist. *)
 let keeper_tool_search_scope (meta : keeper_meta) : string list =
   let lookup = tool_access_lookup_of_meta meta in
   let from_allowlist =
-    meta.tool_access
-    |> List.filter (fun name ->
-         StringSet.mem name lookup.candidate_set
-         && not (StringSet.mem name lookup.deny_set))
+    lookup.candidate_names
+    |> List.filter (fun name -> not (StringSet.mem name lookup.deny_set))
   in
   let from_core =
     Keeper_tool_registry.core_always_tools
@@ -466,7 +474,7 @@ let filter_schemas_by_names (names : string list)
   |> dedupe_tool_schemas
 
 (** Scoped model tool schemas for BM25 indexing.
-    Returns schemas only for the tool_access-scoped universe. *)
+    Returns schemas for the active descriptor/registry surface minus denied tools. *)
 let keeper_model_tool_schemas (meta : keeper_meta) : Masc_domain.tool_schema list =
   let scoped = keeper_tool_search_scope meta in
   all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
@@ -485,9 +493,9 @@ let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
     let count = List.length result in
     if count > Keeper_config.tool_policy_count_warn_threshold then
       Log.Keeper.warn
-        "tool policy allows %d schemas (~%dKB). Progressive disclosure \
+        "keeper tool surface exposes %d schemas (~%dKB). Progressive disclosure \
          limits actual LLM context to ~20-40, but universe build cost scales \
-         with policy size. Consider a narrower tool_access list."
+         with surface size. Consider tightening denylist/visibility settings."
         count (count * 470 / 1024);
     result
 

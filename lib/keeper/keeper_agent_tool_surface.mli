@@ -147,7 +147,7 @@ val satisfying_tools_for_turn :
   turn_affordances:string list -> allowed_tool_names:string list -> string list
 
 (** Specific tools that should be force-included/preferred for an
-    affordance, when the keeper policy exposes them. *)
+    affordance, when the active runtime schema exposes them. *)
 val preferred_tool_names_for_turn_affordances : string list -> string list
 
 val has_turn_affordance : turn_affordance -> string list -> bool

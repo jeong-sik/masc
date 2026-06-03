@@ -300,7 +300,7 @@ let handle_tool_execute_typed
             ~deterministic_reason:
               Keeper_tool_deterministic_error.Destructive_operation_blocked
             ~error:"destructive_operation_blocked"
-            ~reason:"This typed command is destructive and is blocked for all tool_access lists."
+            ~reason:"This typed command is destructive and is blocked for all Execute surfaces."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
             ()
         else if (not write_enabled)

@@ -181,6 +181,23 @@ let risk_of_typed : Tool_name.t -> risk_level = function
   | Tool_name.Masc m -> risk_of_masc m
 ;;
 
+let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
+  let open Keeper_tool_name in
+  match k with
+  | Execute -> Critical
+  | Board_comment | Board_comment_vote | Board_curation_read | Board_curation_submit
+  | Board_get | Board_list | Board_post | Board_search | Board_stats
+  | Board_sub_board_get | Board_sub_board_list | Board_vote | Broadcast
+  | Context_status | Handoff | Library_read | Library_search | Memory_search
+  | Memory_write | Search_files | Stay_silent | Tasks_audit | Tasks_list | Time_now
+  | Tool_search | Tools_list | Voice_agent | Voice_listen | Voice_session_end
+  | Voice_session_start | Voice_sessions | Voice_speak -> Low
+  | Board_sub_board_create | Board_sub_board_update | Task_claim | Task_create | Task_done
+  | Task_submit_for_verification -> Medium
+  | Fs_edit | Fs_write | Fs_read | Ide_annotate -> High
+  | Board_sub_board_delete | Task_force_done | Task_force_release -> Critical
+;;
+
 (* Non-typed names absent from [Tool_name] keep an explicit override; the
    substring path would misclassify them (e.g. "query_skill" contains
    "kill" -> Critical). Empty = all known names are in [Tool_name]. *)
@@ -341,10 +358,16 @@ let classify_with_payload ~tool_name ~input =
       then Some Critical
       else None
 
+let pre_metadata_risk_overrides : (string * risk_level) list =
+  [ "masc_bind", Medium; "masc_unbind", Medium ]
+
 let baseline_risk ~tool_name ~input =
-  match classify_with_metadata ~tool_name with
+  match List.assoc_opt tool_name pre_metadata_risk_overrides with
   | Some level -> level
   | None ->
+    match classify_with_metadata ~tool_name with
+    | Some level -> level
+    | None ->
       if String.equal tool_name "masc_goal_transition" then
         goal_transition_risk input
       else if
@@ -359,11 +382,14 @@ let baseline_risk ~tool_name ~input =
         match Tool_name.of_string tool_name with
         | Some typed -> risk_of_typed typed
         | None -> (
-            (* not a registered Tool_name: explicit residual override,
-               else substring fallback (defense for unknown/typo names) *)
-            match List.assoc_opt tool_name residual_risk_overrides with
-            | Some level -> level
-            | None -> classify_name tool_name))
+            match Keeper_tool_name.of_string tool_name with
+            | Some typed -> risk_of_keeper typed
+            | None -> (
+                (* not a registered Tool_name: explicit residual override,
+                   else substring fallback (defense for unknown/typo names) *)
+                match List.assoc_opt tool_name residual_risk_overrides with
+                | Some level -> level
+                | None -> classify_name tool_name)))
 
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with

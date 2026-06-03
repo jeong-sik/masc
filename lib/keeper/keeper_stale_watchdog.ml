@@ -154,14 +154,19 @@ let active_turn_stale_status
     ~active_turn_timeout_sec
     ~progress_timeout_sec
     ~fiber_age
-    ~startup_grace =
+    ~startup_grace
+    ~suppress_for_pending_approval =
   let active_seconds = now -. started_at in
   let since_progress_seconds = now -. last_progress_at in
   let outside_startup_grace = fiber_age >= startup_grace in
   { active_total_stale =
-      active_seconds > active_turn_timeout_sec && outside_startup_grace
+      (not suppress_for_pending_approval)
+      && active_seconds > active_turn_timeout_sec
+      && outside_startup_grace
   ; progress_stale =
-      since_progress_seconds > progress_timeout_sec && outside_startup_grace
+      (not suppress_for_pending_approval)
+      && since_progress_seconds > progress_timeout_sec
+      && outside_startup_grace
   ; active_seconds
   ; since_progress_seconds
   }
@@ -444,6 +449,9 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
              in
              let progress_timeout = progress_timeout_sec () in
              let active_slot_holder_age = slot_holder_age ~now meta.name in
+             let approval_pending =
+               Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name
+             in
              let idle_stale, active_total_stale, progress_stale, in_turn_age,
                  since_progress_age, last_progress_kind, idle_skip_suppressed =
                match entry.current_turn_observation with
@@ -457,6 +465,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                      ~progress_timeout_sec:progress_timeout
                      ~fiber_age
                      ~startup_grace
+                     ~suppress_for_pending_approval:approval_pending
                  in
                 ( false
                 , status.active_total_stale
@@ -513,7 +522,10 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  ~started_at:entry.started_at
                  ~last_completed_turn_ended_at
              in
-             let stale = idle_stale || in_turn_stale || failure_loop in
+             let stale =
+               (not approval_pending)
+               && (idle_stale || in_turn_stale || failure_loop)
+             in
              (* The tick line is a sampled state snapshot. Stale termination
                 and broadcasts below remain ERROR, so INFO does not need every
                 intermediate heartbeat/noop snapshot. *)

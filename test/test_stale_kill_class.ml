@@ -249,6 +249,7 @@ let test_active_turn_progress_stale_inside_outer_budget () =
       ~progress_timeout_sec:300.0
       ~fiber_age:500.0
       ~startup_grace:360.0
+      ~suppress_for_pending_approval:false
   in
   Alcotest.(check bool)
     "active turn is below the outer wall"
@@ -269,6 +270,7 @@ let test_active_turn_progress_stale_respects_grace () =
       ~progress_timeout_sec:300.0
       ~fiber_age:120.0
       ~startup_grace:360.0
+      ~suppress_for_pending_approval:false
   in
   Alcotest.(check bool)
     "startup grace suppresses total stale"
@@ -276,6 +278,27 @@ let test_active_turn_progress_stale_respects_grace () =
     status.active_total_stale;
   Alcotest.(check bool)
     "startup grace suppresses progress stale"
+    false
+    status.progress_stale
+
+let test_active_turn_pending_approval_suppresses_stale () =
+  let status =
+    SW.active_turn_stale_status_for_test
+      ~now:701.0
+      ~started_at:0.0
+      ~last_progress_at:100.0
+      ~active_turn_timeout_sec:600.0
+      ~progress_timeout_sec:300.0
+      ~fiber_age:700.0
+      ~startup_grace:360.0
+      ~suppress_for_pending_approval:true
+  in
+  Alcotest.(check bool)
+    "pending approval suppresses active-total stale"
+    false
+    status.active_total_stale;
+  Alcotest.(check bool)
+    "pending approval suppresses progress stale"
     false
     status.progress_stale
 
@@ -465,6 +488,8 @@ let () =
             test_active_turn_progress_stale_inside_outer_budget;
           Alcotest.test_case "progress stale respects startup grace" `Quick
             test_active_turn_progress_stale_respects_grace;
+          Alcotest.test_case "pending approval suppresses stale" `Quick
+            test_active_turn_pending_approval_suppresses_stale;
         ] );
       ( "missing_registry",
         [

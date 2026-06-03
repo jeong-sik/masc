@@ -113,6 +113,59 @@ let actionable_path_error
 
 let file_not_found_prefix = "File not found:"
 
+let dirname_opt path =
+  let trimmed = String.trim path in
+  if trimmed = ""
+  then None
+  else (
+    match String.rindex_opt trimmed '/' with
+    | None -> Some "."
+    | Some 0 -> Some "/"
+    | Some idx -> Some (String.sub trimmed 0 idx))
+;;
+
+let split_repo_relative raw =
+  match String.split_on_char '/' raw with
+  | "repos" :: repo :: rest when repo <> "" ->
+    let rel = String.concat "/" rest in
+    Some (repo, rel)
+  | _ -> None
+;;
+
+let missing_file_recovery_examples ~(raw_path : string option) =
+  match raw_path with
+  | None -> `Assoc []
+  | Some raw ->
+    let parent = dirname_opt raw |> Option.value ~default:"." in
+    let grep_filename =
+      Filename.basename raw
+      |> fun name ->
+      `Assoc
+        [ "tool", `String "Grep"
+        ; "pattern", `String name
+        ; "path", `String parent
+        ]
+    in
+    let list_parent =
+      match split_repo_relative raw with
+      | Some (repo, rel) ->
+        let repo_parent = dirname_opt rel |> Option.value ~default:"." in
+        `Assoc
+          [ "tool", `String "Execute"
+          ; "cwd", `String ("repos/" ^ repo)
+          ; "executable", `String "ls"
+          ; "argv", `List [ `String repo_parent ]
+          ]
+      | None ->
+        `Assoc
+          [ "tool", `String "Execute"
+          ; "executable", `String "ls"
+          ; "argv", `List [ `String parent ]
+          ]
+    in
+    `Assoc [ "grep_filename", grep_filename; "list_parent", list_parent ]
+;;
+
 let missing_file_error_json
       ~(raw_path : string option)
       ~(cwd : string option)
@@ -141,6 +194,7 @@ let missing_file_error_json
               [ "implicit_cwd", `Bool false
               ; "explicit_cwd_supported", `Bool true
               ; "cwd", Json_util.string_opt_to_json cwd
+              ; "same_path_retry_will_fail", `Bool true
               ; ( "basis"
                 , `String
                     "Read resolves file_path against explicit cwd when cwd is provided; \
@@ -151,6 +205,11 @@ let missing_file_error_json
                     "For repo-relative files, pass cwd=\"repos/<repo>\" with \
                      file_path=\"lib/...\", or pass file_path=\"repos/<repo>/lib/...\". \
                      Use Grep or Execute ls first when the exact path is unclear." )
+              ; ( "retry_policy"
+                , `String
+                    "Do not retry Read with the same file_path until Grep or Execute ls \
+                     confirms the file exists." )
+              ; "recovery_examples", missing_file_recovery_examples ~raw_path
               ] )
         ])
 ;;

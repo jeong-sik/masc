@@ -19,6 +19,9 @@ val effect_domain_for_tool_name : string -> Tool_catalog.effect_domain option
 
 val capability_has : Tool_capability.kind -> string -> bool
 
+val descriptor_and_input_for_tool_call :
+  tool_name:string -> input:Yojson.Safe.t -> (Keeper_tool_descriptor.t * Yojson.Safe.t) option
+
 val readonly_for_tool_name : string -> bool option
 
 val readonly_for_tool_call : tool_name:string -> input:Yojson.Safe.t -> bool option

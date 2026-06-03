@@ -1,8 +1,8 @@
-(** Keeper_tool_policy — tool access control and allowed-tool resolution.
+(** Keeper_tool_policy — keeper tool surface and denylist resolution.
 
     Group definitions are loaded from [config/tool_policy.toml] at startup
-    via {!Keeper_tool_policy_config}.  Consumes {!Keeper_tool_registry} for
-    candidate aggregation and core tools.
+    via {!Keeper_tool_policy_config} for legacy/recovery surfaces. Runtime
+    execution is descriptor/registry driven and filtered by denylist.
 
     @since v2.200.0 *)
 
@@ -15,7 +15,8 @@ module StringSet : Set.S with type elt = string
 (** {1 Policy Initialization} *)
 
 (** Load tool policy configuration from [config/tool_policy.toml].
-    Must be called once at server startup before tool_access resolution. *)
+    Must be called once at server startup before legacy/recovery surface
+    resolution. *)
 val init_policy_config :
   base_path:string -> (unit, string) result
 
@@ -50,9 +51,9 @@ val keeper_supported_masc_tool_names_from_schemas :
 (** Filter names to only those present in the injected MASC set. *)
 val select_existing_masc_tool_names : string list -> string list
 
-(** {1 Tool Access Lookup}
+(** {1 Tool Surface Lookup}
 
-    Per-tool access checks using immutable StringSet. *)
+    Per-tool candidate/deny checks using immutable StringSet. *)
 
 type tool_access_lookup = {
   candidate_names : string list;
@@ -67,14 +68,15 @@ val tool_name_set : string list -> StringSet.t
 (** Build a lookup structure from keeper metadata. *)
 val tool_access_lookup_of_meta : keeper_meta -> tool_access_lookup
 
-(** Check if a tool passes candidate + policy + deny filters. *)
+(** Check if a tool passes candidate + deny filters. *)
 val filter_by_access : lookup:tool_access_lookup -> string -> bool
 
-(** Check candidate membership minus denied, ignoring policy.
+(** Check candidate membership minus denied.
     Used as execution gate for BM25-discovered tools. *)
 val filter_by_universe : lookup:tool_access_lookup -> string -> bool
 
-(** Execution gate: core tools bypass policy, others require allowlist.
+(** Execution gate: core tools bypass candidate_set; other tools must be
+    registered candidates and not denied.
     Rejects hallucinated tool names not in candidate_set. *)
 val can_execute : lookup:tool_access_lookup -> string -> bool
 
@@ -120,7 +122,7 @@ val failing_minimum_tool_names : unit -> string list
     sync regression test. *)
 val essential_masc_minimum_names : string list
 
-(** Policy-filtered allowed tool names.
+(** Active descriptor/registry tool names minus denied tools.
     Returns empty list when [write_done] is true.
     When [phase] is [Failing] and decision layer level >= 2,
     returns [failing_minimum_tool_names] instead (recovery floor). *)
@@ -132,7 +134,7 @@ val keeper_allowed_tool_names :
 (** Universe tool names: candidates minus denied, no policy filter. *)
 val keeper_universe_tool_names : keeper_meta -> string list
 
-(** Tool-access scoped universe: explicit allowlist + core_always - denied. *)
+(** Tool search scope: active candidates + core_always - denied. *)
 val keeper_tool_search_scope : keeper_meta -> string list
 
 (** Tools safe to call on the keeper's last turn. *)
@@ -140,14 +142,14 @@ val last_turn_safe_tool_names : unit -> string list
 
 (** {1 Tool Schema Assembly} *)
 
-(** Policy-filtered model tool schemas. *)
+(** Active model tool schemas minus denied tools. *)
 val keeper_allowed_model_tools :
   ?write_done:bool -> keeper_meta -> Masc_domain.tool_schema list
 
 (** Universe model tool schemas for Agent.run(). *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
-(** Tool-access scoped universe model tool schemas for BM25 indexing. *)
+(** Active descriptor/registry model tool schemas for BM25 indexing. *)
 val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Filter schemas by a set of allowed names.  O(1) per schema. *)

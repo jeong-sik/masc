@@ -87,7 +87,7 @@ val is_core_always_tool : string -> bool
 (** Deduplicate tool names, preserving order. *)
 val dedupe_tool_names : string list -> string list
 
-(** Inject all masc_* schemas for keeper allowlist/denylist filtering.
+(** Inject all masc_* schemas for keeper descriptor/registry surface filtering.
     Must be called once during server initialization.
     Keeper_denied tools are excluded at injection time. *)
 val inject_masc_schemas : Masc_domain.tool_schema list -> unit
@@ -95,8 +95,8 @@ val inject_masc_schemas : Masc_domain.tool_schema list -> unit
 (** Load tool group definitions from [config/tool_policy.toml].
     Must be called once during server initialization.
     Raises [Failure] if the config file is missing or malformed.
-    For tool_access-scoped allowlist filtering to include injected [masc_*]
-    schemas, call [inject_masc_schemas] before the first resolution. *)
+    Call [inject_masc_schemas] before the first resolution so injected
+    [masc_*] schemas can join the active keeper surface. *)
 val init_policy_config : base_path:string -> (unit, string) result
 
 (** Check if a tool name is in the Keeper_denied surface (Tool_catalog).

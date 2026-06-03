@@ -148,8 +148,8 @@ let base_tools : Masc_domain.tool_schema list =
     ; description =
         "List all tools currently available to you, grouped by category. Use when asked \
          'what can you do?' or when you need to discover your capabilities. Returns tool \
-         names organized by category. Only includes tools allowed by your current \
-         tool_access list and policy."
+         names organized by category. Includes the active runtime schema/descriptor \
+         surface after denylist filtering."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ]

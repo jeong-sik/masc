@@ -378,6 +378,51 @@ let assemble_hooks
                     (String.length computed_surface.query_text)
                     (Keeper_agent_tool_surface.tool_selection_mode_to_string
                        computed_surface.selection_mode);
+                let turn_visible_tool_names =
+                  computed_surface.turn_visible_tool_names
+                in
+                let tool_visible name = List.mem name turn_visible_tool_names in
+                let last_turn_decision_hint =
+                  if tool_visible "keeper_board_post"
+                  then
+                    "(2) call keeper_board_post to hand off the current task \
+                     and ask another keeper or operator for judgment when the \
+                     work needs a decision you cannot make alone"
+                  else if tool_visible "keeper_broadcast"
+                  then
+                    "(2) call keeper_broadcast to hand off the current task \
+                     when the work needs a decision you cannot make alone"
+                  else
+                    "(2) include the decision blocker in your [STATE] block \
+                     when the work needs a decision you cannot make alone"
+                in
+                let last_turn_task_close_hint =
+                  if
+                    tool_visible "keeper_task_done"
+                    || tool_visible "keeper_task_submit_for_verification"
+                  then
+                    "; (3) if you claimed a task, close it NOW before session \
+                     ends with keeper_task_done or \
+                     keeper_task_submit_for_verification"
+                  else ""
+                in
+                let budget_blocker_hint =
+                  if tool_visible "keeper_board_post"
+                  then
+                    "If you are blocked on a decision or external input, post \
+                     a question to the board via keeper_board_post rather than \
+                     burning turns retrying — that is the intended \
+                     judgment-escalation path."
+                  else if tool_visible "keeper_broadcast"
+                  then
+                    "If you are blocked on a decision or external input, \
+                     broadcast the blocker via keeper_broadcast rather than \
+                     burning turns retrying."
+                  else
+                    "If you are blocked on a decision or external input, \
+                     record the blocker in [STATE] rather than burning turns \
+                     retrying."
+                in
                 let append_ctx ctx text =
                   Some
                     (match ctx with
@@ -395,14 +440,11 @@ let assemble_hooks
                           now summarizing what you accomplished and what the next \
                           generation should do. Do NOT start new tool work. Three escape \
                           hatches, in priority order: (1) call extend_turns if the task \
-                          is almost finished and more turns will close it out; (2) call \
-                          keeper_board_post to hand off the current task and ask another \
-                          keeper or operator for judgment when the work needs a decision \
-                          you cannot make alone; (3) if you claimed a task, close it NOW \
-                          before session ends with keeper_task_done or \
-                          keeper_task_submit_for_verification."
+                          is almost finished and more turns will close it out; %s%s."
                          computed_surface.per_call_turn
-                         computed_surface.per_call_max_turns)
+                         computed_surface.per_call_max_turns
+                         last_turn_decision_hint
+                         last_turn_task_close_hint)
                   else if is_retry
                   then
                     append_ctx
@@ -419,12 +461,10 @@ let assemble_hooks
                       (Printf.sprintf
                          "[BUDGET] %d/%d turns used in this Agent.run call. Wrap up \
                           current work and emit a [STATE] block. If more turns will \
-                          genuinely finish the task, call extend_turns. If you are \
-                          blocked on a decision or external input, post a question to \
-                          the board via keeper_board_post rather than burning turns \
-                          retrying — that is the intended judgment-escalation path."
+                          genuinely finish the task, call extend_turns. %s"
                          computed_surface.per_call_turn
-                         computed_surface.per_call_max_turns)
+                         computed_surface.per_call_max_turns
+                         budget_blocker_hint)
                   else ctx
                 in
                 if computed_surface.is_warning_zone
@@ -438,9 +478,6 @@ let assemble_hooks
                     computed_surface.per_call_turn
                     computed_surface.per_call_max_turns
                     computed_surface.is_last_turn;
-                let turn_visible_tool_names =
-                  computed_surface.turn_visible_tool_names
-                in
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList turn_visible_tool_names
                 in

@@ -73,9 +73,6 @@ let registry_progress_on_event ~record_turn_progress downstream event =
   Option.iter (fun cb -> cb event) downstream
 
 
-let should_require_provider_tool_choice_support ~initial_tool_requirement =
-  initial_tool_requirement = Keeper_agent_tool_surface.Required
-
 let tool_contract_result_for_observed_tools
     ~(missing_visible_required : string list)
     ~(had_owned_active_task_at_turn_start : bool)

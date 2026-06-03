@@ -157,35 +157,12 @@ let required_tool_satisfaction ?(satisfying_tools : string list = [])
   (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
   =
-  let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
-  (* Generic Require_tool_use is a required-action contract at the keeper
-     boundary. Passive read/status/search tools can support a later action, but
-     they must not satisfy the action predicate by themselves. *)
-  if is_completion_tool_name tool_name
-  then Ok ()
-  else (
-    let mutates =
-      match effect_domain_for_tool_name call.name with
-      | Some Tool_catalog.Read_only -> false
-      | _ ->
-        Keeper_tool_dispatch_runtime.has_mutating_side_effect_with_input ~tool_name ~input:call.input
-    in
-    if mutates
-    then Ok ()
-    else
-      let base_msg =
-        Printf.sprintf
-          "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
-          tool_name
-      in
-      match satisfying_tools with
-      | [] -> Error base_msg
-      | _ ->
-        Error
-          (Printf.sprintf
-             "%s. Call one of these instead: [%s]"
-             base_msg
-             (String.concat "; " satisfying_tools)))
+  ignore satisfying_tools;
+  ignore call;
+  (* Provider-level [Require_tool_use] only means a tool call happened. Keeper
+     progress/liveness classification remains separate; do not reinterpret the
+     provider contract as "must mutate state" or "passive reads do not count". *)
+  Ok ()
 ;;
 
 let parse_tool_csv text =

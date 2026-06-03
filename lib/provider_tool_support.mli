@@ -1,12 +1,9 @@
-(** Provider_tool_support — provider capability negotiation +
-    runtime rejection classification.
+(** Provider_tool_support — provider capability negotiation.
 
     SSOT for "can this provider serve a tool-using turn?" decisions.
-    Three layers:
+    Two layers:
     - {!capabilities}: per-provider boolean record (inline / runtime-MCP).
-    - {!supports_required_tool_use}: yes/no gate.
-    - {!classify_rejection} / {!apply_required_tool_use_filter}: #10474
-      priority-ordered rejection observability for runtime dashboards.
+    - {!provider_supports_runtime_mcp_policy}: policy-level gate.
 
     Internal helpers ({!normalize_cli_caps_when},
     {!supports_runtime_mcp_http_headers}) stay private. *)
@@ -143,72 +140,6 @@ val provider_supports_runtime_mcp_policy
   -> Llm_provider.Llm_transport.runtime_mcp_policy
   -> bool
 
-(** [supports_required_tool_use ?runtime_mcp_policy
-      ~require_tool_choice_support ~require_tool_support cfg]
-    returns the runtime filter gate.  Truth table:
-
-    {ul
-    {- [(false, false)] -> [true] (filter disabled).}
-    {- [(true, true)] -> [supports_inline_tool_choice || runtime_mcp].}
-    {- [(true, false)] -> [supports_inline_tool_choice].}
-    {- [(false, true)] -> [supports_inline_tools || runtime_mcp].}}
-
-    [runtime_mcp] resolves through {!provider_supports_runtime_mcp_policy}
-    when [runtime_mcp_policy = Some _], else through the lane gate. *)
-val supports_required_tool_use
-  :  ?override:runtime_capabilities_override
-  -> ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
-  -> require_tool_choice_support:bool
-  -> require_tool_support:bool
-  -> Llm_provider.Provider_config.t
-  -> bool
-
-(** {1 Rejection classification (#10474)} *)
-
-(** Closed variant — priority-ordered rejection causes for dashboards.
-    Order is most-specific / most-actionable first; see
-    {!classify_rejection}. *)
-type rejection_reason =
-  | Runtime_mcp_http_headers_required
-  (** Runtime-MCP caps are present but the policy demands HTTP
-          headers and the provider does not support them.  Operator
-          remedy: swap to stdio MCP {b or} pick a header-capable
-          provider. *)
-  | Runtime_mcp_caps_missing
-  (** Provider lacks [supports_runtime_mcp_tools] or
-          [supports_runtime_tool_events].  Inline path was also
-          unavailable; runtime authoring problem. *)
-  | Inline_tool_choice_unsupported
-  (** Only [require_tool_choice] mode and provider has no
-          [supports_inline_tool_choice]. *)
-  | Inline_tools_unsupported
-  (** Only [require_tool_support] mode and provider has no
-          [supports_inline_tools]. *)
-  | Filter_disabled
-  (** Both [require_*] flags false — defensive default that
-          should never be emitted in practice. *)
-
-(** [rejection_reason_label r] returns the canonical snake_case label
-    used as the [reason=] Prometheus counter label.  Pinned literals:
-    [runtime_mcp_http_headers_required] / [runtime_mcp_caps_missing] /
-    [inline_tool_choice_unsupported] / [inline_tools_unsupported] /
-    [filter_disabled]. *)
-val rejection_reason_label : rejection_reason -> string
-
-(** [classify_rejection ... cfg] returns [None] if the provider
-    passes the filter, otherwise [Some r] where [r] is the
-    most-specific rejection cause per the priority table above.
-
-    Returns [None] when both [require_*] flags are false (filter
-    disabled — no rejection to classify). *)
-val classify_rejection
-  :  ?override:runtime_capabilities_override
-  -> ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
-  -> require_tool_choice_support:bool
-  -> require_tool_support:bool
-  -> Llm_provider.Provider_config.t
-  -> rejection_reason option
-
 (** {1 Provider labels (debug / metric)} *)
 
 (** [provider_debug_label cfg] returns ["<kind>:<model_id>"] for
@@ -221,39 +152,4 @@ val provider_kind_label : Llm_provider.Provider_config.t -> string
 
 (** {1 Prometheus filter-rejection counter (#10474)} *)
 
-(** Pinned literal: ["masc_runtime_filter_rejection_total"].
-
-    Cardinality bound: runtimes (~10) × provider_kinds (~10) ×
-    reasons (5) ≈ 500 series ceiling. *)
-val runtime_filter_rejection_metric : string
-
-(** [record_filter_rejection ~runtime ~provider_cfg ~reason]
-    increments {!runtime_filter_rejection_metric} with labels
-    [(runtime, provider_kind, reason)].  Counter is the
-    machine-consumable signal for runtime-dead dashboards. *)
-val record_filter_rejection
-  :  runtime:string
-  -> provider_cfg:Llm_provider.Provider_config.t
-  -> reason:rejection_reason
-  -> unit
-
-(** {1 Filter application} *)
-
-(** [apply_required_tool_use_filter ... ~label providers] partitions
-    [providers] using {!supports_required_tool_use}, emits one
-    {!record_filter_rejection} call per rejected provider, and warns
-    via {!Log.Misc.warn} when {b every} provider was filtered out.
-
-    The runtime-dead warn line embeds [label],
-    [provider_debug_label] for each input provider, and
-    [runtime_mcp_http_headers] (the policy's HTTP-header demand
-    flag).  Returns the kept providers in input order. *)
-val apply_required_tool_use_filter
-  :  ?override:runtime_capabilities_override
-  -> ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy
-  -> require_tool_choice_support:bool
-  -> require_tool_support:bool
-  -> label:string
-  -> Llm_provider.Provider_config.t list
-  -> Llm_provider.Provider_config.t list
 

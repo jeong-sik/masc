@@ -181,8 +181,8 @@ let gate_decision_to_string = function
   | Gate_approval_required -> "approval_required"
 
 let gate_decision_is_rejection = function
-  | Gate_override | Gate_approval_required -> true
-  | Gate_continue -> false
+  | Gate_override -> true
+  | Gate_continue | Gate_approval_required -> false
 
 type gate_rejection_log_severity =
   | Gate_rejection_first_warn
@@ -310,11 +310,11 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
     - [reason_text]         human-readable detail
     - [source]              "hook" (distinguishes from legacy paths) *)
 (* Spec mapping: GateRejected action — KeeperTurnCycle.tla lines 189-200.
-   The two-arm match below routes Gate_override | Gate_approval_required to
-   Keeper_registry.mark_turn_gate_rejected_by_name, which fires the
-   decision_stage = "gate_rejected" / turn_phase = "finalizing" transition.
-   The Gate_continue branch skips the spec action entirely and only emits
-   the Event_bus Custom event below.
+   Gate_override routes to Keeper_registry.mark_turn_gate_rejected_by_name,
+   which fires the decision_stage = "gate_rejected" / turn_phase =
+   "finalizing" transition. Gate_approval_required is not terminal: OAS
+   suspends in the approval callback and may still execute the tool after
+   approval.
 
    Cycle 49 observability addition: when the gate rejects, the turn
    becomes terminal WITHOUT any runtime tier ever being attempted.  A
@@ -332,7 +332,7 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
     - [keeper]   ∈ keeper agent names (finite per fleet)
     - [tool]     ∈ tool names (finite, registry-controlled)
     - [reason]   ∈ guard reason_code strings (finite, defined by guards)
-    - [decision] ∈ {override, approval_required} *)
+    - [decision] ∈ {override} *)
 let gate_rejected_terminal_metric =
   Keeper_metrics.(to_string TurnGateRejectedTerminal)
 
@@ -370,7 +370,12 @@ let emit_gate_event
       "keeper:%s tool:%s decision=%s reason_code=%s runtime=none \
        (gate rejected before runtime attempt)"
       agent_name tool_name decision_label reason_code
-  end;
+  end
+  else if decision = Gate_approval_required then
+    Log.Keeper.info
+      "keeper:%s tool:%s decision=%s reason_code=%s runtime=none \
+       (approval pending before runtime attempt)"
+      agent_name tool_name decision_label reason_code;
   match Masc_event_bus.get () with
   | None -> ()
   | Some bus ->
@@ -385,7 +390,11 @@ let emit_gate_event
       ("stage_latency_ms", `Float stage_latency_ms);
       ("reason_text", `String reason_text);
       ("source", `String "hook");
-      ("runtime_attempted", `Bool (not is_gate_rejection));
+      ( "runtime_attempted"
+      , `Bool
+          (match decision with
+           | Gate_continue -> true
+           | Gate_override | Gate_approval_required -> false) );
       ("source_path", Json_util.string_opt_to_json source_path);
       ("source_line", Json_util.int_opt_to_json source_line);
     ] in

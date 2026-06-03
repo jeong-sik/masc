@@ -1,12 +1,9 @@
 (** Keeper_tool_registry — runtime tool name sources and schema injection.
 
-    Static tool name lists have been moved to config/tool_policy.toml.
-    This module retains only runtime-resolved names (Tool_catalog,
-    Tool_shard, injected MASC tools), core always-visible tools,
-    and dynamic schema injection.
-
-    See [Keeper_tool_policy_config] for the declarative tool groups used by
-    keeper tool_access lists. *)
+    This module retains runtime-resolved names (Tool_catalog, Tool_shard,
+    injected MASC tools), core always-visible tools, and dynamic schema
+    injection. Execution surfaces are resolved from descriptors/registries
+    and then denylist-filtered. *)
 
 (** Trim, drop empty entries, and dedupe a list preserving order. *)
 val dedupe_tool_names : string list -> string list

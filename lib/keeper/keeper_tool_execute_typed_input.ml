@@ -559,8 +559,8 @@ let executable_not_allowlisted_hint ~name ~mode =
     match mode, name with
     | Readonly, "gh" | Readonly, "git" ->
       Some
-        "This tool_access list is read-only. Use Read/Grep when visible; \
-         otherwise ask for a write/execute-capable schema before using git/gh."
+        "The active Execute surface is read-only. Use Read/Grep when visible; \
+         otherwise ask for a write/execute-capable runtime surface before using git/gh."
     | _, "bash" | _, "sh" | _, "zsh" ->
       Some
         "Shell interpreters are intentionally unavailable. Use typed \

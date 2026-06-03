@@ -56,13 +56,13 @@ let handle_speak ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
   then error_json "message is required. Good: message='Hello team.'. Bad: message=''."
   else (
     match
-      ( Eio_context.get_switch_opt ()
+      ( Eio_context.get_root_switch_opt ()
       , Eio_context.get_clock_opt ()
       , Eio_context.get_net_opt () )
     with
     | Some sw, Some clock, Some net ->
       (match
-         Voice_bridge.agent_speak
+         Voice_bridge.enqueue_agent_speak
            ~sw
            ~clock
            ~net

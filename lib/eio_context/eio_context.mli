@@ -24,6 +24,11 @@ val set_switch : Eio.Switch.t -> unit
 (** Set the global Eio switch (server root_sw). Written once at server
     bootstrap; survives until process exit. *)
 
+val get_root_switch_opt : unit -> Eio.Switch.t option
+(** Get the server root switch without consulting the fiber-local
+    turn-scoped binding. Use only for work that must survive a single
+    keeper turn, such as queued background voice playback. *)
+
 val set_env : Eio_unix.Stdenv.base -> unit
 (** Set the global Eio standard environment.  Required by long-lived
     consumers that need more than [net]/[clock] (e.g. piaf

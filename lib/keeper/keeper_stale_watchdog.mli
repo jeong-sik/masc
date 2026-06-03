@@ -55,6 +55,7 @@ val active_turn_stale_status_for_test :
   progress_timeout_sec:float ->
   fiber_age:float ->
   startup_grace:float ->
+  suppress_for_pending_approval:bool ->
   active_turn_stale_status
 (** Test-only view of the active-turn liveness classifier. *)
 

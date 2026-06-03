@@ -69,11 +69,11 @@ let readonly_hint_of_category = function
   | "redirect" ->
     "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
      Use Write/Edit when a file must change, or Execute only when the \
-     active policy exposes a write-capable Execute surface. \
+     active runtime schema exposes a write-capable Execute surface. \
      Good: Write file_path='notes.md' content='...'. \
      Bad: raw shell text 'echo hi > notes.md'."
   | "git_write" ->
-    "Use Execute only when the active policy exposes write-capable command \
+    "Use Execute only when the active runtime schema exposes write-capable command \
      execution for git writes. \
      Good: Execute executable='git' argv=['add','lib/foo.ml']. \
      Bad: raw shell text 'git commit -m x' without write access \
@@ -84,7 +84,7 @@ let readonly_hint_of_category = function
      Bad: raw shell text 'opam install eio' without write access \
      does not accept package installs)."
   | "destructive" ->
-    "Use Execute only when the active policy exposes write-capable command \
+    "Use Execute only when the active runtime schema exposes write-capable command \
      execution, not readonly shell. \
      Good: Execute executable='rm' argv=['.tmp/scratch.log']. \
      Bad: raw shell text 'rm -rf .tmp/' (readonly shell does \
@@ -224,7 +224,9 @@ let diagnosis_of_block_reason reason =
     Some
       { Exec_core.rule_id = "command_not_allowed"
       ; explanation =
-          Printf.sprintf "'%s' is not on the allowed command list for this tool_access list." name
+          Printf.sprintf
+            "'%s' is not on the allowed command list for this Execute surface."
+            name
       ; rewrite = None
       ; tool_suggestion = None
       }

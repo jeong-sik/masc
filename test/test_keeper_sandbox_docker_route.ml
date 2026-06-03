@@ -144,6 +144,11 @@ let run_process_ok ~cwd prog argv =
 let git_ok ~cwd args =
   run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
 
+let ensure_git_repo repo =
+  ensure_dir repo;
+  if not (Sys.file_exists (Filename.concat repo ".git")) then
+    git_ok ~cwd:repo [ "init"; "-q" ]
+
 let docker_image_available image =
   let cmd =
     Printf.sprintf "docker image inspect %s > /dev/null 2>&1" (Filename.quote image)
@@ -1035,11 +1040,11 @@ let test_execute_git_push_requires_write_tool_access_before_docker () =
   (match parse_bool_field raw "ok" with
    | Some true -> Alcotest.failf "push unexpectedly succeeded: %s" raw
    | Some false | None -> ());
-  Alcotest.(check (option string)) "readonly allowlist before docker"
-    (Some
-       "executable \"git\" not in readonly allowlist. This tool_access list is read-only. \
-        Use ReadFile/SearchFiles when visible; otherwise ask for a \
-        write/execute-capable schema before using git/gh.")
+	  Alcotest.(check (option string)) "readonly allowlist before docker"
+	    (Some
+	       "executable \"git\" not in readonly allowlist. The active Execute surface is \
+	        read-only. Use Read/Grep when visible; otherwise ask for a \
+	        write/execute-capable runtime surface before using git/gh.")
     (parse_string_field raw "error");
   let log = if Sys.file_exists log_path then read_file log_path else "" in
   Alcotest.(check bool) "docker container was not invoked" false
@@ -1690,6 +1695,7 @@ let test_execute_rg_no_match_remains_successful_in_docker_route () =
       (Filename.concat (Filename.concat playground "repos") "masc")
       "lib"
   in
+  ensure_git_repo (Filename.dirname lib);
   ensure_dir lib;
   ignore (Fs_compat.save_file_atomic (Filename.concat lib "sample.ml") "alpha\n");
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
@@ -1796,7 +1802,7 @@ let test_execute_rewrites_host_path_command_for_docker () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let container_root = Keeper_sandbox.container_root meta.name in
-  ensure_dir (Filename.concat (Filename.concat playground "repos") "masc");
+  ensure_git_repo (Filename.concat (Filename.concat playground "repos") "masc");
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta

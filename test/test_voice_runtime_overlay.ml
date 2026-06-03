@@ -36,18 +36,11 @@ let test_voice_auth_env_resolution () =
     (Voice.auth_env_name ~endpoint_api_key_env:"VOICE_PROXY_KEY" openai_compat)
 ;;
 
-let test_default_agent_voices_preserve_runtime_defaults () =
+let test_default_agent_voices_are_config_driven () =
   check
     (list (pair string string))
-    "agent voice defaults"
-    [ "llama", "Laura"
-    ; "agent_llm_a", "Sarah"
-    ; "agent_code", "George"
-    ; "provider_f", "Roger"
-    ; "agent_llm_a-api", "Sarah"
-    ; "agent_code-api", "George"
-    ; "provider_f-api", "Roger"
-    ]
+    "agent voice defaults are not hardcoded"
+    []
     (Voice.default_agent_voices ())
 ;;
 
@@ -162,6 +155,45 @@ let test_stt_request_mcp_rejected () =
   | Error _ -> ()
 ;;
 
+let make_keeper_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String name
+          ; "trace_id", `String "voice-queue-test"
+          ; ( "tool_access"
+            , Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+                [ "keeper_voice_speak" ] )
+          ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("make_keeper_meta: " ^ err)
+;;
+
+let test_keeper_voice_speak_returns_queued_with_root_switch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let meta = make_keeper_meta "voice-queue-keeper" in
+    let raw =
+      Masc_mcp.Keeper_tool_voice_runtime.handle_voice_tool
+        ~meta
+        ~name:"keeper_voice_speak"
+        ~args:(`Assoc [ "message", `String "hello from queued voice test" ])
+    in
+    let json = Yojson.Safe.from_string raw in
+    check string "queued status" "queued"
+      Yojson.Safe.Util.(member "status" json |> to_string);
+    check string "background execution" "background_voice_queue"
+      Yojson.Safe.Util.(member "execution" json |> to_string))
+;;
+
 let () =
   run
     "voice_runtime_overlay"
@@ -169,9 +201,9 @@ let () =
       , [ test_case "resolve voice aliases" `Quick test_resolve_voice_aliases
         ; test_case "voice auth env resolution" `Quick test_voice_auth_env_resolution
         ; test_case
-            "default agent voices preserve runtime defaults"
+            "default agent voices are config driven"
             `Quick
-            test_default_agent_voices_preserve_runtime_defaults
+            test_default_agent_voices_are_config_driven
         ; test_case
             "voice mcp env no longer overrides default session url"
             `Quick
@@ -184,6 +216,12 @@ let () =
             test_stt_request_elevenlabs_direct
         ; test_case "stt request provider_d compat" `Quick test_stt_request_openai_compat
         ; test_case "stt request mcp rejected" `Quick test_stt_request_mcp_rejected
+        ] )
+    ; ( "keeper_voice_queue"
+      , [ test_case
+            "keeper_voice_speak queues on root switch"
+            `Quick
+            test_keeper_voice_speak_returns_queued_with_root_switch
         ] )
     ]
 ;;

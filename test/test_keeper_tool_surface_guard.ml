@@ -151,69 +151,6 @@ let test_has_valid_tool_call_false_when_empty () =
     (KTO.has_valid_tool_call ~unexpected_tool_names:[] ~tool_names:[])
 ;;
 
-let test_actionable_gate_tools_match_claim_context () =
-  check
-    (list string)
-    "owned task candidates exclude claim context"
-    []
-    (Surface.actionable_gate_tool_names
-       ~claim_context_allowed:false
-       ~turn_affordances:[ "task_claim" ]
-       ~allowed_tool_names:[ "keeper_task_claim"; "masc_claim_next" ]);
-  check
-    (list string)
-    "no-claim candidates exclude owned-task completion"
-    []
-    (Surface.actionable_gate_tool_names
-       ~claim_context_allowed:true
-       ~turn_affordances:[ "task_verify" ]
-       ~allowed_tool_names:[ "keeper_task_submit_for_verification"; "keeper_task_done" ]);
-  check
-    (list string)
-    "no-claim audit candidates keep operator cleanup completion"
-    [ "keeper_task_force_release"; "keeper_task_force_done" ]
-    (Surface.actionable_gate_tool_names
-       ~claim_context_allowed:true
-       ~turn_affordances:[ "task_audit" ]
-       ~allowed_tool_names:[ "keeper_task_force_release"; "keeper_task_force_done" ]);
-  check
-    (list string)
-    "owned task candidates keep completion"
-    [ "keeper_task_submit_for_verification" ]
-    (Surface.actionable_gate_tool_names
-       ~claim_context_allowed:false
-       ~turn_affordances:[ "task_verify" ]
-       ~allowed_tool_names:[ "keeper_task_submit_for_verification" ])
-;;
-
-let test_actionable_gate_tools_fall_back_to_satisfying_tools () =
-  check
-    (list string)
-    "board post falls back to broadcast tool"
-    [ "masc_broadcast" ]
-    (Surface.actionable_gate_tool_names
-       ~claim_context_allowed:true
-       ~turn_affordances:[ "board_post_or_comment" ]
-       ~allowed_tool_names:[ "masc_broadcast" ])
-;;
-
-let test_actionable_gate_surface_keeps_actionable_tools () =
-  check
-    (list string)
-    "gate keeps actionable tools including claim-context"
-    [ "keeper_task_claim"; "Edit"; "Write" ]
-    (Surface.tool_names_for_actionable_gate_surface
-       ~tool_gate_requested:true
-       [ "Read"; "Grep"; "keeper_task_claim"; "keeper_stay_silent"; "Edit"; "Write" ]);
-  check
-    (list string)
-    "actionable gate keeps claim-like progress tool"
-    [ "keeper_task_claim" ]
-    (Surface.tool_names_for_actionable_gate_surface
-       ~tool_gate_requested:true
-       [ "Read"; "keeper_task_claim" ])
-;;
-
 let () =
   run
     "keeper_tool_surface_guard"
@@ -272,20 +209,6 @@ let () =
             "empty tool list returns false"
             `Quick
             test_has_valid_tool_call_false_when_empty
-        ] )
-    ; ( "actionable_gate"
-      , [ test_case
-            "tools match claim context"
-            `Quick
-            test_actionable_gate_tools_match_claim_context
-        ; test_case
-            "tools fall back to satisfying affordance tools"
-            `Quick
-            test_actionable_gate_tools_fall_back_to_satisfying_tools
-        ; test_case
-            "gate keeps actionable claim context"
-            `Quick
-            test_actionable_gate_surface_keeps_actionable_tools
         ] )
     ]
 ;;

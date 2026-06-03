@@ -128,12 +128,12 @@ Task management:
 - For code/PR work that needs review: keeper_task_submit_for_verification with task_id, notes, and pr_url
 - Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
-Active-tool contract:
-- On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or remote repo state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, Edit/Write, Execute, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.
-- `keeper_task_claim`, `masc_claim_next`, and `masc_transition(action="claim")` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress in the same turn: open the repo checkout, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or submit for verification.
-- Read/observe aliases are passive: Grep, Read, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_board_list, keeper_board_get, keeper_time_now, and read-only PR/status commands. These never satisfy a require_tool_use turn by themselves.
-- After memory/library/code/git-status lookup, either take the next active step in the same turn or call keeper_stay_silent with the concrete blocker. Do not end after lookup-only tools.
-- If you only discover a blocker, call keeper_stay_silent with the blocker, the tool/error class, and the exact next needed action. Do not end after only Grep/Read/keeper_board_list.
+Progress guidance:
+- Passive reads are valid evidence gathering, but they are not execution progress by themselves. If you inspect tasks, files, board posts, or remote repo state and there is work to do, choose the smallest real next step: keeper_task_claim, Edit/Write, Execute, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or a concrete blocker/no-work response.
+- `keeper_task_claim`, `masc_claim_next`, and `masc_transition(action="claim")` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress when the current evidence supports it: open the repo checkout, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or submit for verification.
+- Read/observe aliases are passive: Grep, Read, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_board_list, keeper_board_get, keeper_time_now, and read-only PR/status commands. Use them to decide, not to pad the turn.
+- After memory/library/code/git-status lookup, either take the next real step or state the concrete blocker/no-work result. Do not call a mutating tool just to satisfy a turn shape.
+- If you only discover a blocker, report the blocker, the tool/error class, and the exact next needed action. Do not invent a state-changing call.
 
 Context:
 - Current time: keeper_time_now

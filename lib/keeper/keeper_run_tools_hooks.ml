@@ -403,14 +403,6 @@ let assemble_hooks
                           keeper_task_submit_for_verification."
                          computed_surface.per_call_turn
                          computed_surface.per_call_max_turns)
-                  else if computed_surface.tool_gate_requested
-                  then
-                    append_ctx
-                      ctx
-                      (actionable_tool_gate_guidance
-                         ~claim_context_allowed:computed_surface.claim_context_allowed
-                         ~turn_affordances
-                         ~allowed_tool_names:computed_surface.turn_visible_tool_names)
                   else if is_retry
                   then
                     append_ctx
@@ -461,18 +453,9 @@ let assemble_hooks
                     (not computed_surface.is_last_turn)
                     && computed_surface.tool_gate_requested
                     && turn_visible_tool_names <> []
-                  then
-                    Some
-                      (preferred_tool_choice_for_actionable_gate
-                         ~claim_context_allowed:computed_surface.claim_context_allowed
-                         ~turn_affordances
-                         ~allowed_tool_names:turn_visible_tool_names)
+                  then current_params.tool_choice
                   else clear_inherited_strict_tool_choice current_params.tool_choice
                 in
-                let turn_completion_contract =
-                  Keeper_tool_completion_contract.Allow_text_or_tool
-                in
-                acc.completion_contract <- turn_completion_contract;
                 let lane = computed_surface.lane in
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names
                   acc

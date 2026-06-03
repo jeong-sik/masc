@@ -202,7 +202,6 @@ type t =
   | PassiveLoopStreak
   | RequiredToolLoopDetectedTotal
   | ZombieLoopDetectedTotal
-  | RequiredToolGateSuppressedTotal
   | ConsecutiveIdle
   | LastProductiveTs
   | ProviderTimeoutStrike
@@ -445,7 +444,6 @@ let to_string = function
   | PassiveLoopStreak -> "masc_keeper_passive_loop_streak"
   | RequiredToolLoopDetectedTotal -> "masc_keeper_required_tool_loop_detected_total"
   | ZombieLoopDetectedTotal -> "masc_keeper_zombie_loop_detected_total"
-  | RequiredToolGateSuppressedTotal -> "masc_keeper_required_tool_gate_suppressed_total"
   | ConsecutiveIdle -> "masc_keeper_consecutive_idle"
   | LastProductiveTs -> "masc_keeper_last_productive_ts"
   | ProviderTimeoutStrike -> "masc_keeper_provider_timeout_strike_total"

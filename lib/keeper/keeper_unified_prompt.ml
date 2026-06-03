@@ -332,7 +332,8 @@ let fallback_externalized_bullet key =
       "- See board activity? Use the listed post_id. If the preview is \
        enough, comment directly with keeper_board_comment. If you need the \
        full post, call keeper_board_get and keeper_board_comment in the same \
-       response; keeper_board_get alone is passive and fails actionable turns."
+       response when the post gives you a concrete reply. If it does not, \
+       report no-work or the blocker instead of inventing a comment."
   else if String.equal key Keeper_prompt_names.turn_intent_board_post_guidance then
     Some
       "- Have a substantive finding or update? Call keeper_board_post with \

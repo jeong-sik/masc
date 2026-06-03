@@ -49,11 +49,16 @@ let make_keeper_tool_handler
         meta.name
         ~tool_name:name
         ~success:false;
-      (* Validation failure is a Handler_error from the typed-outcome
-         perspective; emit observers directly so metrics / usage_log still
-         see it. *)
+      (* OAS input validation runs outside guarded_dispatch, so emit the
+         shared dispatch observers explicitly with the same shape as the
+         exec error path ([Handled] with the error result).  The rejection
+         class (Policy_rejection) rides in [validation_result] so observers
+         that inspect [Tool_result.failure_class] can still distinguish it.
+         Using [Handled (Some ...)] keeps the failure in the unified observer
+         view; the earlier [Handler_error] arm was dropped by every observer
+         (all three match only [Handled, Some _]). *)
       Tool_dispatch.run_dispatch_observers
-        (Dispatch_outcome.Handler_error { exn = "validation_failed" })
+        Dispatch_outcome.Handled
         (Some validation_result);
       broadcast_keeper_tool_call_event
         ~keeper_name:meta.name

@@ -1,19 +1,21 @@
 open Alcotest
 
-(** RFC-0084 PR-10 — Typed Dispatch_outcome.t 5-arm sum invariants.
+(** RFC-0084 PR-10 — Typed Dispatch_outcome.t sum invariants.
 
     Pins:
-    - 5 variant arms exactly (cardinality drift guard)
+    - 2 variant arms exactly (cardinality drift guard). The sum was
+      collapsed from 5 to 2 arms after the dropped arms
+      (Rejected_by_capability / Rejected_by_pre_hook / Handler_error)
+      were confirmed to have zero producers.
     - Round-trip: every arm.to_string |> of_string |> to_string preserves the label
-    - classify_result_option matches the string-outcome contract used
-      by PR-7/PR-8/PR-9 wraps
-    - String vocabulary parity with PR-7~9 (handled / no_handler)
+    - classify_result_option matches the string-outcome contract
+    - String vocabulary parity (handled / no_handler)
 *)
 
 let test_all_arms_cardinality () =
   (check int)
-    "Dispatch_outcome.all_arms enumerates 5 variants (RFC-0084 §6 D3)"
-    5
+    "Dispatch_outcome.all_arms enumerates 2 variants (RFC-0084 §6 D3)"
+    2
     (List.length Dispatch_outcome.all_arms)
 ;;
 
@@ -21,16 +23,9 @@ let test_to_string_labels () =
   let labels =
     List.map Dispatch_outcome.to_string Dispatch_outcome.all_arms
   in
-  let expected =
-    [ "handled"
-    ; "rejected_by_capability"
-    ; "rejected_by_pre_hook"
-    ; "no_handler"
-    ; "handler_error"
-    ]
-  in
+  let expected = [ "handled"; "no_handler" ] in
   (check (list string))
-    "to_string vocabulary matches the 5-arm label set"
+    "to_string vocabulary matches the 2-arm label set"
     expected
     labels
 ;;
@@ -78,22 +73,10 @@ let test_classify_none_is_no_handler () =
       (Dispatch_outcome.to_string other)
 ;;
 
-let test_classify_with_exn_is_handler_error () =
-  match
-    Dispatch_outcome.classify_result_option ~exn:"oops" (Some 1)
-  with
-  | Dispatch_outcome.Handler_error { exn } ->
-    (check string) "exn payload propagated" "oops" exn
-  | other ->
-    failf
-      "classify_result_option ~exn:... should be Handler_error, got %s"
-      (Dispatch_outcome.to_string other)
-;;
-
-let test_string_vocabulary_parity_with_pr7_8_9 () =
-  (* PR-7 / PR-8 / PR-9 wraps emit outcome strings "handled" and "no_handler".
-     Both must remain valid arms in the typed sum so PR-11 migration
-     does not change the prometheus counter label set. *)
+let test_string_vocabulary_parity () =
+  (* Dispatch wraps emit outcome strings "handled" and "no_handler".
+     Both must remain valid arms in the typed sum so the prometheus
+     counter label set is preserved. *)
   (check bool)
     "handled present in typed sum"
     true
@@ -114,8 +97,7 @@ let () =
         ; test_case "of-string-unknown-returns-none" `Quick test_of_string_unknown_returns_none
         ; test_case "classify-some-is-handled" `Quick test_classify_some_is_handled
         ; test_case "classify-none-is-no-handler" `Quick test_classify_none_is_no_handler
-        ; test_case "classify-with-exn-is-handler-error" `Quick test_classify_with_exn_is_handler_error
-        ; test_case "string-vocabulary-parity-with-pr7-8-9" `Quick test_string_vocabulary_parity_with_pr7_8_9
+        ; test_case "string-vocabulary-parity" `Quick test_string_vocabulary_parity
         ] )
     ]
 ;;

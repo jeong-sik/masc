@@ -139,7 +139,7 @@ let string_of_health_level = function
   | HL_warn -> "warn"
   | HL_degraded -> "degraded"
   | HL_ok -> "ok"
-  | HL_unknown -> "unknown"
+  | HL_unknown -> "<missing status>"
 
 let severity_rank_of_health_level = function
   | HL_critical | HL_bad | HL_risk -> 2
@@ -186,7 +186,7 @@ let string_of_session_lifecycle = function
   | SL_stopped -> "stopped"
   | SL_interrupted -> "interrupted"
   | SL_expired -> "expired"
-  | SL_unknown -> "unknown"
+  | SL_unknown -> "<missing status>"
 
 (** Status/health classification predicates — single source of truth.
     Used across dashboard, briefing, and operator modules. *)

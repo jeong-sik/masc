@@ -1,7 +1,9 @@
 (** Sum-typed provider-kind resolver for runtime model specs.
 
     Resolves a ["provider:model"] spec to a {!Provider_config.provider_kind}
-    via the {!Provider_registry}.
+    via the {!Provider_registry}. This module lives inside the runtime/OAS
+    boundary; masc-core callers should route by opaque runtime id instead of
+    parsing provider/model strings.
 
     This module exists to prevent a recurring anti-pattern where
     callers classify provider kind by substring match over the spec

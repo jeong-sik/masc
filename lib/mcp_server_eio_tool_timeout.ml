@@ -42,11 +42,6 @@ let tool_timeout ~(tool_name : string) ~(_arguments : Yojson.Safe.t) :
   resolved_tool_timeout option
   =
   match tool_name with
-  | "masc_keeper_msg" ->
-    (* No fixed timeout for keeper_msg. Keeper has its own internal limits
-       (max_turns, max_cost_usd, max_tokens) that control call duration.
-       A fixed external timeout conflicts with multi-turn tool-use loops. *)
-    None
   | "masc_transition" ->
     (* Transition can trigger anti-rationalization review on completion
        paths. A fixed timeout can report a false error while the state

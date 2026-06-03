@@ -40,16 +40,11 @@ vi.mock('./components/observatory/observatory', () => ({
   refreshObservatorySurface: vi.fn(),
 }))
 
-vi.mock('./components/activity-graph-store', () => ({
-  refreshActivityGraph: vi.fn(),
-}))
-
 vi.mock('./components/git-graph-store', () => ({
   refreshGitGraph: vi.fn(),
 }))
 
 import { refreshFeatureHealth } from './components/feature-health'
-import { refreshActivityGraph } from './components/activity-graph-store'
 import { refreshGitGraph } from './components/git-graph-store'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshServerConfig } from './components/server-config'
@@ -98,12 +93,12 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'observatory', view: 'activity' },
-    })).toEqual(['namespaceTruth', 'activityGraph'])
+    })).toEqual(['namespaceTruth', 'observatory'])
 
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'observatory', view: 'live' },
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
+    })).toEqual(['namespaceTruth', 'observatory'])
   })
 
   it('keeps the consolidated command surface hydrated for ops queue deep links', () => {
@@ -188,19 +183,17 @@ describe('refreshPlanForRoute', () => {
 
     await waitFor(() => {
       expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
-      expect(refreshActivityGraph).not.toHaveBeenCalled()
     })
   })
 
-  it('refreshes the activity graph only on its explicit evidence lens', async () => {
+  it('keeps retired observatory lens routes on the unified observatory surface', async () => {
     refreshForRoute({
       tab: 'monitoring',
       params: { section: 'observatory', view: 'activity' },
     })
 
     await waitFor(() => {
-      expect(refreshObservatorySurface).not.toHaveBeenCalled()
-      expect(refreshActivityGraph).toHaveBeenCalledTimes(1)
+      expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
     })
   })
 

@@ -548,7 +548,20 @@ let make_hooks
           match output with
           | Ok _ -> "-"
           | Error _ ->
-            output_text
+            (* Strip command_descriptor from error preview to reduce log noise.
+               The descriptor is only meaningful on success; errors carry
+               sufficient diagnostic info via exit code and stderr. *)
+            let stripped =
+              try
+                let json = Yojson.Safe.from_string output_text in
+                match json with
+                | `Assoc fields ->
+                  let fields' = List.filter (fun (k, _) -> k <> "command_descriptor") fields in
+                  Yojson.Safe.to_string (`Assoc fields')
+                | _ -> output_text
+              with _ -> output_text
+            in
+            stripped
             |> Observability_redact.redact_preview ~max_len:240
             |> one_line_preview_for_log
         in

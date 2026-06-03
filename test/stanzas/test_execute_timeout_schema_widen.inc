@@ -1,4 +1,4 @@
 (test
  (name test_execute_timeout_schema_widen)
  (modules test_execute_timeout_schema_widen)
- (libraries masc_mcp alcotest yojson))
+ (libraries masc alcotest yojson))

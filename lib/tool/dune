@@ -30,14 +30,14 @@
 ;; the mega-lib and tests without a Masc_mcp. prefix.
 (library
  (name masc_tool_dispatch)
- (public_name masc_mcp.masc_tool_dispatch)
+ (public_name masc.masc_tool_dispatch)
  (wrapped false)
  (libraries
   masc_types
   masc_core
   masc_config
-  masc_mcp.tool_types
-  masc_mcp.tool_catalog_surfaces
+  masc.tool_types
+  masc.tool_catalog_surfaces
   time_compat
   yojson
   eio

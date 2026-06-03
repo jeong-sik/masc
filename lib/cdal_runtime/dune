@@ -9,7 +9,7 @@
 ;   masc_mcp (本体, lib/cdal_*.ml + lib/cdal/) — CDAL Phase 1A evaluator:
 ;     consumer-side judge, verdict_gate, labeling, adversarial_eval.
 ;
-;   masc_mcp.cdal_runtime (this) — CDAL runtime/producer:
+;   masc.cdal_runtime (this) — CDAL runtime/producer:
 ;     proof capture middleware, mode enforcement, risk contract typing.
 ;
 ; Dependencies are intentionally minimal: only OAS's *core* (agent_sdk.base
@@ -29,7 +29,7 @@
 
 (library
  (name masc_mcp_cdal_runtime)
- (public_name masc_mcp.cdal_runtime)
+ (public_name masc.cdal_runtime)
  (libraries
   masc_core
   agent_sdk.base

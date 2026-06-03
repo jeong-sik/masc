@@ -7,6 +7,6 @@
 
 (library
  (name masc_mcp_tool_catalog_surfaces)
- (public_name masc_mcp.tool_catalog_surfaces)
+ (public_name masc.tool_catalog_surfaces)
  (wrapped false)
  (libraries agent_sdk))

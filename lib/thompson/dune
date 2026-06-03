@@ -14,7 +14,7 @@
 ;; test-only); Thompson itself depends only on the neutral libraries below.
 ;;
 ;; Post_verifier (used by [record_quality_signal]) is NOT a mega-lib edge —
-;; it already lives in the leaf masc_mcp.tool_call_quality_benchmark library
+;; it already lives in the leaf masc.tool_call_quality_benchmark library
 ;; (deps: yojson + masc_core + time_compat, no cycle back to Thompson), so it
 ;; is kept as a normal library dependency rather than callback-inverted.
 ;;
@@ -22,7 +22,7 @@
 ;; sites stay `Thompson_sampling.*`.
 (library
  (name masc_thompson)
- (public_name masc_mcp.masc_thompson)
+ (public_name masc.masc_thompson)
  (wrapped false)
  (libraries
   masc_core
@@ -31,6 +31,6 @@
   masc_workspace
   fs_compat
   time_compat
-  masc_mcp.tool_call_quality_benchmark
+  masc.tool_call_quality_benchmark
   yojson
   eio))

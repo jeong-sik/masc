@@ -5,4 +5,4 @@
 (test
  (name test_discord_gateway_state)
  (modules test_discord_gateway_state)
- (libraries alcotest yojson masc_mcp.gate))
+ (libraries alcotest yojson masc.gate))

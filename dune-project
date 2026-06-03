@@ -2,7 +2,7 @@
 
 (using menhir 3.0)
 
-(name masc_mcp)
+(name masc)
 (version 0.19.35)
 
 (generate_opam_files true)
@@ -10,7 +10,7 @@
 (executables_implicit_empty_intf false)
 
 (source
- (github jeong-sik/masc-mcp))
+ (github jeong-sik/masc))
 
 (authors "Jeongsik Yun")
 
@@ -18,10 +18,10 @@
 
 (license MIT)
 
-(documentation https://github.com/jeong-sik/masc-mcp)
+(documentation https://github.com/jeong-sik/masc)
 
 (package
- (name masc_mcp)
+ (name masc)
  (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
  (description "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents")
  (depends

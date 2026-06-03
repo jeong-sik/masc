@@ -15,7 +15,7 @@
 ;; those two edges are inverted (callback injection). Tracked in PR-AE report.
 (library
  (name masc_economy)
- (public_name masc_mcp.masc_economy)
+ (public_name masc.masc_economy)
  (wrapped false)
  (libraries
   masc_core

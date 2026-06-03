@@ -2,7 +2,7 @@
  (name test_keeper_path_roots_leak_10349)
  (modules test_keeper_path_roots_leak_10349)
  (libraries
-  masc_mcp
+  masc
   fs_compat
   astring
   alcotest

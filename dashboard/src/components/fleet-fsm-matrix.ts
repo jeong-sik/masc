@@ -321,7 +321,6 @@ function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolea
   if (execution.operator_disposition === 'pause_human') return true
   if (execution.outcome === 'receipt_failed') return true
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') return true
-  if (execution.tool_contract_result === 'missing_required_tool_use') return true
   if (execution.tool_contract_result === 'unknown' && execution.error != null) return true
   return false
 }
@@ -405,19 +404,6 @@ function hasHealthyExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean
   return false
 }
 
-function requiredToolText(snapshot: KeeperCompositeSnapshot): string | null {
-  const surface = snapshot.execution?.tool_surface
-  const missing = surface?.missing_required_tools ?? []
-  const required = surface?.required_tools ?? []
-  const names = missing.length > 0 ? missing : required
-  return names.length > 0 ? names.join(', ') : null
-}
-
-function hasRequireToolUseViolation(snapshot: KeeperCompositeSnapshot): boolean {
-  const code = snapshot.execution?.terminal_reason_code ?? ''
-  return code.includes('require_tool_use')
-}
-
 function blockingCause(snapshot: KeeperCompositeSnapshot): string {
   const execution = snapshot.execution
   if (!execution) return 'blocking execution evidence present'
@@ -429,11 +415,10 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
         : 'blocked by operator disposition',
     )
   }
-  if (execution.tool_contract_result === 'missing_required_tool_use') {
-    const tools = requiredToolText(snapshot)
-    parts.push(tools ? `tool contract: missing_required_tool_use (${tools})` : 'tool contract: missing_required_tool_use')
-  } else if (hasRequireToolUseViolation(snapshot)) {
-    parts.push('tool contract: actionable signal without keeper tool')
+  if (execution.tool_contract_result === 'tool_surface_mismatch') {
+    parts.push('tool contract: tool_surface_mismatch')
+  } else if (execution.tool_contract_result === 'no_tool_capable_provider') {
+    parts.push('tool contract: no_tool_capable_provider')
   } else if (execution.tool_contract_result === 'unknown' && execution.error != null) {
     parts.push('tool contract unknown with execution error')
   }
@@ -452,14 +437,11 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
 function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
   const execution = snapshot.execution
   if (!execution) return 'latest execution receipt 확인'
-  if (execution.tool_contract_result === 'missing_required_tool_use') {
-    const tools = requiredToolText(snapshot)
-    return tools
-      ? `필수 tool 호출 경로 확인: ${tools}`
-      : '필수 tool contract를 만족시키거나 task/tool 설정 조정'
-  }
-  if (hasRequireToolUseViolation(snapshot)) {
-    return '모델이 keeper tool을 호출하도록 prompt/tool-choice 경로 확인'
+  if (
+    execution.tool_contract_result === 'tool_surface_mismatch' ||
+    execution.tool_contract_result === 'no_tool_capable_provider'
+  ) {
+    return 'tool surface 또는 runtime lane 설정 확인'
   }
   if (execution.terminal_reason_code === 'api_error_invalid_request') {
     return 'runtime auth/config receipt 확인'

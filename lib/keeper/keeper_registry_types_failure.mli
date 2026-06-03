@@ -48,6 +48,6 @@ val ambiguous_partial_commit_kind_to_string :
   string
 val failure_reason_to_string : failure_reason -> string
 val failure_reason_cohort_key : failure_reason option -> string
-val stale_watchdog_failure_reason :
+val stale_kill_failure_reason :
   prior:failure_reason option ->
   kill_class:stale_kill_class -> failure_reason option

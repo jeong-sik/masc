@@ -104,7 +104,7 @@ let is_provider_runtime_blocker_class blocker_class =
   String.equal blocker_class "provider_runtime_error"
 ;;
 
-let is_stale_watchdog_blocker_class blocker_class =
+let is_stale_turn_timeout_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Stale_turn_timeout)
 ;;
 

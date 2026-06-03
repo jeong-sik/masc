@@ -35,12 +35,6 @@ silently satisfied by adjacent TLA assets. The clean and buggy cfg pairs under
 `specs/goal-loop/` are included in the TLA matrix shard so CI verifies both the
 happy path and the corresponding bug model.
 
-## Completion Audit
-
-`scripts/goal_loop_completion_audit.py --verify-pipeline <result.json>` consumes
-the pipeline result. A partial pipeline adds the `verify_pipeline_complete`
-blocker, so a generic Verify `PASS` cannot close the GOAL LOOP while metric,
-TLA, log, or Orient gates are blocked.
-For schema version 1, completion also validates the reported gate counts and the
-full required gate-id set, so a minimal all-PASS fixture cannot stand in for the
-repo-owned Verify contract.
+The pipeline result is the verification artifact. Completion gating should use
+the explicit gate IDs and evidence payloads above, not a separate prompt-corpus
+closeout ledger.

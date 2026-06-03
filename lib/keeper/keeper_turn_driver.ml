@@ -54,8 +54,6 @@ let run_named
     ?context_reducer
     ?memory
     ?tool_retry_policy
-    ?(required_tool_satisfaction =
-      Agent_sdk.Completion_contract.any_tool_call_satisfies)
     ?raw_trace
     ?on_event
     ?on_yield
@@ -161,7 +159,6 @@ let run_named
     context_reducer;
     memory;
     tool_retry_policy;
-    required_tool_satisfaction;
     raw_trace;
     transport_resolved;
     runtime_mcp_policy;

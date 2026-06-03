@@ -64,58 +64,6 @@ module KeeperSupervisor : sig
   val paused_cleanup_ttl_sec : float
   val auto_resume_initial_sec : float
   val auto_resume_max_sec : float
-
-  (** #12801 Whether the liveness recovery scan is enabled. *)
-  val liveness_recovery_enabled : bool
-
-  (** Minimum seconds a keeper must have been Dead before recovery attempt. *)
-  val liveness_recovery_min_dead_sec : float
-
-  (** Base backoff delay between liveness recovery attempts (seconds). *)
-  val liveness_recovery_backoff_base_sec : float
-
-  (** Maximum backoff delay cap for liveness recovery (seconds). *)
-  val liveness_recovery_backoff_max_sec : float
-
-  (** Maximum total liveness recovery attempts per keeper. *)
-  val liveness_recovery_max_attempts : int
-
-  (** #12838 Scan for alive-but-stuck keepers
-      (proactive_rt.last_ts frozen while autonomous turns advance).
-      Default: true. *)
-  val alive_but_stuck_enabled : bool
-
-  (** Queue a bounded Event Layer wakeup for each deduped
-      alive-but-stuck detection. Default: true. *)
-  val alive_but_stuck_recovery_enabled : bool
-
-  (** Multiplier on the keeper's [proactive.cooldown_sec] before
-      stalling is flagged. Default: 10. *)
-  val alive_but_stuck_stall_multiplier : int
-
-  (** Hard floor (seconds) for stall detection — guards against
-      keepers with very small cooldowns being flagged after a few
-      minutes of legitimate quiet. Default: 1800 (30 min). *)
-  val alive_but_stuck_stall_floor_sec : float
-
-  (** Per-keeper dedup window: counter increments at most once per
-      window per keeper even when the sweep fires every 30s.
-      Default: 3600 (1 hr). *)
-  val alive_but_stuck_dedup_ttl_sec : float
-end
-
-(** {1 Stale-turn watchdog} *)
-
-module KeeperWatchdog : sig
-  val stale_threshold_sec : float
-  val progress_timeout_sec : float
-  val poll_sec : float
-  val noop_threshold : int
-  val grace_period_sec : float
-  val termination_window_sec : float
-  val escalation_threshold : int
-  val batch_window_sec : float
-  val batch_threshold : int
 end
 
 (** {1 Keeper poll intervals} *)

@@ -156,7 +156,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         outcome: 'error',
         terminal_reason_code: 'config_error',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_required_unsatisfied',
+        operator_disposition_reason: 'tool_route_recoverable_failure',
         model_used: 'cli-tool-d:auto',
         stop_reason: 'max_turns',
         tool_contract_result: 'violated',
@@ -180,7 +180,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         },
         tool_surface: {
           tool_requirement: 'required',
-          turn_lane: 'tool_required',
+          turn_lane: 'tool_optional',
           tool_surface_class: 'runtime_mcp',
           visible_tool_count: 2,
           tool_gate_enabled: true,
@@ -196,7 +196,7 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.execution?.latest_receipt_present).toBe(true)
     expect(result.execution?.terminal_reason_code).toBe('config_error')
     expect(result.execution?.runtime?.fallback_reason).toBe('turn_timeout')
-    expect(result.execution?.tool_surface?.turn_lane).toBe('tool_required')
+    expect(result.execution?.tool_surface?.turn_lane).toBe('tool_optional')
     expect(result.execution?.tool_surface?.tool_surface_class).toBe('runtime_mcp')
     expect(result.execution?.tool_surface?.visible_tool_count).toBe(2)
     expect(result.execution?.tool_surface?.tool_surface_fallback_used).toBe(false)

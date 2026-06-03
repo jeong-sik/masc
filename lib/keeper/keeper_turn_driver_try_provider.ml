@@ -42,7 +42,6 @@ type try_provider_ctx =
   ; context_reducer : Agent_sdk.Context_reducer.t option
   ; memory : Agent_sdk.Memory.t option
   ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
-  ; required_tool_satisfaction : Agent_sdk.Completion_contract.required_tool_satisfaction
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
@@ -210,10 +209,7 @@ let run_try_provider
     match
       Runtime_candidate.resolve_tool_lane_for_oas_tools
         ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt ctx.keeper_name)
-        ~tool_requirement:
-          (if ctx.require_tool_choice_support || ctx.require_tool_support
-           then `Required
-           else `Optional)
+        ~tool_requirement:`Optional
         ~tools:ctx.tools
         candidate
     with
@@ -262,10 +258,7 @@ let run_try_provider
               ("effective_tool_count", `Int (List.length effective_tools));
               ("runtime_mcp_policy_present", `Bool (Option.is_some runtime_mcp_policy));
               ( "tool_requirement",
-                `String
-                  (if ctx.require_tool_choice_support || ctx.require_tool_support
-                   then "required"
-                   else "optional") );
+                `String "optional" );
             ])
         Keeper_runtime_manifest.Provider_lane_resolved;
       Ok
@@ -298,7 +291,6 @@ let run_try_provider
           ; context_reducer = ctx.context_reducer
           ; memory = ctx.memory
           ; tool_retry_policy = ctx.tool_retry_policy
-          ; required_tool_satisfaction = ctx.required_tool_satisfaction
           ; description =
               Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved

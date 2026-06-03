@@ -17,12 +17,6 @@ let register
       ()
   =
   add
-    Keeper_metrics.(to_string AliveButStuckRecoveryRequests)
-    "#12838 Total alive-but-stuck recovery requests. Each increment means the supervisor \
-     requested a supervised keeper restart by setting failure_reason plus \
-     fiber_stop/fiber_wakeup. Labeled by keeper."
-    `Counter;
-  add
     Keeper_metrics.(to_string ConsecutiveIdle)
     "Task-138 Current consecutive-idle streak (passive-only turns) per keeper.  Resets \
      to 0 on the next execution/completion turn.  Labeled by keeper."

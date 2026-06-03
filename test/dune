@@ -180,8 +180,7 @@
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
   test_keeper_toml
-  test_keeper_runtime_toml
-  test_runtime_required_tool_fallback
+  test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
   test_keeper_tool_visibility_projection
@@ -279,7 +278,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_relevance_check
-  test_stale_kill_class
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_cognitive_gravity
@@ -442,8 +440,7 @@
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
   test_keeper_toml
-  test_keeper_runtime_toml
-  test_runtime_required_tool_fallback
+  test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
   test_keeper_tool_visibility_projection
@@ -546,7 +543,6 @@
   test_keeper_event_queue
   test_keeper_relevance_check
   test_actionable_path_action
-  test_stale_kill_class
   test_keeper_synthetic_marker
   test_keeper_turn_fsm_wired_sites
   test_effective_oas_env
@@ -1256,8 +1252,6 @@
 
 (include stanzas/test_keeper_production_readiness_gate.inc)
 
-(include stanzas/test_keeper_turn_driver_exhaustion_log_source.inc)
-
 
 
 (include stanzas/test_channel_gate.inc)
@@ -1566,8 +1560,6 @@
 (include stanzas/test_release_train_guard_script.inc)
 
 (include stanzas/test_reqd_invalid_state_swallow.inc)
-
-(include stanzas/test_require_tool_use_violation_counter_10091.inc)
 
 (include stanzas/test_server_state_product.inc)
 

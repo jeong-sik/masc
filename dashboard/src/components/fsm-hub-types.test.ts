@@ -169,7 +169,7 @@ describe('failureReasonLabel', () => {
 
   it('preserves parametric detail after the base', () => {
     expect(failureReasonLabel('heartbeat_consecutive_failures(3)')).toBe('하트비트 연속 실패(3)')
-    expect(failureReasonLabel('tool_required_unsatisfied(code:detail)')).toBe('필수 도구 미충족(code:detail)')
+    expect(failureReasonLabel('tool_route_recoverable_failure(code:detail)')).toBe('도구 라우팅 복구 가능 실패(code:detail)')
   })
 
   it('falls back to raw string for unknown bases', () => {

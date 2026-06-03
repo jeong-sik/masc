@@ -184,10 +184,6 @@ let register
      provider."
     `Counter;
   add
-    Keeper_metrics.(to_string RequireToolUseViolations)
-    "Tool contract require_tool_use violations. Labels: keeper, contract_status."
-    `Counter;
-  add
     Keeper_metrics.(to_string SemaphoreWaitSecondsBucket)
     "Keeper turn semaphore wait duration buckets (le label)."
     `Counter;

@@ -1,13 +1,11 @@
-(** Keeper_tool_progress - tool progress classification and required-action
-    contract helpers.
+(** Keeper_tool_progress - tool progress classification helpers.
 
     This module owns whether a tool call is passive, claim/context binding,
     execution progress, or completion. It is deliberately separate from tool
     disclosure/selection so liveness and contract semantics do not live in the
     prompt-surface module. *)
 
-(** Tool progress class shared by required-tool validation, runtime receipts,
-    and liveness metrics. *)
+(** Tool progress class shared by runtime receipts and liveness metrics. *)
 type tool_progress_class =
   | Passive_status
   | Claim_context
@@ -71,11 +69,3 @@ val classify_tool_progress : string -> tool_progress_class
 val is_passive_status_tool_name : string -> bool
 val is_execution_progress_tool_name : string -> bool
 val is_owned_task_progress_tool_name : string -> bool
-
-(** Increment the [keeper_require_tool_use_violations] Prometheus counter with
-    [keeper] / [has_current_task] / [contract_status] labels. *)
-val record_require_tool_use_violation
-  :  keeper_name:string
-  -> has_current_task:bool
-  -> contract_status:string
-  -> unit

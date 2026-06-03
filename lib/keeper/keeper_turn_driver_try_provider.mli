@@ -25,8 +25,6 @@ type try_provider_ctx =
   ; context_reducer : Agent_sdk.Context_reducer.t option
   ; memory : Agent_sdk.Memory.t option
   ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
-  ; required_tool_satisfaction :
-      Agent_sdk.Completion_contract.required_tool_satisfaction
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; transport_resolved : Masc_grpc_transport.t
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option

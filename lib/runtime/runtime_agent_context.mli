@@ -65,8 +65,6 @@ type config = {
   initial_messages : Agent_sdk.Types.message list;
   raw_trace : Agent_sdk.Raw_trace.t option;
   tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
-  required_tool_satisfaction :
-    Agent_sdk.Completion_contract.required_tool_satisfaction;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
@@ -83,7 +81,7 @@ type config = {
   exit_condition_result : (int -> stop_reason * string option) option;
   summarizer : (Agent_sdk.Types.message list -> string) option;
 }
-(** Per-worker configuration.  48 fields — concrete record because
+(** Per-worker configuration.  47 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 

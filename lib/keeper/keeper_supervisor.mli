@@ -72,9 +72,8 @@ val apply_self_preservation :
   (Keeper_registry.registry_entry * string) list
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
-    Bounded minority [stale_turn_timeout] cohorts are allowed through so
-    alive-but-stuck recovery can drain partial slot starvation; larger stale
-    cohorts still use the circuit breaker/probe path.
+    Bounded minority [stale_turn_timeout] cohorts are allowed through while
+    larger stale cohorts still use the circuit breaker/probe path.
     Returns the filtered list of entries that should proceed with restart. *)
 
 val reset_self_preservation_escape_state_for_test : unit -> unit
@@ -94,70 +93,3 @@ val restart_launch_noop_enabled_for_test : unit -> bool
 val with_restart_launch_noop_for_test : (unit -> 'a) -> 'a
 (** Test-only: scoped restart-launch noop override. Nested and overlapping
     scopes restore the prior flag only after the outer scope exits. *)
-
-(** {1 Liveness Recovery} *)
-
-val liveness_recovery_scan : 'a context -> unit
-(** Scan all Dead keepers in [Keeper_registry].  For each Dead keeper whose
-    root cause is recoverable and that has been dead for at least
-    [MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC], attempt to re-register and
-    relaunch the keepalive fiber.  Uses exponential backoff per keeper and a
-    per-keeper attempt budget.  Gated behind
-    [MASC_KEEPER_LIVENESS_RECOVERY_ENABLED] (default: true).
-
-    [credential_archived] is recoverable through the per-keeper credential
-    self-heal path before relaunch. [zombie_timeout_reached] remains
-    structural and is skipped.
-
-    Emits [metric_keeper_liveness_recovery_attempts] and
-    [metric_keeper_liveness_recovery_outcomes] Prometheus counters. *)
-
-type credential_recovery_outcome =
-  | Credential_recovery_not_needed
-  | Credential_recovery_reissued of string
-  | Credential_recovery_failed of string
-
-val credential_recovery_before_restart_for_test :
-  base_path:string ->
-  Keeper_registry.registry_entry ->
-  credential_recovery_outcome
-(** Test hook for the credential self-heal step used before liveness recovery
-    relaunches a [credential_archived] keeper. *)
-
-
-(** {1 Alive-but-stuck detector (#12838)} *)
-
-(** detect_alive_but_stuck moved to Keeper_supervisor_types (intra-library
-    file split, 2026-05-16). Re-exported via include above. *)
-
-val alive_but_stuck_scan : 'a context -> unit
-(** Scan all keepers in [Keeper_registry].  For each keeper detected as
-    alive-but-stuck, emit one [metric_keeper_alive_but_stuck] counter
-    increment and write a single warn log line.  Per-keeper dedup keeps
-    counter / wakeup emission at most once per
-    [alive_but_stuck_dedup_ttl_sec] window.
-
-    The recovery side effect is queued only when BOTH gates are on:
-    - [MASC_KEEPER_ALIVE_BUT_STUCK_ENABLED] (default: true) — the
-      detector itself; turning this off skips the entire scan, no
-      counters or warns are emitted.
-    - [MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED] (default: true)
-      — the recovery action.  When this is off, the detector still
-      runs (counter + warn), but no Event Layer wakeup or supervised
-      restart request is queued; this lets operators observe the signal
-      in production before turning on the side-effect.  When enabled,
-      [alive_but_stuck_scan] enqueues an Event Layer stimulus and sets
-      [failure_reason] plus [fiber_stop]/[fiber_wakeup] so the next
-      sweep can route the keeper through the existing crash/restart
-      path.  PR #13123. *)
-
-val request_alive_but_stuck_recovery_for_test :
-  base_path:string ->
-  elapsed:float ->
-  Keeper_registry.registry_entry ->
-  unit
-(** Test-only hook for the recovery request side effect used by
-    [alive_but_stuck_scan]. *)
-
-val alive_but_stuck_reset_for_test : unit -> unit
-(** Test-only: clear the alive-but-stuck dedup table. *)

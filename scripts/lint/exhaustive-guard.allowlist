@@ -464,8 +464,6 @@ lib/keeper/keeper_msg_async.ml:113
 lib/keeper/keeper_msg_async.ml:146
 lib/keeper/keeper_msg_async.ml:152
 lib/keeper/keeper_msg_async.ml:304
-lib/keeper/keeper_passive_loop_detector.ml:96
-lib/keeper/keeper_passive_loop_detector.ml:101
 lib/keeper/keeper_persona_authoring.ml:34
 lib/keeper/keeper_persona_authoring.ml:671
 lib/keeper/keeper_persona_authoring.ml:886
@@ -508,7 +506,6 @@ lib/keeper/keeper_tool_execute_runtime.ml:729
 lib/keeper/keeper_tool_execute_runtime.ml:744
 lib/keeper_skill_routing/keeper_skill_routing.ml:111
 lib/keeper/keeper_social_model.ml:164
-lib/keeper/keeper_stale_watchdog.ml:257
 lib/keeper/keeper_state_machine.ml:51
 lib/keeper/keeper_status_bridge.ml:686
 lib/keeper/keeper_status_bridge.ml:703

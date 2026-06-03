@@ -1184,7 +1184,7 @@ describe('dashboard goals decoding', () => {
             },
             execution: {
               tool_contract_result: 'unknown',
-              runtime_proof_status: 'missing_required_tool_use',
+              runtime_proof_status: 'tool_surface_mismatch',
               required_tools: ['keeper_task_done'],
               missing_required_tools: ['keeper_task_done'],
               requested_tools: ['keeper_task_claim', 'keeper_task_done'],
@@ -1264,7 +1264,7 @@ describe('dashboard goals decoding', () => {
         },
         execution_summary: {
           tool_contract_result: 'unknown',
-          runtime_proof_status: 'missing_required_tool_use',
+          runtime_proof_status: 'tool_surface_mismatch',
           required_tools: ['keeper_task_done'],
           missing_required_tools: ['keeper_task_done'],
           requested_tools: ['keeper_task_claim', 'keeper_task_done'],
@@ -1564,7 +1564,7 @@ describe('fetchKeeperConfig', () => {
     const cases = [
       ['no_tool_capable_provider', '도구 실행 런타임 없음'],
       ['provider_runtime_error', '런타임 호출 오류'],
-      ['tool_required_unsatisfied', '필수 도구 미충족'],
+      ['tool_route_recoverable_failure', '도구 라우팅 복구 가능 실패'],
       ['fiber_unresolved', 'Fiber 미해결'],
       ['stale_turn_timeout', '오래된 턴 만료'],
       ['awaiting_operator', '운영자 조치 대기'],

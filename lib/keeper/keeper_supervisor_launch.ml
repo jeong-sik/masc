@@ -89,7 +89,7 @@ let launch_supervised_fiber
     in
     let fork_body body =
       bump_fork_outcome
-        (if domain_pool_flag then "inline_eio_required" else "inline_disabled");
+        (if domain_pool_flag then "inline_eio_context" else "inline_disabled");
       if
         domain_pool_flag
         && Atomic.compare_and_set

@@ -81,12 +81,6 @@ PATTERNS: tuple[PatternSpec, ...] = (
         "Keeper credential archived because of starvation recovery.",
     ),
     PatternSpec(
-        "alive_but_stuck",
-        r"alive-but-stuck detected",
-        "critical",
-        "Supervisor detected alive-but-stuck keeper state.",
-    ),
-    PatternSpec(
         "governance_unparseable",
         r"Governance judge returned unparseable",
         "warning",

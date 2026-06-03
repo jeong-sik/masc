@@ -3,7 +3,7 @@ open Alcotest
 (** RFC-0084 PR-13 — Keeper_disclosure_strategy typed sum invariants.
 
     PR-13 introduces the typed surface; follow-up activation PR(s)
-    wire it into worker_oas + keeper_runtime_toml.  This test pins:
+    wire it into worker_oas + runtime_toml.  This test pins:
 
     - 3-arm cardinality (Full | Hybrid | Minimal_index)
     - default = Full (safe today's behaviour)

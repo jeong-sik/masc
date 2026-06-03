@@ -21,11 +21,6 @@ type t =
   | TurnCompleted
   | IdleSeconds
   | ContractViolations
-  | AliveButStuck
-  | AliveButStuckSeconds
-  | AliveButStuckThresholdSeconds
-  | AliveButStuckRecoveryRequests
-  | AliveButStuckRecovery
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
@@ -108,7 +103,6 @@ type t =
   | RecordingErrorDedup
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
-  | RequireToolUseViolations
   | ToolCallTotal
   | ProfileConfigConflicts
   | OasTimeoutClassifications
@@ -185,7 +179,6 @@ type t =
   | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
-  | StaleWatchdogTickFailures
   | DeadTotal
   | AutoResumedTotal
   | AutoResumeBlockedTotal
@@ -196,8 +189,6 @@ type t =
   | NearExhaustionTotal
   | RestartAttempts
   | RestartOutcomes
-  | LivenessRecoveryAttempts
-  | LivenessRecoveryOutcomes
   | ConsecutiveIdle
   | LastProductiveTs
   | ProviderTimeoutStrike
@@ -246,11 +237,6 @@ let to_string = function
   | TurnCompleted -> "masc_keeper_turn_completed_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
   | ContractViolations -> "masc_keeper_contract_violations_total"
-  | AliveButStuck -> "masc_keeper_alive_but_stuck_total"
-  | AliveButStuckSeconds -> "masc_keeper_alive_but_stuck_seconds"
-  | AliveButStuckThresholdSeconds -> "masc_keeper_alive_but_stuck_threshold_seconds"
-  | AliveButStuckRecoveryRequests -> "masc_keeper_alive_but_stuck_recovery_requests_total"
-  | AliveButStuckRecovery -> "masc_keeper_alive_but_stuck_recovery_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
   | ContextMaxObserved -> "masc_keeper_context_max_observed_total"
   | TurnStarts -> "masc_keeper_turn_starts_total"
@@ -339,7 +325,6 @@ let to_string = function
   | PausedStatePersistErrors -> "masc_keeper_paused_state_persist_errors_total"
   | UnexpectedToolPartialTolerance ->
     "masc_keeper_unexpected_tool_partial_tolerance_total"
-  | RequireToolUseViolations -> "masc_keeper_require_tool_use_violations_total"
   | ToolCallTotal -> "masc_keeper_tool_call_total"
   | ProfileConfigConflicts -> "masc_keeper_profile_config_conflicts_total"
   | OasTimeoutClassifications -> "masc_keeper_oas_timeout_classifications_total"
@@ -423,7 +408,6 @@ let to_string = function
   | RegistryUpdateDropped -> "masc_keeper_registry_update_dropped_total"
   | RegistryOrphanThresholdBreached ->
     "masc_keeper_registry_orphan_threshold_breached_total"
-  | StaleWatchdogTickFailures -> "masc_keeper_stale_watchdog_tick_failures_total"
   | DeadTotal -> "masc_keeper_dead_total"
   | AutoResumedTotal -> "masc_keeper_auto_resumed_total"
   | AutoResumeBlockedTotal -> "masc_keeper_auto_resume_blocked_total"
@@ -434,8 +418,6 @@ let to_string = function
   | NearExhaustionTotal -> "masc_keeper_near_exhaustion_total"
   | RestartAttempts -> "masc_keeper_restart_attempts_total"
   | RestartOutcomes -> "masc_keeper_restart_outcomes_total"
-  | LivenessRecoveryAttempts -> "masc_keeper_liveness_recovery_attempts_total"
-  | LivenessRecoveryOutcomes -> "masc_keeper_liveness_recovery_outcomes_total"
   | ConsecutiveIdle -> "masc_keeper_consecutive_idle"
   | LastProductiveTs -> "masc_keeper_last_productive_ts"
   | ProviderTimeoutStrike -> "masc_keeper_provider_timeout_strike_total"

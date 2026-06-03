@@ -149,7 +149,7 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
   [ ( "CompletionContractViolation"
     , SdkE.Agent
         (SdkE.CompletionContractViolation
-           { contract = Agent_sdk.Completion_contract_id.Require_tool_use
+           { contract = Agent_sdk.Completion_contract_id.Allow_text_or_tool
            ; reason = "test"
            ; violation_detail = None
            }) )

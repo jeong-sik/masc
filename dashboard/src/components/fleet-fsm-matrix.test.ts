@@ -208,7 +208,7 @@ describe('runtimeAttentionForSnapshot', () => {
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_required_unsatisfied',
+        operator_disposition_reason: 'tool_route_recoverable_failure',
         tool_contract_result: 'unknown',
         error: {
           kind: 'api',
@@ -223,7 +223,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.label).toBe('정체')
     expect(attention.reason).toContain('is_live=false')
     expect(attention.reason).toContain('operator=pause_human')
-    expect(attention.reason).toContain('reason=tool_required_unsatisfied')
+    expect(attention.reason).toContain('reason=tool_route_recoverable_failure')
     expect(attention.title).toContain('latest activity 10m ago')
   })
 
@@ -439,13 +439,13 @@ describe('runtimeAttentionForSnapshot', () => {
       is_live: false,
       execution: execution({
         outcome: 'receipt_failed',
-        terminal_reason_code: 'completion_contract_violation:require_tool_use',
+        terminal_reason_code: 'completion_contract_violation:tool_contract',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_required_unsatisfied',
-        tool_contract_result: 'missing_required_tool_use',
+        operator_disposition_reason: 'tool_route_recoverable_failure',
+        tool_contract_result: 'tool_surface_mismatch',
         tool_surface: {
           tool_requirement: 'required',
-          turn_lane: 'tool_required',
+          turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
           visible_tool_count: 0,
           tool_gate_enabled: true,
@@ -458,8 +458,8 @@ describe('runtimeAttentionForSnapshot', () => {
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
-    expect(attention.cause).toContain('missing_required_tool_use (Execute)')
-    expect(attention.reason).toContain('turn_lane=tool_required')
+    expect(attention.cause).toContain('tool_surface_mismatch (Execute)')
+    expect(attention.reason).toContain('turn_lane=tool_optional')
     expect(attention.reason).toContain('visible_tools=0')
     expect(attention.reason).toContain('tool_surface_fallback=true')
     expect(attention.nextStep).toContain('Execute')
@@ -472,7 +472,7 @@ describe('runtimeAttentionForSnapshot', () => {
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error_timeout',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_required_unsatisfied',
+        operator_disposition_reason: 'tool_route_recoverable_failure',
         tool_contract_result: 'unknown',
         error: {
           kind: 'api',
@@ -499,10 +499,10 @@ describe('fleetCellPresentation', () => {
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_required_unsatisfied',
+        operator_disposition_reason: 'tool_route_recoverable_failure',
         tool_surface: {
           tool_requirement: 'required',
-          turn_lane: 'tool_required',
+          turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
           visible_tool_count: 0,
           tool_gate_enabled: true,
@@ -521,7 +521,7 @@ describe('fleetCellPresentation', () => {
     expect(cell.className).toContain('var(--bad-light)')
     expect(cell.title).toContain('KSM Running')
     expect(cell.title).toContain('runtime 정체')
-    expect(cell.title).toContain('blocked: tool_required_unsatisfied')
+    expect(cell.title).toContain('blocked: tool_route_recoverable_failure')
   })
 
   it('keeps non-KSM lanes tied to their raw FSM state', () => {
@@ -550,10 +550,10 @@ describe('buildRuntimeAssistPrompt', () => {
         outcome: 'receipt_failed',
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
-        operator_disposition_reason: 'tool_required_unsatisfied',
+        operator_disposition_reason: 'tool_route_recoverable_failure',
         tool_surface: {
           tool_requirement: 'required',
-          turn_lane: 'tool_required',
+          turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
           visible_tool_count: 0,
           tool_gate_enabled: true,
@@ -568,9 +568,9 @@ describe('buildRuntimeAssistPrompt', () => {
 
     expect(prompt).toContain('감독형 런타임 진단 요청: blocked')
     expect(prompt).toContain('cause=')
-    expect(prompt).toContain('blocked: tool_required_unsatisfied')
+    expect(prompt).toContain('blocked: tool_route_recoverable_failure')
     expect(prompt).toContain('evidence=')
-    expect(prompt).toContain('"turn_lane":"tool_required"')
+    expect(prompt).toContain('"turn_lane":"tool_optional"')
     expect(prompt).toContain('"visible_tool_count":0')
     expect(prompt).toContain('"tool_surface_fallback_used":true')
     expect(prompt).toContain('KSM=Running')
@@ -806,7 +806,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
             outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
             operator_disposition: 'pause_human',
-            operator_disposition_reason: 'tool_required_unsatisfied',
+            operator_disposition_reason: 'tool_route_recoverable_failure',
           }),
         }),
       ]),
@@ -830,7 +830,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
         keeperName: 'blocked',
         attention: expect.objectContaining({
           level: 'blocked',
-          cause: expect.stringContaining('tool_required_unsatisfied'),
+          cause: expect.stringContaining('tool_route_recoverable_failure'),
         }),
         message: expect.stringContaining('resolve 후보'),
       }),
@@ -852,7 +852,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
             outcome: 'receipt_failed',
             terminal_reason_code: 'api_error',
             operator_disposition: 'pause_human',
-            operator_disposition_reason: 'tool_required_unsatisfied',
+            operator_disposition_reason: 'tool_route_recoverable_failure',
           }),
           recommended_actions: [
             {
@@ -860,7 +860,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
               target_type: 'keeper',
               target_id: 'blocked',
               severity: 'warn',
-              reason: 'Inspect tool-contract blocker: tool_required_unsatisfied',
+              reason: 'Inspect tool-contract blocker: tool_route_recoverable_failure',
               confirm_required: false,
               suggested_payload: {
                 source: 'fleet_fsm',
@@ -874,7 +874,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
 
     render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
 
-    const button = await screen.findByRole('button', { name: 'Inspect tool-contract blocker: tool_required_unsatisfied' })
+    const button = await screen.findByRole('button', { name: 'Inspect tool-contract blocker: tool_route_recoverable_failure' })
     await act(async () => {
       fireEvent.click(button)
     })

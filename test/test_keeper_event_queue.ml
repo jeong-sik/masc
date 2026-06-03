@@ -14,7 +14,6 @@ let () =
         | Bootstrap -> "Bootstrap"
         | Unsupported s -> "Unsupported("^s^")"
         | Board_signal -> "Board_signal"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
         | Stay_silent_recovery -> "Stay_silent_recovery")));
 
   let live_comment_payload =
@@ -31,7 +30,6 @@ let () =
         | Bootstrap -> "Bootstrap"
         | Unsupported s -> "Unsupported("^s^")"
         | Board_signal -> "Board_signal"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
         | Stay_silent_recovery -> "Stay_silent_recovery")));
 
   (* --- classify: bootstrap --- *)
@@ -47,7 +45,6 @@ let () =
         | Board_signal -> "Board_signal"
         | Unsupported s -> "Unsupported("^s^")"
         | Bootstrap -> "Bootstrap"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
         | Stay_silent_recovery -> "Stay_silent_recovery")));
 
   (* --- classify: unsupported --- *)
@@ -64,7 +61,6 @@ let () =
        (match other with
         | Board_signal -> "Board_signal"
         | Bootstrap -> "Bootstrap"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
         | Stay_silent_recovery -> "Stay_silent_recovery"
         | Unsupported _ -> "Unsupported")));
 
@@ -87,7 +83,6 @@ let () =
         | Board_signal -> "Board_signal"
         | Bootstrap -> "Bootstrap"
         | Unsupported _ -> "Unsupported"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
         | Stay_silent_recovery -> "Stay_silent_recovery")));
 
   let stay_silent_recovery_stim = {
@@ -102,7 +97,6 @@ let () =
         | Board_signal -> "Board_signal"
         | Bootstrap -> "Bootstrap"
         | Unsupported s -> "Unsupported("^s^")"
-        | Alive_but_stuck_recovery -> "Alive_but_stuck_recovery"
         | Stay_silent_recovery -> "Stay_silent_recovery")));
 
   (* --- queue operations preserved --- *)

@@ -380,8 +380,8 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 last_blocker =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
-                       ~detail:
-                         "Completion contract [require_tool_use] violated: no ToolUse block"
+                      ~detail:
+                         "Completion contract [tool_contract] violated: no ToolUse block"
                        Keeper_meta_contract.Completion_contract_violation);
               };
           }
@@ -401,19 +401,17 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ("turn_count", `Int 12);
             ("outcome", `String "error");
             ( "terminal_reason_code",
-              `String "completion_contract_violation:require_tool_use" );
+              `String "completion_contract_violation:tool_contract" );
             ("operator_disposition", `String "pause_human");
             ( "operator_disposition_reason",
-              `String "tool_required_unsatisfied" );
+              `String "unmapped_runtime_state" );
             ( "tool_contract_result",
-              `String "missing_required_tool_use" );
+              `String "violated" );
             ("tools_used", `List []);
             ( "tool_surface",
               `Assoc
                 [
-                  ("tool_requirement", `String "required");
-                  ("required_tools", `List [ `String "tool_execute" ]);
-                  ("missing_required_tools", `List [ `String "tool_execute" ]);
+                  ("tool_requirement", `String "optional");
                   ("visible_tool_count", `Int 8);
                 ] );
             ( "sandbox",
@@ -456,10 +454,10 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "trust disposition blocks" "Blocked"
         (trust |> member "disposition" |> to_string);
       Alcotest.(check string) "operator reason preserved"
-        "tool_required_unsatisfied"
+        "unmapped_runtime_state"
         (trust |> member "operator_disposition_reason" |> to_string);
       Alcotest.(check string) "terminal code preserved"
-        "completion_contract_violation:require_tool_use"
+        "completion_contract_violation:tool_contract"
         (trust |> member "latest_terminal_reason" |> member "code"
        |> to_string);
       Operator_control.invalidate_snapshot_cache ();

@@ -121,28 +121,6 @@ let keeper_assignments_ref : (string * string) list ref = ref []
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
-let runtime_supports_required_tools (rt : t) =
-  let provider_caps =
-    match rt.provider.capabilities with
-    | Some capabilities -> capabilities
-    | None -> capabilities_default
-  in
-  let model_caps =
-    match rt.model.capabilities with
-    | Some capabilities -> capabilities
-    | None -> model_capabilities_default
-  in
-  rt.model.tools_support
-  && model_caps.supports_tool_choice
-  && provider_caps.supports_runtime_mcp_tools
-;;
-
-let required_tool_runtime_ids runtimes =
-  runtimes
-  |> List.filter runtime_supports_required_tools
-  |> runtime_ids
-;;
-
 let init_default ~config_path =
   match load_list ~config_path with
   | Ok (runtimes, rt, assignments) ->
@@ -155,7 +133,6 @@ let init_default ~config_path =
 let get_default_runtime () = !default_runtime_ref
 let get_runtimes () = !runtimes_ref
 let get_runtime_ids () = runtime_ids !runtimes_ref
-let get_required_tool_runtime_ids () = required_tool_runtime_ids !runtimes_ref
 
 (* RFC persona⊥{model,runtime}: keeper→runtime assignment is sourced from
    [[runtime.assignments]] (runtime.toml SSOT), NOT from persona JSON or keeper
@@ -204,7 +181,7 @@ let config_path () : string option =
   | Env | Local_masc ->
       let path =
         Filename.concat resolution.config_root.path
-          Config_dir_resolver.keeper_runtime_toml_filename
+          Config_dir_resolver.runtime_toml_filename
       in
       if Sys.file_exists path then Some path else None
   | Invalid_env | Missing -> None

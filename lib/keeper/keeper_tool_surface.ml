@@ -785,12 +785,12 @@ let () =
    remaining keeper tools (status, msg, clear, compact, repair,
    sandbox lifecycle) use the keeper Eio context and are gated on
    Phase 5 Eio plumbing scope. *)
-(* RFC-0182 Phase 5 PR-B: [eio_required] returns a typed "Eio context
+(* RFC-0182 Phase 5 PR-B: [eio_context_missing] returns a typed "Eio context
    required" failure when masc_keeper_msg / masc_keeper_up etc. are
    invoked from a path that lacks ?sw / ?clock (e.g. OAS handler).
    Production keeper dispatch from [Mcp_server_eio_execute] always
    provides them via PR-A.2 plumbing. *)
-let eio_required tool_name =
+let eio_context_missing tool_name =
   Some
     (tool_result_error
        ~tool_name
@@ -853,7 +853,7 @@ let () =
               ?proc_mgr
               ?net
               args)
-       | _ -> eio_required "masc_keeper_msg")
+       | _ -> eio_context_missing "masc_keeper_msg")
     | "masc_keeper_up" ->
       (match sw, clock with
        | Some sw, Some clock ->
@@ -866,6 +866,6 @@ let () =
               ?proc_mgr
               ?net
               args)
-       | _ -> eio_required "masc_keeper_up")
+       | _ -> eio_context_missing "masc_keeper_up")
     | _ -> None
 ;;

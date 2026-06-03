@@ -443,28 +443,6 @@ let run (ctx : ctx)
           ();
         mark_terminal_error reclassified;
         Error reclassified)
-      else if
-        let fallback_not_yet_tried = false in
-        EC.should_cap_rotation_for_contract_violation
-          ~attempted_runtimes
-          ~fallback_not_yet_tried
-          err
-      then (
-        Log.Keeper.warn
-          "%s: required_tool_contract_violation after rotation (%s, \
-           %d runtime(s) attempted) — skipping further rotation; \
-           rotating again is unlikely to change the model's \
-           tool-use choice. Error: %s"
-          meta.name
-          execution_runtime_id
-          (List.length attempted_runtimes)
-          (short_preview (Agent_sdk.Error.to_string err));
-        Prometheus.inc_counter
-          "masc_keeper_contract_violation_rotation_capped_total"
-          ~labels:[ "keeper", meta.name ]
-          ();
-        mark_terminal_error err;
-        Error err)
       else (
         match
           next_fail_open_runtime_for_turn_with_budget

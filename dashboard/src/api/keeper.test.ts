@@ -301,7 +301,7 @@ describe('keeper runtime trace', () => {
             code: 'required_tool_not_materialized',
             severity: 'bad',
             lane: 'tool_runtime',
-            detail: 'missing required tools: keeper_task_done',
+            detail: 'tool surface mismatch: keeper_task_done',
           },
           {
             code: 'clock_provider_attempt_unfinished',

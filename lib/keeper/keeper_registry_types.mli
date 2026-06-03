@@ -127,12 +127,12 @@ val failure_reason_to_string : failure_reason -> string
     recurring P0 pattern (#10490, #10574). *)
 val failure_reason_cohort_key : failure_reason option -> string
 
-val stale_watchdog_failure_reason :
+val stale_kill_failure_reason :
   prior:failure_reason option -> kill_class:stale_kill_class -> failure_reason option
-(** Preserve authoritative terminal failure reasons when the stale watchdog
-    fires after a failed turn, but do not carry stale-watchdog cohort labels
-    across fresh watchdog kills. Storm labels are relatched only by the current
-    per-keeper threshold; fleet-batch detection is observation-only. *)
+(** Preserve authoritative terminal failure reasons when a stale kill follows
+    a failed turn, but do not carry stale-kill cohort labels across fresh
+    stale kills. Storm labels are relatched only by the current per-keeper
+    threshold; fleet-batch detection is observation-only. *)
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
@@ -488,15 +488,12 @@ type registry_entry = {
       (** Most recent [keeper_cycle_decision] skip outcome captured by
           the keepalive loop (#10940 follow-up).  The [Prometheus]
           [proactive_skip_reason_metric] aggregates skip reasons over
-          time, but at stale-watchdog kill the operator wants to see
-          *which* reasons were active *just before* the 300s idle
-          timeout fired.  [Some (ts, reasons)] = wall clock + verdict
+          time, but operators need recent skip verdict context when
+          diagnosing idle/quiet keepers. [Some (ts, reasons)] = wall
+          clock + verdict
           reason strings ([cooldown_pending], [no_signal],
           [scheduled_autonomous_disabled], etc.) from the last skip;
-          [None] until the first skip is observed.  Read by
-          [Keeper_stale_watchdog] to enrich the kill warn line so an
-          [idle_stale=true] termination is no longer indistinguishable
-          from a *stuck* fiber. *)
+          [None] until the first skip is observed. *)
   compaction_stage : packed_compaction_stage;
       (** Explicit KMC projection owned by the runtime, not derived from
           parent phase on read. This lets the observer surface

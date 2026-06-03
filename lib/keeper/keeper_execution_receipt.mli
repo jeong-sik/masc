@@ -275,6 +275,14 @@ type operator_disposition_reason =
   | Reason_preflight_config_error
   | Reason_degraded_retry
   | Reason_runtime_fallback
+  | Reason_transient_runtime_retry
+  (** A retry-recoverable transient provider-runtime failure
+      ([api_error_timeout] / [api_error_network]) that the keeper's in-turn
+      retry self-healed on the SAME runtime — distinct from
+      [Reason_runtime_fallback] (cross-runtime fallback). Paired with
+      [Disp_fail_open_next_runtime]; suppresses the operator page that the
+      pre-fix [Reason_provider_runtime_error] / [Disp_pause_human]
+      fall-through emitted. *)
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_required_unsatisfied

@@ -6,7 +6,9 @@ open Keeper_tool_shared_runtime
 (** Compute a structured command descriptor from Shell IR.
     Used by the IDE bridge for deterministic PR/issue event detection. *)
 let first_int_arg args =
-  List.find_map int_of_string_opt args |> Option.value ~default:0
+  match List.find_map int_of_string_opt args with
+  | Some n -> n
+  | None -> 0
 
 let compute_command_descriptor (ir : Masc_exec.Shell_ir.t) : Ide_event_types.command_descriptor =
   match ir with

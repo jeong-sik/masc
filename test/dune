@@ -585,7 +585,8 @@
   test_prompt_registry_pbt
   test_clean_only_bug_mirrors
   test_keeper_phase_drift_contract
-  test_event_priority_monotone_pbt)
+  test_event_priority_monotone_pbt
+  test_board_metrics_labels)
  (modules
   test_pbt_mention
   test_pbt_validation
@@ -597,7 +598,8 @@
   test_prompt_registry_pbt
   test_clean_only_bug_mirrors
   test_keeper_phase_drift_contract
-  test_event_priority_monotone_pbt)
+  test_event_priority_monotone_pbt
+  test_board_metrics_labels)
  (libraries masc_test_deps))
 
 ; Focused single-module tests

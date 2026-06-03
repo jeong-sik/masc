@@ -130,6 +130,19 @@ type post_kind =
   | System_post [@tla.symbol "system_post"]
 [@@deriving tla]
 
+(* Closed sum for the legacy automation-author classification. Relocated
+   here from board_core_classify so the board metric hook surface
+   (board_metrics_hooks.ml / board_prometheus_hooks.ml) can reference it
+   without a board_core_classify -> board_metrics_hooks -> board_core_classify
+   cycle. board_core_classify re-exports it via [include Board_types]. *)
+type automation_label =
+  | Auto_prefixed       (* "auto-" prefix *)
+  | Qa_prefixed         (* "qa-" prefix *)
+  | Researcher_named    (* contains "researcher" *)
+  | Harness_named       (* contains "harness" *)
+  | Smoke_named         (* contains "smoke" *)
+  | Probe_named         (* contains "probe" *)
+
 type post = {
   id: Post_id.t;
   author: Agent_id.t;

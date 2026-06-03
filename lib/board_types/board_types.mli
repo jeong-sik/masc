@@ -75,6 +75,18 @@ type post_kind =
   | System_post
 [@@deriving tla]
 
+(** Legacy automation-author classification (RFC-0089 §4-3 G2). Defined
+    here so the board metric hook surface can reference it without a
+    dependency cycle through [Board_core_classify]; [Board_core_classify]
+    re-exports it via [include Board_types]. *)
+type automation_label =
+  | Auto_prefixed       (** Author starts with ["auto-"]. *)
+  | Qa_prefixed         (** Author starts with ["qa-"]. *)
+  | Researcher_named    (** Author contains ["researcher"]. *)
+  | Harness_named       (** Author contains ["harness"]. *)
+  | Smoke_named         (** Author contains ["smoke"]. *)
+  | Probe_named         (** Author contains ["probe"]. *)
+
 (** {1 Records — Mandatory TTL} *)
 
 type post = {

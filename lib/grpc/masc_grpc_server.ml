@@ -396,9 +396,16 @@ let create_server
       ~(port : int)
       ~(workspace_config : Workspace_utils_backend_setup.config)
       ~(tool_dispatcher : string -> string -> (string, string) result)
+      ~(lsp_dispatcher :
+          language_id:string
+          -> jsonrpc_request_json:string
+          -> workspace_root:string option
+          -> (string, string) result)
   : Grpc_eio.Server.t
   =
-  let service = Masc_grpc_service.create_service ~workspace_config ~tool_dispatcher in
+  let service =
+    Masc_grpc_service.create_service ~workspace_config ~tool_dispatcher ~lsp_dispatcher
+  in
   let health = Grpc_eio.Health.create ~default_status:Grpc_eio.Health.Serving () in
   Grpc_eio.Health.register_service health ~service:Masc_grpc_service.service_name;
   Grpc_eio.Health.set_status
@@ -461,16 +468,125 @@ let start
     Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)")
   else (
     let port = configured_port () in
+    (* Extract Eio capabilities for LSP proxy wiring. *)
+    let proc_mgr = Eio.Stdenv.process_mgr env in
+    let clock = Eio.Stdenv.clock env in
+    let base_path = workspace_config.Workspace_utils_backend_setup.base_path in
+    (* Build the LSP dispatcher closure. Uses a dedicated switch scoped to
+       the gRPC server lifetime so LSP child processes are cleaned up when
+       the server shuts down. The process cache and router are server-scoped
+       (shared across all gRPC calls) since gRPC calls are stateless unary RPCs,
+       unlike the WebSocket endpoint which uses per-connection state. *)
+    let lsp_sw = sw in
+    let lsp_processes : (string, Lsp_process_manager.lsp_process) Hashtbl.t =
+      Hashtbl.create 8
+    in
+    let lsp_router = Lsp_message_router.create () in
+    let lsp_spawn_mutex = Eio.Mutex.create () in
+    let lsp_dispatcher
+          ~language_id
+          ~jsonrpc_request_json
+          ~workspace_root
+      : (string, string) result
+      =
+      let lang_id = language_id in
+      let ws_root = Option.value workspace_root ~default:base_path in
+      (* Ensure the LSP process for this language is running. *)
+      let ensure_proc () =
+        Eio.Mutex.use_rw ~protect:true lsp_spawn_mutex (fun () ->
+          match Hashtbl.find_opt lsp_processes lang_id with
+          | Some proc -> Ok proc
+          | None ->
+            (match Lsp_process_manager.spawn ~sw:lsp_sw ~lang_id ~workspace_root:ws_root proc_mgr with
+             | Error spawn_err ->
+               Error (Format.asprintf "LSP spawn failed for %s: %a" lang_id Lsp_process_manager.pp_spawn_error spawn_err)
+             | Ok proc ->
+               let _reader =
+                 Lsp_message_router.start_response_reader
+                   ~sw:lsp_sw lsp_router proc
+                   ~on_notification:(fun ~client_id:_ ~method_:_ _params -> ())
+               in
+               (* Send initialize request with timeout. *)
+               let init_params =
+                 `Assoc
+                   [ "processId", `Int (Unix.getpid ())
+                   ; "rootUri", `String ("file://" ^ ws_root)
+                   ; "capabilities", `Assoc []
+                   ]
+               in
+               (try
+                  let init_result =
+                    Eio.Time.with_timeout_exn clock 10.0 (fun () ->
+                      let promise =
+                        Lsp_message_router.send_request
+                          lsp_router proc
+                          ~method_:"initialize"
+                          ~params:init_params
+                          ~client_id:0
+                      in
+                      Eio.Promise.await promise)
+                  in
+                  (match init_result with
+                   | Ok _ ->
+                     Lsp_message_router.send_notification
+                       lsp_router proc
+                       ~method_:"initialized"
+                       ~params:(`Assoc []);
+                     Hashtbl.replace lsp_processes lang_id proc;
+                     Ok proc
+                   | Error msg ->
+                     Error (Printf.sprintf "LSP initialize failed for %s: %s" lang_id msg))
+                with
+                | Eio.Time.Timeout ->
+                  Error (Printf.sprintf "LSP initialize timeout for %s (10s)" lang_id)
+                | exn ->
+                  Error (Printf.sprintf "LSP initialize error for %s: %s" lang_id (Printexc.to_string exn)))))
+      in
+      match ensure_proc () with
+      | Error _ as e -> e
+      | Ok proc ->
+        (* Parse the JSON-RPC request and extract method + params. *)
+        (try
+           let json = Yojson.Safe.from_string jsonrpc_request_json in
+           match json with
+           | `Assoc fields ->
+             let method_ =
+               match List.assoc_opt "method" fields with
+               | Some (`String m) -> m
+               | _ -> failwith "missing method field"
+             in
+             let params =
+               Option.value ~default:`Null (List.assoc_opt "params" fields)
+             in
+             let promise =
+               Lsp_message_router.send_request
+                 lsp_router proc
+                 ~method_
+                 ~params
+                 ~client_id:0
+             in
+             (match Eio.Promise.await promise with
+              | Ok result ->
+                Ok (Yojson.Safe.to_string result)
+              | Error msg ->
+                Error (Printf.sprintf "LSP request failed: %s" msg))
+           | _ -> Error "JSON-RPC request must be a JSON object"
+         with
+         | exn ->
+           Error (Printf.sprintf "LSP dispatch error: %s" (Printexc.to_string exn)))
+    in
     Eio.Fiber.fork ~sw (fun () ->
       try
-        let server = create_server ~port ~workspace_config ~tool_dispatcher in
+        let server =
+          create_server ~port ~workspace_config ~tool_dispatcher ~lsp_dispatcher
+        in
         Log.Server.info
           "gRPC workspace server starting on port %d (health + reflection enabled)"
           port;
         Log.Server.info "  service: %s" Masc_grpc_service.service_name;
         Log.Server.info "  health: %s/Check" health_service_name;
         Log.Server.info
-          "  methods: Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
+          "  methods: Broadcast, GetStatus, ToolCall, LspCall, Subscribe, Heartbeat";
         Transport_metrics.set_grpc_runtime_listening true;
         Transport_metrics.set_grpc_listen_status "listening";
         (* Safe: finally is Atomic.set — no I/O, no exception risk *)

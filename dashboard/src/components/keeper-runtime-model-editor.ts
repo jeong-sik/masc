@@ -1,11 +1,11 @@
 // Keeper runtime editor — a prominent, one-expand-away card that lets an
 // operator change which runtime lane a keeper dispatches on.
 //
-// RFC-0207: a keeper's runtime selection lives in a SINGLE surface — the persona
-// TOML `runtime_id` field (parsed into both `runtime_id` and
-// `model`). The detailed view of that field is buried under
-// 설정 → Keeper 설정 → 소스. This card surfaces the same field at the top of the
-// keeper detail's 진단/운영 section so it is discoverable without digging.
+// RFC-0207: a keeper's runtime selection lives in a SINGLE surface —
+// runtime.toml [runtime.assignments]. The detailed view of that assignment is
+// buried under 설정 → Keeper 설정 → 소스. This card surfaces the same assignment
+// at the top of the keeper detail's 진단/운영 section so it is discoverable
+// without digging.
 //
 // State is SHARED with keeper-config-panel via [configState]/[loadKeeperConfig]
 // (read) and [applyKeeperConfigUpdate] (write) so the two surfaces never show
@@ -50,7 +50,7 @@ export function uniqueNonEmpty(values: readonly string[]): string[] {
 }
 
 /**
- * Editable only when the selection is backed by a writable keeper TOML.
+ * Editable only when the keeper has a writable TOML-backed config source.
  * persona-only / generated keepers have no manifest to patch. Mirrors the
  * `runtimeCanEdit` gate in keeper-config-panel so the two surfaces agree.
  */
@@ -107,8 +107,8 @@ export function KeeperRuntimeModelEditor({ keeperName }: { keeperName: string })
           : null}
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-status-warn)]">
           이 keeper는 편집 가능한 TOML 소스가 아니라(소스: ${kind}) 여기서 model을 바꿀 수 없습니다.
-          편집하려면 <code>.masc/config/keepers/${keeperName}.toml</code> 에
-          <code>runtime_id = "runtime-lane"</code> 을 추가하고 서버를 재시작하세요.
+          편집하려면 <code>.masc/config/runtime.toml</code> 의
+          <code>[runtime.assignments]</code> 에 keeper 배정을 추가하고 서버를 재시작하세요.
         </div>
       </div>
     `

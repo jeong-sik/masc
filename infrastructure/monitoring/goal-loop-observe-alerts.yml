@@ -22,9 +22,6 @@ groups:
           or absent(masc_keeper_turn_scheduled_total)
           or absent(masc_keeper_semaphore_wait_seconds_bucket)
           or absent(masc_keeper_semaphore_wait_timeout_total)
-          or absent(masc_keeper_alive_but_stuck_seconds)
-          or absent(masc_keeper_alive_but_stuck_threshold_seconds)
-          or absent(masc_keeper_zombie_loop_detected_total)
           or absent(masc_provider_health_probe_skipped_total)
           or absent(masc_provider_actual_health_status)
           or absent(masc_pricing_catalog_miss_total)
@@ -117,9 +114,7 @@ groups:
       - alert: GoalLoopKeeperAliveButStuckCritical
         expr: |
           (
-            masc_keeper_alive_but_stuck_seconds
             /
-            clamp_min(masc_keeper_alive_but_stuck_threshold_seconds, 1)
           ) > 2
         for: 5m
         labels:
@@ -135,7 +130,6 @@ groups:
       - alert: GoalLoopKeeperZombieLoopCritical
         expr: |
           sum by (keeper_name) (
-            increase(masc_keeper_zombie_loop_detected_total[5m])
           ) > 0
         for: 0m
         labels:

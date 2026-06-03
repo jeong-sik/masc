@@ -1,5 +1,23 @@
 (** IDE Event Types — unified event model for Keeper activity visualization. *)
 
+(** Structured descriptor for what a shell command did.
+    Computed from Shell IR GADT by the Execute handler.
+    Consumed by the bridge for deterministic event generation. *)
+type command_descriptor =
+  | Gh_pr_create of { title : string; base : string; draft : bool }
+  | Gh_pr_merge of { pr_number : int; squash : bool }
+  | Gh_pr_comment of { pr_number : int; body : string }
+  | Gh_pr_close of { pr_number : int }
+  | Gh_pr_edit of { pr_number : int; title : string option }
+  | Gh_pr_review of { pr_number : int }
+  | Gh_issue_create of { title : string; body : string }
+  | Gh_issue_close of { issue_number : int }
+  | Git_push of { remote : string; branch : string; force : bool }
+  | Git_commit of { message : string }
+  | Generic
+
+val command_descriptor_to_json : command_descriptor -> Yojson.Safe.t
+
 type ide_event =
   | Tool_event of tool_event
   | Turn_event of turn_event

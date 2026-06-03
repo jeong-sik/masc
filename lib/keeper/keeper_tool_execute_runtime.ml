@@ -3,6 +3,67 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
+(** Compute a structured command descriptor from Shell IR.
+    Used by the IDE bridge for deterministic PR/issue event detection. *)
+let compute_command_descriptor (ir : Masc_exec.Shell_ir.t) : Ide_event_types.command_descriptor =
+  match ir with
+  | Masc_exec.Shell_ir.Simple simple ->
+    (match Masc_exec.Shell_ir_typed.of_simple simple with
+     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Gh { subcommand; action; title; draft; squash; delete_branch = _; body; rest }) ->
+       (match subcommand, action with
+        | "pr", Some "create" ->
+          let base = List.fold_left (fun acc -> function
+            | "--base" :: b :: _ -> b
+            | "--base=" :: b :: _ -> (match String.split_on_char '=' b with [ _; v ] -> v | _ -> acc)
+            | _ -> acc
+          ) "main" (List.map (fun s -> String.split_on_char ' ' s) rest) in
+          Gh_pr_create { title = Option.value title ~default:""; base; draft }
+        | "pr", Some "merge" ->
+          let pr_number = List.fold_left (fun acc -> function
+            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
+            | _ -> acc
+          ) 0 rest in
+          Gh_pr_merge { pr_number; squash }
+        | "pr", Some "comment" ->
+          let pr_number = List.fold_left (fun acc -> function
+            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
+            | _ -> acc
+          ) 0 rest in
+          Gh_pr_comment { pr_number; body = Option.value body ~default:"" }
+        | "pr", Some "close" ->
+          let pr_number = List.fold_left (fun acc -> function
+            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
+            | _ -> acc
+          ) 0 rest in
+          Gh_pr_close { pr_number }
+        | "pr", Some "edit" ->
+          let pr_number = List.fold_left (fun acc -> function
+            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
+            | _ -> acc
+          ) 0 rest in
+          Gh_pr_edit { pr_number; title }
+        | "pr", Some "review" ->
+          let pr_number = List.fold_left (fun acc -> function
+            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
+            | _ -> acc
+          ) 0 rest in
+          Gh_pr_review { pr_number }
+        | "issue", Some "create" ->
+          Gh_issue_create { title = Option.value title ~default:""; body = Option.value body ~default:"" }
+        | "issue", Some "close" ->
+          let issue_number = List.fold_left (fun acc -> function
+            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
+            | _ -> acc
+          ) 0 rest in
+          Gh_issue_close { issue_number }
+        | _ -> Generic)
+     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Git_push { force; force_with_lease = _; set_upstream = _; remote; branch }) ->
+       Git_push { remote = Option.value remote ~default:"origin"; branch = Option.value branch ~default:"main"; force }
+     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Git_commit { message; amend = _ }) ->
+       Git_commit { message }
+     | _ -> Generic)
+  | _ -> Generic
+
 let elapsed_duration_ms ~start_time ~end_time =
   let elapsed_ms = (end_time -. start_time) *. 1000. in
   match classify_float elapsed_ms with
@@ -334,6 +395,7 @@ let handle_tool_execute_typed
                 ~classification
                 ~status:result.status
             in
+            let descriptor = compute_command_descriptor ir in
             Yojson.Safe.to_string
               (Exec_core.process_result_json
                  ~classification
@@ -347,6 +409,7 @@ let handle_tool_execute_typed
                       ; "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms
                       ; "timeout_sec", `Float timeout_sec
+                      ; "command_descriptor", Ide_event_types.command_descriptor_to_json descriptor
                       ]
                     @ execution_location_fields cwd)
                  ~status:result.status

@@ -256,15 +256,23 @@ let parse_pr_url_from_output (output : string) : (int * string) option =
      | _ -> None)
 
 (** Ingest PR event from command_descriptor (deterministic).
-    Falls back to heuristic output parsing if descriptor is not available. *)
+    Falls back to heuristic output parsing if descriptor is not available.
+    Only proceeds when [success] is [true] — failed tool executions
+    (auth/network/validation errors) must not produce phantom PR events. *)
 let ingest_pr_event_from_descriptor
     ~base_path
     ~keeper_id
     ~turn_id
     ~output_text
     ~tool_name
+    ~success
   =
-  if String.equal (String.lowercase_ascii tool_name) "execute" then
+  (* Gate: only ingest PR events from successful tool executions.
+     Failed commands (auth/network/validation errors) preserve the
+     command_descriptor in their output, which would otherwise produce
+     phantom PR #0 events. *)
+  if not success then ()
+  else if String.equal (String.lowercase_ascii tool_name) "execute" then
     match extract_descriptor_from_output output_text with
     | Some (Ide_event_types.Gh_pr_create { title; base = _; draft = _ }) ->
       (* PR was created — try to get PR number from output URL *)

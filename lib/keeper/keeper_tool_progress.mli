@@ -61,20 +61,6 @@ val is_completion_tool_name : string -> bool
 (** [true] iff the canonicalized name is keeper_stay_silent. *)
 val is_stay_silent_tool_name : string -> bool
 
-(** [true] iff the tool name represents productive execution progress.
-    Completion tools are exempted even when read-only; passive keeper
-    observation tools remain [false]. *)
-val tool_name_counts_as_execution_progress : string -> bool
-
-(** Validate an observed generic [Require_tool_use] call. This is a
-    provider-level contract: any actual tool call satisfies it. Keeper
-    progress/liveness classification is handled separately and must not be
-    reinterpreted as a mutating-tool requirement. *)
-val required_tool_satisfaction
-  :  ?satisfying_tools:string list
-  -> Agent_sdk.Completion_contract.tool_call
-  -> (unit, string) result
-
 (** Extract OAS completion-contract satisfying-tool hints from an error reason.
     Returns [] when the reason has no hint or the hint is empty. *)
 val satisfying_tools_from_contract_violation_reason : string -> string list

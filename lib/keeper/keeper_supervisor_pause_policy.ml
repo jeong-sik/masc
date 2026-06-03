@@ -208,10 +208,6 @@ let failure_reason_policy_decision
     Some
       (Keeper_failure_policy.decide
          (Keeper_failure_policy.Stale_turn { progress_seen = false }))
-  | Some (Keeper_registry.Tool_required_unsatisfied _) ->
-    Some
-      (Keeper_failure_policy.decide
-         Keeper_failure_policy.Required_tool_contract_violation)
   | Some (Keeper_registry.Ambiguous_partial_commit _) ->
     Some (Keeper_failure_policy.decide Keeper_failure_policy.Ambiguous_partial_commit)
   | Some (Keeper_registry.Turn_consecutive_failures count) ->
@@ -230,13 +226,7 @@ let failure_reason_policy_decision
     Some
       (Keeper_failure_policy.decide
          (Keeper_failure_policy.Runtime_exhausted { retryable }))
-  | Some
-      ( Keeper_registry.Heartbeat_consecutive_failures _
-      | Keeper_registry.Stale_fleet_batch _
-      | Keeper_registry.Provider_runtime_error _
-      | Keeper_registry.Fiber_unresolved _
-      | Keeper_registry.Exception _ )
-  | None ->
+  | Some _ | None ->
     None
 ;;
 

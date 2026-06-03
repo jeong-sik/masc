@@ -233,7 +233,6 @@ let failure_reason_batch_root_cause
   | Turn_consecutive_failures _
   | Turn_overflow_pause
   | Turn_livelock_pause
-  | Tool_required_unsatisfied _
   | Ambiguous_partial_commit _
   | Fiber_unresolved _
   | Exception _ ->

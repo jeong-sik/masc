@@ -67,7 +67,7 @@ let terminal_reason_from_receipt receipt =
 let disposition_of_runtime_blocker_class raw_blocker_class =
   match raw_blocker_class with
   | "completion_contract_violation" | "tool_required_unsatisfied" ->
-      Keeper_turn_disposition.Required_tool_use_unsatisfied
+      Keeper_turn_disposition.Provider_error (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
   | "turn_timeout"
   | "turn_timeout_after_queue_wait"
   | "stale_turn_timeout" ->

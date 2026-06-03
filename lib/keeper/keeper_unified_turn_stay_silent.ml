@@ -29,8 +29,14 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
       threshold
   in
   let failure_reason =
-    Keeper_registry.Tool_required_unsatisfied
-      { code = "stay_silent_loop"; detail }
+    Keeper_registry.Provider_runtime_error
+      { code = "stay_silent_loop"
+      ; detail
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = None
+      ; reason = None
+      }
   in
   Keeper_registry.set_failure_reason
     ~base_path:config.base_path
@@ -82,7 +88,7 @@ let clear_if_recovered ~(config : Workspace.config) meta ~previous_streak ~was_l
   if was_latched then begin
     match Keeper_registry.get ~base_path:config.base_path meta.Keeper_meta_contract.name with
     | Some { Keeper_registry.last_failure_reason =
-               Some (Keeper_registry.Tool_required_unsatisfied { code; _ })
+               Some (Keeper_registry.Provider_runtime_error { code; _ })
            ; _
            }
       when String.equal code "stay_silent_loop" ->

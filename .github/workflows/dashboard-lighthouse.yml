@@ -1,6 +1,6 @@
 name: PR-0.2.H — Dashboard Lighthouse CI (synthetic perf budget)
 
-# Lighthouse CI smoke against the masc-mcp dashboard build. Sibling of:
+# Lighthouse CI smoke against the masc dashboard build. Sibling of:
 #   - .github/workflows/perf-baseline.yml          (PR-0.2.F, server perf)
 #   - .github/workflows/dashboard-ws-load.yml      (PR-0.2.G, k6 WS load)
 #

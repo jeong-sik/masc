@@ -1,6 +1,6 @@
 # Monitoring artefacts
 
-Prometheus / Grafana files that live alongside the masc-mcp source so deployments can apply them without a separate ops repo.
+Prometheus / Grafana files that live alongside the masc source so deployments can apply them without a separate ops repo.
 
 ## Catalogue
 

@@ -114,10 +114,10 @@ jobs:
 
           # Heavy CI runs whenever the PR is live (OPEN), regardless of draft
           # status. Earlier we skipped draft PRs to save CI minutes, but the
-          # masc-mcp fast-track pattern (open Draft → mark ready → admin-merge
+          # masc fast-track pattern (open Draft → mark ready → admin-merge
           # within seconds) means the build/lint/test surfaces almost never
           # got a chance to run. Two visible failures from that gap this week:
-          # - masc-mcp #15531 (Tool_args / Tool_result sub-lib extract) merged
+          # - masc #15531 (Tool_args / Tool_result sub-lib extract) merged
           #   main in a non-building state; recovered by #15540.
           # - oas #1596 (turn_ready_tool_names signature narrow) — same shape,
           #   recovered by oas #1599.
@@ -577,7 +577,7 @@ jobs:
         # See: PR #11721 followup, memory feedback_admin_merge_can_bypass_build_ci.md.
         env:
           # Reduce parallelism to minimize Eio fiber scheduling flakes in tests.
-          # See: https://github.com/jeong-sik/masc-mcp/issues/2957
+          # See: https://github.com/jeong-sik/masc/issues/2957
           DUNE_JOBS: 1
         run: |
           set -euo pipefail
@@ -681,7 +681,7 @@ jobs:
           MASC_KEEPER_MSG_TIMEOUT_MAX_SEC: "10"
           MASC_E2E_TESTS: "true"
           # Reduce parallelism to minimize Eio fiber scheduling flakes.
-          # See: https://github.com/jeong-sik/masc-mcp/issues/2957
+          # See: https://github.com/jeong-sik/masc/issues/2957
           DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me

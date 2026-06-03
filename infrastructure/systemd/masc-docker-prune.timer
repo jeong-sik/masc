@@ -3,7 +3,7 @@
 
 [Unit]
 Description=Weekly MASC MCP Docker prune
-Documentation=https://github.com/jeong-sik/masc-mcp
+Documentation=https://github.com/jeong-sik/masc
 
 [Timer]
 OnCalendar=Sun *-*-* 04:23:00

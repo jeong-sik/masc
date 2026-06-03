@@ -1,4 +1,4 @@
-# MASC MCP – Linux systemd unit, parity with infrastructure/launchd/com.jeong-sik.masc-mcp.plist.
+# MASC MCP – Linux systemd unit, parity with infrastructure/launchd/com.jeong-sik.masc.plist.
 #
 # Why this exists:
 #   The launchd plist covers macOS dev/prod, but production Linux hosts
@@ -7,18 +7,18 @@
 #   contract (KeepAlive=on-failure, ThrottleInterval=30s).
 #
 # Install (per-host, machine-specific paths must be edited):
-#   sudo install -m 0644 infrastructure/systemd/masc-mcp.service \
-#     /etc/systemd/system/masc-mcp.service
+#   sudo install -m 0644 infrastructure/systemd/masc.service \
+#     /etc/systemd/system/masc.service
 #   sudo systemctl daemon-reload
-#   sudo systemctl enable --now masc-mcp.service
+#   sudo systemctl enable --now masc.service
 #
 # Status:
-#   sudo systemctl status masc-mcp.service
-#   sudo journalctl -u masc-mcp.service -f
+#   sudo systemctl status masc.service
+#   sudo journalctl -u masc.service -f
 
 [Unit]
 Description=MASC MCP server (Multi-Agent Shared Context)
-Documentation=https://github.com/jeong-sik/masc-mcp
+Documentation=https://github.com/jeong-sik/masc
 After=network-online.target
 Wants=network-online.target
 
@@ -26,15 +26,15 @@ Wants=network-online.target
 # Adjust to your install layout.
 User=masc
 Group=masc
-WorkingDirectory=/opt/masc-mcp
+WorkingDirectory=/opt/masc
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-Environment=MASC_BASE_PATH=/var/lib/masc-mcp
-Environment=MASC_CONFIG_DIR=/opt/masc-mcp/config
+Environment=MASC_BASE_PATH=/var/lib/masc
+Environment=MASC_CONFIG_DIR=/opt/masc/config
 Environment=MASC_MCP_PORT=8080
 Environment=MASC_SHUTDOWN_CLEANUP_TIMEOUT=10
 Environment=MASC_SHUTDOWN_FORCE_TIMEOUT=60
 
-ExecStart=/opt/masc-mcp/bin/masc-mcp --http --port 8080 --base-path /var/lib/masc-mcp
+ExecStart=/opt/masc/bin/masc --http --port 8080 --base-path /var/lib/masc
 
 # Graceful shutdown contract — TimeoutStopSec is set a few seconds
 # larger than the server's force timeout (MASC_SHUTDOWN_FORCE_TIMEOUT=60)
@@ -59,10 +59,10 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
-ReadWritePaths=/var/lib/masc-mcp /var/log/masc-mcp
+ReadWritePaths=/var/lib/masc /var/log/masc
 
 # Logs go to journald by default; set StandardOutput/Error explicitly so
-# `journalctl -u masc-mcp` is the SSOT (parity with launchd StandardOutPath).
+# `journalctl -u masc` is the SSOT (parity with launchd StandardOutPath).
 StandardOutput=journal
 StandardError=journal
 

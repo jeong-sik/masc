@@ -31,7 +31,7 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
   if parameters = [] then Pass
   else
     let oas_schema : Agent_sdk.Types.tool_schema =
-      { name = tool_name; description = ""; parameters }
+      { name = tool_name; description = ""; parameters; strict = None }
     in
     match Agent_sdk.Tool_input_validation.validate oas_schema args with
     | Agent_sdk.Tool_input_validation.Valid coerced ->

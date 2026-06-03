@@ -28,7 +28,11 @@ let tool_execute_exec_stage_schema =
                        executable as argv[0]. Example: executable='grep', argv=['-rn', \
                        'pattern', 'lib']; not argv=['grep', ...]. Shell \
                        metacharacters are data; use pipeline for multi-stage \
-                       execution." )
+                       execution. Wildcards (*, ?, [...]) are NOT expanded: argv \
+                       reaches the process unchanged with no shell, so 'foo*.ml' \
+                       matches a file literally named 'foo*.ml'. Pass exact paths, \
+                       or list the directory first (executable='ls', argv=['some/dir']) \
+                       then act on the names it returns." )
                 ] )
           ] )
     ; "required", `List [ `String "executable" ]
@@ -59,7 +63,9 @@ let tool_execute_argv_field =
             "Typed argv form: arguments after executable, passed verbatim. Do not \
              repeat executable as argv[0]. Example: executable='git', argv=['status', \
              '--short']; example: executable='grep', argv=['-rn', 'pattern', 'lib']. \
-             A literal '|' token is data, not a pipe." )
+             A literal '|' token is data, not a pipe. Wildcards (*, ?, [...]) are \
+             NOT expanded either: there is no shell, so 'foo*.ml' is a literal \
+             filename, not a glob. Use exact paths or list a directory first." )
       ] )
 ;;
 

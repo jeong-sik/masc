@@ -132,7 +132,8 @@ let test_supervisor_policy_pauses_watchdog_provider_timeout_loop () =
   let decision =
     policy_decision_exn (Some (Reg.Provider_timeout_loop { count = 3 }))
   in
-  check string "scope" "turn" (KFP.failure_scope_to_label decision.failure_scope);
+  check string "scope" "keeper_liveness"
+    (KFP.failure_scope_to_label decision.failure_scope);
   check string "lifecycle" "pause_keeper"
     (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
   check string "circuit" "operator_breaker"

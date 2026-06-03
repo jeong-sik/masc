@@ -69,37 +69,7 @@ let apply_loop_detectors ~config updated_meta result =
         ~previous_streak
         ~was_latched
   in
-  let turn_effect =
-    let calls = result.Keeper_agent_run.tool_calls in
-    if calls = []
-    then Keeper_tool_progress.Streak_increment
-    else
-      let effects =
-        List.map
-          (fun (detail : Keeper_agent_run.tool_call_detail) ->
-             Keeper_tool_progress.classify_tool_progress_with_outcome
-               detail.tool_name detail.typed_outcome)
-          calls
-      in
-      if List.for_all
-        (function Keeper_tool_progress.Streak_increment -> true | _ -> false)
-        effects
-      then Keeper_tool_progress.Streak_increment
-      else
-        match
-          List.find_opt
-            (function
-              | Keeper_tool_progress.Streak_reset_and_empty_queue_sleep _ -> true
-              | _ -> false)
-            effects
-        with
-        | Some (Keeper_tool_progress.Streak_reset_and_empty_queue_sleep { reason }) ->
-            Keeper_tool_progress.Streak_reset_and_empty_queue_sleep { reason }
-        | _ -> Keeper_tool_progress.Streak_reset
-  in
-  Keeper_passive_loop_detector.record_turn_effect
-    ~keeper_name:updated_meta.name
-    turn_effect;
+  ignore result.Keeper_agent_run.tool_calls;
   updated_meta
 ;;
 

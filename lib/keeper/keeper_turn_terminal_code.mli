@@ -6,10 +6,9 @@
     intentionally inert: no caller in the tree references it yet.
     PR-2 swaps the existing typed bridges to return values of type [t];
     PR-3 swaps [Keeper_turn_terminal.t.code] from
-    [string] to [t]; PR-4 converts the readers
-    ([Keeper_execution_receipt] disposition mapping,
-    [Keeper_passive_loop_detector.progress_class_of_terminal_reason_code])
-    from [String.starts_with ~prefix] to exhaustive [match].
+    [string] to [t]; PR-4 converts the
+    [Keeper_execution_receipt] disposition mapping from
+    [String.starts_with ~prefix] to exhaustive [match].
 
     Adding a new variant here is, by construction, a compile
     obligation for every match site after PR-4 lands. *)

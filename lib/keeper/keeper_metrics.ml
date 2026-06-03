@@ -198,10 +198,6 @@ type t =
   | RestartOutcomes
   | LivenessRecoveryAttempts
   | LivenessRecoveryOutcomes
-  | PassiveLoopDetectedTotal
-  | PassiveLoopStreak
-  | RequiredToolLoopDetectedTotal
-  | ZombieLoopDetectedTotal
   | ConsecutiveIdle
   | LastProductiveTs
   | ProviderTimeoutStrike
@@ -440,10 +436,6 @@ let to_string = function
   | RestartOutcomes -> "masc_keeper_restart_outcomes_total"
   | LivenessRecoveryAttempts -> "masc_keeper_liveness_recovery_attempts_total"
   | LivenessRecoveryOutcomes -> "masc_keeper_liveness_recovery_outcomes_total"
-  | PassiveLoopDetectedTotal -> "masc_keeper_passive_loop_detected_total"
-  | PassiveLoopStreak -> "masc_keeper_passive_loop_streak"
-  | RequiredToolLoopDetectedTotal -> "masc_keeper_required_tool_loop_detected_total"
-  | ZombieLoopDetectedTotal -> "masc_keeper_zombie_loop_detected_total"
   | ConsecutiveIdle -> "masc_keeper_consecutive_idle"
   | LastProductiveTs -> "masc_keeper_last_productive_ts"
   | ProviderTimeoutStrike -> "masc_keeper_provider_timeout_strike_total"

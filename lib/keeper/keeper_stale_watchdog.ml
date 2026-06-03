@@ -1,8 +1,8 @@
-(** Stale-turn watchdog — standalone fiber for keeper liveness detection.
+(** Stale-turn watchdog — dormant liveness detector implementation.
 
-    Extracted from [Keeper_supervisor] to avoid circular dependency with
-    [Keeper_keepalive]. Both modules call [fork_stale_watchdog] through
-    this shared implementation.
+    This implementation is no longer auto-wired from keeper launch paths.
+    Keep it isolated until the remaining stale-turn policy can be replaced by
+    evidence-driven judgment instead of heuristic background fibers.
 
     Four stall detection modes — see {!Keeper_registry.stale_kill_class}:
     1. [Idle_turn]: [last_turn_ts] older than the idle threshold while
@@ -20,8 +20,8 @@
        watchdog threshold — catches keepers in LLM timeout loops where
        [last_turn_ts] stays fresh because each failed turn updates it.
 
-    On detection, sets [fiber_stop] and emits a stale broadcast so the
-    supervisor's [sweep_and_recover] can restart the keeper.
+    On detection, sets [fiber_stop] and emits a stale broadcast so a caller
+    can route the keeper through supervised recovery.
 
     @since PR #10670 — extracted from Keeper_supervisor. *)
 
@@ -36,8 +36,6 @@
    which extracted this module from Keeper_supervisor to break a
    circular dependency.  After the extraction:
 
-     keeper_supervisor.ml line ~118    fork_stale_watchdog wrapper
-                                       (re-exports the function below)
      keeper_stale_watchdog.ml          actual fiber logic + emit
                                        (this file)
      keeper_execution_receipt.ml       emit_stale_keeper_broadcast

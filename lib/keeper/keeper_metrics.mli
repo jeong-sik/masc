@@ -189,10 +189,6 @@ type t =
   | RestartOutcomes
   | LivenessRecoveryAttempts
   | LivenessRecoveryOutcomes
-  | PassiveLoopDetectedTotal
-  | PassiveLoopStreak
-  | RequiredToolLoopDetectedTotal
-  | ZombieLoopDetectedTotal
   | ConsecutiveIdle
   | LastProductiveTs
   | ProviderTimeoutStrike

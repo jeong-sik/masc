@@ -23,28 +23,6 @@ let register
      fiber_stop/fiber_wakeup. Labeled by keeper."
     `Counter;
   add
-    Keeper_metrics.(to_string PassiveLoopDetectedTotal)
-    "#12799 Total passive-loop detections: keeper issued only read-only tool calls for N \
-     consecutive turns. Labeled by keeper."
-    `Counter;
-  add
-    Keeper_metrics.(to_string PassiveLoopStreak)
-    "Current passive-loop streak length per keeper.  Resets to 0 on any \
-     execution/completion turn.  Labeled by keeper."
-    `Gauge;
-  add
-    Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
-    "#13362 Total required-tool contract loops: keeper hit N consecutive actionable \
-     required-tool failures before making execution/completion progress. Labeled by \
-     keeper and kind."
-    `Counter;
-  add
-    Keeper_metrics.(to_string ZombieLoopDetectedTotal)
-    "Goal-loop Observe counter for no-progress keeper loops. Emitted by the \
-     passive/required-tool loop detector when progress-signalling turns make no \
-     execution or completion progress. Labeled by keeper_name."
-    `Counter;
-  add
     Keeper_metrics.(to_string ConsecutiveIdle)
     "Task-138 Current consecutive-idle streak (passive-only turns) per keeper.  Resets \
      to 0 on the next execution/completion turn.  Labeled by keeper."

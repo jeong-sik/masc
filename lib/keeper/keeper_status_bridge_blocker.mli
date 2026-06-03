@@ -26,7 +26,6 @@ val runtime_blocker_surface_of_failure_reason :
 
 val is_runtime_exhausted_blocker_class : string -> bool
 val is_no_tool_capable_blocker_class : string -> bool
-val is_completion_contract_blocker_class : string -> bool
 val is_provider_runtime_blocker_class : string -> bool
 val is_stale_watchdog_blocker_class : string -> bool
 val is_fiber_unresolved_blocker_class : string -> bool

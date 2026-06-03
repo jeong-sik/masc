@@ -699,13 +699,6 @@ let prepare_agent_setup
           turn_visible_tool_names
       else turn_visible_tool_names
     in
-    let passive_streak =
-      Keeper_passive_loop_detector.current_streak ~keeper_name:meta.name
-    in
-    Prometheus.set_gauge
-      Keeper_metrics.(to_string PassiveLoopStreak)
-      ~labels:[ "keeper", meta.name ]
-      (float_of_int passive_streak);
     let tool_gate_requested =
       tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
     in

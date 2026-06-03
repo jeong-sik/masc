@@ -26,8 +26,6 @@ let committed_tools_of_ambiguous_blocker =
 
 let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
 let publish_phase_lifecycle = Keeper_supervisor_publish_lifecycle.publish_phase_lifecycle
-let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog
-
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
 let set_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.set
@@ -60,7 +58,6 @@ let launch_supervised_fiber
   if restart_launch_noop_enabled_for_test ()
   then ()
   else (
-    fork_stale_watchdog ctx meta ~startup_warmup_sec:proactive_warmup_sec reg;
     (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
     let bootstrap_signal : Keeper_event_queue.stimulus =

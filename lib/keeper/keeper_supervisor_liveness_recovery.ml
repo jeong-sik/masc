@@ -137,7 +137,6 @@ let scan ~supervise_keepalive ~publish_lifecycle (ctx : _ context) =
                  Keeper_registry.unregister ~base_path entry.name;
                  Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
                  Keeper_stay_silent_loop_detector.reset ~keeper_name:entry.name;
-                 Keeper_passive_loop_detector.reset ~keeper_name:entry.name;
                  match read_meta ctx.config entry.name with
                  | Ok (Some meta) ->
                    let recovery_meta =

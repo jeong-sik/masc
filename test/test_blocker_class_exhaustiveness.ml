@@ -191,12 +191,24 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
   ]
 ;;
 
-let test_all_agent_variants_map_to_blocker_class () =
+let agent_variants_with_no_runtime_blocker = [ "CompletionContractViolation" ]
+
+let test_all_agent_variants_classified_intentionally () =
   List.iter
     (fun (label, sdk_error) ->
-       match KSB.blocker_class_of_sdk_error sdk_error with
-       | Some _ -> ()
-       | None ->
+       let expected_none =
+         List.exists (fun allowed -> String.equal allowed label)
+           agent_variants_with_no_runtime_blocker
+       in
+       match KSB.blocker_class_of_sdk_error sdk_error, expected_none with
+       | Some _, false -> ()
+       | None, true -> ()
+       | Some klass, true ->
+         failf
+           "Agent sub-variant %S unexpectedly mapped to blocker_class %S"
+           label
+           (blocker_class_to_string klass)
+       | None, false ->
          failf
            "Agent sub-variant %S returned None from blocker_class_of_sdk_error — \
             either map it to a blocker_class or document why None is correct"
@@ -324,8 +336,8 @@ let () =
         ; test_case "variant count pin" `Quick test_variant_count
         ] )
     ; ( "sdk_error_mapping"
-      , [ test_case "all Agent variants map to blocker_class" `Quick
-            test_all_agent_variants_map_to_blocker_class
+      , [ test_case "all Agent variants are intentionally classified" `Quick
+            test_all_agent_variants_classified_intentionally
         ; test_case "Agent variant count pin" `Quick test_agent_variant_count_pin
         ; test_case "structural timeout → oas_agent_execution_timeout" `Quick
             test_structural_timeout_maps_to_oas_timeout

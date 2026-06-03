@@ -9,6 +9,8 @@
  (modules
   ide_annotation_types
   ide_annotations
+  ide_bridge
+  ide_event_types
   ide_paths
   ide_region_tracker)
  (libraries

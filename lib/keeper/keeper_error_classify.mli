@@ -54,6 +54,11 @@ val is_ambiguous_side_effect_error : Agent_sdk.Error.sdk_error -> bool
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] when the error is a completion contract violation.
+    Contract violations should cap rotation because retrying the same
+    or different runtime will not satisfy the contract. *)
+val is_completion_contract_violation : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when the error is an OAS [InputRequired] — the agent paused
     to request human input.  Not a failure; a special stop condition. *)
 val is_input_required_error : Agent_sdk.Error.sdk_error -> bool
@@ -142,6 +147,11 @@ val degraded_retry_after_recoverable_error :
     target via [runtime.toml]. The hint is normalized and deduplicated like
     any other candidate; if it duplicates the effective runtime or has
     already been attempted, the next legal candidate is returned.
+
+    Non-contract errors (provider timeout, rate limit, server error) allow
+    cycling through candidates again when all are exhausted, because the
+    same runtime may succeed on a subsequent attempt. Contract violations
+    cap rotation — retrying cannot satisfy the contract.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?fallback_hint:string ->

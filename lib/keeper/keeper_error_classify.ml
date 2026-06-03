@@ -525,6 +525,26 @@ let degraded_rotation_candidates
   |> List.filter (fun candidate ->
          not (String.equal candidate normalized_effective))
 
+(** [true] when the error is a completion contract violation.
+    Contract violations should cap rotation because retrying the same
+    or different runtime will not satisfy the contract. Non-contract
+    errors (provider timeout, rate limit, server error) are transient
+    and should allow cycling through candidates again. *)
+let is_completion_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
+    true
+  | Agent_sdk.Error.Api _
+  | Agent_sdk.Error.Provider _
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Internal _ -> false
+
 let degraded_rotation_after_recoverable_error
     ?fallback_hint
     ~(base_runtime : string)
@@ -544,13 +564,34 @@ let degraded_rotation_after_recoverable_error
         |> List.map (normalized_runtime_id ~catalog_names)
         |> dedupe_keep_order
       in
-      degraded_rotation_candidates
-        ~catalog_names
-        ~fallback_hint
-        ~base_runtime ~effective_runtime ~tool_requirement
-      |> List.find_opt (fun candidate ->
+      let candidates =
+        degraded_rotation_candidates
+          ~catalog_names
+          ~fallback_hint
+          ~base_runtime ~effective_runtime ~tool_requirement
+      in
+      let untried =
+        List.find_opt
+          (fun candidate ->
              not (List.exists (String.equal candidate) attempted))
-      |> Option.map (fun next_runtime -> { next_runtime; fallback_reason })
+          candidates
+      in
+      (match untried with
+       | Some next_runtime ->
+         Some { next_runtime; fallback_reason }
+       | None when not (is_completion_contract_violation err) ->
+         (* Non-contract errors (provider timeout, rate limit, server error)
+            are transient. Allow cycling through candidates again because
+            the same runtime may succeed on a subsequent attempt. Only
+            contract violations cap rotation — retrying cannot satisfy the
+            contract. #19930 *)
+         (match candidates with
+          | [] -> None
+          | first_candidate :: _ ->
+            Some { next_runtime = first_candidate; fallback_reason })
+       | None ->
+         (* Contract violation: all candidates exhausted. Cap rotation. *)
+         None)
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err

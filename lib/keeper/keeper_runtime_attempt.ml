@@ -301,10 +301,6 @@ let sdk_error_is_terminal_provider_runtime_failure = function
     message_looks_like_terminal_provider_runtime_failure message
   | _ -> false
 
-let sdk_error_is_required_tool_contract_violation = function
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) -> true
-  | _ -> false
-
 let sdk_error_is_hard_quota = function
   | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _ as err)
     when Llm_provider.Retry.is_hard_quota err -> true
@@ -417,6 +413,4 @@ let sdk_error_runtime_fallback_class err =
   | Some internal -> Some (Keeper_internal_error.kind_of_masc_internal_error internal)
   | None when sdk_error_is_hard_quota err -> Some "hard_quota"
   | None when sdk_error_is_max_turns_exceeded err -> Some "max_turns"
-  | None when sdk_error_is_required_tool_contract_violation err ->
-    Some "required_tool_contract_violation"
   | None -> None

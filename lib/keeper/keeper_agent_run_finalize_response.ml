@@ -57,6 +57,14 @@ let finalize
     then "model_state_block"
     else "synthesized"
   in
+  (* Gate the working-state resume merge (ResumeFromDigest) to turns where active
+     loops can be silently lost: a pre-dispatch compaction may have dropped the
+     reminder, or the model emitted no [STATE] block at all (synthesized). On a
+     normal model_state_block turn the snapshot is authoritative, so a dropped
+     loop still clears. *)
+  let resume_merge =
+    pre_dispatch_compacted || String.equal state_snapshot_source "synthesized"
+  in
   let { Keeper_agent_run_sidecar.working_state = _
       ; state_snapshot_saved = _
       ; working_state_saved = _
@@ -71,6 +79,7 @@ let finalize
       ~session_dir:session.session_dir
       ~state_snapshot
       ~state_snapshot_source
+      ~resume_merge
       ~append_manifest
       ()
   in

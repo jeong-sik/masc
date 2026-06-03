@@ -100,6 +100,53 @@ let compact ?max_digest state =
         ~resolved_loops:state.resolved_loops ()
   }
 
+(* Merge a persisted working-state ledger into the one freshly projected from
+   the current [STATE] snapshot, implementing the TLA [ResumeFromDigest] action:
+   on resume/compaction, persisted active loops must survive even if the current
+   snapshot omits them, while resolved/archived loops must not resurrect.
+
+   Semantics:
+   - active_loops = current active loops, plus each persisted active loop whose
+     id is not already present (in either side's active loops) and is not
+     resolved/archived in either side. This is the union that preserves a
+     persisted open loop the current snapshot dropped.
+   - resolved_loops / archived_loops = persisted history is carried forward; any
+     current entry not already present (by id) is appended. The current side is
+     snapshot-projected (active only) in production, so this defensively keeps
+     both sources without duplicating ids.
+   - A persisted active loop is dropped if the current side has since resolved or
+     archived that id (the snapshot is the newer signal for terminal status).
+
+   This is intentionally gated by the caller to compaction/handoff resume; on a
+   normal turn the current snapshot alone is authoritative, so a loop the model
+   drops from [STATE] still clears (completion-by-omission). *)
+let merge_resume ~persisted ~current =
+  let mem_id id loops = List.exists (fun l -> String.equal l.id id) loops in
+  let current_terminal_ids =
+    ids current.resolved_loops @ ids current.archived_loops
+  in
+  let persisted_terminal_ids =
+    ids persisted.resolved_loops @ ids persisted.archived_loops
+  in
+  let surviving_persisted_active =
+    persisted.active_loops
+    |> List.filter (fun loop ->
+           (not (mem_id loop.id current.active_loops))
+           && (not (List.mem loop.id current_terminal_ids))
+           && not (List.mem loop.id persisted_terminal_ids))
+  in
+  let active_loops = current.active_loops @ surviving_persisted_active in
+  let merge_bucket current_bucket persisted_bucket =
+    let extra =
+      current_bucket
+      |> List.filter (fun loop -> not (mem_id loop.id persisted_bucket))
+    in
+    persisted_bucket @ extra
+  in
+  let resolved_loops = merge_bucket current.resolved_loops persisted.resolved_loops in
+  let archived_loops = merge_bucket current.archived_loops persisted.archived_loops in
+  compact { active_loops; resolved_loops; archived_loops; prompt_digest_ids = [] }
+
 let all_loops state =
   state.active_loops @ state.resolved_loops @ state.archived_loops
 

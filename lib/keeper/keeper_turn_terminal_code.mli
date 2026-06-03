@@ -43,9 +43,6 @@ type t =
   | Provider_runtime_error of string
   (** [Keeper_registry.Provider_runtime_error]: payload is the
           original [code] field. *)
-  | Tool_required_unsatisfied of string
-  (** [Keeper_registry.Tool_required_unsatisfied]: payload is the
-          original [code] field. *)
   | Ambiguous_partial_commit_post_commit_timeout
   (** [Keeper_registry.Ambiguous_partial_commit] with
           [kind = Post_commit_timeout]. *)

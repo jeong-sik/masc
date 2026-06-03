@@ -93,12 +93,16 @@ let test_failure_reason_to_string_provider_runtime_error () =
           ; provider_id = None; http_status = None; runtime_id = None; reason = None }))
 
 let test_failure_reason_to_string_tool_required_unsatisfied () =
-  r "Tool_required_unsatisfied includes terminal code"
-    "tool_required_unsatisfied(required_tool_use_no_tool_call:no keeper tools)"
+  r "Provider_runtime_error includes terminal code"
+    "provider_runtime_error(required_tool_use_no_tool_call:no keeper tools)"
     (failure_reason_to_string
-       (Tool_required_unsatisfied
+       (Provider_runtime_error
           { code = "required_tool_use_no_tool_call";
             detail = "no keeper tools";
+            provider_id = None;
+            http_status = None;
+            runtime_id = None;
+            reason = None;
           }))
 
 let check_missing_registry_warn ~msg ~captured_paused ~persisted_paused
@@ -170,11 +174,12 @@ let test_terminal_failure_cohort_keys () =
           (Provider_runtime_error
              { code = "provider_error"; detail = "x"
              ; provider_id = None; http_status = None; runtime_id = None; reason = None })));
-  r "Tool_required_unsatisfied cohort_key" "tool_required_unsatisfied"
+  r "Provider_runtime_error cohort_key" "provider_runtime_error"
     (failure_reason_cohort_key
        (Some
-          (Tool_required_unsatisfied
-             { code = "required_tool_use_unsatisfied"; detail = "x" })))
+          (Provider_runtime_error
+             { code = "required_tool_use_unsatisfied"; detail = "x"
+             ; provider_id = None; http_status = None; runtime_id = None; reason = None })))
 
 let test_stale_watchdog_preserves_terminal_failure_reason () =
   let prior =

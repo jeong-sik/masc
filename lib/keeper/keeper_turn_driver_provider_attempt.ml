@@ -282,14 +282,6 @@ let sdk_error_is_terminal_provider_runtime_failure
   || message_looks_like_terminal_provider_runtime_failure
        (Agent_sdk.Error.to_string err)
 
-let sdk_error_is_required_tool_contract_violation
-    (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
-  | Agent_sdk.Error.Agent
-      (Agent_sdk.Error.CompletionContractViolation { contract; _ }) ->
-    contract = Agent_sdk.Completion_contract_id.Require_tool_use
-  | _ -> false
-
 (* RFC-0206: runtime rotation is gone, but "max turns exceeded" still surfaces
    as a structured masc_internal_error envelope on a single dispatch. *)
 let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
@@ -328,15 +320,11 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
 
 let fallback_class_hard_quota = "hard_quota"
 let fallback_class_max_turns = "max_turns"
-let fallback_class_required_tool_contract_violation =
-  "required_tool_contract_violation"
 
 let sdk_error_runtime_fallback_class (err : Agent_sdk.Error.sdk_error) :
     string option =
   if sdk_error_is_hard_quota err then Some fallback_class_hard_quota
   else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns
-  else if sdk_error_is_required_tool_contract_violation err then
-    Some fallback_class_required_tool_contract_violation
   else None
 
 let record_candidate_health_error candidate sdk_err =
@@ -356,17 +344,6 @@ let record_candidate_health_error candidate sdk_err =
   else if sdk_error_is_terminal_provider_runtime_failure sdk_err
   then (
     let error_kind = health_error_kind "terminal_provider_runtime_failure" in
-    health_keys
-    |> List.iter (fun provider_key ->
-      Keeper_binding_health.record_terminal_failure
-        Keeper_binding_health.global
-        ~provider_key
-        ~error_kind
-        ~error_reason
-        ()))
-  else if sdk_error_is_required_tool_contract_violation sdk_err
-  then (
-    let error_kind = health_error_kind "required_tool_contract_violation" in
     health_keys
     |> List.iter (fun provider_key ->
       Keeper_binding_health.record_terminal_failure

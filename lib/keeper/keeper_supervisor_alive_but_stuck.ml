@@ -93,7 +93,6 @@ let request_recovery ~base_path ~elapsed (entry : Keeper_registry.registry_entry
     | Some (Keeper_registry.Heartbeat_consecutive_failures _)
     | Some (Keeper_registry.Turn_consecutive_failures _)
     | Some (Keeper_registry.Provider_runtime_error _)
-    | Some (Keeper_registry.Tool_required_unsatisfied _)
     | Some (Keeper_registry.Ambiguous_partial_commit _)
     | Some (Keeper_registry.Stale_fleet_batch _)
     | Some Keeper_registry.Turn_overflow_pause

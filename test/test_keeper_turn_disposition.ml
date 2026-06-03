@@ -37,8 +37,6 @@ let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
   ; "external_cancel", D.External_cancel
   ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
-  ; "required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied
   ; "post_commit_ambiguous", D.Post_commit_ambiguous
   ; "provider_error", D.Provider_error (Code.Provider_runtime_error "provider_error")
   ; "unknown_error", D.Unknown { raw_error = "" }
@@ -145,8 +143,6 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "Required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
-  ; "Required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied
   ; "Post_commit_ambiguous", D.Post_commit_ambiguous
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
@@ -213,9 +209,6 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Stale_turn_timeout_no_progress
     , D.Turn_wall_clock_timeout )
   ; "Stale_turn_timeout/noop", Code.Stale_turn_timeout_noop, D.Turn_wall_clock_timeout
-  ; ( "Tool_required_unsatisfied"
-    , Code.Tool_required_unsatisfied "x"
-    , D.Required_tool_use_unsatisfied )
   ; ( "Ambiguous/timeout"
     , Code.Ambiguous_partial_commit_post_commit_timeout
     , D.Post_commit_ambiguous )

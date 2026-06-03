@@ -62,15 +62,7 @@
  dashboard_keeper_feature_catalog
  dashboard_keeper_feature_proof
  dashboard_keeper_tool_failure_proof
- board_effect_hooks
- board_agent_effect_hooks
- board_metrics_hooks
- board_prometheus_hooks
- board_core_json
- board_core
- board_curation
- board_votes_json
- board_votes
+  board_prometheus_hooks
  dashboard_execution_helpers
  dashboard_execution_fixture
  dashboard_execution_sessions
@@ -317,8 +309,6 @@
   tool_board_registry
   tool_board_dispatch
   tool_shard_schemas
-  board_core_classify
-  board_core_payload
   server_ide_http
   lsp_process_manager
   lsp_message_router
@@ -565,6 +555,8 @@
    masc.masc_exec_command_gate
    ;; Board types (extracted sub-library — first step toward board isolation)
    masc_board
+   ;; Decoupled board handlers
+   masc.board_handlers
    ;; Random identifier helper — shared between masc_workspace and masc
    ;; so the vrf-/p-/c-/fn- generation algorithm lives in one place.
    masc_random_id

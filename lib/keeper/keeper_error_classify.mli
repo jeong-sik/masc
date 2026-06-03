@@ -27,10 +27,6 @@ val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
     [InvalidRequest]. *)
 val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] when the provider/tooling violated a required tool-use contract
-    by returning text/no-op where a ToolUse block was required. *)
-val is_required_tool_contract_violation : Agent_sdk.Error.sdk_error -> bool
-
 (** [true] when the keeper should preserve liveness and skip consecutive
     failure counting, even if same-turn retry is still disabled. *)
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
@@ -38,7 +34,8 @@ val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 (** [true] when the turn runner should record the immediate
     ["keeper cycle FAILED"] line as WARN instead of ERROR because the
     heartbeat policy layer will handle the failure as a provider/OAS budget
-    strike with cooldown or work-level pause. *)
+    strike with cooldown or work-level pause, or as a required-tool-use
+    contract violation (model behavior, not a fault). *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
 
 (** Reclassify any post-commit turn error as a persistent integrity error when
@@ -97,7 +94,6 @@ type degraded_retry_reason =
   | Provider_timeout
   | Turn_timeout
   | Runtime_candidates_filtered
-  | Required_tool_contract_violation
   | Runtime_exhausted
   | Capacity_backpressure
   | Rate_limit

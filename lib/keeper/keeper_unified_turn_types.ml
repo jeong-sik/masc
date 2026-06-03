@@ -214,14 +214,6 @@ let registry_failure_reason_of_terminal_reason
   | Some _ as reason -> reason
   | None ->
   match terminal_reason.disposition with
-  | Keeper_turn_disposition.Required_tool_use_no_tool_call ->
-    Some
-      (Keeper_registry.Tool_required_unsatisfied
-         { code = "required_tool_use_no_tool_call"; detail })
-  | Keeper_turn_disposition.Required_tool_use_unsatisfied ->
-    Some
-      (Keeper_registry.Tool_required_unsatisfied
-         { code = "required_tool_use_unsatisfied"; detail })
   | Keeper_turn_disposition.Provider_error c ->
     Some
       (Keeper_registry.Provider_runtime_error

@@ -430,15 +430,6 @@ let apply_to_result ~(meta : keeper_meta)
   in
   (result, social_state, transition_reason)
 
-let is_required_tool_use_contract_error = function
-  | Some
-      (Agent_sdk.Error.Agent
-         (Agent_sdk.Error.CompletionContractViolation
-            { contract = Agent_sdk.Completion_contract_id.Require_tool_use; _ }))
-    ->
-      true
-  | _ -> false
-
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(previous_state : Types.social_state option)
@@ -451,18 +442,8 @@ let derive_failure_state ~(meta : keeper_meta)
     | "" -> None
     | value -> Some (short_preview value)
   in
-  let required_tool_use_failed =
-    is_required_tool_use_contract_error sdk_error
-  in
   let state =
-    if required_tool_use_failed then
-      make_state ~meta ~observation ?previous_state
-        ~active_desire:"recover_tool_route"
-        ~current_intention:"surface_required_tool_blocker"
-        ?blocker
-        ~need:"operator_guidance_or_tool_capable_route"
-        ()
-    else if is_auto_recoverable && observation.claimable_task_count > 0 then
+    if is_auto_recoverable && observation.claimable_task_count > 0 then
       make_state ~meta ~observation ?previous_state
         ~active_desire:"recover_tool_route"
         ~current_intention:"retry_claim_after_recovery"
@@ -473,9 +454,6 @@ let derive_failure_state ~(meta : keeper_meta)
       make_state ~meta ~observation ?previous_state ?blocker ()
   in
   let output =
-    if required_tool_use_failed then
-      { speech_act = Types.Request_help; delivery_surface = Types.Board_post }
-    else
-      { speech_act = Types.Defer; delivery_surface = Types.Silent }
+    { speech_act = Types.Defer; delivery_surface = Types.Silent }
   in
   (to_social_state state output, Types.Failure_run_error)

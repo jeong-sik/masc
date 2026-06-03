@@ -50,20 +50,12 @@ let resolve_runtime_providers
       ()
   =
   (* RFC-0206 single-binding: runtime catalog resolution removed. The providers
-     are the default runtime's single provider_config, passed through the same
-     required tool-use gate so require_tool_support is honored (a non-tool
-     default is filtered out, not silently used). [provider_filter] is moot with
-     one provider. *)
+     are the default runtime's single provider_config. [provider_filter] is moot
+     with one provider. Required tool-use filter removed — concept unused. *)
   match Runtime.get_default_runtime () with
   | None -> Error "no default runtime configured"
   | Some rt ->
-    Ok
-      (Provider_tool_support.apply_required_tool_use_filter
-         ?runtime_mcp_policy
-         ~require_tool_choice_support
-         ~require_tool_support
-         ~label:rt.Runtime.id
-         [ rt.Runtime.provider_config ])
+    Ok [ rt.Runtime.provider_config ]
 
 (* Injected keeper name translators (dependency inversion of the
    runtime -> keeper-domain Keeper_identity edge). The runtime no longer

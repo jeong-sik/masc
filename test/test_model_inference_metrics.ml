@@ -1120,6 +1120,7 @@ let zero_model_stats (model_id : string) ~provider ~entry_count
     total_input_tokens = None;
     total_output_tokens = None;
     total_cache_read_tokens = None;
+    total_cache_creation_tokens = None;
     total_reasoning_tokens = None;
     usage_sample_count = entry_count;
     telemetry_sample_count = entry_count;

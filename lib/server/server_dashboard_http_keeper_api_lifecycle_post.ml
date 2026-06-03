@@ -38,6 +38,13 @@ let invalidate_keeper_execution_surfaces ~config () =
   Dashboard_projection_cache.invalidate_snapshot_json ~config;
   Server_dashboard_http_execution_surfaces.invalidate_execution_cache ()
 
+(* Typed outcome of a keeper lifecycle action, so the log severity is chosen by
+   an exhaustive match rather than a string-parsing wildcard with a permissive
+   default (#8605). [Succeeded]/[Already_live] are successes (Info);
+   [Rejected] (400) and [Dispatch_none] (500) are failures (Warn) — see
+   docs/spec/18-log-severity-taxonomy.md § 3.6. *)
+type lifecycle_outcome = Succeeded | Already_live | Rejected | Dispatch_none
+
 let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     state agent_name req reqd =
   let req_path = Http.Request.path req in
@@ -194,23 +201,24 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         let duration_ms () =
           (Eio.Time.now clock -. started_at) *. 1000.0 |> int_of_float
         in
-        let log_lifecycle_result outcome =
-          (* docs/spec/18-log-severity-taxonomy.md § 3.6: this line carries a
-             runtime [outcome=%s] covering both success ("ok"/"already_live")
-             and failure ("rejected" → 400, "dispatch_none" → 500) paths, so the
-             severity is derived from the outcome instead of a static [Info] —
-             otherwise a rejected/failed lifecycle action hides under the noise
-             floor. Failures are degraded-with-recovery (the client gets an
-             error response, the server keeps serving) → [Warn]. *)
-          let level : Log.level =
+        let log_lifecycle_result (outcome : lifecycle_outcome) =
+          (* docs/spec/18-log-severity-taxonomy.md § 3.6: the line carries the
+             outcome, so the severity is derived from it (single emission)
+             instead of a static [Info] — otherwise a rejected/failed lifecycle
+             action hides under the noise floor. Failures are
+             degraded-with-recovery (the client gets an error response, the
+             server keeps serving) → [Warn]. *)
+          let level, outcome_s =
             match outcome with
-            | "ok" | "already_live" -> Log.Info
-            | _ -> Log.Warn
+            | Succeeded -> (Log.Info, "ok")
+            | Already_live -> (Log.Info, "already_live")
+            | Rejected -> (Log.Warn, "rejected")
+            | Dispatch_none -> (Log.Warn, "dispatch_none")
           in
           Log.Server.emit level
             (Printf.sprintf
                "keeper lifecycle %s name=%s actor=%s outcome=%s duration_ms=%d"
-               action name agent_name outcome (duration_ms ()))
+               action name agent_name outcome_s (duration_ms ()))
         in
         Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
           action name agent_name;
@@ -243,7 +251,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              | Some latest -> Keeper_meta_json.meta_to_json latest.meta
              | None -> Keeper_meta_json.meta_to_json entry.meta
            in
-           log_lifecycle_result "already_live";
+           log_lifecycle_result Already_live;
            Http.Response.json_value ~compress:true ~request:req
              (`Assoc
                 [
@@ -269,7 +277,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                  | Some Keeper_state_machine.Paused -> persist_keeper_paused_state true
                  | Some _ | None -> ());
                 invalidate_keeper_execution_surfaces ~config ());
-              log_lifecycle_result "ok";
+              log_lifecycle_result Succeeded;
               Http.Response.json_value ~compress:true ~request:req
                 (`Assoc
                    [
@@ -285,7 +293,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                  persist_keeper_paused_state true;
                  refresh_keeper_execution_surfaces ~config ~name "stopped"
                | _ -> invalidate_keeper_execution_surfaces ~config ());
-              log_lifecycle_result "ok";
+              log_lifecycle_result Succeeded;
               Http.Response.json_value ~compress:true ~request:req
                 (`Assoc
                    [
@@ -296,12 +304,12 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 reqd
             | Some result ->
               let body = Tool_result.message result in
-              log_lifecycle_result "rejected";
+              log_lifecycle_result Rejected;
               Http.Response.json_value ~status:`Bad_request ~request:req
                 (`Assoc [("ok", `Bool false); ("error", `String body)])
                 reqd
             | None ->
-              log_lifecycle_result "dispatch_none";
+              log_lifecycle_result Dispatch_none;
               respond_error ~status:`Internal_server_error ~request:req ~ok:false
                 reqd "dispatch returned None"))
 

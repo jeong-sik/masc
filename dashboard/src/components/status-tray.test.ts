@@ -147,7 +147,7 @@ describe('summarizeStatusTray', () => {
           needs_attention: false,
           trust: {
             execution_summary: {
-              tool_contract_result: 'missing_required_tool_use',
+              tool_contract_result: 'tool_surface_mismatch',
               missing_required_tools: ['Execute'],
             },
           },

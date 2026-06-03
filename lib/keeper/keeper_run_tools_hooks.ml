@@ -247,8 +247,6 @@ let assemble_hooks
              ~turn_id
              ~output_text
              ~tool_name))
-        ~passive_loop_nudge:(fun () ->
-          Keeper_passive_loop_detector.nudge_message ~keeper_name:acc.meta.name)
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard
         ()
     in

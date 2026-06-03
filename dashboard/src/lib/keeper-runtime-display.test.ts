@@ -201,9 +201,7 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe(
       '런타임 호출 오류',
     )
-    expect(keeperRuntimeBlockerLabel('tool_required_unsatisfied')).toBe(
-      '필수 도구 미충족',
-    )
+    expect(keeperRuntimeBlockerLabel('no_tool_capable_provider')).toBe('도구 실행 런타임 없음')
   })
 
   it('labels the 9 RFC-0062 SDK blocker variants', () => {
@@ -235,13 +233,13 @@ describe('keeperRuntimeBlockerHint', () => {
     ).toBe('런타임 호출 경계가 keeper 진행 전에 실패했습니다.')
   })
 
-  it('explains unsatisfied required tool terminal failures when no summary is available', () => {
+  it('explains recoverable tool-route failures when no summary is available', () => {
     expect(
       keeperRuntimeBlockerHint(makeKeeper({
-        runtime_blocker_class: 'tool_required_unsatisfied',
-        runtime_blocker_summary: 'tool_required_unsatisfied',
+        runtime_blocker_class: 'no_tool_capable_provider',
+        runtime_blocker_summary: 'no_tool_capable_provider',
       })),
-    ).toBe('액션 가능한 신호에 필요한 keeper 도구 호출이 충족되지 않았습니다.')
+    ).toBe('도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.')
   })
 
   it('explains admission queue waits as keeper FIFO waits, not OAS waits', () => {

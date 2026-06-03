@@ -105,8 +105,8 @@ val normalize_tool_result
     required self-correction without parsing nested tool-specific payloads. *)
 
 (** Promote a tool-specific [recovery_plan] out of a deterministic
-    failure payload so required-tool turns can route the next call
-    without scraping nested detail text. *)
+    failure payload so the next call can route without scraping nested
+    detail text. *)
 
 (** Error-class string for transient mutex contention failures. *)
 val transient_mutex_contention_error_class : string

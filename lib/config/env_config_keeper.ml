@@ -144,10 +144,8 @@ module KeeperSupervisor = Env_config_keeper_supervisor
     natural event signal — they have to wake up periodically and check.
     Previously hardcoded as inline literals in the fiber loop body,
     making them invisible to the operator and impossible to tune
-    without a rebuild. Same fragmentation class as the watchdog
-    thresholds extracted in {!KeeperWatchdog} (#10740): operator-tunable
-    cadence is a load-bearing config knob in production, not an
-    implementation detail.
+    without a rebuild. Operator-tunable cadence is a load-bearing
+    config knob in production, not an implementation detail.
 
     Precedence: process env > hardcoded default below. *)
 
@@ -519,100 +517,6 @@ module KeeperKeepalive = struct
   let idle_skip_threshold =
     max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
   ;;
-end
-
-(** {1 Keeper Watchdog Configuration}
-
-    Thresholds for the stale-turn watchdog fiber
-    ({!Keeper_stale_watchdog}). Previously hardcoded; extracted so
-    operators can tune per deployment without a rebuild.
-
-    Precedence: process env > hardcoded default below. *)
-
-module KeeperWatchdog = struct
-  (** Seconds since last turn before a Running keeper is considered idle-stale.
-      Must be >= 60. Default: 300 (5 minutes).
-
-      Invariant: [stale_threshold_sec] must not exceed [turn_timeout_sec].
-      If the operator overrides push it above the turn cap, we clamp and log
-      a warning so the watchdog does not declare a keeper stale later than
-      the turn itself could possibly run. *)
-  let stale_threshold_sec =
-    let raw =
-      Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_STALE_SEC")
-    in
-    if raw > KeeperKeepalive.turn_timeout_sec
-    then (
-      Log.Config.warn
-        "MASC_KEEPER_WATCHDOG_STALE_SEC (%.1f) exceeds turn_timeout_sec (%.1f); clamping \
-         to turn_timeout_sec"
-        raw
-        KeeperKeepalive.turn_timeout_sec;
-      KeeperKeepalive.turn_timeout_sec)
-    else raw
-  ;;
-
-  (** Seconds since the last in-turn progress signal before an active turn is
-      considered mid-turn-stale. Default: 300 (5 minutes).
-
-      This is intentionally separate from [stale_threshold_sec] (idle keepers)
-      and [turn_timeout_sec] (outer wall clock). It catches no-first-token and
-      inter-chunk-idle stalls while preserving the larger total turn budget for
-      turns that continue to make progress.
-
-      @category Timeouts
-      @ops_class operator *)
-  let progress_timeout_sec =
-    let raw =
-      Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_PROGRESS_SEC")
-    in
-    if raw > KeeperKeepalive.turn_timeout_sec
-    then (
-      Log.Config.warn
-        "MASC_KEEPER_WATCHDOG_PROGRESS_SEC (%.1f) exceeds turn_timeout_sec (%.1f); \
-         clamping to turn_timeout_sec"
-        raw
-        KeeperKeepalive.turn_timeout_sec;
-      KeeperKeepalive.turn_timeout_sec)
-    else raw
-  ;;
-
-  (** Watchdog poll interval in seconds. Must be >= 5.
-      Default: 30. *)
-  let poll_sec = Float.max 5.0 (get_float ~default:30.0 "MASC_KEEPER_WATCHDOG_POLL_SEC")
-
-  (** Consecutive noop turns before considering the keeper stuck in a
-      failure loop. Must be >= 2. Default: 3. *)
-  let noop_threshold = max 2 (get_int ~default:3 "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD")
-
-  (** Grace period after fiber start before idle-stale detection activates.
-      Prevents false positives on server restart when [last_turn_ts] is
-      carried over from a previous server lifecycle.
-      Must be >= 0. Default: 360 (6 minutes — covers proactive warmup
-      up to 255 s plus one heartbeat cycle). *)
-  let grace_period_sec =
-    Float.max 0.0 (get_float ~default:360.0 "MASC_KEEPER_WATCHDOG_GRACE_SEC")
-  ;;
-
-  (** Sliding window for stale-termination escalation tracking.
-      Default: 21600 (6 hours). *)
-  let termination_window_sec =
-    Float.max 3600.0 (get_float ~default:21600.0 "MASC_KEEPER_TERMINATION_WINDOW_SEC")
-  ;;
-
-  (** Number of stale terminations within [termination_window_sec] before
-      escalating to [Stale_termination_storm]. Default: 5. *)
-  let escalation_threshold = max 1 (get_int ~default:5 "MASC_KEEPER_ESCALATION_THRESHOLD")
-
-  (** Fleet batch-termination detection window in seconds.
-      Default: 60. *)
-  let batch_window_sec =
-    Float.max 1.0 (get_float ~default:60.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
-  ;;
-
-  (** Number of distinct keepers terminating within [batch_window_sec] before
-      emitting a fleet batch alert. Default: 5. *)
-  let batch_threshold = max 1 (get_int ~default:5 "MASC_KEEPER_BATCH_THRESHOLD")
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)

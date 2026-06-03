@@ -21,7 +21,6 @@ val registry_progress_on_event :
   unit
 
 val tool_contract_result_for_observed_tools :
-  missing_visible_required:string list ->
   had_owned_active_task_at_turn_start:bool ->
   actual_keeper_tool_names:string list ->
   Keeper_execution_receipt.tool_contract_result

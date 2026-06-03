@@ -10,7 +10,6 @@
 
 module KK = Masc.Keeper_keepalive
 module KTS = Masc.Keeper_turn_slot
-module SW = Masc.Keeper_stale_watchdog
 
 exception After_flag_injected
 
@@ -182,27 +181,6 @@ let test_reactive_slot_released_when_hook_raises_after_flag () =
   let names = List.map fst (KK.reactive_slot_holders ~now:(Time_compat.now ())) in
   if List.mem keeper_name names then
     failwith "reactive holder leaked after injected failure"
-
-let test_watchdog_slot_holder_age_reflects_active_holder () =
-  let keeper_name = "diag-watchdog-holder" in
-  let result =
-    KK.with_keeper_turn_slot_for_test
-      ~keeper_name
-      ~channel:Masc.Keeper_world_observation.Reactive
-      (fun ~semaphore_wait_ms:_ ->
-        match
-          SW.slot_holder_age_for_test ~now:(Time_compat.now ()) ~keeper_name
-        with
-        | None -> failwith "expected watchdog holder age for active holder"
-        | Some age ->
-            if age < 0.0 || age > 5.0 then
-              failwith
-                (Printf.sprintf "unreasonable watchdog holder age=%.2fs" age))
-  in
-  match result with
-  | Ok () -> ()
-  | Error (`Semaphore_wait_timeout _) ->
-      failwith "unexpected semaphore wait timeout in test"
 
 let test_force_release_stale_holder_restores_slots_once () =
   let keeper_name = "diag-force-release" in
@@ -611,8 +589,6 @@ let () =
         test_slot_holders_summary_reflects_active_holder;
       "reactive slot releases when hook raises after acquired flag",
         test_reactive_slot_released_when_hook_raises_after_flag;
-      "watchdog holder fallback sees active holder",
-        test_watchdog_slot_holder_age_reflects_active_holder;
       "force release restores stale holder slots once",
         test_force_release_stale_holder_restores_slots_once;
       "force release markers are acquisition scoped",

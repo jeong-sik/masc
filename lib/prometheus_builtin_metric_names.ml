@@ -123,19 +123,8 @@ include Prometheus_policy_metric_names
    reached the atomic, or a regression silently re-introduced
    MissedWakeup. Pair with stale_termination_by_class for full
    positive/negative coverage. Labels: keeper. *)
-(* #12801: Liveness Recovery Supervisor — auto-recover Dead keepers
-   whose root cause has cleared.  [attempts] increments each time the
-   scan selects a Dead keeper for recovery; [outcomes] breaks out the
-   result by outcome label (started | not_running | meta_missing |
-   meta_read_failed | meta_write_failed). Labels: keeper (for
-   attempts) and keeper+outcome (for outcomes). *)
-(* #12799: Passive loop detector — keeper emitting only read-only tool
-   calls for N consecutive turns.  Labels: keeper. *)
-
-(* Task-138: Minimum proactive cadence — observability gauges that pair
-   with the [keeper_passive_loop_detector] streak counter so operators
-   can see "alive but unproductive" keepers in Grafana before the
-   detection latch fires.  Labels: keeper. *)
+(* Task-138: Minimum proactive cadence — observability gauges for consecutive
+   idle turns and last productive turn timestamps. Labels: keeper. *)
 (* PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
    per keeper. Counter increments on each strike; a strike at
    [outcome=promote] means [Keeper_fiber_crash] was raised so
@@ -173,10 +162,8 @@ let metric_fs_atomic_orphans_cleaned = "masc_fs_atomic_orphans_cleaned_total"
 
 include Prometheus_identity_metric_names
 
-(* Centralized from keeper_stale_watchdog.ml.  Originally each metric was
-   an inline string literal passed to inc_counter / register_counter.
-   Constants make grep/audit trivial and prevent typo-induced metric
-   proliferation (a single-character typo creates a new invisible metric). *)
+(* Centralized metric names prevent typo-induced metric proliferation
+   (a single-character typo creates a new invisible metric). *)
 
 (* Centralized metric constants for inline string replacement.
    keeper_hooks_oas.ml, keeper_guards.ml, keeper_execution_receipt.ml,

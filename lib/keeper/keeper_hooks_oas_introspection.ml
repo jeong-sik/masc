@@ -38,7 +38,7 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
       slot
         ~active:true
         ~source:"keeper_hooks_oas"
-        ~features:[ "passive_loop_nudge"; "utf8_guard" ]
+        ~features:[ "utf8_guard" ]
         "before_turn";
       slot
         ~active:true

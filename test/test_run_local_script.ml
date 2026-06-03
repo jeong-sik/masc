@@ -108,7 +108,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "keeper_runtime.toml") "# repo seed\n";
+  write_file (Filename.concat config "runtime.toml") "# repo seed\n";
   config
 
 let write_keeper_seed repo_root =
@@ -166,8 +166,8 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         failf "run-local failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       let target_abs = Unix.realpath target in
       let captured = read_file capture in
-      check bool "bootstrapped keeper_runtime.toml" true
-        (Sys.file_exists (Filename.concat target_abs ".masc/config/keeper_runtime.toml"));
+      check bool "bootstrapped runtime.toml" true
+        (Sys.file_exists (Filename.concat target_abs ".masc/config/runtime.toml"));
       check bool "did not synthesize runtime.json" false
         (Sys.file_exists (Filename.concat target_abs ".masc/config/runtime.json"));
       check bool "bootstrapped keepers excluded by default" false
@@ -276,8 +276,8 @@ let test_existing_target_config_is_not_overwritten () =
       let target = Filename.concat dir "target" in
       let target_config = Filename.concat target ".masc/config" in
       mkdir_p target_config;
-      write_file (Filename.concat target_config "keeper_runtime.toml")
-        "# preserved target keeper_runtime.toml\n";
+      write_file (Filename.concat target_config "runtime.toml")
+        "# preserved target runtime.toml\n";
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
@@ -287,8 +287,8 @@ let test_existing_target_config_is_not_overwritten () =
       in
       if code <> 0 then
         failf "run-local failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
-      let runtime = read_file (Filename.concat target_config "keeper_runtime.toml") in
-      check string "target config preserved" "# preserved target keeper_runtime.toml\n" runtime)
+      let runtime = read_file (Filename.concat target_config "runtime.toml") in
+      check string "target config preserved" "# preserved target runtime.toml\n" runtime)
 
 let test_explicit_config_env_is_preserved_without_bootstrap () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -319,7 +319,7 @@ let test_explicit_config_env_is_preserved_without_bootstrap () =
       check bool "explicit personas dir preserved" true
         (contains_substring captured ("MASC_PERSONAS_DIR=" ^ override_personas));
       check bool "target config not bootstrapped" false
-        (Sys.file_exists (Filename.concat target ".masc/config/keeper_runtime.toml")))
+        (Sys.file_exists (Filename.concat target ".masc/config/runtime.toml")))
 
 let test_config_dir_set_personas_dir_unset_defaults_to_config_personas () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -374,8 +374,8 @@ let test_bootstrap_only_materializes_state_without_exec () =
       if code <> 0 then
         failf "run-local bootstrap-only failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
-      check bool "bootstrapped keeper_runtime.toml" true
-        (Sys.file_exists (Filename.concat target ".masc/config/keeper_runtime.toml"));
+      check bool "bootstrapped runtime.toml" true
+        (Sys.file_exists (Filename.concat target ".masc/config/runtime.toml"));
       check bool "did not synthesize runtime.json" false
         (Sys.file_exists (Filename.concat target ".masc/config/runtime.json"));
       check bool "fake exe not invoked" false (Sys.file_exists capture);

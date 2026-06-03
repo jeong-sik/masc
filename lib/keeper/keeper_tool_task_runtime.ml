@@ -192,7 +192,6 @@ let claim_scope_context_suffix ~(meta : keeper_meta) claim_goal_scope =
          " preferring active_goal_ids=[%s] (advisory)"
          (String.concat ", " goal_ids))
   | "all_tasks" -> " across all tasks"
-  | "auto_goal_fallback_all_tasks" -> " after auto-goal fallback to all tasks"
   | "empty_goal_scope_fallback_all_tasks" ->
     " after active-goal fallback to all tasks"
   | mode -> Printf.sprintf " in claim_scope.mode=%s" mode

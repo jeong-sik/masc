@@ -75,7 +75,7 @@ let () =
       , [ ( "resolve_bind_state skips read-only lookup"
           , `Quick
           , test_resolve_bind_state_skips_read_only_lookup )
-        ; ( "resolve_bind_state checks bind-required tools"
+        ; ( "resolve_bind_state checks bind-gated tools"
           , `Quick
           , test_resolve_bind_state_checks_bind_required_tools )
         ; ( "resolve_bind_state skips unknown agent"

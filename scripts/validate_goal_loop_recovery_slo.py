@@ -20,7 +20,6 @@ from typing import Any, TextIO
 EXPECTED_SOURCE_CATALOG_ID = "goal-loop-206-audit-external-claim-2026-05-05"
 REQUIRED_PROOF_REQUIREMENT_IDS = (
     "startup-credential-starvation",
-    "startup-alive-but-stuck",
 )
 VALID_EVIDENCE_KINDS = {
     "unit_replay",
@@ -31,7 +30,6 @@ VALID_EVIDENCE_KINDS = {
 }
 EXPECTED_TRIGGER_TYPES = {
     "startup-credential-starvation": "credential_archived_starvation",
-    "startup-alive-but-stuck": "alive_but_stuck",
 }
 
 
@@ -92,21 +90,6 @@ def validate_credential_trigger(
     if trigger.get("archived_credentials_replaced") is not True:
         errors.append(
             f"{requirement_id}: trigger.archived_credentials_replaced must be true"
-        )
-
-
-def validate_alive_but_stuck_trigger(
-    requirement_id: str, trigger: dict[str, Any], errors: list[str]
-) -> None:
-    elapsed = as_finite_number(trigger.get("elapsed_sec"))
-    threshold = as_finite_number(trigger.get("threshold_sec"))
-    if elapsed is None or elapsed <= 0.0:
-        errors.append(f"{requirement_id}: trigger.elapsed_sec must be > 0")
-    if threshold is None or threshold <= 0.0:
-        errors.append(f"{requirement_id}: trigger.threshold_sec must be > 0")
-    if elapsed is not None and threshold is not None and elapsed <= threshold:
-        errors.append(
-            f"{requirement_id}: trigger.elapsed_sec must exceed threshold_sec"
         )
 
 
@@ -180,8 +163,6 @@ def validate_proof_item(
             errors.append(f"{requirement_id}: trigger.observed_at is required")
         if requirement_id == "startup-credential-starvation":
             validate_credential_trigger(requirement_id, trigger, errors)
-        elif requirement_id == "startup-alive-but-stuck":
-            validate_alive_but_stuck_trigger(requirement_id, trigger, errors)
 
     recovery = nested_object(proof, "recovery")
     if recovery is None:

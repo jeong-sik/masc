@@ -5,7 +5,6 @@ type actionable_signal =
 
 type contract_status =
   | Tool_surface_mismatch of { missing : string list }
-  | Missing_required_tool_use
   | Claim_only_after_owned_task
   | Needs_execution_progress
   | Passive_only
@@ -19,7 +18,6 @@ let actionable_signal_label = function
 
 let contract_status_label = function
   | Tool_surface_mismatch _ -> "tool_surface_mismatch"
-  | Missing_required_tool_use -> "missing_required_tool_use"
   | Claim_only_after_owned_task -> "claim_only_after_owned_task"
   | Needs_execution_progress -> "needs_execution_progress"
   | Passive_only -> "passive_only"

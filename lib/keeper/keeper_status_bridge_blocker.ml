@@ -48,7 +48,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
        when Keeper_error_classify.is_structural_oas_timeout_message message ->
        Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
-       Some Completion_contract_violation
+       None
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
        Some Oas_agent_execution_timeout
@@ -100,15 +100,11 @@ let is_no_tool_capable_blocker_class blocker_class =
   String.equal blocker_class "runtime_exhausted_no_tool_capable"
 ;;
 
-let is_completion_contract_blocker_class blocker_class =
-  String.equal blocker_class (blocker_class_to_string Completion_contract_violation)
-;;
-
 let is_provider_runtime_blocker_class blocker_class =
   String.equal blocker_class "provider_runtime_error"
 ;;
 
-let is_stale_watchdog_blocker_class blocker_class =
+let is_stale_turn_timeout_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Stale_turn_timeout)
 ;;
 

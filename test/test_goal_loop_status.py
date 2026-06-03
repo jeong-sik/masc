@@ -32,7 +32,7 @@ class GoalLoopStatusTest(unittest.TestCase):
                 "total_lines": 12,
                 "matched_lines": 3,
                 "patterns": {
-                    "alive_but_stuck": {
+                    "credential_archived_starvation": {
                         "count": 2,
                         "severity": "critical",
                     },
@@ -50,8 +50,8 @@ class GoalLoopStatusTest(unittest.TestCase):
                 },
                 "findings": [
                     {
-                        "finding_id": "NF-3",
-                        "title": "alive_but_stuck_no_recovery",
+                        "finding_id": "NF-2",
+                        "title": "credential_archived_all_keepers",
                         "severity": "critical",
                         "status": "EVIDENCE_PRESENT",
                         "count": 2,
@@ -65,14 +65,14 @@ class GoalLoopStatusTest(unittest.TestCase):
                 "act_linked_count": 0,
                 "decisions": [
                     {
-                        "decision_id": "D-P1-1",
-                        "action": "Execute recovery strategy",
+                        "decision_id": "D-EMERGENCY-1",
+                        "action": "Slot forced reclaim + keeper credential auto-recovery",
                     }
                 ],
             },
             verify={
                 "status": "FAIL",
-                "failing_findings": [{"finding_id": "NF-3"}],
+                "failing_findings": [{"finding_id": "NF-2"}],
             },
             generated_at="2026-05-05T10:00:00+00:00",
             loop_iteration="#1",
@@ -81,9 +81,11 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(report.overall_status, "critical")
         self.assertEqual(report.phases["observe"].status, "critical")
         self.assertEqual(report.phases["act"].summary["act_missing_count"], 1)
-        self.assertEqual(report.next_action["decision_id"], "D-P1-1")
+        self.assertEqual(report.next_action["decision_id"], "D-EMERGENCY-1")
         self.assertEqual(
-            report.system_health_signals["keeper_failure_patterns"]["alive_but_stuck"],
+            report.system_health_signals["keeper_failure_patterns"][
+                "credential_archived_starvation"
+            ],
             2,
         )
 
@@ -234,8 +236,8 @@ class GoalLoopStatusTest(unittest.TestCase):
                 "audit_catalog": {
                     "status": "INCOMPLETE",
                     "expected_findings_total": 206,
-                    "itemized_findings_total": 19,
-                    "missing_itemized_findings": 187,
+                    "itemized_findings_total": 18,
+                    "missing_itemized_findings": 188,
                     "source_documents_status": "COMPLETE",
                     "source_documents_covered": 12,
                     "source_documents_expected": 12,
@@ -249,9 +251,9 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "line_ref_errors": 0,
                         "source_itemized_id_status": "INCOMPLETE",
                         "source_itemized_finding_ids_total": 0,
-                        "catalog_itemized_finding_ids_total": 19,
+                        "catalog_itemized_finding_ids_total": 18,
                         "source_ids_missing_from_catalog": 0,
-                        "catalog_ids_missing_from_source": 19,
+                        "catalog_ids_missing_from_source": 18,
                         "source_structured_item_ids_total": 0,
                         "source_structured_item_ids_uncataloged": 0,
                         "source_structured_item_ids_uncataloged_occurrences": 0,
@@ -274,15 +276,15 @@ class GoalLoopStatusTest(unittest.TestCase):
         self.assertEqual(report.phases["orient"].status, "warning")
         audit_catalog = report.phases["orient"].summary["audit_catalog"]
         self.assertEqual(audit_catalog["source_documents_covered"], 12)
-        self.assertEqual(audit_catalog["missing_itemized_findings"], 187)
+        self.assertEqual(audit_catalog["missing_itemized_findings"], 188)
         self.assertEqual(audit_catalog["consistency_findings_total"], 1)
         self.assertEqual(audit_catalog["consistency_findings_open"], 1)
         self.assertEqual(audit_catalog["source_artifacts_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_artifacts_missing"], 12)
         self.assertEqual(audit_catalog["source_itemized_id_status"], "INCOMPLETE")
         self.assertEqual(audit_catalog["source_itemized_finding_ids_total"], 0)
-        self.assertEqual(audit_catalog["catalog_itemized_finding_ids_total"], 19)
-        self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 19)
+        self.assertEqual(audit_catalog["catalog_itemized_finding_ids_total"], 18)
+        self.assertEqual(audit_catalog["catalog_ids_missing_from_source"], 18)
         self.assertEqual(audit_catalog["source_structured_item_ids_total"], 0)
         self.assertEqual(audit_catalog["source_structured_item_ids_uncataloged"], 0)
         self.assertEqual(
@@ -341,7 +343,7 @@ class GoalLoopStatusTest(unittest.TestCase):
                         "source_structured_item_id_families": [
                             {
                                 "family": "NF",
-                                "total": 8,
+                                "total": 7,
                                 "uncataloged": 0,
                                 "uncataloged_samples": [],
                             }
@@ -369,94 +371,11 @@ class GoalLoopStatusTest(unittest.TestCase):
             [
                 {
                     "family": "NF",
-                    "total": 8,
+                    "total": 7,
                     "uncataloged": 0,
                     "uncataloged_samples": [],
                 }
             ],
-        )
-
-    def test_orient_audit_catalog_carries_strict_row_corpus_metadata(self) -> None:
-        report = goal_loop_status.build_status_report(
-            observe={
-                "files": ["server.log"],
-                "total_lines": 5,
-                "matched_lines": 0,
-                "patterns": {},
-            },
-            orient={
-                "summary": {
-                    "evidence_present": 0,
-                    "critical_present": 0,
-                    "findings_total": 206,
-                },
-                "findings": [],
-                "audit_catalog": {
-                    "catalog_id": "goal-loop-206-audit-external-claim-2026-05-05",
-                    "status": "COMPLETE",
-                    "expected_findings_total": 206,
-                    "itemized_findings_total": 206,
-                    "missing_itemized_findings": 0,
-                    "source_documents_status": "COMPLETE",
-                    "source_documents_covered": 12,
-                    "source_documents_expected": 12,
-                    "strict_row_corpus": {
-                        "provided": True,
-                        "validated": True,
-                        "row_count": 206,
-                        "errors_total": 0,
-                    },
-                    "source_artifacts": {
-                        "status": "COMPLETE",
-                        "source_artifacts_total": 12,
-                        "source_artifacts_resolved": 12,
-                        "source_artifacts_missing": 0,
-                        "line_ref_errors": 0,
-                        "source_itemized_id_status": "COMPLETE",
-                        "source_itemized_id_basis": "strict_row_corpus",
-                        "source_itemized_finding_ids_total": 206,
-                        "source_document_itemized_finding_ids_total": 19,
-                        "catalog_itemized_finding_ids_total": 206,
-                        "source_ids_missing_from_catalog": 0,
-                        "catalog_ids_missing_from_source": 0,
-                        "source_structured_item_ids_total": 19,
-                        "source_structured_item_ids_uncataloged": 0,
-                        "source_structured_item_ids_uncataloged_occurrences": 0,
-                        "source_structured_item_id_families": [],
-                        "source_aggregate_claim_status": "COMPLETE",
-                        "source_aggregate_claim_sources_verified": 6,
-                        "source_aggregate_claim_sources_missing": 0,
-                        "source_aggregate_reconciliation_status": "COMPLETE",
-                        "source_aggregate_reconciliations_verified": 1,
-                        "source_aggregate_reconciliations_failed": 0,
-                        "source_identity_status": "COMPLETE",
-                        "source_identity_checks_verified": 12,
-                        "source_identity_checks_failed": 0,
-                    },
-                },
-            },
-            decide={"decisions_total": 0, "p0_count": 0, "decisions": []},
-            verify={"status": "PASS", "failing_findings": []},
-            generated_at="2026-05-05T10:00:00+00:00",
-        )
-
-        self.assertEqual(report.phases["orient"].status, "ok")
-        audit_catalog = report.phases["orient"].summary["audit_catalog"]
-        self.assertEqual(
-            audit_catalog["catalog_id"],
-            "goal-loop-206-audit-external-claim-2026-05-05",
-        )
-        self.assertTrue(audit_catalog["strict_row_corpus_provided"])
-        self.assertTrue(audit_catalog["strict_row_corpus_validated"])
-        self.assertEqual(audit_catalog["strict_row_corpus_row_count"], 206)
-        self.assertEqual(audit_catalog["strict_row_corpus_errors_total"], 0)
-        self.assertEqual(
-            audit_catalog["source_itemized_id_basis"],
-            "strict_row_corpus",
-        )
-        self.assertEqual(
-            audit_catalog["source_document_itemized_finding_ids_total"],
-            19,
         )
 
     def test_malformed_catalog_consistency_finding_counts_open(self) -> None:
@@ -834,7 +753,7 @@ class GoalLoopStatusTest(unittest.TestCase):
         payload = json.loads(status_result.stdout)
         self.assertEqual(payload["overall_status"], "critical")
         self.assertEqual(payload["loop_iteration"], "#fixture")
-        self.assertEqual(payload["phases"]["decide"]["summary"]["act_linked_count"], 5)
+        self.assertEqual(payload["phases"]["decide"]["summary"]["act_linked_count"], 4)
         self.assertEqual(payload["phases"]["act"]["summary"]["act_missing_count"], 0)
         self.assertEqual(
             payload["phases"]["verify"]["summary"]["violation_kinds"],

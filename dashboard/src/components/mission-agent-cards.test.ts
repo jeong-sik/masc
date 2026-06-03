@@ -99,7 +99,6 @@ describe('mission keeper runtime helpers', () => {
     expect(keeperRuntimeBlockerLabel('heartbeat_failures')).toBe('하트비트 실패')
     expect(keeperRuntimeBlockerLabel('turn_failures')).toBe('턴 실패 반복')
     expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe('런타임 호출 오류')
-    expect(keeperRuntimeBlockerLabel('tool_required_unsatisfied')).toBe('필수 도구 미충족')
     expect(keeperRuntimeBlockerLabel('exception')).toBe('런타임 예외')
     expect(keeperRuntimeBlockerLabel('stale_fleet_batch')).toBe('Fleet stale 배치')
   })

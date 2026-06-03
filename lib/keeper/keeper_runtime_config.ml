@@ -56,18 +56,11 @@ let key_to_env =
     "turn.adaptive_thinking",           "MASC_KEEPER_ADAPTIVE_THINKING";
     "turn.degraded_retry_slot_phase_budget_sec",
                                         "MASC_KEEPER_DEGRADED_RETRY_SLOT_PHASE_BUDGET_SEC";
-    (* [watchdog] *)
-    "watchdog.stale_sec",               "MASC_KEEPER_WATCHDOG_STALE_SEC";
-    "watchdog.poll_sec",                "MASC_KEEPER_WATCHDOG_POLL_SEC";
-    "watchdog.noop_threshold",          "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD";
-    "watchdog.grace_sec",               "MASC_KEEPER_WATCHDOG_GRACE_SEC";
     (* [supervisor] *)
     "supervisor.max_restarts",          "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS";
     "supervisor.backoff_base_sec",      "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S";
     "supervisor.backoff_max_sec",       "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S";
     "supervisor.sweep_sec",             "MASC_KEEPER_SUPERVISOR_SWEEP_SEC";
-    "supervisor.alive_but_stuck_recovery_enabled",
-                                        "MASC_KEEPER_ALIVE_BUT_STUCK_RECOVERY_ENABLED";
     (* [lifecycle] *)
     "lifecycle.self_preservation_ratio","MASC_KEEPER_SELF_PRESERVATION_RATIO";
     "lifecycle.self_preservation_min",  "MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES";
@@ -121,7 +114,7 @@ let resolved_config_root ~base_path =
 let toml_path ~base_path =
   Filename.concat
     (resolved_config_root ~base_path)
-    Config_dir_resolver.keeper_runtime_toml_filename
+    Config_dir_resolver.runtime_toml_filename
 
 let read_file path =
   (* Eio-native read (Fs_compat.load_file) so the keeper-runtime TOML

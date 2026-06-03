@@ -120,27 +120,8 @@ let register
     `Gauge;
   add
     Keeper_metrics.(to_string ContractViolations)
-    "Keeper turns rejected for required-tool-contract violations (labels: keeper_name, \
-     kind={passive|text_only|missing_required_tool_use}). #10530."
-    `Counter;
-  add
-    Keeper_metrics.(to_string AliveButStuck)
-    "Keepers detected as alive-but-stuck: non-Dead, non-paused, keepalive-running, but \
-     proactive_rt.last_ts has been frozen while autonomous turns kept advancing. Labels: \
-     keeper."
-    `Counter;
-  add
-    Keeper_metrics.(to_string AliveButStuckSeconds)
-    "Current alive-but-stuck elapsed seconds by keeper_name. Set to 0 when the keeper is \
-     not currently detected as alive-but-stuck."
-    `Gauge;
-  add
-    Keeper_metrics.(to_string AliveButStuckThresholdSeconds)
-    "Current alive-but-stuck detector threshold seconds by keeper_name."
-    `Gauge;
-  add
-    Keeper_metrics.(to_string AliveButStuckRecovery)
-    "Bounded recovery wakeups queued by alive_but_stuck_scan. Labels: keeper, outcome."
+    "Keeper contract telemetry counter (labels: keeper_name, kind={passive|text_only}). \
+     #10530."
     `Counter;
   (* Tool schema budget gauges — set once at boot via
      [set_tool_schema_stats]. Covers #7483 Step 1. *)

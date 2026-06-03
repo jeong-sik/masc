@@ -31,7 +31,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         needs_attention: false,
         trust: {
           execution_summary: {
-            tool_contract_result: 'missing_required_tool_use',
+            tool_contract_result: 'tool_surface_mismatch',
             required_tools: ['keeper_task_done'],
             missing_required_tools: ['keeper_task_done'],
           },
@@ -44,7 +44,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     // label from `toolContractLabel`. The prior sibling "증명" span and
     // its raw English token are intentionally removed (모순 #2).
     expect(container.textContent).toContain('도구 계약')
-    expect(container.textContent).toContain('필수 도구 호출 누락')
+    expect(container.textContent).toContain('도구 표면 불일치')
     expect(container.textContent).not.toContain('증명')
     expect(container.textContent).toContain('필요 도구')
     expect(container.textContent).toContain('keeper_task_done')

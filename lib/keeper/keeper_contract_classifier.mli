@@ -9,7 +9,6 @@ type actionable_signal =
 
 type contract_status =
   | Tool_surface_mismatch of { missing : string list }
-  | Missing_required_tool_use
   | Claim_only_after_owned_task
   | Needs_execution_progress
   | Passive_only

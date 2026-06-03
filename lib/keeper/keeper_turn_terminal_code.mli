@@ -6,10 +6,9 @@
     intentionally inert: no caller in the tree references it yet.
     PR-2 swaps the existing typed bridges to return values of type [t];
     PR-3 swaps [Keeper_turn_terminal.t.code] from
-    [string] to [t]; PR-4 converts the readers
-    ([Keeper_execution_receipt] disposition mapping,
-    [Keeper_passive_loop_detector.progress_class_of_terminal_reason_code])
-    from [String.starts_with ~prefix] to exhaustive [match].
+    [string] to [t]; PR-4 converts the
+    [Keeper_execution_receipt] disposition mapping from
+    [String.starts_with ~prefix] to exhaustive [match].
 
     Adding a new variant here is, by construction, a compile
     obligation for every match site after PR-4 lands. *)
@@ -65,7 +64,7 @@ type t =
           internal). The payload is the existing parametrised wire
           format produced by [Keeper_agent_error.terminal_reason_code_of_sdk_error]
           (e.g. ["agent_error_max_turns_exceeded:turns=10,limit=10"],
-          ["completion_contract_violation:require_tool_use"],
+          ["completion_contract_violation:tool_contract"],
           ["api_error_server:502"]). PR-2.5 wraps the existing typed
           accessors in this variant so the typed bridge becomes a
           single source of truth for [Keeper_turn_terminal.t.code]

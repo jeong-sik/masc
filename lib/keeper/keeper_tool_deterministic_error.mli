@@ -41,9 +41,9 @@ type deterministic_reason =
   | Write_operation_gated
       (** write-capable Execute is required before retrying the same operation. *)
   | Completion_contract_violation
-      (** keeper completion contract (e.g. require_tool_use) failed. *)
-  | Structured_tool_required
-      (** Raw shell rejected because a structured visible tool/native workflow is required. *)
+      (** keeper completion contract failed. *)
+  | Structured_tool_payload
+      (** Raw shell rejected because a structured visible tool/native workflow should carry the payload. *)
   | Workflow_rejection_blocked
       (** typed workflow_rejection failure class — handled by a
           separate counter in [Keeper_tools_oas]. It is considered

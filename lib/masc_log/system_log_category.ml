@@ -5,7 +5,6 @@ type t =
   | Telemetry_or_metadata_parse_drop
   | Host_fd_pressure
   | Docker_start_pressure
-  | Keeper_stale_watchdog_lifecycle
   | Provider_timeout
   | Provider_runtime_exhaustion
   | Task_state_probe_misuse
@@ -22,7 +21,6 @@ let to_string = function
   | Telemetry_or_metadata_parse_drop -> "telemetry_or_metadata_parse_drop"
   | Host_fd_pressure -> "host_fd_pressure"
   | Docker_start_pressure -> "docker_start_pressure"
-  | Keeper_stale_watchdog_lifecycle -> "keeper_stale_watchdog_lifecycle"
   | Provider_timeout -> "provider_timeout"
   | Provider_runtime_exhaustion -> "provider_runtime_exhaustion"
   | Task_state_probe_misuse -> "task_state_probe_misuse"
@@ -38,7 +36,6 @@ let all =
     Telemetry_or_metadata_parse_drop;
     Host_fd_pressure;
     Docker_start_pressure;
-    Keeper_stale_watchdog_lifecycle;
     Provider_timeout;
     Provider_runtime_exhaustion;
     Task_state_probe_misuse;
@@ -56,7 +53,6 @@ let of_string_opt raw =
   | "telemetry_or_metadata_parse_drop" -> Some Telemetry_or_metadata_parse_drop
   | "host_fd_pressure" -> Some Host_fd_pressure
   | "docker_start_pressure" -> Some Docker_start_pressure
-  | "keeper_stale_watchdog_lifecycle" -> Some Keeper_stale_watchdog_lifecycle
   | "provider_timeout" -> Some Provider_timeout
   | "provider_runtime_exhaustion" -> Some Provider_runtime_exhaustion
   | "task_state_probe_misuse" -> Some Task_state_probe_misuse

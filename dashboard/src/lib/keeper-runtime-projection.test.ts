@@ -145,13 +145,13 @@ describe('deriveKeeperRuntimeProjection', () => {
       composite: composite({
         phase: 'failing',
         turn_phase: 'executing',
-        decision: { stage: 'tool_required' },
+        decision: { stage: 'tool_optional' },
         runtime: { state: 'degraded_retry' },
         compaction: { stage: 'idle' },
         circuit_breaker: { state: 'closed' },
         execution: {
           ...composite().execution!,
-          tool_contract_result: 'missing_required_tool_use',
+          tool_contract_result: 'tool_surface_mismatch',
         },
       }),
       runtimeTrace: runtimeTrace(),
@@ -167,7 +167,7 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(projection.context.breach).toBe(true)
     expect(projection.socialModel.recognized).toBe(false)
     expect(projection.fiberAlive.alive).toBe(true)
-    expect(projection.toolContract).toBe('missing_required_tool_use')
+    expect(projection.toolContract).toBe('tool_surface_mismatch')
     expect(projection.fsmLanes.map(lane => lane.axis)).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC', 'KCB'])
     expect(projection.signals.map(signal => signal.kind)).toEqual([
       'operational_state',
@@ -187,7 +187,7 @@ describe('deriveKeeperRuntimeProjection', () => {
     expect(projection.synchronizationDetail).toContain('social unrecognized')
     expect(projection.synchronizationDetail).toContain('fiber alive')
     expect(projection.synchronizationDetail).toContain('stop clear')
-    expect(projection.synchronizationDetail).toContain('tool missing_required_tool_use')
+    expect(projection.synchronizationDetail).toContain('tool tool_surface_mismatch')
     expect(projection.synchronizationDetail).toContain('KSM failing')
   })
 

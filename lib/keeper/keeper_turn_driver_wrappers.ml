@@ -179,8 +179,6 @@ let run_named_with_masc_tools
     ?hooks
     ?memory
     ?tool_retry_policy
-    ?(required_tool_satisfaction =
-      Agent_sdk.Completion_contract.any_tool_call_satisfies)
     ?raw_trace
     ?on_event
     ?on_yield
@@ -204,7 +202,6 @@ let run_named_with_masc_tools
     ~max_turns ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
     ?stream_idle_timeout_s ?wait_timeout_sec ?guardrails ?hooks ?memory
     ?tool_retry_policy
-    ~required_tool_satisfaction
     ~accept
     ?compact_ratio
     ?approval

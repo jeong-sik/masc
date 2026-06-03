@@ -128,7 +128,7 @@ val runtime_outcome_to_string : runtime_outcome -> string
     producer paths: (i) initial-state sentinel [Contract_unknown];
     (ii) boundary-state overrides [Contract_not_dispatched],
     [Contract_violated], [Contract_no_tool_capable_provider]; (iii) the
-    seven classifier outcomes mirrored from
+    six classifier outcomes mirrored from
     [Keeper_contract_classifier.contract_status]. *)
 type tool_contract_result =
   | Contract_unknown
@@ -136,7 +136,6 @@ type tool_contract_result =
   | Contract_violated
   | Contract_tool_surface_mismatch
   | Contract_no_tool_capable_provider
-  | Contract_missing_required_tool_use
   | Contract_claim_only_after_owned_task
   | Contract_needs_execution_progress
   | Contract_passive_only
@@ -285,7 +284,6 @@ type operator_disposition_reason =
       fall-through emitted. *)
   | Reason_provider_runtime_error
   | Reason_internal_error
-  | Reason_tool_required_unsatisfied
   | Reason_tool_route_recoverable_failure
   | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked

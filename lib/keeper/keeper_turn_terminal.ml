@@ -66,8 +66,8 @@ let contract_code_from_error_text raw_error =
   if
     contains_ci raw_error "no ToolUse block"
     || contains_ci raw_error "returned no keeper tool"
-  then "required_tool_use_no_tool_call"
-  else "required_tool_use_unsatisfied"
+  then "tool_contract_no_tool_call"
+  else "tool_contract_unsatisfied"
 ;;
 
 let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_error err =

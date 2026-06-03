@@ -295,25 +295,42 @@ const modelTotals = computed(() => {
   let totalOut = 0
   let totalCache = 0
   let totalReasoning = 0
+  let totalSuccess = 0
+  let totalError = 0
   let p50Sum = 0
   let p50Count = 0
   let p95Max = 0
+  let ttfrcSum = 0
+  let ttfrcCount = 0
   for (const m of data) {
     totalCost += m.total_cost_usd ?? 0
     totalIn += m.total_input_tokens ?? 0
     totalOut += m.total_output_tokens ?? 0
     totalCache += m.total_cache_read_tokens ?? 0
     totalReasoning += m.total_reasoning_tokens ?? 0
+    totalSuccess += m.success_count ?? 0
+    totalError += m.error_count ?? 0
     if (m.p50_latency_ms != null) {
       p50Sum += m.p50_latency_ms
       p50Count += 1
     }
     if (m.p95_latency_ms != null && m.p95_latency_ms > p95Max) p95Max = m.p95_latency_ms
+    // Aggregate TTFRC from recent entries
+    if (m.recent_entries) {
+      for (const e of m.recent_entries) {
+        if (e.streaming_ttfrc_ms != null) {
+          ttfrcSum += e.streaming_ttfrc_ms
+          ttfrcCount += 1
+        }
+      }
+    }
   }
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
   const cacheRatio = totalIn > 0 ? totalCache / totalIn : null
   const reasoningRatio = totalOut > 0 ? totalReasoning / totalOut : null
-  return { totalCost, totalIn, totalOut, totalCache, totalReasoning, cacheRatio, reasoningRatio, p50Avg, p95Max, count: data.length }
+  const errorRate = (totalSuccess + totalError) > 0 ? totalError / (totalSuccess + totalError) : null
+  const avgTtfrc = ttfrcCount > 0 ? Math.round(ttfrcSum / ttfrcCount) : null
+  return { totalCost, totalIn, totalOut, totalCache, totalReasoning, totalSuccess, totalError, cacheRatio, reasoningRatio, errorRate, avgTtfrc, p50Avg, p95Max, count: data.length }
 })
 
 const keeperTotals = computed(() => {
@@ -337,7 +354,7 @@ const keeperTotals = computed(() => {
     if (k.p95_latency_ms != null && k.p95_latency_ms > p95Max) p95Max = k.p95_latency_ms
   }
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
-  return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length }
+  return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
 })
 
 function ThRight({ children }: { children: unknown }) {
@@ -392,6 +409,18 @@ function ModelRow({
   const cacheRatio = inTok > 0 && cacheRead != null ? cacheRead / inTok : null
   const reasoningRatio = outTok > 0 && reasoning != null ? reasoning / outTok : null
 
+  // Error rate
+  const errCount = model.error_count ?? 0
+  const succCount = model.success_count ?? 0
+  const totalTurns = errCount + succCount
+  const errRate = totalTurns > 0 ? errCount / totalTurns : null
+
+  // Average TTFRC from recent entries
+  const ttfrcEntries = model.recent_entries?.filter(e => e.streaming_ttfrc_ms != null) ?? []
+  const avgTtfrc = ttfrcEntries.length > 0
+    ? Math.round(ttfrcEntries.reduce((sum, e) => sum + (e.streaming_ttfrc_ms ?? 0), 0) / ttfrcEntries.length)
+    : null
+
   // Derive latest usage_trust from recent_entries
   const latestTrust = model.recent_entries?.length
     ? (model.recent_entries[model.recent_entries.length - 1]?.usage_trust ?? null)
@@ -435,6 +464,12 @@ function ModelRow({
             style=${`width: ${p95Pct.toFixed(1)}%`}
           ></div>
         </div>
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">
+        ${avgTtfrc != null ? html`<span class="text-text-muted">${avgTtfrc}ms</span>` : html`<span class="text-text-disabled">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${errRate != null && errRate > 0.1 ? 'text-[var(--color-status-err)]' : errRate != null && errRate > 0 ? 'text-[var(--color-status-warn)]' : ''}">
+        ${errRate != null ? formatPct1(errRate) : html`<span class="text-text-disabled">—</span>`}
       </td>
       <td class="px-2 py-1.5 text-center">
         ${coverage != null
@@ -1318,6 +1353,22 @@ function CostDashboardContent({ view }: { view: CostView }) {
               delta=${{ direction: t.p95Max > 8000 ? 'down' : 'flat', text: t.p95Max > 8000 ? 'over 8s budget' : 'within budget' }}
             />
           </div>
+          ${mode === 'model' ? html`
+            <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+              <${StatTile}
+                label="Error Rate"
+                value=${t.errorRate != null ? formatPct1(t.errorRate) : '—'}
+                status=${t.errorRate != null ? (t.errorRate > 0.1 ? 'crit' : t.errorRate > 0 ? 'warn' : 'ok') : undefined}
+                delta=${{ direction: 'flat', text: `${t.totalError} errors / ${t.totalSuccess} success` }}
+              />
+              <${StatTile}
+                label="Avg TTFRC"
+                value=${t.avgTtfrc != null ? `${t.avgTtfrc}ms` : '—'}
+                status=${t.avgTtfrc != null && t.avgTtfrc > 3000 ? 'warn' : undefined}
+                delta=${{ direction: 'flat', text: 'streaming first chunk' }}
+              />
+            </div>
+          ` : null}
         ` : null}
 
         ${showMatrix ? html`<${CostMatrix} models=${activeState.data as DashboardRuntimeModelMetric[]} />` : null}
@@ -1358,6 +1409,8 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   <${ThRight}>p95</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">p95 trend</th>
                   ${mode === 'model' ? html`
+                    <${ThRight}>ttfrc</${ThRight}>
+                    <${ThRight}>err%</${ThRight}>
                     <${ThRight}>coverage</${ThRight}>
                     <${ThRight}>trust</${ThRight}>
                   ` : null}

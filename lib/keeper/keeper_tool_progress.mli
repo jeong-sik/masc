@@ -64,7 +64,7 @@ val is_stay_silent_tool_name : string -> bool
 (** [true] iff the tool name represents productive execution progress.
     Completion tools are exempted even when read-only; passive keeper
     observation tools remain [false]. *)
-val tool_name_can_satisfy_required_contract : string -> bool
+val tool_name_counts_as_execution_progress : string -> bool
 
 (** Validate an observed generic [Require_tool_use] call. This is a
     provider-level contract: any actual tool call satisfies it. Keeper

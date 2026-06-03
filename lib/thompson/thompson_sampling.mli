@@ -88,7 +88,7 @@ val init_agent : string -> unit
 
     @param is_healthy Injected health predicate (dependency inversion). The
       caller supplies the agent-health check so this module stays a leaf and
-      does not depend on the masc_mcp mega-library root. Required: a default
+      does not depend on the masc mega-library root. Required: a default
       would silently make every agent eligible. Production callers pass
       [Health.is_healthy].
     @param on_priority_selected Injected observability hook fired once per

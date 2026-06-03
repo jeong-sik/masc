@@ -450,7 +450,7 @@ let masc_deliver_spec : tool_spec =
   }
 ;;
 
-(* === PR-2c: inline_infra group (3 of 4 tools — masc_mcp_session
+(* === PR-2c: inline_infra group (3 of 4 tools — masc_session
    deferred because enum SSOT is locked to Tool_schemas_inline_infra
    by test_types.ml :: mcp_session_action_ssot. Codegen needs a
    shared enum source RFC before that can swap.) === *)
@@ -588,7 +588,7 @@ let phase6_specs : tool_spec list =
   ; masc_plan_clear_task_spec
   ; masc_note_add_spec
   ; masc_deliver_spec
-    (* PR-2c: inline_infra (masc_mcp_session manual; masc_spawn removed by RFC-0182) *)
+    (* PR-2c: inline_infra (masc_session manual; masc_spawn removed by RFC-0182) *)
   ; masc_approval_pending_spec
   ; masc_approval_get_spec
     (* PR-2d: inline_workspace group *)

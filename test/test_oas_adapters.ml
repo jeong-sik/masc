@@ -2,7 +2,7 @@
     through Context_compact_oas), message roundtrip, and compaction strategies.
 
     Note: Context_compact_oas is an internal module not directly accessible
-    from tests (installed opam masc_mcp may lack it). Tests go through the
+    from tests (installed opam masc may lack it). Tests go through the
     public Context_manager API which delegates to Context_compact_oas. *)
 
 open Masc_mcp

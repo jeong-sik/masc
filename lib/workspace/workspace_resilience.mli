@@ -9,7 +9,7 @@
       protocol that runs in the background.
 
     Renamed from [Resilience] (cycle 100 / fix #11709) so the module
-    name does not shadow the [masc_mcp.resilience] sub-library that
+    name does not shadow the [masc.resilience] sub-library that
     PR #11695 started using via [Resilience.Keeper_bridge].
 
     @since Single source of truth — failure handling consolidation *)

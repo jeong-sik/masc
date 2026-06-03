@@ -4,8 +4,8 @@
     Included by {!Prometheus} so existing callers keep using
     [Prometheus.metric_*] bindings unchanged. *)
 
-let metric_mcp_tool_schema_count = "masc_mcp_tool_schema_count"
-let metric_mcp_tool_schema_tokens_approx = "masc_mcp_tool_schema_tokens_approx"
+let metric_mcp_tool_schema_count = "masc_tool_schema_count"
+let metric_mcp_tool_schema_tokens_approx = "masc_tool_schema_tokens_approx"
 let metric_inference_queue_depth = "masc_inference_queue_depth"
 let metric_inference_queue_inflight = "masc_inference_queue_inflight"
 let metric_inference_queue_acquired = "masc_inference_queue_acquired_total"

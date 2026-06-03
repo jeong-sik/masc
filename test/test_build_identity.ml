@@ -151,7 +151,7 @@ let test_parse_dune_project_version () =
   Alcotest.(check (option string)) "version parsed"
     (Some "0.19.20")
     (Build_identity.parse_dune_project_version
-       "(lang dune 3.22)\n\n(name masc_mcp)\n(version 0.19.20)\n");
+       "(lang dune 3.22)\n\n(name masc)\n(version 0.19.20)\n");
   Alcotest.(check (option string)) "missing version" None
     (Build_identity.parse_dune_project_version "(lang dune 3.22)\n")
 

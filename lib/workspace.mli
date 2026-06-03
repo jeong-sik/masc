@@ -96,7 +96,7 @@ val record_process_timeout :
     [Eio.Time.Timeout] in [run_argv] / [run_argv_with_stdin] /
     [run_argv_with_stdin_and_status_split] / [run_argv_with_status_split]
     surfaces in Prometheus without taking a direct dependency on
-    [masc_mcp.Prometheus] from the lower [masc_process] layer. *)
+    [masc.Prometheus] from the lower [masc_process] layer. *)
 
 (** {1 Distributed lock observability (#9645)} *)
 

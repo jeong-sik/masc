@@ -10,7 +10,7 @@ let mcp_session_action_enum_strings =
 
 (* RFC-0057 PR-2c: masc_approval_pending and masc_approval_get
    moved to codegen (Tool_descriptors_gen via Tool_schemas_misc.schemas).
-   masc_mcp_session remains here because its [action] enum is locked
+   masc_session remains here because its [action] enum is locked
    to [mcp_session_action_enum_strings] above by the SSOT regression
    test; codegen needs a shared enum source RFC before it can swap.
 
@@ -71,9 +71,9 @@ let inline_infra_schemas =
         manual_inline_infra_schemas)
 
 let schemas : tool_schema list = inline_infra_schemas @ [
-  (* masc_mcp_session *)
+  (* masc_session *)
   {
-    name = "masc_mcp_session";
+    name = "masc_session";
     description = "Create, get, list, or remove MCP sessions that track client context across requests. \
 Use when managing multi-request workflows that need session continuity (Mcp-Session-Id header). \
 Pair with masc_subscription to receive session-scoped event notifications.";

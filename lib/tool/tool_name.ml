@@ -272,7 +272,7 @@ module Masc = struct
     | Config -> "masc_config"
     | Gc -> "masc_gc"
     | Get_metrics -> "masc_get_metrics"
-    | Mcp_session -> "masc_mcp_session"
+    | Mcp_session -> "masc_session"
     | Pause -> "masc_pause"
     | Resume -> "masc_resume"
     | Start -> "masc_start"
@@ -329,7 +329,7 @@ module Masc = struct
             | "masc_config" -> Some Config
             | "masc_gc" -> Some Gc
             | "masc_get_metrics" -> Some Get_metrics
-            | "masc_mcp_session" -> Some Mcp_session
+            | "masc_session" -> Some Mcp_session
             | "masc_pause" -> Some Pause
             | "masc_resume" -> Some Resume
             | "masc_start" -> Some Start

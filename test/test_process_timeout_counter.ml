@@ -10,7 +10,7 @@
    operators could not answer "which command is timing out
    and is 15s/60s the right budget?" without log scraping.
 
-   Layering: [masc_process] sits below [masc_mcp.Prometheus]
+   Layering: [masc_process] sits below [masc.Prometheus]
    in the library dep graph, so the emit runs through
    [Process_eio.process_timeout_observer_fn] which [lib/workspace.ml]
    wires to [Masc_mcp.Workspace.record_process_timeout].  This test

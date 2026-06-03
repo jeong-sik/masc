@@ -144,7 +144,7 @@ let subscribe_messages_fn
     signals TLA+ KeeperTaskInterlock violations (currently the
     [Claimed_to_done_skip] branch) through this hook; [lib/workspace.ml]
     wires it to a Prometheus counter emit at startup.  Keeping the
-    hook here avoids a [masc_workspace → masc_mcp.Prometheus]
+    hook here avoids a [masc_workspace → masc.Prometheus]
     dependency cycle. *)
 let fsm_drift_observer_fn
   : (variant:string -> force:bool -> agent_name:string -> unit) Atomic.t
@@ -160,7 +160,7 @@ let fsm_drift_observer_fn
     is no fleet-wide rate metric for "how often does this fail,
     on which key?".
 
-    This hook decouples the emit from [masc_mcp.Prometheus] (which
+    This hook decouples the emit from [masc.Prometheus] (which
     sits above [masc_workspace] in the dep graph).  [lib/workspace.ml]
     wires it to a Prometheus counter at startup; [masc_workspace]
     callers fire it from the failure branches without taking a
@@ -287,7 +287,7 @@ let cache_desync_cleared_fn
     state.
 
     Wired in [lib/keeper/keeper_runtime.ml] at startup; the default no-op
-    keeps [masc_workspace] free of a direct dependency on [masc_mcp]. *)
+    keeps [masc_workspace] free of a direct dependency on [masc]. *)
 let claim_post_provision_fn
   : (Workspace_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit) Atomic.t
   = Atomic.make (fun _ ~agent_name:_ ~task_id:_ -> ())

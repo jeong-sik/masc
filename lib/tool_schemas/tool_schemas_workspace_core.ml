@@ -9,7 +9,7 @@ open Masc_domain
 (** Issue #8636: hand-mirrored from
     [Tool_workspace.valid_assertion_strings]. Cycle constraint —
     [Tool_schemas_workspace_core] is upstream of [Tool_workspace] (the schema
-    library lives in [masc_tool_schemas], the handler is in [masc_mcp]).
+    library lives in [masc_tool_schemas], the handler is in [masc]).
     The test [test_types.ml :: assertion_kind_ssot] asserts this mirror
     stays in sync with the SSOT so adding a 6th assertion kind fails
     compilation in [assertion_kind_to_string] AND fails the test here,

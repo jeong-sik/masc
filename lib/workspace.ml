@@ -303,7 +303,7 @@ let () =
    puts the signal on
    [masc_task_fsm_drift_total{variant, force}] so Grafana /
    ratchet-readiness dashboards can see it.  The emit lives at
-   [masc_mcp] layer because [masc_workspace] sits below [Prometheus]
+   [masc] layer because [masc_workspace] sits below [Prometheus]
    in the library dep graph. *)
 let fsm_drift_metric = "masc_task_fsm_drift_total"
 

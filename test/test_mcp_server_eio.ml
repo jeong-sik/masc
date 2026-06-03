@@ -1981,7 +1981,7 @@ let test_handle_request_tools_list_internal_keeper_runtime_includes_keeper_inter
       Alcotest.(check bool) "retired tool_execute hidden" false
         (List.mem "tool_execute" names);
       Alcotest.(check bool) "system internal still hidden" false
-        (List.mem "masc_mcp_session" names))
+        (List.mem "masc_session" names))
 
 let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_internal_tool
     () =

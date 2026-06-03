@@ -245,6 +245,81 @@ let test_hook_typed_outcome_mapping () =
     check string "typed_outcome" "error" typed)
 ;;
 
+let test_pr_event_ingest () =
+  with_temp_dir (fun base_dir ->
+    Ide_bridge.ingest_pr_event
+      ~base_path:base_dir
+      ~pr_number:19872
+      ~pr_url:"https://github.com/jeong-sik/masc-mcp/pull/19872"
+      ~pr_title:"feat(ide): auto-collect tool/turn events"
+      ~pr_state:"open"
+      ~repo:"jeong-sik/masc-mcp"
+      ~keeper_id:"keeper-alpha"
+      ~turn_id:"turn-123"
+      ~comment_count:0
+      ~review_status:None
+      ~timestamp_ms:1717400000000L;
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file exists" true (Sys.file_exists path);
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
+    let pr_url = Yojson.Safe.Util.member "pr_url" json |> Yojson.Safe.Util.to_string in
+    check int "pr_number" 19872 pr_number;
+    check string "pr_url" "https://github.com/jeong-sik/masc-mcp/pull/19872" pr_url)
+;;
+
+let test_pr_event_from_hook_detects_url () =
+  with_temp_dir (fun base_dir ->
+    let output = "remote: https://github.com/jeong-sik/masc-mcp/pull/123\n" in
+    Ide_bridge.ingest_pr_event_from_hook
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:output
+      ~tool_name:"execute";
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file exists" true (Sys.file_exists path);
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
+    check int "pr_number" 123 pr_number)
+;;
+
+let test_pr_event_from_hook_ignores_non_execute () =
+  with_temp_dir (fun base_dir ->
+    let output = "https://github.com/owner/repo/pull/456" in
+    Ide_bridge.ingest_pr_event_from_hook
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:output
+      ~tool_name:"fs_write";
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file not created" false (Sys.file_exists path))
+;;
+
+let test_pr_event_from_hook_ignores_no_url () =
+  with_temp_dir (fun base_dir ->
+    let output = "file written successfully\n" in
+    Ide_bridge.ingest_pr_event_from_hook
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:output
+      ~tool_name:"execute";
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file not created" false (Sys.file_exists path))
+;;
+
 let () =
   run
     "ide_bridge"
@@ -266,5 +341,11 @@ let () =
         ; test_case "no file_path (execute)" `Quick test_hook_no_file_path
         ; test_case "summary truncation" `Quick test_hook_summary_truncation
         ; test_case "typed_outcome mapping" `Quick test_hook_typed_outcome_mapping
+        ] )
+    ; ( "pr_event"
+      , [ test_case "pr event ingest" `Quick test_pr_event_ingest
+        ; test_case "from hook detects url" `Quick test_pr_event_from_hook_detects_url
+        ; test_case "from hook ignores non-execute" `Quick test_pr_event_from_hook_ignores_non_execute
+        ; test_case "from hook ignores no url" `Quick test_pr_event_from_hook_ignores_no_url
         ] )
     ]

@@ -42,4 +42,28 @@ val ingest_tool_event_from_hook :
   input:Yojson.Safe.t ->
   unit
 
+val ingest_pr_event :
+  base_path:string ->
+  pr_number:int ->
+  pr_url:string ->
+  pr_title:string ->
+  pr_state:string ->
+  repo:string ->
+  keeper_id:string ->
+  turn_id:string ->
+  comment_count:int ->
+  review_status:string option ->
+  timestamp_ms:int64 ->
+  unit
+
+(** Try to detect PR creation from Execute tool output and ingest a PR event.
+    Only fires when [tool_name = "execute"] and output contains a GitHub PR URL. *)
+val ingest_pr_event_from_hook :
+  base_path:string ->
+  keeper_id:string ->
+  turn_id:string ->
+  output_text:string ->
+  tool_name:string ->
+  unit
+
 val parse_pr_url_from_output : string -> (int * string) option

@@ -77,6 +77,7 @@ let test_provider_runtime_error_carrier_none () =
       ; provider_id = None
       ; http_status = None
       ; runtime_id = None
+      ; reason = None
       }
   in
   (check string)
@@ -92,6 +93,7 @@ let test_provider_runtime_error_carrier_some () =
       ; provider_id = Some "runpod_mtp"
       ; http_status = Some 502
       ; runtime_id = None
+      ; reason = None
       }
   in
   let s = R.failure_reason_to_string r in

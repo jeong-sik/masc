@@ -221,15 +221,12 @@ let failure_reason_policy_decision
     Some (Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause)
   | Some Keeper_registry.Turn_livelock_pause ->
     Some (Keeper_failure_policy.decide Keeper_failure_policy.Turn_livelock_pause)
-  | Some (Keeper_registry.Provider_runtime_error { code; _ })
-    when String.starts_with ~prefix:"runtime_exhausted_" code ->
-    let retryable =
-      match code with
-      | "runtime_exhausted_candidates_filtered"
-      | "runtime_exhausted_max_turns"
-      | "runtime_exhausted_capacity_exhausted" -> true
-      | _ -> false
-    in
+  | Some (Keeper_registry.Provider_runtime_error { reason = Some reason; _ }) ->
+    (* Typed retryability: read the carried [runtime_exhaustion_reason]
+       directly instead of reparsing the stringified [code]. The former
+       [String.starts_with ~prefix:"runtime_exhausted_"] + [_ -> false]
+       reparse biased transient/connectivity reasons to non-retryable. *)
+    let retryable = Keeper_meta_contract.runtime_exhaustion_reason_retryable reason in
     Some
       (Keeper_failure_policy.decide
          (Keeper_failure_policy.Runtime_exhausted { retryable }))

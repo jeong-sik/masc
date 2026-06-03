@@ -86,6 +86,14 @@ type failure_reason =
       ; provider_id : string option
       ; http_status : int option
       ; runtime_id : string option
+      ; reason : Keeper_meta_contract.runtime_exhaustion_reason option
+          (** Typed runtime-exhaustion reason, [Some] only on the
+              runtime-exhausted construction path
+              ([keeper_unified_turn_types.runtime_exhausted_failure_reason_of_raw_error]).
+              Lets the supervisor decide retryability via
+              [Keeper_meta_contract.runtime_exhaustion_reason_retryable]
+              instead of reparsing [code]. [None] for non-exhaustion
+              provider/runtime errors. *)
       }
   | Tool_required_unsatisfied of
       { code : string

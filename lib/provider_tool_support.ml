@@ -70,10 +70,9 @@ let fallback_tool_policy_for_kind kind =
 let tool_policy_for_kind kind = fallback_tool_policy_for_kind kind
 ;;
 
-(** Whether the resolved provider config is a CLI runtime (Claude Code,
-    Codex CLI, Gemini CLI, Anthropic CLI).  MASC uses this only for local
-    tool-delivery projection after OAS has resolved provider/model
-    capabilities. *)
+(** Whether the resolved provider config is a CLI runtime (Anthropic CLI).
+    MASC uses this only for local tool-delivery projection after OAS has
+    resolved provider/model capabilities. *)
 let is_cli_agent_provider (_provider_cfg : Llm_provider.Provider_config.t) =
   (* CLI subprocess provider kinds were removed in the agent_sdk pin bump;
      no provider kind is a subprocess CLI. *)
@@ -86,10 +85,10 @@ let is_cli_agent_provider (_provider_cfg : Llm_provider.Provider_config.t) =
     [oas_capabilities_of_config] below) can avoid re-resolving for the same
     provider.
 
-    Override semantics: CLI providers (Claude Code, Codex CLI, Gemini CLI,
-    Anthropic CLI) do not expose inline function-calling to this gate. Runtime MCP
-    support remains runtime.toml/OAS-owned because not every CLI can consume
-    request-scoped MCP policy; Gemini CLI is the known false case. *)
+    Override semantics: CLI providers (Anthropic CLI) do not expose inline
+    function-calling to this gate. Runtime MCP support remains
+    runtime.toml/OAS-owned because not every CLI can consume request-scoped
+    MCP policy. *)
 let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
   if is_cli
   then { caps with supports_tools = false; supports_tool_choice = false }

@@ -40,7 +40,7 @@ let pp_auth_error fmt = function
       Format.fprintf fmt "api_key_env_unset(var=%s)" var_name
   | Bound_actor_provider_mismatch { provider_kind } ->
       Format.fprintf fmt "bound_actor_provider_mismatch(kind=%s)"
-        (Llm_provider.Provider_kind.to_string provider_kind)
+        (Runtime_provider_credentials.provider_kind_label provider_kind)
 
 let show_auth_error e =
   let buf = Buffer.create 64 in
@@ -90,7 +90,7 @@ let resolve ~base_path ~keeper_id ~provider_kind
                 (Api_key_env_unset { var_name = "MASC_INTERNAL_MCP_TOKEN" })
         else Error (Token_hash_missing { path = hash_path })
   else
-    match Provider_kind_env.env_var_for_kind provider_kind with
+    match Runtime_provider_credentials.api_key_env_var_for_kind provider_kind with
     | None ->
         (* Providers requiring per-keeper bridging cannot accept the shared
            [MASC_MCP_TOKEN] fallback: their bound-actor runtime MCP tools need

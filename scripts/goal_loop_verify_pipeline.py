@@ -59,7 +59,6 @@ DEFAULT_MUST_NOT_CONTAIN = (
     "skipping turn.*semaphore wait",
     "pricing_catalog_miss",
     "persistence UTF-8 repaired",
-    "alive-but-stuck detected",
     "Lenient_json fallback hit",
     "archived credential.*starvation",
 )

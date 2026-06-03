@@ -206,7 +206,6 @@ type operator_disposition_reason =
   | Reason_transient_runtime_retry
   | Reason_provider_runtime_error
   | Reason_internal_error
-  | Reason_tool_required_unsatisfied
   | Reason_tool_route_recoverable_failure
   | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
@@ -223,7 +222,6 @@ let operator_disposition_reason_to_string = function
   | Reason_transient_runtime_retry -> "transient_runtime_retry"
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
-  | Reason_tool_required_unsatisfied -> "tool_required_unsatisfied"
   | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
   | Reason_turn_budget_exhausted -> "turn_budget_exhausted"
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
@@ -343,16 +341,7 @@ let operator_disposition (receipt : t)
   | _ when provider_runtime_failure ->
     Disp_pause_human, Reason_provider_runtime_error
   | Keeper_terminal_reason.Completion_contract_violation _ ->
-    (* The downstream completion-contract layer has already decided the turn
-       violated [require_tool_use] (or another contract sub-clause) and emits
-       [terminal_reason="completion_contract_violation:<sub_clause>"]. The
-       earlier-layer [tool_contract_result] can show [satisfied_completion]
-       from a separate classifier that judged the same turn locally OK; the
-       two-layer disagreement was the unmapped fall-through that #11651
-       regression counter is meant to flag. Treat terminal_reason as
-       authoritative — the disposition is the same as the explicit
-       [tool_required_unsatisfied] branch below. *)
-    Disp_pause_human, Reason_tool_required_unsatisfied
+    Disp_pause_human, Reason_unmapped_runtime_state
   | Keeper_terminal_reason.Turn_livelock _ ->
     Disp_pause_human, Reason_turn_livelock_blocked
   | _
@@ -368,71 +357,23 @@ let operator_disposition (receipt : t)
           | Some _ | None -> false) ->
     Disp_pause_human, Reason_internal_error
   | Keeper_terminal_reason.Auto_recoverable_budget _ ->
-    (* The turn was cut off by its per-call turn cap / wall-clock ceiling /
-       idle watchdog before producing a verdict. This is auto-recoverable
-       (the supervisor resumes from the checkpoint), NOT a tool-contract
-       failure. Without this branch the turn falls through to the generic
-       [tool_gate_unsatisfied] check below, which — because a
-       cut-off turn has [tools_used = []] on a [tool_requirement = Required]
-       lane — returned [Disp_pause_human, Reason_tool_required_unsatisfied],
-       falsely paging an operator while the keeper silently auto-resumed.
-       #19714 removed the blunt default wall-clock; this closes the
-       disposition-side half of the same mis-signal. *)
     Disp_pass, Reason_turn_budget_exhausted
   | Config_or_auth _
   | Provider_runtime_failure _
   | Pre_dispatch_success _
   | Other _ ->
-    (* Generic tool-gate fall-through. [Config_or_auth] and
+    (* Generic fall-through. [Config_or_auth] and
        [Provider_runtime_failure] are caught by the guarded branches above
        (their constructors force [preflight_config_failure] /
        [provider_runtime_failure] true), so only [Pre_dispatch_success] and
        [Other] reach here in practice; the first two are listed to keep the
-       match exhaustive without a wildcard. This block reproduces the
-       pre-typing [else] branch verbatim. *)
-    let canonical_names names =
-      names
-      |> List.map Keeper_tool_resolution.canonical_tool_name
-      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-    in
-    let used_tool_names =
-      canonical_names
-        (receipt.canonical_tools @ receipt.observed_tools @ receipt.tools_used)
-    in
-    let generic_claim_context_progress =
-      (* A successful claim-only turn still made scheduling progress; the next
-         turn must execute, but this receipt should not be reclassified as a
-         human pause. *)
-      List.exists Keeper_tool_progress.is_claim_context_tool_name used_tool_names
-    in
-    let ok_followup_progress =
-      receipt.outcome = `Ok
-      && receipt.runtime_outcome = Runtime_completed
-      && receipt.tool_contract_result = Contract_needs_execution_progress
-      && generic_claim_context_progress
-    in
-    let tool_gate_unsatisfied =
-      receipt.tool_surface.tool_requirement = Required
-      && (List.mem
-            receipt.tool_contract_result
-            [ Contract_violated
-            ; Contract_unknown
-            ; Contract_needs_execution_progress
-            ; Contract_missing_required_tool_use
-            ; Contract_passive_only
-            ; Contract_claim_only_after_owned_task
-            ; Contract_tool_surface_mismatch
-            ; Contract_no_tool_capable_provider
-            ]
-          || receipt.tools_used = [])
-      && not ok_followup_progress
-    in
-    let required_tool_route_failure =
+       match exhaustive without a wildcard. *)
+    let tool_route_failure =
       List.mem
         receipt.tool_contract_result
         [ Contract_tool_surface_mismatch; Contract_no_tool_capable_provider ]
     in
-    if tool_gate_unsatisfied && required_tool_route_failure
+    if tool_route_failure
     then
       if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
       then Disp_fail_open_next_runtime, Reason_tool_route_recoverable_failure
@@ -441,22 +382,6 @@ let operator_disposition (receipt : t)
         || receipt.runtime_outcome = Runtime_passed_to_next_model
       then Disp_pass_next_model, Reason_tool_route_recoverable_failure
       else Disp_pause_human, Reason_tool_route_recoverable_failure
-    else if tool_gate_unsatisfied
-    then (
-      if receipt.tool_contract_result = Contract_missing_required_tool_use
-      then
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string ContractViolations)
-          ~labels:
-            [ "keeper_name", receipt.keeper_name
-            ; "kind", "missing_required_tool_use"
-            ; "signal"
-            , (if receipt.tools_used = []
-               then "no_tools_used"
-               else "partial_tools_used")
-            ]
-          ();
-      Disp_pause_human, Reason_tool_required_unsatisfied)
     else if
       receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
     then Disp_fail_open_next_runtime, Reason_degraded_retry

@@ -276,8 +276,8 @@ let degraded_retry_after_recoverable_error
         fallback_reason;
       }
   in
-  if tool_requirement = Required
-     || effective_is_declared_phase_buffer
+  ignore tool_requirement;
+  if effective_is_declared_phase_buffer
      || effective_is_declared_phase_recovery
      || String.equal normalized_effective (Keeper_config.default_runtime_id ())
      || String.equal normalized_effective (Keeper_config.default_runtime_id ())
@@ -465,69 +465,26 @@ let normalized_runtime_id ~catalog_names name =
   then trimmed
   else String.trim trimmed
 
-let required_tool_rotation_candidate
-    ?(allow_phase_recovery = false)
-    ~catalog_names
-    name
-  =
-  let normalized = normalized_runtime_id ~catalog_names name in
-  let is_declared_required_tool_runtime =
-    List.exists (String.equal normalized) (Runtime.get_required_tool_runtime_ids ())
-  in
-  let routed_phase_buffer_is_distinct =
-    not
-      (String.equal
-         (Keeper_config.default_runtime_id ())
-         (Keeper_config.default_runtime_id ()))
-  in
-  (* Required-tool turns may still use the phase-recovery route when the catalog
-     declares it as an explicit fallback profile. Do not take it from generic
-     rotation order; requiring an explicit hint avoids accidentally sending
-     required-tool turns into a control/recovery lane. *)
-  not
-    ((routed_phase_buffer_is_distinct
-      && String.equal normalized (Keeper_config.default_runtime_id ())))
-  && (allow_phase_recovery
-      || is_declared_required_tool_runtime
-      || not
-           (String.equal normalized (Keeper_config.default_runtime_id ())))
-  && not (String.equal normalized "")
-
 let runtime_catalog_names () =
   match Runtime.get_runtime_ids () with
   | [] -> [ Keeper_config.default_runtime_id () ]
   | names -> names
 ;;
 
-let tool_required_rotation_runtime_ids () =
-  let default_runtime_id =
-    try Runtime.get_default_runtime_id () with
-    | Failure _ -> Keeper_config.default_runtime_id ()
-  in
-  match Runtime.get_required_tool_runtime_ids () with
-  | [] -> [ default_runtime_id ]
-  | ids -> ids
-
 let default_degraded_rotation_candidates
     ~catalog_names
     ~(base_runtime : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
+  ignore tool_requirement;
   let normalized_base = normalized_runtime_id ~catalog_names base_runtime in
   let default_runtime =
     normalized_runtime_id ~catalog_names (Keeper_config.default_runtime_id ())
-  in
-  let tool_required_runtimes =
-    tool_required_rotation_runtime_ids ()
-    |> List.map (normalized_runtime_id ~catalog_names)
   in
   let phase_recovery_runtime =
     normalized_runtime_id ~catalog_names
       (Runtime.get_default_runtime_id ())
   in
-  match tool_requirement with
-  | Required -> normalized_base :: tool_required_runtimes
-  | Optional | No_tools ->
-    [ normalized_base; default_runtime; phase_recovery_runtime ]
+  [ normalized_base; default_runtime; phase_recovery_runtime ]
 
 let normalize_rotation_candidates ~catalog_names candidates =
   candidates
@@ -561,24 +518,12 @@ let degraded_rotation_candidates
   let candidates =
     match fallback_hint_candidate with
     | None -> raw_candidates
-    (* Required-tool retries must try the configured tool-required lane before
-       declarative fallback hints; otherwise a broad recovery chain can bypass
-       the runtime-MCP-capable lane and immediately land on a passive provider. *)
-    | Some hint when tool_requirement = Required ->
-        dedupe_keep_order (raw_candidates @ [ hint ])
     | Some hint -> dedupe_keep_order (hint :: raw_candidates)
   in
+  ignore tool_requirement;
   candidates
   |> List.filter (fun candidate ->
-         (not (String.equal candidate normalized_effective))
-         && (tool_requirement <> Required
-             || required_tool_rotation_candidate
-                  ~allow_phase_recovery:
-                    (match fallback_hint_candidate with
-                     | Some hint -> String.equal hint candidate
-                     | None -> false)
-                  ~catalog_names
-                  candidate))
+         not (String.equal candidate normalized_effective))
 
 let degraded_rotation_after_recoverable_error
     ?fallback_hint
@@ -756,21 +701,3 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
   | None -> false
-
-(** [true] when the rotation-cap fast-fail should fire for a
-    [required_tool_contract_violation] error.  The cap prevents runaway
-    rotation chains where the LLM calls no keeper tools: we allow at most one
-    rotation (so [attempted_runtimes] must have at least 2 entries before the
-    cap fires), unless a fresh fallback runtime is still available
-    ([fallback_not_yet_tried = true]).
-
-    The list is seeded with the initial runtime name before the first turn
-    attempt, so:
-    - length = 1  ⇒ no rotation has been attempted yet → do not cap
-    - length ≥ 2  ⇒ at least one rotation was tried → cap (unless fallback available) *)
-let should_cap_rotation_for_contract_violation
-    ~(attempted_runtimes : string list)
-    ~(fallback_not_yet_tried : bool)
-    (_err : Agent_sdk.Error.sdk_error) : bool =
-  List.length attempted_runtimes >= 2
-  && not fallback_not_yet_tried

@@ -44,8 +44,7 @@ type heartbeat_event_intake = {
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Prometheus, logs the consumption, and returns a list of
     pending board events derived from [stim] (empty for non-board
-    classes). [Alive_but_stuck_recovery] and [Stay_silent_recovery]
-    also write a reaction-ledger entry. *)
+    classes). [Stay_silent_recovery] also writes a reaction-ledger entry. *)
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta

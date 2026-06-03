@@ -97,7 +97,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "keeper_runtime.toml") repo_runtime_toml;
+  write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "tool_policy.toml")
     "[groups.base]\ntools = [\"keeper_time_now\"]\n";
   write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
@@ -437,7 +437,7 @@ let write_invalid_local_only_runtime base_path =
   let config_root = Filename.concat base_path ".masc/config" in
   mkdir_p config_root;
   write_file
-    (Filename.concat config_root "keeper_runtime.toml")
+    (Filename.concat config_root "runtime.toml")
     {|[providers.ollama]
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
@@ -474,7 +474,7 @@ let write_partially_invalid_runtime ~base_path ~valid_model =
   mkdir_p config_root;
   let model_id, endpoint = split_custom_model_spec valid_model in
   write_file
-    (Filename.concat config_root "keeper_runtime.toml")
+    (Filename.concat config_root "runtime.toml")
     (Printf.sprintf
        {|[providers.custom]
 protocol = "provider_d-http"
@@ -509,7 +509,7 @@ let write_partially_invalid_default_runtime ~base_path ~valid_model =
   mkdir_p config_root;
   let model_id, endpoint = split_custom_model_spec valid_model in
   write_file
-    (Filename.concat config_root "keeper_runtime.toml")
+    (Filename.concat config_root "runtime.toml")
     (Printf.sprintf
        {|[providers.custom]
 protocol = "provider_d-http"
@@ -605,7 +605,7 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       let config_root = Filename.concat base_path ".masc/config" in
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check string) "runtime copied" repo_runtime_toml
-        (read_file (Filename.concat config_root "keeper_runtime.toml"));
+        (read_file (Filename.concat config_root "runtime.toml"));
       Alcotest.(check bool) "tool policy copied" true
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check bool) "prompt copied" true
@@ -624,13 +624,13 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_only () =
       let base_path = Filename.concat dir "base" in
       let config_root = Filename.concat base_path ".masc/config" in
       mkdir_p config_root;
-      write_file (Filename.concat config_root "keeper_runtime.toml") local_runtime_toml;
+      write_file (Filename.concat config_root "runtime.toml") local_runtime_toml;
       mkdir_p (Filename.concat config_root "personas");
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path;
       Alcotest.(check string) "existing runtime preserved" local_runtime_toml
-        (read_file (Filename.concat config_root "keeper_runtime.toml"));
+        (read_file (Filename.concat config_root "runtime.toml"));
       Alcotest.(check bool) "keepers dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "keepers"));
       Alcotest.(check bool) "prompts dir scaffolded" true
@@ -669,7 +669,7 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "prompts");
       mkdir_p (Filename.concat config_root "keepers");
       mkdir_p (Filename.concat config_root "personas");
-      write_file (Filename.concat config_root "keeper_runtime.toml") "";
+      write_file (Filename.concat config_root "runtime.toml") "";
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
@@ -709,10 +709,10 @@ let test_bootstrap_base_path_config_root_collapses_masc_input () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root
         ~base_path:(Filename.concat base_path Common.masc_dirname);
       Alcotest.(check bool) "config root created under parent .masc" true
-        (Sys.file_exists (Filename.concat base_path ".masc/config/keeper_runtime.toml"));
+        (Sys.file_exists (Filename.concat base_path ".masc/config/runtime.toml"));
       Alcotest.(check bool) "nested .masc/.masc config not created" false
         (Sys.file_exists
-           (Filename.concat base_path ".masc/.masc/config/keeper_runtime.toml")))
+           (Filename.concat base_path ".masc/.masc/config/runtime.toml")))
 let test_config_bootstrap_mode_parses_env () =
   let check expected value =
     with_env "MASC_CONFIG_BOOTSTRAP" value @@ fun () ->
@@ -749,7 +749,7 @@ let test_bootstrap_empty_mode_creates_scaffold_without_files () =
       Alcotest.(check bool) "prompts dir scaffolded" true
         (Sys.is_directory (Filename.concat config_root "prompts"));
       Alcotest.(check bool) "runtime not copied" false
-        (Sys.file_exists (Filename.concat config_root "keeper_runtime.toml"));
+        (Sys.file_exists (Filename.concat config_root "runtime.toml"));
       Alcotest.(check bool) "tool policy not copied" false
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check bool) "keeper not copied" false
@@ -1881,7 +1881,7 @@ let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
       let expected = Filename.concat dir ".masc/config/prompts" in
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
-      write_file (Filename.concat config_root "keeper_runtime.toml") "";
+      write_file (Filename.concat config_root "runtime.toml") "";
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
@@ -1904,7 +1904,7 @@ let test_prompt_markdown_dir_does_not_use_repo_seed () =
       let expected = Filename.concat dir ".masc/config/prompts" in
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
-      write_file (Filename.concat config_root "keeper_runtime.toml") "";
+      write_file (Filename.concat config_root "runtime.toml") "";
       write_file (Filename.concat config_root "tool_policy.toml")
         "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->

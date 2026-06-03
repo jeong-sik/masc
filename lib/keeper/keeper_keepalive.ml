@@ -485,19 +485,9 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     let synced = m in
     (* Reset stale timestamp from previous server lifecycle.
 
-       Use [Time_compat.now ()] (not [0.0]). The original intent was to
-       prevent the stale watchdog from immediately terminating the fiber
-       on server restart by clearing an old [last_turn_ts]. Setting it
-       to [0.0] worked for that — but [keeper_stale_watchdog.ml:141]
-       gates the stall check on [last_turn > 0.0], so [0.0] permanently
-       blinds the watchdog: a keeper that never runs a real turn (auth
-       failure, OAS budget exhaustion, no work signal) stays in a
-       zombie state the watchdog cannot detect.
-
-       Resetting to [now_ts] preserves the original goal — grace_period
-       (180s default) covers the bootstrap window so the watchdog still
-       doesn't fire prematurely — while restoring detection for a
-       truly idle keeper after grace elapses. Real turns continue to
+       Use [Time_compat.now ()] (not [0.0]). This preserves a sane
+       bootstrap timestamp for runtime health surfaces without encoding
+       a stale value from a previous server lifecycle. Real turns continue to
        overwrite this with the actual turn time as before.
 
        Production evidence (2026-04-27): 7 of 11 keepers had
@@ -700,11 +690,6 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
        behavioral_stats no longer consumed by build_prompt. *)
       dispatch_fiber_started ~base_path:ctx.config.base_path live_meta.name;
       publish_keeper_started ~live_meta;
-      Keeper_stale_watchdog.fork_stale_watchdog
-        ctx
-        live_meta
-        ~startup_warmup_sec:proactive_warmup_sec
-        reg;
       Eio.Fiber.fork ~sw:ctx.sw (fun () ->
         let record_crash failure_reason =
           record_keeper_crashed

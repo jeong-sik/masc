@@ -145,7 +145,6 @@ const EXECUTION_ATTENTION_SET: ReadonlySet<string> = new Set([
   'violated',
   'tool_surface_mismatch',
   'no_tool_capable_provider',
-  'missing_required_tool_use',
   'claim_only_after_owned_task',
   'needs_execution_progress',
   'passive_only',

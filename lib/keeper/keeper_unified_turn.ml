@@ -813,15 +813,6 @@ let run_keeper_cycle
                         meta.name
                         (Some failure_reason)
                     | None -> ());
-                  (match
-                     Keeper_passive_loop_detector.progress_class_of_disposition
-                       terminal_reason.disposition
-                   with
-                   | Some progress_class ->
-                     Keeper_passive_loop_detector.record_turn
-                       ~keeper_name:updated_meta.name
-                       ~progress_class
-                   | None -> ());
                   Keeper_unified_metrics.append_decision_record
                     ~config
                     ~meta:updated_meta

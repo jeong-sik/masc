@@ -290,21 +290,15 @@ let composite_snapshot_is_idle snapshot =
   && Option.value ~default:"clean" breaker_state = "clean"
 ;;
 
-let composite_execution_tool_required execution =
+let composite_execution_tool_route_blocked execution =
   string_opt_is_any
     (json_string "tool_contract_result" execution)
-    [ "violated"
-    ; "unknown"
-    ; "needs_execution_progress"
-    ; "missing_required_tool_use"
-    ; "passive_only"
-    ; "claim_only_after_owned_task"
-    ; "tool_surface_mismatch"
+    [ "tool_surface_mismatch"
     ; "no_tool_capable_provider"
     ]
   || string_opt_is_any
        (json_string "operator_disposition_reason" execution)
-       [ "tool_required_unsatisfied"; "tool_route_recoverable_failure" ]
+       [ "tool_route_recoverable_failure" ]
 ;;
 
 let composite_execution_config_blocked execution =
@@ -337,7 +331,7 @@ let composite_execution_config_drift execution =
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
 let composite_execution_blocked execution =
-  composite_execution_tool_required execution
+  composite_execution_tool_route_blocked execution
   || composite_execution_claim_no_eligible execution
   || string_opt_is_any (json_string "operator_disposition" execution) [ "pause_human" ]
   || (match lower_string_opt (json_string "terminal_reason_code" execution) with

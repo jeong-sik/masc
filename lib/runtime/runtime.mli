@@ -28,13 +28,6 @@ val load_list :
 
 val runtime_ids : t list -> string list
 
-val runtime_supports_required_tools : t -> bool
-(** [true] when a runtime can carry required keeper tool-use turns through
-    runtime MCP tooling and model-level tool-choice support. *)
-
-val required_tool_runtime_ids : t list -> string list
-(** Tool-capable runtime ids, preserving the TOML binding order. *)
-
 (** {1 Lazy default runtime singleton}
 
     Initialized once at startup via {!init_default}.  All consumer
@@ -45,7 +38,6 @@ val init_default : config_path:string -> (unit, string) result
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list
-val get_required_tool_runtime_ids : unit -> string list
 
 val runtime_id_for_keeper : string -> string option
 (** [runtime_id_for_keeper keeper_name] is the runtime id assigned to

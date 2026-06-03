@@ -164,8 +164,8 @@ let make_zero_zombie_consumer ~sw ~workspace_config
          still raises and is wrapped here, because lifting Result into
          the public signature would force every test-suite caller
          (test_workspace.ml:909-964) to be rewritten.  Follow-up RFC =
-         Liveness Recovery Supervisor that consumes typed failures here
-         and escalates to operators (see project_keeper-reaction-chain-break). *)
+         typed recovery consumer can decide whether to escalate to operators
+         (see project_keeper-reaction-chain-break). *)
       let module Stale_claim_outcome = struct
         type t =
           | Released of (string * string) list

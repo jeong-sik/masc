@@ -742,7 +742,7 @@ let test_claim_next_ignores_routing_handoff_text () =
                cycle_count = 1
              ; do_not_reclaim_reason =
                  Some
-                   "Auto-claimed via auto_goal_fallback; sandbox-isolated keeper has no \
+                   "Auto-claimed by sandbox-isolated keeper with no \
                     access to masc source. Releasing for keeper with repo access."
              }
            else t)

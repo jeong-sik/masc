@@ -236,7 +236,7 @@ describe('buildFleetRows runtime labels', () => {
           code: 'no_tool_capable_provider',
           source: 'runtime_blocker_class',
           label: 'no tool capable provider',
-          summary: 'no provider can satisfy required tools',
+          summary: 'no provider can satisfy tool surface',
           severity: 'warn',
           next_action: 'inspect_provider_tool_contract',
         },
@@ -246,7 +246,7 @@ describe('buildFleetRows runtime labels', () => {
     expect(row?.stop_cause).toMatchObject({
       code: 'no_tool_capable_provider',
       source: 'runtime_blocker_class',
-      summary: 'no provider can satisfy required tools',
+      summary: 'no provider can satisfy tool surface',
     })
   })
 })

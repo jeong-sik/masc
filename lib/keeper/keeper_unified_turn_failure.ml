@@ -65,9 +65,9 @@ let record_failure_and_maybe_escalate
             threshold)
         else
           Log.Keeper.warn
-            "%s: auto-paused after %d required-tool contract failures \
+            "%s: auto-paused after %d tool-route contract failures \
              (pause_threshold=%d, crash_threshold=%d, released_task=%s); operator \
-             must inspect provider tool contract before resuming"
+             must inspect provider tool route before resuming"
             meta.name
             count
             Keeper_behavioral_regime.turn_fail_streak_threshold

@@ -28,7 +28,7 @@ TURN_ID=""
 MODE="provider"
 SERVER_URL=""
 LIMIT=200
-REQUIRE_TOOL_CALL=0
+EXPECT_TOOL_CALL_LOG=0
 SELF_TEST=0
 
 usage() {
@@ -57,7 +57,7 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="$2"; shift 2 ;;
     --server-url) SERVER_URL="${2%/}"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
-    --require-tool-call) REQUIRE_TOOL_CALL=1; shift ;;
+    --expect-tool-call-log) EXPECT_TOOL_CALL_LOG=1; shift ;;
     --self-test) SELF_TEST=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown flag: $1" >&2; usage; exit 64 ;;
@@ -108,7 +108,7 @@ if [[ "$SELF_TEST" = "1" ]]; then
   jq -cn --arg k "$keeper" --arg t "$trace" --arg p "$tool_log_path" --argjson turn "$turn" \
     '{schema_version:1,ts:"2026-05-12T00:00:09Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"turn_finished",runtime_id:null,status:"success",decision:{},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:$p}}' >>"$manifest_path"
   "$0" --base-path "$tmp" --keeper "$keeper" --trace-id "$trace" \
-    --turn-id "$turn" --mode provider --require-tool-call
+    --turn-id "$turn" --mode provider --expect-tool-call-log
   fail_keeper="runtime-truth-gate-timeout"
   fail_trace="trace-self-test-timeout"
   fail_turn="8"
@@ -288,8 +288,8 @@ tool_log_path="$(printf '%s\n' "$turn_rows" | jq -r '
   | .links.tool_call_log_path // empty
 ' | tail -n1)"
 
-if [[ "$REQUIRE_TOOL_CALL" = "1" || "$tools_used_count" -gt 0 ]]; then
-  [[ -n "$tool_log_path" ]] || fail "tool use was present/required but turn_finished lacks tool_call_log_path"
+if [[ "$EXPECT_TOOL_CALL_LOG" = "1" || "$tools_used_count" -gt 0 ]]; then
+  [[ -n "$tool_log_path" ]] || fail "tool use was present/expected but turn_finished lacks tool_call_log_path"
   [[ -f "$tool_log_path" ]] || fail "linked tool-call log path missing: $tool_log_path"
 fi
 

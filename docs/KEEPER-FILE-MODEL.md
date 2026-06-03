@@ -139,7 +139,7 @@ persona_name = "analyst"
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none`; `local` defaults to `inherit`. Hard mode requires `none`. |
 | `runtime_id` | Optional | Deployment-specific runtime override | Only when not using the default runtime. |
 | `tool_access` | Optional | Deployment-specific tool allowlist override | Only when intentionally overriding persona default. |
-| `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` claims only tasks linked to these goals. If the scoped pool has no task claimable with the keeper's current capabilities, the claim stops; only auto-repaired keeper-purpose goals may fall back to all claimable tasks. |
+| `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` prefers tasks linked to these goals and reports scope health in audit/status surfaces. |
 
 ### Additional supported overlay fields
 

@@ -623,24 +623,3 @@ let sweep_and_recover (ctx : _ context) =
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx
 ;;
-
-type credential_recovery_outcome =
-  Keeper_supervisor_liveness_recovery.credential_recovery_outcome =
-  | Credential_recovery_not_needed
-  | Credential_recovery_reissued of string
-  | Credential_recovery_failed of string
-
-let credential_recovery_before_restart_for_test =
-  Keeper_supervisor_liveness_recovery.credential_recovery_before_restart_for_test
-;;
-
-let liveness_recovery_scan ctx =
-  Keeper_supervisor_liveness_recovery.scan ~supervise_keepalive ~publish_lifecycle ctx
-;;
-
-let request_alive_but_stuck_recovery_for_test =
-  Keeper_supervisor_alive_but_stuck.request_recovery_for_test
-;;
-
-let alive_but_stuck_reset_for_test = Keeper_supervisor_alive_but_stuck.reset_for_test
-let alive_but_stuck_scan = Keeper_supervisor_alive_but_stuck.scan

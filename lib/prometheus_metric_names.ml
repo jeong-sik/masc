@@ -24,22 +24,6 @@
     text-only turns rejected by the keeper agent loop).
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 
-(** #12838: keepers detected as alive-but-stuck — non-Dead, non-paused,
-    keepalive_running, but [proactive_rt.last_ts] has been frozen while
-    autonomous turns kept advancing.  Per-keeper dedup window
-    ([alive_but_stuck_dedup_ttl_sec]) bounds emission rate so a single
-    stuck keeper does not flood the counter on every 30s sweep.
-    Labels: keeper. *)
-
-(** #12838 follow-up: supervisor recovery requests emitted after an
-    alive-but-stuck detection.  Each increment means the supervisor set
-    [failure_reason] + [fiber_stop]/[fiber_wakeup] so the existing sweep
-    path can force a crash/restart instead of leaving the keeper at
-    detection-only.  Labels: keeper. *)
-
-(** #12838 follow-up: bounded recovery wakeups queued by
-    [alive_but_stuck_scan].  Labels: keeper, outcome. *)
-
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
    [keeper_unified_turn.ml] used to be log-only, masking state/metric
    divergence. Surface as a counter so dashboards can alert on silent
@@ -291,16 +275,6 @@ let metric_timeout_policy_overshoot = "masc_timeout_policy_overshoot_total"
 (* Keeper keepalive (keeper_keepalive.ml). *)
 let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"
 
-(* #10091: [require_tool_use] contract violations labelled by
-   [has_current_task] (true = #10091's active-task path that
-   [#10031] intentionally left strict, false = the no-task path
-   that [#10031] relaxed to [Auto]) and by fine-grained
-   [contract_status] ([passive_only], [needs_execution_progress],
-   [claim_only_after_owned_task], [tool_surface_mismatch],
-   [missing_required_tool_use]).  The fleet histogram of
-   (keeper, contract_status) pairs tells the operator which
-   keeper tool surfaces need reshaping for the current task mix
-   without masking the strict gate. *)
 (* #10474: no_tool_capable_provider and proactive cycle outcome counters.
    [Keeper_metrics.(to_string NoToolProvider)] fires every time a keeper's
    runtime has zero tool-capable providers, labelled by runtime so

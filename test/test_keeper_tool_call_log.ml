@@ -235,8 +235,8 @@ let test_turn_context_fields_stored () =
     Keeper_tool_call_log.set_turn_context
       ~keeper_name:"k"
       ~agent_name:"keeper-k-agent"
-      ~lane:"tool_required"
-      ~tool_choice:"required"
+      ~lane:"tool_optional"
+      ~tool_choice:"auto"
       ~thinking_enabled:false
       ~thinking_budget:1024
       ~prompt_fingerprint:"prompt-fp-k"
@@ -265,10 +265,10 @@ let test_turn_context_fields_stored () =
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry = List.hd entries in
     Alcotest.(check (option string)) "lane field"
-      (Some "tool_required")
+      (Some "tool_optional")
       (Safe_ops.json_string_opt "lane" entry);
     Alcotest.(check (option string)) "tool_choice field"
-      (Some "required")
+      (Some "auto")
       (Safe_ops.json_string_opt "tool_choice" entry);
     Alcotest.(check bool) "thinking_enabled present" true
       (match Yojson.Safe.Util.member "thinking_enabled" entry with
@@ -648,8 +648,8 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~keeper_name:"k1" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0
-      ~model:"provider_k-5.1" ~lane:"tool_required"
-      ~tool_choice:"required"
+      ~model:"provider_k-5.1" ~lane:"tool_optional"
+      ~tool_choice:"auto"
       ~thinking_enabled:false ~thinking_budget:1024
       ~runtime_profile:"primary" ();
     Keeper_tool_call_log.log_call
@@ -707,7 +707,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       (Safe_ops.json_int ~default:0 "calls" retry_bucket);
     Alcotest.(check int) "enabled thinking calls" 1
       (Safe_ops.json_int ~default:0 "calls" enabled_bucket);
-    Alcotest.(check int) "auto tool_choice calls" 1
+    Alcotest.(check int) "auto tool_choice calls" 2
       (Safe_ops.json_int ~default:0 "calls" auto_bucket))
 
 let test_dashboard_hourly_trend_numeric_ts () =

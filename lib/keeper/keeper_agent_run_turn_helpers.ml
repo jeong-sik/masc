@@ -74,7 +74,6 @@ let registry_progress_on_event ~record_turn_progress downstream event =
 
 
 let tool_contract_result_for_observed_tools
-    ~(missing_visible_required : string list)
     ~(had_owned_active_task_at_turn_start : bool)
     ~(actual_keeper_tool_names : string list) :
     Keeper_execution_receipt.tool_contract_result =
@@ -82,9 +81,7 @@ let tool_contract_result_for_observed_tools
   let classes = List.map class_of actual_keeper_tool_names in
   let has_class wanted = List.exists (( = ) wanted) classes in
   let all_class wanted = classes <> [] && List.for_all (( = ) wanted) classes in
-  if missing_visible_required <> [] then
-    Keeper_execution_receipt.Contract_tool_surface_mismatch
-  else if actual_keeper_tool_names = [] then
+  if actual_keeper_tool_names = [] then
     Keeper_execution_receipt.Contract_satisfied_completion
   else if
     all_class Keeper_tool_progress.Claim_context

@@ -55,22 +55,6 @@
       "title": "credential_archived_all_keepers"
     },
     {
-      "count": 6,
-      "finding_id": "NF-3",
-      "patterns": [
-        "alive_but_stuck"
-      ],
-      "samples": [
-        {
-          "line": "[WARN] [Keeper] nick0cave: alive-but-stuck detected (elapsed=924857s, threshold=1800s)",
-          "line_no": 31
-        }
-      ],
-      "severity": "critical",
-      "status": "EVIDENCE_PRESENT",
-      "title": "alive_but_stuck_no_recovery"
-    },
-    {
       "count": 2,
       "finding_id": "NF-4",
       "patterns": [

@@ -12,11 +12,6 @@ type t =
   | TurnCompleted
   | IdleSeconds
   | ContractViolations
-  | AliveButStuck
-  | AliveButStuckSeconds
-  | AliveButStuckThresholdSeconds
-  | AliveButStuckRecoveryRequests
-  | AliveButStuckRecovery
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
@@ -99,7 +94,6 @@ type t =
   | RecordingErrorDedup
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
-  | RequireToolUseViolations
   | ToolCallTotal
   | ProfileConfigConflicts
   | OasTimeoutClassifications
@@ -176,7 +170,6 @@ type t =
   | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
-  | StaleWatchdogTickFailures
   | DeadTotal
   | AutoResumedTotal
   | AutoResumeBlockedTotal
@@ -187,12 +180,6 @@ type t =
   | NearExhaustionTotal
   | RestartAttempts
   | RestartOutcomes
-  | LivenessRecoveryAttempts
-  | LivenessRecoveryOutcomes
-  | PassiveLoopDetectedTotal
-  | PassiveLoopStreak
-  | RequiredToolLoopDetectedTotal
-  | ZombieLoopDetectedTotal
   | ConsecutiveIdle
   | LastProductiveTs
   | ProviderTimeoutStrike

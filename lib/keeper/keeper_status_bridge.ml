@@ -370,12 +370,10 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
         true, Some "runtime_attempts_exhausted", Some "inspect_runtime_attempts"
       | Some blocker when is_no_tool_capable_blocker_class blocker.blocker_class ->
         true, Some "provider_tool_capability_missing", Some "inspect_provider_tool_lane"
-      | Some blocker when is_completion_contract_blocker_class blocker.blocker_class ->
-        true, Some "completion_contract_violation", Some "inspect_completion_contract"
       | Some blocker when is_provider_runtime_blocker_class blocker.blocker_class ->
         true, Some "provider_runtime_error", Some "inspect_provider_runtime_cause"
-      | Some blocker when is_stale_watchdog_blocker_class blocker.blocker_class ->
-        true, Some "watchdog_stale_turn", Some "inspect_watchdog_root_cause"
+      | Some blocker when is_stale_turn_timeout_blocker_class blocker.blocker_class ->
+        true, Some "stale_turn_timeout", Some "inspect_stale_turn_root_cause"
       | Some blocker when is_fiber_unresolved_blocker_class blocker.blocker_class ->
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"

@@ -230,8 +230,8 @@ export function displayState(value: string): string {
 /** Korean labels for `last_failure_reason` cohort bases. Backend emits
  *  the value via `Keeper_registry_types.failure_reason_to_string`
  *  (lib/keeper/keeper_registry_types.ml:104-135) in the parametric
- *  format `<base>(<detail>)` (e.g. `heartbeat_consecutive_failures(3)`,
- *  `tool_required_unsatisfied(code:detail)`). The 11 closed-sum bases
+ *  format `<base>(<detail>)` (e.g. `heartbeat_consecutive_failures(3)`).
+ *  The closed-sum bases
  *  match the `failure_reason_to_string` base prefixes (line 104-135).
  *  Note: `failure_reason_cohort_key` (line 146-159) uses shortened
  *  keys (`heartbeat_failures`, `turn_failures`) for metric grouping
@@ -247,7 +247,6 @@ const FAILURE_REASON_BASE_LABELS = {
   stale_termination_storm: 'Stale 종료 폭주',
   stale_fleet_batch: 'Fleet stale 배치',
   provider_runtime_error: '런타임 호출 오류',
-  tool_required_unsatisfied: '필수 도구 미충족',
   ambiguous_partial_commit: '부분 commit 모호',
   fiber_unresolved: 'Fiber 미해결',
   exception: '런타임 예외',
@@ -311,7 +310,7 @@ export function executionOutcomeLabel(value: string | null | undefined): string 
  *  - `tool_surface_class` (3 values, line 103-107, RFC-0065 §3.2.2):
  *    none / public_only / mixed.
  *  - `turn_lane` (6 values, line 57-63):
- *    pre_dispatch / text_only / tool_required / tool_optional /
+ *    pre_dispatch / text_only / tool_optional /
  *    tool_disabled / retry.
  *  Tooltips in `fsm-hub.ts:159-160` and stale-cause parts list in
  *  `fleet-fsm-matrix.ts:289-295` currently interpolate these as raw
@@ -332,7 +331,6 @@ const TOOL_SURFACE_CLASS_LABELS: Record<string, string> = {
 const TURN_LANE_LABELS: Record<string, string> = {
   pre_dispatch: '디스패치 전',
   text_only: '텍스트 전용',
-  tool_required: '도구 필수',
   tool_optional: '도구 선택',
   tool_disabled: '도구 비활성',
   retry: '재시도',
@@ -501,7 +499,6 @@ const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
   'runtime_exhausted',
   'heartbeat_consecutive_failures',
   'turn_consecutive_failures',
-  'tool_required_unsatisfied',
   'provider_runtime_error',
   'fiber_unresolved',
   'stale_turn_timeout',
@@ -513,7 +510,7 @@ export function isTurnTerminalFailureCode(code: string | null | undefined): bool
 }
 
 
-/** Korean labels for `execution.tool_contract_result`. Backend emits 11
+/** Korean labels for `execution.tool_contract_result`.
  *  closed-sum values via `Keeper_execution_receipt.tool_contract_result_to_string`
  *  (lib/keeper/keeper_execution_receipt.ml:181-193). The labels are
  *  intentionally NOT folded into `STATE_DISPLAY_NAMES` because that map
@@ -529,7 +526,6 @@ const TOOL_CONTRACT_LABELS: Record<string, string> = {
   violated: '도구 계약 위반',
   tool_surface_mismatch: '도구 표면 불일치',
   no_tool_capable_provider: '도구 가능 런타임 없음',
-  missing_required_tool_use: '필수 도구 호출 누락',
   claim_only_after_owned_task: 'claim 전용 (소유 task 후)',
   needs_execution_progress: '실행 진척 필요',
   passive_only: 'passive 만 수행',
@@ -581,7 +577,6 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   runtime_fallback: '런타임 폴백',
   provider_runtime_error: '런타임 호출 오류',
   internal_error: '내부 오류',
-  tool_required_unsatisfied: '필수 도구 미충족',
   tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   turn_livelock_blocked: '턴 livelock 차단',
   cancelled: '취소됨',

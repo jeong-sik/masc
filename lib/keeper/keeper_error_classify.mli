@@ -34,8 +34,7 @@ val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 (** [true] when the turn runner should record the immediate
     ["keeper cycle FAILED"] line as WARN instead of ERROR because the
     heartbeat policy layer will handle the failure as a provider/OAS budget
-    strike with cooldown or work-level pause, or as a required-tool-use
-    contract violation (model behavior, not a fault). *)
+    strike with cooldown or work-level pause. *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
 
 (** Reclassify any post-commit turn error as a persistent integrity error when
@@ -71,17 +70,6 @@ val extract_input_required
 (** [true] when an error represents terminal runtime exhaustion or a
     final accept-rejected result from the MASC OAS boundary. *)
 val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
-
-(** [true] when the rotation-cap fast-fail should fire: the error is a
-    [required_tool_contract_violation], at least one runtime rotation has
-    already been attempted ([List.length attempted_runtimes >= 2]; the list is
-    seeded with the initial runtime name so length=1 means no rotations yet),
-    and no untried fallback runtime remains. *)
-val should_cap_rotation_for_contract_violation :
-  attempted_runtimes:string list ->
-  fallback_not_yet_tried:bool ->
-  Agent_sdk.Error.sdk_error ->
-  bool
 
 (** Classification of why a degraded retry is being attempted. Closed
     set; producer-side is [keeper_error_classify]. Wire form is the
@@ -138,8 +126,7 @@ val recoverable_runtime_failure_reason :
   Agent_sdk.Error.sdk_error -> degraded_retry_reason option
 
 (** Returns the one-shot degraded retry lane for recoverable whole-runtime
-    failures. Required-tool turns stay terminal, and already-degraded lanes
-    do not broaden further. *)
+    failures. Already-degraded lanes do not broaden further. *)
 val degraded_retry_after_recoverable_error :
   effective_runtime:string ->
   tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
@@ -148,9 +135,7 @@ val degraded_retry_after_recoverable_error :
 
 (** Returns the next untried runtime in the same-turn recovery group for a
     whole-runtime failure. Uses the default degraded rotation candidate set
-    (base/tool_required for required-tool turns, base/default/phase-recovery
-    for optional/text turns). Required-tool turns keep the tool requirement
-    and leave concrete provider filtering to the runtime resolver.
+    (base/default/phase-recovery).
 
     [fallback_hint], when provided, is prepended to the candidate list so
     that single-provider profiles can declare an immediate escalation

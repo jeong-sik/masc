@@ -19,29 +19,25 @@ let should_log_unexpected_tool_partial_once ~keeper_name ~unexpected_tool_names 
         true))
 
 type tool_requirement =
-  | Required
   | Optional
   | No_tools
 
 let tool_requirement_to_string = function
-  | Required -> "required"
   | Optional -> "optional"
   | No_tools -> "none"
 
 let tool_requirement_of_string = function
-  | "required" -> Some Required
   | "optional" -> Some Optional
   | "none" -> Some No_tools
   | _ -> None
 
 let tool_requirement_to_yojson = function
-  | Required -> `String "required"
   | Optional -> `String "optional"
   | No_tools -> `String "none"
 
 (* Closed sum type for turn_lane.  Two producers emit values:
-   - keeper_run_tools.ml:963-973 emits the five per-turn lanes
-     (text_only, tool_required, tool_optional, tool_disabled, retry).
+   - keeper_run_tools.ml emits the per-turn lanes
+     (text_only, tool_optional, tool_disabled, retry).
    - keeper_turn_helpers.pre_dispatch_tool_surface emits the
      [Lane_pre_dispatch] placeholder before the per-turn lane logic
      runs.
@@ -51,7 +47,6 @@ let tool_requirement_to_yojson = function
 type turn_lane =
   | Lane_pre_dispatch
   | Lane_text_only
-  | Lane_tool_required
   | Lane_tool_optional
   | Lane_tool_disabled
   | Lane_retry
@@ -59,7 +54,6 @@ type turn_lane =
 let turn_lane_to_string = function
   | Lane_pre_dispatch -> "pre_dispatch"
   | Lane_text_only -> "text_only"
-  | Lane_tool_required -> "tool_required"
   | Lane_tool_optional -> "tool_optional"
   | Lane_tool_disabled -> "tool_disabled"
   | Lane_retry -> "retry"
@@ -67,7 +61,6 @@ let turn_lane_to_string = function
 let turn_lane_of_string = function
   | "pre_dispatch" -> Some Lane_pre_dispatch
   | "text_only" -> Some Lane_text_only
-  | "tool_required" -> Some Lane_tool_required
   | "tool_optional" -> Some Lane_tool_optional
   | "tool_disabled" -> Some Lane_tool_disabled
   | "retry" -> Some Lane_retry
@@ -188,7 +181,7 @@ let turn_affordance_to_string = function
 
 (* Affordance -> tools worth keeping visible for that affordance.
    This is an advisory surface-shaping hint only. It must not force
-   tool_choice, required-tool completion policy, or text rejection. *)
+   tool_choice, completion policy, or text rejection. *)
 let tools_for_affordance = function
   | Board_curation ->
     [ "keeper_board_curation_submit" ]

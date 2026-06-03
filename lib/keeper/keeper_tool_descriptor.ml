@@ -1178,7 +1178,7 @@ let internal_descriptors : t list =
   ; masc_keeper_descriptor "reset" "masc_keeper_reset"
       "Reset a keeper's runtime state (usage counters, last_model_used)." ~readonly:false
   ; masc_keeper_descriptor "persona_audit" "masc_keeper_persona_audit"
-      "Audit configured keepers vs personas (optional goal repair pass)." ~readonly:false
+      "Audit configured keepers vs personas." ~readonly:true
   ; masc_keeper_descriptor "status" "masc_keeper_status"
       "Detailed single-keeper status (defaults to self when name is empty)." ~readonly:true
   ; masc_keeper_descriptor "repair" "masc_keeper_repair"

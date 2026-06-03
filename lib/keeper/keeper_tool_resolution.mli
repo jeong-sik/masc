@@ -62,7 +62,7 @@ val runtime_decision : string -> runtime_decision_outcome
 
 (** Pure canonicalisation — no telemetry side-effect.
 
-    Used by set-logic call sites (required-tool canonicalisation, surface
+    Used by set-logic call sites (tool canonicalisation, surface
     composition, satisfaction checks) where every invocation should NOT
     count as an observation event. *)
 val canonical_tool_name : string -> string

@@ -48,7 +48,7 @@ type inputs = {
 
     Documented in [docs/TOML-RELOAD-MATRIX.md]. *)
 val tool_policy_toml_filename : string
-val keeper_runtime_toml_filename : string
+val runtime_toml_filename : string
 
 val inputs_from_env : unit -> inputs
 (** Snapshot current environment (cwd, executable, env vars). *)

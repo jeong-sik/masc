@@ -30,22 +30,6 @@ type claim_goal_scope = {
   fallback_reason : string option;
 }
 
-let goal_title_matches_keeper_purpose ~(meta : keeper_meta) goal =
-  String.equal goal.Goal_store.title
-    (Keeper_goal_repair.goal_title_of_purpose meta.goal)
-
-let active_goal_ids_are_auto_keeper_goals config ~(meta : keeper_meta) goal_ids =
-  goal_ids <> []
-  && List.for_all
-       (fun goal_id ->
-         match Goal_store.get_goal config ~goal_id with
-         | Some goal ->
-           (match goal.Goal_store.phase with
-           | Goal_phase.Paused -> false
-           | _ -> goal_title_matches_keeper_purpose ~meta goal)
-         | None -> false)
-       goal_ids
-
 let task_is_eligible_for_claim latest_verification_status task =
   Workspace_task_schedule.task_is_claim_pool_candidate task
   && not
@@ -62,9 +46,7 @@ let active_goal_ids_have_eligible_claim_task config goal_ids =
        task_is_linked_to_keeper_goals goal_ids task
        && task_is_eligible_for_claim latest_verification_status task)
 
-let resolve_claim_goal_scope
-    ?(allow_empty_goal_scope_fallback = false) ~(config : Workspace.config)
-    ~(meta : keeper_meta) () =
+let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) () =
   match meta.active_goal_ids with
   | [] ->
       {
@@ -77,9 +59,6 @@ let resolve_claim_goal_scope
       let has_scoped_tasks =
         active_goal_ids_have_eligible_claim_task config goal_ids
       in
-      let is_auto_goal =
-        active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
-      in
       (* Advisory mode: active_goal_ids is a preference, not a hard gate.
          Tasks outside the goal scope are claimable but the keeper receives
          a warning in its context so it prefers goal-linked tasks. *)
@@ -89,20 +68,6 @@ let resolve_claim_goal_scope
           mode = "active_goal_ids_advisory";
           effective_goal_ids = goal_ids;
           fallback_reason = None;
-        }
-      else if allow_empty_goal_scope_fallback || is_auto_goal then
-        {
-          task_filter = (fun (_task : Masc_domain.task) -> true);
-          mode =
-            (if is_auto_goal then "auto_goal_fallback_all_tasks"
-             else "empty_goal_scope_fallback_all_tasks");
-          effective_goal_ids = goal_ids;
-          fallback_reason =
-            Some
-              (if is_auto_goal then
-                 "auto keeper goal has no claimable linked tasks; preferring goal-linked but allowing all claimable tasks"
-               else
-                 "active goal scope has no claimable linked tasks; preferring goal-linked but allowing all claimable tasks");
         }
       else
         {
@@ -114,10 +79,7 @@ let resolve_claim_goal_scope
 
 let resolve_observation_claim_goal_scope ~(config : Workspace.config)
     ~(meta : keeper_meta) () =
-  let allow_empty_goal_scope_fallback =
-    active_goal_ids_are_auto_keeper_goals config ~meta meta.active_goal_ids
-  in
-  resolve_claim_goal_scope ~allow_empty_goal_scope_fallback ~config ~meta ()
+  resolve_claim_goal_scope ~config ~meta ()
 
 let task_is_blocked (task : Masc_domain.task) =
   (* Enumerate every [task_status] variant so the compiler flags any new

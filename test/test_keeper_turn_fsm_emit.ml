@@ -105,7 +105,7 @@ let test_transition_actions_cover_tla_next () =
     ~to_state:
       (F.Failed
          (F.Failure_no_tool_capable_provider
-            { runtime_id = "tools"; detail = "no provider supports required tools" }));
+            { runtime_id = "tools"; detail = "no provider supports requested tool surface" }));
   check_action
     F.ProviderError
     ~from_state:F.Runtime_routing
@@ -123,7 +123,7 @@ let test_transition_actions_cover_tla_next () =
     F.ContractViolation
     ~from_state:F.Streaming
     ~to_state:
-      (F.Failed (F.Failure_tool_contract_violation { reason_code = "require_tool_use" }));
+      (F.Failed (F.Failure_tool_contract_violation { reason_code = "tool_contract" }));
   check_action
     F.ReceiptLost
     ~from_state:F.Streaming

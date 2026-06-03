@@ -78,7 +78,6 @@ let keeper_fleet_runtime_resolution_base_fields
   let base_path = runtime_base_path_opt () in
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
   let phase_counts = phase_snapshot.counts in
-  let running_names = phase_snapshot.running_names in
   let keeper_fibers = phase_counts.running in
   let paused_keepers_json =
     match meta_scan with
@@ -94,13 +93,11 @@ let keeper_fleet_runtime_resolution_base_fields
       keeper_fleet_safety_health_json
         ~bootable_names:scan.bootable_names
         ~autoboot_scan:scan.autoboot_scan
-        ~running_keeper_names:running_names
         ~phase_counts
         ~paused_keepers_json
         ()
     | None ->
       keeper_fleet_safety_health_json
-        ~running_keeper_names:running_names
         ~phase_counts
         ~paused_keepers_json
         ()

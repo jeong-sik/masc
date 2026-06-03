@@ -1,27 +1,8 @@
 open Alcotest
 
-module KCC = Masc_mcp.Keeper_contract_classifier
 module KTC = Masc_mcp.Keeper_tool_completion_contract
 module KTO = Masc_mcp.Keeper_tool_observation
 module KTP = Masc_mcp.Keeper_tool_progress
-
-let unclaimed_task_context =
-  KCC.make_actionable_signal_context
-    ~tool_gate_required:false
-    ~actionable_signal:KCC.Has_unclaimed_tasks
-;;
-
-let board_activity_context =
-  KCC.make_actionable_signal_context
-    ~tool_gate_required:false
-    ~actionable_signal:KCC.Has_board_activity
-;;
-
-let tool_gate_context =
-  KCC.make_actionable_signal_context
-    ~tool_gate_required:true
-    ~actionable_signal:KCC.No_actionable_signal
-;;
 
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
@@ -137,133 +118,6 @@ let test_validate_completion_contract_presence_requires_keeper_surface_tool () =
       (contains_substring e "keeper-surface tools")
 ;;
 
-let test_actionable_tool_contract_flags_no_tools () =
-  match
-    KTP.actionable_tool_contract_violation_reason
-      ~claim_context_allowed:true
-      ~actionable_signal_context:unclaimed_task_context
-      ~tool_names:[]
-      ()
-  with
-  | Some reason ->
-    check
-      bool
-      "reason mentions no keeper tools"
-      true
-      (contains_substring reason "no keeper tools");
-    check
-      bool
-      "reason preserves signal kind"
-      true
-      (contains_substring reason "has_unclaimed_tasks")
-  | None -> fail "expected actionable no-tool violation"
-;;
-
-let test_actionable_tool_contract_preserves_turn_gate_context () =
-  match
-    KTP.actionable_tool_contract_violation_reason
-      ~claim_context_allowed:true
-      ~actionable_signal_context:tool_gate_context
-      ~tool_names:[]
-      ()
-  with
-  | Some reason ->
-    check
-      bool
-      "reason preserves turn affordance gate"
-      true
-      (contains_substring reason "turn_affordance_requires_tool")
-  | None -> fail "expected tool-gate no-tool violation"
-;;
-
-let test_actionable_tool_contract_flags_passive_only_tools () =
-  match
-    KTP.actionable_tool_contract_violation_reason
-      ~claim_context_allowed:true
-      ~actionable_signal_context:board_activity_context
-      ~tool_names:[ "keeper_board_get"; "masc_status" ]
-      ()
-  with
-  | Some reason ->
-    check
-      bool
-      "reason mentions passive tools"
-      true
-      (contains_substring reason "passive status/read tools");
-    check
-      bool
-      "reason preserves board signal kind"
-      true
-      (contains_substring reason "has_board_activity")
-  | None -> fail "expected actionable passive-only violation"
-;;
-
-let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () =
-  let () =
-    match
-      KTP.actionable_tool_contract_violation_reason
-        ~claim_context_allowed:false
-        ~actionable_signal_context:unclaimed_task_context
-        ~tool_names:[ "keeper_task_claim" ]
-        ()
-    with
-    | Some reason ->
-      check
-        bool
-        "reason mentions execution progress"
-        true
-        (contains_substring reason "without execution progress")
-    | None -> fail "expected actionable claim-context-only violation"
-  in
-  check
-    (option string)
-    "claim context is allowed before ownership"
-    None
-    (KTP.actionable_tool_contract_violation_reason
-       ~claim_context_allowed:true
-       ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_task_claim" ]
-       ())
-;;
-
-let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
-  let check_violation label tool_names =
-    match
-      KTP.actionable_tool_contract_violation_reason
-        ~claim_context_allowed:false
-        ~actionable_signal_context:unclaimed_task_context
-        ~tool_names
-        ()
-    with
-    | Some reason ->
-      check
-        bool
-        (label ^ " mentions owned active task")
-        true
-        (contains_substring reason "owned active task");
-      check
-        bool
-        (label ^ " mentions execution progress")
-        true
-        (contains_substring reason "without execution progress")
-    | None -> fail (label ^ ": expected owned-task silence violation")
-  in
-  check_violation "stay_silent alone" [ "keeper_stay_silent" ];
-  check_violation
-    "stay_silent plus passive"
-    [ "keeper_stay_silent"; "keeper_tasks_list"; "masc_status" ];
-  check_violation "claim plus passive" [ "keeper_task_claim"; "keeper_tasks_list" ];
-  check
-    (option string)
-    "task completion still satisfies owned task"
-    None
-    (KTP.actionable_tool_contract_violation_reason
-       ~claim_context_allowed:false
-       ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_task_done" ]
-       ())
-;;
-
 let () =
   run
     "keeper_unified_completion_contract"
@@ -300,26 +154,6 @@ let () =
             "completion contract presence requires keeper-surface tool"
             `Quick
             test_validate_completion_contract_presence_requires_keeper_surface_tool
-        ; test_case
-            "actionable signal rejects no tools"
-            `Quick
-            test_actionable_tool_contract_flags_no_tools
-        ; test_case
-            "actionable signal preserves turn-gate context"
-            `Quick
-            test_actionable_tool_contract_preserves_turn_gate_context
-        ; test_case
-            "actionable signal rejects passive-only tools"
-            `Quick
-            test_actionable_tool_contract_flags_passive_only_tools
-        ; test_case
-            "actionable signal rejects claim context after ownership"
-            `Quick
-            test_actionable_tool_contract_rejects_claim_context_when_already_claimed
-        ; test_case
-            "actionable signal rejects stay_silent after ownership"
-            `Quick
-            test_actionable_tool_contract_rejects_stay_silent_when_already_claimed
         ] )
     ]
 ;;

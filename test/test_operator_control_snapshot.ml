@@ -380,7 +380,8 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 last_blocker =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
-                       ~detail:"Completion contract [require_tool_use] violated: actionable keeper signal was present, but the model called no keeper tools"
+                       ~detail:
+                         "Completion contract [require_tool_use] violated: no ToolUse block"
                        Keeper_meta_contract.Completion_contract_violation);
               };
           }

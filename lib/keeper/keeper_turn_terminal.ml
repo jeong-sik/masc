@@ -65,7 +65,6 @@ let contains_ci text needle = String_util.contains_substring_ci text needle
 let contract_code_from_error_text raw_error =
   if
     contains_ci raw_error "no ToolUse block"
-    || contains_ci raw_error "called no keeper tools"
     || contains_ci raw_error "returned no keeper tool"
   then "required_tool_use_no_tool_call"
   else "required_tool_use_unsatisfied"

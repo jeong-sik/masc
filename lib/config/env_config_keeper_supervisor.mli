@@ -1,8 +1,6 @@
 (** Keeper supervisor runtime configuration. *)
 
 val domain_pool_enabled : bool
-val fleet_capacity_tick_enabled : bool
-val fleet_capacity_tick_interval_sec : float
 val max_restarts : int
 val backoff_base_s : float
 val backoff_max_s : float

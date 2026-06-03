@@ -92,7 +92,7 @@ flowchart TD
     C -- yes --> D[resolve runtime name from active runtime config]
     D --> E[resilience/API-key/local endpoint preflight]
     E --> F[build prompt callback]
-    F --> G[dynamic context: recovery snapshot, long-term memory, skills, worktree changes, telemetry, turn instructions, required tools]
+    F --> G[dynamic context: recovery snapshot, long-term memory, skills, worktree changes, telemetry, turn instructions, visible tool surface]
     G --> H[Keeper_agent_run.run_turn]
     H --> I[prepare_run_context: inference params, session dir, checkpoint, base prompt, pre-dispatch compaction]
     I --> J[build_turn_context: sanitize user, memory/temporal context, append user]

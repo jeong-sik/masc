@@ -82,7 +82,7 @@ Dashboard panel: same three sections rendered as Solid components on `/dashboard
 
 | Sub-issue | Outcome variant(s) | Closure condition |
 |-----------|-------------------|-------------------|
-| #13567 (policy / approval) | `Approval_required`, `Policy_denied` | All approval-required tools have at least one `Success` after a documented approval; all policy-denied receipts have a follow-up issue explaining why the policy is correct |
+| #13567 (policy / approval) | `Approval_required`, `Policy_denied` | All tools that require approval have at least one `Success` after a documented approval; all policy-denied receipts have a follow-up issue explaining why the policy is correct |
 | #13568 (sandbox / precondition) | `Precondition_failed`, `Sandbox_path_error` | Per-tool failure rate < 5% over 7-day window AND each remaining failure has a `Keeper_path_check_error` typed cause (no raw-string class) |
 | #13569 (zero-evidence) | `Zero_evidence_placeholder` | Every registered keeper-facing tool has produced at least one `Success` `proof_receipt` from at least one autonomous turn |
 

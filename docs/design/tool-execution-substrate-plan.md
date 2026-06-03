@@ -95,7 +95,7 @@ What to borrow:
 
 - Toolsets are useful for grouping capability exposure.
 - Terminal/process execution can be backend-selectable without changing the
-  model-facing tool contract.
+  model-facing tool descriptor surface.
 - MCP tools should be namespaced and treated as remote capabilities.
 
 What not to copy:

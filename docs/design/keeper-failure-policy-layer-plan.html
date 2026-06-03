@@ -428,7 +428,7 @@ type decision = {
             <td>turn progress observation</td>
             <td><span class="warn">pause current work possible</span></td>
             <td>the turn cannot produce an execution/progress signal through the active surface</td>
-            <td>Required tool contract cannot be satisfied. Adjust provider/tool policy.</td>
+            <td>Tool-surface request cannot be satisfied. Adjust provider/tool surface policy.</td>
           </tr>
           <tr>
             <td><code>fatal_environment</code></td>
@@ -466,14 +466,14 @@ type decision = {
             <li>provider health has recent success or short cooldown only</li>
             <li>prompt/context was unusually large for this turn</li>
             <li>outer keeper turn remains cancellable and slots are released</li>
-            <li>no hard quota, auth, model-not-found, or required-tool terminal fingerprint</li>
+            <li>no hard quota, auth, model-not-found, or tool-surface terminal fingerprint</li>
           </ul>
         </div>
         <div class="panel">
           <h3>Potentially hopeless without operator action</h3>
           <ul>
             <li>all runtime candidates are missing credentials, hard-quotaed, or model-not-found</li>
-            <li>required tool contract cannot be satisfied by any selected provider</li>
+            <li>tool-surface request cannot be satisfied by any selected provider</li>
             <li>timeout phase is <code>provider_step</code> and all fallback candidates are exhausted or disabled</li>
             <li>same terminal fingerprint repeats after cooldown windows</li>
             <li>active child process or slot is wedged and force-release evidence exists</li>

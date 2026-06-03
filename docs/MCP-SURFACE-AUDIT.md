@@ -57,7 +57,7 @@ The key split is intentional:
 | MCP resources | `resources/list/read` | `masc://status`, `masc://tasks`, `masc://tool-help-index` | Snapshot/read layer |
 | Internal prompt/runtime plane | Not MCP-discoverable | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Used by chains, keepers, dashboard judges, and runtime execution |
 
-Web tool contract note:
+Web tool surface note:
 
 - `masc_web_search` / `masc_web_fetch` are Keeper-internal backend tool names for the `WebSearch` / `WebFetch` aliases.
 - They are not part of the canonical MCP `tools/list` public surface.

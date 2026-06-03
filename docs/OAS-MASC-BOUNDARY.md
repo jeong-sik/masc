@@ -109,7 +109,7 @@ OAS  ──does not know──→ MASC
   compatibility leakage in MASC-side code. New keeper runtime manifest rows,
   `/runtime-trace` projections, and product summaries should stay
   capability/lane/status based and redact raw provider/model identifiers.
-  No-tool-capable runtime errors should report required tools, candidate
+  No-tool-capable runtime errors should report requested tool names, candidate
   counts, and rejection reasons without naming configured providers. Keeper
   runtime/social status surfaces should keep legacy model-label keys null
   rather than resolving provider/model display labels. Runtime trust,

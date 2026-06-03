@@ -132,8 +132,8 @@ gRPC under `masc.workspace collaboration.v1` follows standard proto3 rules:
 |-------------|---------------|-----------------|
 | Add JSON field to response | **Compatible** | None |
 | Add optional tool input param | **Compatible** | Add focused schema/handler test |
-| Add required tool input param with default | **Minor** | Add focused schema/handler test |
-| Add required tool input param without default | **Breaking** | Prefer a new tool name; remove the old descriptor/dispatch when retired |
+| Add required input param on a tool with default | **Minor** | Add focused schema/handler test |
+| Add required input param on a tool without default | **Breaking** | Prefer a new tool name; remove the old descriptor/dispatch when retired |
 | Remove/rename JSON field | **Breaking** | Sunset header, 30-day grace |
 | Remove tool entirely | **Breaking** | Remove descriptor and dispatch; add a ratchet for the removed MCP name |
 | Change field type | **Breaking** | New field name, deprecate old |

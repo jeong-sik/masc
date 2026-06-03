@@ -668,10 +668,16 @@ let release_stale_claims config ~ttl_seconds =
           (fun (task : task) ->
              match task.task_status with
              | Claimed { assignee; claimed_at } ->
-               let ts =
-                 parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) claimed_at
+               let effective_ttl =
+                 match task.contract with
+                 | Some c when c.stale_claim_timeout_sec > 0 ->
+                   float_of_int c.stale_claim_timeout_sec
+                 | _ -> ttl_seconds
                in
-               if now_f -. ts > ttl_seconds
+               let ts =
+                 parse_iso8601 ~default_time:(now_f -. effective_ttl -. 1.0) claimed_at
+               in
+               if now_f -. ts > effective_ttl
                then (
                  stale_tasks := (task.id, assignee) :: !stale_tasks;
                  log_event

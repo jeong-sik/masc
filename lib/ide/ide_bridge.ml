@@ -301,7 +301,7 @@ let ingest_pr_event_from_descriptor
         ~pr_state:"open" ~repo ~keeper_id ~turn_id
         ~comment_count:1 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
-    | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Generic)
+    | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
     | None ->
       (* Not a PR operation — fall back to heuristic output parsing *)
       if String.equal tool_name "execute" then

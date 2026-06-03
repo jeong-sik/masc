@@ -26,8 +26,8 @@ let test_round_trip_known_variants () =
     C.all
 
 let test_all_count () =
-  (* 13 structural variants; Other_boundary_unclassified excluded. *)
-  Alcotest.(check int) "all enumeration size" 13 (List.length C.all)
+  (* 11 structural variants; Other_boundary_unclassified excluded. *)
+  Alcotest.(check int) "all enumeration size" 11 (List.length C.all)
 
 let test_unknown_string_returns_none () =
   Alcotest.(check (option string))

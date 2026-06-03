@@ -40,7 +40,7 @@ done
 cd "$ROOT"
 
 SCAN_FILES=(
-  "lib/provider_runtime_projection.ml"
+  "lib/runtime/provider_runtime_projection.ml"
 )
 
 LITERAL_PATTERN='"(claude|codex|gemini|llama|llama\.cpp|llamacpp|openrouter|openai_compat|ollama|custom|auto)"'

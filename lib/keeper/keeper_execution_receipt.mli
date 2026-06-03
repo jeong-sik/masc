@@ -127,26 +127,23 @@ val runtime_outcome_to_string : runtime_outcome -> string
 (** Receipt-level tool-contract evaluation result. Closed union of three
     producer paths: (i) initial-state sentinel [Contract_unknown];
     (ii) boundary-state overrides [Contract_not_dispatched],
-    [Contract_violated], [Contract_no_tool_capable_provider]; (iii) the
-    six classifier outcomes mirrored from
+    [Contract_violated]; (iii) the five classifier outcomes mirrored from
     [Keeper_contract_classifier.contract_status]. *)
-type tool_contract_result =
+type completion_contract_result =
   | Contract_unknown
   | Contract_not_dispatched
   | Contract_violated
-  | Contract_tool_surface_mismatch
-  | Contract_no_tool_capable_provider
   | Contract_claim_only_after_owned_task
   | Contract_needs_execution_progress
   | Contract_passive_only
   | Contract_satisfied_completion
   | Contract_satisfied_execution
 
-val tool_contract_result_to_string : tool_contract_result -> string
+val completion_contract_result_to_string : completion_contract_result -> string
 
-val tool_contract_result_of_contract_status
+val completion_contract_result_of_contract_status
   :  Keeper_contract_classifier.contract_status
-  -> tool_contract_result
+  -> completion_contract_result
 
 (** {2 Structured contract-violation encoding} *)
 
@@ -207,7 +204,7 @@ type t =
   ; canonical_tools : string list
   ; unexpected_tools : string list
   ; tools_used : string list
-  ; tool_contract_result : tool_contract_result
+  ; completion_contract_result : completion_contract_result
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
   ; sandbox_root : string option
@@ -284,7 +281,6 @@ type operator_disposition_reason =
       fall-through emitted. *)
   | Reason_provider_runtime_error
   | Reason_internal_error
-  | Reason_tool_route_recoverable_failure
   | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
   | Reason_cancelled

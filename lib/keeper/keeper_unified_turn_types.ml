@@ -127,7 +127,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
     in
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = "no_tool_capable_provider"
+         { code = "no_capable_provider"
              ; detail =
                  Printf.sprintf
                "no tool-capable provider found (runtime=%s labels=[%s]%s)"
@@ -147,7 +147,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          }) ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = "no_tool_capable_provider"
+         { code = "no_capable_provider"
          ; detail = "no tool-capable provider found"
          ; provider_id = None
          ; http_status = None

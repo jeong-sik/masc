@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-06-03T10:59:47Z (HEAD: 0451548491)
+Generated: 2026-06-03T13:10:43Z (HEAD: ecf96a6490)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -132,7 +132,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperSocialModelMagenticLedger.tla | KeeperSocialModelMagenticLedger | manual | 2 | 1 | clean={inv:TypeOK, inv:ClassifyTypeOK, inv:StalledNeedsGoalOrFailure, prop:ProgressDominates, prop:ReactiveDominatesIdleTimeout, prop:StalledStickyWithGoal, prop:QuietWhenNoDrivers} buggy={inv:StalledNeedsGoalOrFailureMustHold} | 1dd4fa238ae4 |
 | KeeperStateMachine.tla | KeeperStateMachine | manual | 3 | 2 | clean={inv:TypeOK, prop:DeadIsForever, prop:StoppedIsForever, prop:ZombieIsForever, prop:BudgetNeverRevives, prop:RestartCountMonotonic, prop:RunningRequiresFiber, prop:StoppedRequiresDrain, prop:DeadRequiresNoBudget, prop:OfflineRequiresLaunchPending, prop:ZombieRequiresTerminalFailureLatched, prop:FailingResolves, prop:CrashedRestartsEventually, prop:DrainingResolves, prop:CompactingResolves, prop:HandoffResolves, prop:CompactionClearsOverflow, prop:OverflowedResolves} buggy={inv:TypeOK} overflow-buggy={inv:TypeOK} | f23ad5705391 |
 | KeeperTaskAcquisition.tla | KeeperTaskAcquisition | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | cd9f3f8545c5 |
-| KeeperToolSurface.tla | KeeperToolSurface | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 79e36ad80382 |
+| KeeperToolSurface.tla | KeeperToolSurface | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 68a837adbd60 |
 | KeeperTraceSpec.tla | KeeperTraceSpec | manual | 2 | 1 | clean={inv:TypeOK, inv:RunningRequiresFiber, inv:OfflineRequiresLaunchPending, inv:StoppedRequiresDrain, inv:DeadRequiresNoBudget, inv:DerivePhaseAgreement, prop:RestartCountMonotonic, prop:BudgetNeverRevives, prop:TransitionMatrixAgreement} buggy={inv:TypeOK, inv:DerivePhaseAgreementMustHold} | 733248761720 |
 | KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | d6d719d016a0 |
 | KeeperTurnSlot.tla | KeeperTurnSlot | manual | 2 | 1 | clean={inv:Safety} buggy={inv:RetryPhaseRequiresReleased} | a9e690736bb8 |

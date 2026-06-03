@@ -262,6 +262,13 @@ let append_decision_record
                     let runtime_id =
                       co.runtime_id
                     in
+                    let streaming_fields =
+                      [
+                        ("streaming_ttfrc_ms", Json_util.float_opt_to_json co.streaming_ttfrc_ms);
+                        ("streaming_inter_chunk_count", `Int co.streaming_inter_chunk_count);
+                        ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json co.streaming_inter_chunk_avg_ms);
+                      ]
+                    in
                     [
                       ("runtime_id", `String runtime_id);
                       ("strategy", Json_util.string_opt_to_json co.strategy);
@@ -270,7 +277,7 @@ let append_decision_record
                       ("fallback_applied", `Bool co.fallback_applied);
                       ("fallback_hops", match co.fallback_hops with Some n -> `Int n | None -> `Int 0);
                       ("candidate_models", `List []);
-                    ]
+                    ] @ streaming_fields
                 | None -> []
               in
               let tool_surface_fields =

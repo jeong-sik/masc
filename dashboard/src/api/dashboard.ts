@@ -658,6 +658,9 @@ export interface DashboardRuntimeModelMetric {
     usage_anomaly_reasons?: string[] | null
     coverage_reason?: string | null
     coverage_stage?: string | null
+    streaming_ttfrc_ms?: number | null
+    streaming_inter_chunk_count?: number | null
+    streaming_inter_chunk_avg_ms?: number | null
   }> | null
   buckets?: BucketMetric[] | null
 }

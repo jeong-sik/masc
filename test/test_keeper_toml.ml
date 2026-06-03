@@ -910,6 +910,32 @@ let test_persona_resolver_omits_unspecified_tool_access () =
        | `Null -> ()
        | _ -> fail "unspecified tool_access should be omitted")
 
+let test_persona_defaults_ignore_legacy_self_model_fields () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test persona keeper",
+    "will": "legacy will",
+    "needs": "legacy needs",
+    "desires": "legacy desires",
+    "instructions": "legacy instructions"
+  }
+}
+|};
+  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
+  check (option string) "goal still loads" (Some "test persona keeper")
+    defaults.goal;
+  check (option string) "legacy will ignored" None defaults.will;
+  check (option string) "legacy needs ignored" None defaults.needs;
+  check (option string) "legacy desires ignored" None defaults.desires;
+  check (option string) "legacy instructions ignored" None defaults.instructions
+
 let test_persona_resolver_rejects_operator_todo_profile () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -1920,6 +1946,8 @@ let () =
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "persona resolver omits unspecified tool_access" `Quick
             test_persona_resolver_omits_unspecified_tool_access;
+          test_case "persona defaults ignore legacy self-model fields" `Quick
+            test_persona_defaults_ignore_legacy_self_model_fields;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver reports placeholder defaults source" `Quick

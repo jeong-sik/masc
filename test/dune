@@ -130,6 +130,7 @@
   test_keeper_runtime_trust_snapshot
   test_ide_annotations
   test_ide_bridge
+  test_command_descriptor
   test_server_ide_lsp_proxy
   test_ide_paths
   test_ide_canonical_url_join
@@ -390,6 +391,7 @@
   test_keeper_runtime_trust_snapshot
   test_ide_annotations
   test_ide_bridge
+  test_command_descriptor
   test_server_ide_lsp_proxy
   test_ide_paths
   test_ide_canonical_url_join

@@ -57,7 +57,6 @@ RFC-0109 가 절반 깔아둠: `Cdal_evidence_gate.decide` 가 typed CDAL verdic
 type task_contract = {
   strict : bool;
   completion_contract : string list;
-  required_tools : string list;
   required_evidence : string list;   (* ← raw string list, RFC-0088 §"String 분류기" *)
   inspect_gate_evidence : string list;
   verify_gate_evidence : string list;

@@ -136,8 +136,8 @@ All three under 800 lines.
 
 Hook configuration section (lines 1178-1667 of `prepare_agent_setup`).
 
-Nested functions capture: `hooks_acc`, `tool_bundle`, `required_tools`,
-`session_ctx`. These become fields of a `hook_builder_context` record.
+Nested functions capture: `hooks_acc`, `tool_bundle`, `session_ctx`.
+These become fields of a `hook_builder_context` record.
 
 ### §4.2 keeper_tool_surface_compute.ml (~419 lines)
 

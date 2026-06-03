@@ -79,7 +79,6 @@ type task = {
   task_status : task_status;
   assignee : string option;
   priority : priority;
-  required_tools : string list;
   (* ... *)
 }
 ```

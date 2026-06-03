@@ -367,6 +367,54 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
+(* Sweep paths that resolve a keeper's runtime id reach
+   [Keeper_meta_contract.runtime_id_of_meta], which falls back to
+   [Runtime.get_default_runtime_id ()] for keepers without an explicit
+   [[runtime.assignments]] entry.  That fallback fail-fasts until
+   [Runtime.init_default] has run (RFC-0206 §2.1, no silent fallback).
+   In a booted server [init_default] runs at startup
+   (server_runtime_bootstrap.ml); a bare [dune exec] test binary must
+   stand the default runtime up itself.  Mirrors the established pattern in
+   test_keeper_lifecycle_registry_dispatch.ml. *)
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let ensure_test_runtime =
+  let initialized = ref false in
+  fun () ->
+    if not !initialized then (
+      let path = Filename.temp_file "keeper_supervisor_runtime_" ".toml" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc test_runtime_toml);
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove path with
+          | Sys_error _ -> ())
+        (fun () ->
+          match Masc_mcp.Runtime.init_default ~config_path:path with
+          | Ok () -> initialized := true
+          | Error msg -> fail msg))
+
 let test_persona_drift_check_uses_toml_persona_name () =
   with_config_dir @@ fun config_dir ->
   let keepers_dir = Filename.concat config_dir "keepers" in
@@ -1529,6 +1577,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
 (* Test: Phase 3.5 sweep auto-resumes a keeper whose timer has elapsed. *)
 let test_sweep_auto_resumes_after_backoff () =
   with_restart_launch_noop @@ fun () ->
+  ensure_test_runtime ();
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1603,6 +1652,7 @@ let test_sweep_auto_resumes_after_backoff () =
         (baseline_auto_resume +. 1.0) after_auto_resume)
 
 let test_sweep_auto_resumes_registered_paused_entry () =
+  ensure_test_runtime ();
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->

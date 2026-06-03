@@ -434,7 +434,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 300)
   })
 
-  it('names missing required keeper tools in blocker cause and next step', () => {
+  it('surfaces tool contract mismatch without required-tool detail', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({
@@ -444,25 +444,23 @@ describe('runtimeAttentionForSnapshot', () => {
         operator_disposition_reason: 'tool_route_recoverable_failure',
         tool_contract_result: 'tool_surface_mismatch',
         tool_surface: {
-          tool_requirement: 'required',
+          tool_requirement: 'optional',
           turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
           visible_tool_count: 0,
           tool_gate_enabled: true,
           tool_surface_fallback_used: true,
-          missing_required_tools: ['Execute'],
-          required_tools: ['Execute'],
         },
       }),
     })
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
-    expect(attention.cause).toContain('tool_surface_mismatch (Execute)')
+    expect(attention.cause).toContain('tool_surface_mismatch')
     expect(attention.reason).toContain('turn_lane=tool_optional')
     expect(attention.reason).toContain('visible_tools=0')
     expect(attention.reason).toContain('tool_surface_fallback=true')
-    expect(attention.nextStep).toContain('Execute')
+    expect(attention.nextStep).toContain('tool surface 또는 runtime lane 설정 확인')
   })
 
   it('routes provider timeout blockers away from generic approval guidance', () => {

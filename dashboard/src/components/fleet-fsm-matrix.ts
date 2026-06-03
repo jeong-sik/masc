@@ -495,8 +495,6 @@ export function buildRuntimeAssistPrompt(
       operator_disposition: snapshot.execution.operator_disposition,
       operator_disposition_reason: snapshot.execution.operator_disposition_reason,
       tool_contract_result: snapshot.execution.tool_contract_result,
-      required_tools: snapshot.execution.tool_surface?.required_tools ?? [],
-      missing_required_tools: snapshot.execution.tool_surface?.missing_required_tools ?? [],
       tool_requirement: snapshot.execution.tool_surface?.tool_requirement ?? null,
       turn_lane: snapshot.execution.tool_surface?.turn_lane ?? null,
       tool_surface_class: snapshot.execution.tool_surface?.tool_surface_class ?? null,

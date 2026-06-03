@@ -112,7 +112,7 @@ describe('mission keeper runtime helpers', () => {
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '요구 도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.',
+      '도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.',
     )
   })
 

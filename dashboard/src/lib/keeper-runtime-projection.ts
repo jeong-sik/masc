@@ -560,6 +560,10 @@ function isExecutionAttentionCode(value: string | null | undefined): boolean {
     || normalized === 'allowed_in_sandbox'
     || normalized.startsWith('satisfied')
   ) return false
+  if (
+    normalized === 'tool_surface_mismatch'
+    || normalized === 'no_tool_capable_provider'
+  ) return true
   return normalized.includes('violat')
     || normalized.includes('missing')
     || normalized.includes('need')

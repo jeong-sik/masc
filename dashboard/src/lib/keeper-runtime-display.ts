@@ -285,6 +285,7 @@ const runtimeBlockerLabels = {
   runtime_exhausted: '런타임 후보 소진',
   no_tool_capable_provider: '도구 실행 런타임 없음',
   provider_runtime_error: '런타임 호출 오류',
+  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   fiber_unresolved: 'Fiber 미해결',
   stale_turn_timeout: '오래된 턴 만료',
   stale_termination_storm: 'Stale 종료 폭주',

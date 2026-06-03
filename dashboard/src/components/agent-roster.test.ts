@@ -671,7 +671,7 @@ describe('AgentRoster live-only cards', () => {
 
     const text = container.textContent ?? ''
     expect(text).toContain('일시정지 원인: 도구 실행 런타임 없음')
-    expect(text).toContain('요구 도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.')
+    expect(text).toContain('도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.')
   })
 
   it('uses heartbeat and full keeper model for cards when action/model fallbacks disagree', async () => {

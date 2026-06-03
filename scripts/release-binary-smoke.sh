@@ -91,7 +91,7 @@ actual_subcmds=$(awk '
 
 # Subcommands the README claims exist. Restrict to lines/segments inside
 # backticks (inline `code` or ``` fenced blocks ```), so prose like
-# "use masc in Claude" never trips the gate.
+# "use masc in another local agent" never trips the gate.
 readme_subcmds=$(awk '
   /^```/        { in_fence = !in_fence; next }
   in_fence      { print; next }

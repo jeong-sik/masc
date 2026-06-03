@@ -3,7 +3,7 @@
 # not keep growing in the MASC-owned runtime projection boundary.
 #
 # This is intentionally narrower than a repo-wide string grep.  Terms like
-# "claude", "gemini", or "auto" are valid in auth, agent naming, voice persona,
+# "auto" are valid in auth, agent naming, voice persona,
 # and unrelated operator UX code. The migration risk is the runtime projection
 # boundary learning concrete provider identity after Provider_adapter was removed.
 #

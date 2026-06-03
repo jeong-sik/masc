@@ -272,10 +272,6 @@ val metric_egress_audit_stale_orphan : string
     execution or completion progress. Incremented once per loop episode.
     Labels: [keeper_name]. *)
 
-(** #13631 Total Require_tool_use gate suppressions caused by actionable
-    affordances whose visible keeper tool surface contains no
-    contract-satisfying tool. Labels: [affordance]. *)
-
 (** Task-138 Current consecutive-idle streak (passive-only turns) per
     keeper.  Resets to 0 on the next execution/completion turn.  Pairs
     with [metric_keeper_passive_loop_detected_total]: the counter fires

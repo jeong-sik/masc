@@ -45,12 +45,6 @@ let register
      execution or completion progress. Labeled by keeper_name."
     `Counter;
   add
-    Keeper_metrics.(to_string RequiredToolGateSuppressedTotal)
-    "#13631 Total Require_tool_use gate suppressions caused by actionable affordances \
-     whose visible keeper tool surface contains no contract-satisfying tool. Labeled by \
-     affordance."
-    `Counter;
-  add
     Keeper_metrics.(to_string ConsecutiveIdle)
     "Task-138 Current consecutive-idle streak (passive-only turns) per keeper.  Resets \
      to 0 on the next execution/completion turn.  Labeled by keeper."

@@ -53,7 +53,6 @@ let prepare_agent_setup
     { meta
     ; tool_calls = []
     ; current_turn = 0
-    ; completion_contract = Keeper_tool_completion_contract.Allow_text_or_tool
     ; keeper_surface_tool_used = false
     ; discovered =
         Keeper_discovered_tools.create
@@ -483,8 +482,7 @@ let prepare_agent_setup
   let fallback_tool_surface ~turn =
     validate_allow_list ~turn fallback_floor_tool_names
   in
-  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
-      ~claim_context_allowed ~allowed_tool_names =
+  let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
     let caller_requires_tools =
       (* Enumerate every [tool_choice] variant + [None] so a new constructor
          added to [Agent_sdk.Types.tool_choice] surfaces a Warning 8 here.
@@ -499,12 +497,7 @@ let prepare_agent_setup
     in
     max_turns > 1
     && (not is_last_turn)
-    && (caller_requires_tools
-        || turn_affordances_require_tool_gate_with_allowed
-             ~record_suppression_metric:true
-             ~claim_context_allowed
-             ~allowed_tool_names
-             turn_affordances)
+    && caller_requires_tools
   in
   let compute_tool_surface
         ~turn
@@ -726,16 +719,7 @@ let prepare_agent_setup
       ~labels:[ "keeper", meta.name ]
       (float_of_int passive_streak);
     let tool_gate_requested =
-      tool_gate_requested_for_turn
-        ~current_tool_choice
-        ~is_last_turn
-        ~claim_context_allowed
-        ~allowed_tool_names:turn_visible_tool_names
-    in
-    let turn_visible_tool_names =
-      tool_names_for_actionable_gate_surface
-        ~tool_gate_requested
-        turn_visible_tool_names
+      tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
     in
     let visible_tool_count = List.length turn_visible_tool_names in
     let tool_surface_class : Keeper_agent_tool_surface.tool_surface_class =

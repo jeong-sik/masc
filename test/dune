@@ -169,7 +169,6 @@
   test_tool_token
   test_autonomy_liberation
   test_keeper_unified_claim_progress
-  test_keeper_unified_completion_contract
   test_keeper_unified_context_overflow
   test_keeper_unified_required_tools
   test_keeper_unified_tool_observation
@@ -430,7 +429,6 @@
   test_tool_token
   test_autonomy_liberation
   test_keeper_unified_claim_progress
-  test_keeper_unified_completion_contract
   test_keeper_unified_context_overflow
   test_keeper_unified_required_tools
   test_keeper_unified_tool_observation

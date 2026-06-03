@@ -99,6 +99,14 @@ let register
     "Total OAS LLM output tokens, labeled by provider and model"
     `Counter;
   add
+    metric_llm_provider_cache_read_tokens
+    "Total OAS LLM cache read tokens, labeled by provider and model"
+    `Counter;
+  add
+    metric_llm_provider_reasoning_tokens
+    "Total OAS LLM reasoning tokens, labeled by provider and model"
+    `Counter;
+  add
     metric_llm_provider_tool_calls
     "Total OAS LLM provider-emitted tool calls, labeled by provider and model"
     `Counter;

@@ -129,6 +129,122 @@ let test_ingest_multiple_events () =
     check int "two events" 2 !count)
 ;;
 
+let test_hook_extracts_file_path_from_path_key () =
+  with_temp_dir (fun base_dir ->
+    let input = `Assoc [ "path", `String "lib/test.ml"; "content", `String "hello" ] in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~tool_name:"fs_write"
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:100.0
+      ~output_text:"wrote 10 lines"
+      ~input;
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "tool_events.jsonl" in
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let fp = Yojson.Safe.Util.member "file_path" json in
+    check string "file_path" "lib/test.ml" (Yojson.Safe.Util.to_string fp))
+;;
+
+let test_hook_extracts_file_path_from_file_path_key () =
+  with_temp_dir (fun base_dir ->
+    let input = `Assoc [ "file_path", `String "src/main.ml" ] in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~tool_name:"fs_edit"
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:50.0
+      ~output_text:"edited"
+      ~input;
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "tool_events.jsonl" in
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let fp = Yojson.Safe.Util.member "file_path" json in
+    check string "file_path" "src/main.ml" (Yojson.Safe.Util.to_string fp))
+;;
+
+let test_hook_no_file_path () =
+  with_temp_dir (fun base_dir ->
+    let input = `Assoc [ "command", `String "ls" ] in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~tool_name:"execute"
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:10.0
+      ~output_text:"file1.ml\nfile2.ml"
+      ~input;
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "tool_events.jsonl" in
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let fp = Yojson.Safe.Util.member "file_path" json in
+    check bool "file_path is null" true (fp = `Null))
+;;
+
+let test_hook_summary_truncation () =
+  with_temp_dir (fun base_dir ->
+    let long_output = String.make 300 'x' in
+    let input = `Assoc [] in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~tool_name:"execute"
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:10.0
+      ~output_text:long_output
+      ~input;
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "tool_events.jsonl" in
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let summary = Yojson.Safe.Util.member "summary" json |> Yojson.Safe.Util.to_string in
+    check bool "summary truncated" true (String.length summary <= 200))
+;;
+
+let test_hook_typed_outcome_mapping () =
+  with_temp_dir (fun base_dir ->
+    let input = `Assoc [] in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~tool_name:"execute"
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~outcome:"error"
+      ~typed_outcome_str:"error"
+      ~duration_ms:10.0
+      ~output_text:"command failed"
+      ~input;
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "tool_events.jsonl" in
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let typed = Yojson.Safe.Util.member "typed_outcome" json |> Yojson.Safe.Util.to_string in
+    check string "typed_outcome" "error" typed)
+;;
+
 let () =
   run
     "ide_bridge"
@@ -143,5 +259,12 @@ let () =
       , [ test_case "tool event" `Quick test_ingest_tool_event
         ; test_case "turn event" `Quick test_ingest_turn_event
         ; test_case "multiple events" `Quick test_ingest_multiple_events
+        ] )
+    ; ( "hook_extract"
+      , [ test_case "file_path from path key" `Quick test_hook_extracts_file_path_from_path_key
+        ; test_case "file_path from file_path key" `Quick test_hook_extracts_file_path_from_file_path_key
+        ; test_case "no file_path (execute)" `Quick test_hook_no_file_path
+        ; test_case "summary truncation" `Quick test_hook_summary_truncation
+        ; test_case "typed_outcome mapping" `Quick test_hook_typed_outcome_mapping
         ] )
     ]

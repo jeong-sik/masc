@@ -227,31 +227,21 @@ let assemble_hooks
              | Some (Keeper_tool_outcome.Error _) -> "error"
              | None -> outcome
            in
-           let file_path =
-             match Yojson.Safe.Util.member "path" input with
-             | `String p -> Some p
-             | _ ->
-               match Yojson.Safe.Util.member "file_path" input with
-               | `String p -> Some p
-               | _ -> None
-           in
-           let summary = if String.length output_text > 200 then String.sub output_text 0 200 else output_text in
            let turn_id =
              match acc.meta.Keeper_meta_contract.current_task_id with
              | Some t -> Keeper_id.Task_id.to_string t
              | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
            in
-           Ide_bridge.ingest_tool_event
+           Ide_bridge.ingest_tool_event_from_hook
              ~base_path:config.base_path
              ~tool_name
              ~keeper_id:acc.meta.name
              ~turn_id
              ~outcome
-             ~typed_outcome:typed_outcome_str
-             ~latency_ms:(int_of_float duration_ms)
-             ~summary
-             ~file_path
-             ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))))
+             ~typed_outcome_str
+             ~duration_ms
+             ~output_text
+             ~input))
         ~passive_loop_nudge:(fun () ->
           Keeper_passive_loop_detector.nudge_message ~keeper_name:acc.meta.name)
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard

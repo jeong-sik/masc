@@ -77,6 +77,10 @@ let stop_reason_metric_label = function
   | Agent_sdk.Types.StopToolUse -> "tool_use"
   | Agent_sdk.Types.MaxTokens -> "max_tokens"
   | Agent_sdk.Types.StopSequence -> "stop_sequence"
+  | Agent_sdk.Types.Refusal -> "refusal"
+  | Agent_sdk.Types.PauseTurn -> "pause_turn"
+  | Agent_sdk.Types.Compaction -> "compaction"
+  | Agent_sdk.Types.ContextWindowExceeded -> "model_context_window_exceeded"
   | Agent_sdk.Types.Unknown _ -> "unknown"
 
 let content_block_has_visible_or_tool_progress = function

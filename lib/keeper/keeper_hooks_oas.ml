@@ -62,6 +62,10 @@ let stop_reason_to_label = function
   | Agent_sdk.Types.StopToolUse -> stop_reason_label_tool_use
   | Agent_sdk.Types.MaxTokens -> stop_reason_label_max_tokens
   | Agent_sdk.Types.StopSequence -> stop_reason_label_stop_sequence
+  | Agent_sdk.Types.Refusal -> "refusal"
+  | Agent_sdk.Types.PauseTurn -> "pause_turn"
+  | Agent_sdk.Types.Compaction -> "compaction"
+  | Agent_sdk.Types.ContextWindowExceeded -> "model_context_window_exceeded"
   | Agent_sdk.Types.Unknown _ -> stop_reason_label_unknown
 
 let idle_severity_to_label = function

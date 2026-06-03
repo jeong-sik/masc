@@ -109,6 +109,8 @@ let model_response_is_valid (resp : Agent_sdk_response.api_response) =
   && (match resp.stop_reason with
       | Agent_sdk.Types.EndTurn | Agent_sdk.Types.MaxTokens
       | Agent_sdk.Types.StopSequence | Agent_sdk.Types.StopToolUse
+      | Agent_sdk.Types.Refusal | Agent_sdk.Types.PauseTurn
+      | Agent_sdk.Types.Compaction | Agent_sdk.Types.ContextWindowExceeded
       | Agent_sdk.Types.Unknown _ -> true)
 
 let call_model_direct_sync ~agent_type ~prompt =

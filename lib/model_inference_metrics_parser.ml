@@ -349,12 +349,7 @@ let canonical_cost_model_id ~(provider : string option) model =
   let provider_key =
     match provider with
     | None -> None
-    | Some raw ->
-      (match Llm_provider.Provider_kind.of_string raw with
-       | Some kind -> Some (Llm_provider.Provider_kind.to_string kind)
-       | None ->
-         let trimmed = String.trim raw in
-         if String.equal trimmed "" then None else Some (String.lowercase_ascii trimmed))
+    | Some raw -> Runtime_provider_labels.canonical_provider_label raw
   in
   match provider_key with
   | None -> model

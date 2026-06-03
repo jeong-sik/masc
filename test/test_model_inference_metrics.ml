@@ -715,7 +715,7 @@ let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
     check
       (list string)
       "private provider keys stay distinct"
-      ["provider_a:shared-model"; "ollama:shared-model"]
+      ["ollama:shared-model"; "provider_a:shared-model"]
       ids;
     let token_totals =
       agg.models
@@ -726,7 +726,7 @@ let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
     check
       (list (pair string int))
       "tokens are not merged across provider lanes"
-      ["provider_a:shared-model", 20; "ollama:shared-model", 10]
+      ["ollama:shared-model", 10; "provider_a:shared-model", 20]
       token_totals)
 
 let test_costs_jsonl_zero_latency_is_missing () =

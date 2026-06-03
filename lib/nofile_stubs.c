@@ -6,7 +6,7 @@
 #include <sys/resource.h>
 #endif
 
-CAMLprim value masc_mcp_nofile_soft_limit(value unit)
+CAMLprim value masc_nofile_soft_limit(value unit)
 {
   CAMLparam1(unit);
   CAMLlocal1(result);

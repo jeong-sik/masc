@@ -7,6 +7,42 @@
 **Tracking issue**: #19129
 **Memory anchors**: `project_masc_cdal_evidence_gate_internal_antipatterns_2026_05_27`
 
+## Implementation status update (2026-06-03): Phase A `required_evidence_typed` field removed
+
+Phase A (below) added `task_contract.required_evidence_typed : Evidence_claim.t list`
+alongside the legacy `required_evidence : string list`. That parallel typed field
+has been **removed** from `task_contract` (`lib/types/types_core.ml`).
+
+Reason: fan-in was 0. No producer ever populated it — every record literal in
+`lib/` and `test/` wrote `required_evidence_typed = []`. No consumer ever read it
+(`.required_evidence_typed` appears only in doc comments). Phase B's
+`Deterministic_evidence_evaluator`, the sole intended consumer, was never
+implemented. Keeping a permanently-empty, never-read parallel field is itself the
+split-brain the RFC warns against (RFC-0088 §"String 분류기" lives on the *string*
+side, but an unwired typed twin invites drift and false "already typed" signals).
+
+What is retained: the `Evidence_claim` closed-sum schema module
+(`lib/types/evidence_claim.ml{,i}`) and its schema test
+(`test/test_evidence_claim_schema.ml`). The schema is correct and ready; only its
+unwired attachment point on `task_contract` was dropped.
+
+What stays live: `required_evidence : string list` remains the source of truth.
+It feeds `Cdal_evidence_gate.decide` (`lib/cdal_evidence_gate.ml`), which
+substring-matches each entry against completion notes / handoff refs. No gate
+behavior changed.
+
+**Phase B deferred.** When Phase B is built, it must re-introduce a typed field
+*together with* the migration that resolves the open question in §"미해결 질문"
+below (line: "codemod 가 기존 `required_evidence` string 을 자동 parse 할 수
+있는가?"). Re-adding an empty typed field ahead of a working evaluator + migration
+would just recreate the fan-in-0 scaffolding removed here. The free-form legacy
+strings (e.g. `completion_notes`, `pr_url_or_artifact_ref`, `board post`) have no
+lossless parse into the closed sum, so the migration is a real design task, not a
+mechanical codemod.
+
+The Phase A description below is kept for historical context; treat the
+`required_evidence_typed` field it introduces as removed.
+
 ## Context
 
 Verifier keeper 가 single point of bottleneck. Day 3+ stall: 33 unowned backlog tasks, 0 awaiting_verification, verifier idle. Tool policy fix (verifier denylist clear, 2026-05-27) 는 *capability* 회복일 뿐 *bottleneck 구조* 는 그대로 — 한 keeper 가 모든 verification 을 처리해야 한다는 가정이 root.

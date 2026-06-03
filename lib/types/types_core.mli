@@ -110,7 +110,6 @@ type task_contract =
   (** Deprecated and ignored by task claim routing. *)
   ; required_tools : string list [@default []]
   ; required_evidence : string list [@default []]
-  ; required_evidence_typed : Evidence_claim.t list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
   ; links : task_execution_links

@@ -21,7 +21,6 @@ let empty_contract : T.task_contract = {
   required_evidence = [];
   inspect_gate_evidence = [];
   verify_gate_evidence = [];
-  required_evidence_typed = [];
   links = empty_links;
 }
 

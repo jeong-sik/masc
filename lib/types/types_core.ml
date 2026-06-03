@@ -455,20 +455,26 @@ type task_execution_links = {
 
 (** Task contract - persisted deterministic gate inputs.
 
-    RFC-0199 Phase A: [required_evidence_typed] carries the closed-sum
-    typed evidence schema consumed by [Deterministic_evidence_evaluator]
-    (Phase B). The legacy [required_evidence : string list] is kept for
-    backward compatibility — neither writer nor reader is removed in
-    Phase A; migration tool comes with Phase B/C. New task creators
-    should populate [required_evidence_typed] and may also mirror to
-    [required_evidence] for legacy consumers. *)
+    [required_evidence : string list] is the live source of truth: the CDAL
+    evidence gate ([Cdal_evidence_gate]) substring-matches each entry against
+    task-completion notes / handoff refs to decide whether a contracted task
+    may complete.
+
+    RFC-0199 Phase A added a parallel [required_evidence_typed :
+    Evidence_claim.t list] meant for a future [Deterministic_evidence_evaluator]
+    (Phase B). That field was removed (2026-06-03): fan-in was 0 — no producer
+    ever populated it (every site wrote [[]]), no consumer ever read it, and the
+    Phase B evaluator was never implemented. The [Evidence_claim] schema module
+    is retained for when Phase B is built; see RFC-0199 for the deferral note.
+    A future Phase B should re-introduce a typed field with a migration that
+    parses legacy [required_evidence] strings (RFC-0199 open question), not a
+    silently-empty parallel field. *)
 type task_contract = {
   strict : bool; [@default false]
   completion_contract : string list; [@default []]
   (** Deprecated and ignored by task claim routing. *)
   required_tools : string list; [@default []]
   required_evidence : string list; [@default []]
-  required_evidence_typed : Evidence_claim.t list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
   links : task_execution_links; [@default { operation_id = None; session_id = None }]

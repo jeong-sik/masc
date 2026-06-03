@@ -330,15 +330,7 @@ let run_turn
             ("context_digest", `String context_digest);
           ]))
     Keeper_runtime_manifest.Context_injected;
-  let actionable_signal =
-    match world_observation with
-    | None -> false
-    | Some wo ->
-      wo
-      |> Keeper_contract_classifier.of_keeper_world_observation
-      |> Keeper_contract_classifier.classify_actionable_signal
-      |> Keeper_contract_classifier.is_actionable
-  in
+  let _world_observation_is_advisory = world_observation in
   (* 7. Set up agent — delegated to Keeper_run_tools *)
   let setup =
     Keeper_run_tools.prepare_agent_setup
@@ -365,7 +357,6 @@ let run_turn
       ~gemini_mcp_disabled
       ~approval_mode_effective
       ~approval_mode_derived
-      ~actionable_signal
       ?max_cost_usd
       ~trajectory_acc
       ~tool_overlay
@@ -416,7 +407,6 @@ let run_turn
     let initial_tool_surface_blocker_ref =
       s.Keeper_run_tools.initial_tool_surface_blocker
     in
-    let all_tool_names = s.Keeper_run_tools.all_tool_names in
     let tool_usage_before = s.Keeper_run_tools.tool_usage_before in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
@@ -470,24 +460,13 @@ let run_turn
      with
      | Error e -> Error (Agent_sdk.Error.Internal e)
      | Ok oas_allowed_paths ->
-       let actionable_observation_requires_tool_support =
-         match world_observation with
-         | None -> false
-         | Some observation ->
-           observation
-           |> Keeper_contract_classifier.of_keeper_world_observation
-           |> Keeper_contract_classifier.requires_tool_support_for_allowed_tools
-                ~allowed_tool_names:all_tool_names
-       in
        let require_tool_support =
          tools <> []
-         && (initial_tool_surface.tool_requirement = Required
-             || actionable_observation_requires_tool_support)
+         && initial_tool_surface.tool_requirement = Required
        in
        let require_tool_choice_support =
          should_require_provider_tool_choice_support
            ~initial_tool_requirement:initial_tool_surface.tool_requirement
-           ~actionable_observation_requires_tool_support
        in
        let timeout_s =
          match oas_timeout_s with

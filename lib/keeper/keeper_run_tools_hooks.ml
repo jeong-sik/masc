@@ -41,7 +41,7 @@ type ctx =
   ; compute_tool_surface :
       turn:int -> messages:Agent_sdk.Types.message list ->
       current_tool_choice:Agent_sdk.Types.tool_choice option ->
-      decay_discovered:bool -> ?actionable_signal:bool -> unit ->
+      decay_discovered:bool -> unit ->
       computed_tool_surface
   ; config : Workspace.config
   ; keeper_tool_bundle : Keeper_tools_oas.tool_bundle
@@ -81,7 +81,6 @@ let assemble_hooks
       ~(gemini_mcp_disabled : bool)
       ~(approval_mode_effective : string option)
       ~(approval_mode_derived : bool)
-      ?(actionable_signal = false)
       ?max_cost_usd
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
@@ -115,7 +114,6 @@ let assemble_hooks
       ~messages:history_messages
       ~current_tool_choice:None
       ~decay_discovered:false
-      ~actionable_signal
       ()
   in
   acc.tool_surface
@@ -355,7 +353,6 @@ let assemble_hooks
                     ~messages
                     ~current_tool_choice:current_params.tool_choice
                     ~decay_discovered:true
-                    ~actionable_signal
                     ()
                 in
                 if Keeper_types_profile.keeper_debug

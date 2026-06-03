@@ -36,29 +36,3 @@ let merge_tool_selection_boundary
   in
   Keeper_types_profile_toml_normalizers.dedupe_keep_order (deterministic_floor @ llm_selected)
 ;;
-
-let contract_enforcement_filter
-      ~(passive_streak : int)
-      ~(streak_threshold : int)
-      ~(actionable_signal : bool)
-      (tool_names : string list)
-  : string list
-  =
-  if passive_streak < streak_threshold || not actionable_signal
-  then tool_names
-  else (
-    let preserved, _removed =
-      List.partition
-        (fun name ->
-           match Keeper_tool_progress.classify_tool_progress name with
-           | Keeper_tool_progress.Passive_status -> false
-           | Keeper_tool_progress.Claim_context
-           | Keeper_tool_progress.Execution
-           | Keeper_tool_progress.Completion -> true)
-        tool_names
-    in
-    (* stay_silent is Completion-class, already in [preserved].
-       This filter removes only Passive_status tools (Read, Grep, List, etc.)
-       that contribute nothing to owned tasks during streaks. *)
-    preserved)
-;;

@@ -131,7 +131,7 @@ These are repeating misclassifications observed in `git log --grep='demote\|prom
 | Pattern | Message describes a syntactic / behavioral mistake by the LLM (`tool contract violated`, `gh syntax`, `JSON parse failed in tool args`) AND severity is `Error` |
 | Why wrong | Model behavior is a **distribution**, not a fault. Logging every model-output flake as `Error` produces alarm inflation — operators learn to ignore `Error`, then miss the real ones. |
 | Correct | `Warn`, with a per-keeper rate-limit OR aggregation. Promote to `Error` only when escalation policy kicks in (e.g., 5 violations in 10 turns → contract permanently broken). |
-| Origin | `Log.Keeper.error "keeper:%s required tool contract violated (turn=%d, tools=%d)"` — fleet-wide ~40/day. Memory `proactive_turn_contract_violation_dominant` documents the pattern. |
+| Origin | Historical `Log.Keeper.error "keeper:%s required tool contract violated (turn=%d, tools=%d)"` path — removed from the keeper turn path in the 2026-06-03 CDAL advisory split. Memory `proactive_turn_contract_violation_dominant` documented the original pattern. |
 
 ### 3.4 Watchdog tick / periodic heartbeat
 

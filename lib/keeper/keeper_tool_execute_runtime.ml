@@ -5,6 +5,9 @@ open Keeper_tool_shared_runtime
 
 (** Compute a structured command descriptor from Shell IR.
     Used by the IDE bridge for deterministic PR/issue event detection. *)
+let first_int_arg args =
+  List.find_map int_of_string_opt args |> Option.value ~default:0
+
 let compute_command_descriptor (ir : Masc_exec.Shell_ir.t) : Ide_event_types.command_descriptor =
   match ir with
   | Masc_exec.Shell_ir.Simple simple ->
@@ -19,42 +22,24 @@ let compute_command_descriptor (ir : Masc_exec.Shell_ir.t) : Ide_event_types.com
           ) "main" (List.map (fun s -> String.split_on_char ' ' s) rest) in
           Gh_pr_create { title = Option.value title ~default:""; base; draft }
         | "pr", Some "merge" ->
-          let pr_number = List.fold_left (fun acc -> function
-            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
-            | _ -> acc
-          ) 0 rest in
+          let pr_number = first_int_arg rest in
           Gh_pr_merge { pr_number; squash }
         | "pr", Some "comment" ->
-          let pr_number = List.fold_left (fun acc -> function
-            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
-            | _ -> acc
-          ) 0 rest in
+          let pr_number = first_int_arg rest in
           Gh_pr_comment { pr_number; body = Option.value body ~default:"" }
         | "pr", Some "close" ->
-          let pr_number = List.fold_left (fun acc -> function
-            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
-            | _ -> acc
-          ) 0 rest in
+          let pr_number = first_int_arg rest in
           Gh_pr_close { pr_number }
         | "pr", Some "edit" ->
-          let pr_number = List.fold_left (fun acc -> function
-            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
-            | _ -> acc
-          ) 0 rest in
+          let pr_number = first_int_arg rest in
           Gh_pr_edit { pr_number; title }
         | "pr", Some "review" ->
-          let pr_number = List.fold_left (fun acc -> function
-            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
-            | _ -> acc
-          ) 0 rest in
+          let pr_number = first_int_arg rest in
           Gh_pr_review { pr_number }
         | "issue", Some "create" ->
           Gh_issue_create { title = Option.value title ~default:""; body = Option.value body ~default:"" }
         | "issue", Some "close" ->
-          let issue_number = List.fold_left (fun acc -> function
-            | n when (try ignore (int_of_string n); true with _ -> false) -> int_of_string n
-            | _ -> acc
-          ) 0 rest in
+          let issue_number = first_int_arg rest in
           Gh_issue_close { issue_number }
         | _ -> Generic)
      | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Git_push { force; force_with_lease = _; set_upstream = _; remote; branch }) ->

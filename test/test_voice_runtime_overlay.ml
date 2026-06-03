@@ -163,7 +163,7 @@ let make_keeper_meta name =
           ; "agent_name", `String name
           ; "trace_id", `String "voice-queue-test"
           ; ( "tool_access"
-            , Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+            , Masc.Keeper_meta_tool_access.tool_access_to_json
                 [ "keeper_voice_speak" ] )
           ])
   with
@@ -182,7 +182,7 @@ let test_keeper_voice_speak_returns_queued_with_root_switch () =
   Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
     let meta = make_keeper_meta "voice-queue-keeper" in
     let raw =
-      Masc_mcp.Keeper_tool_voice_runtime.handle_voice_tool
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool
         ~meta
         ~name:"keeper_voice_speak"
         ~args:(`Assoc [ "message", `String "hello from queued voice test" ])

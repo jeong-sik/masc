@@ -35,21 +35,27 @@ CONSTANTS
     MaxSteps         \* bound model checking
 
 VARIABLES
-    count,           \* consecutive failure count (0..Threshold)
+    count,           \* consecutive failure count (0..Threshold) — the trip driver
     currentClass,    \* current error class being tracked
     tripped,         \* whether hint was injected on THIS step
     totalTrips,      \* cumulative trip count
-    classStreak,     \* TRUE iff all counted failures are same class (ghost variable)
+    sameClassRun,    \* honest length of the current same-class failure run
     step             \* step counter for bounded checking
 
-vars == <<count, currentClass, tripped, totalTrips, classStreak, step>>
+\* sameClassRun is the *honest* same-class run length, maintained by the real
+\* rule (same class +1, different class reset to 1, success/trip reset to 0) in
+\* EVERY action — including the buggy one. It is NOT a ghost that mirrors the
+\* action under test: in RecordFailureBuggy only [count] is corrupted, while
+\* [sameClassRun] keeps the truth, so the trip property can compare the
+\* dishonest driver against the honest streak.
+vars == <<count, currentClass, tripped, totalTrips, sameClassRun, step>>
 
 TypeOK ==
     /\ count \in 0..Threshold
     /\ currentClass \in ErrorClasses \cup {"none"}
     /\ tripped \in BOOLEAN
     /\ totalTrips \in Nat
-    /\ classStreak \in BOOLEAN
+    /\ sameClassRun \in 0..Threshold
     /\ step \in 0..MaxSteps
 
 Init ==
@@ -57,7 +63,7 @@ Init ==
     /\ currentClass = "none"
     /\ tripped = FALSE
     /\ totalTrips = 0
-    /\ classStreak = TRUE
+    /\ sameClassRun = 0
     /\ step = 0
 
 \* --- Clean Actions ---
@@ -68,7 +74,7 @@ RecordSuccess ==
     /\ currentClass' = currentClass
     /\ tripped' = FALSE
     /\ totalTrips' = totalTrips
-    /\ classStreak' = TRUE
+    /\ sameClassRun' = 0          \* a success breaks any same-class run
     /\ step' = step + 1
 
 RecordFailure(cls) ==
@@ -82,19 +88,19 @@ RecordFailure(cls) ==
                  /\ tripped' = TRUE
                  /\ totalTrips' = totalTrips + 1
                  /\ currentClass' = currentClass
-                 /\ classStreak' = TRUE
+                 /\ sameClassRun' = 0          \* trip resets the run
             ELSE
                  /\ count' = count + 1
                  /\ tripped' = FALSE
                  /\ totalTrips' = totalTrips
                  /\ currentClass' = currentClass
-                 /\ classStreak' = TRUE  \* still same class
+                 /\ sameClassRun' = sameClassRun + 1  \* same class extends the run
        ELSE \* different class: reset to 1
             /\ count' = 1
             /\ currentClass' = cls
             /\ tripped' = FALSE
             /\ totalTrips' = totalTrips
-            /\ classStreak' = TRUE  \* fresh streak of new class
+            /\ sameClassRun' = 1          \* fresh run of the new class
     /\ step' = step + 1
 
 Next ==
@@ -109,19 +115,33 @@ Spec == Init /\ [][Next]_vars
 CountBounded ==
     count >= 0 /\ count < Threshold
 
-\* S2: trip only with class streak
+\* S2: trip only with a genuine same-class streak.
+\*
+\* Action property (mirrors KeeperStateMachine.CompactionClearsOverflow): when a
+\* trip fires on a step (tripped' = TRUE), the *honest* same-class run length
+\* immediately before that step must already be at least Threshold-1, i.e. the
+\* trip is the (Threshold)-th consecutive failure of one class. The honest run
+\* [sameClassRun] is read UNPRIMED because the trip step itself resets it to 0;
+\* a plain state invariant would read the reset value and false-violate on the
+\* clean spec.
+\*
+\* This is NOT vacuous: the clean spec does reach tripped' = TRUE states (a
+\* same-class run of Threshold), and there [sameClassRun] = Threshold-1 holds.
+\* The buggy spec corrupts [count] (accumulates across classes) so it can trip
+\* with [sameClassRun] < Threshold-1 — a cross-class trip — which violates this.
 TripOnlyWithStreak ==
-    tripped = TRUE => classStreak = TRUE
+    [][ tripped' = TRUE => sameClassRun >= Threshold - 1 ]_vars
 
 \* S3: totalTrips monotonic
 TotalTripsMonotonic ==
     totalTrips >= 0
 
-\* Combined
+\* Combined. TripOnlyWithStreak is an action property (uses primed vars), so it
+\* is supplied via PROPERTY, not INVARIANT; SafetyInvariant keeps the
+\* state-predicate invariants only.
 SafetyInvariant ==
     /\ TypeOK
     /\ CountBounded
-    /\ TripOnlyWithStreak
     /\ TotalTripsMonotonic
 
 \* --- Buggy model: class change does NOT reset count ---
@@ -129,20 +149,26 @@ SafetyInvariant ==
 RecordFailureBuggy(cls) ==
     /\ step < MaxSteps
     /\ cls \in ErrorClasses
-    \* BUG: no class-change branch — always increment
+    \* BUG: [count] has no class-change branch — it always increments, so it
+    \* accumulates failures across different classes and can trip on a
+    \* cross-class total. [sameClassRun] is still maintained by the honest rule
+    \* (same class +1, different class reset to 1), so when this buggy count
+    \* trips on a cross-class accumulation, sameClassRun is below Threshold-1
+    \* and TripOnlyWithStreak is violated.
     /\ LET newCount == count + 1 IN
-       LET classChanged == cls # currentClass /\ currentClass # "none" IN
+       LET sameClass == cls = currentClass IN
+       LET honestRun == IF sameClass THEN sameClassRun + 1 ELSE 1 IN
        IF newCount >= Threshold
        THEN /\ count' = 0
             /\ tripped' = TRUE
             /\ totalTrips' = totalTrips + 1
             /\ currentClass' = cls
-            /\ classStreak' = IF classChanged THEN FALSE ELSE classStreak
+            /\ sameClassRun' = 0          \* trip resets the honest run too
        ELSE /\ count' = newCount
             /\ tripped' = FALSE
             /\ totalTrips' = totalTrips
             /\ currentClass' = cls
-            /\ classStreak' = IF classChanged THEN FALSE ELSE classStreak
+            /\ sameClassRun' = honestRun
     /\ step' = step + 1
 
 NextBuggy ==

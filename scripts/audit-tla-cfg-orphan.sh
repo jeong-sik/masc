@@ -31,8 +31,10 @@
 #     would be flagged as orphan.  Add explicit extension-aware lookup
 #     if false positives appear.
 #   - Suffix-stripping heuristic relies on `-`-delimited tokens.  If a
-#     spec author uses `_` or no separator for cfg variants, the
-#     parent lookup will SKIP.
+#     spec author uses `_` or no separator for cfg variants, the parent
+#     lookup exhausts and the cfg is flagged ORPHAN (no parent .tla).
+#     A cfg with no resolvable parent verifies nothing and is reported as
+#     an orphan (previously such cfgs were silently skipped).
 
 set -u
 
@@ -46,7 +48,6 @@ fi
 
 ORPHANS=0
 CHECKED=0
-SKIPPED=0
 
 for cfg in $(find specs -name "*.cfg" | sort); do
   base=$(basename "$cfg" .cfg)
@@ -60,7 +61,14 @@ for cfg in $(find specs -name "*.cfg" | sort); do
     tla="$dir/$parent.tla"
   done
   if [[ ! -f "$tla" ]]; then
-    SKIPPED=$((SKIPPED+1))
+    # A cfg whose parent .tla never resolves is itself an orphan: it can
+    # never be model-checked (TLC has no spec to run) so it verifies nothing.
+    # Previously this branch counted such cfgs as "skipped" and they passed
+    # the audit silently — the exact class of spec-level theatre this audit
+    # exists to catch (e.g. KeeperCampaignLifecycle-buggy.cfg, whose .tla was
+    # deleted in #9450). Flag it as an orphan so it fails the audit.
+    printf "ORPHAN %s -> (no parent .tla — cfg verifies nothing)\n" "$cfg"
+    ORPHANS=$((ORPHANS+1))
     continue
   fi
   CHECKED=$((CHECKED+1))
@@ -81,8 +89,8 @@ for cfg in $(find specs -name "*.cfg" | sort); do
 done
 
 echo "---"
-printf "audit-tla-cfg-orphan summary: %d cfgs scanned / %d skipped (no parent) / %d orphans\n" \
-  "$CHECKED" "$SKIPPED" "$ORPHANS"
+printf "audit-tla-cfg-orphan summary: %d cfgs with parent scanned / %d orphans (incl. no-parent)\n" \
+  "$CHECKED" "$ORPHANS"
 
 if [[ $ORPHANS -gt 0 ]]; then
   echo ""

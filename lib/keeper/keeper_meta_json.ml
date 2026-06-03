@@ -15,6 +15,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   `Assoc
     [ "name", `String m.name
     ; "agent_name", `String m.agent_name
+    ; ( "persona"
+      , match m.persona with
+        | Some s -> `String s
+        | None -> `Null )
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
     ; "generation", `Int rt.generation
@@ -100,6 +104,7 @@ include Keeper_meta_json_parse
 let fallback_canonical_keeper_meta_key_names =
   [ "name"
   ; "agent_name"
+  ; "persona"
   ; "trace_id"
   ; "trace_history"
   ; "generation"

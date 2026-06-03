@@ -569,6 +569,7 @@ type keeper_meta =
     id : Ids.Keeper_id.t option [@default None]
   ; name : string
   ; agent_name : string
+  ; persona : string option
   ; goal : string
   ; short_goal : string
   ; mid_goal : string

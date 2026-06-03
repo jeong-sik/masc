@@ -69,6 +69,33 @@ let validate_keeper_assignments ~(config_path : string) (runtimes : t list)
          (List.length runtimes))
 ;;
 
+let materialize_config ~(config_path : string) (cfg : config)
+  : (t list * t * (string * string) list, string) result
+  =
+  let runtimes = List.filter_map (of_binding cfg) cfg.bindings in
+  let assignments = cfg.keeper_assignments in
+  match cfg.default_runtime_id with
+  | None ->
+    Error
+      (Printf.sprintf
+         "%s: [runtime].default is required (no default runtime configured; \
+          silent fallback removed)"
+         config_path)
+  | Some did ->
+    (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
+     | None ->
+       Error
+         (Printf.sprintf
+            "%s: [runtime].default = %S not found among %d runtimes"
+            config_path
+            did
+            (List.length runtimes))
+     | Some rt ->
+       (match validate_keeper_assignments ~config_path runtimes assignments with
+        | Error _ as e -> e
+        | Ok () -> Ok (runtimes, rt, assignments)))
+;;
+
 let load_list ~(config_path : string)
   : (t list * t * (string * string) list, string) result
   =
@@ -79,29 +106,7 @@ let load_list ~(config_path : string)
          "runtime config parse failed (%s): %d error(s)"
          config_path
          (List.length errs))
-  | Ok cfg ->
-    let runtimes = List.filter_map (of_binding cfg) cfg.bindings in
-    let assignments = cfg.keeper_assignments in
-    (match cfg.default_runtime_id with
-     | None ->
-       Error
-         (Printf.sprintf
-            "%s: [runtime].default is required (no default runtime configured; \
-             silent fallback removed)"
-            config_path)
-     | Some did ->
-       (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
-        | None ->
-          Error
-            (Printf.sprintf
-               "%s: [runtime].default = %S not found among %d runtimes"
-               config_path
-               did
-               (List.length runtimes))
-        | Some rt ->
-          (match validate_keeper_assignments ~config_path runtimes assignments with
-           | Error _ as e -> e
-           | Ok () -> Ok (runtimes, rt, assignments))))
+  | Ok cfg -> materialize_config ~config_path cfg
 
 (* ---- Lazy default runtime singleton ---- *)
 
@@ -203,6 +208,267 @@ let config_path () : string option =
       in
       if Sys.file_exists path then Some path else None
   | Invalid_env | Missing -> None
+;;
+
+let contains_newline s =
+  String.exists (function
+    | '\n' | '\r' -> true
+    | _ -> false)
+    s
+;;
+
+let toml_escape_string s =
+  let buf = Buffer.create (String.length s) in
+  String.iter
+    (function
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | c -> Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+;;
+
+let assignment_line ~keeper_name ~runtime_id =
+  Printf.sprintf
+    "\"%s\" = \"%s\""
+    (toml_escape_string keeper_name)
+    (toml_escape_string runtime_id)
+;;
+
+let split_lines content =
+  if String.equal content "" then [], false
+  else (
+    let len = String.length content in
+    let trailing_newline = Char.equal content.[len - 1] '\n' in
+    let parts = String.split_on_char '\n' content in
+    let lines =
+      if trailing_newline
+      then (
+        match List.rev parts with
+        | "" :: rest -> List.rev rest
+        | _ -> parts)
+      else parts
+    in
+    lines, trailing_newline)
+;;
+
+let join_lines lines ~trailing_newline =
+  match lines with
+  | [] -> if trailing_newline then "\n" else ""
+  | _ ->
+    let body = String.concat "\n" lines in
+    if trailing_newline then body ^ "\n" else body
+;;
+
+let strip_toml_comment line =
+  match String.index_opt line '#' with
+  | None -> line
+  | Some index -> String.sub line 0 index
+;;
+
+let is_toml_table_header line =
+  let s = line |> strip_toml_comment |> String.trim in
+  let len = String.length s in
+  len >= 2 && Char.equal s.[0] '[' && Char.equal s.[len - 1] ']'
+;;
+
+let is_runtime_assignments_header line =
+  String.equal (line |> strip_toml_comment |> String.trim) "[runtime.assignments]"
+;;
+
+let rec split_at n xs =
+  if n <= 0 then [], xs
+  else
+    match xs with
+    | [] -> [], []
+    | x :: rest ->
+      let before, after = split_at (n - 1) rest in
+      x :: before, after
+;;
+
+let find_index pred xs =
+  let rec loop index = function
+    | [] -> None
+    | x :: rest -> if pred x then Some index else loop (index + 1) rest
+  in
+  loop 0 xs
+;;
+
+let parse_quoted_key raw =
+  let len = String.length raw in
+  if len < 2 || not (Char.equal raw.[0] '"') then None
+  else
+    let buf = Buffer.create len in
+    let rec loop index =
+      if index >= len then None
+      else
+        match raw.[index] with
+        | '"' -> Some (Buffer.contents buf)
+        | '\\' when index + 1 < len ->
+          let escaped =
+            match raw.[index + 1] with
+            | '"' -> '"'
+            | '\\' -> '\\'
+            | 'n' -> '\n'
+            | 'r' -> '\r'
+            | 't' -> '\t'
+            | c -> c
+          in
+          Buffer.add_char buf escaped;
+          loop (index + 2)
+        | c ->
+          Buffer.add_char buf c;
+          loop (index + 1)
+    in
+    loop 1
+;;
+
+let parse_literal_key raw =
+  let len = String.length raw in
+  if len < 2 || not (Char.equal raw.[0] '\'') then None
+  else
+    match String.index_from_opt raw 1 '\'' with
+    | None -> None
+    | Some end_index -> Some (String.sub raw 1 (end_index - 1))
+;;
+
+let assignment_key_of_line line =
+  let trimmed = String.trim line in
+  if String.equal trimmed "" || Char.equal trimmed.[0] '#'
+  then None
+  else
+    match String.index_opt trimmed '=' with
+    | None -> None
+    | Some eq_index ->
+      let key_part = String.sub trimmed 0 eq_index |> String.trim in
+      if String.equal key_part ""
+      then None
+      else if Char.equal key_part.[0] '"'
+      then parse_quoted_key key_part
+      else if Char.equal key_part.[0] '\''
+      then parse_literal_key key_part
+      else Some key_part
+;;
+
+let replace_or_append_assignment section_lines ~keeper_name ~runtime_id =
+  let line = assignment_line ~keeper_name ~runtime_id in
+  let rec loop acc = function
+    | [] -> List.rev_append acc [ line ]
+    | existing :: rest ->
+      (match assignment_key_of_line existing with
+       | Some key when String.equal key keeper_name ->
+         List.rev_append acc (line :: rest)
+       | _ -> loop (existing :: acc) rest)
+  in
+  loop [] section_lines
+;;
+
+let append_runtime_assignments_section lines ~keeper_name ~runtime_id =
+  let section =
+    [ "[runtime.assignments]"; assignment_line ~keeper_name ~runtime_id ]
+  in
+  match List.rev lines with
+  | [] -> section
+  | last :: _ when String.equal (String.trim last) "" -> lines @ section
+  | _ -> lines @ ("" :: section)
+;;
+
+let update_runtime_assignment_text content ~keeper_name ~runtime_id =
+  let lines, _trailing_newline = split_lines content in
+  let updated_lines =
+    match find_index is_runtime_assignments_header lines with
+    | None -> append_runtime_assignments_section lines ~keeper_name ~runtime_id
+    | Some header_index ->
+      let before, from_header = split_at header_index lines in
+      (match from_header with
+       | [] -> append_runtime_assignments_section lines ~keeper_name ~runtime_id
+       | header :: after_header ->
+         let section_lines, after_section =
+           match find_index is_toml_table_header after_header with
+           | None -> after_header, []
+           | Some next_header_index -> split_at next_header_index after_header
+         in
+         before
+         @ (header
+            :: replace_or_append_assignment
+                 section_lines
+                 ~keeper_name
+                 ~runtime_id)
+         @ after_section)
+  in
+  join_lines updated_lines ~trailing_newline:true
+;;
+
+let runtime_parse_errors_to_string errs =
+  errs
+  |> List.map (fun (err : Runtime_toml.parse_error) ->
+    Printf.sprintf "%s: %s" err.path err.message)
+  |> String.concat "; "
+;;
+
+let validate_runtime_config_text ~config_path content =
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    Error
+      (Printf.sprintf
+         "runtime config parse failed (%s): %s"
+         config_path
+         (runtime_parse_errors_to_string errs))
+  | Ok cfg ->
+    (match materialize_config ~config_path cfg with
+     | Ok _ -> Ok ()
+     | Error _ as e -> e)
+;;
+
+let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
+  let keeper_name = String.trim keeper_name in
+  let runtime_id = String.trim runtime_id in
+  if String.equal keeper_name ""
+  then Error "keeper_name must not be empty"
+  else if String.equal runtime_id ""
+  then Error "runtime_id must not be empty"
+  else if contains_newline keeper_name
+  then Error "keeper_name must not contain newlines"
+  else if contains_newline runtime_id
+  then Error "runtime_id must not contain newlines"
+  else
+    let path_result =
+      match runtime_config_path with
+      | Some path -> Ok path
+      | None ->
+        (match config_path () with
+         | Some path -> Ok path
+         | None -> Error "runtime config path not found")
+    in
+    match path_result with
+    | Error _ as e -> e
+    | Ok path ->
+      let content_result =
+        try Ok (Fs_compat.load_file path) with
+        | exn ->
+          Error
+            (Printf.sprintf
+               "failed to read runtime config %s: %s"
+               path
+               (Printexc.to_string exn))
+      in
+      (match content_result with
+       | Error _ as e -> e
+       | Ok content ->
+         let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
+         (match validate_runtime_config_text ~config_path:path next with
+          | Error _ as e -> e
+          | Ok () ->
+            (match Fs_compat.save_file_atomic path next with
+             | Error _ as e -> e
+             | Ok () ->
+               (match init_default ~config_path:path with
+                | Ok () -> Ok ()
+                | Error msg ->
+                  Error ("runtime config saved but reload failed: " ^ msg)))))
 ;;
 
 (* RFC-0206 single-binding: the deleted [Runtime_runtime.resolve_*_max_context]

@@ -500,6 +500,28 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         Progress.stop_tracking task_id;
         tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" e)
       | Ok _ ->
+      let runtime_assignment_result =
+        match p.runtime_id_opt with
+        | None -> Ok ()
+        | Some runtime_id ->
+          Runtime.set_runtime_id_for_keeper
+            ~keeper_name:p.name
+            ~runtime_id
+            ()
+      in
+      (match runtime_assignment_result with
+       | Error e ->
+         Prometheus.inc_counter
+           Keeper_metrics.(to_string LifecycleDispatchRejections)
+           ~labels:[("keeper", p.name); ("event", "create_runtime_assignment")]
+           ();
+         Log.Keeper.error
+           "create_keeper failed: runtime assignment error for name=%s: %s"
+           p.name
+           e;
+         Progress.stop_tracking task_id;
+         tool_result_error e
+       | Ok () ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_initial_meta ctx.config meta with
       | Error e ->
@@ -552,4 +574,4 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("handoff_threshold", `Float meta.handoff_threshold);
           ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in
-        tool_result_ok (Yojson.Safe.to_string json)
+        tool_result_ok (Yojson.Safe.to_string json))

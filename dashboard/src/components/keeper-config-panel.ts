@@ -551,10 +551,7 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
 function runtimeSelectionSummary(c: KeeperConfig): string {
   const selected = c.execution.selected_runtime_id || MISSING_DATA_DASH
   const canonical = c.execution.selected_runtime_canonical || selected
-  const manifest = c.sources.default_manifest_path
-  const selectionPart = manifest
-    ? `선택은 ${manifest} 에서 관리됩니다.`
-    : '선택 source 경로를 확인할 수 없습니다.'
+  const selectionPart = '선택은 runtime.toml [runtime.assignments] 에서 관리됩니다.'
   const canonicalPart =
     canonical !== '' && canonical !== selected
       ? ` 현재 값 ${selected} 는 runtime에서 ${canonical} 으로 정규화됩니다.`
@@ -748,7 +745,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${Callout}
         title="편집 가능 범위"
-        body="여기서 저장되는 값은 keeper 프롬프트, live override 계층, keeper TOML의 runtime_id입니다."
+        body="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다."
       />
 
       ${promptSection}

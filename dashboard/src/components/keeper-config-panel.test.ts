@@ -520,7 +520,8 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
     expect(mocks.fetchRuntimeProfiles).not.toHaveBeenCalled()
     expect(container.textContent).toContain('편집 가능 범위')
-    expect(container.textContent).toContain('keeper TOML')
+    expect(container.textContent).toContain('runtime.toml')
+    expect(container.textContent).toContain('[runtime.assignments]')
     expect(container.textContent).toContain('Runtime 선택')
     expect(container.textContent).toContain('tier-group.keeper_unified')
     expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
@@ -580,7 +581,7 @@ describe('KeeperConfigPanel', () => {
     )
     expect(container.textContent).toContain('runtime_id')
     expect(container.textContent).toContain('tier-group.keeper_unified')
-    expect(container.textContent).toContain('선택은 /tmp/config/keepers/default.toml 에서 관리됩니다.')
+    expect(container.textContent).toContain('선택은 runtime.toml [runtime.assignments] 에서 관리됩니다.')
     expect(mocks.updateKeeperRuntime).not.toHaveBeenCalled()
   })
 

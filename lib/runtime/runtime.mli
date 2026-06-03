@@ -78,6 +78,17 @@ val config_path : unit -> string option
     deleted [Runtime.config_path] (delegates to
     [Config_dir_resolver]). *)
 
+val set_runtime_id_for_keeper :
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  runtime_id:string ->
+  unit ->
+  (unit, string) result
+(** Persist [keeper_name] -> [runtime_id] in
+    [\[runtime.assignments\]] (runtime.toml SSOT), validate the resulting
+    runtime config, atomically write it, and refresh the in-process runtime
+    assignment cache. *)
+
 val default_max_context : unit -> int
 (** Context-window budget of the default runtime's model (RFC-0206
     single-binding). Replaces the deleted [Runtime_runtime.resolve_*_max_context]

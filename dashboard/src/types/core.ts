@@ -1275,7 +1275,6 @@ interface KeeperConfigWorkspace {
 }
 
 export interface KeeperConfigTools {
-  tool_access: unknown
   resolved_allowlist: string[]
   tool_denylist: string[]
   active_masc_tool_count: number

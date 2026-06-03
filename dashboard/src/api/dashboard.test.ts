@@ -1464,7 +1464,6 @@ describe('fetchKeeperConfig', () => {
         missing_active_goal_ids: [],
       },
       tools: {
-        tool_access: ['tool_read_file'],
         resolved_allowlist: 'tool_read_file',
         tool_denylist: 'Execute',
         active_masc_tool_count: '1',

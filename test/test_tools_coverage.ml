@@ -544,7 +544,7 @@ let test_masc_keeper_create_from_persona_schema () =
       | Some props ->
           Alcotest.(check bool) "has persona_name" true
             (List.mem_assoc "persona_name" props);
-          Alcotest.(check bool) "has canonical tool_access" true
+          Alcotest.(check bool) "omits removed tool_access" false
             (List.mem_assoc "tool_access" props);
           Alcotest.(check bool) "omits social_model" false
             (List.mem_assoc "social_model" props)
@@ -570,7 +570,7 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "social_model" props);
           Alcotest.(check bool) "has autoboot_enabled" true
             (List.mem_assoc "autoboot_enabled" props);
-          Alcotest.(check bool) "has canonical tool_access" true
+          Alcotest.(check bool) "omits removed tool_access" false
             (List.mem_assoc "tool_access" props);
           Alcotest.(check bool) "omits models" false
             (List.mem_assoc "models" props);

@@ -103,7 +103,6 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
           ("last_model_used", `String "llama:auto");
-          ("tool_access", `List []);
         ])
   with
   | Ok meta -> meta

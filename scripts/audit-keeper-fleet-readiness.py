@@ -76,7 +76,6 @@ class KeeperAudit:
     runtime_path: str | None
     sandbox_profile: str | None
     network_mode: str | None
-    tool_access: list[str] | None
     last_turn_ts: float | None
     last_turn_age_hours: float | None
     recent_action: bool
@@ -279,30 +278,6 @@ def string_list_value(value: Any) -> list[str] | None:
         if item:
             tools.append(item)
     return tools
-
-
-def tool_access_from_config(
-    config: dict[str, Any],
-) -> tuple[list[str] | None, list[str]]:
-    raw = config.get("tool_access")
-    if raw is None:
-        return None, []
-    tools = string_list_value(raw)
-    if tools is None:
-        return None, ["tool_access_config_invalid"]
-    return tools, []
-
-
-def tool_access_from_runtime(
-    runtime: dict[str, Any],
-) -> tuple[list[str] | None, list[str]]:
-    raw = runtime.get("tool_access")
-    if raw is None:
-        return None, []
-    tools = string_list_value(raw)
-    if tools is None:
-        return None, ["tool_access_runtime_invalid"]
-    return tools, []
 
 
 def tools_from_decision(row: dict[str, Any]) -> list[str]:
@@ -1075,20 +1050,10 @@ def audit_keeper(
     network_mode = string_field(runtime, "network_mode") or string_field(
         config, "network_mode"
     )
-    config_tool_access, config_tool_access_failures = tool_access_from_config(config)
-    runtime_tool_access, runtime_tool_access_failures = tool_access_from_runtime(
-        runtime
-    )
-    tool_access = (
-        runtime_tool_access if runtime_tool_access is not None else config_tool_access
-    )
-
     if sandbox_profile != "docker":
         failures.append("sandbox_not_docker")
     if network_mode != "inherit":
         failures.append("network_not_inherit")
-    failures.extend(config_tool_access_failures)
-    failures.extend(runtime_tool_access_failures)
 
     evidence_ts, tools = scan_keeper_evidence(
         base_path,
@@ -1180,7 +1145,6 @@ def audit_keeper(
         runtime_path=str(runtime_path) if runtime_path.exists() else None,
         sandbox_profile=sandbox_profile,
         network_mode=network_mode,
-        tool_access=tool_access,
         last_turn_ts=last_turn_ts,
         last_turn_age_hours=last_turn_age_hours,
         recent_action=recent_action,
@@ -1306,13 +1270,8 @@ def print_text(report: dict[str, Any]) -> None:
         marker = "OK" if not failures else "FAIL"
         age = keeper["last_turn_age_hours"]
         age_label = "unknown" if age is None else f"{age:.2f}h"
-        tool_access_label = (
-            "default"
-            if keeper["tool_access"] is None
-            else str(len(keeper["tool_access"]))
-        )
         print(
-            "- {name}: {marker} tool_access={tool_access} "
+            "- {name}: {marker} "
             "sandbox={sandbox}/{network} "
             "recent={recent} age={age} board={board} "
             "web_search={web_search} "
@@ -1322,7 +1281,6 @@ def print_text(report: dict[str, Any]) -> None:
             "history={history} tool_call_log={tool_call_log}".format(
                 name=keeper["name"],
                 marker=marker,
-                tool_access=tool_access_label,
                 sandbox=keeper["sandbox_profile"],
                 network=keeper["network_mode"],
                 recent=str(keeper["recent_action"]).lower(),

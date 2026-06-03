@@ -48,7 +48,6 @@ let test_meta_json_roundtrip_with_auto_pause_blocker () =
     ("name", `String "test-keeper");
     ("agent_name", `String "agent-test");
     ("trace_id", `String "trace-test");
-    ("tool_access", `List []);
   ] in
   let meta = match Keeper_meta_json_parse.meta_of_json base_json with
     | Ok m -> m
@@ -85,7 +84,6 @@ let test_meta_json_roundtrip_with_stale_storm_blocker () =
     ("name", `String "test-keeper2");
     ("agent_name", `String "agent-test2");
     ("trace_id", `String "trace-test2");
-    ("tool_access", `List []);
   ] in
   let meta = match Keeper_meta_json_parse.meta_of_json base_json with
     | Ok m -> m
@@ -120,7 +118,6 @@ let legacy_base_json name =
       "name", `String name;
       "agent_name", `String (name ^ "-agent");
       "trace_id", `String ("trace-" ^ name);
-      "tool_access", `List [];
     ]
 
 let test_legacy_last_blocker_pair_rejected () =

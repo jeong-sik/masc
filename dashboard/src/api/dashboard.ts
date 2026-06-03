@@ -2292,7 +2292,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       missing_active_goal_ids: normalizeStringList(workspace.missing_active_goal_ids),
     },
     tools: {
-      tool_access: tools.tool_access ?? {},
       resolved_allowlist: normalizeStringList(tools.resolved_allowlist),
       tool_denylist: normalizeStringList(tools.tool_denylist),
       active_masc_tool_count: asInt(tools.active_masc_tool_count) ?? 0,

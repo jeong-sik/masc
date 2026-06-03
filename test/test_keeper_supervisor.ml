@@ -285,7 +285,6 @@ let test_should_cleanup_dead_true () =
         ("goal", `String "goal");
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
-        ("tool_access", `List []);
       ] in
       match Keeper_meta_json_parse.meta_of_json json with
       | Ok meta -> meta
@@ -306,7 +305,6 @@ let test_should_cleanup_dead_false_when_recent () =
         ("goal", `String "goal");
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
-        ("tool_access", `List []);
       ] in
       match Keeper_meta_json_parse.meta_of_json json with
       | Ok meta -> meta
@@ -362,7 +360,6 @@ let make_meta name =
     ("goal", `String "test");
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
-    ("tool_access", `List []);
   ] in
   match Keeper_meta_json_parse.meta_of_json json with
   | Ok meta -> meta

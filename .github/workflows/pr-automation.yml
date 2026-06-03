@@ -60,11 +60,11 @@ jobs:
             const pullNumber = pr.number;
 
             const titlePattern = new RegExp(
-              (process.env.AGENT_DRAFT_GUARD_TITLE_RE || String.raw`^\[codex\]`),
+              (process.env.AGENT_DRAFT_GUARD_TITLE_RE || String.raw`^\[ai-agent\]`),
               "i"
             );
             const branchPattern = new RegExp(
-              (process.env.AGENT_DRAFT_GUARD_BRANCH_RE || String.raw`^(codex[/-]|keeper[/-])`),
+              (process.env.AGENT_DRAFT_GUARD_BRANCH_RE || String.raw`^(ai-agent[/-]|keeper[/-])`),
               "i"
             );
             const automationProneBypassLabels = new Set(["allow-auto-merge"]);
@@ -135,7 +135,7 @@ jobs:
               titlePattern.test(currentPr.title || pr.title || "") ||
               branchPattern.test(currentPr.head?.ref || pr.head?.ref || "") ||
               labels.includes("agent-pr") ||
-              labels.includes("codex");
+              labels.includes("ai-agent");
 
             const bypassLabelSet = new Set(bypassLabels);
             const presentBypassLabels = labels.filter((label) => bypassLabelSet.has(label));

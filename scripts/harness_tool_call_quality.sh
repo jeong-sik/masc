@@ -390,7 +390,7 @@ start_live_server() {
     export OAS_CLAUDE_STRICT_MCP="1"
     export OAS_GEMINI_NO_MCP="1"
     export OAS_GEMINI_APPROVAL_MODE="plan"
-    export OAS_CODEX_CONFIG="mcp_servers={}"
+    export OAS_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" \
       --target-dir "${TARGET_DIR}" \
       --port "${PORT}" \
@@ -409,7 +409,7 @@ start_live_server() {
     export OAS_CLAUDE_STRICT_MCP="1"
     export OAS_GEMINI_NO_MCP="1"
     export OAS_GEMINI_APPROVAL_MODE="plan"
-    export OAS_CODEX_CONFIG="mcp_servers={}"
+    export OAS_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
   ) >"${launch_log}" 2>&1 &
   SERVER_PID="$!"

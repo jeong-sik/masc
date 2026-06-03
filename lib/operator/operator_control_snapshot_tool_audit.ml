@@ -124,13 +124,7 @@ let cached_tool_audit_json
   =
   let base_hash = Digest.to_hex (Digest.string config.base_path) in
   let cache_key = "kta:" ^ base_hash ^ ":" ^ meta.name in
-  if lightweight
-  then
-    Dashboard_cache.seed_stale_if_missing
-      cache_key
-      ~stale_for:120.0
-      (lightweight_tool_audit_fallback_json meta);
-  let ttl = if lightweight then 30.0 else 2.0 in
+  let ttl = 2.0 in
   Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
     let ( allowed_tool_names
         , recent_tool_names

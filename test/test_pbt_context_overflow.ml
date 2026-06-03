@@ -18,11 +18,11 @@
       keeper_agent_run source does NOT contain ~max_input_tokens.
 
     Property 5 (Reducer integration):
-      keeper_run_tools source contains cap_message_tokens in the
+      keeper_run_tools_hooks source contains cap_message_tokens in the
       keeper reducer chain, ordered before the local pair repair.
 
     Property 6 (Reducer hardening):
-      keeper_run_tools source uses the keeper-local repair path and does
+      keeper_run_tools_hooks source uses the keeper-local repair path and does
       not call OAS repair_dangling_tool_calls, which fabricates synthetic
       ToolResult messages for dangling tool uses. *)
 
@@ -166,7 +166,7 @@ let test_cap_message_tokens_integration () =
         in
         ascend (Sys.getcwd ())
   in
-  let target = Filename.concat repo_root "lib/keeper/keeper_run_tools.ml" in
+  let target = Filename.concat repo_root "lib/keeper/keeper_run_tools_hooks.ml" in
   if not (Sys.file_exists target) then
     ()
   else begin
@@ -189,7 +189,7 @@ let test_cap_message_tokens_integration () =
       | None -> None
     in
     Alcotest.(check bool)
-      "keeper_run_tools.ml must integrate cap_message_tokens before local pair repair"
+      "keeper_run_tools_hooks.ml must integrate cap_message_tokens before local pair repair"
       true
       (match cap_pos, repair_pos with
        | Some cap_pos, Some repair_pos -> cap_pos < repair_pos
@@ -222,7 +222,7 @@ let test_pair_repair_integration () =
         in
         ascend (Sys.getcwd ())
   in
-  let target = Filename.concat repo_root "lib/keeper/keeper_run_tools.ml" in
+  let target = Filename.concat repo_root "lib/keeper/keeper_run_tools_hooks.ml" in
   if not (Sys.file_exists target) then
     ()
   else begin
@@ -242,11 +242,11 @@ let test_pair_repair_integration () =
       find_substring content "Keeper_context_core.repair_broken_tool_call_pairs"
     in
     Alcotest.(check bool)
-      "keeper_run_tools.ml must not invoke OAS synthetic repair_dangling_tool_calls"
+      "keeper_run_tools_hooks.ml must not invoke OAS synthetic repair_dangling_tool_calls"
       true
       (Option.is_none oas_repair_pos);
     Alcotest.(check bool)
-      "keeper_run_tools.ml must integrate local non-fabricating pair repair"
+      "keeper_run_tools_hooks.ml must integrate local non-fabricating pair repair"
       true
       (Option.is_some local_pos)
   end
@@ -271,7 +271,12 @@ let user_tool_result id content : Agent_sdk.Types.message =
   { role = Agent_sdk.Types.User
   ; content =
       [ Agent_sdk.Types.ToolResult
-          { tool_use_id = id; content; is_error = false; json = None }
+          { tool_use_id = id
+          ; content
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
       ]
   ; name = None
   ; tool_call_id = None

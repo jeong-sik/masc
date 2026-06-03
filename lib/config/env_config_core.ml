@@ -370,14 +370,14 @@ let base_path_prod_guard path =
         else path
   end
 
-(** Project base path. Missing [MASC_BASE_PATH] falls back to cwd, not HOME. *)
+(** Project base path. [MASC_BASE_PATH] is required. *)
 let base_path () =
-  let raw =
-    match base_path_opt () with
-    | Some path -> path
-    | None -> "."
-  in
-  base_path_prod_guard raw
+  match base_path_opt () with
+  | Some path -> base_path_prod_guard path
+  | None ->
+      raise (Config_error
+        "MASC_BASE_PATH is not set. Set MASC_BASE_PATH to the project root \
+         containing the .masc/ directory.")
 
 let sb_path_opt () =
   match base_path_opt () with

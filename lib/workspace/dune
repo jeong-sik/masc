@@ -45,6 +45,7 @@
   mention
   mention_dedup
   workspace_resilience
+  workspace_goal_index
   heartbeat
   nickname)
  (libraries

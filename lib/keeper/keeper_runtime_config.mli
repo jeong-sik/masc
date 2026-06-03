@@ -1,5 +1,5 @@
 (** Keeper_runtime_config — load startup keeper env seeding from
-    [<resolved config root>/keeper_runtime.toml].
+    [<resolved config root>/runtime.toml].
 
     Per-base-path config for keeper turn budgets, semaphore timeouts, and
     other runtime parameters that previously lived only in environment
@@ -8,7 +8,7 @@
 
     Precedence (highest first):
       1. Process env var (caller override, e.g. CI/test)
-      2. TOML value from [<resolved config root>/keeper_runtime.toml]
+      2. TOML value from [<resolved config root>/runtime.toml]
       3. Hardcoded default in [Env_config_keeper.KeeperKeepalive].
 
     The TOML loader runs at server startup, before any module that reads
@@ -19,7 +19,7 @@
 
     @since 0.7.1 *)
 
-(** Load TOML from [<resolved config root>/keeper_runtime.toml] and
+(** Load TOML from [<resolved config root>/runtime.toml] and
     record any overrides in the process-local boot override store.
 
     The resolved config root honors [MASC_CONFIG_DIR] when set; otherwise it
@@ -35,7 +35,7 @@
 val load_and_apply : base_path:string -> (int, string) result
 
 (** Read the raw TOML value for [env_name] from the shadow registry.
-    Returns [None] when the key was absent from [keeper_runtime.toml]
+    Returns [None] when the key was absent from [runtime.toml]
     or the file did not exist.
 
     This is the TOML intent *independent* of any env override — it lets

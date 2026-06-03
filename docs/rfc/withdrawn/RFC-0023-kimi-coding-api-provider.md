@@ -12,7 +12,7 @@ withdrawn_reason: "Provider-C provider ships via provider_adapter.ml + transport
 - **Status**: Draft
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-03
-- **Related**: provider_adapter.ml, transport_cli-tool-c.ml, config/keeper_runtime.toml
+- **Related**: provider_adapter.ml, transport_cli-tool-c.ml, config/runtime.toml
 
 ## 1. Problem
 
@@ -65,7 +65,7 @@ Reuse existing Provider-D-compatible `Direct_api` transport. Only differences ar
 |------|--------|
 | `lib/provider_adapter.ml` | Add `provider-c-coding` provider entry |
 | `lib/provider_adapter.mli` | Expose if needed |
-| `config/keeper_runtime.toml` | Optional: add to runtime profile after validation |
+| `config/runtime.toml` | Optional: add to runtime profile after validation |
 
 ## 5. Validation
 

@@ -48,8 +48,8 @@ let normalized =
 
 문제:
 
-- **SSOT 위반**: `keeper_runtime.toml` 의 `[[routes]]` 테이블이 "canonical path 는 `"runtime.strict_tool_candidates"`" 라고 정의하는데, 코드는 `"strict_tool_candidates"` 도 받아들인다. 같은 의미가 두 가지 wire format 으로 존재.
-- **Silent drift**: `keeper_runtime.toml` 에서 `"runtime.strict_tool_candidates"` 를 `"tier.strict_tool_candidates"` 로 옮기면, auto-normalize 는 *여전히* `"strict_tool_candidates"` 를 받아들여 첫 match (`"runtime"` prefix) 를 반환. operator 가 route table 을 바꿨음에도 실제 동작이 바뀌지 않을 수 있다.
+- **SSOT 위반**: `runtime.toml` 의 `[[routes]]` 테이블이 "canonical path 는 `"runtime.strict_tool_candidates"`" 라고 정의하는데, 코드는 `"strict_tool_candidates"` 도 받아들인다. 같은 의미가 두 가지 wire format 으로 존재.
+- **Silent drift**: `runtime.toml` 에서 `"runtime.strict_tool_candidates"` 를 `"tier.strict_tool_candidates"` 로 옮기면, auto-normalize 는 *여전히* `"strict_tool_candidates"` 를 받아들여 첫 match (`"runtime"` prefix) 를 반환. operator 가 route table 을 바꿨음에도 실제 동작이 바뀌지 않을 수 있다.
 - **Discovery cost**: "이 문자열이 어디에서 유효한가" 를 파악하려면 `profile_lookup` 의 auto-prefix 로직을 추적해야 함. 문자열 값 자첧만으로는 의미를 알 수 없음.
 
 ### 1.2 String classifier (안티패턴 §2)
@@ -73,10 +73,10 @@ auto-normalize 와 string classifier 는 표면적으로 다른 파일의 다른
 
 ## §2 Non-goals
 
-1. **Route table semantics 변경**: `keeper_runtime.toml` 의 `[[routes]]` 구조나 runtime 정의를 바꾸지 않는다. 본 RFC 는 *wire format* 과 *분류기* 만 변경.
+1. **Route table semantics 변경**: `runtime.toml` 의 `[[routes]]` 구조나 runtime 정의를 바꾸지 않는다. 본 RFC 는 *wire format* 과 *분류기* 만 변경.
 2. **Capability profile 의미 확장**: 현재 `"strict_tool_candidates"`, `"tool_strict"` 등의 의미는 유지. 새 profile 을 추가하는 것은 별도 RFC.
 3. **Health probe 전체 rewrite**: `keeper_health_probe.ml` 의 다른 분기(`Client_capacity_full`, `Provider_capacity` 등) 는 본 RFC scope 밖. 단, `Tier_admission_full` 분기만 typed 로 교체.
-4. **Backward-compatible short form 지원**: Phase A 부터 short form 은 *파싱 시점 오류* 로 처리. migration window 없음. (근거: 현재 short form 을 쓰는 caller 는 `keeper_runtime.toml` 낸부의 MASC 코드로, 한 PR 에서 모두 교체 가능.)
+4. **Backward-compatible short form 지원**: Phase A 부터 short form 은 *파싱 시점 오류* 로 처리. migration window 없음. (근거: 현재 short form 을 쓰는 caller 는 `runtime.toml` 낸부의 MASC 코드로, 한 PR 에서 모두 교체 가능.)
 
 ## §3 Design
 

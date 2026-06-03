@@ -18,7 +18,7 @@ Follow-up goal/plan: runtime naming cleanup moved into implementation PRs; the s
 |---|---|---|---|
 | Keeper lifecycle | MASC owns a keeper-cycle FSM above OAS and records pre-dispatch terminal receipts for skips/errors before `Agent.run`. | One "turn" is split across MASC keeper turn, MASC runtime attempts, and OAS agent turns. A reader can easily confuse these clocks. | Add/keep a single turn manifest that records all three counters and every context/runtime/tool decision. |
 | Tools | Tool surface is rebuilt every OAS SDK turn: BM25 index, deterministic prefilter, optional LLM rerank, discovered tools, required tools, policy allowlist, `tool_choice`, completion contract, observed/reported/canonical reconciliation. | Tool selection happens before final provider attempt. Provider lane resolution later can change inline-vs-runtime MCP exposure, so receipt/debug surfaces must show both "requested surface" and "resolved lane". | Record provider-lane result next to `tool_surface`; fail loud when required tool policy and provider lane disagree. |
-| Provider/model/runtime | `keeper_runtime.toml`/catalog routes are MASC-owned; MASC iterates providers and calls OAS as a single-provider runtime per attempt. OAS has its own `Complete_runtime`, but the keeper hot path does not use it. | Two runtime concepts exist. Future fixes can accidentally use OAS runtime semantics in a MASC-owned policy lane. | Document/enforce "one runtime plane per call path"; keep OAS `Complete_runtime` out of keeper hot path unless deliberately migrated. |
+| Provider/model/runtime | `runtime.toml`/catalog routes are MASC-owned; MASC iterates providers and calls OAS as a single-provider runtime per attempt. OAS has its own `Complete_runtime`, but the keeper hot path does not use it. | Two runtime concepts exist. Future fixes can accidentally use OAS runtime semantics in a MASC-owned policy lane. | Document/enforce "one runtime plane per call path"; keep OAS `Complete_runtime` out of keeper hot path unless deliberately migrated. |
 | Context/memory/compaction | MASC has pre-dispatch checkpoint hygiene, memory hook injection, OAS proactive/emergency compaction, post-run checkpoint patching, and memory-bank writes. | Context state still straddles MASC `working_context`, OAS checkpoint, raw `[STATE]` text, memory hooks, and durable MASC memory. Boundary doc already calls this a partial migration. | Make OAS checkpoint/session the runtime SSOT and move MASC continuity to structured sidecars/receipts instead of raw markers. |
 | External comparison | Agent-LLM-A/Provider-D/ADK put turn loop + context/session near runner. OpenClaw/Hermes expose stronger provider failover and compaction surfaces, closer to MASC. | MASC has stronger operator receipts than most SDKs, but also more boundary complexity than runner-centered systems. | Preserve MASC receipts/governance, but simplify runtime state ownership around OAS primitives. |
 
@@ -225,7 +225,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[keeper_runtime.toml / active catalog] --> B[routes.logical_use -> profile]
+    A[runtime.toml / active catalog] --> B[routes.logical_use -> profile]
     B --> C[keeper meta runtime_id / selected item override]
     C --> D[Keeper_runtime_profile.normalize_declared_name]
     D --> E[Keeper_runtime_routing.select_runtime by phase]
@@ -270,7 +270,7 @@ flowchart TD
 
 | Decision | Owner | Code path |
 |---|---|---|
-| Logical route -> runtime profile | MASC | `Keeper_runtime_profile.runtime_id_for_use`, `config/keeper_runtime.toml [routes]` |
+| Logical route -> runtime profile | MASC | `Keeper_runtime_profile.runtime_id_for_use`, `config/runtime.toml [routes]` |
 | Phase override | MASC | `Keeper_runtime_routing.select_runtime` |
 | Model label expansion | MASC catalog | `Runtime_runtime.models_of_runtime_id_result` |
 | Provider config parsing/filtering | MASC catalog + OAS provider config type | `resolve_named_providers_strict_with_secondary_resolver` |

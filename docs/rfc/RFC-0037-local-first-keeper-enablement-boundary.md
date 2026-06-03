@@ -10,14 +10,14 @@
   `lib/runtime/runtime_health_tracker.ml`,
   `lib/keeper/keeper_runtime_profile.ml:14-22`,
   `lib/keeper/keeper_unified_turn.ml:319-394`,
-  `config/keeper_runtime.toml:[tier_small]`,
+  `config/runtime.toml:[tier_small]`,
   `lib/provider_adapter.ml:296`
 
 ## 1. Problem
 
 A keeper cannot be enabled to use Ollama with a single configuration switch.
 RFC-0024 completed the *registration* layer (provider_adapter has the Ollama
-entry at `lib/provider_adapter.ml:296`; keeper_runtime.toml has a commented `[tier_small]`
+entry at `lib/provider_adapter.ml:296`; runtime.toml has a commented `[tier_small]`
 slot). What is still missing is the **boundary** between two layers:
 
 1. **Harness layer** (deterministic, automatic) — should make Ollama work
@@ -33,7 +33,7 @@ These two layers are entangled in main:
 | Harness — URL classification | Explicit provider declaration first, port heuristic last | Pure substring `:11434` scan in `masc_network_defaults.is_ollama_url` |
 | Harness — cooldown policy | Local providers tolerated more than remote | Uniform `cooldown_threshold=3 / cooldown_sec=30` for all providers (no `is_local_provider` use in `runtime_health_tracker.ml`) |
 | Harness — saturation skip cap | Bounded retry | PR #14100 (in flight) — bounds at 5 consecutive skips |
-| User — declaration toggle | One line in `config/keepers/<name>.toml` | None. Operator must edit `keeper_runtime.toml`, uncomment models, find the right runtime name, set keeper's `runtime` field, hope phases align |
+| User — declaration toggle | One line in `config/keepers/<name>.toml` | None. Operator must edit `runtime.toml`, uncomment models, find the right runtime name, set keeper's `runtime` field, hope phases align |
 
 The result: an operator who runs Ollama locally still gets a 4-step manual
 alignment that must succeed exactly to enable a keeper. The harness layer
@@ -44,7 +44,7 @@ single place to express intent.
 
 1. **G1 — Single-line user declaration.** A keeper config carrying
    `providers = ["ollama"]` (or equivalent) routes through Ollama without
-   the operator touching `keeper_runtime.toml`.
+   the operator touching `runtime.toml`.
 2. **G2 — Robust harness auto-discovery.** Ollama on `:11434` becomes
    reachable from the runtime runtime even when `Eio_context` is partially
    unset, with explicit fallback registration and warning logs.
@@ -56,7 +56,7 @@ single place to express intent.
 ## 3. Non-Goals
 
 - Replacing RFC-0024's registration layer — already done.
-- Removing the existing runtime catalog mechanism — `keeper_runtime.toml` remains
+- Removing the existing runtime catalog mechanism — `runtime.toml` remains
   the SSOT for runtime definitions.
 - Adding a "model selection AI" — this is plumbing, not policy.
 - Cross-host Ollama deployments — out of scope; the default URL is local.
@@ -83,11 +83,11 @@ Add a field to keeper config TOML (single source of truth in
 # config/keepers/local_only_keeper.toml
 name = "local_only_keeper"
 providers = ["ollama"]              # NEW — explicit, declarative
-# (instead of) runtime = "tier_small"  + uncommenting models in keeper_runtime.toml
+# (instead of) runtime = "tier_small"  + uncommenting models in runtime.toml
 ```
 
 Resolution rule:
-- If `providers = [...]` is set: synthesize an in-memory runtime from the listed providers, bypassing `keeper_runtime.toml` lookup.
+- If `providers = [...]` is set: synthesize an in-memory runtime from the listed providers, bypassing `runtime.toml` lookup.
 - If `providers` is absent: fall through to existing `runtime = "..."` lookup.
 
 This deliberately avoids adding a `Local_only` variant to
@@ -216,7 +216,7 @@ Defer until Phase 2 stabilizes.
 
 - No existing config breaks. `providers` field is opt-in; absence means
   current `runtime = "..."` lookup runs unchanged.
-- `keeper_runtime.toml [tier_small]` stays as fallback path for operators who
+- `runtime.toml [tier_small]` stays as fallback path for operators who
   prefer the catalog.
 - Knob defaults match prior behavior: `MASC_LOCAL_COOLDOWN_THRESHOLD=5`
   is more generous than today's `3`, but the change applies only to
@@ -227,14 +227,14 @@ Defer until Phase 2 stabilizes.
 | Check | Method | Pass criterion |
 |-------|--------|----------------|
 | C1 | Phase 1 PRs each cite RFC-0037 §X.Y in body | manual review |
-| C2 | After Phase 1: keeper with `runtime = "tier_small"` and uncommented model in keeper_runtime.toml routes through Ollama with **no** Eio_context special-casing required | integration test |
-| C3 | After Phase 2: keeper with only `providers = ["ollama"]` (no keeper_runtime.toml edit) routes through Ollama | integration test |
+| C2 | After Phase 1: keeper with `runtime = "tier_small"` and uncommented model in runtime.toml routes through Ollama with **no** Eio_context special-casing required | integration test |
+| C3 | After Phase 2: keeper with only `providers = ["ollama"]` (no runtime.toml edit) routes through Ollama | integration test |
 | C4 | Local provider cooldown: simulated 4 consecutive Ollama failures keep the endpoint usable; 4 consecutive Agent-LLM-A failures cool it down | unit test |
 | C5 | URL classification: `http://my-server:8080` with `~explicit_provider:"ollama"` returns true; `http://example.com:9000` returns false | unit test |
 
 ## 8. Risks and Tradeoffs
 
-- **Risk**: `providers` field bypasses `keeper_runtime.toml`, causing two ways to
+- **Risk**: `providers` field bypasses `runtime.toml`, causing two ways to
   configure the same thing. **Mitigation**: documentation calls out
   `providers` as the *recommended* path; `runtime` field remains for legacy
   catalog-driven setups.

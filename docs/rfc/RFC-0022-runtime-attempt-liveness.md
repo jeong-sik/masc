@@ -376,7 +376,7 @@ need a higher value (60-90s) under load.
 | `lib/runtime/runtime_health_tracker.ml` | classify attempt-liveness failures into `persistent` vs `transient` per §3 table |
 | `lib/runtime/runtime_config.ml` | add `liveness_budget` field per profile |
 | `lib/runtime/runtime_config.mli` | surface `liveness_budget` reader |
-| `config/keeper_runtime.toml` | no liveness class; runtime learns from successful concrete candidates |
+| `config/runtime.toml` | no liveness class; runtime learns from successful concrete candidates |
 | `lib/runtime/runtime_attempt_liveness_config.ml` | bootstrap budget plus recent successful sample store |
 | `lib/config/env_config_keeper.ml` | env override hooks for the three thresholds (per profile) |
 | `lib/keeper/keeper_hooks_oas.ml` | bridge `Stream_chunk` events to RFC-0012 `record_progress` (Invariant L1) |
@@ -443,7 +443,7 @@ Phase C (default `enforce` everywhere):
   3 600 s design and is resolved separately by per-runtime override
   (Step 2 of goal `oas-bridge-stabilization`).
 - **Permitted (per-runtime override, added 2026-05-06)**: a runtime
-  profile in `config/keeper_runtime.toml` may set its own
+  profile in `config/runtime.toml` may set its own
   `turn_timeout_sec`. Checked-in remote/CLI profiles (`primary`,
   `keeper_diverse`, `retired_fast_profile`, `tier_medium`) run at 600 s.
   Operator-populated local-model profiles (not the checked-in

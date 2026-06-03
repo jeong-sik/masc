@@ -111,7 +111,7 @@ let unresolved_tool_message ~label ~name =
    [Masc_test_deps.find_project_root ()] in tests or the repo root in
    production. The direct check avoids the executable-relative walk in
    [Config_dir_resolver] which can pick up partial config shards
-   materialised by dune into [_build/default/config/keeper_runtime.toml] and
+   materialised by dune into [_build/default/config/runtime.toml] and
    resolve the wrong root. Scoped to this loader only — the generic
    resolver (used by dashboard/runtime code that reads per-env state
    from the resolved root) is untouched. *)

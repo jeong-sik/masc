@@ -177,7 +177,7 @@ match Yojson.Safe.Util.member "reason" json with
 
 `_` swallows `` `Int _``, `` `Bool _``, `` `Assoc _``, `` `Null``, `` `List _``, every future variant Yojson adds. When an upstream provider changes the field shape (string → object with `{"detail": …}`), the call silently returns `None` — the runtime classification routes to `Unknown` and the user sees a generic "runtime exhausted" with no provider rejection detail.
 
-MEMORY `project_runtime_misroute_2026_05_17` is a sibling incident: keeper_runtime.toml parsing silenced a partial-config bug. The catch-all extraction pattern in this file is the *runtime-side* sibling — provider responses silently lose detail.
+MEMORY `project_runtime_misroute_2026_05_17` is a sibling incident: runtime.toml parsing silenced a partial-config bug. The catch-all extraction pattern in this file is the *runtime-side* sibling — provider responses silently lose detail.
 
 ## 4. Proposal — phased
 

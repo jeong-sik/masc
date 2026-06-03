@@ -198,8 +198,8 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 | Field | Replacement / rationale |
 | --- | --- |
 | Retired tool-policy aliases | Tool policy is the canonical `tool_access` string-array allowlist. |
-| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `runtime_id` → `keeper_runtime.toml`. Do not pin per-keeper. |
-| `allowed_providers` | Provider/model ownership lives in `keeper_runtime.toml` and OAS runtime receipts. Do not pin providers per keeper. |
+| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `runtime_id` → `runtime.toml`. Do not pin per-keeper. |
+| `allowed_providers` | Provider/model ownership lives in `runtime.toml` and OAS runtime receipts. Do not pin providers per keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |
 | `trigger_mode`, `policy_action_budget` | Removed with the legacy policy engine. |
 | `initiative_scope`, `initiative_enabled`, `initiative_idle_sec`, `initiative_cooldown_sec` | Renamed to `proactive_*` (see above). |

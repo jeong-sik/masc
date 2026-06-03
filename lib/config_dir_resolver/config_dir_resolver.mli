@@ -132,7 +132,7 @@ val keeper_repo_mappings_toml_path : base_path:string -> string
 
 val config_signature_exists : string -> bool
 (** [config_signature_exists dir] checks whether [dir] looks like a valid
-    MASC config directory (has keeper_runtime.toml, tool_policy.toml, prompts/,
+    MASC config directory (has runtime.toml, tool_policy.toml, prompts/,
     keepers/, or personas/). *)
 
 (** {1 Env introspection}

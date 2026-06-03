@@ -52,7 +52,7 @@ registry: phase transition name=X old=running new=crashed event=fiber_terminated
 with zero hint that the upstream root was a 502 from one specific provider.
 
 The two gaps that combined to produce this incident are *both* visible from
-`keeper_runtime.toml` itself, which already declares the desired end-state in
+`runtime.toml` itself, which already declares the desired end-state in
 comments at `[providers.runpod_mtp.healthcheck]`:
 
 > "Phase 1: 선언만. 실제 probe 동작은 Phase 3
@@ -72,7 +72,7 @@ let transient_http_status code =
 
 `runtime_fsm.ml:48-52` correctly signals `Try_next` to the next candidate when
 a transient error occurs. However, the *candidate ordering itself* is fixed by
-`[tier.strict_tool_candidates] members = [...]` in `keeper_runtime.toml` and never
+`[tier.strict_tool_candidates] members = [...]` in `runtime.toml` and never
 reorders at runtime. Each keeper turn dispatches:
 
 1. `runpod_mtp.qwen36-35b-a3b-mtp.keeper` → 502 → `Try_next`
@@ -86,7 +86,7 @@ the same provider trigger `noop_failure_loop(noop=4)`; six keepers stuck on the
 same provider trigger `stale_fleet_batch(distinct_count=6)`. The supervisor
 then forces `crashed`.
 
-`lib/runtime/provider_health.ml` referenced by `keeper_runtime.toml` *does not
+`lib/runtime/provider_health.ml` referenced by `runtime.toml` *does not
 exist*. The `[providers.X.healthcheck]` blocks (`enabled`, `endpoint`,
 `method`, `timeout_seconds`, `probe_interval_seconds`, `unhealthy_threshold`,
 `recovery_threshold`) are parsed by `runtime_config.ml` into
@@ -134,7 +134,7 @@ fiber-termination signal so dashboards stay consistent.
 In-scope:
 
 - **(A)** Implement `lib/runtime/provider_health.ml` (Phase 3 wiring per the
-  keeper_runtime.toml comment): an Eio fiber per `[providers.X.healthcheck enabled=true]`
+  runtime.toml comment): an Eio fiber per `[providers.X.healthcheck enabled=true]`
   block, plus an in-band attempt-result feed; a per-provider health state used
   by the runtime to *skip* unhealthy candidates in the per-turn lineup.
 - **(B)** Thread `provider_id : string option` and `http_status : int option`
@@ -145,7 +145,7 @@ In-scope:
 
 Out-of-scope:
 
-- Hot-reload of `keeper_runtime.toml` on config change (separate concern).
+- Hot-reload of `runtime.toml` on config change (separate concern).
 - Cross-provider request hedging (different design space).
 - Modification of `transient_http_status` itself — the classification is
   correct; the *list reordering* is what's missing.
@@ -314,7 +314,7 @@ Wire-in:
 |---|---|
 | `Fiber_terminated` variant widening runtimes to many caller sites. | OCaml exhaustive-match compile guarantees no missed updates. Default `~provider_id:None ~http_status:None` for non-runtime paths preserves all current behaviour. |
 | Probe fiber leaks across pod restart / supervisor crash. | `Eio.Switch.on_release` cleanup. Dedicated test in PR-2: tear down switch, assert fiber stopped. |
-| Probe loop floods upstream during outage. | Minimum `probe_interval_seconds = 60` enforced at config-parse time (validated, with rejection of `<60`). Document in keeper_runtime.toml schema comments. |
+| Probe loop floods upstream during outage. | Minimum `probe_interval_seconds = 60` enforced at config-parse time (validated, with rejection of `<60`). Document in runtime.toml schema comments. |
 | Filter empties candidate list, causing dead-runtime. | Empty-after-filter is the explicit *fall-through* case — original list is returned. Dashboard surfaces "all-unhealthy" state via the gauge so the operator sees the degraded condition. |
 | `RFC-0125` 3-way collision pattern recurs and someone else takes 0126 mid-plan. | Ledger advanced to 0128; Draft PR opened immediately after this commit so the reservation becomes visible in `gh pr list --search RFC-0127`. |
 | Phase-2 fiber blocks ALL runtime configs at config-parse failure of one provider. | Probe-spawn loop iterates per provider with try/with; a malformed `[healthcheck]` block disables only that provider's probe, not the supervisor. |
@@ -340,7 +340,7 @@ Wire-in:
 
 ## 7. References
 
-- `keeper_runtime.toml:432-468` — `[providers.runpod_mtp.healthcheck]` Phase 1
+- `runtime.toml:432-468` — `[providers.runpod_mtp.healthcheck]` Phase 1
   declaration (comments reference Phase 3 wiring deferral)
 - `lib/runtime/runtime_attempt_fsm.ml:478` — `transient_http_status`
 - `lib/runtime/runtime_fsm.ml:48-52` — `Try_next` signal site

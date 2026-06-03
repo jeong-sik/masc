@@ -477,7 +477,7 @@ let keeper_unified_max_tokens_rp =
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_UNIFIED_MAX_TOKENS"
                           ~default:65536 ~min_v:256 ~max_v:262144)
     ~min_v:256 ~max_v:262144
-    ~description:"Keeper turn max output tokens fallback (keeper_runtime.toml may override in production)" ()
+    ~description:"Keeper turn max output tokens fallback (runtime.toml may override in production)" ()
 let keeper_unified_max_tokens () : int =
   Runtime_params.get keeper_unified_max_tokens_rp
 

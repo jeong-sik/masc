@@ -41,7 +41,7 @@ Out of scope (separate RFC candidates from the same audit):
 
 - B1 LIFE: Dead phase entry-action ordering race (`keeper_state_machine.ml:773-778`).
 - B2 MEMORY: RFC-0107 `Jsonl_atomic` adoption for memory bank compaction.
-- B3 RUNTIME: keeper_runtime.toml unknown field strict validation.
+- B3 RUNTIME: runtime.toml unknown field strict validation.
 - B4 RUNTIME: `runtime_inference.ml:59-82` inference param fail-OPEN.
 - B6 TURN: `keeper_turn_runtime_budget_routing.ml:11,17` string prefix dispatch → tagged variant.
 

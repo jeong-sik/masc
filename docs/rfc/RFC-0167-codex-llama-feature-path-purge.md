@@ -33,8 +33,8 @@ The operator deferred §9 explicitly and confirmed in the follow-up turn that bo
 
 | Path | Before | After |
 |------|--------|-------|
-| `keeper_runtime.toml` with `"llama:<model_id>"` label, no `Discovery.context_for_model` match | Fell back to `current_llama_endpoint` round-robin and ticked `masc_runtime_llama_model_not_discovered_total` | `resolve_label_context` returns `None`. Per-slot context resolution must use `"custom:<url>"` label shape instead. |
-| `keeper_runtime.toml` with `"llama:<model_id>"` label, has Discovery match | Returned `Some ctx` | Returns `None`. |
+| `runtime.toml` with `"llama:<model_id>"` label, no `Discovery.context_for_model` match | Fell back to `current_llama_endpoint` round-robin and ticked `masc_runtime_llama_model_not_discovered_total` | `resolve_label_context` returns `None`. Per-slot context resolution must use `"custom:<url>"` label shape instead. |
+| `runtime.toml` with `"llama:<model_id>"` label, has Discovery match | Returned `Some ctx` | Returns `None`. |
 | cli-tool-a runtime adapter omits keeper-bound MCP tools (per-keeper bridging required, no per-keeper bearer) | Logged WARN-once + ticked per-tool counter + (if `required`) returned `Error (invalid_runtime_config ...)` | Same `Error` path retained; WARN + counter removed. |
 | Test `test_cli-tool-a_omission_dedup_10097` | Validated WARN-once + counter semantics | Removed; the validated behavior no longer exists. |
 
@@ -70,13 +70,13 @@ All 7 rejection signatures: NO.
 - `rg 'cli-tool-a_omission|on_llama_model_not_discovered|Some \("llama"' lib/ bin/` returns only RFC-0167 closeout comments.
 - `rg -i 'agent-llm-a|provider-f|agent-code|provider-c|provider-a|provider-k|llama' lib/ bin/` returns only:
   - RFC-0166 / RFC-0167 closeout comments (self-documenting).
-  - `runtime_metrics.ml` describing how `keeper_runtime.toml` `"llama:..."` labels behaved before the removal (operator-facing release note context, kept in comment form pending a separate docs sweep).
+  - `runtime_metrics.ml` describing how `runtime.toml` `"llama:..."` labels behaved before the removal (operator-facing release note context, kept in comment form pending a separate docs sweep).
   - `workspace/nickname.ml` `"llama"` animal name (false positive).
 
 ## 7. Migration
 
 Operators must:
 
-- Replace any `keeper_runtime.toml` runtime entries of the shape `"llama:<model_id>"` with `"custom:<endpoint_url>"` (the generic discovery-based label).
+- Replace any `runtime.toml` runtime entries of the shape `"llama:<model_id>"` with `"custom:<endpoint_url>"` (the generic discovery-based label).
 - Drop Grafana queries against `masc_runtime_llama_model_not_discovered_total` (series no longer emitted).
 - The structural cli-tool-a WARN/counter is gone; rely on the `tool_support` `Error` path for required-tool omissions on cli-tool-a transports.

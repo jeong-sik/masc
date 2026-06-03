@@ -63,7 +63,7 @@ progress" from "hung turn that will never complete".
   **flat global reduction** that ignores the legitimate 27 B
   `900 s+` floor (`lib/keeper/keeper_stale_watchdog.ml:405-418`).
 - **Permitted (per-runtime override, added 2026-05-06)**: a runtime
-  profile in `config/keeper_runtime.toml` may declare its own
+  profile in `config/runtime.toml` may declare its own
   `turn_timeout_sec`. Checked-in remote/CLI profiles (`primary`,
   `keeper_diverse`, `retired_fast_profile`, `tier_medium`) run at 600 s.
   Operator-populated local-model profiles run at 900 s when they

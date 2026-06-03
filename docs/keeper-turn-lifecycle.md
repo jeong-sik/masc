@@ -182,7 +182,7 @@ sequenceDiagram
 | Scheduling | `run_heartbeat_loop` admits turn after world observation | Immediate preflight then dispatch |
 | Entry point | `Keeper_unified_turn.run_keeper_cycle` | `Keeper_turn.handle_keeper_msg` |
 | Phase gate | Yes — skipped if phase blocks turn | No — direct turn is phase-agnostic but still checks keeper existence |
-| Runtime selection | Same `keeper_runtime.toml` based resolution | Same `keeper_runtime.toml` based resolution |
+| Runtime selection | Same `runtime.toml` based resolution | Same `runtime.toml` based resolution |
 | OAS dispatch mode | `Single_provider_agent_run` (enforced) | `Single_provider_agent_run` (enforced) |
 | Tool surface | Same `compute_tool_surface` + OAS hooks | Same `compute_tool_surface` + OAS hooks |
 | Receipt | Same `Keeper_execution_receipt` append | Same `Keeper_execution_receipt` append |

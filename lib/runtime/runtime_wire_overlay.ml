@@ -1,7 +1,7 @@
 (** Wire-layer overlays that MASC applies after OAS resolves a provider config.
 
     This module owns transport-shape repairs, not provider/model identity.
-    Provider and model truth remains in OAS plus keeper_runtime.toml. *)
+    Provider and model truth remains in OAS plus runtime.toml. *)
 
 let auth_header_authorization = "Authorization"
 

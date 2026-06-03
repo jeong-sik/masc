@@ -32,7 +32,7 @@ let runtime_candidates_of_providers provider_cfgs =
 (** Run a single Agent.run() call with MASC-driven runtime model fallback.
 
     MASC drives the runtime FSM directly:
-    - Resolves runtime providers from keeper_runtime.toml
+    - Resolves runtime providers from runtime.toml
     - For each provider, runs OAS with a single provider
     - Uses Runtime_fsm.decide to determine next action on failure
     - Runtime loop runs inside Admission_queue permit

@@ -217,4 +217,4 @@ Each PR builds clean. PR-2..PR-4 are *batch-mechanical* — same shape applied t
 
 - RFC-0088 — workaround rejection bar.
 - RFC-0141 — TOML field typed variant (sister RFC for repo_manager/credential subsystem, same 2026-05-20 audit).
-- MEMORY `project_runtime_misroute_2026_05_17` — same silent-drop family at the keeper_runtime.toml boundary.
+- MEMORY `project_runtime_misroute_2026_05_17` — same silent-drop family at the runtime.toml boundary.

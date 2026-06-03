@@ -144,7 +144,7 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| `keeper_runtime.toml`을 수동으로 편집 | 진짜 — `config/keeper_runtime.toml` 수동 편집 기반 | **C — real gap** |
+| `runtime.toml`을 수동으로 편집 | 진짜 — `config/runtime.toml` 수동 편집 기반 | **C — real gap** |
 | `masc runtime create/activate/list/delete` CLI | 미구현 | **C — design idea** |
 | 런타임에 즉시 적용 (재시작 없이) | RFC-0027 진행 중 — **#13067 (PR-9a weighted_entry, schema additive, R)** + **#13097 (PR-9b dual-track resolver wiring, D)**가 같은 axis (runtime evolution) | **B** |
 

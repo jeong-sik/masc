@@ -416,7 +416,7 @@ let parse_models (toml : Otoml.t)
 
 (* The dropped routing namespaces (system, routes, profiles) remain
    reserved: keeping them out of the provider-table scan ensures a stale
-   [[routes]]/[[profiles]] table in an existing keeper_runtime.toml is silently
+   [[routes]]/[[profiles]] table in an existing runtime.toml is silently
    ignored rather than misread as a provider with bogus model bindings. *)
 let reserved_namespaces =
   [ "providers"; "models"; "system"; "routes"; "profiles"; "runtime" ]

@@ -63,7 +63,7 @@ val provider_satisfies_profile :
     of [p]'s capability requirement is set on [caps]. *)
 ```
 
-이 함수는 PR #2 (keeper_runtime.toml schema) + PR #3 (validator lint)에서 사용된다.
+이 함수는 PR #2 (runtime.toml schema) + PR #3 (validator lint)에서 사용된다.
 
 ### 3.3 PR scope (this PR — PR #1)
 
@@ -79,7 +79,7 @@ val provider_satisfies_profile :
 
 | PR | 책임 |
 |---|---|
-| #2 | `keeper_runtime.toml` schema에 `required_capability_profile = "tool_strict"` 옵션 필드 추가. omit = legacy. |
+| #2 | `runtime.toml` schema에 `required_capability_profile = "tool_strict"` 옵션 필드 추가. omit = legacy. |
 | #3 | `runtime_catalog_validator.ml`에 capability mismatch lint. `MASC_CAPABILITY_LINT={off,warn,error}`. cross-runtime fallback resolver capability propagation. |
 | #4 | `__safe_lane` system profile (모든 capability 만족) 추가 + last-resort fallback target. |
 | #9 | Dual-track CLI+API entry parser (cli-tool-b primary → provider-f-api secondary). |

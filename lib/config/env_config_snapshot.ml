@@ -129,10 +129,6 @@ let inference_entries =
 
 let keeper_entries =
   [
-    entry ~default:"true" "MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED"
-      "Enable fleet capacity supervisor execution loop";
-    entry ~default:"30.0" "MASC_FLEET_CAPACITY_SUPERVISOR_TICK_SEC"
-      "Fleet capacity supervisor execution tick interval (seconds)";
     entry ~default:"true" "MASC_KEEPER_BOOTSTRAP_ENABLED"
       "Enable keeper auto-bootstrap";
     entry ~default:"300" "MASC_KEEPER_SNAPSHOT_SEC"

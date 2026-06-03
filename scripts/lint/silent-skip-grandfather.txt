@@ -18,8 +18,7 @@
 # updated in the same PR — the line-stability check fails otherwise.
 # When a site is migrated to typed propagation, REMOVE its line.
 
-# E1 + E2 sites (| Error _ -> ()) — 13 baseline
-lib/goal/goal_janitor.ml:194:E2
+# E1 + E2 sites (| Error _ -> ()) — 12 baseline
 lib/workspace/workspace_agent.ml:184:E2
 lib/mcp_server_eio_resource.ml:46:E2
 lib/runtime/runtime_event_bridge.ml:573:E1

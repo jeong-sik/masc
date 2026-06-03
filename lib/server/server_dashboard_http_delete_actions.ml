@@ -429,21 +429,6 @@ let add_delete_action_routes router =
          )
        ) request reqd)
 
-  |> Http.Router.post "/api/v1/dashboard/goals/sweep" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name _req reqd ->
-         let config = state.Mcp_server.workspace_config in
-         let sweep_config = Goal_janitor.runtime_config () in
-         let result = Goal_janitor.run ~config:sweep_config config in
-         Http.Response.json_value ~compress:true ~request
-           (`Assoc
-              [
-                ("ok", `Bool true);
-                ("result", Goal_janitor.sweep_result_to_yojson result);
-              ])
-           reqd
-       ) request reqd)
-
   (* ── Board moderation routes (Phase 2) ───────────────────────────── *)
 
   |> Http.Router.post "/api/v1/dashboard/board/moderation/flag" (fun request reqd ->

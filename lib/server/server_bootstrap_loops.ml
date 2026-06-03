@@ -604,7 +604,7 @@ let start_keeper_loops
           ~actor:"operator-judge"
           ~view:"summary"
           ~include_messages:false
-          ~include_keepers:false
+          ~include_keepers:true
           operator_judge_ctx)
       ());
   fork_subsystem "session_cleanup" (fun () ->
@@ -617,32 +617,6 @@ let start_keeper_loops
       loop ()
     in
     loop ());
-  (* #10405: Goal_janitor.run was previously only invoked by the
-     dashboard DELETE handler, so stagnated [Active] goals never got
-     promoted to [Dropped] and [last_review_at] stayed null indefinitely
-     (4 goals stale for 4 days observed on 2026-04-25).  Spawn a
-     periodic sweep fiber on a 1-hour cadence so the existing
-     [stagnant_days] / [dropped_ttl_days] thresholds actually fire.
-     [enabled ()] is true by default; flipping it to false leaves the
-     dashboard DELETE path as the only caller (pre-fix behaviour). *)
-  fork_subsystem "goal_janitor" (fun () ->
-    if not (Env_config_runtime.Goal_janitor.enabled ())
-    then Log.Server.info "goal_janitor: disabled via MASC_GOAL_JANITOR_ENABLED=false"
-    else (
-      let interval = Env_config_runtime.Goal_janitor.interval_seconds in
-      let rec loop () =
-        Eio.Time.sleep clock interval;
-        (try
-           let config = Goal_janitor.runtime_config () in
-           let _result = Goal_janitor.run ~config state.workspace_config in
-           ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Server.warn "goal_janitor: sweep failed: %s" (Printexc.to_string exn));
-        loop ()
-      in
-      loop ()));
   (* HITL approval queue death-spiral fix.
      [Keeper_approval_queue.expire_stale] has been a complete
      implementation (queue removal, audit event, promise [Reject]
@@ -658,8 +632,7 @@ let start_keeper_loops
      ([last_skip_observation] surface) so operators can see
      [last_skip=[approval_pending]] alongside the kill warn line.
      [max_wait_s] is a code constant (policy, not calibration);
-     [interval_seconds] mirrors [Goal_janitor]'s env exposure so
-     ops can tune cadence without changing policy. *)
+     [interval_seconds] remains an ops knob for cadence tuning. *)
   fork_subsystem "approval_janitor" (fun () ->
     if not (Env_config_runtime.Approval_janitor.enabled ())
     then
@@ -704,48 +677,6 @@ let start_keeper_loops
         masc_root
         keeper_dir
         all_count;
-      (* 2026-05-05 — auto-repair active_goal_ids=[] keepers before boot.
-         Newer keepers (created via persona autoboot or
-         masc_keeper_create_from_persona) start with active_goal_ids=[] and
-         have no automatic path to populate it, so they enter a "frozen"
-         state where no desire fires (no goal → keeper_stay_silent →
-         completion contract violation, then
-         contract violation was previously class=null per #13055).
-         Keeper_goal_repair was previously only invokable via
-         masc_keeper_persona_audit(repair=true) MCP tool — manual operator
-         action.  Default-on so keepers self-heal on next server restart;
-         opt out with MASC_KEEPER_AUTO_GOAL_REPAIR=false.  Idempotent:
-         skips keepers that already have non-empty active_goal_ids. *)
-      let auto_repair_enabled =
-        match Sys.getenv_opt "MASC_KEEPER_AUTO_GOAL_REPAIR" with
-        | Some ("0" | "false" | "FALSE" | "off" | "OFF") -> false
-        | _ -> true
-      in
-      if auto_repair_enabled
-      then (
-        try
-          let result = Keeper_goal_repair.run config in
-          let action_count = List.length result.actions in
-          let error_count = List.length result.errors in
-          let skipped_count = List.length result.skipped in
-          if action_count > 0 || error_count > 0
-          then
-            Log.Keeper.info
-              "autoboot: goal_repair created=%d errors=%d skipped=%d (set \
-               MASC_KEEPER_AUTO_GOAL_REPAIR=false to disable)"
-              action_count
-              error_count
-              skipped_count
-          else
-            Log.Keeper.info
-              "autoboot: goal_repair scanned, all keepers have active_goal_ids \
-               (skipped=%d)"
-              skipped_count
-        with
-        | exn ->
-          Log.Keeper.warn
-            "autoboot: goal_repair failed (continuing without repair): %s"
-            (Printexc.to_string exn));
       let names = Keeper_runtime.bootable_keeper_names config in
       let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
       let keeper_boot_ctx : _ Keeper_types_profile.context =
@@ -917,117 +848,10 @@ let start_keeper_loops
          races into [start_existing_keepalives] anyway. *)
       (try Keeper_runtime.start_supervisor_sweep keeper_boot_ctx with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Keeper.error
-           "autoboot: supervisor sweep failed to start: %s"
-           (Printexc.to_string exn));
-      let start_fleet_capacity_supervisor_loop () =
-        if not Env_config.KeeperSupervisor.fleet_capacity_tick_enabled
-        then
-          Log.Keeper.info
-            "fleet_capacity_supervisor: disabled via \
-             MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED=false"
-        else (
-          let tick_interval =
-            Env_config.KeeperSupervisor.fleet_capacity_tick_interval_sec
-          in
-          let cooldown_seconds = Float.min 120.0 (tick_interval *. 2.0) in
-          let last_action_at = ref None in
-          let execute_once () =
-            let now = Eio.Time.now clock in
-            let phase_snapshot =
-              Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot
-                ~base_path:config.base_path
-                ()
-            in
-            let bootable_names = Keeper_runtime.bootable_keeper_names config in
-            let target_count = List.length bootable_names in
-            let minimum_running_fibers =
-              if target_count <= 1 then target_count else 2
-            in
-            let reaction_capacity_shortfall_count =
-              max
-                0
-                (target_count
-                 - phase_snapshot.counts.running
-                 - phase_snapshot.counts.recovering)
-            in
-            let supervisor_tick =
-              Server_routes_http_runtime_fleet_scan.fleet_capacity_supervisor_tick
-                ~running_names:phase_snapshot.running_names
-                ~autoboot_names:bootable_names
-                ~running_keeper_fiber_count:phase_snapshot.counts.running
-                ~target_reaction_capacity_count:target_count
-                ~minimum_running_fibers
-                ~reaction_capacity_shortfall_count
-                ~now
-                ~last_action_at:!last_action_at
-                ~cooldown_seconds
-                ()
-            in
-            match supervisor_tick.decision with
-            | Keeper_fleet_capacity_supervisor.Spawn _ ->
-              let unregistered_missing_autoboot_names =
-                supervisor_tick.missing_autoboot_names
-                |> List.filter (fun name ->
-                  not
-                    (Keeper_registry.is_registered
-                       ~base_path:config.base_path
-                       name))
-              in
-              let result =
-                Keeper_fleet_capacity_supervisor.execute
-                  ~spawn_keeper:(fun keeper_name ->
-                    if try_boot_one ~log_prefix:"fleet_capacity_supervisor" 0 keeper_name
-                    then Ok ()
-                    else Error "keeper boot did not register")
-                  ~suggested_keeper_names:unregistered_missing_autoboot_names
-                  supervisor_tick.decision
-              in
-              if result.requested_keeper_names <> [] then last_action_at := Some now;
-              if result.requested_keeper_names <> []
-              then
-                Log.Keeper.info
-                  "fleet_capacity_supervisor: decision=%s requested=[%s] \
-                   started=[%s] failed=%d"
-                  (Keeper_fleet_capacity_supervisor.decision_to_string
-                     result.decision)
-                  (String.concat ", " result.requested_keeper_names)
-                  (String.concat ", " result.started_keeper_names)
-                  (List.length result.failed_keeper_names);
-              if result.failed_keeper_names <> []
-              then
-                Log.Keeper.warn
-                  "fleet_capacity_supervisor: failed keepers [%s]"
-                  (result.failed_keeper_names
-                   |> List.map (fun (name, error) -> name ^ "=" ^ error)
-                   |> String.concat ", ")
-            | Keeper_fleet_capacity_supervisor.Backpressure reason ->
-              Log.Keeper.warn
-                "fleet_capacity_supervisor: backpressure=%s"
-                (Keeper_fleet_capacity_supervisor.Backpressure_reason.to_string
-                   reason)
-            | Keeper_fleet_capacity_supervisor.Noop _ -> ()
-          in
-          Log.Keeper.info
-            "fleet_capacity_supervisor: enabled interval=%.0fs cooldown=%.0fs"
-            tick_interval
-            cooldown_seconds;
-          let rec loop () =
-            (try execute_once () with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Keeper.warn
-                 "fleet_capacity_supervisor: tick failed: %s"
-                 (Printexc.to_string exn));
-            Eio.Time.sleep clock tick_interval;
-            loop ()
-          in
-          loop ())
-      in
-      fork_subsystem
-        "fleet_capacity_supervisor"
-        start_fleet_capacity_supervisor_loop));
+      | exn ->
+        Log.Keeper.error
+          "autoboot: supervisor sweep failed to start: %s"
+          (Printexc.to_string exn))));
   (* Phase 5: unified startup subsystem summary *)
   Log.Startup.info "subsystems: keeper loops started"
 ;;

@@ -85,11 +85,6 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Experimental; since = "2.170.0" };
 
-  { env_name = "MASC_FLEET_CAPACITY_SUPERVISOR_TICK_ENABLED";
-    description = "Fleet capacity supervisor execution loop";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.245.0" };
-
   { env_name = "MASC_KEEPER_BOOTSTRAP_ENABLED";
     description = "Startup keeper auto-bootstrap scan";
     default = true; category = "keeper";

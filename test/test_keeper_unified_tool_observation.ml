@@ -1,14 +1,6 @@
 open Alcotest
 
-module KCC = Masc_mcp.Keeper_contract_classifier
 module KTO = Masc_mcp.Keeper_tool_observation
-module KTP = Masc_mcp.Keeper_tool_progress
-
-let unclaimed_task_context =
-  KCC.make_actionable_signal_context
-    ~tool_gate_required:false
-    ~actionable_signal:KCC.Has_unclaimed_tasks
-;;
 
 let test_tool_usage_delta_uses_registry_counts () =
   let before = [ "keeper_board_post", 1; "tool_read_file", 0; "keeper_voice_agent", 2 ] in
@@ -84,7 +76,7 @@ let test_final_keeper_tool_names_falls_back_to_reported_tool_use () =
     final_tools
 ;;
 
-let test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool () =
+let test_final_keeper_tool_names_ignores_legacy_mcp_alias () =
   let final_tools =
     KTO.final_keeper_tool_names
       ~reported_tool_names:[ "mcp__masc__masc_board_post"; "list_mcp_resources" ]
@@ -93,18 +85,9 @@ let test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool () =
   in
   check
     (list string)
-    "reported MCP keeper tool preserved"
-    [ "keeper_board_post" ]
-    final_tools;
-  check
-    (option string)
-    "reported execution tool satisfies actionable signal"
-    None
-    (KTP.actionable_tool_contract_violation_reason
-       ~claim_context_allowed:true
-       ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:final_tools
-       ())
+    "legacy MCP-prefixed keeper alias ignored"
+    []
+    final_tools
 ;;
 
 let test_requested_tool_names_seen_preserves_prior_turn_surface () =
@@ -168,9 +151,9 @@ let () =
             `Quick
             test_final_keeper_tool_names_falls_back_to_reported_tool_use
         ; test_case
-            "final keeper tool names accept reported MCP keeper tool"
+            "final keeper tool names ignore legacy MCP keeper alias"
             `Quick
-            test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool
+            test_final_keeper_tool_names_ignores_legacy_mcp_alias
         ; test_case
             "requested tool names seen preserves prior turn surface"
             `Quick

@@ -757,11 +757,6 @@ let run_turn
                        ~actual_keeper_tool_names
                        ~tool_calls:acc.tool_calls
                    in
-                   let no_progress_success_tool_names =
-                     no_progress_success_tool_names_for_contract
-                       ~allowed_tool_names:acc.requested_tool_names_seen
-                       ~tool_calls:acc.tool_calls
-                   in
                    let usage = Keeper_context_runtime.usage_of_response result.response in
                    let ctx_composition =
                      build_ctx_composition_metrics
@@ -773,23 +768,6 @@ let run_turn
                        ~history_messages
                        ~actual_input_tokens:(Some usage.input_tokens)
                    in
-                   let actionable_contract =
-                     Keeper_agent_run_actionable_contract.analyze
-                       ~world_observation
-                       ~allowed_tool_names:all_tool_names
-                       ~turn_affordances
-                       ~progress_keeper_tool_names
-                       ~no_progress_success_tool_names
-                       ~claim_context_allowed:
-                         (not had_owned_active_task_at_turn_start)
-                       ~tool_calls:acc.tool_calls
-                   in
-                   let actionable_signal_kind =
-                     actionable_contract.actionable_signal_kind
-                   in
-                   let actionable_tool_contract_violation_reason =
-                     actionable_contract.violation_reason
-                   in
                    let tool_contract_status ()
                        : Keeper_execution_receipt.tool_contract_result =
                      Contract_helpers.observed_tool_contract_status
@@ -798,29 +776,8 @@ let run_turn
                        ~actual_keeper_tool_names:progress_keeper_tool_names
                    in
                    let text_result =
-                     match actionable_tool_contract_violation_reason with
-                     | Some reason ->
-                       let contract_status
-                           : Keeper_execution_receipt.tool_contract_result =
-                         Contract_helpers.passive_violation_contract_status
-                           ~actual_keeper_tool_names
-                           ~progress_keeper_tool_names
-                           ~fallback:tool_contract_status
-                       in
-                       acc.receipt_tool_contract_result <- contract_status;
-                       Keeper_agent_run_contract_violation_log.record_passive
-                         ~keeper_name:meta.name
-                         ~has_current_task:(keeper_has_owned_active_task ())
-                         ~contract_status
-                         ~actionable_signal_kind
-                         ~turns:result.turns
-                         ~actual_keeper_tool_names
-                         ~reason;
-                       Error
-                         (Contract_helpers.completion_contract_violation_error reason)
-                     | None ->
-                       acc.receipt_tool_contract_result <- tool_contract_status ();
-                       Ok (`Provider_text text)
+                     acc.receipt_tool_contract_result <- tool_contract_status ();
+                     Ok (`Provider_text text)
                    in
                    match text_result with
                    | Error e -> Error e

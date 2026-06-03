@@ -177,16 +177,7 @@ module Verification : sig
   val timeout_check_interval_seconds : float
 end
 
-(** {1 Goal / Approval janitors} *)
-
-module Goal_janitor : sig
-  val enabled : unit -> bool
-  val interval_seconds : float
-  val auto_stagnant_days : unit -> int
-  (** [auto_stagnant_days ()] = [MASC_GOAL_JANITOR_AUTO_STAGNATE_DAYS]
-      or default [7].  Drops auto-generated Active goals (title suffix
-      [" (auto)"]) sooner than the 30-day manual threshold. *)
-end
+(** {1 Approval janitor} *)
 
 module Approval_janitor : sig
   val enabled : unit -> bool

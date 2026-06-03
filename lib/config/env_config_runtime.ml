@@ -362,33 +362,6 @@ module Verification = struct
     get_float ~default:60.0 "MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC"
 end
 
-(** {1 Goal Janitor}
-
-    #10405: Goal_janitor.run was only invoked from the dashboard
-    DELETE handler.  4 goals stagnated for 4 days with [last_review_at
-    = null] and [goals_snapshots/] empty.  Add a periodic background
-    fiber that sweeps stagnated goals on a 1-hour cadence by default. *)
-module Goal_janitor = struct
-  (** Enable the periodic goal_janitor sweep fiber.  Default: true.
-      Set MASC_GOAL_JANITOR_ENABLED=false to disable when debugging. *)
-  let enabled () =
-    get_bool ~default:true "MASC_GOAL_JANITOR_ENABLED"
-
-  (** Sweep interval in seconds.  Default: 3600 (1 hour).
-      Goal stagnation is measured in days, so the cadence does not need
-      to be tight; a coarse sweep keeps the fleet log uncluttered. *)
-  let interval_seconds =
-    get_float ~default:3600.0 "MASC_GOAL_JANITOR_INTERVAL_SEC"
-
-  (** Stagnate threshold (days) for auto-generated goals.  Default: 7.
-      Auto-generated = title suffix [" (auto)"] from
-      [Keeper_goal_repair.goal_title_of_purpose].  Separate from the
-      manual [stagnant_days] (30) so keeper-repair leftovers do not
-      accumulate while operator-authored long-running goals survive. *)
-  let auto_stagnant_days () =
-    get_int ~default:7 "MASC_GOAL_JANITOR_AUTO_STAGNATE_DAYS"
-end
-
 (** {1 Approval Janitor}
 
     HITL approval queue dead-end fix.  [Keeper_approval_queue.expire_stale]
@@ -414,8 +387,8 @@ module Approval_janitor = struct
   (** Sweep interval in seconds.  Default: 60s (every minute).
       Operators tolerate up to a minute of "approval still pending"
       after the policy timeout has elapsed; a tighter cadence buys
-      nothing but log churn.  Mirrors [Goal_janitor]'s exposure
-      pattern (interval is operational cadence, not policy). *)
+      nothing but log churn.  The interval is operational cadence,
+      not policy. *)
   let interval_seconds =
     get_float ~default:60.0 "MASC_APPROVAL_JANITOR_INTERVAL_SEC"
 end

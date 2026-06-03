@@ -17,7 +17,7 @@ open Workspace_identity
 (* activity_workspace_id removed — namespace retired (#unify-namespace). *)
 
 (* #9795: FSM drift observability. [masc_workspace] sits below the
-   [masc_mcp] library in the dep graph, so it cannot call
+   [masc] library in the dep graph, so it cannot call
    [Prometheus.inc_counter] directly. The variant→label mapping
    stays here (pattern-matches the sealed drift enum), and the
    emit runs through a [Workspace_hooks] callback wired by

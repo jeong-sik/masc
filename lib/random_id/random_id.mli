@@ -5,7 +5,7 @@
     (verification, board post/comment, workspace
     task, streamable HTTP session, ...). Centralising removes the
     drift risk and lets lower-layer libraries (e.g. [masc_workspace])
-    use the same generator without depending on [masc_mcp].
+    use the same generator without depending on [masc].
 
     @since 0.9.5 *)
 

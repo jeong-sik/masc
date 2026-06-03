@@ -188,7 +188,7 @@ let metric_file_lock_table_cas_retries =
 
 (* Memory_jsonl.parse_line silent drop counter (V15 / RFC-0109 §5.1
    Option A).  Bumped from a callback wired in workspace.ml — the
-   masc_mcp_memory_jsonl leaf sub-library cannot depend on Prometheus
+   masc_memory_jsonl leaf sub-library cannot depend on Prometheus
    directly (cycle).  Closed-vocabulary [reason] in
    {no_key | not_assoc | json_parse_error}.  Empty lines benign,
    not counted. *)

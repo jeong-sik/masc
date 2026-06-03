@@ -195,7 +195,7 @@ let static_mcp_context_tool_names =
   ; "masc_broadcast"
   ; "masc_messages"
   ; "masc_approval_get"
-  ; "masc_mcp_session"
+  ; "masc_session"
   ]
 
 let static_destructive_tool_names =

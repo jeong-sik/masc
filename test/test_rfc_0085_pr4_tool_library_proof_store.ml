@@ -7,7 +7,7 @@ open Alcotest
       (Host_config.host()-based로 변경).
     - lib/cdal_runtime/proof_store.ml: Not_found -> "/tmp" 리터럴 및
       home-level [.oas] fallback 제거. cdal_runtime sub-library는
-      masc_mcp 본 라이브러리와 격리되어 있으므로 MASC_BASE_PATH /
+      masc 본 라이브러리와 격리되어 있으므로 MASC_BASE_PATH /
       cwd 순서만 직접 사용한다.
 
     AST-based via Ast_grep. *)

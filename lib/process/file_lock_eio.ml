@@ -27,7 +27,7 @@ exception Flock_timeout of { caller : string; path : string; attempts : int }
 
     Default no-op; [masc_process] cannot depend on [Prometheus]
     (sub-library boundary, would be a cycle), so emission is wired
-    from the [masc_mcp] root via this Atomic ref. *)
+    from the [masc] root via this Atomic ref. *)
 let on_lock_attempt_fn :
     (caller:string -> retries:int -> elapsed_s:float -> outcome:string -> unit)
       Atomic.t =
@@ -45,7 +45,7 @@ let observe_lock_attempt ~caller ~retries ~started_at ~outcome =
     contention signal but was previously invisible.
 
     Default no-op; [masc_process] cannot depend on [Prometheus]
-    (sub-library boundary), so emission is wired from the [masc_mcp]
+    (sub-library boundary), so emission is wired from the [masc]
     root via this Atomic ref (mirrors [on_lock_attempt_fn] pattern). *)
 let on_cas_retry_fn : (unit -> unit) Atomic.t =
   Atomic.make (fun () -> ())

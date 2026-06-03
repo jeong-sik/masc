@@ -201,8 +201,8 @@ case "$cmd" in
     fi
     if [ "$count" = "0" ]; then
       echo 1 > "$state"
-      echo "Error: Files lib/.masc_mcp.objs/native/masc_mcp__Keeper_context_core.cmx" >&2
-      echo "       and lib/.masc_mcp.objs/native/masc_mcp__Inference_utils.cmx" >&2
+      echo "Error: Files lib/.masc.objs/native/masc__Keeper_context_core.cmx" >&2
+      echo "       and lib/.masc.objs/native/masc__Inference_utils.cmx" >&2
       echo "       make inconsistent assumptions over implementation Agent_sdk__Context_reducer" >&2
       exit 1
     fi
@@ -1133,7 +1133,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
         (contains_substring captured_override "MASC_KEEPER_BOOTSTRAP_ENABLED=true"))
 
 let () =
-  run "start_masc_mcp_script"
+  run "start_masc_script"
     [
       ( "script",
         [

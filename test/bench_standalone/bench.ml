@@ -10,7 +10,7 @@
     3. mixed      — IO + CPU (simulated LLM call + tool execution).
                     Closest to real keeper behavior.
 
-    Standalone — no masc_mcp dependency. Inline Executor_pool weight
+    Standalone — no masc dependency. Inline Executor_pool weight
     policy from Domain_pool (PR-6 of RFC-0059):
       - IO-bound: weight 0.05 (~20 concurrent jobs/domain)
       - CPU-bound: weight 1.0 (1 job/domain)

@@ -1,6 +1,6 @@
 (** Keeper runtime provider candidate mapping utilities.
     Extracted from keeper_turn_driver.ml — sibling pattern (same flat
-    masc_mcp library, no sub-library).
+    masc library, no sub-library).
 
     Used by the keeper turn driver's [run_named] entry to map providers
     to runtime candidates with deterministic admission keys. *)

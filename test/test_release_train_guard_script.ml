@@ -95,7 +95,7 @@ let install_script_under_test dir =
 
 let write_dune_project ~dir ~version =
   write_file (Filename.concat dir "dune-project")
-    (Printf.sprintf "(lang dune 3.17)\n\n(name masc_mcp)\n(version %s)\n" version)
+    (Printf.sprintf "(lang dune 3.17)\n\n(name masc)\n(version %s)\n" version)
 
 let commit_version ~dir ~version ~message =
   write_dune_project ~dir ~version;

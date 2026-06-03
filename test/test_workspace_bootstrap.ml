@@ -27,7 +27,7 @@ module Types = Masc_domain
        [.masc/messages/] exist plus the root mirrors. *)
 
 module B = Workspace_bootstrap
-(* [Workspace] is the wrapper module re-exported by [masc_mcp]; it
+(* [Workspace] is the wrapper module re-exported by [masc]; it
    contains [default_config].  Other workspace internals live as
    top-level modules ([Workspace_utils], [Workspace_bootstrap]). *)
 module Workspace = Masc_mcp.Workspace

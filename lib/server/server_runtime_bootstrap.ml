@@ -413,7 +413,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Llm_metric_bridge.install ();
       Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total)";
       (* #13885: install backend mutex observers from the top-level
-         masc_mcp layer.  Backend/workspace sub-libraries cannot depend on
+         masc layer.  Backend/workspace sub-libraries cannot depend on
          Prometheus without creating dependency cycles, but the global
          observer refs can be wired before any FileSystem backend writes. *)
       Backend_mutex_metrics.install ();

@@ -160,6 +160,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; coverage_reason = json_string_field_opt "coverage_reason" tfields
              ; coverage_stage = json_string_field_opt "coverage_stage" tfields
              ; is_error = true
+             ; streaming_ttfrc_ms = json_float_field_opt "streaming_ttfrc_ms" tfields
+             ; streaming_inter_chunk_count = json_int_field_opt "streaming_inter_chunk_count" tfields
+             ; streaming_inter_chunk_avg_ms = json_float_field_opt "streaming_inter_chunk_avg_ms" tfields
              })
          else (
            (* Success turns: full telemetry parsing.
@@ -326,6 +329,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
                     | None -> Some "keeper")
                   else json_string_field_opt "coverage_stage" tfields)
              ; is_error = false
+             ; streaming_ttfrc_ms = json_float_field_opt "streaming_ttfrc_ms" tfields
+             ; streaming_inter_chunk_count = json_int_field_opt "streaming_inter_chunk_count" tfields
+             ; streaming_inter_chunk_avg_ms = json_float_field_opt "streaming_inter_chunk_avg_ms" tfields
              })
        | _ -> Error No_telemetry_object)
     | _ -> Error Not_assoc)
@@ -506,6 +512,9 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          ; coverage_reason = None
          ; coverage_stage = Some "costs_jsonl"
          ; is_error = false
+         ; streaming_ttfrc_ms = None
+         ; streaming_inter_chunk_count = None
+         ; streaming_inter_chunk_avg_ms = None
          }))
   | _ -> Error Not_assoc
 ;;

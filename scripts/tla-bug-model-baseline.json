@@ -1,7 +1,8 @@
 {
   "_comment": "TLA+ Bug Model coverage baseline. Regenerate with scripts/tla-bug-model-ratchet.sh --regenerate.",
   "_metrics": "See scripts/tla-bug-model-ratchet.sh STRICT_METRICS array.",
+  "_metric_change": "bug_model_coverage_specs now counts VERDICT-CAPABLE buggy cfgs (resolvable parent .tla AND >=1 INVARIANT/PROPERTY), not the raw *-buggy.cfg file count. The previous file-count baseline (74) over-counted spec-level theatre: an orphan cfg and assertion-less cfgs inflated coverage without any TLC verdict. Removing the KeeperCampaignLifecycle orphan and counting only verdict-capable cfgs yields the current value.",
   "_audit": "docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md",
-  "bug_model_coverage_specs": 74,
-  "domains_without_bug_model": 5
+  "bug_model_coverage_specs": 97,
+  "domains_without_bug_model": 0
 }

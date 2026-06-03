@@ -10,9 +10,6 @@ type category =
   | ConfidenceEvaluated
   | DegradationTriggered
   | DegradationRecovered
-  | SpeculativeBranchStarted
-  | SpeculativeBranchCompleted
-  | SpeculativeWinnerSelected
   | RecoveryClassified
   | RecoveryAttempted
   | RecoverySucceeded
@@ -25,9 +22,6 @@ let category_to_string = function
   | ConfidenceEvaluated -> "ConfidenceEvaluated"
   | DegradationTriggered -> "DegradationTriggered"
   | DegradationRecovered -> "DegradationRecovered"
-  | SpeculativeBranchStarted -> "SpeculativeBranchStarted"
-  | SpeculativeBranchCompleted -> "SpeculativeBranchCompleted"
-  | SpeculativeWinnerSelected -> "SpeculativeWinnerSelected"
   | RecoveryClassified -> "RecoveryClassified"
   | RecoveryAttempted -> "RecoveryAttempted"
   | RecoverySucceeded -> "RecoverySucceeded"
@@ -40,9 +34,6 @@ let category_of_string = function
   | "ConfidenceEvaluated" -> Some ConfidenceEvaluated
   | "DegradationTriggered" -> Some DegradationTriggered
   | "DegradationRecovered" -> Some DegradationRecovered
-  | "SpeculativeBranchStarted" -> Some SpeculativeBranchStarted
-  | "SpeculativeBranchCompleted" -> Some SpeculativeBranchCompleted
-  | "SpeculativeWinnerSelected" -> Some SpeculativeWinnerSelected
   | "RecoveryClassified" -> Some RecoveryClassified
   | "RecoveryAttempted" -> Some RecoveryAttempted
   | "RecoverySucceeded" -> Some RecoverySucceeded

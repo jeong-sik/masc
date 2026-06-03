@@ -80,13 +80,12 @@ type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
     Receives the typed {!Dispatch_outcome.t} together with the
     handler-produced {!Tool_result.result} (when the [Handled] arm ran)
-    once dispatch completes — regardless of which arm fired
-    ([Handled] / [Rejected_by_capability] / [Rejected_by_pre_hook] /
-    [No_handler] / [Handler_error]).
+    once dispatch completes — for whichever arm fired
+    ([Handled] / [No_handler]).
 
     The optional [Tool_result.result] is [Some _] only on the [Handled]
-    arm; other arms receive [None] so observers can pattern-match on
-    the typed outcome first and read [tool_name] / [success] /
+    arm; the [No_handler] arm receives [None] so observers can pattern-match
+    on the typed outcome first and read [tool_name] / [success] /
     [duration_ms] from the result only when relevant.
 
     Returns [unit] because typed hooks are *observers* (metrics,

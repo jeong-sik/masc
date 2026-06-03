@@ -127,6 +127,33 @@ type runtime_exhaustion_reason =
         [No_tool_capable_provider] variant of [masc_internal_error]. *)
   | Other_detail of string
 
+(** Total typed retryability for a runtime-exhaustion reason.
+
+    Replaces a former string-prefix reparse in
+    [keeper_supervisor_pause_policy] that matched on the wire form of
+    [runtime_exhaustion_reason_code] and biased every unlisted reason to
+    non-retryable via a [_ -> false] catch-all.  That polarity was wrong
+    for transient/connectivity faults (Connection_refused, Dns_failure,
+    No_providers_available, All_providers_failed,
+    Structural_attempt_timeout), which the supervisor should retry.
+
+    Exhaustive match: adding a new [runtime_exhaustion_reason] variant
+    fails compilation here, forcing an explicit retryability decision
+    rather than silently defaulting. *)
+let runtime_exhaustion_reason_retryable
+      (reason : runtime_exhaustion_reason)
+  : bool
+  =
+  match reason with
+  | Candidates_filtered_after_cycles | Max_turns_exceeded | Capacity_exhausted ->
+    true
+  | Connection_refused | Dns_failure | No_providers_available | All_providers_failed ->
+    true (* transient/connectivity — retry into a fresh runtime rotation *)
+  | Structural_attempt_timeout _ -> true
+  | No_tool_capable _ -> false (* capability gap, not transient *)
+  | Other_detail _ -> false (* unknown free-text — conservative *)
+;;
+
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure

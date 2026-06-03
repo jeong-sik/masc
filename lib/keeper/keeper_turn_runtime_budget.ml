@@ -609,6 +609,7 @@ let make_post_turn_resilience_executor
          (Keeper_registry.Provider_runtime_error
             { code; detail; provider_id = None; http_status = None
             ; runtime_id = None
+            ; reason = None
             }));
     match
       sync_keeper_paused_state_with_resume_policy

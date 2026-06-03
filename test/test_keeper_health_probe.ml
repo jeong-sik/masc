@@ -76,6 +76,7 @@ let test_runtime_pressure_classifier () =
           ; provider_id = None
           ; http_status = None
           ; runtime_id = None
+          ; reason = None
           }));
   Alcotest.check
     pressure_label_t
@@ -88,6 +89,7 @@ let test_runtime_pressure_classifier () =
           ; provider_id = None
           ; http_status = None
           ; runtime_id = None
+          ; reason = None
           }));
   Alcotest.check
     pressure_label_t
@@ -100,6 +102,7 @@ let test_runtime_pressure_classifier () =
           ; provider_id = Some "provider_d"
           ; http_status = Some 429
           ; runtime_id = None
+          ; reason = None
           }));
   Alcotest.check
     pressure_label_t
@@ -112,6 +115,7 @@ let test_runtime_pressure_classifier () =
           ; provider_id = Some "zai"
           ; http_status = None
           ; runtime_id = None
+          ; reason = None
           }));
   Alcotest.check
     pressure_label_t
@@ -124,6 +128,7 @@ let test_runtime_pressure_classifier () =
           ; provider_id = None
           ; http_status = Some 504
           ; runtime_id = None
+          ; reason = None
           }));
   Alcotest.check
     pressure_label_t
@@ -136,6 +141,7 @@ let test_runtime_pressure_classifier () =
           ; provider_id = None
           ; http_status = Some 500
           ; runtime_id = None
+          ; reason = None
           }));
   Alcotest.check
     pressure_label_t
@@ -185,6 +191,7 @@ let test_run_once_records_specific_failure_ratio_reason () =
             ; provider_id = Some "zai"
             ; http_status = None
             ; runtime_id = None
+            ; reason = None
             });
        register_crashed
          "provider-dns-b"
@@ -194,6 +201,7 @@ let test_run_once_records_specific_failure_ratio_reason () =
             ; provider_id = Some "zai"
             ; http_status = None
             ; runtime_id = None
+            ; reason = None
             });
        H.run_once ~base_path:base_dir;
        Alcotest.check

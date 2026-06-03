@@ -8,14 +8,21 @@
     exception so a single bad message cannot bring the SSE loop
     down. *)
 
+val mcp_exn_level_and_tag : exn -> Log.level * string
+(** Severity and grep prefix for an exception logged via {!log_mcp_exn}.
+    Recognised I/O / parse / control-flow exceptions ([Sys_error] / [Failure] /
+    [Not_found] / [End_of_file] / [Yojson.Json_error] /
+    [Yojson.Safe.Util.Type_error]) map to [(Log.Info, "")]; any other exception
+    maps to [(Log.Warn, "[UNEXPECTED] ")].  Exposed so the regression suite can
+    prove an unrecognised exception is not emitted at [Info]
+    (docs/spec/18-log-severity-taxonomy.md § 3.6). *)
+
 val log_mcp_exn : label:string -> exn -> unit
-(** Log an MCP server error via [Log.Mcp.info]. The line is
-    prefixed with ["[UNEXPECTED] "] for any exception outside the
-    expected set ([Sys_error] / [Failure] / [Not_found] /
-    [End_of_file] / [Yojson.Json_error] /
-    [Yojson.Safe.Util.Type_error]) — the prefix is what
-    operators grep for in production logs to find genuine
-    surprises versus routine I/O / parse failures. *)
+(** Log an MCP server-side exception at the severity given by
+    {!mcp_exn_level_and_tag} (recognised → [Info], unrecognised → [Warn]),
+    rather than a hardcoded level.  The ["[UNEXPECTED] "] prefix on the
+    unrecognised branch is what operators grep for to find genuine surprises
+    versus routine I/O / parse failures.  Emits exactly one line. *)
 
 val wait_for_message_eio :
   clock:_ Eio.Time.clock ->

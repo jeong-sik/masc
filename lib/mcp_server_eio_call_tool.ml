@@ -10,13 +10,12 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Managed_agent
   | Operator_remote
 
-let log_mcp_exn ~label exn =
-  let tag = match exn with
-    | Sys_error _ | Failure _ | Not_found | End_of_file
-    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
-    | _ -> "[UNEXPECTED] "
-  in
-  Log.Mcp.info "%s%s: %s" tag label (Printexc.to_string exn)
+(* Delegate to the single canonical definition rather than re-declaring the
+   exception→severity match (it previously drifted as a verbatim copy in two
+   modules; [Mcp_server_eio_execute] already delegates the same way). The
+   severity is derived from the exception class — see
+   [Mcp_server_eio_helpers.mcp_exn_level_and_tag]. *)
+let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 
 (* Substring containment, ASCII case-insensitive.  Delegates to
    [String_util.contains_substring_ci] (which scans byte-wise without

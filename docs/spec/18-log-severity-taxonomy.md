@@ -151,6 +151,15 @@ These are repeating misclassifications observed in `git log --grep='demote\|prom
 | Correct | `Debug`. Reserve `Info` for validation **failures** that auto-recovered. |
 | Origin | `Log.Misc.info "tool_input_validation coerced args for tool_execute"` — emitted on every tool call, ~1k+/h fleet-wide. |
 
+### 3.6 Static level on an outcome-carrying line
+
+| | |
+|--|--|
+| Pattern | A `Log.*.info` call whose format string embeds a runtime `outcome=%s` (or an equivalent failure value the caller already holds) AND the level is hardcoded regardless of that value |
+| Why wrong | The same line fires at `Info` whether the operation succeeded or failed, so the failure case hides under the `Info` noise floor with no companion `Warn`/`Error`. The caller has the outcome in hand; the level should be derived from it, not fixed at the call site. |
+| Correct | Derive the level from the outcome and emit exactly once: `Log.<M>.emit (level_of_outcome outcome) (Printf.sprintf "…outcome=%s…" outcome)`. The typed-variant selector form is equally correct and preferred when the outcome is already a sum type: `(match outcome with Error -> Log.<M>.error \| Ok \| Unknown -> Log.<M>.info) "…outcome=%s…"`. Never emit two lines (one per level) for one event. |
+| Origin | `Log.Governance.info "refresh_once: compute_judgments telemetry outcome=%s …"` emitted at `Info` for `outcome="error"` with zero companion `Warn`/`Error` — production 2026-06-01: 58 errored governance computes invisible to `journalctl -p warning`. Also `Log.Server.info "keeper lifecycle … outcome=%s …"` (the `rejected` / `dispatch_none` failure paths logged at `Info`). |
+
 ## 4. Lint
 
 `scripts/ci/check-log-severity-anti-patterns.sh` (planned, see [§ 6 Migration](#6-migration)) enforces:
@@ -162,6 +171,7 @@ These are repeating misclassifications observed in `git log --grep='demote\|prom
 | L3 | `Log\.[A-Z][a-z]+\.error.*(contract violated\|gh_cli_shape\|JSON parse failed)` | Model behavior is `Warn` (§ 3.3) |
 | L4 | `Log\.[A-Z][a-z]+\.info.*(watchdog tick\|keepalive\|heartbeat)` | Periodic ticks are `Debug` (§ 3.4) |
 | L5 | `Log\.[A-Z][a-z]+\.info.*(coerced\|validated)` | Validation success is `Debug` (§ 3.5) |
+| L6 | `Log\.[A-Z][a-z]+\.info\s*"...outcome=%s` | Outcome-carrying line must derive level from outcome (§ 3.6). Matches only a format string opening directly after `.info` (a `(match … -> …info)` level selector is excluded). |
 
 Each rule is a `rg -P` regex over `lib/`. Exit 1 on any match outside an explicit allowlist comment (`(* log-severity-allow:LN-N <reason> *)`).
 

@@ -106,7 +106,7 @@ type overflow_retry_recovery = {
 
 (* The two pure helpers ([masc_autonomous_enabled] / [upsert_autonomous_meta])
    live in [lib/autonomous/wirein_helpers.{mli,ml}] so unit tests can
-   call them without depending on the full [masc_mcp] library. The
+   call them without depending on the full [masc] library. The
    wire-in below dispatches through [Autonomous.Wirein_helpers]. *)
 
 let bridge_after_tick (bridge : Autonomous.Autonomous_bridge.t) ~now :

@@ -229,7 +229,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   (* Verification tools removed: pruned *)
 
   (* ── MCP Session ────────────────────────────────────────────── *)
-  | "masc_mcp_session" ->
+  | "masc_session" ->
       (* Issue #8520: parse via Mcp_session.action_of_string_opt;
          dispatch via exhaustive match on the Variant — adding a 6th
          action will fail compilation here, not silently break. *)

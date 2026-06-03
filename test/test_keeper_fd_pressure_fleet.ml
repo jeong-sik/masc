@@ -171,7 +171,7 @@ let test_nofile_probe_is_native_not_shell () =
   Alcotest.(check bool)
     "native nofile stub is wired"
     true
-    (file_contains "lib/keeper_fd_pressure.ml" "masc_mcp_nofile_soft_limit");
+    (file_contains "lib/keeper_fd_pressure.ml" "masc_nofile_soft_limit");
   Alcotest.(check bool)
     "nofile soft-limit probe does not spawn a shell"
     false

@@ -6,4 +6,4 @@ val install : unit -> unit
 
     The backend sub-library intentionally has no dependency on Prometheus.
     Calling [install] from the top-level runtime wires that dependency from
-    [masc_mcp], where both modules are already available. *)
+    [masc], where both modules are already available. *)

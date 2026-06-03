@@ -8,7 +8,7 @@
    measured instead of scraped from logs.
 
    Layering: [masc_workspace] (home of [Workspace_task]) sits below
-   [masc_mcp.Prometheus] in the library dep graph, so the emit
+   [masc.Prometheus] in the library dep graph, so the emit
    runs through [Workspace_hooks.fsm_drift_observer_fn] which
    [lib/workspace.ml] wires to [Masc_mcp.Workspace.record_fsm_drift].  This test
    exercises the wired pair — [record_fsm_drift] directly for

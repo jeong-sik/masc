@@ -221,7 +221,7 @@ let admin_surface_tools =
    variant; de-variant-ized in the surface-cut refactor. *)
 let system_internal_hidden =
   [ (* MCP protocol internals *)
-    "masc_mcp_session"
+    "masc_session"
   ; (* Session lifecycle — auto-called *)
     "masc_reset"
   ; (* Maintenance *)

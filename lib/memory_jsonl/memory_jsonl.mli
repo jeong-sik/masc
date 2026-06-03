@@ -91,8 +91,8 @@ val make_backend_with_query_observer :
     Empty lines are intentionally not counted (file-end newlines are
     benign).
 
-    The leaf [masc_mcp_memory_jsonl] sub-library cannot depend on
-    [Prometheus] (cycle), so emission is wired from the [masc_mcp] root
+    The leaf [masc_memory_jsonl] sub-library cannot depend on
+    [Prometheus] (cycle), so emission is wired from the [masc] root
     at startup ([lib/workspace.ml]) via this Atomic ref.  Mirrors the
     [File_lock_eio.on_lock_attempt_fn] / [on_cas_retry_fn] pattern.
 

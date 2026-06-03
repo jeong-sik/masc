@@ -158,7 +158,7 @@ let trigger_bypasses_health = function
 
 (* [is_healthy] is injected by the caller of [select_with_feedback]
    (dependency inversion). Previously this called [Health.is_healthy]
-   directly, coupling this module to the masc_mcp mega-library root. The
+   directly, coupling this module to the masc mega-library root. The
    caller now supplies the health predicate so this module stays a clean
    leaf. Required (not optional) — a permissive default would silently make
    every agent eligible if a caller forgot to wire health (CLAUDE.md
@@ -464,7 +464,7 @@ let record_quality_signal ~agent_name ~(verdict : Post_verifier.verdict) =
 
 (* [on_priority_selected] is an injected observability hook for the
    priority-trigger selection path. Previously this site called
-   [Prometheus.inc_counter] directly, coupling this module to the masc_mcp
+   [Prometheus.inc_counter] directly, coupling this module to the masc
    mega-library root. Defaulted to a no-op (observability, not behavior) so
    non-instrumented callers stay simple; an instrumented caller supplies the
    real Prometheus increment. *)

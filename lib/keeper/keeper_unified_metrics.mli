@@ -38,13 +38,13 @@ val classify_usage_trust :
 
 val usage_trust_is_trusted : usage_trust -> bool
 
-val estimate_trusted_usage_cost_usd :
-  usage_trusted:bool ->
+val estimate_usage_cost_usd :
   Agent_sdk.Types.api_usage ->
   float
-(** Return the OAS-reported turn cost for trusted usage.  MASC does not
-    estimate provider/model pricing locally; missing or non-positive cost
-    remains [0.0]. *)
+(** Return the OAS-reported turn cost. cost_usd is the provider's authoritative
+    cost field and is accounted independently of token-count trust (token⊥cost).
+    MASC does not estimate provider/model pricing locally; missing or
+    non-positive cost remains [0.0]. *)
 
 val usage_trust_to_string : usage_trust -> string
 

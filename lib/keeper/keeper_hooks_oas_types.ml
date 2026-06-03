@@ -152,7 +152,11 @@ let cost_status_for_event
     ~(output_tokens : int)
     ~(cost_usd : float) =
   if usage_missing then Cost_usage_missing
-  else if not usage_trusted then Cost_usage_untrusted
+  (* token⊥cost: an untrusted *token count* does not gate the provider's
+     authoritative cost_usd. A positive cost_usd is accounted (Cost_reported)
+     even when token usage is untrusted; only zero/absent cost on an untrusted
+     turn keeps the Cost_usage_untrusted label. *)
+  else if (not usage_trusted) && not (cost_usd > 0.0) then Cost_usage_untrusted
   else if cost_usd > 0.0 then Cost_reported
   else if input_tokens <= 0 && output_tokens <= 0 then Cost_no_tokens
   else if runtime_unmetered then Cost_known_free

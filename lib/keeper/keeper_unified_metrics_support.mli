@@ -29,8 +29,7 @@ val classify_usage_trust :
 
 val usage_trust_is_trusted : usage_trust -> bool
 
-val estimate_trusted_usage_cost_usd :
-  usage_trusted:bool ->
+val estimate_usage_cost_usd :
   Agent_sdk.Types.api_usage ->
   float
 

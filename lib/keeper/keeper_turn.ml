@@ -27,17 +27,10 @@ let handle_keeper_up = Keeper_turn_up.handle_keeper_up
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
 let turn_cost_for_result (result : Keeper_agent_run.run_result) : float =
-  let usage_trust =
-    Keeper_unified_metrics.classify_usage_trust
-      ~usage_reported:result.usage_reported
-      ~usage:result.usage
-      ~context_max:0
-  in
-  if Keeper_unified_metrics.usage_trust_is_trusted usage_trust then
-    Keeper_unified_metrics.estimate_trusted_usage_cost_usd
-      ~usage_trusted:true
-      result.usage
-  else 0.0
+  (* cost_usd is accounted independently of token-count trust (token⊥cost). The
+     provider's authoritative cost field is used directly; missing/non-positive
+     cost remains 0.0. *)
+  Keeper_unified_metrics.estimate_usage_cost_usd result.usage
 
 let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     (result : Keeper_agent_run.run_result) : keeper_meta =

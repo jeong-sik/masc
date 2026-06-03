@@ -239,7 +239,14 @@ let assemble_hooks
              ~typed_outcome_str
              ~duration_ms
              ~output_text
-             ~input))
+             ~input;
+           (* IDE Bridge: detect PR creation from Execute output *)
+           Ide_bridge.ingest_pr_event_from_hook
+             ~base_path:config.base_path
+             ~keeper_id:acc.meta.name
+             ~turn_id
+             ~output_text
+             ~tool_name))
         ~passive_loop_nudge:(fun () ->
           Keeper_passive_loop_detector.nudge_message ~keeper_name:acc.meta.name)
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard

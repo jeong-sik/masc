@@ -2,7 +2,7 @@
 (library
  (name masc_board_handlers)
  (public_name masc.board_handlers)
- (wrapped false)
+ (wrapped true)
  (modules
    board
    board_agent_effect_hooks

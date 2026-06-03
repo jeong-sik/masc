@@ -133,6 +133,8 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
              sum_int_opt (List.filter_map (fun e -> e.output_tokens) success_entries)
          ; total_cache_read_tokens =
              sum_int_opt (List.filter_map (fun e -> e.cache_read_tokens) success_entries)
+         ; total_cache_creation_tokens =
+             sum_int_opt (List.filter_map (fun e -> e.cache_creation_tokens) success_entries)
          ; total_reasoning_tokens =
              sum_int_opt (List.filter_map (fun e -> e.reasoning_tokens) success_entries)
          ; usage_sample_count

@@ -409,7 +409,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          call (e.g. a warmup probe, early keeper fiber) to capture
          the default noop sink instead of the Prometheus-backed one. *)
       Llm_metric_bridge.install ();
-      Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total)";
+      Llm_metric_bridge.init ~base_path;
+      Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
       (* #13885: install backend mutex observers from the top-level
          masc layer.  Backend/workspace sub-libraries cannot depend on
          Prometheus without creating dependency cycles, but the global

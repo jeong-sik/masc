@@ -178,7 +178,6 @@ let normalize_execution_links (links : Masc_domain.task_execution_links) =
 let normalize_task_contract (contract : Masc_domain.task_contract) =
   { contract with
     completion_contract = normalized_string_list contract.completion_contract
-  ; required_tools = []
   ; required_evidence = normalized_string_list contract.required_evidence
   ; inspect_gate_evidence = normalized_string_list contract.inspect_gate_evidence
   ; verify_gate_evidence = normalized_string_list contract.verify_gate_evidence
@@ -189,7 +188,6 @@ let normalize_task_contract (contract : Masc_domain.task_contract) =
 let empty_task_contract =
   { strict = false
   ; completion_contract = []
-  ; required_tools = []
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
@@ -244,7 +242,7 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
     else default_verification_evidence_refs
   in
   normalize_task_contract
-    { base with completion_contract; required_tools = []; required_evidence; verify_gate_evidence }
+    { base with completion_contract; required_evidence; verify_gate_evidence }
 ;;
 
 let merge_execution_links

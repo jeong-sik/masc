@@ -3,7 +3,7 @@
     helpers:
 
     - [cli_tool_a_can_auth_keeper_bound_runtime_mcp] — predicate that
-      decides whether the Codex CLI route can mint a per-keeper
+      decides whether the cli_tool_a transport can mint a per-keeper
       Authorization header for a bound-actor MCP policy.
 
     - [bridged_runtime_mcp_policy_for_agent] — the RFC-0058 §2.4
@@ -44,9 +44,9 @@ let cli_tool_a_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
    Invariant: this function is only reached from the dispatch site when the
    provider-tool policy says per-keeper bridging is required, i.e. the runtime
    cannot carry arbitrary per-request HTTP headers.  Body is intentionally
-   identical in semantics to the prior [codex_runtime_mcp_policy_for_agent] —
-   the rename removes the provider-name leak from the dispatch site without
-   altering behavior.
+   identical in semantics to the prior client-named projection — the rename
+   removes the provider-name leak from the dispatch site without altering
+   behavior.
 
    A future adapter with [requires_per_keeper_bridging = true] but
    different transport semantics (e.g. native per-keeper header

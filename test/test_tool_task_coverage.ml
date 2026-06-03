@@ -1494,7 +1494,7 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_url_alias" (fun () 
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let pr_url = "https://github.com/jeong-sik/masc/pull/13169" in
-    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
+    add_task_requiring_tools ctx ~title:"CLI approval follow-up" [ "tool_execute" ];
     let result =
       Tool_task.handle_transition
         ~tool_name:"test_tool" ~start_time:0.0
@@ -1594,7 +1594,7 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
 let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
+    add_task_requiring_tools ctx ~title:"CLI approval follow-up" [ "tool_execute" ];
     let submit_result =
       Tool_task.handle_transition
         ~tool_name:"test_tool" ~start_time:0.0
@@ -1763,7 +1763,7 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
   | None -> failwith "dispatch returned None"
 )
 
-(* Regression for issue: tool_execute-gated tasks stay todo after merged Codex PR
+(* Regression for issue: tool_execute-gated tasks stay todo after merged PR
    evidence. submit_pr_evidence must bypass the required_tool claim guard and
    transition Todo -> AwaitingVerification without claiming. *)
 let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun () ->

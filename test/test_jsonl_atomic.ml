@@ -249,7 +249,7 @@ let test_two_handles_share_mutex () =
       with e -> failf "invalid JSON: %s" (Printexc.to_string e))
     lines
 
-(* ── Scenario 5: path spellings collapse to one mutex (Codex P1 #15906) ── *)
+(* ── Scenario 5: path spellings collapse to one mutex (P1 #15906) ── *)
 
 let test_path_spelling_collapse () =
   Eio_main.run @@ fun env ->

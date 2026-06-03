@@ -31,3 +31,36 @@ val enrich_hover :
 
 val has_annotations_at_line : base_dir:string -> file_path:string -> line:int -> bool
 (** Check if any MASC annotations overlap the given LSP position (0-based line). *)
+
+val definition_links : base_dir:string -> file_path:string -> line:int -> Yojson.Safe.t list
+(** Generate LSP Location links for annotations overlapping [line].
+    Used by textDocument/definition. *)
+
+val reference_locations :
+  base_dir:string -> file_path:string -> line:int -> include_declaration:bool ->
+  Yojson.Safe.t list
+(** Generate LSP Location[] for annotations related to those at [line].
+    Finds annotations sharing the same goal_id or task_id.
+    Used by textDocument/references. *)
+
+val completion_items : base_dir:string -> file_path:string -> line:int -> Yojson.Safe.t list
+(** Generate CompletionItem[] for MASC annotation snippets.
+    Used by textDocument/completion. *)
+
+val code_actions :
+  base_dir:string -> file_path:string -> line:int -> diagnostics:Yojson.Safe.t list ->
+  Yojson.Safe.t list
+(** Generate CodeAction[] for annotation operations.
+    Used by textDocument/codeAction. *)
+
+val document_symbols : base_dir:string -> file_path:string -> Yojson.Safe.t list
+(** Generate SymbolInformation[] for MASC annotations.
+    Used by textDocument/documentSymbol. *)
+
+val folding_ranges : base_dir:string -> file_path:string -> Yojson.Safe.t list
+(** Generate FoldingRange[] for consecutive annotation blocks.
+    Used by textDocument/foldingRange. *)
+
+val document_highlights : base_dir:string -> file_path:string -> line:int -> Yojson.Safe.t list
+(** Generate DocumentHighlight[] for annotations sharing goal/task context.
+    Used by textDocument/documentHighlight. *)

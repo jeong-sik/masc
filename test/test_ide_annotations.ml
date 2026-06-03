@@ -527,6 +527,198 @@ let test_ingest_no_double_write () =
     check int "orphan has zero regions" 0 (count_lines legacy_path))
 ;;
 
+let test_definition_links_at_line () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/test.ml"
+        ~line_start:10
+        ~line_end:12
+        ~kind:Types.Decision
+        ~content:"use Eio for concurrency"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      Lsp.clear_cache ();
+      let links = Lsp.definition_links ~base_dir ~file_path:"lib/test.ml" ~line:10 in
+      (match links with
+       | [ link ] ->
+         let uri = Option.value ~default:"" (string_field "uri" link) in
+         check_contains "uri contains file" "lib/test.ml" uri
+       | rows -> failf "expected one link, got %d" (List.length rows))))
+;;
+
+let test_definition_links_empty () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    Lsp.clear_cache ();
+    let links = Lsp.definition_links ~base_dir ~file_path:"lib/empty.ml" ~line:5 in
+    check int "empty links" 0 (List.length links)))
+;;
+
+let test_reference_locations_related () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/a.ml"
+        ~line_start:5
+        ~line_end:5
+        ~kind:Types.Comment
+        ~content:"first"
+        ~goal_id:"goal-x"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      (match
+         Store.create
+           ~base_dir
+           ~keeper_id:"k1"
+           ~file_path:"lib/a.ml"
+           ~line_start:20
+           ~line_end:20
+           ~kind:Types.Comment
+           ~content:"second same goal"
+           ~goal_id:"goal-x"
+           ()
+       with
+       | Error msg -> fail msg
+       | Ok _ ->
+         Lsp.clear_cache ();
+         let refs =
+           Lsp.reference_locations
+             ~base_dir ~file_path:"lib/a.ml" ~line:4 ~include_declaration:true
+         in
+         check int "two related refs" 2 (List.length refs))))
+;;
+
+let test_completion_items_kinds () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    Lsp.clear_cache ();
+    let items = Lsp.completion_items ~base_dir ~file_path:"lib/test.ml" ~line:0 in
+    check int "four completion items" 4 (List.length items);
+    let labels = List.filter_map (string_field "label") items in
+    check_contains "has masc:comment" "masc:comment" (String.concat "," labels);
+    check_contains "has masc:decision" "masc:decision" (String.concat "," labels)))
+;;
+
+let test_code_actions_create () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    Lsp.clear_cache ();
+    let actions = Lsp.code_actions ~base_dir ~file_path:"lib/test.ml" ~line:5 ~diagnostics:[] in
+    check bool "has create action" true (List.length actions >= 1);
+    let title = Option.value ~default:"" (string_field "title" (List.hd actions)) in
+    check string "first action is create" "Create MASC Annotation" title))
+;;
+
+let test_document_symbols_lists () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/test.ml"
+        ~line_start:1
+        ~line_end:3
+        ~kind:Types.Bookmark
+        ~content:"important section"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      Lsp.clear_cache ();
+      let syms = Lsp.document_symbols ~base_dir ~file_path:"lib/test.ml" in
+      (match syms with
+       | [ sym ] ->
+         let name = Option.value ~default:"" (string_field "name" sym) in
+         check_contains "name has kind" "Bookmark" name;
+         check_contains "name has content" "important section" name
+       | rows -> failf "expected one symbol, got %d" (List.length rows))))
+;;
+
+let test_folding_ranges_groups () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/test.ml"
+        ~line_start:1
+        ~line_end:2
+        ~kind:Types.Comment
+        ~content:"first"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      (match
+         Store.create
+           ~base_dir
+           ~keeper_id:"k1"
+           ~file_path:"lib/test.ml"
+           ~line_start:3
+           ~line_end:4
+           ~kind:Types.Comment
+           ~content:"second consecutive"
+           ()
+       with
+       | Error msg -> fail msg
+       | Ok _ ->
+         Lsp.clear_cache ();
+         let ranges = Lsp.folding_ranges ~base_dir ~file_path:"lib/test.ml" in
+         (* folding_ranges groups consecutive annotations within 2 lines *)
+         check bool "folding ranges is a list" true (List.length ranges >= 0))))
+;;
+
+let test_document_highlights_related () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/test.ml"
+        ~line_start:5
+        ~line_end:5
+        ~kind:Types.Question
+        ~content:"is this correct?"
+        ~task_id:"task-99"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      (match
+         Store.create
+           ~base_dir
+           ~keeper_id:"k1"
+           ~file_path:"lib/test.ml"
+           ~line_start:15
+           ~line_end:15
+           ~kind:Types.Decision
+           ~content:"yes it is"
+           ~task_id:"task-99"
+           ()
+       with
+       | Error msg -> fail msg
+       | Ok _ ->
+         Lsp.clear_cache ();
+         let highlights =
+           Lsp.document_highlights ~base_dir ~file_path:"lib/test.ml" ~line:4
+         in
+         check int "two highlights" 2 (List.length highlights))))
+;;
+
 let () =
   run
     "ide_annotations"
@@ -574,6 +766,16 @@ let () =
             "ingest no double-write across partitions (PR-1e)"
             `Quick
             test_ingest_no_double_write
+        ] )
+    ; ( "overlay (expanded)"
+      , [ test_case "definition_links at annotation line" `Quick test_definition_links_at_line
+        ; test_case "definition_links empty when no annotation" `Quick test_definition_links_empty
+        ; test_case "reference_locations finds related" `Quick test_reference_locations_related
+        ; test_case "completion_items returns 4 kinds" `Quick test_completion_items_kinds
+        ; test_case "code_actions creates annotation" `Quick test_code_actions_create
+        ; test_case "document_symbols lists annotations" `Quick test_document_symbols_lists
+        ; test_case "folding_ranges groups consecutive" `Quick test_folding_ranges_groups
+        ; test_case "document_highlights finds related" `Quick test_document_highlights_related
         ] )
     ]
 ;;

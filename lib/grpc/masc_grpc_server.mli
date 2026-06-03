@@ -21,6 +21,10 @@ val create_server :
   port:int ->
   workspace_config:Workspace_utils_backend_setup.config ->
   tool_dispatcher:(string -> string -> (string, string) result) ->
+  lsp_dispatcher:(language_id:string ->
+                   jsonrpc_request_json:string ->
+                   workspace_root:string option ->
+                   (string, string) result) ->
   Grpc_eio.Server.t
 
 (** Start the gRPC workspace server in a forked fiber.

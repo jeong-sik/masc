@@ -128,11 +128,6 @@ let finalize
   let tool_contract_result
       : Keeper_execution_receipt.tool_contract_result =
     match turn_result with
-    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _))
-      ->
-      (match acc.receipt_tool_contract_result with
-       | Contract_unknown -> Contract_violated
-       | other -> other)
     | _ -> acc.receipt_tool_contract_result
   in
   let terminal_reason_code =

@@ -56,7 +56,6 @@ type failure =
       }
   | Transient_provider_failure
   | Runtime_exhausted of { retryable : bool }
-  | Required_tool_contract_violation
   | Fatal_environment of { detail : string option }
   | Stale_turn of { progress_seen : bool }
   | Stale_termination_storm of { count : int }

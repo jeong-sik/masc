@@ -642,11 +642,7 @@ let run_keeper_cycle
                           Keeper_turn_fsm.Cancelled_provider_timeout)
                    else
                      let fsm_failure_reason =
-                       if EC.is_required_tool_contract_violation err
-                       then
-                         Keeper_turn_fsm.Failure_tool_contract_violation
-                           { reason_code = "require_tool_use" }
-                       else if EC.is_receipt_lost_error err
+                       if EC.is_receipt_lost_error err
                        then
                          Keeper_turn_fsm.Failure_receipt_lost
                            { primary_error = e_str; fallback_path = None }

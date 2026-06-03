@@ -89,15 +89,6 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
       make ~source:"typed_error" "turn_wall_clock_timeout"
     | _ ->
       (match err with
-       | Agent_sdk.Error.Agent
-           (Agent_sdk.Error.CompletionContractViolation
-              { contract = Agent_sdk.Completion_contract_id.Require_tool_use; _ }) ->
-         let code =
-           if tool_call_count <= 0
-           then contract_code_from_error_text raw_error
-           else "required_tool_use_unsatisfied"
-         in
-         make ~source:"typed_error" code
        | _ ->
          (* RFC-0047 follow-up: emit typed [Provider_error] directly via
             [Keeper_agent_error.terminal_reason_code_of_sdk_error_typed]

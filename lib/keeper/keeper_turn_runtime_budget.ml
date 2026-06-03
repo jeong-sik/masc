@@ -254,10 +254,7 @@ let next_fail_open_runtime_for_turn_with_budget
   | Some retry ->
       (* The candidate is always a retry, so use per-attempt budget semantics
          regardless of whether the current attempt was itself a retry. *)
-      let first_contract_rotation =
-        EC.is_required_tool_contract_violation err
-        && List.length attempted_runtimes <= 1
-      in
+      let first_contract_rotation = false in
       if
         match time_spent_in_turn_s with
         | Some time_spent_in_turn_s ->

@@ -15,7 +15,6 @@ type t =
   | Heartbeat_failures
   | Turn_failures
   | Provider_runtime_error of string
-  | Tool_required_unsatisfied of string
   | Ambiguous_partial_commit_post_commit_timeout
   | Ambiguous_partial_commit_post_commit_failure
   | Fiber_unresolved
@@ -39,7 +38,6 @@ let to_wire = function
   | Heartbeat_failures -> "heartbeat_failures"
   | Turn_failures -> "turn_failures"
   | Provider_runtime_error code -> code
-  | Tool_required_unsatisfied code -> code
   | Ambiguous_partial_commit_post_commit_timeout
   | Ambiguous_partial_commit_post_commit_failure -> "ambiguous_partial_commit"
   | Fiber_unresolved -> "fiber_unresolved"
@@ -92,8 +90,6 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Provider_timeout_loop _ ->
     Provider_runtime_error "provider_timeout_loop"
   | Keeper_registry.Provider_runtime_error { code; _ } -> Provider_runtime_error code
-  | Keeper_registry.Tool_required_unsatisfied { code; _ } ->
-    Tool_required_unsatisfied code
   | Keeper_registry.Ambiguous_partial_commit
       { kind = Keeper_registry.Post_commit_timeout; _ } ->
     Ambiguous_partial_commit_post_commit_timeout

@@ -204,7 +204,6 @@ let launch_supervised_fiber
                   | Some (Keeper_registry.Heartbeat_consecutive_failures _)
                   | Some (Keeper_registry.Turn_consecutive_failures _)
                   | Some (Keeper_registry.Provider_runtime_error _)
-                  | Some (Keeper_registry.Tool_required_unsatisfied _)
                   | Some Keeper_registry.Turn_overflow_pause
                   | Some Keeper_registry.Turn_livelock_pause
                   | Some (Keeper_registry.Ambiguous_partial_commit _)

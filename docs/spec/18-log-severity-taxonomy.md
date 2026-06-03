@@ -48,7 +48,7 @@ The taxonomy is built around **operator action**. If a log line does not change 
 | Marker (must NOT) | Triggered by model output, network flake, or any retry-able failure |
 | Cardinality | Low — a healthy fleet should produce ≤1/day per `Error` site |
 | Example (good) | `Log.Misc.error "tool_usage_log: init failed: %s" exn` — durable store init failed, dashboard now blind |
-| Anti-pattern | `Log.Keeper.error "keeper cycle FAILED ... runtime=keeper_unified ..."` for `required_tool_contract_violation` — model behavior, fleet-wide expected, not actionable |
+| Anti-pattern | `Log.Keeper.error "keeper cycle FAILED ... runtime=keeper_unified ..."` for `completion_contract_violation` — model behavior, fleet-wide expected, not actionable |
 
 ### `Warn`
 
@@ -128,10 +128,10 @@ These are repeating misclassifications observed in `git log --grep='demote\|prom
 
 | | |
 |--|--|
-| Pattern | Message describes a syntactic / behavioral mistake by the LLM (`tool contract violated`, `gh syntax`, `JSON parse failed in tool args`) AND severity is `Error` |
+| Pattern | Message describes a syntactic / behavioral mistake by the LLM (`completion contract violated`, `gh syntax`, `JSON parse failed in tool args`) AND severity is `Error` |
 | Why wrong | Model behavior is a **distribution**, not a fault. Logging every model-output flake as `Error` produces alarm inflation — operators learn to ignore `Error`, then miss the real ones. |
 | Correct | `Warn`, with a per-keeper rate-limit OR aggregation. Promote to `Error` only when escalation policy kicks in (e.g., 5 violations in 10 turns → contract permanently broken). |
-| Origin | Historical `Log.Keeper.error "keeper:%s required tool contract violated (turn=%d, tools=%d)"` path — removed from the keeper turn path in the 2026-06-03 CDAL advisory split. Memory `proactive_turn_contract_violation_dominant` documented the original pattern. |
+| Origin | Historical `Log.Keeper.error "keeper:%s completion contract violated (turn=%d, signals=%d)"` path — removed from the keeper turn path in the 2026-06-03 CDAL advisory split. Memory `proactive_turn_contract_violation_dominant` documented the original pattern. |
 
 ### 3.4 Watchdog tick / periodic heartbeat
 

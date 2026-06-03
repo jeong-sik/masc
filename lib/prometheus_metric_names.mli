@@ -22,7 +22,7 @@
     gaps are visible as a scrapeable gauge, not only in message text.
     Labels: [keeper_name]. *)
 
-(** #10530: keeper required-tool-contract violations.
+(** #10530: keeper completion-contract violations.
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 
 (** #9953: bucketed counter for observed [context_max] values.
@@ -249,12 +249,12 @@ val metric_egress_audit_stale_orphan : string
     Incremented once per loop episode (streak resets on any execution-progress
     turn). Labels: [keeper]. *)
 
-(** #13362 Total required-tool contract loops: keeper hit N consecutive
-    actionable required-tool failures before making execution/completion
+(** #13362 Total completion-contract loops: keeper hit N consecutive
+    actionable completion-contract failures before making execution/completion
     progress.  Incremented once per loop episode. Labels: [keeper, kind]. *)
 
 (** Goal-loop Observe counter for no-progress keeper loops. Emitted by the
-    passive/required-tool loop detector when progress-signalling turns make no
+    passive/completion-contract loop detector when progress-signalling turns make no
     execution or completion progress. Incremented once per loop episode.
     Labels: [keeper_name]. *)
 

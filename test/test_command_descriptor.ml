@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module Desc = Masc_mcp.Keeper_tool_execute_runtime.For_testing
+module Desc = Masc.Keeper_tool_execute_runtime.For_testing
 
 let with_temp_dir f =
   let dir = Filename.temp_file "cmd_desc_test" "" in
@@ -16,9 +16,9 @@ let with_temp_dir f =
 
 (** Helper: parse command string to Shell_ir.t via Exec_policy. *)
 let parse_ir cmd =
-  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Masc_mcp.Exec_policy.Strict cmd with
+  match Masc.Exec_policy.parse_string_to_ir ~mode:Masc.Exec_policy.Strict cmd with
   | Ok ir -> ir
-  | Error reason -> failf "parse failed: %s" (Masc_mcp.Exec_policy.block_reason_to_string reason)
+  | Error reason -> failf "parse failed: %s" (Masc.Exec_policy.block_reason_to_string reason)
 ;;
 
 let test_gh_pr_create () =

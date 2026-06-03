@@ -81,10 +81,10 @@ let with_exec_fixture ?tool_access name fn =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Masc.Workspace.default_config dir in
       let meta = make_meta ?tool_access () in
-      ignore (Masc_mcp.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
       Fun.protect
         ~finally:(fun () ->
-          Masc_mcp.Keeper_registry.unregister ~base_path:config.base_path meta.name)
+          Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
         (fun () -> fn ~config ~meta ~ctx_work:(make_ctx ())))
 
 let payload_kind = function

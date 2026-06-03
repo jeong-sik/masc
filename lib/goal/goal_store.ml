@@ -471,6 +471,36 @@ let list_goals config ?horizon ?status ?phase () =
          | Some phase -> goal.phase = phase)
   |> sort_goals
 
+let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
+  (* Cannot be own parent *)
+  if String.equal goal_id parent_goal_id then
+    Error "goal cannot be its own parent"
+  else
+    (* Parent must exist *)
+    match find_goal goals parent_goal_id with
+    | None -> Error (Printf.sprintf "parent goal %s not found" parent_goal_id)
+    | Some _ ->
+      (* Walk ancestor chain to detect cycles *)
+      let rec walk visited current_id =
+        if String.equal current_id goal_id then
+          true (* cycle detected *)
+        else
+          match find_goal goals current_id with
+          | None -> false (* orphan parent, already checked above *)
+          | Some g ->
+            match g.parent_goal_id with
+            | None -> false
+            | Some pid ->
+              if List.mem pid visited then
+                false (* existing cycle in ancestors, don't add to it *)
+              else
+                walk (pid :: visited) pid
+      in
+      if walk [parent_goal_id] parent_goal_id then
+        Error "parent_goal_id would create a cycle"
+      else
+        Ok ()
+
 let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
     ?priority ?status ?phase ?parent_goal_id ?verifier_policy
     ?require_completion_approval () =
@@ -491,6 +521,34 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
     | Ok default_phase ->
         let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
+        (* Validate parent_goal_id before acquiring the write lock *)
+        let parent_validation =
+          let current_goals = (read_state config).goals in
+          match find_goal current_goals resolved_id with
+          | Some existing ->
+              (* Existing goal: validate only if parent is being changed *)
+              (match parent_goal_id with
+               | Some new_pid ->
+                   (match existing.parent_goal_id with
+                    | Some old_pid when String.equal old_pid new_pid ->
+                        Ok () (* no change, skip validation *)
+                    | _ ->
+                        validate_parent_goal_id current_goals
+                          ~goal_id:resolved_id
+                          ~parent_goal_id:new_pid)
+               | None -> Ok ())
+          | None ->
+              (* New goal: validate any provided parent_goal_id *)
+              (match parent_goal_id with
+               | Some pid ->
+                   validate_parent_goal_id current_goals
+                     ~goal_id:resolved_id
+                     ~parent_goal_id:pid
+               | None -> Ok ())
+        in
+        (match parent_validation with
+         | Error msg -> Error msg
+         | Ok () ->
         let was_created = ref false in
         let state =
           update_state config (fun state ->
@@ -579,7 +637,7 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
         | Some goal ->
             Ok (goal, if !was_created then `created else `updated)
         | None ->
-            Error "failed to save goal"
+            Error "failed to save goal")
 
 let compute_rollup goals =
   let count predicate =

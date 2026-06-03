@@ -137,7 +137,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
              ; provider_id = None
          ; http_status = None
          ; runtime_id = Some (ntcp_runtime_id)
-         ; reason = None
+         ; reason = Some (Keeper_meta_contract.No_tool_capable (Some detail))
          })
   | Some
       (Keeper_internal_error.Runtime_exhausted
@@ -152,7 +152,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; runtime_id = Some (ntcp_runtime_id)
-         ; reason = None
+         ; reason = Some (Keeper_meta_contract.No_tool_capable None)
          })
   (* Generic Runtime_exhausted catch-all — after No_tool_capable specifics *)
   | Some (Keeper_internal_error.Runtime_exhausted { reason; runtime_id }) ->

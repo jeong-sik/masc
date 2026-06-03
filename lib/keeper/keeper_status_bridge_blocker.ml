@@ -266,16 +266,22 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                window; keeper was auto-paused before restart loop."
               distinct_count)
          Stale_fleet_batch)
-  | Keeper_registry.Provider_runtime_error { code; detail; runtime_id = _ }
-     when code = "no_tool_capable_provider" ->
+  | Keeper_registry.Provider_runtime_error
+      { reason = Some (No_tool_capable _ as no_tool_capable); detail; _ } ->
+    (* Typed no-tool-capable path: the producer
+       ([keeper_unified_turn_types.runtime_exhausted_failure_reason_of_raw_error])
+       carries the already-typed [No_tool_capable] reason on the record.
+       Reading the typed field instead of reparsing [code =
+       "no_tool_capable_provider"] removes a typed->string->typed round-trip;
+       the [code] string is retained on the record for wire/dashboard readers. *)
     Some
       (runtime_blocker_surface_of_typed_class
          ~summary:
            (Printf.sprintf
               "No tool-capable provider available (registry path): %s"
               detail)
-         (Runtime_exhausted (No_tool_capable None)))
-  | Keeper_registry.Provider_runtime_error { code; detail } ->
+         (Runtime_exhausted no_tool_capable))
+  | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
     Some
       { blocker_class = "provider_runtime_error"
       ; summary =

@@ -134,6 +134,7 @@ let test_variant_count () =
 module SdkE = Agent_sdk.Error
 module SdkRetry = Agent_sdk.Retry
 module KSB = Masc_mcp.Keeper_status_bridge_blocker
+module Reg = Masc_mcp.Keeper_registry
 
 (** Every [Agent_sdk.Error.Agent _] sub-variant must map to a [Some blocker_class]
     through the two-layer pipeline in [blocker_class_of_sdk_error]:
@@ -232,6 +233,84 @@ let test_structural_timeout_maps_to_oas_timeout () =
   | None -> fail "structural timeout should map to Some blocker_class"
 ;;
 
+(* ── No_tool_capable round-trip removal: typed-reason consumer ──── *)
+
+(* The consumer [runtime_blocker_surface_of_failure_reason] now reads the
+   typed [reason = Some (No_tool_capable _)] field on
+   [Provider_runtime_error] instead of reparsing [code =
+   "no_tool_capable_provider"].  These tests pin that the typed-match path
+   yields the same blocker surface the old string-match produced, and that a
+   non-no_tool_capable provider error still falls through to the
+   provider_runtime_error catch-all (no widening). *)
+
+let no_tool_capable_surface_exn ~reason ~code =
+  let failure_reason =
+    Reg.Provider_runtime_error
+      { code
+      ; detail = "no tool-capable provider found (runtime=r labels=[a])"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = Some "r"
+      ; reason
+      }
+  in
+  match KSB.runtime_blocker_surface_of_failure_reason failure_reason with
+  | Some surface -> surface
+  | None ->
+    fail "runtime_blocker_surface_of_failure_reason returned None for Provider_runtime_error"
+;;
+
+let test_no_tool_capable_typed_reason_surface () =
+  (* Both producer shapes: with and without telemetry detail. *)
+  let detail_shape =
+    no_tool_capable_surface_exn
+      ~reason:
+        (Some
+           (No_tool_capable
+              (Some { configured_labels = [ "a" ]; provider_rejections = [] })))
+      ~code:"no_tool_capable_provider"
+  in
+  let none_shape =
+    no_tool_capable_surface_exn
+      ~reason:(Some (No_tool_capable None))
+      ~code:"no_tool_capable_provider"
+  in
+  List.iter
+    (fun (label, surface) ->
+       check string
+         (label ^ ": blocker_class is runtime_exhausted_no_tool_capable")
+         "runtime_exhausted_no_tool_capable"
+         surface.KSB.blocker_class;
+       (* Old string-match produced [Runtime_exhausted (No_tool_capable None)]
+          with continue_gate = false (Runtime_exhausted _ is non-gating). *)
+       check bool (label ^ ": continue_gate false") false surface.KSB.continue_gate)
+    [ "detail shape", detail_shape; "none shape", none_shape ]
+;;
+
+let test_non_no_tool_capable_provider_error_falls_through () =
+  (* A provider error without a No_tool_capable typed reason must route to the
+     generic provider_runtime_error catch-all, not the no-tool-capable arm. *)
+  let surface =
+    no_tool_capable_surface_exn
+      ~reason:(Some Connection_refused)
+      ~code:"runtime_exhausted_connection_refused"
+  in
+  check string
+    "non-NTC provider error -> provider_runtime_error catch-all"
+    "provider_runtime_error"
+    surface.KSB.blocker_class
+;;
+
+let test_reason_none_provider_error_falls_through () =
+  let surface =
+    no_tool_capable_surface_exn ~reason:None ~code:"provider_error"
+  in
+  check string
+    "reason=None provider error -> provider_runtime_error catch-all"
+    "provider_runtime_error"
+    surface.KSB.blocker_class
+;;
+
 (* ── Runner ────────────────────────────────────────────────────── *)
 
 let () =
@@ -250,6 +329,14 @@ let () =
         ; test_case "Agent variant count pin" `Quick test_agent_variant_count_pin
         ; test_case "structural timeout → oas_agent_execution_timeout" `Quick
             test_structural_timeout_maps_to_oas_timeout
+        ] )
+    ; ( "no_tool_capable_typed_reason"
+      , [ test_case "typed reason -> no_tool_capable surface" `Quick
+            test_no_tool_capable_typed_reason_surface
+        ; test_case "non-NTC provider error falls through" `Quick
+            test_non_no_tool_capable_provider_error_falls_through
+        ; test_case "reason=None provider error falls through" `Quick
+            test_reason_none_provider_error_falls_through
         ] )
     ]
 ;;

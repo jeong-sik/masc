@@ -116,7 +116,7 @@ let worker_tag (result : (unit, W.block_reason) result) : string =
 ;;
 
 let validate_worker_execute_raw ~allowed_commands raw =
-  match Masc.Exec_policy.parse_string_to_ir ~mode:Tool_execute raw with
+  match Exec_policy.parse_string_to_ir ~mode:Tool_execute raw with
   | Ok ir -> W.validate_command_tool_execute_with_allowlist ~allowed_commands ir
   | Error reason -> Error reason
 ;;

@@ -56,6 +56,10 @@ MEGA_LIB = "masc"
 # Extend as each domain is extracted (RFC-0056 / boundary campaign).
 DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.masc_goal",
+    # RFC-0056 Phase 1L: Attribution envelope and phantom-tagged wrappers.
+    "masc.attribution",
+    # RFC-0056 Phase 1M: Shell IR execution policy and typed path errors.
+    "masc.exec_policy",
     # PR-S3 (LANE 2): Tool dispatch substrate. The gate enforces that the
     # Tool layer cannot pull keeper/runtime/telemetry back in via the mega-lib.
     "masc.masc_tool_dispatch",

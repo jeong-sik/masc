@@ -5,12 +5,12 @@ let get_string_field json key =
   json |> member key |> to_string
 
 let classification_of_cmd cmd =
-  match Masc.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
   | Ok ir -> Masc.Exec_core.classify_command_of_ir ir
   | Error reason ->
       failwith
         ("command parse failed: "
-         ^ Masc.Exec_policy.block_reason_to_string reason)
+         ^ Exec_policy.block_reason_to_string reason)
 
 let test_rg_no_match_is_semantic_success () =
   let cmd = "rg missing_pattern lib/" in

@@ -70,6 +70,10 @@
    (re_export masc.keeper_invariant)
    ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
    (re_export masc.compaction_trigger)
+   ;; RFC-0056 Phase 1L — Attribution leaf sub-library.
+   (re_export masc.attribution)
+   ;; RFC-0056 Phase 1M — Execution policy leaf sub-library.
+   (re_export masc.exec_policy)
    ;; RFC-0058 Phase 1 — Declarative runtime TOML parser sub-library.
    (re_export masc.ag_ui)
    (re_export masc.config)

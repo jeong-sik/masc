@@ -15,12 +15,11 @@ module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
 module Keeper_types = Masc.Keeper_types
 module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
-module Dev_exec_allowlist = Masc.Dev_exec_allowlist
 module Exec_program = Masc_exec.Exec_program
 module Json = Yojson.Safe.Util
 
 let validate cmd =
-  match Masc.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
   | Ok ir -> Masc.Worker_dev_tools.validate_command ir
   | Error reason -> Error reason
 ;;
@@ -100,7 +99,7 @@ let test_empty_command () =
   Alcotest.(check bool) "whitespace blocked" true (is_error (validate "   "))
 
 let is_write cmd =
-  match Masc.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
   | Ok ir ->
     let envelope = Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir) in
     envelope.Masc_exec.Shell_ir_risk.risk <> Masc_exec.Shell_ir_risk.R0_Read

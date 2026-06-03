@@ -294,8 +294,8 @@ let execute_tool_eio
                      ~name
                      ~args:coerced_args
                  | Mod_task ->
-                   Tool_task.dispatch
-                     { Tool_task.config; agent_name; sw = Some sw }
+                   Task.Tool.dispatch
+                     { Task.Tool.config; agent_name; sw = Some sw }
                      ~name
                      ~args:coerced_args
                  | Mod_state ->

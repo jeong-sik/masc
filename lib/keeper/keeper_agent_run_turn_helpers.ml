@@ -73,10 +73,10 @@ let registry_progress_on_event ~record_turn_progress downstream event =
   Option.iter (fun cb -> cb event) downstream
 
 
-let completion_contract_result_for_progress_evidence
+let tool_contract_result_for_observed_tools
     ~(had_owned_active_task_at_turn_start : bool)
     ~(actual_keeper_tool_names : string list) :
-    Keeper_execution_receipt.completion_contract_result =
+    Keeper_execution_receipt.tool_contract_result =
   let class_of name = Keeper_tool_progress.classify_tool_progress name in
   let classes = List.map class_of actual_keeper_tool_names in
   let has_class wanted = List.exists (( = ) wanted) classes in

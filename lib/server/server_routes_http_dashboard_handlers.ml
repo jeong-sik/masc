@@ -83,7 +83,7 @@ let handle_dashboard_task_history state req reqd =
     let json =
       Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
         Domain_pool_ref.submit_io_or_inline (fun () ->
-          Tool_task.task_history_events_json state.Mcp_server.workspace_config
+          Task.Tool.task_history_events_json state.Mcp_server.workspace_config
             ~task_id ~limit))
     in
     Http.Response.json_value ~compress:true ~request:req json reqd

@@ -32,7 +32,7 @@ let workflow_rejection_error_json
      surfaces it directly in the JSON payload so the LLM does not
      have to parse prose [hint] strings to discover next-tool
      candidates. *)
-  Tool_task_payloads.workflow_rejection_payload_json
+  Task.Payloads.workflow_rejection_payload_json
     ~rule_id
     ~scope_policy:"block_scope"
     ~alternatives
@@ -486,14 +486,14 @@ let handle_keeper_task_tool
       | Error message -> validation_error_json message
       | Ok goal_id ->
           (* De-duplicated: this keeper-internal path now shares the canonical
-             [Tool_task_args.parse_task_contract] used by the public
+             [Task.Args.parse_task_contract] used by the public
              masc_task_create facade. The previous local copy
              [parse_task_contract_arg] had regressed — it rejected an OMITTED
              optional [contract] via a catch-all that conflated None(omitted)
              with a wrong-typed value, which falsely failed keeper_task_create
              and tripped the keeper failure circuit breaker. Same lib, no
              dependency wall; the canonical parser handles [None | Some `Null]. *)
-          (match Tool_task_args.parse_task_contract args with
+          (match Task.Args.parse_task_contract args with
            | Error message -> validation_error_json message
            | Ok contract ->
               let capacity_error =
@@ -572,10 +572,10 @@ let handle_keeper_task_tool
        in
        if needs_start then begin
          let start_result =
-           Tool_task.handle_transition
+           Task.Tool.handle_transition
              ~tool_name:"keeper_auto_start"
              ~start_time:0.0
-             { Tool_task.config; agent_name = keeper_agent_sender ~meta;
+             { Task.Tool.config; agent_name = keeper_agent_sender ~meta;
                sw = Eio_context.get_switch_opt () }
              (`Assoc ["task_id", `String task_id; "action", `String "start"])
          in
@@ -634,7 +634,7 @@ let handle_keeper_task_tool
               ?fallback_reason:claim_goal_scope.fallback_reason ()
           , [
               ( "claim_observation",
-                Tool_task.build_claim_observation_payload
+                Task.Tool.build_claim_observation_payload
                   ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
                   ~task_id );
               ( "claimed_task",
@@ -757,11 +757,11 @@ let handle_keeper_task_tool
         ]
       in
       let transition_result =
-        Tool_task.handle_transition
+        Task.Tool.handle_transition
           ~tool_name:"keeper_task_done"
           ~start_time:0.0
           {
-            Tool_task.config;
+            Task.Tool.config;
             agent_name = keeper_agent_sender ~meta;
             sw = Eio_context.get_switch_opt ();
           }
@@ -796,7 +796,7 @@ let handle_keeper_task_tool
         ~alternatives:
           [ "keeper_task_submit_for_verification"; "keeper_task_done" ]
         "pr_url is required. Include the PR opened for this task."
-    else if not (Tool_task_completion_review.pr_url_has_pull_ref pr_url)
+    else if not (Task.Completion_review.pr_url_has_pull_ref pr_url)
     then
       workflow_rejection_error_json
         ~alternatives:[ "keeper_task_submit_for_verification" ]
@@ -815,11 +815,11 @@ let handle_keeper_task_tool
           ]
       in
       let transition_result =
-        Tool_task.handle_transition
+        Task.Tool.handle_transition
           ~tool_name:"keeper_task_submit_for_verification"
           ~start_time:0.0
           {
-            Tool_task.config;
+            Task.Tool.config;
             agent_name = keeper_agent_sender ~meta;
             sw = Eio_context.get_switch_opt ();
           }

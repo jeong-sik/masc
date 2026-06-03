@@ -441,7 +441,7 @@ let find_schema_exn name schemas =
   | None -> failwith ("missing schema: " ^ name)
 
 let masc_transition_schema =
-  find_schema_exn "masc_transition" Tool_task_schemas.schemas
+  find_schema_exn "masc_transition" Task.Schemas.schemas
 
 let masc_goal_list_schema =
   find_schema_exn "masc_goal_list" Tool_schemas_workspace_extra.schemas

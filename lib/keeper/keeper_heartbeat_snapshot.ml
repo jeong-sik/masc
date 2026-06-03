@@ -387,8 +387,9 @@ let write_heartbeat_snapshot
              emitting it on every heartbeat made
              per-provider latency histograms and dashboards show
              ghost provider names long after the binary that wrote
-             them was rebuilt (observed stale synthetic provider
-             labels across post-#9967 rebuild).  Emit empty string here so
+             them was rebuilt (observed qa-king / nick0cave stuck on
+             "deterministic_required_tool_fallback" across
+             post-#9967 rebuild).  Emit empty string here so
              downstream per-provider aggregation ignores heartbeat
              records.  `last_model_used_label` on the keeper state
              JSON still reflects the last real turn for dashboard

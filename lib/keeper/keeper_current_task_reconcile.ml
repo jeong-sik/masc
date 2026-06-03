@@ -1,7 +1,7 @@
 (** Keeper current-task reconciliation shared by task transitions and
     keeper run-context assembly.
 
-    This module intentionally does not depend on Tool_task or
+    This module intentionally does not depend on Task.Tool or
     Keeper_agent_tool_surface, so lifecycle transitions can update keeper meta
     without creating a keeper tool-surface dependency cycle. *)
 

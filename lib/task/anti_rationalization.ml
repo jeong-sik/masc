@@ -29,6 +29,30 @@ type verdict =
   | Approve
   | Reject of string
 
+let excuse_pattern_observer_fn
+  : (pattern:string -> decision:string -> unit) Atomic.t
+  = Atomic.make (fun ~pattern:_ ~decision:_ -> ())
+
+let fallback_observer_fn
+  : (mode:string -> runtime:string -> unit) Atomic.t
+  = Atomic.make (fun ~mode:_ ~runtime:_ -> ())
+
+let run_llm_reviewer_fn
+  : (?sw:Eio.Switch.t ->
+     evaluator_runtime:string ->
+     prompt:string ->
+     report_tool_schema:Types_core.tool_schema ->
+     unit -> ((verdict option * string), Agent_sdk.Error.sdk_error) result) Atomic.t
+  = Atomic.make (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+      Error (Agent_sdk.Error.Internal "Workspace_hooks: run_llm_reviewer_fn not connected"))
+
+let is_runtime_permanently_dead_fn
+  : (Agent_sdk.Error.sdk_error -> bool) Atomic.t
+  = Atomic.make (fun _ -> false)
+
+
+
+
 (** Issue #8436: schema enum used to be hand-rolled as a 2-element
     string list. Payload-bearing [Reject _] prevents the simple
     [List.map] trick. Witness function below ensures every variant
@@ -499,7 +523,7 @@ let parse_verdict (text : string) : (verdict, string) result =
    until [Runtime.init_default] runs at startup (RFC-0206 §2.1). A module-level
    binding evaluates at load time and crashes boot; defer to call time. *)
 let default_evaluator_runtime () =
-  Runtime.get_default_runtime_id ()
+  (Atomic.get Workspace_hooks.get_default_runtime_id_fn) ()
 ;;
 
 (* ================================================================ *)
@@ -579,10 +603,7 @@ let review
     let excuse_match = find_excuse_pattern notes_trimmed in
     match excuse_match with
     | Some (pattern, reason) when Env_config.AntiRationalization.gate2_fail_closed ->
-      Prometheus.inc_counter
-        Prometheus.metric_anti_rationalization_excuse_pattern
-        ~labels:[ "pattern", pattern; "decision", "terminal_reject" ]
-        ();
+      (Atomic.get excuse_pattern_observer_fn) ~pattern ~decision:"terminal_reject";
       Log.Task.info
         ~keeper_name:req.task_id
         "[anti-rationalization] agent=%s task=%s excuse_pattern=%s \
@@ -608,10 +629,7 @@ let review
         match excuse_match with
         | None -> None
         | Some (pattern, reason) ->
-          Prometheus.inc_counter
-            Prometheus.metric_anti_rationalization_excuse_pattern
-            ~labels:[ "pattern", pattern; "decision", "advisory_to_llm" ]
-            ();
+          (Atomic.get excuse_pattern_observer_fn) ~pattern ~decision:"advisory_to_llm";
           Log.Task.info
         ~keeper_name:req.task_id
             "[anti-rationalization] agent=%s task=%s excuse_pattern=%s (advisory; \
@@ -669,53 +687,22 @@ let review
               gc
               evaluator_runtime
           | None | Some _ -> ());
-         let verdict_ref = ref None in
-         let dispatch ~name ~args =
-           let start_time = Time_compat.now () in
-           match parse_review_verdict_from_json args with
-           | Ok v ->
-             verdict_ref := Some v;
-             Tool_result.error
-               ~tool_name:name
-               ~start_time
-               (match v with
-                | Approve -> "Approved"
-                | Reject r -> "Rejected: " ^ r)
-           | Error msg ->
-             Log.Task.warn
-        ~keeper_name:req.task_id
-               "[anti-rationalization] structured verdict parse failed: %s"
-               msg;
-             Tool_result.error
-               ~tool_name:name
-               ~start_time
-               (sprintf "Invalid verdict format: %s" msg)
-         in
          (match
-            Masc_oas_bridge.run_with_caller
-              ~caller:Env_config_oas_bridge.Anti_rationalization
-              (fun () ->
-                 Keeper_turn_driver_wrappers.run_named_with_masc_tools
-                   ~runtime_id:evaluator_runtime
-                   ~goal:prompt
-                   ~masc_tools:[ report_review_verdict_schema ]
-                   ~dispatch
-                   ~max_turns:1
-                   ~temperature:Runtime_provider_defaults.deterministic_temperature
-                   ~max_tokens:200
-                   ~approval:Approval_callbacks.auto_approve
-                   ?sw
-                   ())
+            (Atomic.get run_llm_reviewer_fn)
+              ?sw
+              ~evaluator_runtime
+              ~prompt
+              ~report_tool_schema:report_review_verdict_schema
+              ()
           with
-          | Ok result ->
+          | Ok (verdict_opt, text) ->
             let v, gate, fallback_reason =
-              match !verdict_ref with
+              match verdict_opt with
               | Some v ->
                 Log.Task.info ~keeper_name:req.task_id "[anti-rationalization] verdict via structured tool call";
                 v, Structured_tool, None
               | None ->
                 (* LLM responded with text — lenient fallback *)
-                let text = Agent_sdk_response.text_of_response result.response in
                 Log.Task.info ~keeper_name:req.task_id "[anti-rationalization] verdict via text fallback";
                 (match parse_verdict text with
                  | Ok v -> v, Llm_text_fallback, None
@@ -783,39 +770,11 @@ let review
           by liveness — the operator must fix the runtime definition
           before the safety net can do useful work. *)
             let runtime_permanently_dead =
-              (* Enumerate every [masc_internal_error] variant plus [None]
-                 so the compiler flags any new constructor here. Same
-                 reasoning as [degraded_retry_bypasses_slot_phase_guard]
-                 (closed in PR #14716): a guard whose default direction
-                 is [false] must not absorb new error classes silently. *)
-              match Keeper_turn_driver.classify_masc_internal_error err with
-              | Some (Keeper_turn_driver.Runtime_exhausted { reason = Keeper_meta_contract.No_tool_capable _; _ }) -> true
-              | Some
-                  ( Keeper_turn_driver.Runtime_exhausted _
-                  | Keeper_turn_driver.Capacity_backpressure _
-                  | Keeper_turn_driver.Resumable_cli_session _
-                  | Keeper_turn_driver.Accept_rejected _
-                  | Keeper_turn_driver.Admission_queue_timeout _
-                  | Keeper_turn_driver.Admission_queue_rejected _
-                  | Keeper_turn_driver.Turn_timeout _
-                  | Keeper_turn_driver.Provider_timeout _
-                  | Keeper_turn_driver.Max_tokens_ceiling_violation _
-                  | Keeper_turn_driver.Ambiguous_post_commit _
-                  (* RFC-0158: admission denial — budget too low. *)
-                  | Keeper_turn_driver.Retry_admission_denied _
-                  (* RFC-0159 Phase A: opaque internal failures. *)
-                  | Keeper_turn_driver.Internal_unhandled_exception _
-                  | Keeper_turn_driver.Internal_bridge_exception _
-                  | Keeper_turn_driver.Internal_contract_rejected _ )
-              | None ->
-                false
+              (Atomic.get is_runtime_permanently_dead_fn) err
             in
             let mode = Env_config.AntiRationalization.fail_mode in
             let mode_str = Env_config.AntiRationalization.fail_mode_to_string mode in
-            Prometheus.inc_counter
-              Prometheus.metric_anti_rationalization_fallback
-              ~labels:[ "mode", mode_str; "runtime", evaluator_runtime ]
-              ();
+            (Atomic.get fallback_observer_fn) ~mode:mode_str ~runtime:evaluator_runtime;
             if runtime_permanently_dead
             then
               (* 2026-05-27: runtime-dead liveness approve previously fired
@@ -834,13 +793,7 @@ let review
                  active substring advisory and continue to approve. *)
               match excuse_advisory with
               | Some (pattern, reason) ->
-                Prometheus.inc_counter
-                  Prometheus.metric_anti_rationalization_excuse_pattern
-                  ~labels:
-                    [ "pattern", pattern
-                    ; "decision", "advisory_safety_net_reject_runtime_dead"
-                    ]
-                  ();
+                (Atomic.get excuse_pattern_observer_fn) ~pattern ~decision:"advisory_safety_net_reject_runtime_dead";
                 Log.Task.error
         ~keeper_name:req.task_id
                   "[anti-rationalization] runtime %s permanently dead AND gate-2 \
@@ -904,10 +857,7 @@ let review
           with the substring detector. *)
               match excuse_advisory, mode with
               | Some (pattern, reason), _ ->
-                Prometheus.inc_counter
-                  Prometheus.metric_anti_rationalization_excuse_pattern
-                  ~labels:[ "pattern", pattern; "decision", "advisory_safety_net_reject" ]
-                  ();
+                (Atomic.get excuse_pattern_observer_fn) ~pattern ~decision:"advisory_safety_net_reject";
                 Log.Task.warn
         ~keeper_name:req.task_id
                   "[anti-rationalization] LLM unavailable + gate-2 advisory pattern=%s \

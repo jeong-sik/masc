@@ -633,7 +633,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/config/excuse-patterns" ->
           with_h2_public_read h2_reqd (fun _state ->
-            let patterns = Anti_rationalization.load_excuse_patterns () in
+            let patterns = Task.Anti_rationalization.load_excuse_patterns () in
             let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
             let json = `List json_items in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
@@ -644,7 +644,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               h2_read_body h2_reqd (fun body_str ->
                 try
                   let json = Yojson.Safe.from_string body_str in
-                  match Anti_rationalization.parse_excuse_patterns_json json with
+                  match Task.Anti_rationalization.parse_excuse_patterns_json json with
                   | Error msg ->
                       h2_respond_json_value
                         h2_reqd
@@ -652,7 +652,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                         ~status:`Bad_request
                         ~extra_headers:cors
                   | Ok patterns ->
-                      (match Anti_rationalization.save_excuse_patterns patterns with
+                      (match Task.Anti_rationalization.save_excuse_patterns patterns with
                        | Ok () ->
                            h2_respond_json_value h2_reqd
                              (`Assoc [ ("ok", `Bool true) ])
@@ -791,7 +791,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                 |> Server_utils.clamp ~min_v:1 ~max_v:200
               in
               let json =
-                Tool_task.task_history_events_json state.Mcp_server.workspace_config
+                Task.Tool.task_history_events_json state.Mcp_server.workspace_config
                   ~task_id ~limit
               in
               h2_respond_json_value h2_reqd json

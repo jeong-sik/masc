@@ -43,9 +43,9 @@ let runtime_catalog_error_to_sdk_error detail =
     bypassing the old Model_spec facade. *)
 let resolve_runtime_providers
       ?provider_filter:_
-      ?require_tool_choice_support:_
-      ?require_tool_support:_
-      ?runtime_mcp_policy:_
+      ?(require_tool_choice_support = false)
+      ?(require_tool_support = false)
+      ?runtime_mcp_policy
       ~runtime_id:_
       ()
   =
@@ -159,3 +159,4 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
            Runtime_agent.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names
     | _ -> false)
+

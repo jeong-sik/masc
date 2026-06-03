@@ -284,7 +284,7 @@ let add_routes ~sw ~clock router =
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               let patterns = Anti_rationalization.load_excuse_patterns () in
+               let patterns = Task.Anti_rationalization.load_excuse_patterns () in
                let json_items =
                  List.map
                    (fun (pat, reason) -> `List [ `String pat; `String reason ])
@@ -300,12 +300,12 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              try
                let json = Yojson.Safe.from_string body_str in
-               match Anti_rationalization.parse_excuse_patterns_json json with
+               match Task.Anti_rationalization.parse_excuse_patterns_json json with
                | Error msg ->
                  Http.Response.json_value ~status:`Bad_request ~request:req
                    (`Assoc [("ok", `Bool false); ("error", `String msg)]) reqd
                | Ok patterns ->
-                 (match Anti_rationalization.save_excuse_patterns patterns with
+                 (match Task.Anti_rationalization.save_excuse_patterns patterns with
                  | Ok () ->
                      respond_dashboard_ok ~request:req reqd
                  | Error msg ->

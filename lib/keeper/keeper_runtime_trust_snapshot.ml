@@ -23,15 +23,15 @@ let terminal_reason_from_receipt receipt =
     |> Option.map String.lowercase_ascii
   in
   let tool_contract_result =
-    json_string_opt_member "completion_contract_result" receipt
+    json_string_opt_member "tool_contract_result" receipt
     |> Option.map String.lowercase_ascii
   in
   let receipt_requires_tool_attention =
     match operator_disposition, operator_disposition_reason, tool_contract_result with
     | _, Some "tool_route_recoverable_failure", _
     | _, _, Some "needs_execution_progress"
-    | _, _, Some "surface_mismatch"
-    | _, _, Some "no_capable_provider"
+    | _, _, Some "tool_surface_mismatch"
+    | _, _, Some "no_tool_capable_provider"
     | _, _, Some "passive_only"
     | _, _, Some "violated" ->
         true
@@ -73,7 +73,7 @@ let disposition_of_runtime_blocker_class raw_blocker_class =
       Keeper_turn_disposition.Post_commit_ambiguous
   | "sdk_input_required" ->
       Keeper_turn_disposition.Input_required
-  | ("runtime_exhausted" | "no_capable_provider"
+  | ("runtime_exhausted" | "no_tool_capable_provider"
      | "provider_runtime_error") as cls ->
       Keeper_turn_disposition.Provider_error
         (Keeper_turn_terminal_code.Provider_runtime_error cls)
@@ -495,7 +495,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
     | None -> None
   in
   let tool_contract_result =
-    Option.bind latest_receipt (json_string_opt_member "completion_contract_result")
+    Option.bind latest_receipt (json_string_opt_member "tool_contract_result")
   in
   let requested_tools =
     match latest_receipt with
@@ -547,7 +547,7 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
   in
   `Assoc
     [
-      ("completion_contract_result", Json_util.string_opt_to_json tool_contract_result);
+      ("tool_contract_result", Json_util.string_opt_to_json tool_contract_result);
       ( "runtime_proof_status",
         Json_util.string_opt_to_json tool_contract_result );
       ("requested_tools", Json_util.json_string_list requested_tools);

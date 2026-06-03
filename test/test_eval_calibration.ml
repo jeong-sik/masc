@@ -6,7 +6,7 @@
 
 open Alcotest
 module Cal = Masc.Eval_calibration
-module AR = Masc.Anti_rationalization
+module AR = Masc.Task.Anti_rationalization
 
 let test_counter = ref 0
 

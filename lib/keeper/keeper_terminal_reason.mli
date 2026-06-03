@@ -8,7 +8,7 @@
     - [Keeper_turn_terminal_code] (RFC-0042 PR-1/PR-2.5) is the
       {e producer-side} bridge from [Keeper_registry.failure_reason] /
       [Agent_sdk.Error.sdk_error]. Its [of_wire] returns [None] for the
-      SDK-error codes ([api_error_*], receipt contract-violation wires,
+      SDK-error codes ([api_error_*], [completion_contract_violation:*],
       [turn_livelock:*], the budget prefixes, [internal_error]) because
       they are all collapsed into its [Sdk_error of string] blob — the
       sub-sum RFC-0042 §5.2 explicitly defers. Matching on [Sdk_error s]
@@ -69,8 +69,7 @@ type t =
           preserving the pre-typing behaviour. Payload is the original
           string. *)
   | Completion_contract_violation of string
-  (** Wire parsed by
-          [Keeper_execution_receipt_types.decode_contract_violation_reason],
+  (** Wire [String.starts_with ~prefix:"completion_contract_violation:"],
           including the extended [:called[..]:satisfying[..]] form. Payload
           is the original string. *)
   | Turn_livelock of string

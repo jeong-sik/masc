@@ -106,8 +106,8 @@ let install_hooks () =
   let keeper_tool_names_fn = keeper_tool_names in
   let transition_action_denylist_fn = transition_action_denylist in
   let active_goal_phases_for_agent_fn = active_goal_phases_for_agent in
-  Tool_task_handlers.set_task_owner_hooks
-    Tool_task_handlers.
+  Task.Handlers.set_task_owner_hooks
+    Task.Handlers.
       { is_registered_agent_alias =
           (fun config agent_name -> is_registered_agent_alias_fn config agent_name)
       ; sync_current_task_binding =

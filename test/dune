@@ -1516,8 +1516,6 @@
 
 (include stanzas/test_oas_worker_exec_close_cancel_source.inc)
 
-(include stanzas/test_runtime_provider_tool_support_boundary.inc)
-
 
 (include stanzas/test_oas_worker_exec_checkpoint.inc)
 

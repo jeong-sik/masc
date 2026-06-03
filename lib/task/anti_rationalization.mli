@@ -128,3 +128,15 @@ val parse_verdict : string -> (verdict, string) result
     Deterministic extraction from report_review_verdict tool output.
     @since 2.223.0 *)
 val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
+
+val excuse_pattern_observer_fn : (pattern:string -> decision:string -> unit) Atomic.t
+val fallback_observer_fn : (mode:string -> runtime:string -> unit) Atomic.t
+val run_llm_reviewer_fn :
+  (?sw:Eio.Switch.t ->
+   evaluator_runtime:string ->
+   prompt:string ->
+   report_tool_schema:Types_core.tool_schema ->
+   unit -> ((verdict option * string), Agent_sdk.Error.sdk_error) result)
+  Atomic.t
+val is_runtime_permanently_dead_fn :
+  (Agent_sdk.Error.sdk_error -> bool) Atomic.t

@@ -8,7 +8,7 @@
 
 ## 1. Scope
 
-This document defines **synthetic** performance measurement for the masc-mcp dashboard SPA. It explicitly **does not** define a Real User Monitoring (RUM) pipeline; §4 records why.
+This document defines **synthetic** performance measurement for the masc dashboard SPA. It explicitly **does not** define a Real User Monitoring (RUM) pipeline; §4 records why.
 
 In scope:
 - Lighthouse CI run on every PR that touches `dashboard/**`.

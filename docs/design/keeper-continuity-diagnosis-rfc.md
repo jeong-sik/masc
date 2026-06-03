@@ -28,7 +28,7 @@
 
 ## Problem Statement
 
-masc-mcp filesystem 진단에서 keeper memory 시스템의 여러 gap을 발견했다. 대표 증상: 23개 keeper가 37턴 이상 대화했지만 "아까 뭐라고?"에 "기억하지 못합니다"로 응답.
+masc filesystem 진단에서 keeper memory 시스템의 여러 gap을 발견했다. 대표 증상: 23개 keeper가 37턴 이상 대화했지만 "아까 뭐라고?"에 "기억하지 못합니다"로 응답.
 
 **원인은 미확정이다.** 진단 중 7개 gap(G1-G7)을 발견했으나, 이들이 증상의 직접 원인인지는 런타임 재현으로 확인해야 한다.
 

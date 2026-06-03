@@ -9,7 +9,7 @@ code_refs:
 
 # Context Compaction Lifecycle
 
-> Developer reference for how context compaction works end-to-end in masc-mcp.
+> Developer reference for how context compaction works end-to-end in masc.
 > For memory-bank compaction (a separate subsystem), see
 > [`specs/bug-models/MemoryCompaction.tla`](../../specs/bug-models/MemoryCompaction.tla)
 > and [`keeper_memory_bank.ml`](../../lib/keeper/keeper_memory_bank.ml).

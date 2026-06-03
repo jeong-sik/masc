@@ -72,7 +72,7 @@ and docker subprocess checks all fail in the same window.
 ## Verification Status
 
 Checked on 2026-05-15 from
-`/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/fix-keeper-24-fleet-risk-controls`.
+`/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-keeper-24-fleet-risk-controls`.
 
 - `git diff --check`: passed.
 - `env DUNE_JOBS=1 scripts/dune-local.sh build ./test/test_keeper_registry.exe ./test/test_heartbeat_integration.exe ./test/test_keeper_memory.exe ./test/test_tool_metrics_persist.exe ./test/test_keeper_event_queue.exe`:

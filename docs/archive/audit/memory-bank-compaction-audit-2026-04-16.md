@@ -259,20 +259,20 @@ Spec's `SafeCompact` has no recent-floor pre-pass — it does a single kind-capp
 
 ## 5. Reproduction Commands + Observed Results
 
-**Note**: `specs/keeper-state-machine/tla2tools.jar` is not tracked in the worktree filesystem (shared-git / separate-working-tree). Use the main repo's copy at `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/specs/keeper-state-machine/tla2tools.jar`, or `cd` into the main repo's `specs/keeper-state-machine/` directory before running TLC.
+**Note**: `specs/keeper-state-machine/tla2tools.jar` is not tracked in the worktree filesystem (shared-git / separate-working-tree). Use the main repo's copy at `/Users/dancer/me/workspace/yousleepwhen/masc/specs/keeper-state-machine/tla2tools.jar`, or `cd` into the main repo's `specs/keeper-state-machine/` directory before running TLC.
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp/.worktrees/docs/memory-bank-audit/specs/bug-models
+cd ~/me/workspace/yousleepwhen/masc/.worktrees/docs/memory-bank-audit/specs/bug-models
 
 # Buggy — expect "Invariant LongTermProtected is violated"
 java -XX:+UseParallelGC -Xmx2g \
-  -cp ~/me/workspace/yousleepwhen/masc-mcp/specs/keeper-state-machine/tla2tools.jar \
+  -cp ~/me/workspace/yousleepwhen/masc/specs/keeper-state-machine/tla2tools.jar \
   tlc2.TLC -config MemoryCompaction-buggy.cfg -workers 4 -deadlock \
   MemoryCompaction.tla
 
 # Clean — expect "No error" (long-running, see below)
 java -XX:+UseParallelGC -Xmx2g \
-  -cp ~/me/workspace/yousleepwhen/masc-mcp/specs/keeper-state-machine/tla2tools.jar \
+  -cp ~/me/workspace/yousleepwhen/masc/specs/keeper-state-machine/tla2tools.jar \
   tlc2.TLC -config MemoryCompaction.cfg -workers 4 -deadlock \
   MemoryCompaction.tla
 ```

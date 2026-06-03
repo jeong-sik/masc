@@ -42,7 +42,7 @@ code_refs:
 - gRPC/Phi rollout RFC의 G0-G4 완료
 - phi shadow mode 14일 evidence 보유
 - advisory alerts가 noisy 하지 않음
-- [adaptive-heartbeat-safety-harness-spec.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-safety-harness-spec.md) 의 gRPC/Phi 시나리오 구현 완료
+- [adaptive-heartbeat-safety-harness-spec.md](/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-safety-harness-spec.md) 의 gRPC/Phi 시나리오 구현 완료
 
 이 전제 하나라도 빠지면 phi enforcement는 `No-Go` 다.
 

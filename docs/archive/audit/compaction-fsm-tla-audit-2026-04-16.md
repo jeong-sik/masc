@@ -129,7 +129,7 @@ No `-buggy.cfg` variant present (per `ls specs/keeper-state-machine/`) — **thi
 `tla2tools.jar` is bundled at `specs/keeper-state-machine/tla2tools.jar`. The repo's canonical script `scripts/tla-check.sh` orchestrates all spec runs with download/caching for CI.
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp/specs/keeper-state-machine
+cd ~/me/workspace/yousleepwhen/masc/specs/keeper-state-machine
 
 # Clean spec
 java -XX:+UseParallelGC -Xmx2g -cp tla2tools.jar tlc2.TLC \
@@ -137,7 +137,7 @@ java -XX:+UseParallelGC -Xmx2g -cp tla2tools.jar tlc2.TLC \
   KeeperContextLifecycle.tla
 
 # (Recommended) Use the repo's script for full-suite runs:
-~/me/workspace/yousleepwhen/masc-mcp/scripts/tla-check.sh
+~/me/workspace/yousleepwhen/masc/scripts/tla-check.sh
 ```
 
 **Observed runtime (2026-04-16, M3 Max 128GB)**: KeeperContextLifecycle clean run on default cfg reached **Progress(30) with ~5.6M distinct states explored in 13+ minutes, no invariant or property violations observed**; did not complete in session budget. No drift found within the explored state subset. **Recommendation**: for CI, create a reduced `KeeperContextLifecycle-ci.cfg` with `Keepers={"a"}, MaxTurns=2` (state space ~1-2 orders smaller) that completes in <1 min and retain the default cfg for periodic nightly/release validation.
@@ -235,7 +235,7 @@ Cannot determine without direct read of `keeper_memory_bank.ml`. The spec's TLA+
 ### 2.4 Reproduction Commands + Observed Results
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp/specs/bug-models
+cd ~/me/workspace/yousleepwhen/masc/specs/bug-models
 
 # Buggy — expect "Invariant X is violated"
 java -XX:+UseParallelGC -Xmx2g -cp ../keeper-state-machine/tla2tools.jar tlc2.TLC \

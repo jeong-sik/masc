@@ -10,7 +10,7 @@ code_refs:
 # MASC Capsule Execution Plan
 
 Updated: 2026-04-17
-Scope: `masc-mcp` only
+Scope: `masc` only
 
 > **Note (2026-04-17)**: The Immediate Slices catalog below (Slices A–C) targeted the
 > `team_session` subsystem, which has since been retired — see
@@ -21,7 +21,7 @@ Scope: `masc-mcp` only
 > migration context only and no longer reflect active implementation targets.
 
 This document is the execution companion for work that stays inside the
-`masc-mcp` capsule.
+`masc` capsule.
 
 We are the middle layer between:
 
@@ -34,7 +34,7 @@ The product only works if these layers can trust the same workspace collaboratio
 
 ## Product Thesis
 
-`masc-mcp` is not just “an MCP server with many tools”.
+`masc` is not just “an MCP server with many tools”.
 
 Inside this capsule, MASC should behave like a workspace collaboration operating system for
 persistent repo-local agent society:

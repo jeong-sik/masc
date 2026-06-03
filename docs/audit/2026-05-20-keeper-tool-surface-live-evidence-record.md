@@ -11,7 +11,7 @@
 ## 근거
 
 - 항목: 지난 6시간 live `WARN`/`ERROR` 중 Keeper/Bash tool-surface 오류가 반복되고, prompt/tool guidance가 내부 구현명(`tool_execute`)을 call example로 노출하면 같은 실패를 재생산한다.
-- 출처: [근거] `jq -sr 'map(select((.level=="WARN" or .level=="ERROR") and (.ts >= "2026-05-20T04:24:00Z"))) | group_by(.level) | map({level: .[0].level, count: length})' /Users/dancer/me/.masc/logs/system_log_2026-05-20.jsonl`; [근거] `scripts/analyze-keeper-bash-failures.sh /Users/dancer/me 6`; [근거] `gh pr list --repo jeong-sik/masc-mcp --state open --limit 80 --json number,title,state,isDraft,headRefName,url`; [근거] `scripts/check-oas-pin.sh`
+- 출처: [근거] `jq -sr 'map(select((.level=="WARN" or .level=="ERROR") and (.ts >= "2026-05-20T04:24:00Z"))) | group_by(.level) | map({level: .[0].level, count: length})' /Users/dancer/me/.masc/logs/system_log_2026-05-20.jsonl`; [근거] `scripts/analyze-keeper-bash-failures.sh /Users/dancer/me 6`; [근거] `gh pr list --repo jeong-sik/masc --state open --limit 80 --json number,title,state,isDraft,headRefName,url`; [근거] `scripts/check-oas-pin.sh`
 - 확인일시: 2026-05-20T19:26:33+09:00
 - 신뢰도: High
 - 제한조건: Live window is `/Users/dancer/me/.masc` only; cutoff was `2026-05-20T04:24:00Z`; results are time-sensitive and must be rechecked for later incidents.
@@ -26,7 +26,7 @@ Live findings:
 ## 검증
 
 - 1차: Live logs and Bash census were queried from `/Users/dancer/me/.masc` for the current six-hour window.
-- 2차: GitHub open PRs were queried on `jeong-sik/masc-mcp`; OAS downstream pin was checked with `scripts/check-oas-pin.sh`.
+- 2차: GitHub open PRs were queried on `jeong-sik/masc`; OAS downstream pin was checked with `scripts/check-oas-pin.sh`.
 - 3차: Prompt/code guidance was changed so model-facing hints render public aliases (`Execute`, `Read`, `Grep`, `Edit`, `Write`) and typed repository workflows instead of internal `tool_execute` call recipes.
 - 재현 결과: prompt/tool-surface grep for private keeper tool names, legacy raw-command Bash examples, and stale `cmd` examples returned no matches after the change. `ocamlformat --check lib/keeper/keeper_tool_guidance.ml lib/keeper/keeper_unified_prompt.ml test/test_keeper_unified.ml`, `git diff --check`, and this evidence-record validator passed. Focused Dune validation command was `scripts/dune-local.sh build ./test/test_keeper_unified.exe`, but it was not completed because `/tmp/me-dune-local.lock` was held by PID 5198 running `test/test_keeper_fd_pressure_fleet.exe` for another worktree; the waiting command was cancelled to avoid adding more queue pressure.
 

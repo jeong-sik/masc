@@ -357,6 +357,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         id = None;
         name = p.name;
         agent_name = Keeper_identity.keeper_agent_name p.name;
+        persona = Some persona_extended;
         goal;
         short_goal;
         mid_goal;

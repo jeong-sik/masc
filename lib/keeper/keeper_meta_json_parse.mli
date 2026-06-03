@@ -12,6 +12,7 @@ open Keeper_meta_contract
 type parsed_keeper_identity =
   { pk_name : string
   ; pk_agent_name : string
+  ; pk_persona : string option
   ; pk_trace_id : Keeper_id.Trace_id.t
   ; pk_trace_history : string list
   ; pk_goal : string

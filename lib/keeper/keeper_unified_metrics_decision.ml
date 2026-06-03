@@ -162,7 +162,7 @@ let append_decision_record
                terminal_reason.Keeper_turn_terminal.severity) );
         ("terminal_reason_source", `String terminal_reason.source);
         ("provider_context", provider_context_json ~meta result);
-        ("tool_contract", tool_contract_json ~tool_call_count ~tools_used result);
+        ("tool_surface", tool_surface_json ~tool_call_count ~tools_used result);
         ("pending_approval_count", `Int pending_approval_count);
         ("approval_mode", Json_util.string_opt_to_json approval_mode);
         ("channel", `String (decision_channel_of_observation observation));

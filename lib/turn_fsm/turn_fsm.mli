@@ -26,12 +26,12 @@ type failure_reason =
       base : string;
       resolved : string option;
     }
-  | Failure_no_tool_capable_provider of {
+  | Failure_no_capable_provider of {
       runtime_id : string;
       detail : string;
     }
   | Failure_provider_error of { kind : string; detail : string }
-  | Failure_tool_contract_violation of { reason_code : string }
+  | Failure_completion_contract_violation of { reason_code : string }
   | Failure_receipt_lost of {
       primary_error : string;
       fallback_path : string option;

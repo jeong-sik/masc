@@ -192,7 +192,7 @@ let run_keeper_cycle
                      ; reason = Keeper_meta_contract.No_tool_capable _
                      ; _
                      }) ->
-                Keeper_turn_fsm.Failure_no_tool_capable_provider
+                Keeper_turn_fsm.Failure_no_capable_provider
                   { runtime_id = runtime_id
                   ; detail = error_message
                   }
@@ -654,7 +654,7 @@ let run_keeper_cycle
                                 ; reason = Keeper_meta_contract.No_tool_capable _
                                 ; _
                                 }) ->
-                           Keeper_turn_fsm.Failure_no_tool_capable_provider
+                           Keeper_turn_fsm.Failure_no_capable_provider
                              { runtime_id = runtime_id
                              ; detail = short_preview e_str
                              }

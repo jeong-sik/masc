@@ -314,11 +314,6 @@ def tools_from_decision(row: dict[str, Any]) -> list[str]:
         values = row.get(key)
         if isinstance(values, list):
             tools.extend(v for v in values if isinstance(v, str))
-    contract = row.get("tool_contract")
-    if isinstance(contract, dict):
-        values = contract.get("tools_used")
-        if isinstance(values, list):
-            tools.extend(v for v in values if isinstance(v, str))
     calls = row.get("tool_calls")
     if isinstance(calls, list):
         for call in calls:

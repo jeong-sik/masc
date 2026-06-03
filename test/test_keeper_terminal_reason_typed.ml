@@ -50,8 +50,8 @@ let roundtrip_corpus =
   ; "api_error_context_overflow"
   ; "api_error_oas_agent_execution_timeout"
     (* completion-contract-violation (legacy + enriched forms) *)
-  ; "completion_contract_violation:tool_contract"
-  ; "completion_contract_violation:tool_contract:called[a,b]:satisfying[c]"
+  ; "completion_contract_violation:completion_contract"
+  ; "completion_contract_violation:completion_contract:called[a,b]:satisfying[c]"
     (* turn-livelock *)
   ; "turn_livelock:stuck_age_exceeded"
     (* budget cut-offs *)
@@ -62,7 +62,7 @@ let roundtrip_corpus =
   ; "provider_error_server:500"
   ; "provider_error_missing_api_key"
   ; "provider_error_hard_quota:openai"
-  ; "no_tool_capable_provider"
+  ; "no_capable_provider"
   ; "mcp_error"
   ; "serialization_error"
   ; "io_error"
@@ -183,8 +183,8 @@ let frozen_operator_disposition (receipt : R.t)
   else (
     let tool_route_failure =
       List.mem
-        receipt.tool_contract_result
-        [ R.Contract_tool_surface_mismatch; R.Contract_no_tool_capable_provider ]
+        receipt.completion_contract_result
+        [ R.Contract_surface_mismatch; R.Contract_no_capable_provider ]
     in
     if tool_route_failure
     then
@@ -205,7 +205,7 @@ let frozen_operator_disposition (receipt : R.t)
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = R.Runtime_not_dispatched
-      && receipt.tool_contract_result = R.Contract_not_dispatched
+      && receipt.completion_contract_result = R.Contract_not_dispatched
       && String.equal terminal_reason "pre_dispatch_success"
     then R.Disp_pass, R.Reason_healthy
     else (
@@ -255,7 +255,7 @@ let base_receipt : R.t =
   ; canonical_tools = []
   ; unexpected_tools = []
   ; tools_used = []
-  ; tool_contract_result = R.Contract_unknown
+  ; completion_contract_result = R.Contract_unknown
   ; tool_surface = base_tool_surface
   ; sandbox_kind = Masc.Keeper_types_profile_sandbox.Local
   ; sandbox_root = None
@@ -313,11 +313,11 @@ let runtime_outcomes =
   ; R.Runtime_not_dispatched
   ]
 
-let tool_contract_results =
+let completion_contract_results =
   [ R.Contract_unknown
   ; R.Contract_not_dispatched
-  ; R.Contract_no_tool_capable_provider
-  ; R.Contract_tool_surface_mismatch
+  ; R.Contract_no_capable_provider
+  ; R.Contract_surface_mismatch
   ; R.Contract_needs_execution_progress
   ; R.Contract_satisfied_completion
   ]
@@ -361,7 +361,7 @@ let () =
                                             ; degraded_retry_applied = degraded
                                             ; runtime_fallback_applied = fallback
                                             ; runtime_outcome
-                                            ; tool_contract_result = tcr
+                                            ; completion_contract_result = tcr
                                             ; tools_used
                                             ; outcome
                                             }
@@ -388,7 +388,7 @@ let () =
                                                    (R.outcome_kind_to_string outcome)
                                                    (R.runtime_outcome_to_string
                                                       runtime_outcome)
-                                                   (R.tool_contract_result_to_string tcr)
+                                                   (R.completion_contract_result_to_string tcr)
                                                    (tools_used <> [])
                                                    degraded
                                                    fallback
@@ -397,7 +397,7 @@ let () =
                                                 false))
                                        outcomes)
                                   tools_used_variants)
-                             tool_contract_results)
+                             completion_contract_results)
                         runtime_outcomes)
                    fallback_bools)
               degraded_bools)

@@ -18,7 +18,7 @@ type runtime_pressure_class =
   | Provider_error
   | Turn_stale_timeout
   | Keeper_liveness_failure
-  | Tool_contract_failure
+  | Completion_contract_failure
   | Runtime_failure
 
 let runtime_pressure_class_to_string = function
@@ -30,7 +30,7 @@ let runtime_pressure_class_to_string = function
   | Provider_error -> "provider_error"
   | Turn_stale_timeout -> "turn_stale_timeout"
   | Keeper_liveness_failure -> "keeper_liveness_failure"
-  | Tool_contract_failure -> "tool_contract_failure"
+  | Completion_contract_failure -> "completion_contract_failure"
   | Runtime_failure -> "runtime_failure"
 ;;
 
@@ -46,8 +46,8 @@ let runtime_pressure_class_of_label label =
   | "turn_stale_timeout" | "stale_turn_timeout" -> Some Turn_stale_timeout
   | "keeper_liveness_failure" | "heartbeat_failures" | "turn_failures" ->
     Some Keeper_liveness_failure
-  | "tool_contract_failure" ->
-    Some Tool_contract_failure
+  | "completion_contract_failure" ->
+    Some Completion_contract_failure
   | "runtime_failure" | "fiber_unresolved" | "exception" -> Some Runtime_failure
   | _ -> None
 ;;

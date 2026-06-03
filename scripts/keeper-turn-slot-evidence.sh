@@ -93,7 +93,7 @@ for f in "${files[@]}"; do
         end;
       def tool_count:
         (.tool_call_count | n) as $top
-        | if $top > 0 then $top else (.tool_contract.tool_call_count | n) end;
+        | if $top > 0 then $top else (.tool_surface.visible_tool_count | n) end;
       def turn_mode: (.turn_mode // .result_kind // "");
       def is_normal_success:
         (.outcome == "success")

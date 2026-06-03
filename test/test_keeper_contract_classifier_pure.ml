@@ -44,10 +44,10 @@ let test_signal_label_none () =
 
 (* ── contract_status_label ───────────────────────────────────────────── *)
 
-let test_status_label_tool_surface_mismatch () =
+let test_status_label_surface_mismatch () =
   let rendered =
     Format.asprintf "%a" KCC.pp_contract_status
-      (KCC.Tool_surface_mismatch { missing = [ "keeper_task_claim"; "masc_broadcast" ] })
+      (KCC.Surface_mismatch { missing = [ "keeper_task_claim"; "masc_broadcast" ] })
   in
   (* The stable label is intentionally low-cardinality; the pretty printer
      carries missing tool names for grep/debug output. *)
@@ -115,8 +115,8 @@ let () =
         ] );
       ( "contract_status_label",
         [
-          Alcotest.test_case "Tool_surface_mismatch carries missing names"
-            `Quick test_status_label_tool_surface_mismatch;
+          Alcotest.test_case "Surface_mismatch carries missing names"
+            `Quick test_status_label_surface_mismatch;
           Alcotest.test_case "Satisfied_completion stable token" `Quick
             test_status_label_satisfied_completion;
           Alcotest.test_case "Satisfied_execution stable token" `Quick

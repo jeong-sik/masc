@@ -91,7 +91,7 @@ let prepare_agent_setup
         }
     ; requested_tool_names = []
     ; requested_tool_names_seen = []
-    ; receipt_tool_contract_result =
+    ; receipt_completion_contract_result =
         Keeper_execution_receipt.Contract_unknown
     }
   in

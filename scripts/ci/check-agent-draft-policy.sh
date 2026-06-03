@@ -16,8 +16,8 @@
 #   non-forgeable credential boundary.
 set -euo pipefail
 
-title_re="${AGENT_DRAFT_GUARD_TITLE_RE:-^\[codex\]}"
-branch_re="${AGENT_DRAFT_GUARD_BRANCH_RE:-^(codex[/-]|keeper[/-])}"
+title_re="${AGENT_DRAFT_GUARD_TITLE_RE:-^\[ai-agent\]}"
+branch_re="${AGENT_DRAFT_GUARD_BRANCH_RE:-^(ai-agent[/-]|keeper[/-])}"
 bypass_labels_csv="${AGENT_DRAFT_GUARD_BYPASS_LABELS:-human-approved-ready}"
 hard_stop_labels_csv="${AGENT_DRAFT_GUARD_HARD_STOP_LABELS:-do-not-merge}"
 
@@ -100,7 +100,7 @@ done
 looks_agent_authored=0
 if [[ "$pr_title" =~ $title_re || "$pr_head_ref" =~ $branch_re ]]; then
   looks_agent_authored=1
-elif csv_has_label "$pr_labels_csv" "agent-pr" || csv_has_label "$pr_labels_csv" "codex"; then
+elif csv_has_label "$pr_labels_csv" "agent-pr" || csv_has_label "$pr_labels_csv" "ai-agent"; then
   looks_agent_authored=1
 fi
 

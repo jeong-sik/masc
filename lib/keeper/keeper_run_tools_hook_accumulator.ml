@@ -22,8 +22,8 @@ type hook_accumulator =
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
   ; mutable requested_tool_names_seen : string list
-  ; mutable receipt_tool_contract_result :
-      Keeper_execution_receipt.tool_contract_result
+  ; mutable receipt_completion_contract_result :
+      Keeper_execution_receipt.completion_contract_result
   }
 
 type hook_outputs =
@@ -35,8 +35,8 @@ type hook_outputs =
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
   ; out_requested_tool_names_seen : string list
-  ; out_receipt_tool_contract_result :
-      Keeper_execution_receipt.tool_contract_result
+  ; out_receipt_completion_contract_result :
+      Keeper_execution_receipt.completion_contract_result
   }
 
 let freeze (acc : hook_accumulator) : hook_outputs =
@@ -48,7 +48,7 @@ let freeze (acc : hook_accumulator) : hook_outputs =
   ; out_tool_surface = acc.tool_surface
   ; out_requested_tool_names = acc.requested_tool_names
   ; out_requested_tool_names_seen = acc.requested_tool_names_seen
-  ; out_receipt_tool_contract_result = acc.receipt_tool_contract_result
+  ; out_receipt_completion_contract_result = acc.receipt_completion_contract_result
   }
 ;;
 

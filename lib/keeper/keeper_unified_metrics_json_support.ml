@@ -85,7 +85,7 @@ let redacted_runtime_observation_to_json
     ]
 ;;
 
-let tool_contract_json ~(tool_call_count : int) ~(tools_used : string list)
+let tool_surface_json ~(tool_call_count : int) ~(tools_used : string list)
     (result : Keeper_agent_run.run_result option) =
   let requirement =
     match result with

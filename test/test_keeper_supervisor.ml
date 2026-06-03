@@ -832,7 +832,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
               last_blocker =
                 Some
                   (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_post]; retry disabled to avoid duplicate mutation; original_error=Completion contract [tool_contract] violated"
+                     ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_post]; retry disabled to avoid duplicate mutation; original_error=Completion contract [completion_contract] violated"
                      Keeper_meta_contract.Ambiguous_post_commit_timeout);
             };
         }

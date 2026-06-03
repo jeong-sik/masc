@@ -125,10 +125,10 @@ let finalize
       ( Some (Keeper_execution_receipt.error_kind_of_string (Keeper_agent_error.sdk_error_kind err))
       , Some (Agent_sdk.Error.to_string err) )
   in
-  let tool_contract_result
-      : Keeper_execution_receipt.tool_contract_result =
+  let completion_contract_result
+      : Keeper_execution_receipt.completion_contract_result =
     match turn_result with
-    | _ -> acc.receipt_tool_contract_result
+    | _ -> acc.receipt_completion_contract_result
   in
   let terminal_reason_code =
     match turn_result with
@@ -177,7 +177,7 @@ let finalize
     ; canonical_tools = !canonical_tool_names_ref
     ; unexpected_tools = !unexpected_tool_names_ref
     ; tools_used = !actual_keeper_tool_names_ref
-    ; tool_contract_result
+    ; completion_contract_result
     ; tool_surface =
         { turn_lane = acc.tool_surface.turn_lane
         ; tool_surface_class = acc.tool_surface.tool_surface_class

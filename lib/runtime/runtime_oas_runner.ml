@@ -45,13 +45,16 @@ let resolve_runtime_providers
       ?provider_filter:_
       ?(require_tool_choice_support = false)
       ?(require_tool_support = false)
-      ?runtime_mcp_policy
+      ?runtime_mcp_policy:_
       ~runtime_id:_
       ()
   =
+  ignore require_tool_choice_support;
+  ignore require_tool_support;
   (* RFC-0206 single-binding: runtime catalog resolution removed. The providers
-     are the default runtime's single provider_config. [provider_filter] is moot
-     with one provider. Required tool-use filter removed — concept unused. *)
+     are the default runtime's single provider_config. [provider_filter] and
+     the historical require-tool gates are moot with one provider; runtime tool
+     surface compatibility is handled by runtime MCP policy resolution. *)
   match Runtime.get_default_runtime () with
   | None -> Error "no default runtime configured"
   | Some rt ->
@@ -159,4 +162,3 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
            Runtime_agent.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names
     | _ -> false)
-

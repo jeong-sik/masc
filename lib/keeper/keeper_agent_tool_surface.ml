@@ -444,18 +444,6 @@ let preferred_tool_choice_for_actionable_gate
     | Some tool_choice -> tool_choice
     | None -> Agent_sdk.Types.Any)
 
-let actionable_signal_requires_tool_gate ~(actionable_signal : bool)
-    ~(claim_context_allowed : bool)
-    ~(turn_affordances : string list)
-    ~(allowed_tool_names : string list) =
-  actionable_signal
-  && actionable_gate_tool_names
-       ~claim_context_allowed
-       ~turn_affordances
-       ~allowed_tool_names
-     <> []
-;;
-
 let actionable_tool_gate_guidance
     ~(claim_context_allowed : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =

@@ -33,10 +33,6 @@ let register
      execution/completion turn.  Labeled by keeper."
     `Gauge;
   add
-    Keeper_metrics.(to_string PassiveLoopStreakExceeded)
-    "Total passive-loop streak threshold exceeded events.  Labeled by keeper."
-    `Counter;
-  add
     Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
     "#13362 Total required-tool contract loops: keeper hit N consecutive actionable \
      required-tool failures before making execution/completion progress. Labeled by \

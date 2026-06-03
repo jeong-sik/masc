@@ -200,7 +200,6 @@ type t =
   | LivenessRecoveryOutcomes
   | PassiveLoopDetectedTotal
   | PassiveLoopStreak
-  | PassiveLoopStreakExceeded
   | RequiredToolLoopDetectedTotal
   | ZombieLoopDetectedTotal
   | RequiredToolGateSuppressedTotal
@@ -444,7 +443,6 @@ let to_string = function
   | LivenessRecoveryOutcomes -> "masc_keeper_liveness_recovery_outcomes_total"
   | PassiveLoopDetectedTotal -> "masc_keeper_passive_loop_detected_total"
   | PassiveLoopStreak -> "masc_keeper_passive_loop_streak"
-  | PassiveLoopStreakExceeded -> "masc_keeper_passive_loop_streak_exceeded_total"
   | RequiredToolLoopDetectedTotal -> "masc_keeper_required_tool_loop_detected_total"
   | ZombieLoopDetectedTotal -> "masc_keeper_zombie_loop_detected_total"
   | RequiredToolGateSuppressedTotal -> "masc_keeper_required_tool_gate_suppressed_total"

@@ -66,6 +66,7 @@ and tool_event =
   ; latency_ms : int
   ; summary : string
   ; file_path : string option
+  ; command_descriptor : command_descriptor option
   ; timestamp_ms : int64
   }
 
@@ -104,6 +105,7 @@ let tool_event_to_json (e : tool_event) : Yojson.Safe.t =
     ; "latency_ms", `Int e.latency_ms
     ; "summary", `String e.summary
     ; "file_path", (match e.file_path with Some fp -> `String fp | None -> `Null)
+    ; "command_descriptor", (match e.command_descriptor with Some d -> command_descriptor_to_json d | None -> `Null)
     ; "timestamp_ms", `Intlit (Int64.to_string e.timestamp_ms)
     ]
 

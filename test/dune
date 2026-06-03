@@ -287,7 +287,8 @@
   test_chronicle_event
   test_chronicle_librarian
   test_alignment_score
-  test_blocker_class_exhaustiveness)
+  test_blocker_class_exhaustiveness
+  test_log_severity_outcome_level)
  (modules
   test_board_activity_cache
   test_jsonl_mtime_projection
@@ -555,7 +556,8 @@
   test_chronicle_event
   test_chronicle_librarian
   test_alignment_score
-  test_blocker_class_exhaustiveness)
+  test_blocker_class_exhaustiveness
+  test_log_severity_outcome_level)
  (libraries masc_test_deps multimodal))
 
 ; Focused CI gate for runtime TOML validity.

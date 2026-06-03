@@ -166,6 +166,17 @@ val parse_governance_response_for_testing :
     [model_used] remains accepted for legacy call sites, but
     parsed public rows redact it to [null]. *)
 
+(** {1 Compute-finish log severity} *)
+
+val level_of_compute_outcome :
+  outcome:string -> reason:string -> Log.level
+(** Severity for the [refresh_once: compute_judgments telemetry outcome=…]
+    line, derived from the compute outcome rather than hardcoded.  A genuine
+    ["error"] outcome (degraded with auto-recovery via the next refresh) is
+    [Log.Warn]; a graceful cancellation ([reason="cancelled"]) and success are
+    [Log.Info].  Exposed so the regression suite can prove an errored compute is
+    not emitted at [Info] (docs/spec/18-log-severity-taxonomy.md § 3.6). *)
+
 (** {1 Daemon identity} *)
 
 val keeper_name : string

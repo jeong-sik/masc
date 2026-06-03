@@ -494,7 +494,11 @@ let guarded_execute
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           let msg = Printexc.to_string exn in
           error_ref := Some msg;
-          Log.Harness.info "eval_gate tool %s failed: %s" tool_name msg;
+          (* Caught tool-execution exception (Cancelled is re-raised above):
+             degraded-with-recovery — the gate records the error and returns an
+             error result — so [Warn], not [Info]
+             (docs/spec/18-log-severity-taxonomy.md § 2). *)
+          Log.Harness.warn "eval_gate tool %s failed: %s" tool_name msg;
           Yojson.Safe.to_string (`Assoc [
             ("error", `String "Tool execution failed (internal error)");
             ("tool", `String tool_name);

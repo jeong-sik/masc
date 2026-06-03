@@ -2,7 +2,7 @@
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Provides runtime profile defaults, Eio context validation,
-    provider resolution, and tool-support filtering.
+    provider resolution, and runtime MCP policy helpers.
 
     @since God file decomposition *)
 
@@ -159,4 +159,3 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
            Runtime_agent.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names
     | _ -> false)
-

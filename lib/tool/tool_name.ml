@@ -187,16 +187,124 @@ module Operator_name = struct
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 
-module Masc = struct
-  (* Domain tool-NAME operations (Task/Board/Goal/Operator) are owned by the
-     domain submodules above; [Masc.t] composes them rather than enumerating
-     each operation flat. The remaining variants are admin/lifecycle/misc
-     tool names that have no domain owner yet and stay flat here. *)
+(** Domain_tool — the single domain-owned grouping of Task/Board/Goal/Operator
+    tool names, together with the substrate classifications each domain attaches
+    to its members.
+
+    PR-S2 (tool⊥domain cut): the Tool substrate must not enumerate domain
+    constructors. This module is the ONLY place that destructures
+    [Task]/[Board]/[Goal]/[Operator]; [Masc.t] carries it behind one neutral
+    arm ([Domain of Domain_tool.t]), and [Tool_dispatch]/[Tool_catalog_inference]
+    consume it through [module_tag]/[effect_domain] without spelling any domain
+    constructor. The [module_tag] / [effect_domain] result types live in the
+    zero-dep leaf [Tool_tag_types], re-exported by the substrate by
+    type-equality so external call sites and [.mli] contracts are unchanged.
+
+    Every [masc_*] wire string is preserved: [to_string]/[of_string] delegate to
+    the domain submodules, which own the complete strings. *)
+module Domain_tool = struct
   type t =
     | Task of Task_name.t
     | Board of Board_name.t
     | Goal of Goal_name.t
     | Operator of Operator_name.t
+
+  let to_string = function
+    | Task t -> Task_name.to_string t
+    | Board b -> Board_name.to_string b
+    | Goal g -> Goal_name.to_string g
+    | Operator o -> Operator_name.to_string o
+  ;;
+
+  let of_string s =
+    (* Domain submodules are tried in turn; each returns [None] for names it
+       does not own. The string namespaces are disjoint, so order is
+       irrelevant for correctness. *)
+    match Task_name.of_string s with
+    | Some t -> Some (Task t)
+    | None ->
+      match Board_name.of_string s with
+      | Some b -> Some (Board b)
+      | None ->
+        match Goal_name.of_string s with
+        | Some g -> Some (Goal g)
+        | None ->
+          match Operator_name.of_string s with
+          | Some o -> Some (Operator o)
+          | None -> None
+  ;;
+
+  let is_board = function
+    | Board _ -> true
+    | Task _ | Goal _ | Operator _ -> false
+  ;;
+
+  (* Dispatch routing tag. Uniform per domain: every member of a domain maps to
+     the same tag (Tag alignment proof, PR-S1):
+       Task     -> Mod_task     (was 7 arms, all Mod_task)
+       Board    -> Mod_inline   (was 20 Board_* arms, all Mod_inline)
+       Goal     -> Mod_state    (was 4 Goal_* arms, all Mod_state)
+       Operator -> Mod_operator (was 4 Operator_* arms, all Mod_operator) *)
+  let module_tag : t -> Tool_tag_types.module_tag = function
+    | Task _ -> Tool_tag_types.Mod_task
+    | Board _ -> Tool_tag_types.Mod_inline
+    | Goal _ -> Tool_tag_types.Mod_state
+    | Operator _ -> Tool_tag_types.Mod_operator
+  ;;
+
+  (* Inferred effect classification. NON-uniform within Board (Read_only vs
+     Masc_workspace) and Operator (three ways), so the mapping is per-member.
+     Transcribed member-for-member from the prior flat match in
+     [tool_catalog_inference]; exhaustiveness is compiler-enforced. *)
+  let effect_domain : t -> Tool_tag_types.effect_domain = function
+    | Operator Operator_name.Operator_action -> Tool_tag_types.Host_repo_write
+    | Board Board_name.Board_get
+    | Board Board_name.Board_curation_read
+    | Board Board_name.Board_hearths
+    | Board Board_name.Board_list
+    | Board Board_name.Board_profile
+    | Board Board_name.Board_search
+    | Board Board_name.Board_stats
+    | Board Board_name.Board_sub_board_get
+    | Board Board_name.Board_sub_board_list
+    | Goal Goal_name.Goal_list
+    | Operator Operator_name.Operator_digest
+    | Operator Operator_name.Operator_snapshot
+    | Task Task_name.Task_history
+    | Task Task_name.Tasks -> Tool_tag_types.Read_only
+    | Task Task_name.Add_task
+    | Task Task_name.Batch_add_tasks
+    | Task Task_name.Claim_next
+    | Task Task_name.Transition
+    | Task Task_name.Update_priority
+    | Board Board_name.Board_cleanup
+    | Board Board_name.Board_comment
+    | Board Board_name.Board_comment_vote
+    | Board Board_name.Board_curation_submit
+    | Board Board_name.Board_delete
+    | Board Board_name.Board_post
+    | Board Board_name.Board_reaction
+    | Board Board_name.Board_sub_board_create
+    | Board Board_name.Board_sub_board_delete
+    | Board Board_name.Board_sub_board_update
+    | Board Board_name.Board_vote
+    | Goal Goal_name.Goal_transition
+    | Goal Goal_name.Goal_upsert
+    | Goal Goal_name.Goal_verify
+    | Operator Operator_name.Operator_confirm -> Tool_tag_types.Masc_workspace
+  ;;
+
+  let pp fmt t = Format.pp_print_string fmt (to_string t)
+end
+
+module Masc = struct
+  (* Domain tool-NAME operations (Task/Board/Goal/Operator) are owned by
+     [Domain_tool]; [Masc.t] carries them behind one neutral [Domain] arm so
+     the Tool substrate never enumerates domain constructors. The remaining
+     variants are admin/lifecycle/misc tool names that have no domain owner
+     and stay flat here. *)
+  type t =
+    | Domain of Domain_tool.t
     | Agent_fitness
     | Agent_update
     | Agent_card
@@ -237,10 +345,7 @@ module Masc = struct
     | Tool_stats
 
   let to_string = function
-    | Task t -> Task_name.to_string t
-    | Board b -> Board_name.to_string b
-    | Goal g -> Goal_name.to_string g
-    | Operator o -> Operator_name.to_string o
+    | Domain d -> Domain_tool.to_string d
     | Agent_fitness -> "masc_agent_fitness"
     | Agent_update -> "masc_agent_update"
     | Agent_card -> "masc_agent_card"
@@ -282,21 +387,13 @@ module Masc = struct
   ;;
 
   let of_string s =
-    (* Domain submodules are tried first; their [of_string] returns [None] for
-       non-domain names, so a flat fallthrough resolves the remainder. The
-       string namespaces are disjoint, so order is irrelevant for correctness. *)
-    match Task_name.of_string s with
-    | Some t -> Some (Task t)
+    (* Domain names resolve through [Domain_tool]; its [of_string] returns
+       [None] for non-domain names, so the flat fallthrough resolves the
+       remainder. The string namespaces are disjoint, so order is irrelevant
+       for correctness. *)
+    match Domain_tool.of_string s with
+    | Some d -> Some (Domain d)
     | None ->
-      match Board_name.of_string s with
-      | Some b -> Some (Board b)
-      | None ->
-        match Goal_name.of_string s with
-        | Some g -> Some (Goal g)
-        | None ->
-          match Operator_name.of_string s with
-          | Some o -> Some (Operator o)
-          | None ->
             match s with
             | "masc_agent_fitness" -> Some Agent_fitness
             | "masc_agent_update" -> Some Agent_update
@@ -340,7 +437,10 @@ module Masc = struct
   ;;
 
   let is_board = function
-    | Board _ -> true
+    | Domain d -> Domain_tool.is_board d
+    (* Flat admin/lifecycle/misc tool names are never board tools. The [Domain]
+       arm above is explicit, so this wildcard covers only the non-domain
+       admin variants — it does not mask a domain constructor. *)
     | _ -> false
   ;;
 

@@ -2,7 +2,11 @@
 
     Moved verbatim from the keeper task tool runtime helper introduced by
     #13981 so all 5 task creation entrypoints can wire the same guard
-    via [Workspace_task.add_task ~reject_if]. *)
+    via [Workspace_task.add_task ~reject_if].
+
+    The [check] function now uses a pre-built reverse index from
+    [Workspace_goal_index] to avoid O(n) linear scans. The legacy
+    [open_task_count_for_goal] is retained as a compatibility wrapper. *)
 
 type capacity_error = {
   goal_id : string;
@@ -19,6 +23,8 @@ let task_matches_goal ~goal_id (task : Masc_domain.task) =
   | None -> false
 ;;
 
+(** Compatibility wrapper -- O(n) linear scan over the full backlog.
+    Retained for existing callers that pass a [backlog] directly. *)
 let open_task_count_for_goal (backlog : Masc_domain.backlog) ~goal_id =
   List.fold_left
     (fun count (task : Masc_domain.task) ->
@@ -35,7 +41,12 @@ let check ?goal_id (backlog : Masc_domain.backlog) =
   match goal_id with
   | None -> None
   | Some goal_id ->
-    let open_task_count = open_task_count_for_goal backlog ~goal_id in
+    let index =
+      Workspace_goal_index.build_goal_task_index backlog.tasks
+    in
+    let open_task_count =
+      Workspace_goal_index.open_task_count_for_goal_indexed index ~goal_id
+    in
     let limit = default_goal_open_limit in
     if open_task_count < limit
     then None

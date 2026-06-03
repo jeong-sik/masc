@@ -146,3 +146,7 @@ val provider_supports_runtime_mcp_policy
 (** [provider_debug_label cfg] returns ["<kind>:<model_id>"] for
     human-readable warn lines (runtime-dead diagnostics). *)
 val provider_debug_label : Llm_provider.Provider_config.t -> string
+
+(** [provider_kind_label cfg] returns the provider kind alone — used
+    as a bounded metric label. *)
+val provider_kind_label : Llm_provider.Provider_config.t -> string

@@ -290,3 +290,7 @@ let provider_debug_label (cfg : Llm_provider.Provider_config.t) =
     (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
     cfg.model_id
 ;;
+
+let provider_kind_label (cfg : Llm_provider.Provider_config.t) =
+  Llm_provider.Provider_config.string_of_provider_kind cfg.kind
+;;

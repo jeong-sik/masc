@@ -92,6 +92,12 @@ val emit_fallback_triggered : kind:string -> detail:string -> unit
     touching global state. *)
 val make_sink : unit -> Llm_provider.Metrics.t
 
+(** Initialise the inference-events JSONL store under
+    [base_path/data/inference-events/].  Must be called before
+    any LLM call for events to be persisted; events emitted
+    before [init] go to Prometheus only (no crash). *)
+val init : base_path:string -> unit
+
 (** Install the bridge as the process-wide default metrics sink.
     Idempotent; should be called once during server bootstrap
     before any keeper turn fires its first LLM call. *)

@@ -294,6 +294,7 @@ const modelTotals = computed(() => {
   let totalIn = 0
   let totalOut = 0
   let totalCache = 0
+  let totalCacheCreation = 0
   let totalReasoning = 0
   let totalSuccess = 0
   let totalError = 0
@@ -307,6 +308,7 @@ const modelTotals = computed(() => {
     totalIn += m.total_input_tokens ?? 0
     totalOut += m.total_output_tokens ?? 0
     totalCache += m.total_cache_read_tokens ?? 0
+    totalCacheCreation += m.total_cache_creation_tokens ?? 0
     totalReasoning += m.total_reasoning_tokens ?? 0
     totalSuccess += m.success_count ?? 0
     totalError += m.error_count ?? 0
@@ -330,7 +332,7 @@ const modelTotals = computed(() => {
   const reasoningRatio = totalOut > 0 ? totalReasoning / totalOut : null
   const errorRate = (totalSuccess + totalError) > 0 ? totalError / (totalSuccess + totalError) : null
   const avgTtfrc = ttfrcCount > 0 ? Math.round(ttfrcSum / ttfrcCount) : null
-  return { totalCost, totalIn, totalOut, totalCache, totalReasoning, totalSuccess, totalError, cacheRatio, reasoningRatio, errorRate, avgTtfrc, p50Avg, p95Max, count: data.length }
+  return { totalCost, totalIn, totalOut, totalCache, totalCacheCreation, totalReasoning, totalSuccess, totalError, cacheRatio, reasoningRatio, errorRate, avgTtfrc, p50Avg, p95Max, count: data.length }
 })
 
 const keeperTotals = computed(() => {
@@ -354,7 +356,7 @@ const keeperTotals = computed(() => {
     if (k.p95_latency_ms != null && k.p95_latency_ms > p95Max) p95Max = k.p95_latency_ms
   }
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
-  return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
+  return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalCacheCreation: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
 })
 
 function ThRight({ children }: { children: unknown }) {
@@ -397,6 +399,7 @@ function ModelRow({
   const inTok = model.total_input_tokens ?? 0
   const outTok = model.total_output_tokens ?? 0
   const cacheRead = model.total_cache_read_tokens ?? null
+  const cacheCreation = model.total_cache_creation_tokens ?? null
   const reasoning = model.total_reasoning_tokens ?? null
   const thinkingFrac = model.thinking_fraction ?? null
   const coverage = model.coverage_status ?? null
@@ -436,6 +439,9 @@ function ModelRow({
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(outTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs ${cacheRatioColor(cacheRatio)}">
         ${cacheRatio != null ? formatPct1(cacheRatio) : html`<span class="text-text-disabled">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">
+        ${cacheCreation != null ? formatTokens(cacheCreation) : html`<span class="text-text-disabled">—</span>`}
       </td>
       <td class="px-2 py-1.5 text-right font-mono text-xs ${reasoningRatioColor(reasoningRatio)}">
         ${reasoning != null ? html`${formatTokens(reasoning)}${reasoningRatio != null ? html` <span class="text-text-muted">(${formatPct1(reasoningRatio)})</span>` : ''}` : html`<span class="text-text-disabled">—</span>`}
@@ -1400,6 +1406,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   <${ThRight}>out tok</${ThRight}>
                   ${mode === 'model' ? html`
                     <${ThRight}>cache%</${ThRight}>
+                    <${ThRight}>creation</${ThRight}>
                     <${ThRight}>reason</${ThRight}>
                     <${ThRight}>think%</${ThRight}>
                   ` : null}

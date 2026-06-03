@@ -16,11 +16,12 @@ let append_event ~base_dir ~partition ~(event : ide_event) =
   in
   let path = Filename.concat dir file_name in
   let json = ide_event_to_json event in
-  let line = Yojson.Safe.to_string json in
-  let oc = open_out_gen [ Open_creat; Open_append; Open_text ] 0o644 path in
-  output_string oc line;
-  output_char oc '\n';
-  close_out oc
+  (* Use Fs_compat.append_jsonl for per-path mutex protection.
+     Safe for concurrent calls from parallel Eio fibers (Eio.Fiber.List.map)
+     and async agent spawns. Fs_compat uses Stdlib.Mutex.protect per path,
+     so writes to the same file are serialized; writes to different files
+     can proceed concurrently. *)
+  Fs_compat.append_jsonl path json
 
 let ingest_tool_event
     ~base_path

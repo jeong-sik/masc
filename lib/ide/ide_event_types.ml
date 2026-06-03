@@ -17,6 +17,7 @@ type command_descriptor =
   | Gh_api_pr_create of { repo : string; title : string; base : string }
   | Gh_api_pr_merge of { repo : string; pr_number : int }
   | Gh_api_pr_comment of { repo : string; pr_number : int; body : string }
+  | Pipe_chain of { first_cmd : string; last_cmd : string; length : int }
   | Generic
 
 let command_descriptor_to_json = function
@@ -46,6 +47,8 @@ let command_descriptor_to_json = function
     `Assoc [ "kind", `String "gh_api_pr_merge"; "repo", `String repo; "pr_number", `Int pr_number ]
   | Gh_api_pr_comment { repo; pr_number; body } ->
     `Assoc [ "kind", `String "gh_api_pr_comment"; "repo", `String repo; "pr_number", `Int pr_number; "body", `String body ]
+  | Pipe_chain { first_cmd; last_cmd; length } ->
+    `Assoc [ "kind", `String "pipe_chain"; "first_cmd", `String first_cmd; "last_cmd", `String last_cmd; "length", `Int length ]
   | Generic ->
     `Assoc [ "kind", `String "generic" ]
 
@@ -136,3 +139,56 @@ let ide_event_to_json = function
   | Tool_event e -> tool_event_to_json e
   | Turn_event e -> turn_event_to_json e
   | Pr_event e -> pr_event_to_json e
+
+(** Exit code semantics — many commands use exit codes to convey
+    information beyond success/failure. Inspired by Claude Code's
+    commandSemantics.ts. *)
+type exit_semantics =
+  | Success
+  | No_matches
+  | Files_differ
+  | Condition_false
+  | Error of string
+
+let interpret_exit_code ~(cmd_name : string) ~(exit_code : int) : exit_semantics =
+  match cmd_name, exit_code with
+  (* grep/rg/ag/ack: 0=matches found, 1=no matches, 2+=error *)
+  | ("grep" | "rg" | "ag" | "ack"), 0 -> Success
+  | ("grep" | "rg" | "ag" | "ack"), 1 -> No_matches
+  | ("grep" | "rg" | "ag" | "ack"), n -> Error (Printf.sprintf "exit %d" n)
+  (* diff: 0=no differences, 1=differences found, 2+=error *)
+  | "diff", 0 -> Success
+  | "diff", 1 -> Files_differ
+  | "diff", n -> Error (Printf.sprintf "exit %d" n)
+  (* test/[: 0=condition true, 1=condition false, 2+=error *)
+  | ("test" | "["), 0 -> Success
+  | ("test" | "["), 1 -> Condition_false
+  | ("test" | "["), n -> Error (Printf.sprintf "exit %d" n)
+  (* find: 0=success, 1=partial success, 2+=error *)
+  | "find", 0 -> Success
+  | "find", 1 -> Success (* partial success is still success *)
+  | "find", n -> Error (Printf.sprintf "exit %d" n)
+  (* General: 0=success, anything else=error *)
+  | _, 0 -> Success
+  | _, n -> Error (Printf.sprintf "exit %d" n)
+
+(** Classify a command into a broad category for UI display.
+    Inspired by Claude Code's BASH_SEARCH/READ/LIST/SILENT_COMMANDS sets. *)
+type cmd_category =
+  | Search_cmd
+  | Read_cmd
+  | List_cmd
+  | Silent_cmd
+  | Neutral_cmd
+  | Write_cmd
+
+let classify_cmd_category ~(cmd_name : string) : cmd_category =
+  match cmd_name with
+  | "find" | "grep" | "rg" | "ag" | "ack" | "locate" | "which" | "whereis" -> Search_cmd
+  | "cat" | "head" | "tail" | "less" | "more" | "wc" | "stat" | "file" | "strings"
+  | "jq" | "awk" | "cut" | "sort" | "uniq" | "tr" -> Read_cmd
+  | "ls" | "tree" | "du" -> List_cmd
+  | "mv" | "cp" | "rm" | "mkdir" | "rmdir" | "chmod" | "chown" | "chgrp"
+  | "touch" | "ln" | "cd" | "export" | "unset" | "wait" -> Silent_cmd
+  | "echo" | "printf" | "true" | "false" | ":" -> Neutral_cmd
+  | _ -> Write_cmd

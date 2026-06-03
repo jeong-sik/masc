@@ -8,12 +8,12 @@
 
 open Alcotest
 
-module KAR = Masc_mcp.Keeper_agent_run
+module KAR = Masc.Keeper_agent_run
 module KSR = Keeper_skill_routing
-module KP = Masc_mcp.Keeper_prompt
-module KRP = Masc_mcp.Keeper_run_prompt
-module KCB = Masc_mcp.Keeper_failure_circuit_breaker
-module KUP = Masc_mcp.Keeper_unified_prompt
+module KP = Masc.Keeper_prompt
+module KRP = Masc.Keeper_run_prompt
+module KCB = Masc.Keeper_failure_circuit_breaker
+module KUP = Masc.Keeper_unified_prompt
 
 (* CJK-aware token estimator from OAS *)
 let estimate_tokens s =
@@ -42,12 +42,12 @@ let repo_root () =
 let () =
   let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
-  Masc_mcp.Prompt_defaults.init ()
+  Masc.Prompt_defaults.init ()
 
 let restore_prompt_registry () =
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
-  Masc_mcp.Prompt_defaults.init ()
+  Masc.Prompt_defaults.init ()
 
 (* ── Fixture: realistic keeper prompt components ──────── *)
 

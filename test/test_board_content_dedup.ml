@@ -3,7 +3,7 @@
     single post, preventing the 3-6x duplication observed in production
     keeper board writes (0s gap between duplicates). *)
 
-open Masc_mcp
+open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()

@@ -1,4 +1,4 @@
-# MASC-MCP LLM Front Door
+# MASC LLM Front Door
 
 `masc` has many tools. Do not start from the full surface.
 

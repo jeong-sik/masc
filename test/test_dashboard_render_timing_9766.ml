@@ -5,8 +5,8 @@
     counts and the per-keeper enrich average. *)
 
 open Alcotest
-module DE = Masc_mcp.Dashboard_execution
-module Prom = Masc_mcp.Prometheus
+module DE = Masc.Dashboard_execution
+module Prom = Masc.Prometheus
 
 let sample_timings () : DE.render_phase_timings_ms = {
   total_ms = 59800.0;

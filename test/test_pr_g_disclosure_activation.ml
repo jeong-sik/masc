@@ -23,8 +23,8 @@ open Alcotest
 
 let test_to_oas_disclosure_level_full_is_none () =
   let level =
-    Masc_mcp.Keeper_disclosure_strategy.to_oas_disclosure_level
-      Masc_mcp.Keeper_disclosure_strategy.Full
+    Masc.Keeper_disclosure_strategy.to_oas_disclosure_level
+      Masc.Keeper_disclosure_strategy.Full
   in
   (check bool)
     "Full maps to None (SDK default Full_schema applies, no builder call)"
@@ -33,13 +33,13 @@ let test_to_oas_disclosure_level_full_is_none () =
 
 let test_to_oas_disclosure_level_hybrid () =
   let strategy =
-    Masc_mcp.Keeper_disclosure_strategy.Hybrid
+    Masc.Keeper_disclosure_strategy.Hybrid
       { full_names = [ "tool_execute"; "tool_edit_file" ]
       ; demote_on_error = false
       }
   in
   let level =
-    Masc_mcp.Keeper_disclosure_strategy.to_oas_disclosure_level strategy
+    Masc.Keeper_disclosure_strategy.to_oas_disclosure_level strategy
   in
   match level with
   | Some (Agent_sdk.Tool.Hybrid { full_names }) ->
@@ -52,8 +52,8 @@ let test_to_oas_disclosure_level_hybrid () =
 
 let test_to_oas_disclosure_level_minimal () =
   let level =
-    Masc_mcp.Keeper_disclosure_strategy.to_oas_disclosure_level
-      Masc_mcp.Keeper_disclosure_strategy.Minimal_index
+    Masc.Keeper_disclosure_strategy.to_oas_disclosure_level
+      Masc.Keeper_disclosure_strategy.Minimal_index
   in
   match level with
   | Some Agent_sdk.Tool.Minimal_index -> ()
@@ -62,27 +62,27 @@ let test_to_oas_disclosure_level_minimal () =
 
 let test_resolver_full_is_none () =
   let r =
-    Masc_mcp.Keeper_disclosure_strategy.to_oas_resolver
-      Masc_mcp.Keeper_disclosure_strategy.Full
+    Masc.Keeper_disclosure_strategy.to_oas_resolver
+      Masc.Keeper_disclosure_strategy.Full
   in
   (check bool) "Full has no resolver" true (Option.is_none r)
 ;;
 
 let test_resolver_minimal_is_none () =
   let r =
-    Masc_mcp.Keeper_disclosure_strategy.to_oas_resolver
-      Masc_mcp.Keeper_disclosure_strategy.Minimal_index
+    Masc.Keeper_disclosure_strategy.to_oas_resolver
+      Masc.Keeper_disclosure_strategy.Minimal_index
   in
   (check bool) "Minimal_index has no resolver" true (Option.is_none r)
 ;;
 
 let test_resolver_hybrid_without_demote_is_none () =
   let strategy =
-    Masc_mcp.Keeper_disclosure_strategy.Hybrid
+    Masc.Keeper_disclosure_strategy.Hybrid
       { full_names = [ "tool_execute" ]; demote_on_error = false }
   in
   let r =
-    Masc_mcp.Keeper_disclosure_strategy.to_oas_resolver strategy
+    Masc.Keeper_disclosure_strategy.to_oas_resolver strategy
   in
   (check bool)
     "Hybrid with demote_on_error=false has no resolver"
@@ -91,10 +91,10 @@ let test_resolver_hybrid_without_demote_is_none () =
 
 let test_resolver_hybrid_with_demote_promotes_on_error () =
   let strategy =
-    Masc_mcp.Keeper_disclosure_strategy.Hybrid
+    Masc.Keeper_disclosure_strategy.Hybrid
       { full_names = [ "tool_execute" ]; demote_on_error = true }
   in
-  match Masc_mcp.Keeper_disclosure_strategy.to_oas_resolver strategy with
+  match Masc.Keeper_disclosure_strategy.to_oas_resolver strategy with
   | None ->
     Alcotest.fail "Hybrid with demote_on_error=true must produce a resolver"
   | Some resolver ->
@@ -124,7 +124,7 @@ let test_worker_oas_accepts_disclosure_strategy_arg () =
   (* This is a *compile-time* assertion: if Worker_oas.build_agent's
      signature drops [?disclosure_strategy] the function reference
      below stops type-checking. *)
-  let _ = Masc_mcp.Worker_oas.build_agent in
+  let _ = Masc.Worker_oas.build_agent in
   ()
 ;;
 

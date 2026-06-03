@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module Progress = Masc_mcp.Progress
+module Progress = Masc.Progress
 
 (* ============================================================
    validate_task_id Tests

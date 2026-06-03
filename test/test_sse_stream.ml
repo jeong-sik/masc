@@ -5,7 +5,7 @@
     inside [Eio_main.run] to exercise the stream path (not the
     direct-push fallback). *)
 
-open Masc_mcp
+open Masc
 
 let reset () = ignore (Sse.close_all_clients ())
 

@@ -1,7 +1,7 @@
 open Alcotest
 
-module Drift_guard = Masc_mcp.Drift_guard
-module Workspace = Masc_mcp.Workspace
+module Drift_guard = Masc.Drift_guard
+module Workspace = Masc.Workspace
 
 let rec rm_rf path =
   if Sys.file_exists path then

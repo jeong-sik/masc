@@ -9,7 +9,7 @@
 open Alcotest
 
 module Log = Log
-module Config = Masc_mcp.Config
+module Config = Masc.Config
 module Env_config = Env_config
 
 (* ============================================================

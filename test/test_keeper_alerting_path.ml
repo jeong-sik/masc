@@ -1,7 +1,7 @@
 (** Pure-function unit tests for [Keeper_alerting_path].
     Covers the deterministic helpers that don't touch the filesystem. *)
 
-open Masc_mcp
+open Masc
 module KAP = Keeper_alerting_path
 
 let check_string_list label expected actual =

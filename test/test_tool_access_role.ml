@@ -8,7 +8,7 @@ module Types = Masc_domain
     and every role. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ================================================================ *)
 (* Closed permission simulation                                      *)
@@ -145,7 +145,7 @@ let test_sidecar_allowed_for_dashboard_worker () =
 
 let test_permissions_promoted_to_metadata_ssot () =
   ignore
-    (Masc_mcp.Mcp_server_eio.create_state ~test_mode:true
+    (Masc.Mcp_server_eio.create_state ~test_mode:true
        ~base_path:"/tmp/masc-permission-metadata-ssot" ());
   let expectations =
     [

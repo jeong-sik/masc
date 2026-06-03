@@ -26,7 +26,7 @@ module Types = Masc_domain
         blame to the right agent pair.
 *)
 
-open Masc_mcp
+open Masc
 module Prom = Prometheus
 
 let mismatch_total ~expected ~actual =

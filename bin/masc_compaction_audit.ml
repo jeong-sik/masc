@@ -1,7 +1,7 @@
 (** [masc_compaction_audit] — CLI for inspecting the compaction audit JSONL.
 
     Reads events from [{base}/data/harness-compact/] via
-    {!Masc_mcp.Keeper_compact_audit}, pairs Start/Complete rows by
+    {!Masc.Keeper_compact_audit}, pairs Start/Complete rows by
     [compaction_id], and prints a human-readable summary. Supports date
     range / keeper filter / orphan-only view, plus manual retention prune.
 
@@ -48,7 +48,7 @@ let parse_date_arg name s =
   | _ -> error (Printf.sprintf "invalid %s: %S (expected YYYY-MM-DD)" name s)
 
 let base_path () =
-  (* sb/main_eio uses Masc_mcp.Env_config.base_path.
+  (* sb/main_eio uses Masc.Env_config.base_path.
      Replicating the env lookup avoids pulling heavy deps into this CLI. *)
   match Sys.getenv_opt "MASC_BASE_PATH" with
   | Some p when String.trim p <> "" -> p
@@ -117,7 +117,7 @@ let format_ts ts =
     (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
     tm.tm_hour tm.tm_min tm.tm_sec
 
-module KCA = Masc_mcp.Keeper_compact_audit
+module KCA = Masc.Keeper_compact_audit
 
 let print_paired ~(pre : KCA.start_record) ~(post : KCA.complete_record) =
   let delta = post.before_tokens - post.after_tokens in

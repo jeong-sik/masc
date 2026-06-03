@@ -18,12 +18,12 @@
     looks them up by string. *)
 
 open Alcotest
-module Descriptor = Masc_mcp.Keeper_tool_descriptor
-module Policy = Masc_mcp.Keeper_tool_policy
-module Exec = Masc_mcp.Keeper_tool_dispatch_runtime
-module Registry = Masc_mcp.Keeper_tool_registry
-module Resolution = Masc_mcp.Keeper_tool_descriptor_resolution
-module Tool_board_registry = Masc_mcp.Tool_board_registry
+module Descriptor = Masc.Keeper_tool_descriptor
+module Policy = Masc.Keeper_tool_policy
+module Exec = Masc.Keeper_tool_dispatch_runtime
+module Registry = Masc.Keeper_tool_registry
+module Resolution = Masc.Keeper_tool_descriptor_resolution
+module Tool_board_registry = Masc.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
 

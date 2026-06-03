@@ -3,9 +3,9 @@
 
 open Alcotest
 
-module R = Masc_mcp.Keeper_registry
-module KT = Masc_mcp.Keeper_types
-module KSM = Masc_mcp.Keeper_state_machine
+module R = Masc.Keeper_registry
+module KT = Masc.Keeper_types
+module KSM = Masc.Keeper_state_machine
 module Cfg = Env_config
 
 let bp = "/tmp/test-phase2"
@@ -224,7 +224,7 @@ let test_failure_reason_cleared_on_reregister () =
 
 (* ── Fix 2: Cohort detection uses ADT, not string prefix ── *)
 
-module Sup = Masc_mcp.Keeper_supervisor
+module Sup = Masc.Keeper_supervisor
 
 let test_cohort_key_heartbeat () =
   let key = Sup.cohort_key_of_reason

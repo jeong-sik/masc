@@ -6,7 +6,7 @@
     level (fence > inline tick > double-asterisk > unfinished link/image). *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let signal_eq a b =
   Tool_board.truncation_signal_to_string a

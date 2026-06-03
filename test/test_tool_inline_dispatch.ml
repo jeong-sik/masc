@@ -19,7 +19,7 @@ let test_discover_tools_uses_bm25_ranking_not_substring_or () =
     ]
   in
   let json =
-    Masc_mcp.Tool_inline_dispatch.For_testing.discover_tools_json
+    Masc.Tool_inline_dispatch.For_testing.discover_tools_json
       ~query:"read file contents"
       ~limit:2
       schemas
@@ -36,7 +36,7 @@ let test_discover_tools_returns_empty_for_unmatched_query () =
     ]
   in
   let json =
-    Masc_mcp.Tool_inline_dispatch.For_testing.discover_tools_json
+    Masc.Tool_inline_dispatch.For_testing.discover_tools_json
       ~query:"zzzzzzzz"
       ~limit:5
       schemas
@@ -46,7 +46,7 @@ let test_discover_tools_returns_empty_for_unmatched_query () =
 let test_discover_tools_marks_bm25_scoring () =
   let schemas = [ schema "masc_file_read" "Read file contents" ] in
   let json =
-    Masc_mcp.Tool_inline_dispatch.For_testing.discover_tools_json
+    Masc.Tool_inline_dispatch.For_testing.discover_tools_json
       ~query:"file"
       ~limit:5
       schemas

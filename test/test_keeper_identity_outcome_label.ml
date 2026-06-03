@@ -5,7 +5,7 @@
     that pivot on [outcome=...]. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let label_of = Keeper_identity.validation_error_outcome_label
 

@@ -101,7 +101,7 @@ For the Agent-Code MCP server, the local startup path maintains a private
 non-expiring worker bearer at
 `$BASE_PATH/.masc/auth/agent-code-mcp-client.token`. Manual `login` is still useful
 when bootstrapping or rotating the bearer; export the printed value as
-`MASC_MCP_TOKEN` in the shell that starts Agent-Code:
+`MASC_TOKEN` in the shell that starts Agent-Code:
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
@@ -122,7 +122,7 @@ Expected shape:
 
 ```text
 URL: http://127.0.0.1:8935/mcp
-Bearer Token Env Var: MASC_MCP_TOKEN
+Bearer Token Env Var: MASC_TOKEN
 ```
 
 If Agent-Code still reports that `masc` is not logged in, check the pipeline
@@ -148,12 +148,12 @@ The canonical `[mcp_servers.masc]` shape — as checked by login JSON — is:
 ```toml
 [mcp_servers.masc]
 url = "http://127.0.0.1:8935/mcp"
-bearer_token_env_var = "MASC_MCP_TOKEN"
+bearer_token_env_var = "MASC_TOKEN"
 http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "agent-code-mcp-client" }
 ```
 
 **Do not include `Authorization = "Bearer ..."` inside `[mcp_servers.masc]`.**
-The server reads the token from `MASC_MCP_TOKEN` at runtime via
+The server reads the token from `MASC_TOKEN` at runtime via
 `bearer_token_env_var`; hardcoding a literal token in the config file persists
 the raw value on disk and causes auth drift when the token is rotated.
 

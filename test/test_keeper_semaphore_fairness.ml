@@ -16,7 +16,7 @@
     computation extracted from [maybe_yield_for_fairness] — so we never
     need to actually sleep in a test. *)
 
-module KK = Masc_mcp.Keeper_keepalive
+module KK = Masc.Keeper_keepalive
 
 (** Reset both the completion table and the FIFO wait queue between tests.
 
@@ -130,7 +130,7 @@ let test_reactive_slot_released_when_body_raises () =
     try
       Some
         (KK.with_keeper_turn_slot_for_test ~keeper_name:"reactive-test"
-           ~channel:Masc_mcp.Keeper_world_observation.Reactive
+           ~channel:Masc.Keeper_world_observation.Reactive
            (fun ~semaphore_wait_ms:_ -> raise Exit))
     with Exit -> None
   in
@@ -148,7 +148,7 @@ let test_autonomous_slot_released_when_body_raises () =
     try
       Some
         (KK.with_keeper_turn_slot_for_test ~keeper_name:"autonomous-test"
-           ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+           ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
            (fun ~semaphore_wait_ms:_ -> raise Exit))
     with Exit -> None
   in

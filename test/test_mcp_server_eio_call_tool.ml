@@ -37,7 +37,7 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
     ?tool_access name =
   let agent_name =
     Option.value agent_name
-      ~default:(Masc_mcp.Keeper_identity.keeper_agent_name name)
+      ~default:(Masc.Keeper_identity.keeper_agent_name name)
   in
   let fields =
     [
@@ -62,7 +62,7 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
      | Some tool_access ->
          [
            ( "tool_access",
-             Masc_mcp.Keeper_meta_tool_access.tool_access_to_json tool_access );
+             Masc.Keeper_meta_tool_access.tool_access_to_json tool_access );
          ]
      | None -> [])
   in
@@ -112,7 +112,7 @@ let rec check_json_strings_valid_utf8 label = function
 
 let test_timeout_quality_is_error () =
   let quality =
-    Masc_mcp.Mcp_server_eio_call_tool.quality_from_result
+    Masc.Mcp_server_eio_call_tool.quality_from_result
       ~success:false
       ~message:"Tool timed out after 30s"
       ~attempts:1
@@ -123,7 +123,7 @@ let test_timeout_quality_is_error () =
 
 let test_generic_failure_quality_is_error () =
   let quality =
-    Masc_mcp.Mcp_server_eio_call_tool.quality_from_result
+    Masc.Mcp_server_eio_call_tool.quality_from_result
       ~success:false
       ~message:"subprocess exited 1"
       ~attempts:2
@@ -134,7 +134,7 @@ let test_generic_failure_quality_is_error () =
 
 let test_success_quality_has_no_issues () =
   let quality =
-    Masc_mcp.Mcp_server_eio_call_tool.quality_from_result
+    Masc.Mcp_server_eio_call_tool.quality_from_result
       ~success:true
       ~message:"ok"
       ~attempts:1
@@ -144,7 +144,7 @@ let test_success_quality_has_no_issues () =
 
 let test_activity_payload_sanitizes_invalid_utf8 () =
   let payload =
-    Masc_mcp.Mcp_server_eio_call_tool.For_testing.activity_tool_called_payload
+    Masc.Mcp_server_eio_call_tool.For_testing.activity_tool_called_payload
       ~tool_name:"tool_execute"
       ~success:false
       ~duration_ms:42
@@ -166,7 +166,7 @@ let test_activity_payload_sanitizes_invalid_utf8 () =
     (payload |> U.member "pr_number" |> U.to_int)
 
 let test_contains_casefold_keeps_semantics () =
-  let contains = Masc_mcp.Mcp_server_eio_call_tool.contains_casefold in
+  let contains = Masc.Mcp_server_eio_call_tool.contains_casefold in
   check bool "empty needle" true (contains "anything" "");
   check bool "exact match" true (contains "auth required" "auth required");
   check bool "ascii casefold" true
@@ -181,14 +181,14 @@ let test_contains_casefold_keeps_semantics () =
 let test_transition_has_no_fixed_timeout () =
   check bool "masc_transition has no fixed timeout"
     true
-    (Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
+    (Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
        ~tool_name:"masc_transition"
        ~_arguments:(`Assoc [])
      = None)
 
 let test_persona_generate_timeout_exceeds_oas_budget () =
   match
-    Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
+    Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
       ~tool_name:"masc_persona_generate"
       ~_arguments:(`Assoc [])
   with
@@ -199,7 +199,7 @@ let test_persona_generate_timeout_exceeds_oas_budget () =
 
 let test_regular_tool_uses_default_timeout () =
   match
-    Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
+    Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
       ~tool_name:"masc_status"
       ~_arguments:(`Assoc [])
   with
@@ -208,7 +208,7 @@ let test_regular_tool_uses_default_timeout () =
 
 let timeout_for_tool name =
   match
-    Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
+    Masc.Mcp_server_eio_call_tool.tool_timeout_sec_opt
       ~tool_name:name
       ~_arguments:(`Assoc [])
   with
@@ -264,19 +264,19 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_registry.unregister ~base_path keeper_name;
+      Masc.Keeper_registry.unregister ~base_path keeper_name;
       cleanup_dir base_path)
     (fun () ->
       ignore
-        (Masc_mcp.Keeper_registry.register_offline ~base_path keeper_name meta);
-      Masc_mcp.Keeper_registry.mark_turn_started ~base_path keeper_name;
+        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+      Masc.Keeper_registry.mark_turn_started ~base_path keeper_name;
       let entry =
-        match Masc_mcp.Keeper_registry.get ~base_path keeper_name with
+        match Masc.Keeper_registry.get ~base_path keeper_name with
         | Some entry -> entry
         | None -> fail "expected registered keeper entry"
       in
       let ctx =
-        Masc_mcp.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
+        Masc.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
           ~mcp_session_id:"mcp-session-1"
           entry
           ~arguments:(`Assoc [ ("session_id", `String "session-explicit") ])
@@ -285,7 +285,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
         (Some ("trace-test-" ^ keeper_name))
         ctx.trace_id;
       check (option string) "agent_name"
-        (Some (Masc_mcp.Keeper_identity.keeper_agent_name keeper_name))
+        (Some (Masc.Keeper_identity.keeper_agent_name keeper_name))
         ctx.agent_name;
       check (option string) "session_id"
         (Some "session-explicit")
@@ -312,13 +312,13 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   let keeper_name = "sangsu-task-contract" in
-  let config = Masc_mcp.Workspace.default_config base_path in
-  ignore (Masc_mcp.Workspace.init config ~agent_name:(Some keeper_name));
+  let config = Masc.Workspace.default_config base_path in
+  ignore (Masc.Workspace.init config ~agent_name:(Some keeper_name));
   let contract =
     contract_requiring_tools [ "tool_execute"; "tool_edit_file" ]
   in
   ignore
-    (Masc_mcp.Workspace.add_task
+    (Masc.Workspace.add_task
        ~contract
        config
        ~title:"Needs execution tools"
@@ -332,18 +332,18 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_registry.unregister ~base_path keeper_name;
+      Masc.Keeper_registry.unregister ~base_path keeper_name;
       cleanup_dir base_path)
     (fun () ->
       ignore
-        (Masc_mcp.Keeper_registry.register_offline ~base_path keeper_name meta);
+        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
       let entry =
-        match Masc_mcp.Keeper_registry.get ~base_path keeper_name with
+        match Masc.Keeper_registry.get ~base_path keeper_name with
         | Some entry -> entry
         | None -> fail "expected registered keeper entry"
       in
       let ctx =
-        Masc_mcp.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
+        Masc.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
           entry
           ~arguments:(`Assoc [])
       in
@@ -363,28 +363,28 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   in
   let subscriber_id = "test-runtime-mcp-tool-trace" in
   let received_sse = ref None in
-  Masc_mcp.Keeper_tool_call_log.reset_for_testing ();
-  Masc_mcp.Keeper_tool_call_log.init ~base_path ();
+  Masc.Keeper_tool_call_log.reset_for_testing ();
+  Masc.Keeper_tool_call_log.init ~base_path ();
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Sse.unsubscribe_external subscriber_id;
-      Masc_mcp.Keeper_registry.unregister ~base_path keeper_name;
-      Masc_mcp.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Sse.unsubscribe_external subscriber_id;
+      Masc.Keeper_registry.unregister ~base_path keeper_name;
+      Masc.Keeper_tool_call_log.reset_for_testing ();
       cleanup_dir base_path)
     (fun () ->
       ignore
-        (Masc_mcp.Keeper_registry.register_offline ~base_path keeper_name meta);
-      Masc_mcp.Keeper_registry.mark_turn_started ~base_path keeper_name;
+        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+      Masc.Keeper_registry.mark_turn_started ~base_path keeper_name;
       let entry =
-        match Masc_mcp.Keeper_registry.get ~base_path keeper_name with
+        match Masc.Keeper_registry.get ~base_path keeper_name with
         | Some entry -> entry
         | None -> fail "expected registered keeper entry"
       in
-      Masc_mcp.Sse.subscribe_external
+      Masc.Sse.subscribe_external
         ~id:subscriber_id
         ~callback:(fun payload -> received_sse := Some payload)
         ();
-      Masc_mcp.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+      Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
         ~mcp_session_id:"mcp-session-9"
         entry
         ~tool_name:"tool_execute"
@@ -398,7 +398,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         ~success:false
         ~duration_ms:87;
       let rows =
-        Masc_mcp.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 ()
+        Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 ()
       in
       check int "logged row count" 1 (List.length rows);
       let row = List.hd rows in
@@ -421,7 +421,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (row |> U.member "goal_ids" |> U.to_list |> List.length);
       let runtime_contract = row |> U.member "runtime_contract" in
       check string "runtime contract agent"
-        (Masc_mcp.Keeper_identity.keeper_agent_name keeper_name)
+        (Masc.Keeper_identity.keeper_agent_name keeper_name)
         (runtime_contract |> U.member "agent_name" |> U.to_string);
       check bool "runtime contract has generation" true
         (match runtime_contract |> U.member "generation" with
@@ -488,7 +488,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
          |> U.to_string);
       check string "trajectory runtime agent"
-        (Masc_mcp.Keeper_identity.keeper_agent_name keeper_name)
+        (Masc.Keeper_identity.keeper_agent_name keeper_name)
         (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
          |> U.to_string);
       check bool "trajectory runtime has runtime_profile field" true

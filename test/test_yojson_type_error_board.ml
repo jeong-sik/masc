@@ -5,7 +5,7 @@
     etc. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ---- Helpers ---- *)
 

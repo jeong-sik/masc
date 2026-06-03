@@ -5,7 +5,7 @@
     tab-separated fields). *)
 
 open Alcotest
-module R = Masc_mcp.Keeper_sandbox_runtime.For_testing
+module R = Masc.Keeper_sandbox_runtime.For_testing
 
 (* Docker template emits [\t]-separated fields and a trailing empty
    field when one label is missing, e.g.

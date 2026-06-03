@@ -10,7 +10,7 @@
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps the top-level identifier `Trajectory` unchanged
 ; for ~50 bare callers across lib/ + bin/ + test/. The 26 wrapped-pattern
-; callers (Masc_mcp.Trajectory.X in tests) drop the prefix per RFC-0056
+; callers (Masc.Trajectory.X in tests) drop the prefix per RFC-0056
 ; PoC §4.1 (G5 budget = qualifier-removal only).
 (include_subdirs no)
 

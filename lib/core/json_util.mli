@@ -1,4 +1,4 @@
-(** JSON utilities for MASC-MCP *)
+(** JSON utilities for MASC *)
 
 (** Field extraction with type coercion *)
 

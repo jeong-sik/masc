@@ -32,7 +32,7 @@ OpenQuestions: why did the previous turn see stale tools?|}
 
 let test_strips_backward () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary full_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary full_summary
   in
   Alcotest.(check bool) "Done removed"
     false (String.length filtered >= 5 && Astring.String.is_infix ~affix:"Done:" filtered);
@@ -43,7 +43,7 @@ let test_strips_backward () =
 
 let test_keeps_forward () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary full_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary full_summary
   in
   Alcotest.(check bool) "Goal kept"
     true (Astring.String.is_infix ~affix:"Goal:" filtered);
@@ -58,14 +58,14 @@ let test_keeps_forward () =
 
 let test_empty_input () =
   Alcotest.(check string) "empty stays empty"
-    "" (Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary "");
+    "" (Masc.Keeper_memory_policy.filter_forward_looking_summary "");
   Alcotest.(check string) "all-backward becomes empty"
-    "" (Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary
+    "" (Masc.Keeper_memory_policy.filter_forward_looking_summary
           "Done: work\nDecisions: choice\nProgress: 50%")
 
 let test_preserves_line_order () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary full_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary full_summary
   in
   let lines = String.split_on_char '\n' filtered in
   (* Goal comes before Next plan which comes before Next in the original. *)
@@ -87,7 +87,7 @@ let test_preserves_line_order () =
 
 let test_drops_inert_idle_directives () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary
       inert_idle_summary
   in
   Alcotest.(check bool) "idle next plan removed"
@@ -101,7 +101,7 @@ let test_drops_inert_idle_directives () =
 
 let test_drops_stale_tool_surface_claims () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary
       stale_tool_surface_summary
   in
   Alcotest.(check bool) "stale masc-only claim removed"

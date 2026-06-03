@@ -1,7 +1,7 @@
 (** Tests for Governance_pipeline — risk assessment and governance level policies. *)
 
-module Gp = Masc_mcp.Governance_pipeline
-module Workspace = Masc_mcp.Workspace
+module Gp = Masc.Governance_pipeline
+module Workspace = Masc.Workspace
 module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
 

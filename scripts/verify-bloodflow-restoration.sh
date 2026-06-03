@@ -114,7 +114,7 @@ f1=$(count_pattern_in '"source":"per_keeper_token_file"' "${auth_logs[@]}")
 echo "F1 per_keeper_token_file source events: $f1"
 if [ "$f1" -lt 1 ] && [ "${#auth_logs[@]}" -gt 0 ]; then
   echo "  NOTE: F1 fallback never fired in this log window — either no"
-  echo "  subprocess MCP calls happened, or MASC_MCP_TOKEN was always set."
+  echo "  subprocess MCP calls happened, or MASC_TOKEN was always set."
 fi
 
 # ----- F2: silent_auth + would_reject mode mix ----------------------------

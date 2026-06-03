@@ -5,8 +5,8 @@
 
 open Alcotest
 
-module Prometheus = Masc_mcp.Prometheus
-module TM = Masc_mcp.Transport_metrics
+module Prometheus = Masc.Prometheus
+module TM = Masc.Transport_metrics
 
 let test_default_latency () =
   (* With no broadcast data, latency avg = 0. *)

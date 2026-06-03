@@ -15,7 +15,7 @@
     pure-validation pin here plus the helper-mapping pin is sufficient
     coverage for the new code paths. *)
 
-module Keeper_tool_memory_runtime = Masc_mcp.Keeper_tool_memory_runtime
+module Keeper_tool_memory_runtime = Masc.Keeper_tool_memory_runtime
 
 (* --- helpers ------------------------------------------------------- *)
 

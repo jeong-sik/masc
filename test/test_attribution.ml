@@ -3,7 +3,7 @@
     Round-trip property for every outcome variant, wire-format tagged-union
     shape, parse error paths, and smart-constructor invariants. *)
 
-module A = Masc_mcp.Attribution
+module A = Masc.Attribution
 
 let evidence_sample : Yojson.Safe.t =
   `Assoc

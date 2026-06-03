@@ -9,7 +9,7 @@ module Types = Masc_domain
     - Self-approval/rejection blocked
     - FSM disabled path: error message *)
 
-open Masc_mcp
+open Masc
 
 let rng_initialized = ref false
 

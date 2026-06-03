@@ -1,8 +1,8 @@
 open Alcotest
 
-module KET = Masc_mcp.Keeper_tool_dispatch_runtime
-module KES = Masc_mcp.Keeper_tool_shared_runtime
-module Workspace = Masc_mcp.Workspace
+module KET = Masc.Keeper_tool_dispatch_runtime
+module KES = Masc.Keeper_tool_shared_runtime
+module Workspace = Masc.Workspace
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -63,14 +63,14 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
           ("allowed_paths", `List [ `String "*" ]);
           ("policy_voice_enabled", `Bool policy_voice_enabled);
           ( "tool_access",
-            Masc_mcp.Keeper_meta_tool_access.tool_access_to_json tool_access );
+            Masc.Keeper_meta_tool_access.tool_access_to_json tool_access );
         ])
   with
   | Ok meta -> meta
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 let make_ctx () =
-  Masc_mcp.Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
+  Masc.Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 
 let with_exec_fixture ?tool_access name fn =
   let dir = temp_dir name in
@@ -79,7 +79,7 @@ let with_exec_fixture ?tool_access name fn =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Masc_mcp.Workspace.default_config dir in
+      let config = Masc.Workspace.default_config dir in
       let meta = make_meta ?tool_access () in
       ignore (Masc_mcp.Keeper_registry.register ~base_path:config.base_path meta.name meta);
       Fun.protect
@@ -190,8 +190,8 @@ let test_registered_descriptor_bypasses_tool_access_allowlist () =
            "File not found"))
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
-  Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string ToolNotAllowed)
+  Masc.Prometheus.metric_value_or_zero
+    Masc.Keeper_metrics.(to_string ToolNotAllowed)
     ~labels:[ ("keeper", keeper); ("tool", tool); ("reason", reason) ]
     ()
 
@@ -237,7 +237,7 @@ let test_tool_not_allowed_denied_by_policy_counter () =
           ; ("trace_id", `String "test-not-allowed-b")
           ; ("allowed_paths", `List [ `String "*" ])
           ; ( "tool_access"
-            , Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
+            , Masc.Keeper_meta_tool_access.tool_access_to_json
                 ([ "keeper_board_post" ]) )
           ; ( "tool_denylist"
             , `List [ `String "keeper_board_post" ] )
@@ -263,7 +263,7 @@ let test_tool_not_allowed_denied_by_policy_counter () =
   Fun.protect ~finally:cleanup (fun () ->
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let config = Masc_mcp.Workspace.default_config dir in
+    let config = Masc.Workspace.default_config dir in
     let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
     ignore
       (KET.execute_keeper_tool_call_with_outcome
@@ -509,7 +509,7 @@ let test_registered_tool_dispatch_without_masc_prefix () =
   with_exec_fixture "keeper_tool_dispatch_registered_dispatch"
     (fun ~config ~meta ~ctx_work:_ ->
       match
-        Masc_mcp.Keeper_tool_registered_runtime.handle_registered_tool
+        Masc.Keeper_tool_registered_runtime.handle_registered_tool
           ~config
           ~keeper_name:meta.name
           ~name:registered_dispatch_probe_tool
@@ -528,7 +528,7 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
   with_exec_fixture "keeper_tool_dispatch_registered_workflow_rejection"
     (fun ~config ~meta ~ctx_work:_ ->
       match
-        Masc_mcp.Keeper_tool_registered_runtime.handle_registered_tool
+        Masc.Keeper_tool_registered_runtime.handle_registered_tool
           ~config
           ~keeper_name:meta.name
           ~name:workflow_rejection_probe_tool

@@ -30,7 +30,7 @@ module B = Workspace_bootstrap
 (* [Workspace] is the wrapper module re-exported by [masc]; it
    contains [default_config].  Other workspace internals live as
    top-level modules ([Workspace_utils], [Workspace_bootstrap]). *)
-module Workspace = Masc_mcp.Workspace
+module Workspace = Masc.Workspace
 
 (* ── Fixture helpers ───────────────────────────────────────── *)
 

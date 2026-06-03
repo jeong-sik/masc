@@ -3,7 +3,7 @@
     All tests that touch Circuit_breaker must run inside Eio_main.run
     because Circuit_breaker uses Eio.Mutex internally. *)
 
-module Health = Masc_mcp.Health
+module Health = Masc.Health
 
 open Alcotest
 

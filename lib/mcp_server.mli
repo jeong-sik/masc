@@ -75,7 +75,7 @@ val validate_protocol_version : string -> (string, string) result
 (** Returns [Ok normalized] when the input matches one of
     the supported protocol versions, [Error msg]
     otherwise.  Pinned because [test/test_mcp_server_eio.ml]
-    aliases the module ([module Mcp = Masc_mcp.Mcp_server])
+    aliases the module ([module Mcp = Masc.Mcp_server])
     and exercises the validator directly. *)
 
 (** {1 MCP icons} *)

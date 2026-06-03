@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let temp_dir prefix =
   let dir =

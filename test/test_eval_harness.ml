@@ -1,6 +1,6 @@
 (** Unit tests for Eval_harness module — Scenario-based evaluation. *)
 
-open Masc_mcp
+open Masc
 
 (* ================================================================ *)
 (* Test: apply_deterministic_grader                                  *)

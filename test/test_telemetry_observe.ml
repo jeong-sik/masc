@@ -18,7 +18,7 @@
     keeper_agent_run.ml:157-164 and depends on this wrapper not
     swallowing cancel. *)
 
-open Masc_mcp
+open Masc
 
 let failure_metric_value kind =
   Prometheus.metric_value_or_zero Prometheus.metric_telemetry_observe_failures

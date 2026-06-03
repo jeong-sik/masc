@@ -1,6 +1,6 @@
-module K = Masc_mcp.Keeper_runtime_trust_snapshot
-module O = Masc_mcp.Keeper_status_detail_observability
-module P = Masc_mcp.Prometheus
+module K = Masc.Keeper_runtime_trust_snapshot
+module O = Masc.Keeper_status_detail_observability
+module P = Masc.Prometheus
 
 let rec remove_tree path =
   if Sys.file_exists path
@@ -46,7 +46,7 @@ let with_env name value f =
     f
 ;;
 
-let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -76,10 +76,10 @@ let test_snapshot_counts_malformed_decision_rows () =
     (fun () ->
        with_env "MASC_BASE_PATH" base_dir
        @@ fun () ->
-       let config = Masc_mcp.Workspace.default_config base_dir in
+       let config = Masc.Workspace.default_config base_dir in
        let keeper_name = "runtime-trust-decision-drop" in
        let meta = make_meta keeper_name in
-       let path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config keeper_name in
+       let path = Masc.Keeper_types_support.keeper_decision_log_path config keeper_name in
        let entry_error = Safe_ops.persistence_read_drop_reason_entry_load_error in
        let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
        let before_entry_error = drop_value entry_error in
@@ -128,11 +128,11 @@ let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
     (fun () ->
        with_env "MASC_BASE_PATH" base_dir
        @@ fun () ->
-       let config = Masc_mcp.Workspace.default_config base_dir in
+       let config = Masc.Workspace.default_config base_dir in
        let keeper_name = "runtime-trust-receipt-model" in
        let meta = make_meta keeper_name in
        let receipt_store =
-         Masc_mcp.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
        in
        Dated_jsonl.append
          receipt_store

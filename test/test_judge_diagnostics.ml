@@ -1,7 +1,7 @@
 (** #9774: regression tests for the judge fallback diagnostic formatter. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let test_short_input_passes_through () =
   let raw = "{\"items\":[]}" in

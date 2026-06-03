@@ -1,6 +1,6 @@
 open Alcotest
 
-module WS = Masc_mcp.Keeper_working_state
+module WS = Masc.Keeper_working_state
 
 let evidence ?(kind = "pr") target = WS.make_evidence_ref ~kind ~target
 
@@ -110,13 +110,13 @@ let test_json_roundtrip () =
 
 let test_projector_maps_snapshot_items_to_active_loops () =
   let snapshot =
-    { Masc_mcp.Keeper_memory_policy.empty_keeper_state_snapshot with
+    { Masc.Keeper_memory_policy.empty_keeper_state_snapshot with
       next_items = [ "finish PR"; " "; "finish PR" ]
     ; open_questions = [ "check CI?" ]
     }
   in
   let state =
-    Masc_mcp.Keeper_working_state_projector.of_state_snapshot
+    Masc.Keeper_working_state_projector.of_state_snapshot
       ~keeper_name:"keeper-a"
       ~trace_id:"trace-1"
       ~keeper_turn_id:7
@@ -138,12 +138,12 @@ let test_projector_maps_snapshot_items_to_active_loops () =
 
 let projected_snapshot ?(next_items = []) ?(open_questions = []) () =
   let snapshot =
-    { Masc_mcp.Keeper_memory_policy.empty_keeper_state_snapshot with
+    { Masc.Keeper_memory_policy.empty_keeper_state_snapshot with
       next_items
     ; open_questions
     }
   in
-  Masc_mcp.Keeper_working_state_projector.of_state_snapshot
+  Masc.Keeper_working_state_projector.of_state_snapshot
     ~keeper_name:"keeper-a"
     ~trace_id:"trace-1"
     ~keeper_turn_id:1
@@ -224,7 +224,7 @@ let test_readback_roundtrip_through_sidecar_payload () =
   Fs_compat.save_file latest_path
     (Yojson.Safe.pretty_to_string (sidecar_payload persisted));
   match
-    Masc_mcp.Keeper_agent_run_sidecar.read_persisted_working_state
+    Masc.Keeper_agent_run_sidecar.read_persisted_working_state
       ~keeper_name:"keeper-a" ~latest_path
   with
   | None -> fail "expected readback to recover the persisted ledger"
@@ -239,7 +239,7 @@ let test_readback_absent_file_returns_none () =
   Unix.mkdir dir 0o755;
   let latest_path = Filename.concat dir "working-state.latest.json" in
   check bool "absent file falls back to None" true
-    (Masc_mcp.Keeper_agent_run_sidecar.read_persisted_working_state
+    (Masc.Keeper_agent_run_sidecar.read_persisted_working_state
        ~keeper_name:"keeper-a" ~latest_path
      = None)
 
@@ -250,7 +250,7 @@ let test_readback_corrupt_file_returns_none () =
   let latest_path = Filename.concat dir "working-state.latest.json" in
   Fs_compat.save_file latest_path "{ this is not valid json";
   check bool "corrupt file falls back to None" true
-    (Masc_mcp.Keeper_agent_run_sidecar.read_persisted_working_state
+    (Masc.Keeper_agent_run_sidecar.read_persisted_working_state
        ~keeper_name:"keeper-a" ~latest_path
      = None)
 
@@ -259,20 +259,20 @@ let test_readback_corrupt_file_returns_none () =
    not just the pure components. This is the test that fails if [resume_merge] is
    inverted, the path is wrong, or the merge result is dropped. *)
 
-let noop_manifest : Masc_mcp.Keeper_agent_run_sidecar.append_manifest_fn =
+let noop_manifest : Masc.Keeper_agent_run_sidecar.append_manifest_fn =
   fun ?elapsed_ms:_ ?logical_seq:_ ?status:_ ?decision:_ ?keeper_turn_id:_
       ?oas_turn_count:_ ?checkpoint_path:_ ?compaction_source:_ ~site:_ _ ->
   ()
 
 let snapshot_with ?(next_items = []) ?(open_questions = []) () =
-  { Masc_mcp.Keeper_memory_policy.empty_keeper_state_snapshot with
+  { Masc.Keeper_memory_policy.empty_keeper_state_snapshot with
     next_items
   ; open_questions
   }
 
 let save_through_sidecar ~session_dir ~resume_merge ~next_items ~keeper_turn_id =
   ignore
-    (Masc_mcp.Keeper_agent_run_sidecar.save_sidecars
+    (Masc.Keeper_agent_run_sidecar.save_sidecars
        ~keeper_name:"keeper-a"
        ~agent_name:"agent-a"
        ~trace_id:"trace-1"

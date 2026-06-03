@@ -4,7 +4,7 @@ Status: Phase 1 — observability + module stub. Migration of call sites is trac
 
 ## Layer model
 
-MASC-MCP timeouts nest innermost-first. Every inner layer's wall cap MUST be
+MASC timeouts nest innermost-first. Every inner layer's wall cap MUST be
 `<=` its enclosing layer's cap. An inner "hard cap" that exceeds the outer cap
 is effectively advisory.
 
@@ -76,7 +76,7 @@ siblings when the first branch completes or trips.
 - Envoy/Istio route timeout + retry budget — outer hard-cap separates from
   per-retry soft budgets.
 
-MASC-MCP currently uses the *cooperative* variant (like Go/gRPC) rather than
+MASC currently uses the *cooperative* variant (like Go/gRPC) rather than
 forced-drop (Rust Tokio). The observability step is a prerequisite for any
 future migration to forced-drop or sentinel-based kill.
 

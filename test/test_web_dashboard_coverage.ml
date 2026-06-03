@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Web_dashboard = Masc_mcp.Web_dashboard
+module Web_dashboard = Masc.Web_dashboard
 
 (* Under `dune test`, the working directory differs from the project root,
    so assets_root() can't find assets/dashboard/index.html.

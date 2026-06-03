@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
 
@@ -176,7 +176,7 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
           worker_name = "worker-local";
           model_label = "not-a-model-label";
           working_dir = None;
-          runtime_backend = Masc_mcp.Worker_execution_backend.Local_playground;
+          runtime_backend = Masc.Worker_execution_backend.Local_playground;
           thinking_enabled = Some false;
           worker_run_id = Some "run-local";
           role = Some "worker";

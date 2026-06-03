@@ -51,7 +51,7 @@ val all : t list
     typed kind that downstream reducers need without removing the
     safety net.
 
-    Reference: ~/Downloads/MASC-MCP Reverse Engineering Design Map.html
+    Reference: ~/Downloads/MASC Reverse Engineering Design Map.html
     §Gap "Auth identity is spread across several layers" + §개선 #2
     (request identity state machine). *)
 

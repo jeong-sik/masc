@@ -1,7 +1,7 @@
 (** Tests for multi-dimensional reputation scoring and dynamic autonomy. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ── Reputation_autonomy tests ────────────────────────────────────── *)
 

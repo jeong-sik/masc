@@ -1,7 +1,7 @@
 (** Multi-workspace tests — reduced to flat namespace verification after #4638. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let with_config f =
   Eio_main.run @@ fun env ->

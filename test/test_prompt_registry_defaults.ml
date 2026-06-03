@@ -1,6 +1,6 @@
 (** Tests for prompt registry markdown sources and override API. *)
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 let test_dir () =
   let tmp = Filename.temp_file "masc_prompt_registry" "" in
@@ -286,7 +286,7 @@ let () =
               let labels = [ ("prompt", "override_restore") ] in
               let before =
                 Lib.Prometheus.metric_value_or_zero
-                  Masc_mcp.Keeper_metrics.(to_string PromptFailures)
+                  Masc.Keeper_metrics.(to_string PromptFailures)
                   ~labels
                   ()
               in
@@ -299,7 +299,7 @@ let () =
               check (float 0.0001) "restore rejection counted"
                 (before +. 1.0)
                 (Lib.Prometheus.metric_value_or_zero
-                   Masc_mcp.Keeper_metrics.(to_string PromptFailures)
+                   Masc.Keeper_metrics.(to_string PromptFailures)
                    ~labels
                    ());
               check string "invalid override not applied"

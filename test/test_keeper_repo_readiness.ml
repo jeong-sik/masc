@@ -2,8 +2,8 @@
 
 open Alcotest
 
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
+module Keeper_types = Masc.Keeper_types
+module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
 
 let make_meta ?(sandbox = Keeper_types_profile_sandbox.Docker) name =
   let json =
@@ -51,15 +51,15 @@ let json_string key json =
   Yojson.Safe.Util.(json |> member key |> to_string)
 
 let normalize_path path =
-  Masc_mcp.Keeper_alerting_path.normalize_path_for_check path
-  |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+  Masc.Keeper_alerting_path.normalize_path_for_check path
+  |> Masc.Keeper_alerting_path.strip_trailing_slashes
 
 let test_missing_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc_mcp.Keeper_repo_readiness.inspect ~config
+    Masc.Keeper_repo_readiness.inspect ~config
       ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -69,15 +69,15 @@ let test_missing_clone () =
 
 let test_non_git_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc_mcp.Keeper_repo_readiness.clone_path ~config
+    Masc.Keeper_repo_readiness.clone_path ~config
       ~meta ~repo_name:"masc"
   in
   mkdir_p clone_path;
   let json =
-    Masc_mcp.Keeper_repo_readiness.inspect ~config
+    Masc.Keeper_repo_readiness.inspect ~config
       ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -87,10 +87,10 @@ let test_non_git_clone () =
 
 let test_invalid_repo_name () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc_mcp.Keeper_repo_readiness.inspect ~config
+    Masc.Keeper_repo_readiness.inspect ~config
       ~meta ~repo_name:"../escape" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -140,15 +140,15 @@ let git_ok ~cwd args =
 let test_parent_git_checkout_does_not_count_as_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
   git_ok ~cwd:base_path [ "init"; "-q"; "--initial-branch=main" ];
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let clone_path =
-    Masc_mcp.Keeper_repo_readiness.clone_path ~config
+    Masc.Keeper_repo_readiness.clone_path ~config
       ~meta ~repo_name:"masc"
   in
   mkdir_p clone_path;
   let json =
-    Masc_mcp.Keeper_repo_readiness.inspect ~config
+    Masc.Keeper_repo_readiness.inspect ~config
       ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -210,10 +210,10 @@ let test_auto_provisionable_workspace_repo () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc_mcp.Keeper_repo_readiness.inspect ~config
+    Masc.Keeper_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -244,10 +244,10 @@ let test_missing_clone_skips_workspace_discovery () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc_mcp.Keeper_repo_readiness.inspect ~config ~meta
+    Masc.Keeper_repo_readiness.inspect ~config ~meta
       ~repo_name:"masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
@@ -271,10 +271,10 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc_mcp.Keeper_repo_readiness.inspect ~config
+    Masc.Keeper_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -300,10 +300,10 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc_mcp.Keeper_repo_readiness.inspect ~config
+    Masc.Keeper_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
@@ -329,10 +329,10 @@ let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   git_ok ~cwd:repo [ "push"; "-q"; "origin"; "main" ];
   set_workspace_origin_to_github ~repo;
-  let config = Masc_mcp.Workspace.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "keeper-one" in
   let json =
-    Masc_mcp.Keeper_repo_readiness.inspect ~config
+    Masc.Keeper_repo_readiness.inspect ~config
       ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);

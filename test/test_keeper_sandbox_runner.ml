@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 

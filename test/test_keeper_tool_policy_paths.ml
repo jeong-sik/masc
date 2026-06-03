@@ -46,7 +46,7 @@
     symlinks — pure lexical normalisation"), so we do not test
     symlink behavior here. *)
 
-module P = Masc_mcp.Keeper_tool_policy
+module P = Masc.Keeper_tool_policy
 
 (* ── (1) writable prefixes ───────────────────────────────────────── *)
 

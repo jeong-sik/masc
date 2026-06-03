@@ -7,7 +7,7 @@
 *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (** Test fixtures *)
 module Fixtures = struct

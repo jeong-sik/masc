@@ -1,6 +1,6 @@
 (** Test Shutdown + Supervisor modules *)
 
-open Masc_mcp
+open Masc
 
 let passed = ref 0
 let failed = ref 0

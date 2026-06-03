@@ -8,7 +8,7 @@
       never raises, never empties the block.
     - Non-ToolResult blocks (Text, ToolUse, etc.) pass through. *)
 
-module H = Masc_mcp.Keeper_artifact_hydrator
+module H = Masc.Keeper_artifact_hydrator
 module B = Tool_blob_store
 module O = Tool_output
 module T = Agent_sdk.Types

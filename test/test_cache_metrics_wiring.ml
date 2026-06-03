@@ -7,7 +7,7 @@
 
 open Alcotest
 
-module Prometheus = Masc_mcp.Prometheus
+module Prometheus = Masc.Prometheus
 
 (* ── Helpers ──────────────────────────────────────────── *)
 

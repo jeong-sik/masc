@@ -1,6 +1,6 @@
-(** Tests for Masc_mcp.Lockfree_atomic helpers. *)
+(** Tests for Masc.Lockfree_atomic helpers. *)
 
-module L = Masc_mcp.Lockfree_atomic
+module L = Masc.Lockfree_atomic
 
 let test_update_single () =
   let a = Atomic.make 0 in

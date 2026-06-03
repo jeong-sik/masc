@@ -11,7 +11,7 @@
    semantic change — only a wire-format widening. *)
 
 open Alcotest
-module S = Masc_mcp.Tool_shard_types_schemas_execute
+module S = Masc.Tool_shard_types_schemas_execute
 
 (* Pull the JSON associated with the [timeout_sec] field's [type] key. *)
 let type_value () =

@@ -7,7 +7,7 @@
     caused 59 spurious keeper fiber kills per day (#18315, #18317). *)
 
 open Alcotest
-module M = Masc_mcp.Keeper_unified_metrics_support
+module M = Masc.Keeper_unified_metrics_support
 
 let is_noop = M.is_noop_cycle
 

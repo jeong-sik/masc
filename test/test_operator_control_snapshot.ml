@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 open Test_operator_control_support
 
 let last_substring_index haystack needle =

@@ -1,4 +1,4 @@
-# MASC-MCP LLM Front Door Full
+# MASC LLM Front Door Full
 
 This file is the AI-friendly narrow waist for `masc`.
 

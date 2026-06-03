@@ -8,9 +8,9 @@
     The tests run inside [Eio_main.run] because [with_keeper_turn_slot_for_test]
     requires an Eio fiber context (Eio.Mutex on holder_table). *)
 
-module KK = Masc_mcp.Keeper_keepalive
-module KTS = Masc_mcp.Keeper_turn_slot
-module SW = Masc_mcp.Keeper_stale_watchdog
+module KK = Masc.Keeper_keepalive
+module KTS = Masc.Keeper_turn_slot
+module SW = Masc.Keeper_stale_watchdog
 
 exception After_flag_injected
 
@@ -80,7 +80,7 @@ let test_autonomous_slot_holders_records_during_acquire () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name:"diagnostic-keeper"
-      ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+      ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
       (fun ~semaphore_wait_ms:_ ->
         let now = Time_compat.now () in
         let holders = KK.autonomous_slot_holders ~now in
@@ -108,7 +108,7 @@ let test_holders_released_after_slot_returned () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name:"diag-release"
-      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ -> ())
   in
   (match result with
@@ -128,7 +128,7 @@ let test_slot_holders_summary_reflects_active_holder () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name:"diag-summary"
-      ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+      ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
       (fun ~semaphore_wait_ms:_ ->
         let summary = KK.slot_holders_summary ~now:(Time_compat.now ()) () in
         let mentions s sub =
@@ -166,7 +166,7 @@ let test_reactive_slot_released_when_hook_raises_after_flag () =
      ignore
        (KK.with_keeper_turn_slot_for_test
           ~keeper_name
-          ~channel:Masc_mcp.Keeper_world_observation.Reactive
+          ~channel:Masc.Keeper_world_observation.Reactive
           (fun ~semaphore_wait_ms:_ ->
              failwith "hook should raise before user callback"));
      clear_hook ();
@@ -188,7 +188,7 @@ let test_watchdog_slot_holder_age_reflects_active_holder () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name
-      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ->
         match
           SW.slot_holder_age_for_test ~now:(Time_compat.now ()) ~keeper_name
@@ -211,7 +211,7 @@ let test_force_release_stale_holder_restores_slots_once () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name
-      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ->
         assert_eq ~msg:"turn acquired" ~expected:(turn_before - 1)
           ~actual:(KK.turn_semaphore_value_for_test ());
@@ -232,7 +232,7 @@ let test_force_release_stale_holder_restores_slots_once () =
         let nested =
           KK.with_keeper_turn_slot_for_test
             ~keeper_name
-            ~channel:Masc_mcp.Keeper_world_observation.Reactive
+            ~channel:Masc.Keeper_world_observation.Reactive
             (fun ~semaphore_wait_ms:_ ->
               let released_again =
                 KK.force_release_stale_holder ~keeper_name
@@ -270,7 +270,7 @@ let test_force_release_marker_is_acquisition_scoped () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name
-      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ->
         let released = KK.force_release_stale_holder ~keeper_name in
         if not (List.mem "turn" released) then
@@ -285,7 +285,7 @@ let test_force_release_marker_is_acquisition_scoped () =
         let nested =
           KK.with_keeper_turn_slot_for_test
             ~keeper_name
-            ~channel:Masc_mcp.Keeper_world_observation.Reactive
+            ~channel:Masc.Keeper_world_observation.Reactive
             (fun ~semaphore_wait_ms:_ -> ())
         in
         (match nested with
@@ -332,7 +332,7 @@ let test_force_release_marker_does_not_leak_to_replacement () =
      let _ =
        KK.with_keeper_turn_slot_for_test
          ~keeper_name
-         ~channel:Masc_mcp.Keeper_world_observation.Reactive
+         ~channel:Masc.Keeper_world_observation.Reactive
          (fun ~semaphore_wait_ms:_ ->
            let released = KK.force_release_stale_holder ~keeper_name in
            if not (List.mem "turn" released) then
@@ -354,7 +354,7 @@ let test_force_release_marker_does_not_leak_to_replacement () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name
-      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ -> ())
   in
   (match result with
@@ -378,7 +378,7 @@ let test_force_released_autonomous_holder_does_not_stamp_completion () =
   let result =
     KK.with_keeper_turn_slot_for_test
       ~keeper_name
-      ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+      ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
       (fun ~semaphore_wait_ms:_ ->
          let released = KK.force_release_stale_holder ~keeper_name in
          if not (List.mem "turn" released) then
@@ -421,7 +421,7 @@ let test_retry_control_releases_and_reacquires_reactive_slot () =
   let result =
     KK.with_keeper_turn_slot_control_for_test
       ~keeper_name
-      ~channel:Masc_mcp.Keeper_world_observation.Reactive
+      ~channel:Masc.Keeper_world_observation.Reactive
       (fun ~semaphore_wait_ms:_ ~slot_control ->
          assert_eq ~msg:"turn acquired before retry release"
            ~expected:(turn_before - 1)
@@ -444,7 +444,7 @@ let test_retry_control_releases_and_reacquires_reactive_slot () =
          let nested =
            KK.with_keeper_turn_slot_for_test
              ~keeper_name:"diag-retry-reactive-peer"
-             ~channel:Masc_mcp.Keeper_world_observation.Reactive
+             ~channel:Masc.Keeper_world_observation.Reactive
              (fun ~semaphore_wait_ms:_ -> ())
          in
          (match nested with
@@ -482,7 +482,7 @@ let test_retry_control_autonomous_release_skips_completion_stamp () =
   let result =
     KK.with_keeper_turn_slot_control_for_test
       ~keeper_name
-      ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous
+      ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
       (fun ~semaphore_wait_ms:_ ~slot_control ->
          assert_eq ~msg:"turn acquired before autonomous retry release"
            ~expected:(turn_before - 1)
@@ -562,7 +562,7 @@ let test_no_clock_exhausted_turn_slot_fails_closed () =
           let result =
             KK.with_keeper_turn_slot_for_test
               ~keeper_name:"diag-no-clock-exhausted"
-              ~channel:Masc_mcp.Keeper_world_observation.Reactive
+              ~channel:Masc.Keeper_world_observation.Reactive
               (fun ~semaphore_wait_ms:_ ->
                 failwith "exhausted turn slot should fail before body runs")
           in

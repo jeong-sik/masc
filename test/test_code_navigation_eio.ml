@@ -6,7 +6,7 @@
 
 open Alcotest
 
-module Mcp_eio = Masc_mcp.Mcp_server_eio
+module Mcp_eio = Masc.Mcp_server_eio
 
 (* ===== Test Helpers ===== *)
 

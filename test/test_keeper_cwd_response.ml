@@ -20,7 +20,7 @@
     follow-up PRs. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* Sentinel host-root prefix that must never appear in a
    Docker-keeper LLM-facing response.  Using a recognizable

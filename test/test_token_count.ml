@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module Token_count = Masc_mcp.Token_count
+module Token_count = Masc.Token_count
 
 let result_pp ppf = function
   | `Saved n -> Format.fprintf ppf "`Saved %d" n

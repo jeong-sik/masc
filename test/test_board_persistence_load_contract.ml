@@ -12,7 +12,7 @@
     that is exercised on every fresh server start (no persistence file
     yet). *)
 
-open Masc_mcp
+open Masc
 
 let fresh_test_base_path () =
   let dir =

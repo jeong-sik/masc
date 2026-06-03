@@ -8,7 +8,7 @@
     - make_for_test produces a snapshot whose fields are byte-identical
       to its arguments (no transformation, no rounding) *)
 
-open Masc_mcp
+open Masc
 
 let test_current_starts_empty () =
   Dashboard_snapshot.reset_for_test ();

@@ -10,7 +10,7 @@
    Reference: specs/AgentLifecycle.tla, specs/AgentCancellation.tla
 *)
 
-module KSM = Masc_mcp.Keeper_state_machine
+module KSM = Masc.Keeper_state_machine
 
 (* ── Keeper phase round-trip completeness ─────────────────── *)
 

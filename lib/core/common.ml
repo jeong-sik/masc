@@ -5,7 +5,7 @@ let env_true name =
       let v = String.trim v |> String.lowercase_ascii in
       v = "1" || v = "true" || v = "yes" || v = "on"
 
-let strict_finalizers () = env_true "MASC_MCP_STRICT_FINALIZERS"
+let strict_finalizers () = env_true "MASC_STRICT_FINALIZERS"
 
 let handle_finalizer_error ~module_name ~label ~during_exception ~backtrace ex =
   let suffix = if during_exception then " (during exception)" else "" in

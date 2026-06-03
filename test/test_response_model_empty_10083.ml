@@ -16,8 +16,8 @@
    The test asserts that concrete raw/canonical labels never become the
    returned keeper-facing model string or metric alias label. *)
 
-module Hooks = Masc_mcp.Keeper_hooks_oas
-module Prom = Masc_mcp.Prometheus
+module Hooks = Masc.Keeper_hooks_oas
+module Prom = Masc.Prometheus
 
 let runtime_lane = "runtime"
 let metric_name = Prom.metric_after_turn_response_model_empty

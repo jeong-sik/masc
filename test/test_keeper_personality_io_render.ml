@@ -3,7 +3,7 @@
     harness where data is shortened (UTF-8 boundary safe truncation). *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let make ?(will = "") ?(needs = "") ?(desires = "") ?(instructions = "") () :
     Keeper_personality_io.raw_personality =

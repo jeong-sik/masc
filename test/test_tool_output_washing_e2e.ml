@@ -21,8 +21,8 @@
 
 module B = Tool_blob_store
 module O = Tool_output
-module H = Masc_mcp.Keeper_artifact_hydrator
-module A = Masc_mcp.Server_routes_http_routes_artifacts
+module H = Masc.Keeper_artifact_hydrator
+module A = Masc.Server_routes_http_routes_artifacts
 module T = Agent_sdk.Types
 
 let with_temp_base_path f =

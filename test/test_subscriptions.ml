@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module Subscriptions = Masc_mcp.Subscriptions
+module Subscriptions = Masc.Subscriptions
 
 (* Initialize RNG for crypto *)
 let () = Mirage_crypto_rng_unix.use_default ()

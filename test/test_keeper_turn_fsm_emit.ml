@@ -13,7 +13,7 @@
       [bin/masc-trace] grouping does not silently lose a state
 *)
 
-open Masc_mcp
+open Masc
 module F = Keeper_turn_fsm
 module P = Prometheus
 

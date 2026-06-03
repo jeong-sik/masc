@@ -1,7 +1,7 @@
 (** Tests for Reputation_ledger_v2 — append-only event ledger. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir () =
   let path =

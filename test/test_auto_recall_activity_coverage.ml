@@ -4,7 +4,7 @@ module Types = Masc_domain
     Also covers filesystem-backed activity_feed read-path regressions. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ============================================================
    1. Auto_recall — estimate_tokens

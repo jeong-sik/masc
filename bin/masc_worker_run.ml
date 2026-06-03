@@ -1,4 +1,4 @@
-module Lib = Masc_mcp
+module Lib = Masc
 
 let read_stdin_all () =
   In_channel.input_all In_channel.stdin

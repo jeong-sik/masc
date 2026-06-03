@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let rec rm_rf path =
   if Sys.file_exists path then

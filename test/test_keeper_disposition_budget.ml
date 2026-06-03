@@ -16,7 +16,7 @@
    two cannot drift). Pinning the literals also guards wire compatibility with
    receipts persisted before the refactor. *)
 
-module R = Masc_mcp.Keeper_execution_receipt
+module R = Masc.Keeper_execution_receipt
 
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures

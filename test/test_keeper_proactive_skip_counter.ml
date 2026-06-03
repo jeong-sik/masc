@@ -16,8 +16,8 @@
       string label the counter consumes.  Adding a new reason
       without updating dashboards becomes a test failure. *)
 
-module KK = Masc_mcp.Keeper_keepalive
-module KW = Masc_mcp.Keeper_world_observation
+module KK = Masc.Keeper_keepalive
+module KW = Masc.Keeper_world_observation
 
 let test_metric_name_stable () =
   Alcotest.(check string)

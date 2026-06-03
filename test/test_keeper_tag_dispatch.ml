@@ -4,7 +4,7 @@
     lifecycle-mutating tools (masc_pause, masc_resume) are blocked. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let contains_substring s needle =
   let s_len = String.length s in

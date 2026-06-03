@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Run_eio = Masc_mcp.Run_eio
+module Run_eio = Masc.Run_eio
 
 (* ============================================================
    run_record Type Tests
@@ -121,7 +121,7 @@ let test_log_entry_json_roundtrip () =
    Eio Helpers
    ============================================================ *)
 
-module Workspace = Masc_mcp.Workspace
+module Workspace = Masc.Workspace
 
 let rec rm_rf path =
   if Sys.file_exists path then

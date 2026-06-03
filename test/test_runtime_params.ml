@@ -1,6 +1,6 @@
 (** Tests for Runtime_params — typed parameter store with governance override. *)
 
-open Masc_mcp
+open Masc
 
 let rec rm_rf path =
   if Sys.file_exists path then

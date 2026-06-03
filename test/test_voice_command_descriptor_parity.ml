@@ -13,8 +13,8 @@
     time. *)
 
 open Alcotest
-module Descriptor = Masc_mcp.Keeper_tool_descriptor
-module Voice = Masc_mcp.Keeper_tool_voice_runtime
+module Descriptor = Masc.Keeper_tool_descriptor
+module Voice = Masc.Keeper_tool_voice_runtime
 
 let voice_prefix = "keeper_voice_"
 

@@ -1,7 +1,7 @@
 (** Tests for Goal_verification error paths preserving state. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir () =
   let path = Filename.temp_file "goal_verification_test" "" in

@@ -9,11 +9,11 @@
       {id, ts, ts_unix, keeper, kind, summary} *)
 
 open Alcotest
-module Workspace = Masc_mcp.Workspace
-module Dash = Masc_mcp.Dashboard_http_keeper
-module Keeper_config = Masc_mcp.Keeper_config
-module Keeper_fs = Masc_mcp.Keeper_fs
-module Keeper_types = Masc_mcp.Keeper_types
+module Workspace = Masc.Workspace
+module Dash = Masc.Dashboard_http_keeper
+module Keeper_config = Masc.Keeper_config
+module Keeper_fs = Masc.Keeper_fs
+module Keeper_types = Masc.Keeper_types
 module Json = Yojson.Safe.Util
 
 let test_counter = ref 0
@@ -60,7 +60,7 @@ let keeper_meta name =
 
 let append_jsonl path json =
   let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
-  Masc_mcp.Keeper_types_support.append_jsonl_line path json
+  Masc.Keeper_types_support.append_jsonl_line path json
 ;;
 
 let strings json = json |> Json.to_list |> List.map Json.to_string
@@ -84,7 +84,7 @@ let test_decisions_log_evidence_refs_are_real_refs () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-decisions" in
-  let path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config meta.name in
+  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
   append_jsonl
     path
     (`Assoc
@@ -125,7 +125,7 @@ let test_decisions_log_clamps_low_limit () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-decision-limit" in
-  let path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config meta.name in
+  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
   append_jsonl
     path
     (`Assoc
@@ -150,7 +150,7 @@ let test_decisions_log_json_shape () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-decisions-shape" in
-  let path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config meta.name in
+  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
   append_jsonl
     path
     (`Assoc
@@ -191,7 +191,7 @@ let test_decisions_json_terminal_reason_duration_fallback () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-decision-terminal-duration" in
-  let path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config meta.name in
+  let path = Masc.Keeper_types_support.keeper_decision_log_path config meta.name in
   append_jsonl
     path
     (`Assoc
@@ -282,7 +282,7 @@ let test_memory_log_ids_distinguish_same_timestamp_rows () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-memory" in
-  let path = Masc_mcp.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
   append_jsonl path (memory_row ~ts:2_000.0 "Ship K2 memory feed row alpha");
   append_jsonl path (memory_row ~ts:2_000.0 "Ship K2 memory feed row beta");
   let json = Dash.keeper_memory_log_json ~config ~keepers:[ meta ] ~limit:999 () in
@@ -299,7 +299,7 @@ let test_memory_log_kind_mapping () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-memory-kind" in
-  let path = Masc_mcp.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
   (* progress -> episode *)
   append_jsonl
     path

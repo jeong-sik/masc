@@ -3,7 +3,7 @@
     All tests are pure (no Eio needed) since Post_verifier has no IO. *)
 
 module Pv = Post_verifier
-module Hm = Masc_mcp.Heuristic_metrics
+module Hm = Masc.Heuristic_metrics
 
 open Alcotest
 

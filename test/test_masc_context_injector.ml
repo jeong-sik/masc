@@ -1,7 +1,7 @@
 (** Tests for MCI. *)
 
 open Alcotest
-module MCI = Masc_mcp.Masc_context_injector
+module MCI = Masc.Masc_context_injector
 
 (* ── Helpers ──────────────────────────────────────────── *)
 

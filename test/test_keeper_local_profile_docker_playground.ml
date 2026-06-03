@@ -1,8 +1,8 @@
 open Alcotest
 
-module KSD = Masc_mcp.Keeper_sandbox_docker
-module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
-module KT = Masc_mcp.Keeper_types
+module KSD = Masc.Keeper_sandbox_docker
+module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
+module KT = Masc.Keeper_types
 
 let make_meta ~name ~sandbox_profile ~network_mode =
   let json =

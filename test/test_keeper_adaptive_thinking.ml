@@ -2,7 +2,7 @@ open Alcotest
 
 let test_adaptive_thinking_disabled () =
   let result =
-    Masc_mcp.Keeper_agent_run.adaptive_thinking_budget
+    Masc.Keeper_agent_run.adaptive_thinking_budget
       ~enabled:false
       ~is_retry:true
       ~last_tool_results:[]
@@ -16,7 +16,7 @@ let test_adaptive_thinking_error_or_retry () =
     Error { Agent_sdk.Types.message = "fail"; recoverable = true; error_class = None }
   in
   let result1 =
-    Masc_mcp.Keeper_agent_run.adaptive_thinking_budget
+    Masc.Keeper_agent_run.adaptive_thinking_budget
       ~enabled:true
       ~is_retry:false
       ~last_tool_results:[ err_res ]
@@ -24,7 +24,7 @@ let test_adaptive_thinking_error_or_retry () =
   in
   check (option int) "high thinking for error" (Some 1500) result1;
   let result2 =
-    Masc_mcp.Keeper_agent_run.adaptive_thinking_budget
+    Masc.Keeper_agent_run.adaptive_thinking_budget
       ~enabled:true
       ~is_retry:true
       ~last_tool_results:[]
@@ -35,7 +35,7 @@ let test_adaptive_thinking_error_or_retry () =
 
 let test_adaptive_thinking_fallback () =
   let result =
-    Masc_mcp.Keeper_agent_run.adaptive_thinking_budget
+    Masc.Keeper_agent_run.adaptive_thinking_budget
       ~enabled:true
       ~is_retry:false
       ~last_tool_results:[]

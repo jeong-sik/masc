@@ -1,9 +1,9 @@
 open Alcotest
 
-module Workspace = Masc_mcp.Workspace
-module Dashboard_http_keeper = Masc_mcp.Dashboard_http_keeper
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_types_support = Masc_mcp.Keeper_types_support
+module Workspace = Masc.Workspace
+module Dashboard_http_keeper = Masc.Dashboard_http_keeper
+module Keeper_types = Masc.Keeper_types
+module Keeper_types_support = Masc.Keeper_types_support
 
 let test_counter = ref 0
 
@@ -28,7 +28,7 @@ let make_meta name =
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("runtime_id", `String Masc_mcp.(Keeper_config.default_runtime_id ()));
+          ("runtime_id", `String Masc.(Keeper_config.default_runtime_id ()));
           ("last_model_used", `String "test-model");
         ])
   with

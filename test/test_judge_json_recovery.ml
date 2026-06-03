@@ -4,7 +4,7 @@
    before the JSON. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let test_no_brace_returns_none () =
   let out = Judge_json_recovery.extract_balanced_object "no json here" in

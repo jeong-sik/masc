@@ -10,9 +10,9 @@
 
 open Alcotest
 
-module R = Masc_mcp.Keeper_registry
-module KSM = Masc_mcp.Keeper_state_machine
-module Keeper_types = Masc_mcp.Keeper_types
+module R = Masc.Keeper_registry
+module KSM = Masc.Keeper_state_machine
+module Keeper_types = Masc.Keeper_types
 
 let bp = "/tmp/test-chaos"
 

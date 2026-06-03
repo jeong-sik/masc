@@ -27,7 +27,7 @@ module Types = Masc_domain
        sorted by [token_hash_prefix] for stable log diffs. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* [generate_token] inside [Auth.create_token] / [rotate_shared_tokens]
    pulls from Mirage_crypto_rng — needs an explicit unix init in

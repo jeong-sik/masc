@@ -14,7 +14,7 @@
    [ReceiptMatchesState] (a separate invariant) — this helper is
    single-concern. *)
 
-module R = Masc_mcp.Keeper_execution_receipt
+module R = Masc.Keeper_execution_receipt
 
 let must_ok ~outcome ~turn_state =
   match R.assert_receipt_authoritative ~outcome ~turn_state with

@@ -7,8 +7,8 @@
     string for each class so a copy-paste rename or reorder fails at
     the test boundary, not in production operator-facing output. *)
 
-open Masc_mcp.Keeper_tool_shared_runtime
-module CB = Masc_mcp.Keeper_failure_circuit_breaker
+open Masc.Keeper_tool_shared_runtime
+module CB = Masc.Keeper_failure_circuit_breaker
 
 let r = Alcotest.(check string)
 

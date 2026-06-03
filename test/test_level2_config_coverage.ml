@@ -7,7 +7,7 @@
 
 open Alcotest
 
-module Level2_config = Masc_mcp.Level2_config
+module Level2_config = Masc.Level2_config
 
 (* ============================================================
    Drift_guard Tests

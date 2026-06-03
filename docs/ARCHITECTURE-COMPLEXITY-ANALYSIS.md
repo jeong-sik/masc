@@ -6,7 +6,7 @@ code_refs:
   - bin/
 ---
 
-# MASC-MCP Architecture Complexity Analysis
+# MASC Architecture Complexity Analysis
 
 Date: 2026-03-16
 Version: 2.93.0

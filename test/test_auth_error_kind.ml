@@ -8,7 +8,7 @@ module Types = Masc_domain
     label. *)
 
 open Alcotest
-module Aek = Masc_mcp.Auth_error_kind
+module Aek = Masc.Auth_error_kind
 
 let test_to_of_string_round_trip () =
   List.iter

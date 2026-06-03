@@ -8,7 +8,7 @@
     isolation. *)
 
 open Alcotest
-module K = Masc_mcp.Keeper_types_profile
+module K = Masc.Keeper_types_profile
 
 let test_first_call_emits () =
   K.reset_logged_toml_skip_for_test ();

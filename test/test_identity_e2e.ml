@@ -4,7 +4,7 @@
 *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (** Test identity extraction from MCP-like params *)
 let test_identity_from_mcp_params () =

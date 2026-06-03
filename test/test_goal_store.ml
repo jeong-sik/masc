@@ -9,7 +9,7 @@ module Types = Masc_domain
     [refresh_all] / [upsert_goal]. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir () =
   let path = Filename.temp_file "goal_store_test" "" in

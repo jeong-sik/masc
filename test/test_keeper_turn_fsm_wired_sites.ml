@@ -20,7 +20,7 @@
     Cross-reference: [docs/observability/keeper-turn-fsm-metrics.md]
     "Wiring sites" table lists every emit call with its PR. *)
 
-open Masc_mcp
+open Masc
 
 let read_file path =
   let ic = open_in path in

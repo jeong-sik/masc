@@ -13,7 +13,7 @@
 
     Out of scope: Docker routing (preserved verbatim from pre-P10). *)
 
-open Masc_mcp
+open Masc
 
 (* ---- lines_to_json ------------------------------------------------ *)
 

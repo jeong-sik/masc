@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 
 let with_temp_config f =
   Eio_main.run @@ fun env ->

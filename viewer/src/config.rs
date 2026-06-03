@@ -7,15 +7,15 @@ use crate::mode::ViewerMode;
 // Optional compile-time upstream override.
 // Keep empty by default so local dev still uses relative paths + Trunk proxy.
 #[cfg(target_arch = "wasm32")]
-const COMPILE_TIME_MASC_MCP_URL: &str = match option_env!("MASC_MCP_URL") {
+const COMPILE_TIME_MASC_URL: &str = match option_env!("MASC_URL") {
     Some(v) => v,
     None => "",
 };
 #[cfg(not(target_arch = "wasm32"))]
-const COMPILE_TIME_MASC_MCP_URL: &str = "";
+const COMPILE_TIME_MASC_URL: &str = "";
 
 /// Backward-compatible static base URL for legacy call sites.
-pub const MASC_MCP_URL: &str = COMPILE_TIME_MASC_MCP_URL;
+pub const MASC_URL: &str = COMPILE_TIME_MASC_URL;
 
 pub const DEFAULT_WORKSPACE_ID: &str = "default";
 
@@ -38,10 +38,10 @@ fn runtime_base_url_override() -> Option<String> {
     let win = web_sys::window()?;
 
     // 1) Explicit global override:
-    //    window.__MASC_MCP_URL = "https://your-masc.up.railway.app"
+    //    window.__MASC_URL = "https://your-masc.up.railway.app"
     if let Ok(value) = js_sys::Reflect::get(
         win.as_ref(),
-        &wasm_bindgen::JsValue::from_str("__MASC_MCP_URL"),
+        &wasm_bindgen::JsValue::from_str("__MASC_URL"),
     ) {
         if let Some(raw) = value.as_string() {
             let normalized = normalize_base_url(&raw);
@@ -99,7 +99,7 @@ pub fn masc_base_url() -> String {
             return runtime;
         }
     }
-    normalize_base_url(COMPILE_TIME_MASC_MCP_URL)
+    normalize_base_url(COMPILE_TIME_MASC_URL)
 }
 
 pub fn build_masc_url(path: &str) -> String {

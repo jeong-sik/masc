@@ -1,6 +1,6 @@
 (** Dashboard Tests using Alcotest *)
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 (** Helper to check if str contains substring *)
 let contains str substr =

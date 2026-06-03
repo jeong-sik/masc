@@ -56,9 +56,9 @@ let test_list_specs_basic () =
   let root = make_fixture_dir () in
   Fun.protect ~finally:(fun () -> cleanup root) (fun () ->
     with_specs_dir root (fun () ->
-      let entries = Masc_mcp.Dashboard_tla_specs.list_specs () in
+      let entries = Masc.Dashboard_tla_specs.list_specs () in
       check int "three specs" 3 (List.length entries);
-      let names = List.map (fun (e : Masc_mcp.Dashboard_tla_specs.spec_entry) -> e.name) entries in
+      let names = List.map (fun (e : Masc.Dashboard_tla_specs.spec_entry) -> e.name) entries in
       check (list string) "sorted by (category, name)"
         [ "RuntimeStrategy"; "ZOnlyTla"; "Overflow" ]
         names))
@@ -67,14 +67,14 @@ let test_cfg_presence_flags () =
   let root = make_fixture_dir () in
   Fun.protect ~finally:(fun () -> cleanup root) (fun () ->
     with_specs_dir root (fun () ->
-      let entries = Masc_mcp.Dashboard_tla_specs.list_specs () in
+      let entries = Masc.Dashboard_tla_specs.list_specs () in
       let runtime =
-        List.find (fun (e : Masc_mcp.Dashboard_tla_specs.spec_entry) -> e.name = "RuntimeStrategy") entries
+        List.find (fun (e : Masc.Dashboard_tla_specs.spec_entry) -> e.name = "RuntimeStrategy") entries
       in
       check bool "clean cfg present" true runtime.has_clean_cfg;
       check bool "buggy cfg present" true runtime.has_buggy_cfg;
       let only_tla =
-        List.find (fun (e : Masc_mcp.Dashboard_tla_specs.spec_entry) -> e.name = "ZOnlyTla") entries
+        List.find (fun (e : Masc.Dashboard_tla_specs.spec_entry) -> e.name = "ZOnlyTla") entries
       in
       check bool "clean cfg absent" false only_tla.has_clean_cfg;
       check bool "buggy cfg absent" false only_tla.has_buggy_cfg))
@@ -83,21 +83,21 @@ let test_category_mapping () =
   let root = make_fixture_dir () in
   Fun.protect ~finally:(fun () -> cleanup root) (fun () ->
     with_specs_dir root (fun () ->
-      let entries = Masc_mcp.Dashboard_tla_specs.list_specs () in
+      let entries = Masc.Dashboard_tla_specs.list_specs () in
       let overflow =
-        List.find (fun (e : Masc_mcp.Dashboard_tla_specs.spec_entry) -> e.name = "Overflow") entries
+        List.find (fun (e : Masc.Dashboard_tla_specs.spec_entry) -> e.name = "Overflow") entries
       in
       check string "bug-models category" "bug-models" overflow.category;
       let runtime =
-        List.find (fun (e : Masc_mcp.Dashboard_tla_specs.spec_entry) -> e.name = "RuntimeStrategy") entries
+        List.find (fun (e : Masc.Dashboard_tla_specs.spec_entry) -> e.name = "RuntimeStrategy") entries
       in
       check string "boundary category" "boundary" runtime.category))
 
 let test_missing_dir () =
   with_specs_dir "/does/not/exist/masc-specs-xyz" (fun () ->
-    let entries = Masc_mcp.Dashboard_tla_specs.list_specs () in
+    let entries = Masc.Dashboard_tla_specs.list_specs () in
     check int "empty list when dir missing" 0 (List.length entries);
-    let json = Masc_mcp.Dashboard_tla_specs.specs_json () in
+    let json = Masc.Dashboard_tla_specs.specs_json () in
     match json with
     | `Assoc fields ->
       (match List.assoc "specs_dir" fields with
@@ -112,7 +112,7 @@ let test_json_shape () =
   let root = make_fixture_dir () in
   Fun.protect ~finally:(fun () -> cleanup root) (fun () ->
     with_specs_dir root (fun () ->
-      let json = Masc_mcp.Dashboard_tla_specs.specs_json () in
+      let json = Masc.Dashboard_tla_specs.specs_json () in
       match json with
       | `Assoc fields ->
         check bool "has updated_at" true (List.mem_assoc "updated_at" fields);
@@ -143,11 +143,11 @@ let test_tlc_results_from_logs () =
         "Error: Invariant SafetyInvariant is violated.\n99 states generated, 42 distinct states found, 0 states left on queue.\n";
       with_specs_dir specs_root (fun () ->
         with_tlc_results_dir logs_root (fun () ->
-          let entries = Masc_mcp.Dashboard_tla_specs.list_tlc_results () in
+          let entries = Masc.Dashboard_tla_specs.list_tlc_results () in
           check int "cfg-backed results" 3 (List.length entries);
           let runtime =
             List.find
-              (fun (e : Masc_mcp.Dashboard_tla_specs.tlc_result_entry) ->
+              (fun (e : Masc.Dashboard_tla_specs.tlc_result_entry) ->
                  e.cfg_name = "RuntimeStrategy.cfg")
               entries
           in
@@ -158,30 +158,30 @@ let test_tlc_results_from_logs () =
           check (option int) "diameter" (Some 14) runtime.diameter;
           check bool "clean passed" true
             (match runtime.status with
-             | Masc_mcp.Dashboard_tla_specs.Tlc_passed -> true
+             | Masc.Dashboard_tla_specs.Tlc_passed -> true
              | _ -> false);
           let buggy =
             List.find
-              (fun (e : Masc_mcp.Dashboard_tla_specs.tlc_result_entry) ->
+              (fun (e : Masc.Dashboard_tla_specs.tlc_result_entry) ->
                  e.cfg_name = "RuntimeStrategy-buggy.cfg")
               entries
           in
           check bool "buggy violated" true
             (match buggy.status with
-             | Masc_mcp.Dashboard_tla_specs.Tlc_violated -> true
+             | Masc.Dashboard_tla_specs.Tlc_violated -> true
              | _ -> false);
           check (option string) "violation line"
             (Some "Error: Invariant SafetyInvariant is violated.")
             buggy.violation;
           let overflow =
             List.find
-              (fun (e : Masc_mcp.Dashboard_tla_specs.tlc_result_entry) ->
+              (fun (e : Masc.Dashboard_tla_specs.tlc_result_entry) ->
                  e.cfg_name = "Overflow.cfg")
               entries
           in
           check bool "missing log is not_run" true
             (match overflow.status with
-             | Masc_mcp.Dashboard_tla_specs.Tlc_not_run -> true
+             | Masc.Dashboard_tla_specs.Tlc_not_run -> true
              | _ -> false))))
 
 let test_tlc_results_json_shape () =
@@ -194,7 +194,7 @@ let test_tlc_results_json_shape () =
     (fun () ->
       with_specs_dir root (fun () ->
         with_tlc_results_dir logs_root (fun () ->
-          let json = Masc_mcp.Dashboard_tla_specs.tlc_results_json () in
+          let json = Masc.Dashboard_tla_specs.tlc_results_json () in
           match json with
           | `Assoc fields ->
             check bool "has updated_at" true (List.mem_assoc "updated_at" fields);

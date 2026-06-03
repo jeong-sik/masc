@@ -16,7 +16,7 @@
 
 open Alcotest
 
-module Caller = Masc_mcp.Mcp_server_eio_caller_identity
+module Caller = Masc.Mcp_server_eio_caller_identity
 module Nickname = Nickname
 
 (* The exact predicate the deleted [Client_name_kind.is_transient]

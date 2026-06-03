@@ -6,28 +6,28 @@
     3. Shell metacharacters (;, |, &, etc.) are rejected
     4. Empty commands are rejected *)
 
-module Workspace = Masc_mcp.Workspace
-module Keeper_meta_tool_access = Masc_mcp.Keeper_meta_tool_access
-module Exec_core = Masc_mcp.Exec_core
-module Keeper_tool_command_runtime = Masc_mcp.Keeper_tool_command_runtime
-module Keeper_registry = Masc_mcp.Keeper_registry
-module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
-module Dev_exec_allowlist = Masc_mcp.Dev_exec_allowlist
+module Workspace = Masc.Workspace
+module Keeper_meta_tool_access = Masc.Keeper_meta_tool_access
+module Exec_core = Masc.Exec_core
+module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
+module Keeper_registry = Masc.Keeper_registry
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
+module Keeper_types = Masc.Keeper_types
+module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
+module Dev_exec_allowlist = Masc.Dev_exec_allowlist
 module Exec_program = Masc_exec.Exec_program
 module Json = Yojson.Safe.Util
 
 let validate cmd =
-  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Ok ir -> Masc_mcp.Worker_dev_tools.validate_command ir
+  match Masc.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Ok ir -> Masc.Worker_dev_tools.validate_command ir
   | Error reason -> Error reason
 ;;
 
 let is_ok = function Ok () -> true | Error _ -> false
 let is_error = function Error _ -> true | Ok () -> false
-let error_msg = function Error m -> Masc_mcp.Worker_dev_tools.block_reason_to_string m | Ok () -> ""
+let error_msg = function Error m -> Masc.Worker_dev_tools.block_reason_to_string m | Ok () -> ""
 
 let test_allowed_commands () =
   let allowed = [
@@ -100,7 +100,7 @@ let test_empty_command () =
   Alcotest.(check bool) "whitespace blocked" true (is_error (validate "   "))
 
 let is_write cmd =
-  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  match Masc.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
   | Ok ir ->
     let envelope = Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir) in
     envelope.Masc_exec.Shell_ir_risk.risk <> Masc_exec.Shell_ir_risk.R0_Read
@@ -166,11 +166,11 @@ let test_rg_exit_code_semantics () =
 
 (* ── Playground path detection ──────────────────────────── *)
 
-let playground_path_of = Masc_mcp.Keeper_alerting_path.playground_path_of_keeper
+let playground_path_of = Masc.Keeper_alerting_path.playground_path_of_keeper
 
 let normalize_path_for_containment path =
-  Masc_mcp.Keeper_alerting_path.normalize_path_for_check path
-  |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+  Masc.Keeper_alerting_path.normalize_path_for_check path
+  |> Masc.Keeper_alerting_path.strip_trailing_slashes
 
 let temp_dir () =
   let dir = Filename.temp_file "tool_execute_safety_" "" in
@@ -349,7 +349,7 @@ let run_process_ok ~cwd prog argv =
   | Unix.WEXITED 0, _, _ -> ()
   | status, stdout, stderr ->
     Alcotest.failf "command failed: %s status=%s stdout=%s stderr=%s" prog
-      (Masc_mcp.Keeper_sandbox_exec_failure.status_label status)
+      (Masc.Keeper_sandbox_exec_failure.status_label status)
       stdout stderr
 
 let parse_error_field raw =
@@ -376,7 +376,7 @@ let test_tool_execute_rejects_parent_git_repo_cwd () =
       ]
   in
   match
-    Masc_mcp.Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args
+    Masc.Keeper_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args
   with
   | Ok cwd -> Alcotest.failf "expected repo cwd rejection, got %s" cwd
   | Error err ->
@@ -643,9 +643,9 @@ let test_tool_search_files_ir_timeout_floor_is_not_sub_io_latency () =
   Alcotest.(check (float 0.001))
     "tool_search_files_ir native timeout floor"
     Keeper_tool_command_runtime.keeper_tool_execute_shell_ir_native_min_timeout_sec
-    (Masc_mcp.Keeper_tool_execute_timeout.clamp_shell_timeout
+    (Masc.Keeper_tool_execute_timeout.clamp_shell_timeout
        ~min_sec:Keeper_tool_command_runtime.keeper_tool_execute_shell_ir_native_min_timeout_sec
-       ~default:Masc_mcp.Keeper_tool_execute_timeout.io_timeout_sec
+       ~default:Masc.Keeper_tool_execute_timeout.io_timeout_sec
        args)
 
 let test_tool_search_files_ir_load_bearing_timeout_floor () =
@@ -653,7 +653,7 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
     Alcotest.(check (float 0.001))
       name
       expected
-      (Masc_mcp.Keeper_tool_execute_timeout.keeper_tool_execute_shell_ir_min_timeout_sec_for_args args)
+      (Masc.Keeper_tool_execute_timeout.keeper_tool_execute_shell_ir_min_timeout_sec_for_args args)
   in
   check
     "trivial command keeps native floor"
@@ -665,14 +665,14 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
        [ "executable", `String "git"
        ; "argv", `List [ `String "log"; `String "--oneline"; `String "-5" ]
        ])
-    Masc_mcp.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec;
+    Masc.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec;
   check
     "recursive grep uses tool dispatch floor"
     (`Assoc
        [ "executable", `String "grep"
        ; "argv", `List [ `String "-rn"; `String "Yojson"; `String "." ]
        ])
-    Masc_mcp.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec;
+    Masc.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec;
   check
     "pipeline inherits load-bearing floor"
     (`Assoc
@@ -682,7 +682,7 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
              ; `Assoc [ "executable", `String "head"; "argv", `List [ `String "-5" ] ]
              ] )
        ])
-    Masc_mcp.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec
+    Masc.Keeper_tool_execute_timeout.tool_dispatch_min_timeout_sec
 ;;
 
 let test_nested_runtime_detector_ignores_git_commit_message () =
@@ -869,7 +869,7 @@ let test_execution_location_classifies_repo_worktree_subpath () =
     Filename.concat playground "repos/masc/.worktrees/task-123/lib"
   in
   let loc =
-    Masc_mcp.Keeper_tool_execute_path.execution_location_json
+    Masc.Keeper_tool_execute_path.execution_location_json
       ~config
       ~meta
       ~args:
@@ -907,7 +907,7 @@ let test_execution_location_outside_playground_has_null_relative_cwd () =
   let meta = make_readonly_meta "exec-location-outside" in
   let cwd = Filename.concat base_path "outside" in
   let loc =
-    Masc_mcp.Keeper_tool_execute_path.execution_location_json
+    Masc.Keeper_tool_execute_path.execution_location_json
       ~config
       ~meta
       ~args:(`Assoc [ "cwd", `String cwd ])
@@ -1156,7 +1156,7 @@ let test_rewrite_turn_runtime_paths_to_host () =
   let container_root = Keeper_sandbox.container_root meta.name in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+    |> Masc.Keeper_alerting_path.strip_trailing_slashes
   in
   let input =
     Printf.sprintf "worktree %s/repos/masc\npwd=%s/repos/masc\n"
@@ -1186,7 +1186,7 @@ let test_rewrite_docker_host_paths_to_container () =
   let meta = make_docker_meta "minjae" in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+    |> Masc.Keeper_alerting_path.strip_trailing_slashes
   in
   let container_root = Keeper_sandbox.container_root meta.name in
   let input =
@@ -1209,7 +1209,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
   let meta = make_docker_meta "minjae" in
   let host_root =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+    |> Masc.Keeper_alerting_path.strip_trailing_slashes
   in
   let host_repo = Filename.concat (Filename.concat host_root "repos") "masc" in
   let container_root = Keeper_sandbox.container_root meta.name in

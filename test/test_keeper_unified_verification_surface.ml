@@ -1,7 +1,7 @@
 open Alcotest
 
-module WO = Masc_mcp.Keeper_world_observation
-module UM = Masc_mcp.Keeper_unified_metrics
+module WO = Masc.Keeper_world_observation
+module UM = Masc.Keeper_unified_metrics
 module AE = Economy
 
 let base_observation : WO.world_observation =
@@ -32,7 +32,7 @@ let sample_board_event : WO.pending_board_event =
     title = "Need help";
     preview = "Please take a look.";
     hearth = Some "research";
-    post_kind = Masc_mcp.Board.Human_post;
+    post_kind = Masc.Board.Human_post;
     updated_at = 0.0;
     explicit_mention = false;
     matched_targets = [];
@@ -42,7 +42,7 @@ let sample_board_event : WO.pending_board_event =
     latest_external_preview = None;
   }
 
-let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [
@@ -55,7 +55,7 @@ let make_meta name : Masc_mcp.Keeper_meta_contract.keeper_meta =
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 
-let minimal_meta : Masc_mcp.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
+let minimal_meta : Masc.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
 
 let test_task_verify_affordance_for_keeper () =
   let meta = { minimal_meta with mention_targets = [ "analyst" ] } in

@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let tr_ok body = Tool_result.ok ~tool_name:"keeper-test" ~start_time:0.0 body
 

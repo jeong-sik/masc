@@ -25,7 +25,7 @@
      5. Per-caller env var beats global env var.
 *)
 
-(* MASC_BASE_PATH must be set BEFORE Masc_mcp module init —
+(* MASC_BASE_PATH must be set BEFORE Masc module init —
    #9903 prod-guard fires under HOME otherwise.  Same dune
    [setenv] pattern as #10091 / #10097 / #10101. *)
 let () =

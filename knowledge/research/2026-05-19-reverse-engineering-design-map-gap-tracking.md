@@ -1,7 +1,7 @@
 # Reverse Engineering Design Map — Gap Tracking
 
 **Date**: 2026-05-19
-**Plan SSOT**: `/Users/dancer/Downloads/MASC-MCP Reverse Engineering Design Map.html` (1545 lines)
+**Plan SSOT**: `/Users/dancer/Downloads/MASC Reverse Engineering Design Map.html` (1545 lines)
 **Plan baseline commit**: `23a5dd1521` (2026-05-18 generated)
 **Current main HEAD**: `e5b73669d8` (2026-05-19)
 **Commits between**: 205
@@ -233,7 +233,7 @@ LOC moves since plan (size monolith-reduction proxy):
 
 ## Provenance
 
-- Plan SSOT: `/Users/dancer/Downloads/MASC-MCP Reverse Engineering Design Map.html` lines 409–1545.
+- Plan SSOT: `/Users/dancer/Downloads/MASC Reverse Engineering Design Map.html` lines 409–1545.
 - Code evidence: `git log --oneline 23a5dd1521..origin/main | wc -l = 205`; `wc -l` of 8 plan-tracked files; `rg` for `"runtime"`, `Server_mcp_actor_injection`, `turn_plan`, `Server_dashboard_surface`, `Jsonl_writer`, `internal_keeper_runtime`.
 - Cross-referenced MEMORY entries: `feedback_runtime_lens_boundary_carve_out.md`, `project_godfile_decomp_track_a_b_synthesis.md`, `feedback_fallback_constant_to_discriminated_union.md`.
 - Not committed — author review pending.

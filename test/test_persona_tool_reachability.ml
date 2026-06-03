@@ -3,7 +3,7 @@
     Locks the reusable tool groups that keepers can reference from explicit
     [tool_access] lists. *)
 
-open Masc_mcp
+open Masc
 
 let read_file path =
   let ic = open_in path in

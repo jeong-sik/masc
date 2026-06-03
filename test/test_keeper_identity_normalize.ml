@@ -4,7 +4,7 @@
     wrappers. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 

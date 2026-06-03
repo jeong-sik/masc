@@ -2,7 +2,7 @@
     introduced by the failwith→Result refactor (PR #6479). *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 

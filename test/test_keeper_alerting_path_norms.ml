@@ -20,7 +20,7 @@
     redaction violation) or trips false-positive rejection loops
     that burn turns. *)
 
-open Masc_mcp
+open Masc
 module KAP = Keeper_alerting_path
 
 let check_bool label expected actual =

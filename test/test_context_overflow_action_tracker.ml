@@ -15,8 +15,8 @@
    5. Per-keeper isolation
    6. Grace window env var honored *)
 
-module T = Masc_mcp.Context_overflow_action_tracker
-module Prom = Masc_mcp.Prometheus
+module T = Masc.Context_overflow_action_tracker
+module Prom = Masc.Prometheus
 
 let imminent_count k =
   Prom.metric_value_or_zero

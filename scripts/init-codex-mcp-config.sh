@@ -30,14 +30,14 @@ Usage:
 
 This script generates the correct [mcp_servers.masc] Codex config entry that
 the MASC auth diagnostics (diagnostics) expects:
-  - bearer_token_env_var = "MASC_MCP_TOKEN"   (no hardcoded Authorization header)
+  - bearer_token_env_var = "MASC_TOKEN"   (no hardcoded Authorization header)
   - http_headers with Accept and X-MASC-Agent  (no Authorization header)
 
 After writing the stanza, mint a codex-mcp-client bearer token (if missing):
   BASE_PATH="${MASC_BASE_PATH:-<script default base path>}"
   eval "$(masc login \
     --base-path "$BASE_PATH" --agent codex-mcp-client --role worker --shell)"
-  export MASC_MCP_TOKEN  # export to Codex's shell environment
+  export MASC_TOKEN  # export to Codex's shell environment
 
 Security notes:
   - Never write the raw bearer token into ~/.codex/config.toml.
@@ -71,7 +71,7 @@ MCP_URL="http://${HOST}:${PORT}/mcp"
 MASC_STANZA=$(cat <<EOF
 [mcp_servers.masc]
 url = "${MCP_URL}"
-bearer_token_env_var = "MASC_MCP_TOKEN"
+bearer_token_env_var = "MASC_TOKEN"
 http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "codex-mcp-client" }
 EOF
 )
@@ -116,12 +116,12 @@ fi
 echo "" >&2
 echo "==> Security reminder:" >&2
 echo "    Do NOT add 'Authorization = \"Bearer ...\"' to [mcp_servers.masc]." >&2
-echo "    Use bearer_token_env_var = \"MASC_MCP_TOKEN\" and export the token" >&2
+echo "    Use bearer_token_env_var = \"MASC_TOKEN\" and export the token" >&2
 echo "    in the shell that starts Codex — never write the raw token to disk." >&2
 echo "" >&2
 echo "==> Mint / verify codex-mcp-client bearer token:" >&2
 echo "    eval \"\$(masc login --base-path '${BASE_PATH}' --agent codex-mcp-client --role worker --shell)\"" >&2
-echo "    export MASC_MCP_TOKEN" >&2
+echo "    export MASC_TOKEN" >&2
 echo "" >&2
 echo "==> Verify config with auth diagnostics:" >&2
 echo "    MASC_SYNC_CODEX_MCP_CONFIG=1 masc --base-path '${BASE_PATH}'" >&2

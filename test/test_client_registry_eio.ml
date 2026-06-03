@@ -1,7 +1,7 @@
 (** Tests for Client_registry_eio module *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* All tests must run within Eio context due to Eio.Mutex usage *)
 

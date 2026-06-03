@@ -4,7 +4,7 @@
     config hash format, temporal ordering, read_recent ordering. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 open Tool_assignment_telemetry
 
 let temp_dir () =

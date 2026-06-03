@@ -12,12 +12,12 @@ code_refs:
 
 # OAS-MASC Boundary Contract
 
-OAS (OCaml Agent SDK)와 MASC-MCP 사이의 역할 경계를 정의한다.
+OAS (OCaml Agent SDK)와 MASC 사이의 역할 경계를 정의한다.
 
 **원칙**: OAS는 MASC를 모른다. OAS의 변경은 모든 소비자에게 유익해야 한다.
 
 ```
-consumer → MASC-MCP (workspace collaboration/orchestration) → OAS (agent runtime)
+consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime)
 ```
 
 ## 문서 역할 (SSOT)

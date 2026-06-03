@@ -202,7 +202,7 @@ let resolve_tool_lane_for_oas_tools
     let runtime_mcp_policy =
       if runtime_tool_names = [] && omitted_keeper_bound_actor_tools <> []
       then (
-        let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
+        let env_token = first_nonempty_env [ "MASC_TOKEN" ] in
         let per_keeper_token =
           match env_token, requested_agent_name with
           | None, Some name ->

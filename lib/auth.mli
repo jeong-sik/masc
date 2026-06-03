@@ -198,7 +198,7 @@ val load_raw_token : string -> agent_name:string -> string option
     [<base_path>/.masc/auth/<agent_name>.token] if present. Returns [None] if
     the file is missing, empty after trim, or unreadable. Used by
     [oas_worker_exec_transport] as a fallback for CLI subprocesses that do
-    not inherit the parent's [MASC_MCP_TOKEN] env. *)
+    not inherit the parent's [MASC_TOKEN] env. *)
 
 val verify_internal_keeper_token :
   string -> token:string -> bool

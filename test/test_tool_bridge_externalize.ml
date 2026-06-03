@@ -11,7 +11,7 @@
     The actual blob store is exercised in [test_tool_blob_store]; here we
     only verify the bridge's wiring decisions. *)
 
-module B = Masc_mcp.Tool_bridge
+module B = Masc.Tool_bridge
 module O = Tool_output
 
 let tool_ok ?(tool_name = "") message =

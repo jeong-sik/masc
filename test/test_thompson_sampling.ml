@@ -1,7 +1,7 @@
 (** Tests for Thompson_sampling module — Thompson Sampling with fairness *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* Production health predicate, injected into [select_with_feedback] after the
    masc_thompson leaf carve inverted the direct [Health.is_healthy] edge.
@@ -239,7 +239,7 @@ let test_stronger_trigger_uses_winner_order () =
 (** {1 Quality Signal Tests (Phase 3)} *)
 
 module Pv = Post_verifier
-module Ah = Masc_mcp.Health
+module Ah = Masc.Health
 
 let float_eq ?(eps = 0.001) a b = Float.abs (a -. b) < eps
 

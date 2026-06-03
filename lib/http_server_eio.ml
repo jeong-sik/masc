@@ -310,7 +310,7 @@ module Request = struct
       | Some v -> parse_positive_int v
       | None -> None
     in
-    match from_env "MASC_MCP_MAX_BODY_BYTES" with
+    match from_env "MASC_MAX_BODY_BYTES" with
     | Some v -> v
     | None ->
         (match from_env "MCP_MAX_BODY_BYTES" with

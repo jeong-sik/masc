@@ -6,11 +6,11 @@
     the [sandbox_host_root] / [playground_path] leak that #11080 closed
     in [keeper_status_detail.ml]. *)
 
-module Workspace = Masc_mcp.Workspace
-module Keeper_tool_command_runtime = Masc_mcp.Keeper_tool_command_runtime
-module Keeper_registry = Masc_mcp.Keeper_registry
-module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_types = Masc_mcp.Keeper_types
+module Workspace = Masc.Workspace
+module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
+module Keeper_registry = Masc.Keeper_registry
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_types = Masc.Keeper_types
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 

@@ -24,11 +24,11 @@
     surfaces the wrong root after PR-F lands, this test suite
     should still pass and the diagnosis must look elsewhere. *)
 
-module Workspace = Masc_mcp.Workspace
-module Keeper_types_profile_sandbox = Masc_mcp.Keeper_types_profile_sandbox
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
+module Workspace = Masc.Workspace
+module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
+module Keeper_types = Masc.Keeper_types
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
 
 let temp_dir () =
   let path = Filename.temp_file "masc-path-ssot-" "" in

@@ -31,7 +31,7 @@
     [with_keeper_turn_slot] removes the only path that produced a stale
     [~started_at] in production. *)
 
-open Masc_mcp
+open Masc
 
 let timeout_sec = Keeper_turn_slot.semaphore_wait_timeout_sec
 

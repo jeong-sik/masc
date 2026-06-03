@@ -2,9 +2,9 @@ module Types = Masc_domain
 
 open Alcotest
 
-module Dashboard_briefing_sections = Masc_mcp.Dashboard_briefing_sections
-module Briefing = Masc_mcp.Dashboard_briefing_sections.For_test
-module Workspace = Masc_mcp.Workspace
+module Dashboard_briefing_sections = Masc.Dashboard_briefing_sections
+module Briefing = Masc.Dashboard_briefing_sections.For_test
+module Workspace = Masc.Workspace
 
 let temp_dir () =
   let dir = Filename.temp_file "test_dashboard_briefing_sections_" "" in

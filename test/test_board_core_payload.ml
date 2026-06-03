@@ -5,7 +5,7 @@
     board_posts.jsonl. These tests verify the UTF-8-safe behavior. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 module BP = Board_core_payload
 
 let is_valid_utf8 s =

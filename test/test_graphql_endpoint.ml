@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let with_env key value f =
   let prev = Sys.getenv_opt key in

@@ -5,7 +5,7 @@
    [is_shutting_down_global] branch is unreachable. These tests pin the
    marker's behaviour so the signal-handler wiring cannot silently regress. *)
 
-module S = Masc_mcp.Shutdown
+module S = Masc.Shutdown
 
 let mark_sets_global_flag () =
   Alcotest.(check bool)

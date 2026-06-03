@@ -22,12 +22,12 @@ let init_eio_clock ?sw env =
 
 let init_keeper_tool_registry () =
   if not (Tool_dispatch.is_tag_registry_initialized ()) then
-    let _ = Masc_mcp.Mcp_server_eio.governance_defaults in
+    let _ = Masc.Mcp_server_eio.governance_defaults in
     ()
 
 (** Test fixture parser for [keeper_meta] JSON.
 
-    The production parser at [Masc_mcp.Keeper_meta_json_parse.meta_of_json] requires
+    The production parser at [Masc.Keeper_meta_json_parse.meta_of_json] requires
     explicit [tool_access]. Test fixtures historically built minimal [`Assoc]
     payloads that omitted it. Rather than thread the field through every
     fixture, this helper auto-fills a conservative test default when absent,
@@ -43,15 +43,15 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
     in
     fields
     |> add_if_missing "tool_access"
-         (Masc_mcp.Keeper_meta_tool_access.tool_access_to_json
-            (Masc_mcp.Keeper_meta_tool_access.default_tool_access_of_meta_json ()))
+         (Masc.Keeper_meta_tool_access.tool_access_to_json
+            (Masc.Keeper_meta_tool_access.default_tool_access_of_meta_json ()))
   in
   let json' =
     match json with
     | `Assoc fields -> `Assoc (augment fields)
     | other -> other
   in
-  Masc_mcp.Keeper_meta_json_parse.meta_of_json json'
+  Masc.Keeper_meta_json_parse.meta_of_json json'
 
 (** Walk up the directory tree from [Sys.getcwd()] until
     [config/tool_policy.toml] is found, then return that directory.

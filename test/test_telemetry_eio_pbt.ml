@@ -18,7 +18,7 @@
     Properties (2) + (3) collectively make the addition of a new [option]
     field automatically safe — no per-variant lenient code to remember. *)
 
-module Telemetry_eio = Masc_mcp.Telemetry_eio
+module Telemetry_eio = Masc.Telemetry_eio
 
 let opt_string =
   let open QCheck.Gen in

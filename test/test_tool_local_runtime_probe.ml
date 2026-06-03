@@ -8,7 +8,7 @@ let test_ollama_ps_parser_extracts_loaded_models () =
     Yojson.Safe.from_string
       {|{"models":[{"name":"qwen3.5:35b-a3b-coding-nvfp4","model":"qwen3.5:35b-a3b-coding-nvfp4","size_vram":21474836480,"context_length":262144,"expires_at":"2026-04-10T00:00:00Z"}]}|}
   in
-  let models = Masc_mcp.Tool_local_runtime.ollama_loaded_models_of_ps_json json in
+  let models = Masc.Tool_local_runtime.ollama_loaded_models_of_ps_json json in
   let open Yojson.Safe.Util in
   check int "one loaded model" 1 (List.length models);
   let model = List.hd models in
@@ -26,7 +26,7 @@ let test_ollama_generate_parser_computes_tok_per_second () =
       {|{"response":"READY","done":true,"done_reason":"stop","total_duration":9104952708,"load_duration":3338399458,"prompt_eval_count":20,"prompt_eval_duration":337442459,"eval_count":311,"eval_duration":5428288000,"thinking":"hidden"}|}
   in
   let run_json =
-    Masc_mcp.Tool_local_runtime.ollama_probe_run_of_generate_json ~run_index:1
+    Masc.Tool_local_runtime.ollama_probe_run_of_generate_json ~run_index:1
       ~http_status:(Some 200) ~wall_clock_ms:9120 json
   in
   let prompt_tps =
@@ -44,7 +44,7 @@ let test_ollama_generate_parser_computes_tok_per_second () =
 
 let test_request_body_omits_keep_alive_by_default () =
   let json =
-    Masc_mcp.Tool_local_runtime_probe.request_body_json
+    Masc.Tool_local_runtime_probe.request_body_json
       ~think_enabled:false ~keep_alive:None
       ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY" ~max_tokens:8
     |> Yojson.Safe.from_string
@@ -58,7 +58,7 @@ let test_request_body_omits_keep_alive_by_default () =
 
 let test_request_body_can_enable_thinking () =
   let json =
-    Masc_mcp.Tool_local_runtime_probe.request_body_json ~think_enabled:true
+    Masc.Tool_local_runtime_probe.request_body_json ~think_enabled:true
       ~keep_alive:None ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY"
       ~max_tokens:8
     |> Yojson.Safe.from_string
@@ -69,7 +69,7 @@ let test_request_body_can_enable_thinking () =
 
 let test_request_body_keeps_explicit_keep_alive () =
   let json =
-    Masc_mcp.Tool_local_runtime_probe.request_body_json
+    Masc.Tool_local_runtime_probe.request_body_json
       ~think_enabled:false ~keep_alive:(Some "90s")
       ~model_id:"qwen3.5:35b-a3b-coding-nvfp4" ~prompt:"READY" ~max_tokens:8
     |> Yojson.Safe.from_string
@@ -81,9 +81,9 @@ let test_request_body_keeps_explicit_keep_alive () =
 
 let test_think_mode_parses_adaptive_policy () =
   let parse raw =
-    Masc_mcp.Tool_local_runtime_probe.ollama_probe_think_mode_of_string raw
+    Masc.Tool_local_runtime_probe.ollama_probe_think_mode_of_string raw
     |> Option.map
-         Masc_mcp.Tool_local_runtime_probe.ollama_probe_think_mode_to_string
+         Masc.Tool_local_runtime_probe.ollama_probe_think_mode_to_string
   in
   check (option string) "auto parsed" (Some "auto") (parse " auto ");
   check (option string) "disabled alias parsed" (Some "disabled")
@@ -94,25 +94,25 @@ let test_think_mode_parses_adaptive_policy () =
 
 let test_auto_think_policy_prioritizes_response () =
   check bool "auto disables thinking for readiness" false
-    (Masc_mcp.Tool_local_runtime_probe.effective_think_enabled
-       Masc_mcp.Tool_local_runtime_probe.Think_auto);
+    (Masc.Tool_local_runtime_probe.effective_think_enabled
+       Masc.Tool_local_runtime_probe.Think_auto);
   check bool "enabled opts into thinking" true
-    (Masc_mcp.Tool_local_runtime_probe.effective_think_enabled
-       Masc_mcp.Tool_local_runtime_probe.Think_enabled)
+    (Masc.Tool_local_runtime_probe.effective_think_enabled
+       Masc.Tool_local_runtime_probe.Think_enabled)
 
 let test_runtime_probe_reports_effective_think_mode () =
   let open Yojson.Safe.Util in
   let run mode =
-    Masc_mcp.Tool_local_runtime_probe.runtime_ollama_probe_json
+    Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
       ~server_url:"http://127.0.0.1:1" ~model:"dummy-probe-model"
       ~think_mode:mode ~timeout_sec:3 ~ps_timeout_sec:1 ()
   in
-  let auto = run Masc_mcp.Tool_local_runtime_probe.Think_auto in
+  let auto = run Masc.Tool_local_runtime_probe.Think_auto in
   check string "auto mode reported" "auto"
     (auto |> member "think_mode" |> to_string);
   check bool "auto effective think false" false
     (auto |> member "think" |> to_bool);
-  let enabled = run Masc_mcp.Tool_local_runtime_probe.Think_enabled in
+  let enabled = run Masc.Tool_local_runtime_probe.Think_enabled in
   check string "enabled mode reported" "enabled"
     (enabled |> member "think_mode" |> to_string);
   check bool "enabled effective think true" true
@@ -121,18 +121,18 @@ let test_runtime_probe_reports_effective_think_mode () =
 let test_runtime_probe_status_only_skip_is_telemetry () =
   let labels = [ ("reason", "status_only") ] in
   let before =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_runtime_ollama_probe_generate_skips
+    Masc.Prometheus.metric_value_or_zero
+      Masc.Prometheus.metric_runtime_ollama_probe_generate_skips
       ~labels ()
   in
   let json =
-    Masc_mcp.Tool_local_runtime_probe.runtime_ollama_probe_json
+    Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
       ~server_url:"http://127.0.0.1:1" ~model:"dummy-probe-model"
       ~run_generate:false ~timeout_sec:3 ~ps_timeout_sec:1 ()
   in
   let after =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_runtime_ollama_probe_generate_skips
+    Masc.Prometheus.metric_value_or_zero
+      Masc.Prometheus.metric_runtime_ollama_probe_generate_skips
       ~labels ()
   in
   let open Yojson.Safe.Util in
@@ -144,21 +144,21 @@ let test_runtime_probe_status_only_skip_is_telemetry () =
 
 let test_normalize_server_url_strips_trailing_slashes () =
   check string "normalizes trailing slash" "http://127.0.0.1:11434"
-    (Masc_mcp.Tool_local_runtime_probe.normalize_ollama_server_url
+    (Masc.Tool_local_runtime_probe.normalize_ollama_server_url
        " http://127.0.0.1:11434/// ")
 
 let test_endpoint_urls_use_normalized_base () =
   check string "ps endpoint normalized" "http://127.0.0.1:11434/api/ps"
-    (Masc_mcp.Tool_local_runtime_probe.ollama_ps_url
+    (Masc.Tool_local_runtime_probe.ollama_ps_url
        "http://127.0.0.1:11434/");
   check string "generate endpoint normalized"
     "http://127.0.0.1:11434/api/generate"
-    (Masc_mcp.Tool_local_runtime_probe.ollama_generate_url
+    (Masc.Tool_local_runtime_probe.ollama_generate_url
        "http://127.0.0.1:11434///")
 
 let test_ollama_ps_non_200_is_reported_as_error () =
   check string "ps non-200 surfaced" "ollama ps returned http 503"
-    (Masc_mcp.Tool_local_runtime_probe.ollama_http_error "ps" (Some 503))
+    (Masc.Tool_local_runtime_probe.ollama_http_error "ps" (Some 503))
 
 let test_kv_cache_assessment_detects_repeat_improvement () =
   let runs =
@@ -180,7 +180,7 @@ let test_kv_cache_assessment_detects_repeat_improvement () =
         ];
     ]
   in
-  let assessment = Masc_mcp.Tool_local_runtime.kv_cache_assessment_json runs in
+  let assessment = Masc.Tool_local_runtime.kv_cache_assessment_json runs in
   let open Yojson.Safe.Util in
   check string "likely reuse" "likely_reused"
     (assessment |> member "signal" |> to_string);
@@ -192,7 +192,7 @@ let test_kv_cache_assessment_detects_repeat_improvement () =
 
 let test_kv_cache_assessment_requires_two_successful_runs () =
   let assessment =
-    Masc_mcp.Tool_local_runtime.kv_cache_assessment_json
+    Masc.Tool_local_runtime.kv_cache_assessment_json
       [ `Assoc [ ("run_index", `Int 1) ] ]
   in
   let open Yojson.Safe.Util in
@@ -203,10 +203,10 @@ let test_generate_probe_decision_reports_typed_reasons () =
   let decision ?(effective_model = Some "qwen3") ?before_status
       ?before_error ?(run_generate = true) ?(generate_when_unloaded = true)
       ?(effective_model_loaded_before = false) () =
-    Masc_mcp.Tool_local_runtime_probe.decide_generate_probe ~effective_model
+    Masc.Tool_local_runtime_probe.decide_generate_probe ~effective_model
       ~before_status ~before_error ~run_generate ~generate_when_unloaded
       ~effective_model_loaded_before
-    |> Masc_mcp.Tool_local_runtime_probe.generate_probe_decision_to_string
+    |> Masc.Tool_local_runtime_probe.generate_probe_decision_to_string
   in
   check string "no model reason" "no_effective_model"
     (decision ~effective_model:None ());

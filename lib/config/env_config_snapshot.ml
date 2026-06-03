@@ -572,7 +572,7 @@ let local_runtime_entries =
       "Upper bound for local runtime requests (fallback)";
     entry ~default:"0" "MASC_LOCAL_MAX_TOKENS"
       "Upper bound for local runtime requests (primary; falls back to MASC_LLAMA_MAX_TOKENS)";
-    entry ~default:"(none)" "MASC_MCP_URL"
+    entry ~default:"(none)" "MASC_URL"
       "MASC MCP endpoint URL";
   ]
 

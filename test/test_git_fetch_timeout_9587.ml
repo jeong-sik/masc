@@ -7,7 +7,7 @@
    [MASC_GIT_FETCH_TIMEOUT_SEC] with a 120s default and a 10s
    floor (so a [0] override does not silently disable the cap). *)
 
-open Masc_mcp
+open Masc
 
 let with_env key value f =
   let prev = Sys.getenv_opt key in

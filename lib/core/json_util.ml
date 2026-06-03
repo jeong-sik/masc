@@ -1,4 +1,4 @@
-(** JSON utilities for MASC-MCP.
+(** JSON utilities for MASC.
 
     Centralized Yojson.Safe helpers to reduce code duplication.
     Replaces 177+ `let open Yojson.Safe.Util in` occurrences.

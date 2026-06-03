@@ -1,6 +1,6 @@
 open Alcotest
 
-module Projection = Masc_mcp.Keeper_tool_visibility_projection
+module Projection = Masc.Keeper_tool_visibility_projection
 
 let contains needle haystack =
   let nlen = String.length needle in

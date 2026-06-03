@@ -12,7 +12,7 @@ module Types = Masc_domain
     - Edge cases not covered in test_workspace.ml
 *)
 
-open Masc_mcp
+open Masc
 (* Economy moved to the masc_agent_economy leaf lib (wrapped false);
    the bare module resolves via masc_test_deps, no mega-lib alias needed. *)
 

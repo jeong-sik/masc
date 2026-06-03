@@ -8,7 +8,7 @@
     @since task-626 *)
 
 open Alcotest
-module Kmc = Masc_mcp.Keeper_meta_contract
+module Kmc = Masc.Keeper_meta_contract
 open Kmc
 
 (* ── All variants listed exhaustively ──────────────────────────── *)
@@ -133,8 +133,8 @@ let test_variant_count () =
 
 module SdkE = Agent_sdk.Error
 module SdkRetry = Agent_sdk.Retry
-module KSB = Masc_mcp.Keeper_status_bridge_blocker
-module Reg = Masc_mcp.Keeper_registry
+module KSB = Masc.Keeper_status_bridge_blocker
+module Reg = Masc.Keeper_registry
 
 (** Every [Agent_sdk.Error.Agent _] sub-variant must map to a [Some blocker_class]
     through the two-layer pipeline in [blocker_class_of_sdk_error]:

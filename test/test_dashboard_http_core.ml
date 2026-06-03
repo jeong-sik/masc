@@ -1,8 +1,8 @@
 module Types = Masc_domain
 
-module Lib = Masc_mcp
-module Auth = Masc_mcp.Auth
-module Workspace = Masc_mcp.Workspace
+module Lib = Masc
+module Auth = Masc.Auth
+module Workspace = Masc.Workspace
 
 open Alcotest
 

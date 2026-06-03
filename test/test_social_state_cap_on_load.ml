@@ -7,8 +7,8 @@
     when loaded back into meta.runtime. This test locks the primitive
     so the load path and write path cannot drift. *)
 
-module T = Masc_mcp.Keeper_social_model_types
-module Keeper_meta_json_parse = Masc_mcp.Keeper_meta_json_parse
+module T = Masc.Keeper_social_model_types
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 
 let long n = String.make n 'x'
 

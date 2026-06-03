@@ -1,6 +1,6 @@
 open Alcotest
 
-module HK = Masc_mcp.Keeper_hooks_oas
+module HK = Masc.Keeper_hooks_oas
 
 let contains_substring haystack needle =
   let hay_len = String.length haystack in

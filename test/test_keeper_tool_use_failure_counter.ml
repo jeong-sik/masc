@@ -5,8 +5,8 @@
    labels instead of the degenerate [Heuristic_metrics.record]
    that produced 51 identical 1-bit rows in production. *)
 
-module H = Masc_mcp.Keeper_hooks_oas
-module Prom = Masc_mcp.Prometheus
+module H = Masc.Keeper_hooks_oas
+module Prom = Masc.Prometheus
 
 let counter_for ~keeper ~tool =
   Prom.metric_value_or_zero

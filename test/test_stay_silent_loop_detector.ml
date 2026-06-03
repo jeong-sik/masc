@@ -8,8 +8,8 @@
    - Threshold is the product constant
    - Per-keeper isolation *)
 
-module D = Masc_mcp.Keeper_stay_silent_loop_detector
-module Prom = Masc_mcp.Prometheus
+module D = Masc.Keeper_stay_silent_loop_detector
+module Prom = Masc.Prometheus
 
 (* Detector now uses Eio.Mutex (was Stdlib.Mutex; the latter raised EDEADLK
    under any fiber contention). Every public entry needs an Eio fiber

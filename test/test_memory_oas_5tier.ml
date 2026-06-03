@@ -9,7 +9,7 @@
     @since 2.124.0
     @since 2.266.0 (imperative seeding tests removed) *)
 
-open Masc_mcp
+open Masc
 
 module Oas = Agent_sdk
 

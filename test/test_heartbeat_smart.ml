@@ -6,7 +6,7 @@ module Types = Masc_domain
     multiplier, [should_emit] decision matrix across (busy_skip,
     agent_status, idle vs interval, max_silence safety net). *)
 
-open Masc_mcp
+open Masc
 module HS = Keeper_heartbeat_smart
 
 let check_float label expected actual =

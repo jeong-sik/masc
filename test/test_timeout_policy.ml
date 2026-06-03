@@ -8,7 +8,7 @@
    The surrounding log side effect is not asserted; we rely on the boolean
    return as the observable signal so the test stays deterministic. *)
 
-open Masc_mcp
+open Masc
 
 let assert_eq_float ~epsilon ~msg expected got =
   if Float.abs (expected -. got) > epsilon then

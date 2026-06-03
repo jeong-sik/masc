@@ -36,7 +36,7 @@ type record_outcome =
 
 (** Update streak for [keeper_name] based on [speech_act] from the
     latest turn. [speech_act] is the string form already emitted by
-    {!Masc_mcp.Keeper_social_model_types.speech_act_to_string} —
+    {!Masc.Keeper_social_model_types.speech_act_to_string} —
     we match on the literal ["stay_silent"] rather than the variant
     so this module does not couple to the social-model type. *)
 val record_turn : keeper_name:string -> speech_act:string -> record_outcome

@@ -1,5 +1,5 @@
-module K = Masc_mcp.Keeper_chat_store
-module P = Masc_mcp.Prometheus
+module K = Masc.Keeper_chat_store
+module P = Masc.Prometheus
 
 let rec remove_tree path =
   if Sys.file_exists path then

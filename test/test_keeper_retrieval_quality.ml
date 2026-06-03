@@ -10,7 +10,7 @@ module Types = Masc_domain
 
     @since 2.199.0 — Phase 0 of keeper tool selection eval (#4306) *)
 
-open Masc_mcp
+open Masc
 
 (** Build a default keeper_meta via JSON deserialization (same helper as
     test_keeper_tool_surface.ml). Only name and defaults are needed. *)

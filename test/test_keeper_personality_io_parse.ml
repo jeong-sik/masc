@@ -8,7 +8,7 @@
     surface. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let p_eq =
   testable

@@ -211,7 +211,6 @@ let effective_meta_overlay_hash (meta : keeper_meta) =
       ("sandbox_image", opt_string meta.sandbox_image);
       ("network_mode", network_mode_to_string meta.network_mode);
       ("allowed_paths", cache_fingerprint_list meta.allowed_paths);
-      ("tool_access", cache_fingerprint_list meta.tool_access);
       ("tool_denylist", cache_fingerprint_list meta.tool_denylist);
       ("mention_targets", cache_fingerprint_list meta.mention_targets);
       ("active_goal_ids", cache_fingerprint_list meta.active_goal_ids);
@@ -668,7 +667,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
         let all_internal_tools =
           keeper_model_tools |> List.map (fun tool -> tool.Masc_domain.name)
         in
-        let allowed_tools = keeper_allowed_tool_names m in
+        let allowed_tools = keeper_visible_tool_names m in
         let allowed_tool_preview =
           allowed_tools |> List.filteri (fun idx _ -> idx < 10)
         in

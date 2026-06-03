@@ -189,7 +189,7 @@ let runtime_mcp_keeper_log_context_of_entry
     | ids -> Some ids
   in
   let allowed_tool_names =
-    Keeper_tool_policy.keeper_allowed_tool_names
+    Keeper_tool_policy.keeper_visible_tool_names
       ~phase:entry.phase
       entry.meta
   in

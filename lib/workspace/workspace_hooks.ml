@@ -175,13 +175,12 @@ let tool_assigned_fn
   : (agent_id:string ->
      profile:string ->
      tool_list:string list ->
-     ?allow_set:string list ->
      ?deny_set:string list ->
      ?config_hash:string ->
      ?reason:string ->
      unit ->
      string) Atomic.t
-  = Atomic.make (fun ~agent_id:_ ~profile:_ ~tool_list:_ ?allow_set:_ ?deny_set:_ ?config_hash:_ ?reason:_ () -> "")
+  = Atomic.make (fun ~agent_id:_ ~profile:_ ~tool_list:_ ?deny_set:_ ?config_hash:_ ?reason:_ () -> "")
 
 (** #10449: Task completion path observability.
 

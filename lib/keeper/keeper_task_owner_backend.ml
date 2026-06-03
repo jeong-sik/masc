@@ -65,7 +65,7 @@ let keeper_tool_names config ~agent_name =
   |> List.sort_uniq String.compare
   |> List.find_map (fun keeper_name ->
     match Keeper_registry.get ~base_path:config.base_path keeper_name with
-    | Some entry -> Some (Keeper_tool_policy.keeper_allowed_tool_names entry.meta)
+    | Some entry -> Some (Keeper_tool_policy.keeper_visible_tool_names entry.meta)
     | None -> None)
 ;;
 

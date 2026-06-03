@@ -1,6 +1,6 @@
 (** Keeper_tool_policy_config — load tool groups from config/tool_policy.toml.
 
-    Groups define named tool lists for keeper [tool_access] composition.
+    Groups define named tool lists for keeper visibility projections.
 
     @since 2.236.0 *)
 
@@ -236,4 +236,3 @@ let all_group_tools (config : t) : string list =
 
 let all_masc_tools (config : t) : string list =
   Hashtbl.fold (fun _ tools acc -> tools @ acc) config.masc_groups []
-

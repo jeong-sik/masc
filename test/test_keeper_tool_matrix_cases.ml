@@ -100,7 +100,7 @@ let make_meta ?(name = "keeper-tool-matrix") () =
 
 let all_keeper_tool_schemas_raw () =
   init_keeper_bridge ();
-  KET.keeper_allowed_model_tools (make_meta ())
+  KET.keeper_visible_model_tools (make_meta ())
   |> List.sort (fun (left : Masc_domain.tool_schema) right ->
          String.compare left.name right.name)
 

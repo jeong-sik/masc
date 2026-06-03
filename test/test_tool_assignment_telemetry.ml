@@ -61,7 +61,6 @@ let test_assigned_snapshot_has_all_fields () =
         ~agent_id:"agent-1"
         ~profile:"keeper"
         ~tool_list:[ "bash"; "read" ]
-        ~allow_set:[ "bash"; "read" ]
         ~deny_set:[]
         ~reason:"test assignment"
         ()
@@ -165,7 +164,6 @@ let test_config_hash_format () =
         ~agent_id:"agent-4"
         ~profile:"Operator_remote"
         ~tool_list:[ "bash"; "read"; "write" ]
-        ~allow_set:[ "bash"; "read" ]
         ~deny_set:[ "write" ]
         ()
     in

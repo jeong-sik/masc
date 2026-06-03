@@ -60,6 +60,7 @@ let removed_keeper_input_key_names =
     "runtime_id";
     "allowed_models";
     "active_model";
+    "tool_access";
     "trigger_mode";
     "policy_action_budget";
     "initiative_scope";

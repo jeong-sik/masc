@@ -559,7 +559,7 @@ let tag_dispatch_fn
 ;;
 
 let keeper_tools_list_json ~(meta : keeper_meta) =
-  let names = Keeper_tool_policy.keeper_allowed_tool_names meta in
+  let names = Keeper_tool_policy.keeper_visible_tool_names meta in
   let has_prefix prefix name = String.starts_with ~prefix name in
   (* Display-only grouping for the keeper tools list. The typed [tool_group]
      classifier was deleted in the surface-cut refactor; this prefix categorizer

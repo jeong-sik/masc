@@ -351,19 +351,21 @@ let execute_keeper_tool_call_with_outcome
       ; payload_shape = classify_tool_result_payload raw_output
       }
   in
-  let lookup = tool_access_lookup_of_meta meta in
+  let candidate_names = keeper_candidate_tool_names () in
+  let candidate_set = tool_name_set candidate_names in
+  let deny_set = keeper_deny_tool_set meta in
   apply_circuit_breaker
-    (if not (can_execute ~lookup name)
+    (if not (registered_tool_not_denied ~candidate_set ~deny_set name)
      then (
        let reason, hint =
-         if not (StringSet.mem name lookup.candidate_set)
+         if not (StringSet.mem name candidate_set)
          then
            ( "not_in_candidate_set"
            , Printf.sprintf
                "'%s' is not a recognized tool. Check spelling or use keeper_tools_list \
                 to see available tools."
                name )
-         else if StringSet.mem name lookup.deny_set
+         else if StringSet.mem name deny_set
          then
            ( "denied_by_policy"
            , Printf.sprintf
@@ -444,7 +446,7 @@ let execute_keeper_tool_call_with_outcome
           | Some raw_output -> make_executed_tool_result raw_output
           | None ->
             let suggestion =
-              let candidates = keeper_allowed_tool_names meta in
+              let candidates = keeper_visible_tool_names meta in
               let scored =
                 candidates
                 |> List.filter_map (fun c ->

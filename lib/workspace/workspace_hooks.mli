@@ -56,7 +56,6 @@ val distributed_lock_acquire_failed_fn : (key:string -> attempts:int -> unit) At
 val tool_assigned_fn : (agent_id:string ->
             profile:string ->
             tool_list:string list ->
-            ?allow_set:string list ->
             ?deny_set:string list ->
             ?config_hash:string -> ?reason:string -> unit -> string)
            Atomic.t

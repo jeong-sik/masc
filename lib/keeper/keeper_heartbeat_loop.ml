@@ -294,7 +294,7 @@ let run_keepalive_unified_turn
           meta_after_triage.name
       in
       let available_tools =
-        Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage
+        Keeper_tool_policy.keeper_visible_tool_names meta_after_triage
       in
       let tool_diversity_summary =
         let stats = Keeper_tool_diversity.stats_of_registry_entries tool_usage_entries in

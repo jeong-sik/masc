@@ -149,13 +149,6 @@ let effective_declarative_runtime_id
      runtime selection. *)
   runtime_id_of_meta meta
 
-let resynced_tool_access
-    (defaults : Keeper_types_profile.keeper_profile_defaults)
-    (meta : keeper_meta) =
-  match defaults.tool_access with
-  | Some tools -> normalize_tool_names tools
-  | None -> meta.tool_access
-
 let ensure_keeper_meta config name =
   match read_meta config name with
   | Ok (Some meta) ->
@@ -179,7 +172,6 @@ let ensure_keeper_meta config name =
       apply_default defaults.proactive_idle_sec Keeper_config.default_proactive_idle_sec in
     let target_cooldown_sec =
       apply_default defaults.proactive_cooldown_sec Keeper_config.default_proactive_cooldown_sec in
-    let target_tool_access = resynced_tool_access defaults meta in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
     let target_social_model =
       apply_default defaults.social_model meta.social_model
@@ -284,7 +276,6 @@ let ensure_keeper_meta config name =
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
         active_goal_ids = target_active_goal_ids;
-        tool_access = target_tool_access;
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;

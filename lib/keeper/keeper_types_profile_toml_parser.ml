@@ -12,14 +12,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
-  let has_raw key = List.mem_assoc key doc in
-  let tool_access_defaults_result =
-    let key = k "tool_access" in
-    if has_raw key then
-      let tools = Keeper_toml_loader.toml_string_list doc key in
-      Ok (Some (normalize_name_list tools))
-    else Ok None
-  in
   let per_provider_timeout_state, per_provider_timeout =
     per_provider_timeout_of_toml
       ~source:"keeper TOML"
@@ -125,11 +117,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let result =
     Result.bind result (fun () -> runtime_assignment_result)
   in
-  let result =
-    Result.bind result (fun () -> tool_access_defaults_result)
-  in
   Result.map
-    (fun tool_access ->
+    (fun () ->
       {
         id = None;
         manifest_path = None;
@@ -165,7 +154,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         sandbox_image = str "sandbox_image";
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
-        tool_access;
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         active_goal_ids =
           if has "active_goal_ids" then
@@ -209,7 +197,6 @@ let parsed_field_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
@@ -251,7 +238,6 @@ let canonical_keeper_toml_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
@@ -387,7 +373,6 @@ let merge_keeper_profile_defaults
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
-    tool_access = prefer overlay.tool_access base.tool_access;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     telemetry_feedback_enabled =

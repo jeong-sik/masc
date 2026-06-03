@@ -65,7 +65,7 @@ let test_find_destructive () =
     (typed_simple "find" [ "."; "-execdir"; "sh"; ";" ]);
   is_class "{find,.,-delete} (typed)" Risk.Destructive_protected
     (typed_simple "find" [ "."; "-delete" ]);
-  (* The keeper pre-gate keys on is_destructive (blocks all tool_access). *)
+  (* The keeper pre-gate keys on is_destructive (blocks every Execute surface). *)
   check "find -delete is_destructive" (Risk.is_destructive (envelope (parse "find . -delete")))
 ;;
 

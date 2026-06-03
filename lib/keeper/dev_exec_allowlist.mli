@@ -1,4 +1,4 @@
-(** Executable allowlists for keeper-driven dev/shell tools.
+(** Executable vocabularies for keeper-driven dev/shell tools.
 
     The source of truth is typed {!Masc_exec.Exec_program.known} values; the string
     lists below are derived compatibility surfaces for gate APIs that still
@@ -6,22 +6,22 @@
     vocabulary owned by [Exec_program] instead of maintaining a parallel raw string
     table here.
 
-    These allowlists do no shell parsing, metacharacter scanning, or quoting
+    These vocabularies do no shell parsing, metacharacter scanning, or quoting
     analysis. Those responsibilities belong to {!Keeper_tool_execute_typed_input} and
     the Shell IR gate/dispatch pipeline.
 
     See: docs/rfc/RFC-0091-execute-typed-argv.md *)
 
 val dev_programs : Masc_exec.Exec_program.known list
-(** Typed executable vocabulary for write-enabled dev tool_access lists. *)
+(** Typed executable vocabulary for dev Execute. *)
 
 val dev : string list
 (** [List.map Masc_exec.Exec_program.name_of_known dev_programs]. Executables permitted for
-    write/execute-capable tool_access lists. Used by [Worker_dev_tools] when dispatching
+    write/execute-capable Execute surfaces. Used by [Worker_dev_tools] when dispatching
     Execute for keepers with elevated dev capability. *)
 
 val readonly_programs : Masc_exec.Exec_program.known list
-(** Typed executable vocabulary for read-only tool_access lists. *)
+(** Typed executable vocabulary for read-only Execute. *)
 
 val readonly : string list
 (** [List.map Masc_exec.Exec_program.name_of_known readonly_programs]. Read-only executable

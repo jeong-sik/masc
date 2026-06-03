@@ -28,7 +28,6 @@ type parsed_args = {
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
   continuity_compaction_cooldown_sec_opt : int option;
-  tool_access_opt : string list option;
   tool_denylist_opt : string list option;
   auto_handoff_opt : bool option;
   handoff_threshold_opt : float option;
@@ -99,21 +98,6 @@ let resolve_tool_name_list ~preferred ~fallback =
   |> Option.value ~default:[]
   |> normalize_tool_name_list
 
-let parse_tool_access_input (args : Yojson.Safe.t) :
-    (string list option, string) result =
-  match Json_util.assoc_member_opt "tool_access" args with
-  | Some (`List _ as access_json) -> (
-      match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
-      | Ok access -> Ok (Some access)
-      | Error msg -> Error msg)
-  | Some `Null -> Ok None
-  | Some other ->
-      Error
-        (Printf.sprintf
-           "tool_access must be an array of strings (received %s)"
-           (Json_util.kind_name other))
-  | None -> Ok None
-
 let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -128,19 +112,16 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let compaction_profile_opt_res =
       parse_compaction_profile_opt args "compaction_profile"
     in
-    let tool_access_input_res = parse_tool_access_input args in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     match
-      compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,
+      compaction_profile_opt_res, allowed_paths_opt_res,
       active_goal_ids_opt_res
     with
-    | Error e, _, _, _
-    | _, Error e, _, _
-    | _, _, Error e, _
-    | _, _, _, Error e -> Error (tool_result_error e)
+    | Error e, _, _
+    | _, Error e, _
+    | _, _, Error e -> Error (tool_result_error e)
     | Ok compaction_profile_opt,
-      Ok tool_access_opt,
       Ok allowed_paths_opt,
       Ok active_goal_ids_opt ->
     let goal_opt = get_string_opt args "goal" in
@@ -221,7 +202,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       compaction_message_gate_opt;
       compaction_token_gate_opt;
       continuity_compaction_cooldown_sec_opt;
-      tool_access_opt;
       tool_denylist_opt;
       auto_handoff_opt;
       handoff_threshold_opt;

@@ -46,9 +46,9 @@ let make_tool_bundle
   let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
   let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
   (* Build Tool.t for the full universe so BM25 and Tool_op can
-     discover tools beyond the current turn-visible schema.  Progressive disclosure
-     (AllowList filter in before_turn_hook) controls LLM visibility;
-     execute_keeper_tool_call uses can_execute for the execution gate. *)
+     discover tools beyond the current turn-visible schema.  Progressive
+     disclosure controls LLM visibility; dispatch rejects unknown names and
+     denylisted tools. *)
   let universe_names = Keeper_tool_dispatch_runtime.keeper_universe_tool_names meta in
   let tool_defs = Keeper_tool_dispatch_runtime.keeper_universe_model_tools meta in
   (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): aliased internal
@@ -80,13 +80,13 @@ let make_tool_bundle
      minus aliased counterparts, plus public alias names), so downstream
      Assigned/Called/Completed pairing has no missing entries. *)
   let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
-    let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
     Tool_assignment_telemetry.emit_assigned
       ~agent_id:meta.agent_name
       ~profile:"keeper"
       ~tool_list:assembled_surface_names
-      ~allow_set:(Keeper_tool_policy.StringSet.elements lookup.allow_set)
-      ~deny_set:(Keeper_tool_policy.StringSet.elements lookup.deny_set)
+      ~deny_set:
+        (Keeper_tool_policy.StringSet.elements
+           (Keeper_tool_policy.keeper_deny_tool_set meta))
       ~reason:"keeper tool bundle assembly"
       ()
   in

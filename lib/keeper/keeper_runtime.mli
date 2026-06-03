@@ -90,12 +90,6 @@ val effective_declarative_runtime_id :
 (** Resolve the runtime id for a keeper meta given its profile
     defaults; falls back to the profile default when the meta omits one. *)
 
-val resynced_tool_access :
-  Keeper_types_profile.keeper_profile_defaults ->
-  Keeper_meta_contract.keeper_meta -> string list
-(** Re-derive the tool-access record after merging profile defaults so
-    the meta-level [tool_access] and per-tool overrides stay consistent. *)
-
 val ensure_keeper_meta :
   Workspace.config ->
   string -> (Keeper_meta_contract.keeper_meta, string) result

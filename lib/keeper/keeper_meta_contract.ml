@@ -4,8 +4,6 @@
     their public API while the type-heavy contract is separated from JSON
     parsing and store I/O. *)
 
-include Keeper_meta_tool_access
-
 let now_iso () = Masc_domain.now_iso ()
 
 (* -- Policy types (remain in keeper_meta top-level) -- *)
@@ -585,7 +583,6 @@ type keeper_meta =
   ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
   ; allowed_paths : string list
-  ; tool_access : string list
   ; tool_denylist : string list
   ; mention_targets : string list
   ; proactive : proactive_policy
@@ -685,11 +682,6 @@ let effective_meta_of_profile_defaults
       let network_mode =
         apply_profile_default defaults.network_mode default_network_mode
       in
-      let tool_access =
-        match defaults.tool_access with
-        | Some tools -> normalize_tool_names tools
-        | None -> meta.tool_access
-      in
       Ok
         { meta with
           proactive =
@@ -727,7 +719,6 @@ let effective_meta_of_profile_defaults
              | targets -> targets);
           active_goal_ids =
             apply_profile_default defaults.active_goal_ids meta.active_goal_ids;
-          tool_access;
           sandbox_profile;
           sandbox_image =
             apply_profile_default_opt defaults.sandbox_image meta.sandbox_image;

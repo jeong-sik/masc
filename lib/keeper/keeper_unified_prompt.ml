@@ -492,7 +492,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     | Ok value -> value
     | Error _ -> Prompt_registry.get_prompt Keeper_prompt_names.unified_system
   in
-  let allowed_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
+  let allowed_tool_names = Keeper_tool_policy.keeper_visible_tool_names meta in
   let tool_allowed name = List.mem name allowed_tool_names in
   let claim_tool_available = tool_allowed "keeper_task_claim" in
   let show_claim_guidance =

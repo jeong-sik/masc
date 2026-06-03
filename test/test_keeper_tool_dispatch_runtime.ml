@@ -227,7 +227,7 @@ let test_tool_not_allowed_denied_by_policy_counter () =
   let tool = "keeper_board_post" in
   let reason = "denied_by_policy" in
   (* Build meta that has board_post in the allowlist but also on the denylist
-     so can_execute returns false via the deny-set path. *)
+     so dispatch rejects it via the deny-set path. *)
   let meta_with_deny =
     match
       Masc_test_deps.meta_of_json_fixture

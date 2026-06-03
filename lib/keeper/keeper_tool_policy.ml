@@ -1,8 +1,8 @@
 (** Keeper_tool_policy — keeper tool surface and denylist resolution.
 
     Group definitions are loaded from [config/tool_policy.toml] at startup
-    via {!Keeper_tool_policy_config} for legacy/recovery surfaces. They do not
-    form the runtime execution allowlist for descriptor-backed keeper tools.
+    via {!Keeper_tool_policy_config} for recovery/visibility surfaces. They do not
+    form a runtime execution allowlist for descriptor-backed keeper tools.
 
     Consumes [Keeper_tool_registry] for candidate aggregation and core tools.
     Produces the access-policy types and functions used by the dispatch layer. *)
@@ -242,8 +242,8 @@ let descriptor_candidate_tool_names () =
   |> dedupe_tool_names
 
 let keeper_base_candidate_tool_names () =
-  (* Candidate existence is registry/descriptor driven. [tool_access] and
-     tool_policy.toml groups must not be a second execution allowlist for
+  (* Candidate existence is registry/descriptor driven. Policy groups must not
+     be a second execution gate for
      keeper-owned tools. *)
   dedupe_tool_names
     ( effective_core_tools ()
@@ -267,7 +267,7 @@ let resolve_policy_group ~(fallback : string list) (group_name : string) : strin
           group_name (List.length fallback);
         fallback)
 
-(** Tools allowed on the keeper's last turn.
+(** Tools safe on the keeper's last turn.
     Reads [groups.last_turn_safe] from tool_policy.toml. *)
 let last_turn_safe_tool_names () =
   resolve_policy_group
@@ -280,95 +280,56 @@ let last_turn_safe_tool_names () =
                 "tool_execute"; "masc_web_search"; "masc_web_fetch" ]
     "last_turn_safe"
 
-let tool_policy_of_meta (meta : keeper_meta) =
-  let allow = Tool_access_policy.Names meta.tool_access in
-  {
-    Tool_access_policy.allow;
-    deny = Tool_access_policy.Names meta.tool_denylist;
-  }
-
 module StringSet = Set_util.StringSet
 
-(* ── Access lookup (O(1) per tool) ────────────────────────────── *)
-
-type tool_access_lookup = {
-  candidate_names : string list;
-  candidate_set : StringSet.t;
-  allow_set : StringSet.t;
-  deny_set : StringSet.t;
-}
+(* ── Tool surface helpers (O(1) per tool where needed) ─────────── *)
 
 let tool_name_set names =
   List.fold_left (fun acc name -> StringSet.add name acc) StringSet.empty names
 
-let tool_access_lookup_of_meta (meta : keeper_meta) =
-  (* [allow_set] is retained for compatibility/telemetry consumers that still
-     inspect the field. Runtime execution uses candidate_set - deny_set so
-     empty or narrow [tool_access] cannot hide descriptor-backed board/voice
-     tools. *)
-  let base = keeper_base_candidate_tool_names () in
-  let candidate_names = dedupe_tool_names base in
-  let candidate_set = tool_name_set candidate_names in
-  let allow_names =
-    Tool_access_policy.resolve
-      ~candidates:candidate_names
-      (tool_policy_of_meta meta)
-    |> List.filter (fun name -> StringSet.mem name candidate_set)
-    |> dedupe_tool_names
-  in
-  {
-    candidate_names;
-    candidate_set;
-    allow_set = tool_name_set allow_names;
-    deny_set = tool_name_set meta.tool_denylist;
-  }
+let keeper_candidate_tool_names () =
+  (* Runtime execution is descriptor/registry driven. *)
+  keeper_base_candidate_tool_names ()
 
-let filter_by_access ~(lookup : tool_access_lookup) (name : string) : bool =
-  StringSet.mem name lookup.candidate_set
-  && not (StringSet.mem name lookup.deny_set)
+let keeper_deny_tool_set (meta : keeper_meta) =
+  tool_name_set meta.tool_denylist
 
-(** Universe check: candidate minus denied, ignoring policy allowlist.
-    Core tools and BM25-discovered tools use this gate at execution time. *)
-let filter_by_universe ~(lookup : tool_access_lookup) (name : string) : bool =
-  StringSet.mem name lookup.candidate_set
-  && not (StringSet.mem name lookup.deny_set)
-
-(** Execution gate: core tools bypass candidate_set; all other tools must be
-    registered candidates and not denied.
-    All tools must exist in candidate_set — rejects hallucinated tool names. *)
-let can_execute ~(lookup : tool_access_lookup) (name : string) : bool =
+let registered_tool_not_denied ~candidate_set ~deny_set name =
   if Keeper_tool_registry.is_core_always_tool name then
-    (* Core tools bypass candidate_set — only deny_set blocks them *)
-    not (StringSet.mem name lookup.deny_set)
-  else if not (StringSet.mem name lookup.candidate_set) then
+    not (StringSet.mem name deny_set)
+  else if not (StringSet.mem name candidate_set) then
     false
   else
-    filter_by_universe ~lookup name
+    not (StringSet.mem name deny_set)
 
 (* ── Public query functions ───────────────────────────────────── *)
 
 let keeper_masc_tool_names (meta : keeper_meta) : string list =
-  let lookup = tool_access_lookup_of_meta meta in
+  let candidate_set = tool_name_set (keeper_candidate_tool_names ()) in
+  let deny_set = keeper_deny_tool_set meta in
   masc_schemas_snapshot ()
   |> List.filter_map (fun (schema : Masc_domain.tool_schema) ->
-    if filter_by_access ~lookup schema.name
+    if registered_tool_not_denied ~candidate_set ~deny_set schema.name
     then Some schema.name
     else None)
 
 let keeper_masc_tool_schemas (meta : keeper_meta) : Masc_domain.tool_schema list =
-  let lookup = tool_access_lookup_of_meta meta in
+  let candidate_set = tool_name_set (keeper_candidate_tool_names ()) in
+  let deny_set = keeper_deny_tool_set meta in
   masc_schemas_snapshot ()
-  |> List.filter (fun (schema : Masc_domain.tool_schema) -> filter_by_access ~lookup schema.name)
+  |> List.filter (fun (schema : Masc_domain.tool_schema) ->
+       registered_tool_not_denied ~candidate_set ~deny_set schema.name)
 
 (* ── Layer 2: Universe (all executable tools, policy-independent) ── *)
 
 (** Universe masc_* schemas: candidate minus denied, no policy filter.
     Used by make_tools to build Tool.t for BM25 retrieval scope. *)
 let keeper_universe_masc_tool_schemas (meta : keeper_meta) : Masc_domain.tool_schema list =
-  let lookup = tool_access_lookup_of_meta meta in
+  let candidate_set = tool_name_set (keeper_candidate_tool_names ()) in
+  let deny_set = keeper_deny_tool_set meta in
   masc_schemas_snapshot ()
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-    filter_by_universe ~lookup schema.name)
+    registered_tool_not_denied ~candidate_set ~deny_set schema.name)
 
 let keeper_default_model_tools (_meta : keeper_meta) : Masc_domain.tool_schema list =
   keeper_model_tools @ keeper_voice_tool_schemas
@@ -409,7 +370,7 @@ let failing_minimum_tool_names () : string list =
   shard_floor @ essential_masc_minimum_names
   |> List.sort_uniq String.compare
 
-let keeper_allowed_tool_names ?(write_done = false)
+let keeper_visible_tool_names ?(write_done = false)
     ?(phase = Keeper_state_machine.Running) (meta : keeper_meta) :
     string list =
   if write_done then
@@ -419,42 +380,47 @@ let keeper_allowed_tool_names ?(write_done = false)
   then
     failing_minimum_tool_names ()
   else
-    let lookup = tool_access_lookup_of_meta meta in
-    lookup.candidate_names
-    |> List.filter (fun name -> filter_by_access ~lookup name)
+    let candidate_names = keeper_candidate_tool_names () in
+    let candidate_set = tool_name_set candidate_names in
+    let deny_set = keeper_deny_tool_set meta in
+    candidate_names
+    |> List.filter (fun name -> registered_tool_not_denied ~candidate_set ~deny_set name)
     |> dedupe_tool_names
 
 (** Universe tool names: candidates minus denied, no policy filter.
-    Superset of keeper_allowed_tool_names.  BM25 indexes this set so
-    progressive disclosure can discover tools beyond the active allowlist.
+    Superset of keeper_visible_tool_names.  BM25 indexes this set so
+    progressive disclosure can discover tools beyond the active visible set.
     Core tools are always included even if masc_schemas haven't been
-    injected yet (startup race) or the tool is not in the allowlist. *)
+    injected yet (startup race) or the tool is not in the visible set. *)
 let keeper_universe_tool_names (meta : keeper_meta) : string list =
-  let lookup = tool_access_lookup_of_meta meta in
+  let candidate_names = keeper_candidate_tool_names () in
+  let candidate_set = tool_name_set candidate_names in
+  let deny_set = keeper_deny_tool_set meta in
   let from_candidates =
-    lookup.candidate_names
-    |> List.filter (fun name -> filter_by_universe ~lookup name)
+    candidate_names
+    |> List.filter (fun name -> registered_tool_not_denied ~candidate_set ~deny_set name)
   in
   let from_core =
     Keeper_tool_registry.core_always_tools
-    |> List.filter (fun name -> not (StringSet.mem name lookup.deny_set))
+    |> List.filter (fun name -> not (StringSet.mem name deny_set))
   in
   dedupe_tool_names (from_candidates @ from_core)
 
 (** Search scope: registered candidates + core_always - denied.
     Kept separate from [keeper_universe_tool_names] for call-site clarity;
-    it intentionally does not treat [tool_access] as an execution allowlist. *)
+    it intentionally does not introduce a second execution allowlist. *)
 let keeper_tool_search_scope (meta : keeper_meta) : string list =
-  let lookup = tool_access_lookup_of_meta meta in
-  let from_allowlist =
-    lookup.candidate_names
-    |> List.filter (fun name -> not (StringSet.mem name lookup.deny_set))
+  let candidate_names = keeper_candidate_tool_names () in
+  let deny_set = keeper_deny_tool_set meta in
+  let from_candidates =
+    candidate_names
+    |> List.filter (fun name -> not (StringSet.mem name deny_set))
   in
   let from_core =
     Keeper_tool_registry.core_always_tools
-    |> List.filter (fun name -> not (StringSet.mem name lookup.deny_set))
+    |> List.filter (fun name -> not (StringSet.mem name deny_set))
   in
-  dedupe_tool_names (from_allowlist @ from_core)
+  dedupe_tool_names (from_candidates @ from_core)
 
 (** Shared schema assembly: computes the full tool schema list once.
     [masc_schemas_fn] selects policy-filtered or universe-filtered MASC schemas
@@ -464,7 +430,7 @@ let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schem
   (keeper_default_model_tools meta)
   @ (masc_schemas_fn meta)
 
-(** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup
+(** Filter schemas by a set of selected names.  Uses Hashtbl for O(1) lookup
     instead of List.mem (O(n) per schema). *)
 let filter_schemas_by_names (names : string list)
     (schemas : Masc_domain.tool_schema list) : Masc_domain.tool_schema list =
@@ -480,15 +446,15 @@ let keeper_model_tool_schemas (meta : keeper_meta) : Masc_domain.tool_schema lis
   all_keeper_schemas ~masc_schemas_fn:keeper_universe_masc_tool_schemas meta
   |> filter_schemas_by_names scoped
 
-let keeper_allowed_model_tools ?(write_done = false) (meta : keeper_meta) :
+let keeper_visible_model_tools ?(write_done = false) (meta : keeper_meta) :
     Masc_domain.tool_schema list =
-  let allowed = keeper_allowed_tool_names ~write_done meta in
-  if allowed = [] then
+  let visible = keeper_visible_tool_names ~write_done meta in
+  if visible = [] then
     []
   else
     let result =
       all_keeper_schemas ~masc_schemas_fn:keeper_masc_tool_schemas meta
-      |> filter_schemas_by_names allowed
+      |> filter_schemas_by_names visible
     in
     let count = List.length result in
     if count > Keeper_config.tool_policy_count_warn_threshold then

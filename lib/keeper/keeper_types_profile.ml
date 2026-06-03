@@ -220,13 +220,12 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   (match Safe_ops.json_string_list "shards" keeper_json with
                    | [] -> None
                    | xs -> Some xs);
-                (* Persona profiles are not allowed to own execution allowlists.
+                (* Persona profiles are not allowed to own deployment policy.
                    Keep these in keeper TOML / runtime config only. *)
                 allowed_paths = None;
                 sandbox_profile = None;
                 sandbox_image = None;
                 network_mode = None;
-                tool_access = None;
                 tool_denylist =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_denylist" keeper_json);

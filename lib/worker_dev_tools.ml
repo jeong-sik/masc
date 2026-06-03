@@ -407,7 +407,7 @@ let make_shell_exec_with_allowlist
                is a read tool, but the risk classifier rates it
                Destructive_protected (the delete action, like rm, is on no
                allowlist). Refuse it here so the worker matches the keeper: a
-               Destructive command is blocked for every tool_access. R1
+               Destructive command is blocked for every Execute surface. R1
                writes stay allowed — this dev surface is write-capable by
                design. *)
             Option.iter
@@ -421,7 +421,7 @@ let make_shell_exec_with_allowlist
                    ())
               on_exec;
             tool_error
-              "This command is destructive and is blocked for all tool_access."
+              "This command is destructive and is blocked for every Execute surface."
           | Ok context ->
             let path_workdir =
               match workdir with

@@ -124,7 +124,7 @@ let auth_snapshot_json ctx =
 let tool_inventory_json _ctx ~include_hidden =
   (* Returns all tool schemas from catalog with metadata.
      enabled_in_current_mode=false because this is dashboard context (no keeper).
-     Keeper-specific tool availability is determined by keeper_allowed_tool_names. *)
+     Keeper-specific tool availability is determined by keeper_visible_tool_names. *)
   let surface_map : (string, string list) Hashtbl.t = Hashtbl.create 256 in
   let add_surface name s =
     let prev =

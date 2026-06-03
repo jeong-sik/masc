@@ -82,7 +82,7 @@ let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
 
 let keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names =
   let allowed_tools =
-    Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
+    Keeper_tool_policy.keeper_visible_tool_names !meta_ref in
   let decision =
     on_idle_decision ~consecutive_idle_turns ~tool_names
       ~allowed_tools in

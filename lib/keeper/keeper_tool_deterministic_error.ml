@@ -8,7 +8,6 @@ type deterministic_reason =
   | Path_outside_sandbox
   | Cwd_not_directory
   | Policy_blocked
-  | Write_operation_gated
   | Completion_contract_violation
   | Structured_tool_required
   | Workflow_rejection_blocked
@@ -40,7 +39,6 @@ let to_telemetry_key = function
   | Path_outside_sandbox -> "deterministic_error_path_outside_sandbox"
   | Cwd_not_directory -> "deterministic_error_cwd_not_directory"
   | Policy_blocked -> "deterministic_error_policy_blocked"
-  | Write_operation_gated -> "deterministic_error_write_operation_gated"
   | Completion_contract_violation ->
     "deterministic_error_completion_contract_violation"
   | Structured_tool_required -> "deterministic_error_structured_tool_required"
@@ -59,9 +57,7 @@ let to_string = function
     "destructive operation blocked (force push / rm -rf / push to main)"
   | Path_outside_sandbox -> "path argument outside keeper-allowed sandbox roots"
   | Cwd_not_directory -> "cwd argument is not a directory"
-  | Policy_blocked -> "governance / tool_access policy rejected the call"
-  | Write_operation_gated ->
-    "write-capable Execute is required; retrying the same arguments cannot succeed"
+  | Policy_blocked -> "governance or deny policy rejected the call"
   | Completion_contract_violation ->
     "keeper completion contract violated (e.g. require_tool_use)"
   | Structured_tool_required ->
@@ -103,7 +99,6 @@ let reason_to_wire = function
   | Path_outside_sandbox -> "path_outside_sandbox"
   | Cwd_not_directory -> "cwd_not_directory"
   | Policy_blocked -> "policy_blocked"
-  | Write_operation_gated -> "write_operation_gated"
   | Completion_contract_violation -> "completion_contract_violation"
   | Structured_tool_required -> "structured_tool_required"
   | Workflow_rejection_blocked -> "workflow_rejection_blocked"
@@ -118,7 +113,6 @@ let reason_of_wire = function
   | "path_outside_sandbox" -> Some Path_outside_sandbox
   | "cwd_not_directory" -> Some Cwd_not_directory
   | "policy_blocked" -> Some Policy_blocked
-  | "write_operation_gated" -> Some Write_operation_gated
   | "completion_contract_violation" -> Some Completion_contract_violation
   | "structured_tool_required" -> Some Structured_tool_required
   | "workflow_rejection_blocked" -> Some Workflow_rejection_blocked

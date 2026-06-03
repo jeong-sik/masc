@@ -82,13 +82,13 @@ let test_blocked_json_adds_classification () =
   let json =
     Masc.Exec_core.blocked_result_json
       ~cmd
-      ~error:"write_operation_gated"
-      ~reason:"write tool_access required"
+      ~error:"destructive_operation_blocked"
+      ~reason:"destructive operation blocked"
       ~classification:(classification_of_cmd cmd)
       ~retryability:Masc.Exec_core.Operator_required
       ()
   in
-  check string "error" "write_operation_gated"
+  check string "error" "destructive_operation_blocked"
     (get_string_field json "error");
   check string "semantic_status" "blocked"
     (get_string_field json "semantic_status");

@@ -95,8 +95,8 @@ let register
     `Counter;
   add
     Keeper_metrics.(to_string ToolPolicyFailures)
-    "Total tool_access policy resolution failures (e.g. policy_config_not_loaded). \
-     Labels: site, policy. The policy layer runs at module-init and tool_access resolution \
+    "Total keeper tool policy resolution failures (e.g. policy_config_not_loaded). \
+     Labels: site, policy. The policy layer runs at module-init and visibility resolution \
      time so it does not carry keeper context; keeper attribution is recovered from the \
      surrounding Log.Keeper line."
     `Counter;

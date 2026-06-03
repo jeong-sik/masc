@@ -64,7 +64,7 @@ val validate_command
   -> Masc_exec.Shell_ir.t
   -> (unit, block_reason) result
 
-(** Relaxed validator for write-enabled keeper tool_access lists.  The authoritative
+(** Relaxed validator for write-enabled keeper Execute surfaces.  The authoritative
     verdict comes from {!Masc_exec_command_gate.Shell_command_gate.gate}:
     parsed pipelines validate every stage against the dev allowlist,
     redirects are rejected for the Execute shell path, and parser

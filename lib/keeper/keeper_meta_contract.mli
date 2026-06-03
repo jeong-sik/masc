@@ -6,11 +6,6 @@
     type-heavy contract from JSON parsing
     ({!Keeper_meta_json}) and store I/O.
 
-    Re-exports {!Keeper_meta_tool_access} via [include] for the
-    [tool_access] ADT — callers can reach it via
-    {!Keeper_meta_contract.tool_access} (type identity preserved
-    through the runtime).
-
     Internal: ~3 helpers stay private —
     \[blocker_class_of_serialized_string] (deserializer used
     only by JSON parsing), \[map_compaction_rt] /
@@ -18,10 +13,6 @@
     (nested-record updaters that callers reach via the higher-level
     {!map_runtime} / {!map_usage}).  All consumed only via the include
     runtime or the JSON pipeline. *)
-
-(** {1 Tool-access runtime re-export} *)
-
-include module type of Keeper_meta_tool_access
 
 (** {1 Policy types} *)
 
@@ -338,7 +329,6 @@ type keeper_meta = {
   sandbox_image : string option;
   network_mode : Keeper_types_profile.network_mode;
   allowed_paths : string list;
-  tool_access : string list;
   tool_denylist : string list;
   mention_targets : string list;
   proactive : proactive_policy;
@@ -378,8 +368,7 @@ type keeper_meta = {
 
 (** Overlay TOML/persona defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits
-    TOML-owned fields such as [sandbox_profile], [network_mode], and
-    [tool_access]. *)
+    TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val effective_meta_result : keeper_meta -> (keeper_meta, string) result
 
 (** Pure variant for callers that already loaded profile defaults. *)

@@ -113,14 +113,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~fallback_message:old.compaction.message_gate
       ~fallback_token:old.compaction.token_gate
   in
-  let tool_access =
-    match p.tool_access_opt with
-    | Some access -> access
-    | None ->
-        (match p.profile_defaults.tool_access with
-         | Some tools -> normalize_tool_names tools
-         | None -> old.tool_access)
-  in
   let tool_denylist =
     let profile_or_old =
       match p.profile_defaults.tool_denylist with
@@ -224,7 +216,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     allowed_paths;
     sandbox_profile;
     network_mode;
-    tool_access;
     tool_denylist;
     autoboot_enabled;
     active_goal_ids;

@@ -86,7 +86,7 @@ let test_known_shared_tools_exist_on_agent_surface () =
 
 let test_heuristic_only_keeper_prefixed () =
   let meta = make_meta () in
-  let names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let names = Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
     List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
@@ -96,7 +96,7 @@ let test_heuristic_only_keeper_prefixed () =
 
 let test_learned_only_keeper_prefixed () =
   let meta = make_meta ~policy_voice_enabled:true () in
-  let names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let names = Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
     List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
@@ -111,7 +111,7 @@ let test_learned_only_keeper_prefixed () =
 let test_research_extra_tools_are_research_only () =
   let meta = make_meta ~policy_voice_enabled:true
        () in
-  let names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let names = Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected = List.filter (fun n ->
     not (List.mem n (known_non_keeper_tool_names ()))) non_keeper in
@@ -120,7 +120,7 @@ let test_research_extra_tools_are_research_only () =
 
 let test_write_done_returns_empty () =
   let meta = make_meta () in
-  let names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names ~write_done:true meta in
+  let names = Keeper_tool_dispatch_runtime.keeper_visible_tool_names ~write_done:true meta in
   Alcotest.(check (list string)) "write_done returns empty" [] names
 
 (* ============================================================
@@ -138,7 +138,7 @@ let test_agent_surface_no_keeper_tools () =
 
 let test_no_overlap_heuristic_vs_agent () =
   let meta = make_meta () in
-  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let keeper_names = Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta in
   let agent_names = Keeper_tool_surfaces.spawned_agent_public_tool_names in
   (* Some MASC workspace tools are intentionally shared between spawned
      agents and keeper-selected surfaces. *)
@@ -156,7 +156,7 @@ let test_no_overlap_heuristic_vs_agent () =
 let test_no_overlap_research_vs_agent () =
   let meta = make_meta ~policy_voice_enabled:true
        () in
-  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let keeper_names = Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta in
   let agent_names = Keeper_tool_surfaces.spawned_agent_public_tool_names in
   let overlap =
     List.filter
@@ -190,7 +190,7 @@ let test_shard_tools_overlap_with_agent_documented () =
 let test_research_admin_overlap_documented () =
   let admin = Tool_catalog_surfaces.admin_surface_tools in
   let meta = make_meta  () in
-  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let keeper_names = Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
   (* These research tools are intentionally in both lists.
      Keepers access them via shard allocation, not dispatch pre-hook.
@@ -208,7 +208,7 @@ let test_research_admin_overlap_documented () =
 let test_non_research_admin_tools_documented () =
   let admin = Tool_catalog_surfaces.admin_surface_tools in
   let meta = make_meta ~policy_voice_enabled:true () in
-  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let keeper_names = Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
   (* Mode removal: all keepers get all tools. Admin-listed tools that
      appear in keeper tool set come from known sources (coding, research shards). *)
@@ -225,8 +225,8 @@ let test_heuristic_has_fewer_tools_than_learned () =
   let heuristic = make_meta () in
   let learned = make_meta ~policy_voice_enabled:true
        () in
-  let h_count = List.length (Keeper_tool_dispatch_runtime.keeper_allowed_tool_names heuristic) in
-  let l_count = List.length (Keeper_tool_dispatch_runtime.keeper_allowed_tool_names learned) in
+  let h_count = List.length (Keeper_tool_dispatch_runtime.keeper_visible_tool_names heuristic) in
+  let l_count = List.length (Keeper_tool_dispatch_runtime.keeper_visible_tool_names learned) in
   Alcotest.(check bool)
     "learned mode has >= heuristic tools"
     true (l_count >= h_count)

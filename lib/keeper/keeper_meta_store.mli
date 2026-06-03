@@ -72,8 +72,7 @@ val read_meta :
 
 (** Read persisted keeper meta and overlay TOML/persona defaults before
     returning it. Status/list/operator surfaces should use this for
-    TOML-owned fields such as [sandbox_profile], [network_mode], and
-    [tool_access]. *)
+    TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val read_effective_meta_resolved :
   Workspace.config ->
   string ->

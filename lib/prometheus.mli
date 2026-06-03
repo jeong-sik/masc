@@ -269,7 +269,7 @@ include module type of Prometheus_transport_metric_names
 
 (** Counter incremented when an OAS after-turn response is accepted but
     its response model field is empty. This tracks malformed or partial
-    provider response metadata, not keeper tool_access policy decisions. *)
+    provider response metadata, not keeper tool policy decisions. *)
 val metric_after_turn_response_model_empty : string
 
 val metric_after_turn_response_model_alias : string

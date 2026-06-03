@@ -30,13 +30,6 @@ let persona_axis_schema (axis : Persona_contract.archetype_axis) =
     ; "description", `String axis.schema_description
     ]
 
-let tool_access_schema description =
-  `Assoc [
-    ("type", `String "array");
-    ("description", `String description);
-    ("items", `Assoc [ ("type", `String "string") ]);
-  ]
-
 let keeper_schemas : tool_schema list = [
   {
     name = "masc_persona_list";
@@ -183,9 +176,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
         ]);
-        ("tool_access",
-          tool_access_schema
-            "Canonical tool allowlist, e.g. ['masc_status', 'tool_execute'].");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -343,13 +333,10 @@ let keeper_schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Restrict file writes to these path prefixes. Empty list means playground-only (.masc/playground/<name>/).");
         ]);
-        ("tool_access",
-          tool_access_schema
-            "Canonical tool allowlist, e.g. ['masc_status', 'tool_execute'].");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Tool names to remove after tool_access resolution.");
+          ("description", `String "Tool names to hide from the keeper-visible surface.");
         ]);
       ]);
       ("required", `List [`String "name"]);

@@ -219,7 +219,6 @@ let handle_tool_execute_typed
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
       ~timeout_sec
-      ~write_enabled
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
@@ -241,11 +240,7 @@ let handle_tool_execute_typed
           e
       | Ok input ->
         let cmd = typed_input_command_text input in
-        let mode =
-          if write_enabled
-          then Keeper_tool_execute_typed_input.Dev_full
-          else Keeper_tool_execute_typed_input.Readonly
-        in
+        let mode = Keeper_tool_execute_typed_input.Dev_full in
         let effective_stages = typed_input_effective_stages ~mode input in
         let cwd, root_git_cwd_error =
           resolve_typed_git_cwd_of_stages
@@ -335,8 +330,7 @@ let handle_tool_execute_typed
         let blocked_result ?deterministic_reason ~error ~reason ~alternatives () =
           (* RFC-0208 P1: a blocked typed command emits a Keeper-level audit
              line so denials are greppable, not only returned as tool_error
-             JSON to the agent. Covers destructive-block and write-gate; the
-             [error] code distinguishes them. *)
+             JSON to the agent. *)
           Log.Keeper.warn
             "shell_ir blocked keeper=%s error=%s reason=%s typed_hit=%b cmd=%s"
             meta.name
@@ -377,21 +371,8 @@ let handle_tool_execute_typed
             ~deterministic_reason:
               Keeper_tool_deterministic_error.Destructive_operation_blocked
             ~error:"destructive_operation_blocked"
-            ~reason:"This typed command is destructive and is blocked for all tool_access lists."
+            ~reason:"This typed command is destructive and is blocked for every Execute surface."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
-            ()
-        else if (not write_enabled)
-             && (Masc_exec.Shell_ir_risk.is_r1 envelope
-                || Masc_exec.Shell_ir_risk.is_r2 envelope)
-        then
-          blocked_result
-            ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated
-            ~error:"write_operation_gated"
-            ~reason:"This typed command modifies state. Write-enabled tool_access is required."
-            ~alternatives:
-              [ "Use read-only commands such as rg, cat, ls, git status, or git log."
-              ; "Ask the operator for write-enabled tool_access."
-              ]
             ()
         else
           let allowed_commands =
@@ -509,11 +490,6 @@ let handle_tool_execute
       ~default:Keeper_tool_execute_timeout.io_timeout_sec
       args
   in
-  let write_enabled =
-    List.exists
-      (fun n -> n = "tool_edit_file" || n = "tool_write_file")
-      meta.tool_access
-  in
   if has_typed_execute_input_key args
   then
     handle_tool_execute_typed
@@ -522,7 +498,6 @@ let handle_tool_execute
       ~meta
       ~args
       ~timeout_sec
-      ~write_enabled
       ()
   else
     error_json

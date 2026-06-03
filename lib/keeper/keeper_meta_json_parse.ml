@@ -29,7 +29,6 @@ type parsed_keeper_policy =
   ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_allowed_paths : string list
-  ; pp_tool_access : string list
   ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
   ; pp_proactive : proactive_policy
@@ -163,12 +162,9 @@ let parse_sandbox_policy_fields (json : Yojson.Safe.t)
 let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
   : (parsed_keeper_policy, string) result
   =
-  match tool_access_of_meta_json json with
+  match parse_sandbox_policy_fields json with
   | Error msg -> Error ("meta parse error: " ^ msg)
-  | Ok pp_tool_access ->
-    (match parse_sandbox_policy_fields json with
-     | Error msg -> Error ("meta parse error: " ^ msg)
-     | Ok (pp_sandbox_profile, pp_sandbox_image, pp_network_mode) ->
+  | Ok (pp_sandbox_profile, pp_sandbox_image, pp_network_mode) ->
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let pp_mention_targets =
@@ -228,7 +224,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_sandbox_image
       ; pp_network_mode
       ; pp_allowed_paths
-      ; pp_tool_access
       ; pp_tool_denylist
       ; pp_mention_targets
       ; pp_proactive =
@@ -266,7 +261,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_handoff_threshold
       ; pp_handoff_cooldown_sec
       ; pp_always_approve
-      })
+      }
 ;;
 
 let parse_usage_metrics (json : Yojson.Safe.t) : usage_metrics =
@@ -556,7 +551,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; sandbox_image = policy.pp_sandbox_image
                    ; network_mode = policy.pp_network_mode
                    ; allowed_paths = policy.pp_allowed_paths
-                   ; tool_access = policy.pp_tool_access
                    ; tool_denylist = policy.pp_tool_denylist
                    ; mention_targets = policy.pp_mention_targets
                    ; proactive = policy.pp_proactive

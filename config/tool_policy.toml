@@ -1,14 +1,13 @@
 # Tool Policy Configuration
 #
-# Defines named tool groups for keeper tool_access lists.
+# Defines named keeper tool groups used by descriptor/policy projections.
 # Each group is a named list of tool names.
 #
 # Groups with `shard = "..."` resolve tool names from Tool_shard at runtime.
 # MASC groups are filtered at runtime: only tools
 # that were injected by inject_masc_schemas at startup are included.
 #
-# To add a reusable tool bundle, add it to a group and reference the tool names
-# from keeper tool_access lists.
+# To add a reusable tool bundle, add it to a group and wire the projection in code.
 
 # ── Tool Groups ─────────────────────────────────────────────────────
 
@@ -86,10 +85,8 @@ tools = [
   "masc_web_fetch",
 ]
 
-# Optional tools that require explicit opt-in through a keeper tool_access list.
-# Excluded from all built-in groups by default.
-[groups.voice]
 # Voice session management + TTS/mic via ElevenLabs or local backend.
+[groups.voice]
 tools = [
   "keeper_voice_speak",
   "keeper_voice_listen",

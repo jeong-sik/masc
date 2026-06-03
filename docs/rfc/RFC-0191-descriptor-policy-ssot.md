@@ -39,12 +39,12 @@ Yet `lib/keeper/keeper_tool_policy.ml` is **670 LoC, 63 definitions**, and the o
 | Writable path prefix list | `keeper_writable_prefixes` (3 entries, hardcoded) | none — should be derived per descriptor (`cwd_scope` + tool-specific) |
 | Path normalization | `normalize_path`, `is_masc_write_allowed` | none |
 | Denied-set | `keeper_denied_set` Hashtbl | `visibility = Keeper_denied` |
-| Tool-access tier rules | hand-maintained per-agent access checks | should be expressed as descriptor policy + `tool_access` grants |
+| Visibility tier rules | hand-maintained per-agent visibility checks | should be expressed as descriptor policy |
 | Per-tool inline safety | `keeper_safe_inline_tools` list (handmade) | descriptor `executor = In_process` already captures it |
 | Maintenance gates | `keeper_maintenance_only_tools` list | none — should be `approval = Human_required` + new `audience` field |
 | Last-turn safety | `last_turn_safe_tool_names` list | none — should be a derived property (`readonly_hint = Some true` + `effect_domain = None`) |
-| Allowlist by tool access | tool-access keyed lists | should be a descriptor-driven projection |
-| Universe filter | `tool_access_lookup_of_meta`, `filter_by_universe`, `filter_by_access` | should be a descriptor capability check |
+| Visible tool projection | descriptor/registry candidates minus denylist | should be a descriptor-driven projection |
+| Universe filter | `keeper_candidate_tool_names`, `registered_tool_not_denied` | should be a descriptor capability check |
 
 Net result: two SSOTs, the smaller (`policy` record) defines structure, the larger (`keeper_tool_policy.ml`) defines truth. Any access-rule change requires editing the larger one, and the descriptor never gets consulted.
 
@@ -114,7 +114,7 @@ and audience_class =
 | **P1** | Extend `policy` record with 4 new fields. Every existing descriptor literal gets explicit values matching current `keeper_tool_policy.ml` decisions. No callers migrate yet. | Build green. `Agent_tool_descriptor.all_descriptors ()` answers every per-tool policy question. Cross-check test: for each descriptor, assert agreement with `keeper_tool_policy.<predicate>`. Cross-check pass is the migration safety gate. |
 | **P2** | Migrate `is_keeper_denied`, `is_keeper_safe_inline_tool`, `is_keeper_maintenance_only_tool` to descriptor-driven projections. Drop the corresponding string lists/Hashtbls. | `keeper_tool_policy.ml` LoC down by ~60. Test from P1 still passes (no semantic change). |
 | **P3** | Migrate `last_turn_safe_tool_names` to a derivation rule (`readonly_hint = Some true && effect_domain = None`). Drop the hand list. Audit any descriptor whose old-vs-new disagrees — the disagreement *is* the latent bug, fix by descriptor edit. | Last hand list of per-tool policy classification removed. |
-| **P4** | Migrate tool-access allowlists to descriptor policy data. Drop profile-keyed string list construction. | `tool_access_lookup_of_meta` becomes a descriptor filter. |
+| **P4** | Migrate remaining visibility projections to descriptor policy data. Drop profile-keyed string list construction. | Visible/universe projections are derived from descriptor policy. |
 | **P5** | Drop everything in `keeper_tool_policy.ml` that has no agent-level role. Target: < 250 LoC, only agent-side state + path normalization + descriptor projections. | LoC reduction ~420. |
 | **P6** (follow-up RFC) | Re-evaluate whether `Keeper_tool_policy_config` (TOML loader) can be regenerated from descriptors instead of edited by operators. Likely no — operators tune policy bundles, not per-tool policy. | Out of scope. |
 

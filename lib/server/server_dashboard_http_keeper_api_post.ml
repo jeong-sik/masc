@@ -22,16 +22,15 @@ let read_internal_history_lines = Trace.read_internal_history_lines
 let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
 
 let keeper_tools_response_json (meta : Keeper_meta_contract.keeper_meta) =
-  let allowed = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let visible = Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta in
   let masc_count = List.length (Keeper_tool_dispatch_runtime.keeper_masc_tool_names meta) in
   `Assoc
     [
       ("ok", `Bool true);
-      ("tool_access", Keeper_meta_contract.tool_access_to_json meta.tool_access);
-      ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
+      ("visible_tools", `List (List.map (fun s -> `String s) visible));
       ("tool_denylist", `List (List.map (fun s -> `String s) meta.tool_denylist));
       ("active_masc_tool_count", `Int masc_count);
-      ("total_active", `Int (List.length allowed));
+      ("total_active", `Int (List.length visible));
     ]
 
 let error_json ?ok message =
@@ -75,23 +74,12 @@ let handle_keeper_tools_post state req reqd =
                    let deny =
                      Safe_ops.json_string_list "deny" args |> dedupe_tool_names
                    in
-                   let tool_access_result =
-                     match Json_util.assoc_member_opt "tool_access" args with
-                     | Some (`List _ as access_json) ->
-                         Keeper_meta_contract.tool_access_of_meta_json
-                           (`Assoc [ ("tool_access", access_json) ])
-                     | Some `Null -> Error "tool_access required"
-                     | None | Some _ -> Error "tool_access must be an array of strings"
-                   in
-                   Result.map
-                     (fun tool_access ->
-                       {
-                         meta with
-                         tool_access;
-                         tool_denylist = deny;
-                         updated_at = Keeper_meta_contract.now_iso ();
-                       })
-                     tool_access_result
+                   Ok
+                     {
+                       meta with
+                       tool_denylist = deny;
+                       updated_at = Keeper_meta_contract.now_iso ();
+                     }
                | "" -> Error "action required (set_policy)"
                | other -> Error (Printf.sprintf "unknown action: %s" other)
              in

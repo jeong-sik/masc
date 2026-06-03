@@ -104,7 +104,7 @@ let prepare_agent_setup
   if affinity_k > 0
   then (
     let masc_root = Workspace.masc_root_dir config in
-    let allowed = Keeper_tool_policy.keeper_allowed_tool_names meta in
+    let allowed = Keeper_tool_policy.keeper_visible_tool_names meta in
     let core = Keeper_tool_registry.core_discovery_tools in
     let entries =
       Keeper_tool_affinity.pre_populate_from_history
@@ -226,7 +226,7 @@ let prepare_agent_setup
           Keeper_run_tools_search.partition_tool_search_hits
             ~core
             ~core_always:Keeper_tool_registry.core_always_tools
-            ~allowed:(Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta)
+            ~allowed:(Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta)
             ~retrieved
             ~max_results
         in
@@ -340,15 +340,15 @@ let prepare_agent_setup
     "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
-  let policy_allowed_tool_names =
-    Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta
+  let visible_internal_tool_names =
+    Keeper_tool_dispatch_runtime.keeper_visible_tool_names meta
   in
   (* Descriptor-backed public names are the LLM-visible names; internal
      counterparts are implementation details.
 
-     Order matters: compute [descriptor_public_names] against the UNFILTERED
-     internal allowlist, because tool_policy.toml / tool_access still expresses
-     allowlists in descriptor/internal names (tool_execute, tool_read_file, ...).
+     Order matters: compute [descriptor_public_names] against the unfiltered
+     internal visible set because descriptors map internal names
+     (tool_execute, tool_read_file, ...) to model-facing public names.
      Stripping internals before the descriptor expansion check would leave
      [descriptor_public_names] empty and drop "Execute"/"Read"/... from the
      visible surface. See PR #14596 review. *)
@@ -358,28 +358,26 @@ let prepare_agent_setup
     |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
   in
   (* Only include a public name when its descriptor internal target is
-     itself in [policy_allowed_tool_names]. Otherwise the public name (e.g. "Execute")
-     could let the LLM invoke a tool whose internal handler the current
-     keeper tool_access has explicitly excluded — the descriptor would dispatch to
-     a registered-but-disallowed tool. See PR #14574 review. *)
+     itself in [visible_internal_tool_names]. Otherwise the public name
+     (e.g. "Execute") would route to a hidden internal handler. *)
   let descriptor_public_names =
     Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names
-      policy_allowed_tool_names
+      visible_internal_tool_names
   in
   (* Now strip the descriptor internal names from the LLM-visible surface,
      after [descriptor_public_names] has been computed. *)
-  let policy_allowed_tool_names =
+  let visible_internal_tool_names =
     List.filter
       (fun name -> not (List.mem name descriptor_internal_names))
-      policy_allowed_tool_names
+      visible_internal_tool_names
   in
-  let policy_allowed_tool_names_with_public_descriptors =
-    policy_allowed_tool_names @ descriptor_public_names
+  let visible_tool_names_with_public_descriptors =
+    visible_internal_tool_names @ descriptor_public_names
   in
-  let policy_allowed_tool_set =
+  let visible_tool_set =
     let base =
       Keeper_tool_policy.tool_name_set
-        policy_allowed_tool_names_with_public_descriptors
+        visible_tool_names_with_public_descriptors
     in
     Keeper_tool_policy.StringSet.union
       base
@@ -389,7 +387,7 @@ let prepare_agent_setup
     Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
     |> List.find_opt (fun public_name ->
       Keeper_tool_policy.StringSet.mem public_name universe_set
-      && Keeper_tool_policy.StringSet.mem public_name policy_allowed_tool_set)
+      && Keeper_tool_policy.StringSet.mem public_name visible_tool_set)
   in
   (* Receipt refs: written sequentially after OAS execution, kept as refs
      because the facade (keeper_agent_run.ml) writes them post-run. *)
@@ -421,21 +419,21 @@ let prepare_agent_setup
        public entries (e.g., internal names like tool_edit_file, or
        unrecognized inputs). *)
     if Keeper_tool_policy.StringSet.mem name universe_set
-       && Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set
+       && Keeper_tool_policy.StringSet.mem name visible_tool_set
     then name
     else (
       let canonical = Keeper_tool_resolution.canonical_tool_name name in
       match Keeper_tool_visibility_projection.public_alias_for_internal canonical with
       | Some public
         when Keeper_tool_policy.StringSet.mem public universe_set
-             && Keeper_tool_policy.StringSet.mem public policy_allowed_tool_set ->
+             && Keeper_tool_policy.StringSet.mem public visible_tool_set ->
         public
       | _ -> name)
   in
   let visible_policy_name_opt name =
     let name = visible_policy_name name in
     if Keeper_tool_policy.StringSet.mem name universe_set
-       && Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set
+       && Keeper_tool_policy.StringSet.mem name visible_tool_set
     then Some name
     else allowed_public_name_for_internal name
   in
@@ -451,7 +449,7 @@ let prepare_agent_setup
         (fun n (validated, dropped_names) ->
            if
              Keeper_tool_policy.StringSet.mem n universe_set
-             && Keeper_tool_policy.StringSet.mem n policy_allowed_tool_set
+             && Keeper_tool_policy.StringSet.mem n visible_tool_set
            then n :: validated, dropped_names
            else
              match allowed_public_name_for_internal n with
@@ -511,7 +509,7 @@ let prepare_agent_setup
     let core =
       Keeper_tool_dispatch_runtime.effective_core_tools ()
       |> List.filter (fun name ->
-        Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set)
+        Keeper_tool_policy.StringSet.mem name visible_tool_set)
     in
     let discovered =
       Keeper_discovered_tools.active_names acc.discovered ~turn
@@ -682,10 +680,10 @@ let prepare_agent_setup
       else turn_visible_tool_names, false
     in
     let last_turn_safe = Keeper_tool_policy.last_turn_safe_tool_names () in
-    (* Mirror policy_allowed_tool_names_with_public_descriptors: only include a public name
+    (* Mirror visible_tool_names_with_public_descriptors: only include a public name
        in the last-turn-safe set when its routed internal handler is also
        last-turn-safe. Otherwise the public name could re-introduce a tool
-       the policy explicitly excluded from the final turn. PR #14574. *)
+       excluded from the final turn. PR #14574. *)
     let descriptor_safe_public_names =
       Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names
         last_turn_safe

@@ -2,21 +2,20 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-val keeper_allowed_tool_names
+val keeper_visible_tool_names
   :  ?write_done:bool
   -> ?phase:Keeper_state_machine.phase
   -> keeper_meta
   -> string list
 
-val keeper_allowed_model_tools
+val keeper_visible_model_tools
   :  ?write_done:bool
   -> keeper_meta
   -> Masc_domain.tool_schema list
 
 (** Universe tool names: candidates minus denied, no policy filter.
-    Superset of [keeper_allowed_tool_names].  Used as the BM25 retrieval
-    scope so progressive disclosure can surface tools beyond the active
-    [tool_access] list. *)
+    Superset of [keeper_visible_tool_names].  Used as the BM25 retrieval
+    scope so progressive disclosure can surface descriptor/registry tools. *)
 val keeper_universe_tool_names : keeper_meta -> string list
 
 (** Keeper-facing runtime candidate names before policy filtering. *)
@@ -26,15 +25,13 @@ val keeper_internal_candidate_tool_names : string list
     so [make_tools] can build {!Agent_sdk.Tool.t} for the full search scope. *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
-(** Tool-access scoped universe: explicit allowlist + core_always - denied.
-    Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
-    to reduce candidate pool size per keeper.  See #4637. *)
+(** Tool search scope: active candidates + core_always - denied. *)
 val keeper_tool_search_scope : keeper_meta -> string list
 
-(** Tool-access scoped model tool schemas for BM25 indexing. *)
+(** Descriptor/registry model tool schemas for BM25 indexing. *)
 val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
-(** Core tools that bypass [tool_access] filtering and seed the disclosure floor.
+(** Core tools that seed the disclosure floor.
     Runtime gating/pruning can still narrow their visibility on a given turn. *)
 val core_always_tools : string list
 
@@ -119,7 +116,7 @@ type tool_result_payload =
 
 (** Bridge-facing execution outcome.
     Structured tool errors, including [tool_not_allowed], are failures so
-    tool_access/policy rejections cannot silently end a keeper turn as success. *)
+    visibility/policy rejections cannot silently end a keeper turn as success. *)
 type execution_outcome =
   [ `Success
   | `Failure
@@ -152,10 +149,10 @@ val should_apply_circuit_breaker_to_failure_payload : string -> bool
     Set at server init to [Keeper_tag_dispatch.dispatch]. Default: returns None.
     See #4579. *)
 
-(** masc_* tool names available for a keeper (filtered by allowlist/denylist). *)
+(** masc_* tool names available for a keeper (filtered by descriptor visibility/denylist). *)
 val keeper_masc_tool_names : keeper_meta -> string list
 
-(** masc_* tool schemas available for a keeper (filtered by allowlist/denylist). *)
+(** masc_* tool schemas available for a keeper (filtered by descriptor visibility/denylist). *)
 val keeper_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Compute the keeper's sender identity for portals and broadcasts.

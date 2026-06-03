@@ -14,7 +14,8 @@
 #   warn     (--include-internals):
 #     - `Llm_provider.Provider_kind` qualified module access
 #       outside lib/runtime/provider_kind_resolver.{ml,mli} and
-#       lib/runtime/runtime_provider_credentials.{ml,mli}
+#       lib/runtime/runtime_provider_credentials.{ml,mli} and
+#       lib/runtime/runtime_provider_labels.{ml,mli}
 #       (informational; allowed uses include serialization, type
 #       annotations, local-module aliases, and comments).
 #     - `Llm_provider.Constants` qualified access outside
@@ -102,6 +103,7 @@ scan_warn_provider_kind_external() {
   matches="$(rg -n 'Llm_provider\.Provider_kind|\bProvider_kind\.' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
     | grep -v 'lib/runtime/provider_kind_resolver\.' \
     | grep -v 'lib/runtime/runtime_provider_credentials\.' \
+    | grep -v 'lib/runtime/runtime_provider_labels\.' \
     | filter_noise || true)"
   if [[ -n "$matches" ]]; then
     if [[ "$strict_internals" -eq 1 ]]; then

@@ -17,9 +17,32 @@ type command_descriptor =
   | Gh_api_pr_create of { repo : string; title : string; base : string }
   | Gh_api_pr_merge of { repo : string; pr_number : int }
   | Gh_api_pr_comment of { repo : string; pr_number : int; body : string }
+  | Pipe_chain of { first_cmd : string; last_cmd : string; length : int }
   | Generic
 
 val command_descriptor_to_json : command_descriptor -> Yojson.Safe.t
+
+(** Exit code semantics — many commands use exit codes to convey
+    information beyond success/failure. *)
+type exit_semantics =
+  | Success
+  | No_matches
+  | Files_differ
+  | Condition_false
+  | Error of string
+
+val interpret_exit_code : cmd_name:string -> exit_code:int -> exit_semantics
+
+(** Classify a command into a broad category for UI display. *)
+type cmd_category =
+  | Search_cmd
+  | Read_cmd
+  | List_cmd
+  | Silent_cmd
+  | Neutral_cmd
+  | Write_cmd
+
+val classify_cmd_category : cmd_name:string -> cmd_category
 
 type ide_event =
   | Tool_event of tool_event

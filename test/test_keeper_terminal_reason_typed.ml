@@ -18,6 +18,7 @@
       caught here. *)
 
 module R = Masc.Keeper_execution_receipt
+module Rt = Masc.Keeper_execution_receipt_types
 module Tr = Masc.Keeper_terminal_reason
 
 let failures = ref []
@@ -86,6 +87,30 @@ let () =
        check
          (Printf.sprintf "roundtrip: %S -> %S" s got)
          (String.equal got s))
+    roundtrip_corpus
+;;
+
+let () =
+  List.iter
+    (fun s ->
+       let decoded =
+         Rt.decode_contract_violation_reason (String.lowercase_ascii s)
+       in
+       let classified =
+         match Tr.of_wire s with
+         | Tr.Completion_contract_violation _ -> true
+         | Tr.Runtime_exhausted _
+         | Tr.Config_or_auth _
+         | Tr.Provider_runtime_failure _
+         | Tr.Turn_livelock _
+         | Tr.Internal_error _
+         | Tr.Auto_recoverable_budget _
+         | Tr.Pre_dispatch_success _
+         | Tr.Other _ -> false
+       in
+       check
+         (Printf.sprintf "contract decoder alignment: %S" s)
+         (Option.is_some decoded = classified))
     roundtrip_corpus
 ;;
 

@@ -157,6 +157,7 @@ val keeper_default_source_snapshot : string -> keeper_default_source_snapshot
 val persona_description_max_chars : int
 val load_persona_extended : ?max_chars:int -> string -> string option
 val load_persona_defaults : name:string -> keeper_profile_defaults option
+val load_runtime_defaults : name:string -> keeper_profile_defaults option
 val load_persona_summary : string -> persona_summary option
 val load_persona_summary_from_path : string -> string -> persona_summary option
 val list_persona_summaries : unit -> persona_summary list

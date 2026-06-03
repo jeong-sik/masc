@@ -140,6 +140,66 @@ let load_persona_defaults ~name : keeper_profile_defaults option =
                })
 ;;
 
+(* ── Runtime defaults loading ──────────────────────────────────────────── *)
+
+let load_runtime_defaults ~name : keeper_profile_defaults option =
+  let runtime_dir_opt () =
+    try
+      Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
+      match Config_dir_resolver.current_env_config_dir_opt () with
+      | None -> None
+      | Some dir -> Some (Filename.concat dir "runtimes")
+    with
+    | Sys_error _ -> None
+    | exn ->
+      Log.Keeper.warn
+        "load_runtime_defaults runtime_dir_opt unexpected: %s"
+        (Printexc.to_string exn);
+      None
+  in
+  match runtime_dir_opt () with
+  | None -> None
+  | Some root ->
+      let path = Filename.concat root (name ^ ".json") in
+      if not (Fs_compat.file_exists path)
+      then None
+      else
+        (match
+           Safe_ops.read_json_file_logged ~label:"load_runtime_defaults" path
+         with
+         | None -> None
+         | Some json ->
+             let bool_ key = Safe_ops.json_bool_opt key json in
+             let int_ key = Safe_ops.json_int_opt key json in
+             let str key = Safe_ops.json_string_opt key json in
+             let strs key =
+               match Safe_ops.json_string_list key json with
+               | [] -> None
+               | xs -> Some xs
+             in
+             Some
+               {
+                 empty_keeper_profile_defaults with
+                 sandbox_profile =
+                   Option.bind (str "sandbox_profile") sandbox_profile_of_string;
+                 sandbox_image = str "sandbox_image";
+                 network_mode =
+                   Option.bind (str "network_mode") network_mode_of_string;
+                 tool_access = strs "tool_access";
+                 tool_denylist = strs "tool_denylist";
+                 proactive_enabled = bool_ "proactive_enabled";
+                 proactive_idle_sec = int_ "proactive_idle_sec";
+                 proactive_cooldown_sec = int_ "proactive_cooldown_sec";
+                 max_turns_per_call = int_ "max_turns_per_call";
+                 max_turns_per_call_scheduled_autonomous =
+                   int_ "max_turns_per_call_scheduled_autonomous";
+                 always_approve = bool_ "always_approve";
+                 autoboot_enabled = bool_ "autoboot_enabled";
+                 shards = strs "shards";
+                 allowed_paths = strs "allowed_paths";
+               })
+;;
+
 (* ── JSON workspace-seq helpers ───────────────────────────────────────── *)
 
 let workspace_seq_map_to_json (items : (string * int) list) : Yojson.Safe.t =
@@ -360,22 +420,38 @@ let load_keeper_profile_defaults_result_uncached name :
   (* Priority: TOML config/keepers/<name>.toml > persona profile.json.
      If TOML sets [persona_name], load that persona first and treat TOML as a
      thin overlay instead of duplicating the full keeper profile. *)
-  match keeper_toml_path_opt name with
-  | Some toml_path ->
-    (match load_keeper_toml toml_path with
-     | Ok (_name, defaults) -> (
-         match defaults.persona_name with
-         | Some persona_name ->
-             let persona_defaults =
-               load_keeper_profile_defaults_from_persona persona_name
-             in
-             Ok
-               (merge_keeper_profile_defaults ~agent_name:name
-                  ~base:persona_defaults ~overlay:defaults)
-         | None -> Ok defaults)
-     | Error e -> Error e)
-  | None ->
-    Ok (load_keeper_profile_defaults_from_persona name)
+  let result =
+    match keeper_toml_path_opt name with
+    | Some toml_path ->
+      (match load_keeper_toml toml_path with
+       | Ok (_name, defaults) -> (
+           match defaults.persona_name with
+           | Some persona_name ->
+               let persona_defaults =
+                 load_keeper_profile_defaults_from_persona persona_name
+               in
+               Ok
+                 (merge_keeper_profile_defaults ~agent_name:name
+                    ~base:persona_defaults ~overlay:defaults)
+           | None -> Ok defaults)
+       | Error e -> Error e)
+    | None ->
+      Ok (load_keeper_profile_defaults_from_persona name)
+  in
+  (* Runtime overlay: if the resolved config has runtime_ref, load the
+     runtime file and merge it as base (keeper config wins on conflict). *)
+  match result with
+  | Error _ -> result
+  | Ok defaults ->
+      match defaults.runtime_ref with
+      | None -> result
+      | Some runtime_name ->
+          match load_runtime_defaults ~name:runtime_name with
+          | None -> result
+          | Some runtime_defaults ->
+              Ok
+                (merge_keeper_profile_defaults ~agent_name:name
+                   ~base:runtime_defaults ~overlay:defaults)
 
 (* Classify a [load_keeper_toml] failure message into a low-cardinality
    label suitable for Prometheus. The raw error string embeds user input

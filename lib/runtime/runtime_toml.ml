@@ -302,7 +302,6 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     | Some raw -> parse_thinking_control_format ~path raw
   in
   { Runtime_schema.max_output_tokens = positive_int_opt_field "max-output-tokens"
-  ; supports_parallel_tool_calls = b "supports-parallel-tool-calls"
   ; supports_tool_choice = b "supports-tool-choice"
   ; supports_extended_thinking = b "supports-extended-thinking"
   ; supports_reasoning_budget = b "supports-reasoning-budget"

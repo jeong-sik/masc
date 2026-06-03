@@ -159,8 +159,9 @@ describe('KeeperRuntimeModelEditor', () => {
 
     expect(container.querySelector('select[aria-label="model"]')).toBeNull()
     expect(container.textContent).toContain('편집 가능한 TOML 소스가 아니')
-    // Hint names the exact file to add so the operator can unlock editing.
-    expect(container.textContent).toContain('persona-keeper.toml')
+    // Hint names the runtime assignment surface so the operator can unlock editing.
+    expect(container.textContent).toContain('runtime.toml')
+    expect(container.textContent).toContain('[runtime.assignments]')
   })
 
   it('clears a pending selection when the viewed keeper changes', async () => {

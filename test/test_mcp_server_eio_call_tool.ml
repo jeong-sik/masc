@@ -70,15 +70,13 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
   | Ok meta -> meta
   | Error err -> fail ("make_keeper_meta failed: " ^ err)
 
-let contract_requiring_tools required_tools : Masc_domain.task_contract =
+let empty_contract : Masc_domain.task_contract =
   {
     strict = false;
     completion_contract = [];
-    required_tools;
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = [];
-    required_evidence_typed = [];
     links =
       {
         operation_id = None;
@@ -314,9 +312,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   let keeper_name = "sangsu-task-contract" in
   let config = Masc.Workspace.default_config base_path in
   ignore (Masc.Workspace.init config ~agent_name:(Some keeper_name));
-  let contract =
-    contract_requiring_tools [ "tool_execute"; "tool_edit_file" ]
-  in
+  let contract = empty_contract in
   ignore
     (Masc.Workspace.add_task
        ~contract

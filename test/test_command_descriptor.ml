@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module Desc = Masc_mcp.Keeper_tool_execute_runtime.For_testing
+module Desc = Masc.Keeper_tool_execute_runtime.For_testing
 
 let with_temp_dir f =
   let dir = Filename.temp_file "cmd_desc_test" "" in
@@ -16,9 +16,9 @@ let with_temp_dir f =
 
 (** Helper: parse command string to Shell_ir.t via Exec_policy. *)
 let parse_ir cmd =
-  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Masc_mcp.Exec_policy.Strict cmd with
+  match Masc.Exec_policy.parse_string_to_ir ~mode:Masc.Exec_policy.Strict cmd with
   | Ok ir -> ir
-  | Error reason -> failf "parse failed: %s" (Masc_mcp.Exec_policy.block_reason_to_string reason)
+  | Error reason -> failf "parse failed: %s" (Masc.Exec_policy.block_reason_to_string reason)
 ;;
 
 (** {1 Gh PR operations} *)
@@ -180,7 +180,7 @@ let test_extract_descriptor_gh_pr_create () =
 
 let test_descriptor_to_pr_event () =
   with_temp_dir (fun base_dir ->
-    let output = {|{"ok":true,"output":"https://github.com/jeong-sik/masc-mcp/pull/999","command_descriptor":{"kind":"gh_pr_create","title":"test PR","base":"main","draft":false}}|} in
+    let output = {|{"ok":true,"output":"https://github.com/jeong-sik/masc/pull/999","command_descriptor":{"kind":"gh_pr_create","title":"test PR","base":"main","draft":false}}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
       ~base_path:base_dir
       ~keeper_id:"k1"

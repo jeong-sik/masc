@@ -38,7 +38,6 @@ let make_task
 let make_contract
       ?(strict = false)
       ?(completion_contract = [])
-      ?(required_tools = [])
       ?(required_evidence = [])
       ?(inspect_gate_evidence = [])
       ?(verify_gate_evidence = [])
@@ -47,9 +46,7 @@ let make_contract
   =
   { strict
   ; completion_contract
-  ; required_tools
   ; required_evidence
-  ; required_evidence_typed = []
   ; inspect_gate_evidence
   ; verify_gate_evidence
   ; links = { operation_id = None; session_id = None }

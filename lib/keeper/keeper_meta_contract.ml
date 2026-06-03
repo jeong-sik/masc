@@ -560,7 +560,7 @@ type agent_runtime_state =
   ; last_need : string
   ; last_turn_tool_calls : tool_call_summary list
   ; last_seen_message_seq : int
-    (** Highest [Coord] message seq this keeper has scanned for direct
+    (** Highest message seq this keeper has scanned for direct
         mentions. Persisted across heartbeats so mentions are not re-surfaced. *)
   }
 

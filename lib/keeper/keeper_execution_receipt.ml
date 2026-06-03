@@ -203,6 +203,7 @@ type operator_disposition_reason =
   | Reason_preflight_config_error
   | Reason_degraded_retry
   | Reason_runtime_fallback
+  | Reason_transient_runtime_retry
   | Reason_provider_runtime_error
   | Reason_internal_error
   | Reason_tool_required_unsatisfied
@@ -219,6 +220,7 @@ let operator_disposition_reason_to_string = function
   | Reason_preflight_config_error -> "preflight_config_error"
   | Reason_degraded_retry -> "degraded_retry"
   | Reason_runtime_fallback -> "runtime_fallback"
+  | Reason_transient_runtime_retry -> "transient_runtime_retry"
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
   | Reason_tool_required_unsatisfied -> "tool_required_unsatisfied"
@@ -311,6 +313,33 @@ let operator_disposition (receipt : t)
          && (receipt.runtime_fallback_applied
              || receipt.runtime_outcome = Runtime_passed_to_next_model) ->
     Disp_pass_next_model, Reason_runtime_fallback
+  | _
+    when provider_runtime_failure
+         && Keeper_terminal_reason.is_transient_provider_runtime_failure
+              terminal_reason ->
+    (* Retry-recoverable transient (idle-chunk liveness kill wrapped as
+       [Api.Timeout], or a transient [Api.NetworkError]) that the keeper's
+       in-turn retry self-heals. Before this arm it fell through to the
+       [Disp_pause_human] branch below and broadcast an operator page
+       ([needs_operator_broadcast Disp_pause_human = true]) for a transient
+       that already recovered — fleet log [reason=provider_runtime_error] +
+       liveness guard [retry=1/2] then success (deepseek 17/19). Routing to
+       [Disp_fail_open_next_runtime] advances the FSM (RFC-0022 attempt
+       liveness intent) and, since [needs_operator_broadcast] is [false] for
+       that disposition, emits NO page. The structural OAS budget timeout
+       carries a distinct wire code and is NOT transient, so it still pauses
+       via the fall-through below.
+
+       The reason is [Reason_transient_runtime_retry], NOT
+       [Reason_runtime_fallback]: this arm is reached only AFTER the
+       runtime-fallback arm above excluded [runtime_fallback_applied] /
+       [Runtime_passed_to_next_model], so by construction no cross-runtime
+       fallback happened — the turn recovered via the SAME runtime's in-turn
+       retry. [operator_disposition_reason] is serialised into receipt JSON
+       unconditionally (dashboard-visible), so collapsing this onto the
+       fallback label would mislabel every transient-recovery turn as a
+       genuine fallback. *)
+    Disp_fail_open_next_runtime, Reason_transient_runtime_retry
   | _ when provider_runtime_failure ->
     Disp_pause_human, Reason_provider_runtime_error
   | Keeper_terminal_reason.Completion_contract_violation _ ->

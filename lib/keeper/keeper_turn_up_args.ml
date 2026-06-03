@@ -16,6 +16,7 @@ type parsed_args = {
   short_goal_opt : string option;
   mid_goal_opt : string option;
   long_goal_opt : string option;
+  runtime_id_opt : string option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
   mention_targets_in : string list;
@@ -93,6 +94,20 @@ let parse_present_string_list_opt args key =
         (Printf.sprintf "%s must be an array of strings (received %s)" key
            (Json_util.kind_name other))
 
+let parse_runtime_id_opt args =
+  match Json_util.assoc_member_opt "runtime_id" args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) ->
+      let runtime_id = String.trim raw in
+      if runtime_id = ""
+      then Error "runtime_id must not be empty"
+      else Ok (Some runtime_id)
+  | Some other ->
+      Error
+        (Printf.sprintf
+           "runtime_id must be a string (received %s)"
+           (Json_util.kind_name other))
+
 let resolve_tool_name_list ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback
   |> Option.value ~default:[]
@@ -114,16 +129,19 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
+    let runtime_id_opt_res = parse_runtime_id_opt args in
     match
       compaction_profile_opt_res, allowed_paths_opt_res,
-      active_goal_ids_opt_res
+      active_goal_ids_opt_res, runtime_id_opt_res
     with
-    | Error e, _, _
-    | _, Error e, _
-    | _, _, Error e -> Error (tool_result_error e)
+    | Error e, _, _, _
+    | _, Error e, _, _
+    | _, _, Error e, _
+    | _, _, _, Error e -> Error (tool_result_error e)
     | Ok compaction_profile_opt,
       Ok allowed_paths_opt,
-      Ok active_goal_ids_opt ->
+      Ok active_goal_ids_opt,
+      Ok runtime_id_opt ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
@@ -190,6 +208,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       short_goal_opt;
       mid_goal_opt;
       long_goal_opt;
+      runtime_id_opt;
       allowed_paths_opt;
       active_goal_ids_opt;
       autoboot_enabled_opt;

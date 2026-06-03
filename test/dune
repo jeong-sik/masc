@@ -107,6 +107,7 @@
   test_keeper_usage_trust_counter
   test_llm_metric_bridge
   test_cost_usd_source_attribution_10318
+  test_cost_token_decouple
   test_response_model_empty_10083
   test_keeper_proactive_skip_counter
   test_keeper_tool_selection_passive_streak
@@ -128,6 +129,7 @@
   test_memory_jsonl_truncation
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
+  test_keeper_tool_audit_snapshot
   test_ide_annotations
   test_ide_bridge
   test_command_descriptor
@@ -288,6 +290,7 @@
   test_chronicle_librarian
   test_alignment_score
   test_blocker_class_exhaustiveness
+  test_workspace_goal_index
   test_log_severity_outcome_level)
  (modules
   test_board_activity_cache
@@ -368,6 +371,7 @@
   test_keeper_usage_trust_counter
   test_llm_metric_bridge
   test_cost_usd_source_attribution_10318
+  test_cost_token_decouple
   test_response_model_empty_10083
   test_keeper_proactive_skip_counter
   test_keeper_tool_selection_passive_streak
@@ -389,6 +393,7 @@
   test_memory_jsonl_truncation
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
+  test_keeper_tool_audit_snapshot
   test_ide_annotations
   test_ide_bridge
   test_command_descriptor
@@ -557,6 +562,7 @@
   test_chronicle_librarian
   test_alignment_score
   test_blocker_class_exhaustiveness
+  test_workspace_goal_index
   test_log_severity_outcome_level)
  (libraries masc_test_deps multimodal))
 

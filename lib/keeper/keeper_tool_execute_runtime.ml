@@ -454,7 +454,15 @@ let handle_tool_execute_typed
                 ~classification
                 ~status:result.status
             in
-            let descriptor = compute_command_descriptor ir in
+            (* Only include command_descriptor on success — errors already carry
+               sufficient diagnostic info (exit code, stderr, classification). *)
+            let descriptor_fields =
+              match result.status with
+              | Unix.WEXITED 0 ->
+                let descriptor = compute_command_descriptor ir in
+                [ "command_descriptor", Ide_event_types.command_descriptor_to_json descriptor ]
+              | _ -> []
+            in
             Yojson.Safe.to_string
               (Exec_core.process_result_json
                  ~classification
@@ -468,8 +476,8 @@ let handle_tool_execute_typed
                       ; "typed", `Bool true
                       ; "execution_time_ms", `Int elapsed_ms
                       ; "timeout_sec", `Float timeout_sec
-                      ; "command_descriptor", Ide_event_types.command_descriptor_to_json descriptor
                       ]
+                    @ descriptor_fields
                     @ execution_location_fields cwd)
                  ~status:result.status
                  ~output

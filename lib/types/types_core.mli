@@ -107,8 +107,6 @@ type task_execution_links =
 type task_contract =
   { strict : bool [@default false]
   ; completion_contract : string list [@default []]
-  (** Deprecated and ignored by task claim routing. *)
-  ; required_tools : string list [@default []]
   ; required_evidence : string list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]

@@ -224,10 +224,10 @@ function RuntimeEvidenceStrip({
     <div class="flex flex-wrap gap-1.5 text-3xs">
       <${StatusChip} tone=${runtimeTone(evidence)} uppercase=${false}>runtime ${evidence.health}<//>
       <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
-        OAS turns ${evidence.maxOasTurnCount ?? 'not recorded'}
+        agent turns ${evidence.maxOasTurnCount ?? 'not recorded'}
       </span>
       <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
-        provider ${provider}
+        runtime terminal ${provider}
       </span>
       <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-[var(--color-fg-muted)]">
         attempts ${evidence.providerAttemptStartedCount}/${evidence.providerAttemptFinishedCount}

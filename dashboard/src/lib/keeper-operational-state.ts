@@ -292,7 +292,7 @@ export function compositeIsTurnIdle(snapshot: { turn_phase: string }): boolean {
 
 /** Composite snapshot has entered the post-runtime-exhaustion failure
  *  mode: KSM has folded to `failing` AND the runtime lane reports
- *  `exhausted` (no provider path left). Two sites in
+ *  `exhausted` (no runtime lane left). Two sites in
  *  `fsm-hub-invariant-analysis` (`nextExpectedStep` /
  *  `deriveOperationalInsight`) need this exact conjunction; an SSOT
  *  prevents the predicate from drifting when either enum evolves.

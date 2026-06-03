@@ -1168,9 +1168,9 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const requestedToolCount = execution?.requested_tool_count
   const toolsUsedCount = execution?.tools_used_count
   const unexpectedToolCount = execution?.unexpected_tool_count
-  const providerAttempts = execution?.provider_attempt_count
-  const providerFallback = execution?.provider_fallback_applied
-  const providerSelectedModel = execution?.provider_selected_model?.trim() || null
+  const runtimeAttemptCount = execution?.provider_attempt_count
+  const runtimeFailoverApplied = execution?.provider_fallback_applied
+  const runtimeSelectedLane = execution?.provider_selected_model?.trim() || null
   const executionRuntimeOutcome = execution?.runtime_outcome?.trim() || null
   const sandboxRoot = execution?.sandbox_root?.trim() || null
   const latestTerminalCode = trust?.latest_terminal_reason?.code?.trim() || null
@@ -1200,9 +1200,9 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     || typeof requestedToolCount === 'number'
     || typeof toolsUsedCount === 'number'
     || typeof unexpectedToolCount === 'number'
-    || typeof providerAttempts === 'number'
-    || providerFallback === true
-    || Boolean(providerSelectedModel)
+    || typeof runtimeAttemptCount === 'number'
+    || runtimeFailoverApplied === true
+    || Boolean(runtimeSelectedLane)
     || Boolean(executionRuntimeOutcome)
     || Boolean(sandboxRoot)
     || trustHasPendingFirstEvidence(trust?.approval_state ?? null)
@@ -1286,12 +1286,12 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ${typeof toolsUsedCount === 'number' || typeof requestedToolCount === 'number' || typeof unexpectedToolCount === 'number' ? html`
               <span>도구 카운트 ${toolsUsedCount ?? '-'}/${requestedToolCount ?? '-'}${typeof unexpectedToolCount === 'number' ? ` · 외부 ${unexpectedToolCount}` : ''}</span>
             ` : null}
-            ${typeof providerAttempts === 'number' || providerFallback === true || providerSelectedModel ? html`
+            ${typeof runtimeAttemptCount === 'number' || runtimeFailoverApplied === true || runtimeSelectedLane ? html`
               <span>
-                provider
-                ${typeof providerAttempts === 'number' ? ` ${providerAttempts}회` : ''}
-                ${providerFallback === true ? ' fallback' : ''}
-                ${providerSelectedModel ? ` ${providerSelectedModel}` : ''}
+                runtime
+                ${typeof runtimeAttemptCount === 'number' ? ` ${runtimeAttemptCount}회` : ''}
+                ${runtimeFailoverApplied === true ? ' failover' : ''}
+                ${runtimeSelectedLane ? ` ${runtimeSelectedLane}` : ''}
               </span>
             ` : null}
             ${executionRuntimeOutcome ? html`

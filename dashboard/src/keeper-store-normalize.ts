@@ -169,12 +169,10 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   return 'offline'
 }
 
-// Closed set of strings that `keeperDisplayStatus` is allowed to emit
-// when an offline keeper is rendered. The first 8 are dashboard-classified
-// labels; the last 5 are backend FSM phase names that leak through
-// untranslated. Kept as a `const` set so adding a new value at the
-// `KeeperLifecycleState` union type forces a parallel update here
-// (and forces tsc to fail at consumers if drift occurs).
+// Closed set of display strings that `keeperDisplayStatus` may emit
+// when an offline keeper is rendered. Kept as a `const` set so adding
+// a new value at the `KeeperLifecycleState` union type forces a
+// parallel update here.
 const KEEPER_LIFECYCLE_STATES: ReadonlySet<KeeperLifecycleState> = new Set<KeeperLifecycleState>([
   'active', 'compacting', 'preparing', 'handoff-imminent',
   'idle', 'offline', 'unbooted', 'stopped',
@@ -200,13 +198,8 @@ export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   // (Offline/Stopped/Dead/Crashed/Zombie) so a keeper crashed mid-tick
   // is caught even when its wire-format status hasn't transitioned yet.
   if (isKeeperOffline(keeper)) {
-    // Replaces an `as KeeperLifecycleState` cast that lied to the type
-    // system when `keeperDisplayStatus` returned a backend FSM name
-    // (`'paused'` / `'crashed'` / `'dead'` / `'zombie'` / `'unknown'`)
-    // outside the original 8-tag union. The union has now been widened
-    // to include those 5 names; `toKeeperLifecycleState` enforces the
-    // boundary at runtime so a future drift surfaces as `'idle'`
-    // instead of a silent type-system lie.
+    // Keep offline-detail labels on a typed display axis. Unknown future
+    // wire values fall back to idle instead of silently expanding UI state.
     return toKeeperLifecycleState(keeperDisplayStatus(keeper)) ?? 'idle'
   }
 

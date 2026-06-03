@@ -81,6 +81,44 @@ let ingest_turn_event
    with exn ->
      Printf.eprintf "Ide_bridge.ingest_turn_event error: %s\n%!" (Printexc.to_string exn))
 
+(** Extract tool event parameters from raw hook data and ingest.
+    This is the function called from [keeper_run_tools_hooks.on_tool_executed].
+    Separated for direct testability. *)
+let ingest_tool_event_from_hook
+    ~base_path
+    ~tool_name
+    ~keeper_id
+    ~turn_id
+    ~outcome
+    ~typed_outcome_str
+    ~duration_ms
+    ~output_text
+    ~(input : Yojson.Safe.t)
+  =
+  let file_path =
+    match Yojson.Safe.Util.member "path" input with
+    | `String p -> Some p
+    | _ ->
+      match Yojson.Safe.Util.member "file_path" input with
+      | `String p -> Some p
+      | _ -> None
+  in
+  let summary =
+    if String.length output_text > 200 then String.sub output_text 0 200
+    else output_text
+  in
+  ingest_tool_event
+    ~base_path
+    ~tool_name
+    ~keeper_id
+    ~turn_id
+    ~outcome
+    ~typed_outcome:typed_outcome_str
+    ~latency_ms:(int_of_float duration_ms)
+    ~summary
+    ~file_path
+    ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+
 let parse_pr_url_from_output (output : string) : (int * string) option =
   let prefix = "https://github.com/" in
   let prefix_len = String.length prefix in

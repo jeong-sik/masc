@@ -193,7 +193,6 @@ type t =
   | PassiveLoopStreak
   | RequiredToolLoopDetectedTotal
   | ZombieLoopDetectedTotal
-  | RequiredToolGateSuppressedTotal
   | ConsecutiveIdle
   | LastProductiveTs
   | ProviderTimeoutStrike

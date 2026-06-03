@@ -186,28 +186,10 @@ let turn_affordance_to_string = function
   | Task_audit -> "task_audit"
   | Task_verify -> "task_verify"
 
-let should_tool_gate_affordance = function
-  | Task_claim -> false
-  | Board_curation
-  | Board_post_or_comment
-  | Message_sweep
-  | Task_audit
-  | Task_verify -> true
-
-let turn_affordances_require_tool_gate turn_affordances =
-  List.exists
-    (function
-      | Some affordance -> should_tool_gate_affordance affordance
-      | None -> false)
-    (List.map turn_affordance_of_string turn_affordances)
-
-(* Affordance -> minimum viable tools that can satisfy that affordance.
-   The list is intentionally narrow ("at least one of these is enough").
-   Keepers without any matching tool cannot advance that actionable gate and
-   must be allowed to respond with text instead. [Task_claim] is advisory:
-   visible claimable backlog is an intake opportunity, not proof that this
-   keeper must take new work before responding to stronger live signals. *)
-let tools_for_gated_affordance = function
+(* Affordance -> tools worth keeping visible for that affordance.
+   This is an advisory surface-shaping hint only. It must not force
+   tool_choice, required-tool completion policy, or text rejection. *)
+let tools_for_affordance = function
   | Board_curation ->
     [ "keeper_board_curation_submit" ]
   | Board_post_or_comment ->
@@ -237,7 +219,7 @@ let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_n
   |> List.concat_map (fun aff ->
     match turn_affordance_of_string aff with
     | Some affordance ->
-      tools_for_gated_affordance affordance
+      tools_for_affordance affordance
       |> List.filter (fun n -> String_set.mem (canonicalize n) allowed_set)
     | None -> [])
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
@@ -263,87 +245,6 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
        )
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
-let tool_name_can_satisfy_actionable_gate ~(claim_context_allowed : bool) name =
-  let is_operator_cleanup_completion_tool name =
-    match
-      name
-      |> Keeper_tool_resolution.canonical_tool_name
-      |> Keeper_tool_name.of_string
-    with
-    | Some Keeper_tool_name.Task_force_done
-    | Some Keeper_tool_name.Task_force_release -> true
-    | _ -> false
-  in
-  if claim_context_allowed
-  then
-    Keeper_tool_progress.is_claim_context_tool_name name
-    || (Keeper_tool_progress.tool_name_can_satisfy_required_contract name
-        && (not (Keeper_tool_progress.is_completion_tool_name name)
-            || is_operator_cleanup_completion_tool name))
-  else
-    (not (Keeper_tool_progress.is_claim_context_tool_name name))
-    && Keeper_tool_progress.is_owned_task_progress_tool_name name
-
-(* Filtered variant of [turn_affordances_require_tool_gate]:  a gated
-   affordance only counts when the keeper actually has a tool that can
-   satisfy it.  Without this filter, narrow tool_access lists (which
-   excludes claim/execution tools) get [Require_tool_use] forced on
-   them whenever the board lists unclaimed tasks, leading to repeated
-   [Failure_run_error] turns the keeper cannot resolve. *)
-let turn_affordances_require_tool_gate_with_allowed
-    ?(record_suppression_metric = false)
-    ~(claim_context_allowed : bool)
-    ~(allowed_tool_names : string list) turn_affordances : bool =
-  let has_matching_tool affordance =
-    List.exists
-      (fun tool ->
-         List.mem tool allowed_tool_names
-         && tool_name_can_satisfy_actionable_gate ~claim_context_allowed tool)
-      (tools_for_gated_affordance affordance)
-  in
-  let gated_affordances =
-    turn_affordances
-    |> List.filter_map turn_affordance_of_string
-    |> List.filter should_tool_gate_affordance
-  in
-  let gate_requested = List.exists has_matching_tool gated_affordances in
-  if record_suppression_metric && not gate_requested then
-    List.iter
-      (fun affordance ->
-         if not (has_matching_tool affordance) then
-           Prometheus.inc_counter
-             Keeper_metrics.(to_string RequiredToolGateSuppressedTotal)
-             ~labels:[ ("affordance", turn_affordance_to_string affordance) ]
-             ())
-      gated_affordances;
-  gate_requested
-
-let tool_names_for_actionable_gate_surface ~(tool_gate_requested : bool)
-    (tool_names : string list) : string list =
-  let is_stay_silent name =
-    String.equal (Keeper_tool_resolution.canonical_tool_name name) "keeper_stay_silent"
-  in
-  if not tool_gate_requested then tool_names
-  else
-    let actionable =
-      tool_names
-      |> List.filter (fun name ->
-        Keeper_tool_progress.tool_name_can_satisfy_required_contract name
-        && not (is_stay_silent name))
-      |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-    in
-    match actionable with
-    | [] -> tool_names
-    | _ :: _ -> actionable
-
-let should_require_tools_for_initial_turn ~(max_turns : int)
-    ~(turn_affordances : string list) =
-  let initial_per_call_turn = 1 in
-  let initial_turn_is_last = initial_per_call_turn >= max_turns in
-  max_turns > 1
-  && not initial_turn_is_last
-  && turn_affordances_require_tool_gate turn_affordances
-
 let has_turn_affordance expected turn_affordances =
   List.exists
     (fun affordance ->
@@ -353,128 +254,6 @@ let has_turn_affordance expected turn_affordances =
     turn_affordances
 
 let has_task_claim_affordance = has_turn_affordance Task_claim
-
-let actionable_gate_tool_names
-    ~(claim_context_allowed : bool)
-    ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
-  let is_stay_silent name =
-    String.equal
-      (Keeper_tool_resolution.canonical_tool_name name)
-      "keeper_stay_silent"
-  in
-  let can_recommend_tool name =
-    List.mem name allowed_tool_names
-    && tool_name_can_satisfy_actionable_gate ~claim_context_allowed name
-    && not (is_stay_silent name)
-  in
-  let recommended =
-    preferred_tool_names_for_turn_affordances turn_affordances
-    |> List.filter can_recommend_tool
-    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-  in
-  match recommended with
-  | _ :: _ -> recommended
-  | [] ->
-    turn_affordances
-    |> List.filter_map turn_affordance_of_string
-    |> List.concat_map tools_for_gated_affordance
-    |> List.filter can_recommend_tool
-    |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
-
-let preferred_tool_choice_for_actionable_gate
-    ~(claim_context_allowed : bool)
-    ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
-  let progress_tool_available name =
-    List.mem name allowed_tool_names
-    && tool_name_can_satisfy_actionable_gate ~claim_context_allowed name
-  in
-  let actionable_tool_names =
-    actionable_gate_tool_names
-      ~claim_context_allowed
-      ~turn_affordances
-      ~allowed_tool_names
-  in
-  let exact_tool_choice_if_public = function
-    | [ name ] ->
-      (match Keeper_tool_descriptor.find_public name with
-       | Some _descriptor -> Some (Agent_sdk.Types.Tool name)
-       | None -> None)
-    | [] | _ :: _ :: _ -> None
-  in
-  if has_turn_affordance Board_curation turn_affordances
-     && List.exists
-          progress_tool_available
-          [ "keeper_board_curation_submit" ]
-  then
-    Agent_sdk.Types.Any
-  else if has_task_claim_affordance turn_affordances
-          && progress_tool_available "keeper_task_claim"
-  then
-    Agent_sdk.Types.Any
-  else if has_turn_affordance Board_post_or_comment turn_affordances
-          && List.exists
-               progress_tool_available
-               [ "keeper_board_comment"; "keeper_board_post"; "masc_broadcast" ]
-  then Agent_sdk.Types.Any
-  else if has_turn_affordance Task_audit turn_affordances
-          && progress_tool_available "keeper_task_force_release"
-  then
-    (* The audit tool can discover work that must be resolved by
-       [keeper_task_force_release].  Exact-forcing another audit call after
-       discovery traps keepers in "audit and narrate" loops, so keep the
-       turn tool-required but let the model choose the cleanup tool once it
-       has the task id. *)
-    Agent_sdk.Types.Any
-  else if has_turn_affordance Task_audit turn_affordances
-          && List.mem "keeper_tasks_audit" allowed_tool_names
-  then Agent_sdk.Types.Tool "keeper_tasks_audit"
-  else if has_turn_affordance Task_verify turn_affordances
-          && progress_tool_available "masc_transition"
-  then Agent_sdk.Types.Any
-  else if has_turn_affordance Task_verify turn_affordances
-          && progress_tool_available "keeper_task_submit_for_verification"
-  then Agent_sdk.Types.Any
-  else if has_turn_affordance Task_verify turn_affordances
-          && progress_tool_available "keeper_task_done"
-  then Agent_sdk.Types.Any
-  else if actionable_tool_names = [] then
-    Agent_sdk.Types.Auto
-  else (
-    match exact_tool_choice_if_public actionable_tool_names with
-    | Some tool_choice -> tool_choice
-    | None -> Agent_sdk.Types.Any)
-
-let actionable_tool_gate_guidance
-    ~(claim_context_allowed : bool)
-    ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
-  let actionable_tools =
-    actionable_gate_tool_names
-      ~claim_context_allowed
-      ~turn_affordances
-      ~allowed_tool_names
-  in
-  let preview =
-    actionable_tools
-    |> List.filteri (fun i _ -> i < 6)
-    |> String.concat ", "
-  in
-  let omitted = List.length actionable_tools - min 6 (List.length actionable_tools) in
-  let suffix = if omitted > 0 then Printf.sprintf " (+%d more)" omitted else "" in
-  if String.equal preview ""
-  then
-    Printf.sprintf
-      "[TOOL BLOCKED] This turn has an actionable runtime signal, but no \
-       currently visible keeper tool can advance it. Do not call passive \
-       reads/status or keeper_stay_silent merely to satisfy the gate. \
-       Emit a concise [STATE] blocker instead."
-  else
-    Printf.sprintf
-      "[ACTIONABLE TOOL] This turn has an actionable runtime signal. Before \
-       answering in natural language, call one of the currently visible keeper \
-       runtime tools. Preferred tools for this signal: %s%s. Passive \
-       reads/status alone do not satisfy this turn."
-      preview
-      suffix
 
 let owned_active_task_id_for_meta =
   Keeper_current_task_reconcile.owned_active_task_id_for_meta

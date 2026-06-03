@@ -148,8 +148,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_capability_axis.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_deterministic_error.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_deterministic_error.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_completion_contract.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_completion_contract.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_descriptor_resolution.ml` - tool-surface-policy

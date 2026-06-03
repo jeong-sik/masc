@@ -204,7 +204,7 @@ let ensure_flusher_actor store =
                 match exn with
                 | Invalid_argument msg when String.equal msg "Switch finished!" ->
                     Board_metrics_hooks.inc_dispatch_flusher_start_outcome
-                      ~outcome:"switch_finished";
+                      ~outcome:Switch_finished;
                     Log.BoardLog.warn
                       "Skipping board flusher actor startup on finished switch"
                 | _ -> raise exn
@@ -215,7 +215,7 @@ let ensure_flusher_actor store =
               loop (attempts_left - 1)
             end else begin
               Board_metrics_hooks.inc_dispatch_flusher_start_outcome
-                ~outcome:"cas_exhausted";
+                ~outcome:Cas_exhausted;
               Log.BoardLog.warn
                 "Board flusher actor startup CAS contention exhausted; retrying on next backend access"
             end

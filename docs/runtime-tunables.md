@@ -138,7 +138,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_BOOTSTRAP_MAX_SCAN` | typed:int | unclassified | unclassified | 28 | Max keeper meta files to scan during bootstrap |
 | `MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC` | typed:float | unclassified | unclassified | 70 | Settle delay (seconds) between lazy-startup completion and the keeper bootstrap fan-out. The autoboot fiber sleeps fo... |
 | `MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC` | typed:float | unclassified | unclassified | 24 | Keeper considered stale when last turn exceeds this threshold (seconds) |
-| `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | Timeouts | operator | 510 | Stdout-idle timeout for CLI subprocess transports (Anthropic CLI today; Claude Code / Gemini CLI / Codex CLI need an ... |
+| `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | Timeouts | operator | 510 | Stdout-idle timeout for CLI subprocess transports (Anthropic CLI today; other CLI transports may need an ...
 | `MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 163 | Crash persistence drain fiber wake interval in seconds. Drain fiber batches in-memory crash events and persists them ... |
 | `MASC_KEEPER_DEBUG` | feature_flag | n/a | n/a | 182 | Enable keeper debug logging. Default: false. |
 | `MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD` | typed:float | unclassified | unclassified | 188 | Daily budget for keeper deliberation (USD). Default: 0.10. Re-readable within the process. Live operator control shou... |

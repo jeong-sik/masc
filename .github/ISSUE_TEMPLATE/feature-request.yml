@@ -8,7 +8,7 @@ body:
     attributes:
       value: |
         Use this for net-new capability work.
-        Human reporters, Codex, and internal agents may all file this form.
+        Human reporters and internal agents may all file this form.
         Choose one planning area and one target lane below.
         Automation mirrors those choices into labels and keeps `triage-required`
         on the issue until it has exactly one `type:*`, one `area:*`, and one `target:*` label.

@@ -354,6 +354,15 @@ let make_hooks
               (String.concat "," reasons)
               raw_input_tok raw_output_tok
               (context_max_of_telemetry response.telemetry));
+        (* Provider label for per-provider/model counters.
+           Resolved once from telemetry; falls back to the
+           redacted runtime_lane_label when unavailable. *)
+        let provider_label =
+          match response.telemetry with
+          | Some { provider_kind = Some pk; _ } ->
+            Llm_provider.Provider_kind.to_string pk
+          | _ -> runtime_lane_label
+        in
         (* Cache-token tracking uses OAS-reported counters only. *)
         (match response.usage with
          | Some u when usage_trusted ->
@@ -363,11 +372,31 @@ let make_hooks
              Prometheus.inc_counter
                Prometheus.metric_provider_prefix_cache_creation_tokens
                ~delta:(Float.of_int cc) ();
-           if cr > 0 then
+           if cr > 0 then begin
              Prometheus.inc_counter
                Prometheus.metric_provider_prefix_cache_read_tokens
-               ~delta:(Float.of_int cr) ()
+               ~delta:(Float.of_int cr) ();
+             (* Per-provider/model cache-read counter for Prometheus
+                dashboards.  The legacy unlabelled counter above
+                remains for backward compatibility. *)
+             Prometheus.inc_counter
+               Prometheus.metric_llm_provider_cache_read_tokens
+               ~labels:[ ("provider", provider_label); ("model", model) ]
+               ~delta:(Float.of_int cr)
+               ()
+           end
          | Some _ | None -> ());
+        (* Per-provider/model reasoning-token counter.  Available via
+           [inference_telemetry.reasoning_tokens] on select providers
+           (Anthropic extended thinking, DeepSeek, etc.). *)
+        (match response.telemetry with
+         | Some { reasoning_tokens = Some rt; _ } when usage_trusted && rt > 0 ->
+           Prometheus.inc_counter
+             Prometheus.metric_llm_provider_reasoning_tokens
+             ~labels:[ ("provider", provider_label); ("model", model) ]
+             ~delta:(Float.of_int rt)
+             ()
+         | _ -> ());
         (* Inference latency histogram for /metrics endpoint.
            Missing telemetry stays a separate counter; zero/negative latency
            increments the zero-latency counter and observes a 1ms floor so the

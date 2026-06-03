@@ -13,7 +13,7 @@ Version: 2.93.0
 
 ## Executive Summary
 
-masc-mcp grew from a multi-agent workspace collaboration MCP server into a 34K-line system with
+masc grew from a multi-agent workspace collaboration MCP server into a 34K-line system with
 85 tool modules, 72 dispatch entries, and 371 MCP tools. A typical MCP server exposes
 5-15 tools. This analysis identifies what is essential, what is experimental residue,
 and proposes a phased reduction plan.

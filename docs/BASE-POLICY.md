@@ -3,7 +3,7 @@
 > **MASC tracking**: goal `goal-janestreet-base-adoption`, task `task-130`
 >
 > This document is the single source of truth for how Jane Street
-> [Base](https://github.com/janestreet/base) is used in `masc-mcp`.
+> [Base](https://github.com/janestreet/base) is used in `masc`.
 > It exists so reviewers can give consistent feedback without relying
 > on ad-hoc PR memory.
 

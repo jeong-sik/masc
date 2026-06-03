@@ -23,10 +23,10 @@ consumer → MASC-MCP (workspace collaboration/orchestration) → OAS (agent run
 ## 문서 역할 (SSOT)
 
 - 이 문서는 **boundary contract SSOT**다.
-- `/home/runner/work/masc-mcp/masc-mcp/docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
-- `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
-- `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md`는 OAS observability producer -> bridge -> durable store -> dashboard consumer chain과 fixed gaps를 기록한다.
-- `/home/runner/work/masc-mcp/masc-mcp/docs/design/oas-masc-state-boundary.md`는 historical audit + migration backlog로 취급한다.
+- `/home/runner/work/masc/masc/docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
+- `/home/runner/work/masc/masc/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
+- `/home/runner/work/masc/masc/docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md`는 OAS observability producer -> bridge -> durable store -> dashboard consumer chain과 fixed gaps를 기록한다.
+- `/home/runner/work/masc/masc/docs/design/oas-masc-state-boundary.md`는 historical audit + migration backlog로 취급한다.
 
 ## 역할 분리
 
@@ -206,7 +206,7 @@ OAS  ──does not know──→ MASC
   from `Runtime_error_classify`; provider/model-shaped helpers stay behind
   lower-level OAS boundary modules instead of the keeper facade.
   The stricter OAS-owned provider/model migration is tracked in
-  <https://github.com/jeong-sik/masc-mcp/issues/15028>.
+  <https://github.com/jeong-sik/masc/issues/15028>.
 
 ## Delivery-Contract Split
 
@@ -332,6 +332,6 @@ Regenerate-before-fix is an anti-pattern: the fingerprint must always describe a
 `oas-drift-check.sh` auto-discovers the OAS checkout in this order:
 
 1. `$AGENT_SDK_LOCAL_REPO` (explicit override)
-2. `<masc-mcp-parent>/oas` (sibling checkout)
+2. `<masc-parent>/oas` (sibling checkout)
 
 Each candidate must be a git checkout at the pinned SHA. If none qualifies, the script falls back to `git fetch` into a temp bare clone from the upstream URL. Network is required only for that fallback.

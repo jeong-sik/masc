@@ -48,7 +48,7 @@ Updated: 2026-03-11
 Dry-run plumbing check:
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 DRY_RUN=1 scripts/harness_keeper_continuity_validation.sh
 ```
 
@@ -57,7 +57,7 @@ DRY_RUN=1 scripts/harness_keeper_continuity_validation.sh
 Real isolated validation:
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 KEEPER_MODELS="default" \
 scripts/harness_keeper_continuity_validation.sh
 ```
@@ -65,7 +65,7 @@ scripts/harness_keeper_continuity_validation.sh
 Use an existing MCP server instead of starting a temp one:
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 START_SERVER=0 \
 MCP_URL="http://127.0.0.1:8935/mcp" \
 KEEPER_MODELS="default" \

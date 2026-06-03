@@ -20,7 +20,7 @@ Execution companion for capsule-only workspace collaboration hardening:
 
 ## Product Promise
 
-`masc-mcp` is a repo-local MCP server for alignment multiple coding agents inside one repository.
+`masc` is a repo-local MCP server for alignment multiple coding agents inside one repository.
 
 Primary user:
 

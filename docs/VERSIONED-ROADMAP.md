@@ -7,14 +7,14 @@ code_refs:
   - CHANGELOG.md
 ---
 
-# masc-mcp Versioned Roadmap — Feature Trains First
+# masc Versioned Roadmap — Feature Trains First
 
 > Last updated: 2026-04-09
 > Baseline: v0.2.0
 
 ## Why This Document Exists
 
-`masc-mcp` has enough internal surface area that "stability work" can easily drift away from a clear release promise.
+`masc` has enough internal surface area that "stability work" can easily drift away from a clear release promise.
 This roadmap keeps release planning anchored to one rule:
 
 **Each minor release must ship a user-visible capability promise.**
@@ -103,7 +103,7 @@ Includes:
 
 - restore required `main` CI to green after the merged `v2.87.0` bump
 - replace top-level `CHANGELOG.md` `TBD` placeholders with actual merged release notes
-- reduce `masc-mcp` worktree count to an operational baseline or explicitly track the remainder
+- reduce `masc` worktree count to an operational baseline or explicitly track the remainder
 
 Stays out:
 

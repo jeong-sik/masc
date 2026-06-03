@@ -212,7 +212,7 @@ Review stale clean worktree candidates first:
 ```bash
 scripts/cleanup-docker-playground-worktrees.sh \
   --root "$MASC_BASE_PATH/.masc/playground/docker" \
-  --repo masc-mcp \
+  --repo masc \
   --days 7
 ```
 
@@ -221,7 +221,7 @@ Apply only after reviewing the `CANDID` lines:
 ```bash
 scripts/cleanup-docker-playground-worktrees.sh \
   --root "$MASC_BASE_PATH/.masc/playground/docker" \
-  --repo masc-mcp \
+  --repo masc \
   --days 7 \
   --apply
 ```
@@ -236,7 +236,7 @@ removed unless the operator explicitly opts in:
 ```bash
 scripts/cleanup-docker-playground-worktrees.sh \
   --root "$MASC_BASE_PATH/.masc/playground/docker" \
-  --repo masc-mcp \
+  --repo masc \
   --days 7 \
   --include-broken
 ```
@@ -253,7 +253,7 @@ scripts/dune-local.sh build <target>
 ```
 
 The wrapper serializes local Dune builds across worktrees. Shared server
-startup (`start-masc-mcp.sh`), local production deploys, and the contract
+startup (`start-masc.sh`), local production deploys, and the contract
 harness bootstrap also route rebuilds through this wrapper. A direct `dune
 build`, `dune test`, `dune exec`, or `dune clean` bypasses that machine-wide
 lock and can recreate host-wide FD pressure or mutate `_build` outside the
@@ -279,7 +279,7 @@ scripts/nofile-status.sh --watch 2 --kill-bare-dune --kill-repo-scans
 ```
 
 The kill flags only target rows already classified by the status script:
-unwrapped Dune bypasses and broad `find`/`bfs` scans over `~/me` or `masc-mcp`.
+unwrapped Dune bypasses and broad `find`/`bfs` scans over `~/me` or `masc`.
 Wrapped `scripts/dune-local.sh` builds remain visible but are not terminated.
 
 `orphaned dune-local lock waiters` should also be `none`. A PPID 1 `lockf` or

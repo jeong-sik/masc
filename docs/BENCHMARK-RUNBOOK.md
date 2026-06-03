@@ -75,7 +75,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 
 ## Repo Synthesis Phase 1
 
-Phase 1 corpus는 `masc-mcp` 단일 repo다.
+Phase 1 corpus는 `masc` 단일 repo다.
 
 - front door:
   - none; benchmark inputs are read from command-plane truth surfaces and artifacts
@@ -291,7 +291,7 @@ dune runtest test/test_tool_call_quality_benchmark.ml
   observation 1 회.
 - `masc_oas_make_tool_bundle_sec` — sum/count, 매 keeper turn 1 회.
 
-masc-mcp 의 `Prometheus.observe_histogram` 은 sum + `_count` 만 저장하므로
+masc 의 `Prometheus.observe_histogram` 은 sum + `_count` 만 저장하므로
 *평균(avg = sum/count)* 까지가 in-tree 측정 한계다. p50/p95/p99 quantile 이
 필요하면 외부 Prometheus scraper + `histogram_quantile()` 또는 별도 raw-sample
 경로가 필요하다 (현재 Phase B 범위 밖).

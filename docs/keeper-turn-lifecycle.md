@@ -326,5 +326,5 @@ MASC sits in a different product category from general-purpose agent SDKs. Keepi
 - `lib/keeper/keeper_contract_classifier.ml` — typed contract status (#11172)
 - `lib/auth_resolve.ml` — typed token resolution (#11161)
 - `bin/masc_trace.ml` — turn timeline CLI (#11168)
-- `planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-hashed-pretzel.md`
+- `planning/claude-plans/me-workspace-yousleepwhen-masc-hashed-pretzel.md`
   — Phase 1-4 of the bloodflow restoration plan

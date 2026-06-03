@@ -77,6 +77,9 @@ let get_mono_clock_opt () =
 let set_switch sw =
   Atomic.set current_sw (Some sw)
 
+let get_root_switch_opt () =
+  Atomic.get current_sw
+
 let set_env env =
   Atomic.set current_env (Some env)
 

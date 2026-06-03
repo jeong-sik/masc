@@ -52,7 +52,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
       ~max_suggestions:5
   in
   let alt_str = match alternatives with
-    | [] -> "keeper_tool_search, keeper_board_post, or stay_silent"
+    | [] -> "keeper_tool_search or keeper_stay_silent"
     | alts -> String.concat ", " alts
   in
   if consecutive_idle_turns >= skip_at then

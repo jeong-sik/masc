@@ -53,6 +53,21 @@ val agent_speak :
   unit ->
   (Yojson.Safe.t, string) result
 
+val enqueue_agent_speak :
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  net:_ Eio.Net.t ->
+  agent_id:string ->
+  message:string ->
+  ?provider:string ->
+  ?priority:int ->
+  unit ->
+  (Yojson.Safe.t, string) result
+(** Queue speech for serialized background playback. The caller gets a
+    [status="queued"] result immediately; a single worker drains queued
+    speech by priority and FIFO sequence so multiple keepers do not overlap
+    local playback. *)
+
 val get_agent_voice :
   agent_id:string -> (Yojson.Safe.t, string) result
 

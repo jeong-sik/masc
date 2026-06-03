@@ -246,6 +246,11 @@ let test_risk_medium_keeper_task_create () =
   Alcotest.(check string) "keeper_task_create is medium"
     "medium" (Gp.risk_level_to_string risk)
 
+let test_risk_low_keeper_memory_write () =
+  let risk = Gp.assess_risk ~tool_name:"keeper_memory_write" ~input:no_args in
+  Alcotest.(check string) "keeper_memory_write is low"
+    "low" (Gp.risk_level_to_string risk)
+
 let test_risk_medium_transition_start () =
   let risk =
     Gp.assess_risk ~tool_name:generic_transition_tool ~input:transition_start_input
@@ -932,6 +937,8 @@ let () =
         test_risk_critical_tool_execute_default;
       Alcotest.test_case "medium: keeper task create" `Quick
         test_risk_medium_keeper_task_create;
+      Alcotest.test_case "low: keeper memory write" `Quick
+        test_risk_low_keeper_memory_write;
       Alcotest.test_case "payload: rm -rf is critical" `Quick
         test_risk_payload_destructive_rm_rf;
       Alcotest.test_case "payload: $(date) is medium not critical" `Quick

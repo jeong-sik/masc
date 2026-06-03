@@ -655,6 +655,149 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) () 
     else try_endpoints [] endpoints)
 ;;
 
+type queued_agent_speak_job =
+  { job_id : string
+  ; agent_id : string
+  ; message : string
+  ; provider : string option
+  ; priority : int
+  ; submitted_at : float
+  ; sequence : int
+  }
+
+let speak_queue_mu = Stdlib.Mutex.create ()
+let speak_queue : queued_agent_speak_job list ref = ref []
+let speak_worker_running = ref false
+let speak_next_sequence = Atomic.make 0
+
+let job_precedes a b =
+  if a.priority <> b.priority
+  then a.priority > b.priority
+  else a.sequence < b.sequence
+
+let insert_speak_job job queue =
+  let rec loop acc = function
+    | [] -> List.rev (job :: acc)
+    | head :: rest when job_precedes job head ->
+      List.rev_append acc (job :: head :: rest)
+    | head :: rest -> loop (head :: acc) rest
+  in
+  loop [] queue
+
+let message_preview message =
+  String.sub message 0 (min 80 (String.length message))
+
+let dequeue_speak_job () =
+  Stdlib.Mutex.protect speak_queue_mu (fun () ->
+    match !speak_queue with
+    | [] ->
+      speak_worker_running := false;
+      None
+    | job :: rest ->
+      speak_queue := rest;
+      Some job)
+
+let queue_size () =
+  Stdlib.Mutex.protect speak_queue_mu (fun () -> List.length !speak_queue)
+
+let rec drain_agent_speak_queue ~sw ~clock ~net () =
+  match dequeue_speak_job () with
+  | None -> ()
+  | Some job ->
+    (try
+       match
+         agent_speak
+           ~sw
+           ~clock
+           ~net
+           ~agent_id:job.agent_id
+           ~message:job.message
+           ?provider:job.provider
+           ~priority:job.priority
+           ()
+       with
+       | Ok _ ->
+         Log.Transport.info
+           "voice_queue completed job=%s agent=%s remaining=%d"
+           job.job_id
+           job.agent_id
+           (queue_size ())
+       | Error err ->
+         Log.Transport.error
+           "voice_queue failed job=%s agent=%s error=%s"
+           job.job_id
+           job.agent_id
+           err
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Transport.error
+         "voice_queue exception job=%s agent=%s exn=%s"
+         job.job_id
+         job.agent_id
+         (Printexc.to_string exn));
+    drain_agent_speak_queue ~sw ~clock ~net ()
+
+let enqueue_agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) () =
+  let message = String.trim message in
+  if message = ""
+  then Error "message is required. Good: message='Hello team.'. Bad: message=''."
+  else (
+    let sequence = Atomic.fetch_and_add speak_next_sequence 1 in
+    let submitted_at = Time_compat.now () in
+    let job_id =
+      Printf.sprintf
+        "voice-%s-%d"
+        (safe_agent_id agent_id)
+        sequence
+    in
+    let job =
+      { job_id
+      ; agent_id
+      ; message
+      ; provider =
+          (provider
+           |> Option.map String.trim
+           |> function
+           | Some value when value <> "" -> Some value
+           | _ -> None)
+      ; priority = max 1 priority
+      ; submitted_at
+      ; sequence
+      }
+    in
+    let should_start, queue_position, queue_size =
+      Stdlib.Mutex.protect speak_queue_mu (fun () ->
+        speak_queue := insert_speak_job job !speak_queue;
+        let rec position index = function
+          | [] -> index
+          | queued :: _
+            when queued.sequence = sequence && String.equal queued.job_id job_id -> index
+          | _ :: rest -> position (index + 1) rest
+        in
+        let queue_position = position 1 !speak_queue in
+        let queue_size = List.length !speak_queue in
+        let should_start = not !speak_worker_running in
+        if should_start then speak_worker_running := true;
+        should_start, queue_position, queue_size)
+    in
+    if should_start
+    then Eio.Fiber.fork ~sw (fun () -> drain_agent_speak_queue ~sw ~clock ~net ());
+    Ok
+      (`Assoc
+          [ "status", `String "queued"
+          ; "job_id", `String job_id
+          ; "agent_id", `String agent_id
+          ; "voice", `String (get_voice_for_agent agent_id)
+          ; "queue_position", `Int queue_position
+          ; "queue_size", `Int queue_size
+          ; "priority", `Int job.priority
+          ; "submitted_at", `Float submitted_at
+          ; "execution", `String "background_voice_queue"
+          ; "message_preview", `String (message_preview message)
+          ]))
+;;
+
 (** List active voice sessions *)
 let list_voice_sessions ~sw ~clock ~net =
   if not (is_voice_server_available ~sw ~clock ~net)

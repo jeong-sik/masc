@@ -30,9 +30,9 @@
 \*   floor_fired             | fallback-floor conditional fires (sets tool_surface_fallback_used = true)          | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
 \*   after_floor             | all_allowed after the fallback floor                                               | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
 \*   after_last_turn_safe    | Intersect_with safe_last_turn_tools (when is_last_turn)                            | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
-\*   after_passive           | provider required-tool satisfaction does not filter passive tools                  | lib/keeper/keeper_tool_progress.ml:required_tool_satisfaction
+\*   after_passive           | progress classification remains separate from surface construction                | lib/keeper/keeper_tool_progress.ml:classify_tool_progress
 \*   emitted                 | all_allowed final return — max_tools truncation (essential / non_essential split)  | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
-\*   required                | outstanding_required_tool_names (post-satisfaction required set)                   | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
+\*   required                | outstanding_required_tool_names carried through surface construction               | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
 \*
 \* Provider opacity (G3 acceptance gate):
 \*   The Tools universe is an abstract set of atoms ("t1", "t2", …) only.
@@ -74,7 +74,7 @@ VARIABLES
     after_floor,            \* SUBSET Tools — after the floor stage
     after_last_turn_safe,   \* SUBSET Tools — after the last-turn-safe intersect
     is_last_turn,           \* BOOLEAN — whether the last-turn-safe stage runs
-    after_passive,          \* SUBSET Tools — after provider required-tool satisfaction
+    after_passive,          \* SUBSET Tools — after progress classification
     emitted,                \* SUBSET Tools — final pipeline output (after truncation)
     step                    \* action count
 
@@ -172,8 +172,8 @@ ComputePipeline ==
        \*   - the validate_allow_list gate + merged-tools step in
        \*     compute_tool_surface ensures required
        \*     (post validate_allow_list) is in pre_floor.
-\*   - the Keeper_tool_progress.required_tool_satisfaction boundary
-       \*     (from compute_tool_surface) does not drop required-affordanced tools.
+       \*   - the Keeper_tool_progress.classify_tool_progress boundary
+       \*     remains observational and does not drop required-affordanced tools.
        \*   - the safe_last_turn_tools construction in compute_tool_surface
        \*     includes required-affordanced tools when is_last_turn fires.
        /\ r_aff \subseteq p

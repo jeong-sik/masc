@@ -169,7 +169,7 @@ let test_gate_decision_vocabulary () =
     (KG.gate_decision_is_rejection KG.Gate_override);
   check bool "continue does not reject" false
     (KG.gate_decision_is_rejection KG.Gate_continue);
-  check bool "approval rejects" true
+  check bool "approval waits without rejection" false
     (KG.gate_decision_is_rejection KG.Gate_approval_required)
 
 let test_gate_rejection_log_severity_splits_repeats () =

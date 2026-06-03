@@ -2,7 +2,7 @@
 
     Split into multiple layers:
     - [Keeper_tool_registry]: declarative tool name lists (data)
-    - [Keeper_tool_policy]: access control, tool_access, allowed-tool resolution (logic)
+    - [Keeper_tool_policy]: descriptor/registry surface + denylist resolution (logic)
     - [Keeper_tool_*_runtime]: dedicated runtime modules for tool categories
     - This module: execution dispatch + shared helpers (side-effects) *)
 
@@ -370,10 +370,11 @@ let execute_keeper_tool_call_with_outcome
                "'%s' is blocked by your current policy. Ask operator to grant access."
                name )
          else
-           ( "not_in_allow_set"
+           ( "not_executable"
            , Printf.sprintf
-               "'%s' exists but your tool_access list does not allow it. Use keeper_tools_list to \
-                see available tools."
+               "'%s' exists but is not executable in this keeper runtime. Use \
+                keeper_tool_search to find an active tool or ask the operator \
+                to inspect the descriptor/denylist state."
                name )
        in
        Prometheus.inc_counter
@@ -413,13 +414,26 @@ let execute_keeper_tool_call_with_outcome
            ; mcp_session_id
            }
        in
-       match Keeper_tool_runtime.handle_internal keeper_tool_runtime_context ~name ~args with
+       let descriptor_output =
+         match
+           Keeper_tool_descriptor_resolution.descriptor_and_input_for_tool_call
+             ~tool_name:name
+             ~input:args
+         with
+         | Some (descriptor, translated_args) ->
+           Keeper_tool_runtime.handle
+             keeper_tool_runtime_context
+             ~descriptor
+             ~args:translated_args
+         | None -> Keeper_tool_runtime.handle_internal keeper_tool_runtime_context ~name ~args
+       in
+       match descriptor_output with
        | Some raw_output -> make_executed_tool_result raw_output
        | None ->
-       (* Descriptor-backed dispatch did not recognize this name. Check
-          registered backend tools before returning a suggestion-enriched
-          unknown-tool error. *)
-       let unknown_name = name in
+         (* Descriptor-backed dispatch did not recognize this name. Check
+            registered backend tools before returning a suggestion-enriched
+            unknown-tool error. *)
+         let unknown_name = name in
          (match
             Keeper_tool_registered_runtime.handle_registered_tool
               ~config

@@ -81,7 +81,11 @@ let with_exec_fixture ?tool_access name fn =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Masc_mcp.Workspace.default_config dir in
       let meta = make_meta ?tool_access () in
-      fn ~config ~meta ~ctx_work:(make_ctx ()))
+      ignore (Masc_mcp.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      Fun.protect
+        ~finally:(fun () ->
+          Masc_mcp.Keeper_registry.unregister ~base_path:config.base_path meta.name)
+        (fun () -> fn ~config ~meta ~ctx_work:(make_ctx ())))
 
 let payload_kind = function
   | KET.Structured_success -> "structured_success"
@@ -161,25 +165,29 @@ let test_malformed_json_like_payload_detected () =
       (Printf.sprintf "expected malformed_structured, got %s"
          (payload_kind other))
 
-let test_execute_with_outcome_policy_gate_is_failure () =
+let test_registered_descriptor_bypasses_tool_access_allowlist () =
   with_exec_fixture
     ~tool_access:([ "keeper_tools_list" ])
-    "keeper_tool_dispatch_runtime_policy_gate"
+    "keeper_tool_dispatch_runtime_descriptor_bypass"
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"tool_read_file"
-          ~input:(`Assoc [ ("path", `String "blocked.txt") ])
+          ~name:"Read"
+          ~input:(`Assoc [ ("file_path", `String "blocked.txt") ])
           ()
       in
-      check string "policy gate outcome" "failure"
+      check string "runtime outcome" "failure"
         (match result.outcome with `Success -> "success" | `Failure -> "failure");
-      check string "policy gate payload shape" "structured_error"
+      check string "runtime payload shape" "structured_error"
         (payload_kind result.payload_shape);
       let json = Yojson.Safe.from_string result.raw_output in
-      check string "policy gate error" "tool_not_allowed"
-        Yojson.Safe.Util.(member "error" json |> to_string))
+      check bool "did not stop at tool_access allowlist gate" false
+        Yojson.Safe.Util.(member "error" json |> to_string = "tool_not_allowed");
+      check bool "reached file runtime" true
+        (contains_substring
+           Yojson.Safe.Util.(member "error" json |> to_string)
+           "File not found"))
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
   Masc_mcp.Prometheus.metric_value_or_zero
@@ -188,12 +196,13 @@ let counter_for_tool_not_allowed ~keeper ~tool ~reason =
     ()
 
 (* #13xxx: tool_not_allowed Prometheus counter *)
-let test_tool_not_allowed_increments_counter () =
-  (* A keeper with only keeper_tools_list allowed tries to call
-     tool_read_file — should land in reason=not_in_allow_set. *)
+let test_tool_not_allowed_increments_counter_for_unknown_tool () =
+  (* Unknown names are still rejected by the descriptor/registry existence
+     gate. Registered tools are not rejected merely because tool_access is
+     narrow or empty. *)
   let keeper = "test-exec-tools-not-allowed-a" in
-  let tool = "tool_read_file" in
-  let reason = "not_in_allow_set" in
+  let tool = "keeper_not_a_real_tool" in
+  let reason = "not_in_candidate_set" in
   with_exec_fixture
     ~tool_access:([ "keeper_tools_list" ])
     "keeper_tool_dispatch_runtime_not_allowed_counter"
@@ -205,9 +214,9 @@ let test_tool_not_allowed_increments_counter () =
            ~meta:{ meta with name = keeper }
            ~ctx_work ~exec_cache:None
            ~name:tool
-           ~input:(`Assoc [ ("path", `String "blocked.txt") ])
+           ~input:(`Assoc [])
            ());
-      check (float 0.0001) "not_in_allow_set counter +1"
+      check (float 0.0001) "not_in_candidate_set counter +1"
         (before +. 1.0)
         (counter_for_tool_not_allowed ~keeper ~tool ~reason))
 
@@ -268,19 +277,18 @@ let test_tool_not_allowed_reason_label_is_bounded () =
   (* Verify that the reason label written into the JSON payload is one
      of the three bounded vocabulary values, not a free-form string. *)
   with_exec_fixture
-    ~tool_access:([ "keeper_tools_list" ])
     "keeper_tool_dispatch_runtime_reason_bounded"
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"tool_read_file"
-          ~input:(`Assoc [ ("path", `String "x") ])
+          ~name:"keeper_not_a_real_tool"
+          ~input:(`Assoc [])
           ()
       in
       let json = Yojson.Safe.from_string result.raw_output in
       let reason = Yojson.Safe.Util.(member "reason" json |> to_string) in
-      let valid = [ "not_in_candidate_set"; "denied_by_policy"; "not_in_allow_set" ] in
+      let valid = [ "not_in_candidate_set"; "denied_by_policy"; "not_executable" ] in
       check bool "reason label is bounded vocabulary"
         true (List.mem reason valid))
 
@@ -325,14 +333,28 @@ let test_execute_with_outcome_missing_file_is_failure () =
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"tool_read_file"
-          ~input:(`Assoc [ ("path", `String "missing.txt") ])
+          ~name:"Read"
+          ~input:(`Assoc [ ("file_path", `String "missing.txt") ])
           ()
       in
       check string "missing file outcome" "failure"
         (match result.outcome with `Success -> "success" | `Failure -> "failure");
       check string "missing file payload shape" "structured_error"
-        (payload_kind result.payload_shape))
+        (payload_kind result.payload_shape);
+      let json = Yojson.Safe.from_string result.raw_output in
+      let path_resolution = Yojson.Safe.Util.member "path_resolution" json in
+      check bool "same path retry marked as futile" true
+        Yojson.Safe.Util.(member "same_path_retry_will_fail" path_resolution |> to_bool);
+      check bool "retry policy discourages same Read" true
+        (contains_substring
+           Yojson.Safe.Util.(member "retry_policy" path_resolution |> to_string)
+           "Do not retry Read");
+      check string "grep recovery example" "Grep"
+        Yojson.Safe.Util.(
+          member "recovery_examples" path_resolution
+          |> member "grep_filename"
+          |> member "tool"
+          |> to_string))
 
 let test_execute_with_outcome_bad_query_is_failure () =
   with_exec_fixture "keeper_tool_dispatch_runtime_bad_query"
@@ -565,8 +587,8 @@ let () =
         test_malformed_json_like_payload_detected;
     ]);
     ("execute_keeper_tool_call_with_outcome", [
-      test_case "policy gate is failure" `Quick
-        test_execute_with_outcome_policy_gate_is_failure;
+      test_case "registered descriptor bypasses tool_access allowlist" `Quick
+        test_registered_descriptor_bypasses_tool_access_allowlist;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick
@@ -585,8 +607,8 @@ let () =
         test_registered_dispatch_preserves_workflow_failure_class;
     ]);
     ("tool_not_allowed_counter", [
-      test_case "increments for not_in_allow_set" `Quick
-        test_tool_not_allowed_increments_counter;
+      test_case "increments for not_in_candidate_set" `Quick
+        test_tool_not_allowed_increments_counter_for_unknown_tool;
       test_case "increments for denied_by_policy" `Quick
         test_tool_not_allowed_denied_by_policy_counter;
       test_case "reason label is bounded vocabulary" `Quick

@@ -10,7 +10,6 @@ type selector =
   | Empty
   | All
   | Names of string list
-  | Surface of Tool_catalog.surface
   | Union of selector list
   | Inter of selector list
   | Diff of { base : selector; exclude : selector }

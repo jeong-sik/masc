@@ -64,13 +64,13 @@ let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
 ;;
 
 let default_tool_access_of_meta_json () =
-  (* Full Keeper_internal surface: keepers without explicit tool_access get the
-     complete tool set so runtime filtering can find providers with required tools
-     like masc_transition. Write-intent restrictions are handled by task contract
-     gating, not by default tool access exclusion.
+  (* The Agent_internal surface was empty (agent_internal_surface_tools = []),
+     so the default tool_access for keepers without an explicit list has always
+     been the empty list; runtime filtering supplies the actual tool set.
+     Surface deleted in the surface-cut refactor.
      See fleet deadlock Layer 2 analysis (2026-05-30) + runtime provider
      gap analysis (2026-05-30). *)
-  normalize_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Agent_internal)
+  normalize_tool_names []
 ;;
 
 (** Parse [tool_access] from persisted meta JSON.

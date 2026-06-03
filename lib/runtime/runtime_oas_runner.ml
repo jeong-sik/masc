@@ -71,23 +71,19 @@ let keeper_agent_name_opt (keeper_name : string) =
 
 let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool.t list) =
   let agent_name = keeper_agent_name_opt keeper_name in
+  (* The Agent_internal surface was empty, so the runtime tool set is exactly
+     the public MCP tools and [allow_agent_internal] is always [false].
+     Surface deleted in the surface-cut refactor. *)
   let runtime_tool_names =
     tools
     |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
-      Tool_catalog.is_public_mcp tool.schema.name
-      || (Option.is_some agent_name
-          && Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool.schema.name))
+      Tool_catalog.is_public_mcp tool.schema.name)
     |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
-  in
-  let has_agent_internal =
-    List.exists
-      (Tool_catalog.is_on_surface Tool_catalog.Agent_internal)
-      runtime_tool_names
   in
   match
     ( Runtime_agent.runtime_mcp_policy_of_tool_names
         ?agent_name
-        ~allow_agent_internal:has_agent_internal
+        ~allow_agent_internal:false
         runtime_tool_names
     , agent_name )
   with
@@ -100,14 +96,12 @@ let agent_internal_tool_names_for_runtime_surface
       ~(keeper_name : string)
       (tools : Agent_sdk.Tool.t list)
   =
-  match keeper_agent_name_opt keeper_name with
-  | None -> []
-  | Some _ ->
-    tools
-    |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
-      Tool_catalog.is_on_surface Tool_catalog.Agent_internal tool.schema.name)
-    |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
-    |> List.sort_uniq String.compare
+  (* The Agent_internal surface was empty (agent_internal_surface_tools = []),
+     so no tool was ever a member.  Surface deleted in the surface-cut
+     refactor; this always returns []. *)
+  ignore keeper_name;
+  ignore tools;
+  []
 
 let agent_internal_tools_require_materialized_runtime_surface
       ~(keeper_name : string)

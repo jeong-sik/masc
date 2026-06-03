@@ -624,12 +624,10 @@ let tool_search_aliases name =
   | None -> []
 
 let tool_index_entry ~name ~description : Agent_sdk.Tool_index.entry =
-  let group =
-    Tool_catalog.tool_group name
-    |> Option.map Tool_catalog.tool_group_to_string
-  in
+  (* The typed [tool_group] display classifier was deleted in the surface-cut
+     refactor; tool-index entries are ungrouped. *)
   let aliases = tool_search_aliases name in
-  Agent_sdk.Tool_index.{ name; description; group; aliases }
+  Agent_sdk.Tool_index.{ name; description; group = None; aliases }
 
 let tool_index_entry_of_tool (t : Agent_sdk.Tool.t) : Agent_sdk.Tool_index.entry =
   tool_index_entry ~name:t.schema.name ~description:t.schema.description

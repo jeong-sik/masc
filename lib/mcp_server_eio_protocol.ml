@@ -26,18 +26,7 @@ let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
 
 let unavailable_tool_message name =
-  if Tool_catalog.is_on_surface Tool_catalog.Agent_internal name
-  then (
-    let replacement_hint =
-      match (Tool_catalog.metadata name).Tool_catalog.replacement with
-      | Some replacement -> Printf.sprintf " Try `%s` instead." replacement
-      | None -> ""
-    in
-    Printf.sprintf
-      "Tool '%s' is agent-internal and unavailable on this MCP endpoint.%s"
-      name
-      replacement_hint)
-  else Printf.sprintf "Tool '%s' is not available on this MCP endpoint." name
+  Printf.sprintf "Tool '%s' is not available on this MCP endpoint." name
 ;;
 
 (** {1 Resource Subscriptions} *)
@@ -251,17 +240,11 @@ let handle_list_tools_eio
       | Some wanted ->
         List.filter (fun (schema : Masc_domain.tool_schema) ->
           List.mem schema.name wanted))
+    (* The Agent_internal surface was empty, so the former agent-internal-first
+       ranking applied to no schema; the order reduces to name comparison.
+       Surface deleted in the surface-cut refactor. *)
     |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
-      let rank (schema : Masc_domain.tool_schema) =
-        if
-          include_agent_internal
-          && Tool_catalog.is_on_surface Tool_catalog.Agent_internal schema.name
-        then 0
-        else 1
-      in
-      match Int.compare (rank a) (rank b) with
-      | 0 -> String.compare a.name b.name
-      | order -> order)
+      String.compare a.name b.name)
   in
   (match agent_id with
    | Some aid ->

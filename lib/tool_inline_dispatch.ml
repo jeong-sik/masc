@@ -57,12 +57,10 @@ type context = Tool_inline_dispatch_types.context = {
 
 let tool_index_entry_of_schema (schema : Masc_domain.tool_schema)
   : Agent_sdk.Tool_index.entry =
-  let group =
-    Tool_catalog.tool_group schema.name
-    |> Option.map Tool_catalog.tool_group_to_string
-  in
+  (* The typed [tool_group] display classifier was deleted in the surface-cut
+     refactor; tool-index entries are ungrouped. *)
   Agent_sdk.Tool_index.
-    { name = schema.name; description = schema.description; group; aliases = [] }
+    { name = schema.name; description = schema.description; group = None; aliases = [] }
 
 let discover_tool_matches ~(query : string) ~(limit : int)
     (schemas : Masc_domain.tool_schema list) =

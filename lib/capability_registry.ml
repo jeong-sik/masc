@@ -156,13 +156,13 @@ let make_seed ?capability_id ?(risk_class = Safe)
   }
 
 let spawned_agent_public_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent
+  Tool_catalog_surfaces.spawned_agent_surface_tools
 
 let spawned_agent_prefixed_tools : string list =
-  prefixed_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent)
+  prefixed_tool_names Tool_catalog_surfaces.spawned_agent_surface_tools
 
 let local_worker_public_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Local_worker
+  Tool_catalog_surfaces.local_worker_surface_tools
 
 let local_worker_internal_schemas : Masc_domain.tool_schema list =
   Keeper_tool_surfaces.local_worker_internal_schemas

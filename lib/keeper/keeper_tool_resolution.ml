@@ -23,11 +23,9 @@ type tried_source =
   | Shard_schema                (** S8: Tool_shard.all_keeper_tool_schemas name extraction *)
   | Descriptor_registry         (** S8.5: Keeper_tool_descriptor.all_descriptors public_name —
                                     flat SSOT incl. internal_descriptors (masc_keeper_* live here) *)
-  | Surface of Tool_catalog_surfaces.surface  (** S9-12: Tool_catalog_surfaces.is_on_surface *)
 
 type resolution =
-  | Resolved of { canonical : string ; via : tried_source ;
-                  surface : Tool_catalog_surfaces.surface option }
+  | Resolved of { canonical : string ; via : tried_source }
   | Alias_to of { from_ : string ; canonical : string ; via : tried_source }
   | Unknown of { name : string ; tried : tried_source list }
 
@@ -46,7 +44,6 @@ let string_of_tried_source = function
   | Registry_core_tools -> "registry_core_tools"
   | Shard_schema -> "shard_schema"
   | Descriptor_registry -> "descriptor_registry"
-  | Surface s -> Printf.sprintf "surface:%s" (Tool_catalog_surfaces.surface_to_string s)
 
 let string_of_tried sources =
   String.concat ", " (List.map string_of_tried_source sources)
@@ -57,9 +54,9 @@ let resolve name =
   let normalized = Keeper_tool_alias.strip_mcp_masc_prefix name in
   (* Collect sources in short-circuit order; return on first hit. *)
   if Tool_dispatch.is_registered normalized then
-    Resolved { canonical = normalized; via = Dispatch_table; surface = None }
+    Resolved { canonical = normalized; via = Dispatch_table }
   else if Option.is_some (Tool_name.of_string normalized) then
-    Resolved { canonical = normalized; via = Tool_name_variant; surface = None }
+    Resolved { canonical = normalized; via = Tool_name_variant }
   else
     match Keeper_tool_descriptor.find_public normalized with
     | Some descriptor ->
@@ -70,7 +67,7 @@ let resolve name =
           }
     | None ->
         if Keeper_tool_alias.is_known_internal normalized then
-          Resolved { canonical = normalized; via = Alias_internal; surface = None }
+          Resolved { canonical = normalized; via = Alias_internal }
         else begin
           match Keeper_tool_alias.public_masc_to_internal normalized with
           | Some internal ->
@@ -80,14 +77,14 @@ let resolve name =
               if List.mem normalized Keeper_tool_registry.keeper_internal_candidate_tool_names
               then
                 Resolved
-                  { canonical = normalized; via = Registry_internal_candidate; surface = None }
+                  { canonical = normalized; via = Registry_internal_candidate }
               else if List.mem normalized (Keeper_tool_registry.effective_core_tools ())
               then
                 Resolved
-                  { canonical = normalized; via = Registry_core_tools; surface = None }
+                  { canonical = normalized; via = Registry_core_tools }
               else if
                 List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas)
-              then Resolved { canonical = normalized; via = Shard_schema; surface = None }
+              then Resolved { canonical = normalized; via = Shard_schema }
               else if
                 List.exists
                   (fun (d : Keeper_tool_descriptor.t) ->
@@ -102,46 +99,27 @@ let resolve name =
                    source restores admission without touching dispatch — resolve
                    is a validity gate; [via] is only used for the error string. *)
                 Resolved
-                  { canonical = normalized; via = Descriptor_registry; surface = None }
-              else begin
-                (* RFC-0084 §1.3 — surface coverage gate. *)
-                let surfaces_to_check =
-                  [ Tool_catalog_surfaces.Public_mcp
-                  ; Tool_catalog_surfaces.Spawned_agent
-                  ; Tool_catalog_surfaces.Local_worker
-                  ; Tool_catalog_surfaces.Session_min
-                  ; Tool_catalog_surfaces.Admin
-                  ; Tool_catalog_surfaces.Agent_internal
-                  ; Tool_catalog_surfaces.System_internal
-                  ]
-                in
-                let rec check_surfaces = function
-                  | [] ->
-                      let tried =
-                        [ Dispatch_table
-                        ; Tool_name_variant
-                        ; Public_descriptor
-                        ; Alias_internal
-                        ; Alias_masc_to_internal
-                        ; Registry_internal_candidate
-                        ; Registry_core_tools
-                        ; Shard_schema
-                        ; Descriptor_registry
-                        ]
-                        @ List.map (fun s -> Surface s) surfaces_to_check
-                      in
-                      Unknown { name; tried }
-                  | surface :: rest ->
-                      if Tool_catalog_surfaces.is_on_surface surface normalized then
-                        Resolved
-                          { canonical = normalized
-                          ; via = Surface surface
-                          ; surface = Some surface
-                          }
-                      else check_surfaces rest
-                in
-                check_surfaces surfaces_to_check
-              end
+                  { canonical = normalized; via = Descriptor_registry }
+              else
+                (* The per-actor surface coverage gate (RFC-0084 §1.3) was
+                   removed in the surface-cut refactor: the [surface] type and
+                   its lists are deleted, and keeper tools resolve through the
+                   flat Descriptor_registry source above. A name that reaches
+                   here is admitted by no source — Unknown. *)
+                Unknown
+                  { name
+                  ; tried =
+                      [ Dispatch_table
+                      ; Tool_name_variant
+                      ; Public_descriptor
+                      ; Alias_internal
+                      ; Alias_masc_to_internal
+                      ; Registry_internal_candidate
+                      ; Registry_core_tools
+                      ; Shard_schema
+                      ; Descriptor_registry
+                      ]
+                  }
         end
 
 (* ── Phase 5: full-probe (no short-circuit) ────────────────────────── *)
@@ -175,21 +153,8 @@ let all_admitting_sources name =
         String.equal d.Keeper_tool_descriptor.public_name normalized)
       (Keeper_tool_descriptor.all_descriptors ())
   then sources := Descriptor_registry :: !sources;
-  (* RFC-0084 §1.3 — admit-only surfaces. *)
-  let surfaces_to_check =
-    [ Tool_catalog_surfaces.Public_mcp
-    ; Tool_catalog_surfaces.Spawned_agent
-    ; Tool_catalog_surfaces.Local_worker
-    ; Tool_catalog_surfaces.Session_min
-    ; Tool_catalog_surfaces.Admin
-    ; Tool_catalog_surfaces.Agent_internal
-    ; Tool_catalog_surfaces.System_internal
-    ]
-  in
-  List.iter (fun surface ->
-    if Tool_catalog_surfaces.is_on_surface surface normalized then
-      sources := Surface surface :: !sources
-  ) surfaces_to_check;
+  (* The per-actor surface admit sources (RFC-0084 §1.3) were removed in the
+     surface-cut refactor — the [surface] type is deleted. *)
   List.rev !sources
 ;;
 

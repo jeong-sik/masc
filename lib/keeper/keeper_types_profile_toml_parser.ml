@@ -182,6 +182,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         social_model = normalize_social_model_opt (str "social_model");
         oas_env = extract_oas_env_from_doc doc;
         unknown_toml_keys = [];
+        persona_ref = str "persona_ref";
+        runtime_ref = str "runtime_ref";
       })
     result
 
@@ -219,6 +221,8 @@ let parsed_field_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
+  ; "persona_ref"
+  ; "runtime_ref"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -261,6 +265,8 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
+  ; "persona_ref"
+  ; "runtime_ref"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]
@@ -411,4 +417,6 @@ let merge_keeper_profile_defaults
        surviving_base @ overlay.oas_env);
     unknown_toml_keys =
       merge_string_list ~base:base.unknown_toml_keys overlay.unknown_toml_keys;
+    persona_ref = prefer overlay.persona_ref base.persona_ref;
+    runtime_ref = prefer overlay.runtime_ref base.runtime_ref;
   }

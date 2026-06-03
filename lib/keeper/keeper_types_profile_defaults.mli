@@ -41,6 +41,11 @@ type keeper_profile_defaults = {
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;
   oas_env : (string * string) list;
+  (* Referential separation fields for persona/runtime externalization.
+     When set, the keeper defers to the referenced persona/runtime file
+     instead of inline fields. *)
+  persona_ref : string option;
+  runtime_ref : string option;
   unknown_toml_keys : string list;
 }
 

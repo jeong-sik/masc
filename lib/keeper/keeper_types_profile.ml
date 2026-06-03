@@ -266,6 +266,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 oas_env = [];
                 (* Persona JSON has no [keeper] TOML; nothing to flag. *)
                 unknown_toml_keys = [];
+                persona_ref = Safe_ops.json_string_opt "persona_ref" keeper_json;
+                runtime_ref = Safe_ops.json_string_opt "runtime_ref" keeper_json;
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

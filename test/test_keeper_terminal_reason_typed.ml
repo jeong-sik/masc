@@ -115,6 +115,54 @@ let () =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* 1b. is_completion_contract_violation: contract errors return true,  *)
+(*     all other error families return false. #19930                    *)
+(* ------------------------------------------------------------------ *)
+
+module EC = Masc.Keeper_error_classify
+
+let () =
+  (* Contract violation → true *)
+  check "contract violation: CompletionContractViolation"
+    (EC.is_completion_contract_violation
+       (Agent_sdk.Error.Agent
+          (Agent_sdk.Error.CompletionContractViolation
+             { contract = Agent_sdk.Completion_contract_id.Require_tool_use
+             ; reason = "test"
+             ; violation_detail = None
+             })));
+  (* Non-contract errors → false *)
+  check "non-contract: provider timeout"
+    (not (EC.is_completion_contract_violation
+            (Agent_sdk.Error.Api
+               (Llm_provider.Retry.Timeout
+                  { message = "timeout" }))));
+  check "non-contract: rate limited"
+    (not (EC.is_completion_contract_violation
+            (Agent_sdk.Error.Api
+               (Llm_provider.Retry.RateLimited
+                  { message = "rate limited"; retry_after = None }))));
+  check "non-contract: server error"
+    (not (EC.is_completion_contract_violation
+            (Agent_sdk.Error.Api
+               (Llm_provider.Retry.ServerError
+                  { message = "server error"; status = 500 }))));
+  check "non-contract: overloaded"
+    (not (EC.is_completion_contract_violation
+            (Agent_sdk.Error.Api
+               (Llm_provider.Retry.Overloaded
+                  { message = "overloaded" }))));
+  check "non-contract: MaxTurnsExceeded"
+    (not (EC.is_completion_contract_violation
+            (Agent_sdk.Error.Agent
+               (Agent_sdk.Error.MaxTurnsExceeded
+                  { turns = 8; limit = 8 }))));
+  check "non-contract: Internal"
+    (not (EC.is_completion_contract_violation
+            (Agent_sdk.Error.Internal "internal error")));
+;;
+
+(* ------------------------------------------------------------------ *)
 (* 2. (disposition, reason) equivalence vs a frozen copy of the OLD    *)
 (*    substring classifier.                                            *)
 (* ------------------------------------------------------------------ *)

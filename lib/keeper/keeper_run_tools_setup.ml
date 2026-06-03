@@ -483,21 +483,9 @@ let prepare_agent_setup
     validate_allow_list ~turn fallback_floor_tool_names
   in
   let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
-    let caller_requires_tools =
-      (* Enumerate every [tool_choice] variant + [None] so a new constructor
-         added to [Agent_sdk.Types.tool_choice] surfaces a Warning 8 here.
-         [Auto] and [None_] correctly evaluate to [false] (no tool required);
-         the old [_ -> false] catch-all would have absorbed any future variant
-         in the same direction without review. *)
-      match current_tool_choice with
-      | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> true
-      | Some (Agent_sdk.Types.Auto | Agent_sdk.Types.None_)
-      | None ->
-        false
-    in
-    max_turns > 1
-    && (not is_last_turn)
-    && caller_requires_tools
+    ignore current_tool_choice;
+    ignore is_last_turn;
+    false
   in
   let compute_tool_surface
         ~turn

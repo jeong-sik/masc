@@ -449,12 +449,9 @@ let assemble_hooks
                   | other -> other
                 in
                 let tool_choice =
-                  if
-                    (not computed_surface.is_last_turn)
-                    && computed_surface.tool_gate_requested
-                    && turn_visible_tool_names <> []
-                  then current_params.tool_choice
-                  else clear_inherited_strict_tool_choice current_params.tool_choice
+                  (* Tool gates are advisory. Do not preserve strict inherited
+                     [tool_choice=Any/Tool] in the keeper turn path. *)
+                  clear_inherited_strict_tool_choice current_params.tool_choice
                 in
                 let lane = computed_surface.lane in
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names

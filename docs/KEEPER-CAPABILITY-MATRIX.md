@@ -31,7 +31,7 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
 - The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
-- Write-capable tools such as `tool_edit_file` and `tool_write_file` are present in the keeper surface; `tool_access` policy and eval gates decide whether a keeper may execute the mutation.
+- Write-capable tools such as `tool_edit_file` and `tool_write_file` are present in the keeper surface; descriptor visibility, sandbox posture, risk checks, and eval gates decide whether a mutation may execute.
 - `tool_search_files` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`). Typed command execution is model-facing as `Execute`, backed by the `tool_execute` descriptor route.
 
 ## Tool Surface
@@ -94,8 +94,8 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 테스트 실행 | `Execute` with typed argv from the worktree `cwd` |
 | GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
 
-The goal lifecycle surface is configured as the `masc.goal` policy group and is
-routed to keepers with matching `tool_access` lists. Social and
+The goal lifecycle surface is configured as the `masc.goal` policy group and
+exposed through descriptor visibility and keeper policy projection. Social and
 messaging keepers keep board/task workspace collaboration without goal mutation access.
 
 ## Research Profile Additions

@@ -49,7 +49,7 @@ let required_tool_satisfaction call =
 
 ## §2 의도된 결과
 
-1. Keeper turn-level `required_tool_use` contract 가 **multi-turn intent
+1. Keeper turn-level `removed_tool_contract` contract 가 **multi-turn intent
    window** 를 인식해 `board_list` 같은 *읽기 turn* 을 contract violation
    으로 변환하지 않는다.
 2. `runtime.coding_plan` 의 단일-lane 구조 (`tiers =
@@ -83,7 +83,7 @@ Retired behavior observed in `system_log seq 52304` (2026-05-14):
 
 ```
 INFO  oas:agent  turn completed turn=16
-  stop=error:Completion contract [require_tool_use] violated:
+  stop=error:Completion contract [removed_tool_contract] violated:
   model called [keeper_board_list], but no call satisfied
   (keeper_board_list: read-only/passive cannot satisfy)
 ```
@@ -217,7 +217,7 @@ Schema 변경 없음. RFC-0086 의 keeper namespace bulk promotion 흐름
 - #15113 — runtime SPOF → Phase 2 로 직접 해소
 - #15171 — post-claim OAS turn stall → Phase 1 로 직접 해소
 - #15526 — runtime exhausted after health/cooldown → Phase 2 + 3 trigger 정렬로 해소
-- #15542 — `require_tool_use` violated → Phase 1 로 직접 해소
+- #15542 — `removed_tool_contract` violated → Phase 1 로 직접 해소
 
 ## §8 Non-goal
 

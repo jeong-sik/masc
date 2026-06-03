@@ -86,7 +86,7 @@ type policy =
   ; (* NEW *)
     audience             : audience_class
     (* Tool-access grant required to expose this tool. *)
-  ; required_tool_access : string option
+  ; required_tool_policy_legacy : string option
     (* Whether this tool may execute on the final turn before turn cap.
        Currently a hand-curated list; will be derived from
        (readonly_hint = Some true && effect_domain = None). *)
@@ -105,7 +105,7 @@ and audience_class =
   | Audience_admin_only
 ```
 
-`audience_class` and `required_tool_access` are *new* descriptor fields, not derived. The other three (`last_turn_safe`, `inline_safe`, `maintenance_only`) are bridges: introduced as explicit fields in P1, then narrowed in P3 to be *derived* from other fields where possible.
+`audience_class` and `required_tool_policy_legacy` are *new* descriptor fields, not derived. The other three (`last_turn_safe`, `inline_safe`, `maintenance_only`) are bridges: introduced as explicit fields in P1, then narrowed in P3 to be *derived* from other fields where possible.
 
 ## 5. Implementation phases
 

@@ -133,11 +133,11 @@ describe('buildFleetRows sort order', () => {
         trust: {
           needs_attention: true,
           latest_terminal_reason: {
-            code: 'required_tool_use_unsatisfied',
+            code: 'unmapped_runtime_state',
             severity: 'bad',
-            summary: 'required keeper tool use was not satisfied',
+            summary: 'runtime state needs operator review',
           },
-          latest_next_action: 'inspect_provider_tool_contract',
+          latest_next_action: 'inspect_runtime_state',
         },
       },
       {
@@ -160,8 +160,8 @@ describe('buildFleetRows sort order', () => {
     expect(rows.map(row => row.name)).toEqual(['trust-blocked', 'healthy-busy'])
     expect(rows[0]).toMatchObject({
       runtime_trust_attention: true,
-      terminal_reason_code: 'required_tool_use_unsatisfied',
-      runtime_trust_next_action: 'inspect_provider_tool_contract',
+      terminal_reason_code: 'unmapped_runtime_state',
+      runtime_trust_next_action: 'inspect_runtime_state',
     })
   })
 })

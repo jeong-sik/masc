@@ -255,9 +255,9 @@
             <td>Config migration is sharp. During audit this blocker appeared, then config was repaired to `runtime_id`.</td>
           </tr>
           <tr>
-            <td>`lib/keeper/keeper_meta_tool_access.ml:80-96` and `lib/keeper/keeper_meta_json_parse.ml:164-172`</td>
-            <td>Persisted meta JSON must include `tool_access` as an array.</td>
-            <td>Meta files without `tool_access` hard-fail. Tests now cover defaults for fixtures, but production decode still rejects missing field.</td>
+            <td>`lib/keeper/keeper_meta_policy_legacy.ml:80-96` and `lib/keeper/keeper_meta_json_parse.ml:164-172`</td>
+            <td>Persisted meta JSON must include `legacy_tool_policy` as an array.</td>
+            <td>Meta files without `legacy_tool_policy` hard-fail. Tests now cover defaults for fixtures, but production decode still rejects missing field.</td>
           </tr>
           <tr>
             <td>`lib/keeper/keeper_runtime.ml:140-152`, `580-604`</td>
@@ -278,7 +278,7 @@
       <h3>2. Tool Surface Path</h3>
       <p>The intended path is:</p>
       <pre>keeper tool policy / descriptor catalog
-  -> Keeper_tool_policy.keeper_allowed_tool_names
+  -> Keeper_tool_policy.keeper_visible_tool_names
   -> Keeper_run_tools_setup.compute_tool_surface
   -> Keeper_run_tools_hooks.set_turn_context + tool_disclosure
   -> Agent/OAS materialized runtime tools
@@ -291,7 +291,7 @@
           <tr>
             <td>`lib/keeper/keeper_tool_policy.ml:385-399`</td>
             <td>Computes allowed tool names from keeper meta and policy.</td>
-            <td>Depends on meta/tool_access being readable and current.</td>
+            <td>Depends on meta/legacy_tool_policy being readable and current.</td>
           </tr>
           <tr>
             <td>`lib/keeper/keeper_run_tools_setup.ml:698-887`</td>
@@ -445,7 +445,7 @@
 	          <tr>
 	            <td>Regression guard</td>
 	            <td><span class="badge good">added</span></td>
-	            <td>`test_keeper_effective_meta_overlay` proves raw runtime JSON with local defaults is overlaid by TOML `sandbox_profile=docker`, Docker default network `none`, and TOML `tool_access` before status surfaces read it.</td>
+	            <td>`test_keeper_effective_meta_overlay` proves raw runtime JSON with local defaults is overlaid by TOML `sandbox_profile=docker`, Docker default network `none`, and TOML `legacy_tool_policy` before status surfaces read it.</td>
 	            <td>Focused Dune build/test must stay green for `test_keeper_effective_meta_overlay` and affected library modules.</td>
 	          </tr>
 	          <tr>

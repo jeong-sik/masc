@@ -1,7 +1,6 @@
-(** test_persona_tool_reachability — tool_access group reachability.
+(** test_persona_tool_reachability — tool policy group reachability.
 
-    Locks the reusable tool groups that keepers can reference from explicit
-    [tool_access] lists. *)
+    Locks the reusable tool groups used by keeper policy projection. *)
 
 open Masc
 
@@ -86,7 +85,7 @@ let test_repo_capability_groups_include_expected_tools () =
 let () =
   Alcotest.run "persona_tool_reachability"
     [
-      ( "tool_access_groups",
+      ( "tool_policy_groups",
         [
           Alcotest.test_case "repo capability groups present" `Quick
             test_repo_capability_groups_present;

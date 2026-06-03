@@ -140,7 +140,7 @@ no string classifiers, no N-of-M, no cap/cooldown.
 
 | Site | Field shape | Count of caller in main | Maps to variant |
 |------|-------------|-------------------------|-----------------|
-| `lib/keeper/keeper_cdal_contract.ml:21` | `kind: "keeper_turn_capture_v1"` + 10 fields (keeper_name, agent_name, sandbox_profile, sandbox_image, network_mode, tool_access, tool_denylist, allowed_paths, active_goal_ids, current_task_id_at_start) | 1 (all keeper turn captures) | `Keeper_turn_capture_v1` |
+| `lib/keeper/keeper_cdal_contract.ml:21` | `kind: "keeper_turn_capture_v1"` + 10 fields (keeper_name, agent_name, sandbox_profile, sandbox_image, network_mode, legacy_tool_policy, tool_denylist, allowed_paths, active_goal_ids, current_task_id_at_start) | 1 (all keeper turn captures) | `Keeper_turn_capture_v1` |
 | `lib/masc_contract_catalog.ml:64` | `contract_name`, `description`, `invariants[]` | 3 specs (runtime_critical, keeper_lifecycle, dashboard_telemetry) via `to_risk_contract` | `Contract_catalog_invariants` |
 | `lib/jsonl_writer/jsonl_writer_contract_fixture.ml:88` | same as catalog | 0 (orphan — no caller reads it) | typed via `of_yojson` auto-route; emit-side stays raw JSON to preserve `jsonl_writer` leaf-lib boundary |
 
@@ -157,8 +157,8 @@ bundle audit) currently rely on — every keeper site would fall into
 (** Tool access JSON projection. Kept as JSON because [cdal_runtime]
     intentionally does not depend on [Keeper_types] (independence
     constraint from RFC-OAS-011). Consumers needing structured tool
-    access call [Keeper_types.tool_access_of_meta_json]. *)
-type tool_access_json = Yojson.Safe.t
+    access call [Keeper_types.legacy_tool_policy_of_meta_json]. *)
+type tool_policy_json = Yojson.Safe.t
 
 type goal_ref = {
   goal_id : string;
@@ -172,7 +172,7 @@ type t =
       sandbox_profile : string;
       sandbox_image : string option;
       network_mode : string;
-      tool_access : tool_access_json;
+      legacy_tool_policy : tool_policy_json;
       tool_denylist : string list;
       allowed_paths : string list;
       active_goal_ids : string list;

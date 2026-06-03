@@ -73,7 +73,7 @@ OAS  ──does not know──→ MASC
   OAS-owned runtime data, not MASC product data.
 - 따라서 checked-in repo defaults는 review-stable pinning이 중요할 때 explicit `provider:model_id`를 쓰고, adapter default 자체를 계약으로 삼을 때만 `provider:auto`를 쓴다.
 - legacy `allowed_providers` keeper TOML/meta fields는 더 이상 허용하지 않으며 load/parse boundary에서 reject한다.
-- persisted legacy keeper meta tool-policy fields are scrubbed into canonical `tool_access` on read; direct `meta_of_json` callers must use canonical keeper meta keys.
+- persisted legacy keeper meta tool-policy fields are scrubbed/rejected at the boundary; direct `meta_of_json` callers must use current keeper meta keys.
 
 ## Current Integration Status
 

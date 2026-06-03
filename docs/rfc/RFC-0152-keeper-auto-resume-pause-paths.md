@@ -116,7 +116,7 @@ sweep은 `runtime health probe ≠ Unhealthy`를 검사. 본 RFC는 이 gate를 
 
 - S1/S2 (operator manual): 변경 없음. 의도적 pause는 manual unpause 유지.
 - Stale storm S7: 정책 유지 (의도적 manual).
-- albini case의 `completion_contract_violation`: 별개 영역 (runtime contract layer). runtime가 mention-only keeper(albini)에 `require_tool_use`를 강제하는 mismatch — 본 RFC 범위 외, 별도 RFC 필요.
+- albini case의 `completion_contract_violation`: 별개 영역 (runtime contract layer). runtime가 mention-only keeper(albini)에 `removed_tool_contract`를 강제하는 mismatch — 본 RFC 범위 외, 별도 RFC 필요.
 
 ## 8. Phase
 

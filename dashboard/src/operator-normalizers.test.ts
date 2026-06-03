@@ -267,10 +267,10 @@ describe('normalizeOperatorSnapshot', () => {
               provider_selected_model: 'provider:runtime-lane',
             },
             latest_terminal_reason: {
-              code: 'required_tool_use_unsatisfied',
+              code: 'unmapped_runtime_state',
               severity: 'bad',
-              summary: 'required keeper tool use was not satisfied',
-              next_action: 'inspect_provider_tool_contract',
+              summary: 'runtime state needs operator review',
+              next_action: 'inspect_runtime_state',
             },
           },
         },
@@ -286,7 +286,7 @@ describe('normalizeOperatorSnapshot', () => {
         provider_selected_model: 'provider:runtime-lane',
       },
       latest_terminal_reason: {
-        code: 'required_tool_use_unsatisfied',
+        code: 'unmapped_runtime_state',
         severity: 'bad',
       },
     })
@@ -516,14 +516,14 @@ describe('normalizeOperatorSnapshot', () => {
           status: 'paused',
           needs_attention: true,
           attention_reason: 'tool_route_recoverable_failure',
-          next_human_action: 'inspect_provider_tool_contract',
+          next_human_action: 'inspect_runtime_state',
         },
       ],
     })
     const k = result.keepers[0]
     expect(k?.needs_attention).toBe(true)
     expect(k?.attention_reason).toBe('tool_route_recoverable_failure')
-    expect(k?.next_human_action).toBe('inspect_provider_tool_contract')
+    expect(k?.next_human_action).toBe('inspect_runtime_state')
   })
 
   it('defaults top-level attention fields to null when absent', () => {

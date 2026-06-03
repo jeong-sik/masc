@@ -37,7 +37,7 @@ Phase 1 estimate: 4 modules without telemetry. Confirmed: **all 4** silent.
 | Subject | Test file | Style | LOC |
 |---|---|---|---|
 | `keeper_routine_allowlist` | `test/test_keeper_routine_allowlist.ml` | Alcotest unit | 338 |
-| `tool_access_role` | `test/test_tool_access_policy.ml` | Alcotest unit | 844 |
+| `retired_tool_role` | `test/test_legacy_tool_policy_policy.ml` | Alcotest unit | 844 |
 
 Both files exist; coverage is comprehensive (claim/start/done/heartbeat actions covered). Style is unit-based, not Quickcheck — Phase 3 may add property generators if drift is observed, but the gap as originally framed (no tests) is closed.
 
@@ -121,4 +121,4 @@ This is the second auth-domain Phase 2 produced under the codified 4-phase patte
 - PR #12193 — 4-phase audit pattern (codification)
 - PR #12208 — Dashboard observability Phase 2 (sibling pattern instance)
 - `lib/server/server_auth.ml` — only confirmed C5 anchor
-- `test/test_keeper_routine_allowlist.ml`, `test/test_tool_access_policy.ml` — C3 evidence
+- `test/test_keeper_routine_allowlist.ml`, `test/test_legacy_tool_policy_policy.ml` — C3 evidence

@@ -32,7 +32,7 @@
 - `lib/keeper/keeper_routine_allowlist.{ml,mli}`
 
 **Role (1 pair)**:
-- `lib/tool_access_role.{ml,mli}`
+- `lib/retired_tool_role.{ml,mli}`
 
 **Telemetry baseline**: ~8 `metric_auth_*` Prometheus families found (pending Phase 2 enumeration).
 
@@ -46,7 +46,7 @@ Phase 1 marks these as **candidates**, not certainties. Phase 2 will narrow per-
 |---|---|---|---|
 | C1: Token refresh / rotation without dedicated tests | `auth_login.ml`, `tool_token.ml`, `credential_provider.ml` lifecycle methods | 3 | Medium |
 | C2: Identity resolution without telemetry | `agent_identity`, `keeper_identity`, `workspace_identity`, `build_identity` | 4 | Medium |
-| C3: Allowlist / role semantics without property tests | `keeper_routine_allowlist.ml`, `tool_access_role.ml` | 2 | Medium-High |
+| C3: Allowlist / role semantics without property tests | `keeper_routine_allowlist.ml`, `retired_tool_role.ml` | 2 | Medium-High |
 | C4: Credential storage paths without redaction audit | `credential_provider.ml`, `auth_diagnostic.ml` | 2 | High |
 | C5: Already well-covered (telemetry + guard) | `server_auth.ml`, `auth_strict_mode.ml`, `auth_resolve.ml` | 3 | Low (anchor) |
 

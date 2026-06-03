@@ -76,7 +76,7 @@ Cp_types -> Cp_paths -> Cp_serde -> Cp_io
 type policy_envelope = {
   policy_class : string;       (* strategic | tactical | execution | worker *)
   approval_class : string;     (* strict | guarded *)
-  tool_access : string list;
+  tool_denylist : string list;
   model_allowlist : string list;
   requires_human_for : string list;
   autonomy_level : string;     (* L2..L5 *)

@@ -291,8 +291,7 @@ spawn 시 인자로 직접 설정하는 필드.
   "name": "analyst",
   "goal": "Review incoming issues and prepare safe changes",
   "sandbox_profile": "docker",
-  "network_mode": "none",
-  "tool_access": ["masc_status", "masc_tasks"]
+  "network_mode": "none"
 }
 ```
 
@@ -834,9 +833,9 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 [`docs/KEEPER-FILE-MODEL.md` §2 Keeper Declaration](./KEEPER-FILE-MODEL.md#2-keeper-declaration)을 참조한다. 요약:
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
-- **Overlay fields**: `goal`, `tool_access`, `runtime_id`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용.
-- **Allowed value sets**: `tool_access`는 tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `runtime.toml`에 `<name>_models` 키로 존재해야 함.
-- **Removed / hard-rejected**: `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
+- **Overlay fields**: `goal`, `runtime_id`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용.
+- **Allowed value sets**: `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `runtime.toml`에 `<name>_models` 키로 존재해야 함.
+- **Removed / hard-rejected**: `legacy_tool_policy`, `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 
 Definitive source는 코드의 `canonical_keeper_toml_key_names` (`lib/keeper/keeper_types_profile.ml`)와 `removed_keeper_input_key_names` (`lib/keeper/keeper_config.ml`)다.

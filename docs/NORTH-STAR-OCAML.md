@@ -383,10 +383,10 @@ type keeper_stats = {
 
 ```ocaml
 (* Before — config array that never mutates *)
-let tool_access_profiles = [| "read"; "write"; "execute" |]
+let tool_policy_profiles = [| "read"; "write"; "execute" |]
 
 (* After — OCaml 5.4 *)
-let tool_access_profiles : string Iarray.t =
+let tool_policy_profiles : string Iarray.t =
   Iarray.of_array [| "read"; "write"; "execute" |]
 ```
 

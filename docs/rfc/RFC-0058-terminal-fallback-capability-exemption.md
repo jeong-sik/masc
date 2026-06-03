@@ -40,7 +40,7 @@ From `agent_sdk` `capabilities.ml` and `provider_tool_support.ml:148-164`:
 | `supports_runtime_tool_events` | `false` | No runtime tool event streaming |
 | `supports_runtime_mcp_http_headers` | `false` | No MCP HTTP header passthrough |
 
-Runtime filter behavior (`supports_required_tool_use`, line 160-164):
+Runtime filter behavior (`runtime_mcp_lane_check`, line 160-164):
 
 | Turn requires | Ollama passes? | Expression |
 |---|---|---|
@@ -76,7 +76,7 @@ Conclusion: Ollama works as fallback for ~75% of keeper turns (those needing too
 
 **Rule**: A runtime entry with `fallback_runtime = null` (terminal leaf) is exempt from the monotonicity check on inbound fallback edges.
 
-**Rationale**: Terminal fallbacks represent last-resort degraded operation. The capability degradation from `Tool_strict → Local_inline` is expected and intentional. The runtime filter (`apply_required_tool_use_filter`) will still reject individual turns that require capabilities the terminal provider lacks (e.g., `tool_choice` enforcement), so safety is preserved at the per-request level.
+**Rationale**: Terminal fallbacks represent last-resort degraded operation. The capability degradation from `Tool_strict → Local_inline` is expected and intentional. The runtime filter (`runtime_mcp_lane_check`) will still reject individual turns that require capabilities the terminal provider lacks (e.g., `tool_choice` enforcement), so safety is preserved at the per-request level.
 
 ### 3.2 Code Change: `runtime_config_loader.ml`
 
@@ -203,6 +203,6 @@ retired_tool_profile (tool_strict)
 - `lib/runtime/runtime_config_loader.ml:403-455` (RFC-0055 monotonicity enforcement)
 - `lib/runtime/runtime_tier.ml:15` (`is_subset_profile`)
 - `lib/runtime/runtime_capability_profile.ml` (profile definitions)
-- `lib/provider_tool_support.ml:148-164` (`supports_required_tool_use`)
+- `lib/provider_tool_support.ml:148-164` (`runtime_mcp_lane_check`)
 - `<base-path>/.masc/config/runtime.json` (live SSOT)
 - RFC-0055: GADT phantom-typed runtime tier routing (north star)

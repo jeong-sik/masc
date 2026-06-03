@@ -274,7 +274,7 @@ flowchart TD
 | Phase override | MASC | `Keeper_runtime_routing.select_runtime` |
 | Model label expansion | MASC catalog | `Runtime_runtime.models_of_runtime_id_result` |
 | Provider config parsing/filtering | MASC catalog + OAS provider config type | `resolve_named_providers_strict_with_secondary_resolver` |
-| Tool capability filter | MASC/OAS bridge | `Provider_tool_support.apply_required_tool_use_filter` and `resolve_tool_lane_for_oas_tools` |
+| Tool capability filter | MASC/OAS bridge | `Provider_tool_support.runtime_mcp_lane_check` and `resolve_tool_lane_for_oas_tools` |
 | Provider attempt timeout | MASC | `effective_provider_attempt_timeout_s` |
 | Agent loop and tool execution per attempt | OAS | `Agent.run` -> pipeline |
 | Runtime observation and receipt | MASC | `Runtime_observation.runtime_observation_with_metrics`, `Keeper_execution_receipt` |

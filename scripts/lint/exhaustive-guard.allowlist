@@ -456,8 +456,6 @@ lib/keeper/keeper_meta_contract.ml:285
 lib/keeper/keeper_meta_contract.ml:295
 lib/keeper/keeper_meta_json_parse.ml:508
 lib/keeper/keeper_meta_json.ml:325
-lib/keeper/keeper_meta_tool_access.ml:105
-lib/keeper/keeper_meta_tool_access.ml:145
 lib/keeper/keeper_msg_async.ml:100
 lib/keeper/keeper_msg_async.ml:107
 lib/keeper/keeper_msg_async.ml:113

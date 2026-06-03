@@ -117,7 +117,7 @@ in
 
 Capability 정적 분류 (root of L1):
 - `lib/provider_tool_support.ml:39-69` — `capabilities_of_config` (model-id 미사용, provider-kind 만으로 결정)
-- `lib/provider_tool_support.ml:148-242` — `supports_required_tool_use` 게이트
+- `lib/provider_tool_support.ml:148-242` — `runtime_mcp_lane_check` 게이트
 - ollama → `Llm_provider.Capabilities.ollama_capabilities` 정적 적용 → `supports_inline_tools=false`
 
 ### 2.4 Downstream evidence — 2026-04-28 executor incident

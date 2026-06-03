@@ -467,7 +467,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         runtime_trust: {
           disposition: 'Blocked',
           operator_disposition: 'pause_human',
-          operator_disposition_reason: 'required_tool_use_unsatisfied',
+          operator_disposition_reason: 'unmapped_runtime_state',
           needs_attention: true,
           approval: {
             state: 'ready',
@@ -485,13 +485,13 @@ describe('normalizeKeepers lifecycle metrics', () => {
             provider_selected_model: 'provider:runtime-lane',
           },
           latest_terminal_reason: {
-            code: 'required_tool_use_unsatisfied',
+            code: 'unmapped_runtime_state',
             source: 'execution_receipt',
             severity: 'bad',
-            summary: 'required keeper tool use was not satisfied',
-            next_action: 'inspect_provider_tool_contract',
+            summary: 'runtime state needs operator review',
+            next_action: 'inspect_runtime_state',
           },
-          latest_next_action: 'inspect_provider_tool_contract',
+          latest_next_action: 'inspect_runtime_state',
         },
       },
     ])
@@ -499,7 +499,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.trust).toMatchObject({
       disposition: 'Blocked',
       operator_disposition: 'pause_human',
-      operator_disposition_reason: 'required_tool_use_unsatisfied',
+      operator_disposition_reason: 'unmapped_runtime_state',
       needs_attention: true,
       approval_state: {
         state: 'ready',
@@ -517,11 +517,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
         provider_selected_model: 'provider:runtime-lane',
       },
       latest_terminal_reason: {
-        code: 'required_tool_use_unsatisfied',
+        code: 'unmapped_runtime_state',
         severity: 'bad',
-        next_action: 'inspect_provider_tool_contract',
+        next_action: 'inspect_runtime_state',
       },
-      latest_next_action: 'inspect_provider_tool_contract',
+      latest_next_action: 'inspect_runtime_state',
     })
   })
 

@@ -46,7 +46,7 @@ Concern: *what terminated the turn at the runtime / SDK boundary?*
 ```
 "success" / "external_cancel" / "turn_wall_clock_timeout" /
 "oas_timeout_budget" / "gh_repo_context_missing_worktree" /
-"required_tool_use_no_tool_call" / "required_tool_use_unsatisfied" /
+"removed_tool_contract_no_tool_call" / "removed_tool_contract_unsatisfied" /
 "post_commit_ambiguous" / "provider_error" / "unknown_error" /
 "api_error_*" (substring) / "completion_contract_violation:..." (substring)
 ```
@@ -62,7 +62,7 @@ distinct.
 
 If we tried to merge — i.e., add `Success`, `External_cancel`,
 `Turn_wall_clock_timeout`, `Gh_repo_context_missing_worktree`,
-`Required_tool_use_no_tool_call`, `Required_tool_use_unsatisfied`,
+`Removed_tool_contract_no_tool_call`, `Removed_tool_contract_unsatisfied`,
 `Post_commit_ambiguous`, `Provider_error`, `Unknown_error` to `t` — we
 would conflate two domains:
 
@@ -119,9 +119,9 @@ type t =
   | Gh_repo_context_missing_worktree
       (** GitHub command blocked because the active task has no linked
           worktree. *)
-  | Required_tool_use_no_tool_call
+  | Removed_tool_contract_no_tool_call
       (** Required-tool-use contract: model returned no tool call. *)
-  | Required_tool_use_unsatisfied
+  | Removed_tool_contract_unsatisfied
       (** Required-tool-use contract: tool call did not satisfy the
           contract. *)
   | Post_commit_ambiguous
@@ -164,7 +164,7 @@ val of_termination_code : Keeper_turn_terminal_code.t -> t
     - [Heartbeat_failures]         → [Provider_error _]
     - [Turn_failures]              → [Provider_error _]
     - [Provider_runtime_error _]   → [Provider_error _]
-    - [Tool_required_unsatisfied _] → [Required_tool_use_unsatisfied]
+    - [Tool_required_unsatisfied _] → [Removed_tool_contract_unsatisfied]
     - [Ambiguous_partial_commit_*] → [Post_commit_ambiguous]
     - [Stale_termination_storm]    → [Provider_error _]
     - [Stale_fleet_batch]          → [Provider_error _]
@@ -174,7 +174,7 @@ val of_termination_code : Keeper_turn_terminal_code.t -> t
 
     Note: a runtime cause may map to a *non-Provider_error* operator
     disposition when the runtime classification fully determines the
-    operator action (e.g., [Tool_required_unsatisfied → Required_tool_use_unsatisfied]).
+    operator action (e.g., [Tool_required_unsatisfied → Removed_tool_contract_unsatisfied]).
     Otherwise we wrap with [Provider_error] so the runtime cause is
     preserved for diagnostics. *)
 

@@ -1,7 +1,7 @@
 (** Keeper_runtime_resolved — freeze keeper runtime knobs after bootstrap.
 
     Values resolve with the existing precedence order:
-    environment > keeper_runtime.toml boot override > compiled default.
+    environment > runtime.toml boot override > compiled default.
 
     Before [init] is called, readers see a live snapshot of the current env/boot
     override state. After [init], reads are frozen to the bootstrap snapshot so

@@ -25,7 +25,7 @@ restart**:
 | Asset | File | Restart required? | Validator |
 |-------|------|-------------------|-----------|
 | Keeper persona | `config/keepers/<name>.toml` | Yes (autoboot rescan) | TOML parse + `keeper_meta_json_parse.ml` |
-| Runtime profile | `config/keeper_runtime.toml` | Yes (runtime reload) | `runtime_toml_materializer.ml` |
+| Runtime profile | `config/runtime.toml` | Yes (runtime reload) | `runtime_toml_materializer.ml` |
 | Credential | `config/keepers/<name>.toml` + post-boot issuance | Partial | `credential_provider.ml` |
 
 Operator pain points:
@@ -140,7 +140,7 @@ This surface has the largest risk: runtime routing is hot-path.
 Mitigation:
 
 - `--dry-run` prints the rendered profile + the diff against current
-  `keeper_runtime.toml`.
+  `runtime.toml`.
 - `activate` is gated on a `--confirm` flag for non-`--dry-run`
   invocations; the operator must read the diff before applying.
 - Memory cross-ref: `feedback_keeper_starvation_capacity_vs_turn_duration_mismatch`

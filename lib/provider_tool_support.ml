@@ -88,7 +88,7 @@ let is_cli_agent_provider (_provider_cfg : Llm_provider.Provider_config.t) =
 
     Override semantics: CLI providers (Claude Code, Codex CLI, Gemini CLI,
     Anthropic CLI) do not expose inline function-calling to this gate. Runtime MCP
-    support remains keeper_runtime.toml/OAS-owned because not every CLI can consume
+    support remains runtime.toml/OAS-owned because not every CLI can consume
     request-scoped MCP policy; Gemini CLI is the known false case. *)
 let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
   if is_cli
@@ -97,7 +97,7 @@ let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabiliti
 ;;
 
 (** Resolve OAS-level capabilities for a provider config, then merge
-    declarative keeper_runtime.toml capabilities.  For CLI runtimes, the merge
+    declarative runtime.toml capabilities.  For CLI runtimes, the merge
     is unconditional (runtime MCP lane from tool policy).  For non-CLI
     runtimes, the merge applies when the declarative tool policy declares
     a runtime MCP lane — this ensures [classify_rejection] respects the
@@ -120,7 +120,7 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
     ; supports_runtime_tool_events = runtime_mcp_lane
     }
   else (
-    (* Non-CLI providers: merge declarative keeper_runtime.toml capabilities
+    (* Non-CLI providers: merge declarative runtime.toml capabilities
        so that [classify_rejection] respects the operator's declared
        [supports-runtime-mcp-tools] even when the OAS model-level
        lookup returns a narrower capability set. *)

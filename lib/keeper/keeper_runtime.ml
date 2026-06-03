@@ -606,7 +606,7 @@ let start_supervisor_sweep ctx =
                               (* WORKAROUND-CARRYOVER §Symptom-억제: demote
                                  repeats to DEBUG so the system_log isn't
                                  flooded by invalid TOML drift. Root fix is
-                                 keeper TOML correction + keeper_runtime.toml
+                                 keeper TOML correction + runtime.toml
                                  [keeper_assignable] policy (separate RFC). *)
                               Prometheus.inc_counter
                                 Keeper_metrics.(to_string TomlReconcileDedup)

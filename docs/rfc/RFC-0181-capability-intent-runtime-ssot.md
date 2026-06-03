@@ -15,13 +15,13 @@ related: RFC-0058 (declarative runtime config v2), RFC-0177 (phonebook internal 
 
 runtime routing has two coexisting paths, and *neither alone is the SSOT*:
 
-1. **Legacy `[routes.*]` in `config/keeper_runtime.toml`** — read by `Runtime_routes.runtime_id_for_use`. Every concrete caller today (governance_judge, operator_judge, cross_verifier, verifier, anti_rationalization, verifier_oas, keeper_turn, etc.) resolves through this path. This is what actually decides routing at runtime.
-2. **Phonebook (`runtime_phonebook_*.ml`, `Runtime_routing_policy.default_routing_policies`)** — wired in by RFC Runtime Phonebook Phase 1-4 (#18199, #18218). It receives a `task_use` and resolves to a runtime of typed `Provider_config.t`. The infrastructure exists, but `config/keeper_runtime.toml` does **not** carry the phonebook schema sections (`[providers.*]`, `[models.*]`, `[runtimes.*]` — plural form). Only the test fixture `test/fixtures/runtime-phonebook.toml` is populated.
+1. **Legacy `[routes.*]` in `config/runtime.toml`** — read by `Runtime_routes.runtime_id_for_use`. Every concrete caller today (governance_judge, operator_judge, cross_verifier, verifier, anti_rationalization, verifier_oas, keeper_turn, etc.) resolves through this path. This is what actually decides routing at runtime.
+2. **Phonebook (`runtime_phonebook_*.ml`, `Runtime_routing_policy.default_routing_policies`)** — wired in by RFC Runtime Phonebook Phase 1-4 (#18199, #18218). It receives a `task_use` and resolves to a runtime of typed `Provider_config.t`. The infrastructure exists, but `config/runtime.toml` does **not** carry the phonebook schema sections (`[providers.*]`, `[models.*]`, `[runtimes.*]` — plural form). Only the test fixture `test/fixtures/runtime-phonebook.toml` is populated.
 
 As a result:
 
 - `runtime_models_for_use_via_phonebook` and `runtime_provider_configs_for_use_via_phonebook` return `None` in production today.
-- The intent expressed in `task_use_of_logical_use` (4 judge routes → `Code_review`) is contradicted by `keeper_runtime.toml` (each judge route had its own `target = "runtime.primary"` — fixed in PR #18695 to `runtime.governance`, but the dual-path structure remains).
+- The intent expressed in `task_use_of_logical_use` (4 judge routes → `Code_review`) is contradicted by `runtime.toml` (each judge route had its own `target = "runtime.primary"` — fixed in PR #18695 to `runtime.governance`, but the dual-path structure remains).
 - `default_routing_policies` declares `Code_review → primary_runtime = "cross-verify"`, but no `runtime.cross-verify` exists in any TOML file. Silent dangling reference.
 
 ### Why current state is fragile
@@ -102,7 +102,7 @@ The runtime is then *pure data lookup* — no `[tier.X] members = [...]` strings
 
 The realistic plan is multi-PR. A first cut:
 
-1. **PR-1**: New `[capability.*]` + `[model.*]` + `[intent.*]` sections added to `keeper_runtime.toml`. Old `[tier.*]` / `[runtime.*]` / `[routes.*]` remain. New `Runtime_capability_resolver` module added but not yet wired. Lint/test only.
+1. **PR-1**: New `[capability.*]` + `[model.*]` + `[intent.*]` sections added to `runtime.toml`. Old `[tier.*]` / `[runtime.*]` / `[routes.*]` remain. New `Runtime_capability_resolver` module added but not yet wired. Lint/test only.
 2. **PR-2**: Switch `Runtime_routes.runtime_id_for_use` to query capability resolver. Legacy fallback retained, gated by env var.
 3. **PR-3**: Migrate the 5+ direct call sites (`Runtime_routes.runtime_id_for_use` → typed capability/intent API). Existing callers stop holding strings.
 4. **PR-4**: Drop `[routes.*]` section + legacy resolver code + `Runtime_routing_policy.default_routing_policies "cross-verify"` dangling.
@@ -144,7 +144,7 @@ The §5 5-PR sequence is implemented as a stacked PR chain (each PR base = paren
 ## 8. Evidence
 
 - PR #18695 (fix(runtime): route judge calls to runtime.governance) — immediate symptom mitigation that exposed dual-SSOT structure.
-- `config/keeper_runtime.toml` lines 859-911 (`[routes.*]` section) — legacy resolver input.
+- `config/runtime.toml` lines 859-911 (`[routes.*]` section) — legacy resolver input.
 - `lib/runtime/runtime_routes.ml:313` (`runtime_id_for_use`) — legacy resolver code path.
 - `lib/runtime/runtime_routing_policy.ml:67-70` — dangling `cross-verify` reference.
 - `test/fixtures/runtime-phonebook.toml` — what a populated phonebook actually looks like.

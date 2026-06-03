@@ -288,7 +288,7 @@ let classify_filter_rejection
    providers under a keeper-bound runtime MCP policy), the WARN
    fires once per filtering invocation. Field log: 18 identical
    WARN events / 49 min for a single misconfigured runtime — the
-   genuine signal (operator must edit keeper_runtime.toml) drowns in its
+   genuine signal (operator must edit runtime.toml) drowns in its
    own repeats and shares the WARN level with normal degraded-mode
    noise.
 
@@ -480,7 +480,7 @@ let filter_candidate_providers_for_tool_support
       then
         Log.Misc.error
           "[#11060/#11356] runtime %s: provider-normalized tool-use gate removed all \
-           providers (rejections=[%s]) — operator action: edit keeper_runtime.toml so \
+           providers (rejections=[%s]) — operator action: edit runtime.toml so \
            this runtime has at least one candidate whose declared capabilities satisfy \
            the required tool-use gate, or relax the keeper's required tool surface. \
            Required gate accepts inline tool_choice support or a compatible runtime-MCP \

@@ -1,5 +1,5 @@
 (** Keeper_runtime_config — load startup keeper env seeding from
-    [<resolved config root>/keeper_runtime.toml].  See [.mli] for design. *)
+    [<resolved config root>/runtime.toml].  See [.mli] for design. *)
 
 (* TOML key → env var name. Every keeper runtime knob maps here so
    that TOML is the SSOT and env vars become CI/test overrides.

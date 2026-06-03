@@ -100,15 +100,15 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Unix.putenv Env_config_core.base_path_env_key base_path;
   bootstrap_base_path_config_root ~base_path;
   (* Apply keeper runtime overrides from the resolved config root's
-     keeper_runtime.toml. Must run before any module that reads
+     runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing
      process env vars take precedence — TOML only fills unset slots. *)
   (match Keeper_runtime_config.load_and_apply ~base_path with
    | Ok 0 -> ()
    | Ok n ->
-       Log.Server.info "keeper_runtime.toml: applied %d override(s)" n
+       Log.Server.info "runtime.toml: applied %d override(s)" n
    | Error msg ->
-       Log.Server.warn "keeper_runtime.toml load failed: %s (continuing with env defaults)" msg);
+       Log.Server.warn "runtime.toml load failed: %s (continuing with env defaults)" msg);
   Keeper_runtime_resolved.init ();
   Keeper_task_owner_backend.install_hooks ();
   Keeper_goal_janitor_backend.install_hooks ();

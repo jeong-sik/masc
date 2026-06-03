@@ -435,7 +435,7 @@ live observer는 shell gate counter와 semantic marker 계열만 남는다.
 | 필드 | 결정 로직 | 코드 위치 |
 |------|----------|----------|
 | **Active Model** | `last_model_used` 우선, 없으면 `runtime_id`의 첫 모델 fallback | `keeper_status_runtime.ml:active_model_of_meta` |
-| **Next Model Hint** | `config/keeper_runtime.toml`에서 해석한 runtime 모델 목록에서 현재 active_model과 다른 첫 모델. 없으면 현재 모델 또는 `None` | `keeper_status_runtime.ml:next_model_hint_of_meta` |
+| **Next Model Hint** | `config/runtime.toml`에서 해석한 runtime 모델 목록에서 현재 active_model과 다른 첫 모델. 없으면 현재 모델 또는 `None` | `keeper_status_runtime.ml:next_model_hint_of_meta` |
 | **Skill (Primary/Secondary)** | 마지막 메트릭 항목의 `skill_primary`, `skill_secondary` 필드 | `keeper_status.ml:last_skill_route` |
 
 ---
@@ -474,7 +474,7 @@ Memory compaction 시 어떤 정보를 우선 보존할지는 통합 정책(`kee
 
 ### 4.3 모델 해석
 
-Keeper 모델 선택은 profile.json 인자가 아니라 `runtime_id`로 결정된다. 기본 keeper는 `routes.keeper_turn` 대상 runtime을 사용하고, 실제 모델 목록은 저장소의 고정 경로 `config/keeper_runtime.toml`이 아니라 resolved config root 기준의 `<resolved-config-root>/keeper_runtime.toml`에서 해석된다.
+Keeper 모델 선택은 profile.json 인자가 아니라 `runtime_id`로 결정된다. 기본 keeper는 `routes.keeper_turn` 대상 runtime을 사용하고, 실제 모델 목록은 저장소의 고정 경로 `config/runtime.toml`이 아니라 resolved config root 기준의 `<resolved-config-root>/runtime.toml`에서 해석된다.
 
 ### 4.4 작성 예시
 
@@ -558,7 +558,7 @@ masc_keeper_create_from_persona(persona_name: "sangsu")
 flowchart TD
     A[last_model_used 확인] -->|있으면| Z[Active Model 결정]
     A -->|없으면| B[runtime_id 해석]
-    B --> C[resolved config root/keeper_runtime.toml 첫 모델]
+    B --> C[resolved config root/runtime.toml 첫 모델]
     C --> Z
 
     style Z fill:#e8f5e9
@@ -568,7 +568,7 @@ flowchart TD
 
 Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 
-1. resolved config root의 `keeper_runtime.toml`에서 `runtime_id`의 모델 목록을 읽는다
+1. resolved config root의 `runtime.toml`에서 `runtime_id`의 모델 목록을 읽는다
 2. 현재 `active_model`과 다른 첫 번째 모델을 고른다
 3. 다른 모델이 없으면 현재 모델을 반환한다
 4. runtime 모델 목록이 비어 있으면 `None`
@@ -591,7 +591,7 @@ Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 
 - keeper는 per-call `models` override나 persisted `active_model` pinning을 지원하지 않는다
 - handoff 시 cross-model 정규화가 자동 적용된다: Llama는 Tool 메시지 변환, Agent-LLM-A는 alternating 규칙 적용
-- runtime fallback은 resolved config root의 `keeper_runtime.toml`에 있는 해당 runtime 순서대로 시도한다
+- runtime fallback은 resolved config root의 `runtime.toml`에 있는 해당 runtime 순서대로 시도한다
 
 ---
 
@@ -751,7 +751,7 @@ flowchart TD
 |------|----------|
 | 의도한 모델이 사용 안 됨 | `active_model` vs `last_model_used` 비교 |
 | runtime가 fallback으로 넘어감 | MODEL provider 연결 상태 확인 (API key, 서버 상태 등) |
-| `active_model`이 빈 문자열 | resolved config root의 `keeper_runtime.toml`에서 `routes.keeper_turn` 대상 확인 |
+| `active_model`이 빈 문자열 | resolved config root의 `runtime.toml`에서 `routes.keeper_turn` 대상 확인 |
 
 **Runtime 디버깅**:
 ```
@@ -837,7 +837,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
 - **Overlay fields**: `goal`, `tool_access`, `runtime_id`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용.
-- **Allowed value sets**: `tool_access`는 tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `keeper_runtime.toml`에 `<name>_models` 키로 존재해야 함.
+- **Allowed value sets**: `tool_access`는 tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `runtime.toml`에 `<name>_models` 키로 존재해야 함.
 - **Removed / hard-rejected**: `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 
@@ -853,7 +853,7 @@ Definitive source는 코드의 `canonical_keeper_toml_key_names` (`lib/keeper/ke
 |------|----------|
 | `keepers/<name>.toml` | 다음 supervisor sweep에서 re-sync될 수 있음 |
 | persona `profile.json` | TOML이 없을 때 다음 supervisor sweep에서 fallback source로 re-sync될 수 있음 |
-| `keeper_runtime.toml` | startup-only. 서버 재시작 필요 |
+| `runtime.toml` | startup-only. 서버 재시작 필요 |
 
 즉시 fresh 재생성이 필요하면 아래 경로를 사용한다.
 
@@ -876,7 +876,7 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 
 ### 8.4 모델 실행
 
-모델 선택은 resolved config root의 `keeper_runtime.toml`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `runtime_id` (기본 `routes.keeper_turn` 대상)가 runtime을 지정하고 runtime resolver가 실행 모델을 결정한다.
+모델 선택은 resolved config root의 `runtime.toml`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `runtime_id` (기본 `routes.keeper_turn` 대상)가 runtime을 지정하고 runtime resolver가 실행 모델을 결정한다.
 
 ---
 

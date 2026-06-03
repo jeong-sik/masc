@@ -100,7 +100,6 @@ type operation_context = {
   operation_id : string;
   linked_session_id : string option;
   status : string option;
-  stage : string option;
   detachment_status : string option;
   objective : string option;
   updated_at : string option;

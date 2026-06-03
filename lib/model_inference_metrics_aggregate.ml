@@ -194,6 +194,9 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
                ; re_usage_anomaly_reasons = e.usage_anomaly_reasons
                ; re_coverage_reason = coverage_reason_of_entry e
                ; re_coverage_stage = coverage_stage_of_entry e
+               ; re_streaming_ttfrc_ms = e.streaming_ttfrc_ms
+               ; re_streaming_inter_chunk_count = e.streaming_inter_chunk_count
+               ; re_streaming_inter_chunk_avg_ms = e.streaming_inter_chunk_avg_ms
                })
          ; buckets = []
          }

@@ -26,6 +26,9 @@ type recent_entry = {
   re_usage_anomaly_reasons : string list;
   re_coverage_reason : string option;
   re_coverage_stage : string option;
+  re_streaming_ttfrc_ms : float option;
+  re_streaming_inter_chunk_count : int option;
+  re_streaming_inter_chunk_avg_ms : float option;
 }
 
 type coverage_reason_count = {

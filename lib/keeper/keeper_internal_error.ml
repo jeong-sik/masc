@@ -553,7 +553,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                    exit_code = int_opt_of_assoc "exit_code" json;
                  })
           | _ -> None)
-      | Some (`String "no_tool_capable_provider") -> (
+      | Some (`String "no_capable_provider") -> (
           match string_opt_of_assoc "runtime_id" json with
           | Some runtime_id ->
             let configured_labels =

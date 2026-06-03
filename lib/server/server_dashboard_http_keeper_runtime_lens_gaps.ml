@@ -128,7 +128,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
        else gaps)
   |> (fun gaps ->
        match pre_dispatch_reason with
-       | Some reason when string_contains ~needle:"no_tool_capable_provider" reason ->
+       | Some reason when string_contains ~needle:"no_capable_provider" reason ->
          add
            { code = "route_tool_capability_gap"
            ; severity = "bad"

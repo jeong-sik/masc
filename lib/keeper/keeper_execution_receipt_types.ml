@@ -123,41 +123,34 @@ let runtime_outcome_to_string = function
   | Runtime_not_dispatched -> "not_dispatched"
 ;;
 
-(* Receipt-level result of the tool-contract evaluation for the turn.
+(* Receipt-level result of the completion-contract evaluation for the turn.
    Closed union of three producer paths:
      1. Initial-state sentinel from [keeper_run_tools]: [Contract_unknown].
      2. Boundary-state overrides: [Contract_violated] (agent_run
         CompletionContractViolation), [Contract_not_dispatched]
-        (turn_helpers pre-dispatch), [Contract_no_tool_capable_provider]
-        (run_tools no-provider escape).
-     3. Six outcomes mirrored from
+        (turn_helpers pre-dispatch).
+     3. Five outcomes mirrored from
         [Keeper_contract_classifier.contract_status_label]:
-        [Contract_tool_surface_mismatch], [Contract_claim_only_after_owned_task],
+        [Contract_claim_only_after_owned_task],
         [Contract_needs_execution_progress], [Contract_passive_only],
         [Contract_satisfied_completion],
         [Contract_satisfied_execution].
    JSON wire form is the lowercase string via
-   [tool_contract_result_to_string].  No raw ["satisfied"] variant —
-   producer never emits it; closed type makes the fictional test fixture
-   string unrepresentable. *)
-type tool_contract_result =
+   [completion_contract_result_to_string]. *)
+type completion_contract_result =
   | Contract_unknown
   | Contract_not_dispatched
   | Contract_violated
-  | Contract_tool_surface_mismatch
-  | Contract_no_tool_capable_provider
   | Contract_claim_only_after_owned_task
   | Contract_needs_execution_progress
   | Contract_passive_only
   | Contract_satisfied_completion
   | Contract_satisfied_execution
 
-let tool_contract_result_to_string = function
+let completion_contract_result_to_string = function
   | Contract_unknown -> "unknown"
   | Contract_not_dispatched -> "not_dispatched"
   | Contract_violated -> "violated"
-  | Contract_tool_surface_mismatch -> "tool_surface_mismatch"
-  | Contract_no_tool_capable_provider -> "no_tool_capable_provider"
   | Contract_claim_only_after_owned_task -> "claim_only_after_owned_task"
   | Contract_needs_execution_progress -> "needs_execution_progress"
   | Contract_passive_only -> "passive_only"
@@ -166,13 +159,12 @@ let tool_contract_result_to_string = function
 ;;
 
 (* Lift the typed [Keeper_contract_classifier.contract_status] into the
-   receipt-level [tool_contract_result].  Bridges the six classifier
-   outcomes; the four boundary states are emitted only by producer sites
-   that already know they hold one of those states. *)
-let tool_contract_result_of_contract_status
-  : Keeper_contract_classifier.contract_status -> tool_contract_result
+   receipt-level [completion_contract_result].  Bridges the five classifier
+   outcomes; boundary states are emitted only by producer sites that already
+   know they hold one of those states. *)
+let completion_contract_result_of_contract_status
+  : Keeper_contract_classifier.contract_status -> completion_contract_result
   = function
-  | Tool_surface_mismatch _ -> Contract_tool_surface_mismatch
   | Claim_only_after_owned_task -> Contract_claim_only_after_owned_task
   | Needs_execution_progress -> Contract_needs_execution_progress
   | Passive_only -> Contract_passive_only
@@ -288,7 +280,7 @@ type t =
   ; canonical_tools : string list
   ; unexpected_tools : string list
   ; tools_used : string list
-  ; tool_contract_result : tool_contract_result
+  ; completion_contract_result : completion_contract_result
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
   ; sandbox_root : string option

@@ -357,7 +357,7 @@ let test_failure_reason_labels_documented () =
       , "runtime_unavailable" )
     ; ( F.Failure_no_tool_capable_provider
           { runtime_id = "tools"; detail = "no candidate supports tools" }
-      , "no_tool_capable_provider" )
+      , "no_capable_provider" )
     ; F.Failure_provider_error { kind = "k"; detail = "d" }, "provider_error"
     ; F.Failure_tool_contract_violation { reason_code = "rc" }, "tool_contract_violation"
     ; F.Failure_receipt_lost { primary_error = "e"; fallback_path = None }, "receipt_lost"

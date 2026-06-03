@@ -405,7 +405,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ("operator_disposition", `String "pause_human");
             ( "operator_disposition_reason",
               `String "unmapped_runtime_state" );
-            ( "tool_contract_result",
+            ( "completion_contract_result",
               `String "violated" );
             ("tools_used", `List []);
             ( "tool_surface",
@@ -643,7 +643,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
             ("outcome", `String "ok");
             ("operator_disposition", `String "pass");
             ("operator_disposition_reason", `String "healthy");
-            ("tool_contract_result", `String "satisfied");
+            ("completion_contract_result", `String "satisfied");
             ("tools_used", `List [ `String "keeper_status" ]);
             ("requested_tools", `List [ `String "keeper_status" ]);
             ( "runtime",

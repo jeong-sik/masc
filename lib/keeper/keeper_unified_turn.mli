@@ -155,7 +155,7 @@ val sync_keeper_paused_state
   -> paused:bool
   -> (Keeper_meta_contract.keeper_meta, string) result
 
-(** Required-tool contract failures are persistent keeper/provider contract
+(** Completion-contract failures are persistent keeper/provider contract
     failures, not transient provider blips. Repeated occurrences should pause
     the keeper before the generic supervisor crash/restart loop re-enters the
     same prompt and model family. Exposed for regression tests. *)

@@ -152,6 +152,6 @@ val is_transient_provider_runtime_failure : t -> bool
 (** [true] when [terminal_reason] (assumed already lowercased by the
     caller, as [operator_disposition] does) is a turn/time-budget cut-off:
     auto-recoverable, the keeper resumes from its checkpoint, so it must
-    NOT be classified as a tool-contract failure. Equivalent to
+    NOT be classified as a completion-contract failure. Equivalent to
     [of_wire s] returning [Auto_recoverable_budget _]. *)
 val is_auto_recoverable_turn_budget_terminal : string -> bool

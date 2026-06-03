@@ -754,7 +754,7 @@ describe('RuntimeLensSection', () => {
     render(h(RuntimeLensSection, { trace: runtimeTraceFixture() }))
 
     expect(screen.getByTestId('runtime-lens')).toBeInTheDocument()
-    expect(screen.getByText('keeper / OAS turn')).toBeInTheDocument()
+    expect(screen.getByText('keeper / agent turn')).toBeInTheDocument()
     expect(screen.getByText('7 / 3')).toBeInTheDocument()
     expect(screen.getByText('trace id')).toBeInTheDocument()
     expect(screen.getByText('trace-lens')).toBeInTheDocument()

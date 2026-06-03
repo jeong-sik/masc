@@ -1,8 +1,8 @@
-// Keeper runtime-model editor — a prominent, one-expand-away card that lets an
-// operator change which provider-model a keeper dispatches on.
+// Keeper runtime editor — a prominent, one-expand-away card that lets an
+// operator change which runtime lane a keeper dispatches on.
 //
 // RFC-0207: a keeper's runtime selection lives in a SINGLE surface — the persona
-// TOML `runtime_id = "provider.model"` field (parsed into both `runtime_id` and
+// TOML `runtime_id` field (parsed into both `runtime_id` and
 // `model`). The detailed view of that field is buried under
 // 설정 → Keeper 설정 → 소스. This card surfaces the same field at the top of the
 // keeper detail's 진단/운영 section so it is discoverable without digging.
@@ -62,7 +62,7 @@ function EditorHeader() {
   return html`
     <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
       <span class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg">런타임 model</span>
-      <span class="text-3xs text-[var(--color-fg-muted)]">keeper가 다음 턴에 호출할 provider.model</span>
+      <span class="text-3xs text-[var(--color-fg-muted)]">keeper가 다음 턴에 호출할 runtime lane</span>
     </div>
   `
 }
@@ -108,7 +108,7 @@ export function KeeperRuntimeModelEditor({ keeperName }: { keeperName: string })
         <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-status-warn)]">
           이 keeper는 편집 가능한 TOML 소스가 아니라(소스: ${kind}) 여기서 model을 바꿀 수 없습니다.
           편집하려면 <code>.masc/config/keepers/${keeperName}.toml</code> 에
-          <code>runtime_id = "provider.model"</code> 을 추가하고 서버를 재시작하세요.
+          <code>runtime_id = "runtime-lane"</code> 을 추가하고 서버를 재시작하세요.
         </div>
       </div>
     `

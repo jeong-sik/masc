@@ -77,10 +77,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
 }
 
 // PipelineStage SSOT: `types/core.ts#PipelineStage` (11 values from
-// `Keeper_status_runtime.pipeline_stage_of_phase`). Legacy entries
-// `thinking` / `tool_use` / `scheduled_autonomous` removed — the backend
-// never emits them as pipeline_stage (they live in trajectory
-// content_type / turn channel respectively).
+// `Keeper_status_runtime.pipeline_stage_of_phase`).
 const STAGE_LABELS: Record<string, StageMeta> = {
   idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계가 없습니다.' },
   compacting: { key: 'compacting', label: '압축', description: '컨텍스트 압축 단계를 수행 중입니다.' },

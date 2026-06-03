@@ -4,9 +4,8 @@
 #
 # This is intentionally narrower than a repo-wide string grep.  Terms like
 # "claude", "gemini", or "auto" are valid in auth, agent naming, voice persona,
-# and unrelated operator UX code.  The migration risk tracked by
-# docs/PROVIDER-ADAPTER-REMOVAL-PLAN.md is the provider-runtime/runtime bridge
-# learning concrete provider identity after Provider_adapter was removed.
+# and unrelated operator UX code. The migration risk is the runtime projection
+# boundary learning concrete provider identity after Provider_adapter was removed.
 #
 # Allowlist entries are exact `path:line:literal` keys.  They are a debt ledger:
 # line drift or deletion makes the entry stale and must be cleaned up in the

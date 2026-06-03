@@ -1064,7 +1064,7 @@ export function RuntimeLensSection({
   return html`
     <div class="flex flex-col gap-3" data-testid="runtime-lens">
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5">
-        <${SignalRow} label="keeper / OAS turn" value=${`${clock.keeper_turn_id ?? '-'} / ${clock.max_oas_turn_count ?? '-'}`} />
+        <${SignalRow} label="keeper / agent turn" value=${`${clock.keeper_turn_id ?? '-'} / ${clock.max_oas_turn_count ?? '-'}`} />
         <${SignalRow} label="terminal event" value=${clock.terminal_event_present ? clock.terminal_event ?? 'present' : 'missing'} />
         <${SignalRow} label="runtime lane" value=${lane.resolved_lane ?? lane.status ?? 'unknown'} />
         <${SignalRow} label="tool required" value=${formatLensList(tool.required_tools)} />

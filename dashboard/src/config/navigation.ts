@@ -184,7 +184,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'runtime',
       label: 'Runtime',
-      description: 'Runtime provider health.',
+      description: 'Runtime lane health.',
       params: { section: 'runtime' },
     },
     {

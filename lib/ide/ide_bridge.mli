@@ -70,13 +70,16 @@ val ingest_pr_event_from_hook :
   unit
 
 (** Ingest PR event from command_descriptor (deterministic).
-    Extracts descriptor from tool result JSON, falls back to heuristic. *)
+    Extracts descriptor from tool result JSON, falls back to heuristic.
+    Only proceeds when [success] is [true] — failed tool executions
+    (auth/network/validation errors) must not produce phantom PR events. *)
 val ingest_pr_event_from_descriptor :
   base_path:string ->
   keeper_id:string ->
   turn_id:string ->
   output_text:string ->
   tool_name:string ->
+  success:bool ->
   unit
 
 (** Extract command_descriptor from tool result JSON. *)

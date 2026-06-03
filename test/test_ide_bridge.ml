@@ -323,6 +323,44 @@ let test_pr_event_from_hook_ignores_no_url () =
     check bool "file not created" false (Sys.file_exists path))
 ;;
 
+let test_descriptor_gated_on_success () =
+  with_temp_dir (fun base_dir ->
+    (* Failed gh pr create with command_descriptor in output should NOT produce PR event *)
+    let failed_output = {|{"command_descriptor": {"kind": "gh_pr_create", "title": "feat: test", "base": "main", "draft": true}, "error": "authentication failed"}|} in
+    Ide_bridge.ingest_pr_event_from_descriptor
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:failed_output
+      ~tool_name:"execute"
+      ~success:false;
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file not created on failure" false (Sys.file_exists path))
+;;
+
+let test_descriptor_ingested_on_success () =
+  with_temp_dir (fun base_dir ->
+    (* Successful gh pr create with command_descriptor should produce PR event *)
+    let success_output = {|{"command_descriptor": {"kind": "gh_pr_create", "title": "feat: test", "base": "main", "draft": true}}|} in
+    Ide_bridge.ingest_pr_event_from_descriptor
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:success_output
+      ~tool_name:"execute"
+      ~success:true;
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file created on success" true (Sys.file_exists path);
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
+    check int "pr_number is 0 (no URL in output)" 0 pr_number)
+;;
+
 let test_concurrent_ingest () =
   with_temp_dir (fun base_dir ->
     (* Simulate parallel tool calls writing to the same file *)
@@ -383,6 +421,8 @@ let () =
         ; test_case "from hook detects url" `Quick test_pr_event_from_hook_detects_url
         ; test_case "from hook ignores non-execute" `Quick test_pr_event_from_hook_ignores_non_execute
         ; test_case "from hook ignores no url" `Quick test_pr_event_from_hook_ignores_no_url
+        ; test_case "descriptor gated on success" `Quick test_descriptor_gated_on_success
+        ; test_case "descriptor ingested on success" `Quick test_descriptor_ingested_on_success
         ] )
     ; ( "concurrency"
       , [ test_case "concurrent ingest" `Quick test_concurrent_ingest

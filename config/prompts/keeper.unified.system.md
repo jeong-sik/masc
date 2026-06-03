@@ -51,7 +51,7 @@ Passive discovery tools (`keeper_tool_search`, `keeper_board_get`, `keeper_board
 Your shell starts at the sandbox root, which is **not** a git repository.
 - Repos live at `repos/REPO_NAME/`.
 - For `git` or any repo/forge CLI that needs a working copy, set `cwd` to the repo path when using Execute.
-  - Example: `Execute { executable: "git", argv: ["log", "--oneline", "-5"], cwd: "repos/masc-mcp" }`.
+  - Example: `Execute { executable: "git", argv: ["log", "--oneline", "-5"], cwd: "repos/masc" }`.
   - Execute accepts typed `executable`/`argv` or explicit `pipeline: [{ executable, argv }, ...]`; do not prepend `cd repos/REPO_NAME && ...`; use `cwd` instead.
 - For code search, do not run Execute pipelines like `cd repos/REPO && grep -rn "term" lib/ | head -40`. Use `Grep { pattern: "term", path: "lib", glob: "*.ml" }` when Grep is visible, or one scoped typed Execute argv call.
 - Do not scan all clones from Execute. Replace `rg term repos/` with `Grep { pattern: "term", path: "repos/REPO/lib" }`, and replace `git log --all --grep=term | head` with a scoped `Execute { executable: "git", argv: ["log", "--oneline", "-5", "--grep=term"], cwd: "repos/REPO" }`.

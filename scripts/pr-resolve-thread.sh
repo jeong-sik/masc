@@ -25,7 +25,7 @@
 #   # resolve only (no reply) — pass an empty string for the body
 #   pr-resolve-thread.sh <repo|.> <pr> <thread_id> ""
 #
-# <repo> is owner/name (e.g. jeong-sik/masc-mcp). Pass "." to infer it from
+# <repo> is owner/name (e.g. jeong-sik/masc). Pass "." to infer it from
 # the current directory via `gh repo view`.
 #
 # Exit codes: 0 ok · 1 usage/precondition error · 2 resolve not confirmed.

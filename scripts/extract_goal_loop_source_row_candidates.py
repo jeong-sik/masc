@@ -16,7 +16,7 @@ from typing import Any
 DEFAULT_CATALOG_ID = "goal-loop-206-audit-external-claim-2026-05-05"
 DEFAULT_SOURCE_PREFIX = "prompt_corpus/GOAL_LOOP/"
 DEFAULT_EXPECTED_TOTAL = 206
-ISSUE_REF_RE = re.compile(r"^https://github\.com/jeong-sik/masc-mcp/issues/\d+$")
+ISSUE_REF_RE = re.compile(r"^https://github\.com/jeong-sik/masc/issues/\d+$")
 
 EXACT_ID_RE = re.compile(
     r"\b(?P<id>(?:R-FATAL|CD|CC|CE|CF|NF)-\d+|P-[A-Z]+-\d{2}|[SF]\d{2})\b"

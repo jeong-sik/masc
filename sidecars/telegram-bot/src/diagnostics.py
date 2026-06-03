@@ -229,7 +229,7 @@ async def check_gate_reachable() -> Check:
             severity=Severity.error if "connect" in res else Severity.warn,
             detail=url or "(no config)",
             message=res,
-            hint="MASC 서버 기동 여부 확인 (./start-masc-mcp.sh)",
+            hint="MASC 서버 기동 여부 확인 (./start-masc.sh)",
         )
     if res.status_code >= 500:
         return Check(

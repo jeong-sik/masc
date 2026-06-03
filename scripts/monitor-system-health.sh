@@ -37,7 +37,7 @@ DISK_PCT_WARN="${MASC_SYSMON_DISK_PCT_WARN:-90}"
 DISK_PCT_CRIT="${MASC_SYSMON_DISK_PCT_CRIT:-95}"
 ALERT_COOLDOWN="${MASC_SYSMON_ALERT_COOLDOWN:-300}"
 
-# Pressure flag file. masc-mcp server (future) is expected to poll this
+# Pressure flag file. masc server (future) is expected to poll this
 # and engage Keeper_fd_pressure when level=CRIT. We always rewrite it
 # atomically so a reader sees a consistent snapshot.
 PRESSURE_STATE_FILE="${MASC_SYSMON_PRESSURE_STATE:-/tmp/masc-host-pressure.state}"
@@ -69,7 +69,7 @@ Logs:
   <log-dir>/sysmon.log         per-iteration metrics
   <log-dir>/sysmon-alerts.log  one line per fired alert
 
-Pressure flag (for masc-mcp server integration, future):
+Pressure flag (for masc server integration, future):
   /tmp/masc-host-pressure.state    latest snapshot when level != OK;
                                    removed when system is OK.
   /tmp/masc-host-pressure.events.jsonl  append-only history.
@@ -203,7 +203,7 @@ iteration() {
 
   docker_n=$({ pgrep -f 'com.docker' 2>/dev/null || true; } | wc -l | tr -d ' ')
   ollama_n=$({ pgrep -f 'ollama|llama-server' 2>/dev/null || true; } | wc -l | tr -d ' ')
-  keeper_n=$({ pgrep -f 'masc-mcp|keeper' 2>/dev/null || true; } | wc -l | tr -d ' ')
+  keeper_n=$({ pgrep -f 'masc|keeper' 2>/dev/null || true; } | wc -l | tr -d ' ')
 
   echo "$ts fd=${num_files}(${fd_pct}%) swap=${swap_gb}G free=${free_gb}G load=${load} root=${root_pct}% data=${data_pct}% docker=${docker_n} ollama=${ollama_n} keeper=${keeper_n}" >> "$LOG"
 

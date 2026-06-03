@@ -2,7 +2,7 @@
 # CI gate: old CLI Spawn integration must stay deleted.
 # Meta-issue: #9516
 #
-# CONTRACT: masc-mcp no longer owns a provider-specific CLI spawn mapping.
+# CONTRACT: masc no longer owns a provider-specific CLI spawn mapping.
 # Provider execution belongs to OAS/runtime bindings and MASC model runtimes.
 
 set -euo pipefail

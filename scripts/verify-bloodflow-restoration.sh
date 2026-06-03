@@ -3,7 +3,7 @@
 #
 # Phase A bloodflow-restoration verification helper.  Reads operator-side
 # JSONL logs and grep counters for the five Phase A signals defined in
-# planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-sunny-starfish.md
+# planning/claude-plans/me-workspace-yousleepwhen-masc-sunny-starfish.md
 # section 10:
 #
 #   F1 — per-keeper raw token fallback fired

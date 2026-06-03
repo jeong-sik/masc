@@ -26,7 +26,7 @@
 # that reduce debt may regenerate the baseline (intentional "downward
 # ratchet"). Increases must be justified by --regenerate with a paired
 # follow-up issue (anti-pattern: silent baseline rebound after admin
-# override; see masc-mcp memory feedback_ratchet-naturalization-after-admin-merge).
+# override; see masc memory feedback_ratchet-naturalization-after-admin-merge).
 #
 # Usage:
 #   scripts/ocaml-structure-ratchet.sh              # check; exit 0 ok / 2 drift up / 1 error

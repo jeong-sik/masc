@@ -127,7 +127,7 @@ import sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
 result = payload.get("result") or {}
 server_info = result.get("serverInfo") or {}
-if server_info.get("name") != "masc-mcp":
+if server_info.get("name") != "masc":
     raise SystemExit(f"unexpected serverInfo.name: {server_info.get('name')!r}")
 if result.get("protocolVersion") != "2025-11-25":
     raise SystemExit(

@@ -25,7 +25,7 @@
 #   --baseline F Diff current metrics against baseline F; exit 1 if any
 #                G* regresses (used by CI ratchet, S7).
 #
-# Run from masc-mcp repo root.
+# Run from masc repo root.
 
 set -eu
 # Intentionally no pipefail: `rg -c` exits 1 when zero matches, and we
@@ -67,7 +67,7 @@ fi
 # docstring/comment mentions of legacy identifiers (e.g. `[shell_word_values]`
 # inside `(** ... *)`) inflate raw grep counts even after every real call
 # site has been migrated. Non-nested form is sufficient — OCaml allows
-# nested comments but masc-mcp does not use them in docstrings.
+# nested comments but masc does not use them in docstrings.
 strip_ocaml_comments() {
   perl -0777 -pe 's{\(\*.*?\*\)}{}gs' "$1"
 }

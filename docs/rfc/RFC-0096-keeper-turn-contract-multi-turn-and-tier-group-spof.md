@@ -79,7 +79,7 @@ let required_tool_satisfaction call =
 
 ### §4.1 증상
 
-`system_log seq 52304` (2026-05-14):
+Retired behavior observed in `system_log seq 52304` (2026-05-14):
 
 ```
 INFO  oas:agent  turn completed turn=16
@@ -90,11 +90,14 @@ INFO  oas:agent  turn completed turn=16
 
 Model 이 `keeper_board_list` 로 *상황 파악* 후 다음 turn 에 mutating
 action 을 호출하려는 자연스러운 reasoning 이 turn-level enforcement
-에 의해 *그 turn 자체* 가 contract violation 으로 변환됨.
+에 의해 *그 turn 자체* 가 contract violation 으로 변환됐던 현상.
+현재 정책에서는 provider-level tool-use 와 Keeper progress/liveness
+판정을 분리하고, observation tool 호출을 required-tool 실패로
+재해석하지 않는다.
 
 ### §4.2 위치 + 현재 동작
 
-`lib/keeper/keeper_tool_progress.ml`:
+Retired `lib/keeper/keeper_tool_progress.ml` shape:
 
 ```ocaml
 let required_tool_satisfaction (call : Agent_sdk.Completion_contract.tool_call) =
@@ -105,10 +108,12 @@ let required_tool_satisfaction (call : Agent_sdk.Completion_contract.tool_call) 
       | _ -> Agent_tool_dispatch_runtime.has_mutating_side_effect_with_input ~tool_name ~input:call.input
     in
     if mutates then Ok ()
-    else Error "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
+    else Error "<retired passive-tool rejection>"
 ```
 
-Contract 가 *turn-level* — 한 turn 안에서 mutating 호출이 없으면 fail.
+이 모양은 폐기됐다. 현재 `required_tool_satisfaction` 은 실제 tool call
+발생 여부만 provider-level 로 확인하고, mutating progress 여부는 별도
+progress/liveness classification 으로 남긴다.
 
 ### §4.3 제안 모양
 

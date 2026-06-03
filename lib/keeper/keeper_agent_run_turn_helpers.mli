@@ -20,10 +20,6 @@ val registry_progress_on_event :
   Agent_sdk.Types.sse_event ->
   unit
 
-val should_require_provider_tool_choice_support :
-  initial_tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
-  bool
-
 val tool_contract_result_for_observed_tools :
   missing_visible_required:string list ->
   had_owned_active_task_at_turn_start:bool ->

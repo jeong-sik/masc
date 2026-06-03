@@ -11,6 +11,7 @@ open Keeper_meta_json_scrub
 type parsed_keeper_identity =
   { pk_name : string
   ; pk_agent_name : string
+  ; pk_persona : string option
   ; pk_trace_id : Keeper_id.Trace_id.t
   ; pk_trace_history : string list
   ; pk_goal : string
@@ -69,6 +70,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
   with
   | Error e -> Error ("keeper meta parse error: " ^ e)
   | Ok pk_trace_id ->
+    let pk_persona = Safe_ops.json_string_opt "persona" json in
     let pk_trace_history =
       Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
     in
@@ -116,6 +118,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     Ok
       { pk_name
       ; pk_agent_name
+      ; pk_persona
       ; pk_trace_id
       ; pk_trace_history
       ; pk_goal
@@ -543,6 +546,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (if identity.pk_agent_name = ""
                         then Keeper_identity.keeper_agent_name identity.pk_name
                         else identity.pk_agent_name)
+                   ; persona = identity.pk_persona
                    ; goal = identity.pk_goal
                    ; short_goal = identity.pk_short_goal
                    ; mid_goal = identity.pk_mid_goal

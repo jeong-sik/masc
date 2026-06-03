@@ -18,4 +18,5 @@ module For_testing : sig
     classification:Exec_core.classification ->
     status:Unix.process_status ->
     (string * Yojson.Safe.t) list
+  val compute_command_descriptor : Masc_exec.Shell_ir.t -> Ide_event_types.command_descriptor
 end

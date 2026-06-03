@@ -11,6 +11,7 @@ type keeper_path_rejection =
   | Outside_sandbox of { raw : string }
   | Not_found_relative of { raw : string }
   | Ambiguous_relative_read_path of { raw : string; candidate_count : int }
+  | Task_state_file_path_blocked of { raw : string }
 
 (** LLM-facing opaque message derived from the rejection variant. *)
 val rejection_to_user_message : keeper_path_rejection -> string
@@ -102,6 +103,11 @@ val absolute_allowed_paths_result :
 val playground_root_of_allowed : string list -> string option
 
 val raw_looks_like_playground_subdir : string -> bool
+
+(** Detect paths that reference .masc/ internal state files
+    (backlog.json, tasks/, etc). These should be accessed via
+    keeper_tasks_list / keeper_context_status, not direct file access. *)
+val is_masc_internal_state_path : string -> bool
 
 (** Resolve a write target path under [allowed_paths] within the
     project root. *)

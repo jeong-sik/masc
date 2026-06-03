@@ -225,6 +225,13 @@ let tool_execute_description =
    use Grep when visible; for file edits use Edit. Long-running commands must \
    be split or run through a dedicated structured workflow; this tool no longer \
    exposes background task lifecycle tools. \
+   PIPELINE USAGE: When you need to chain commands (e.g., 'cmd1 | cmd2'), use \
+   the 'pipeline' field instead of shell syntax. Each stage is an object with \
+   'executable' and 'argv'. Example: pipeline=[{executable='rg', argv=['-n', \
+   'pattern', 'file.ml']}, {executable='head', argv=['-60']}]. \
+   NEVER use 'sh -c' or 'bash -c' — shell interpreters are not in the allowlist. \
+   Instead of 'sh -c \"awk ...\"', use 'sed' or 'rg' directly. \
+   Instead of 'sh -c \"cmd1 | cmd2\"', use pipeline with two stages. \
    COMMON REJECTIONS: 'executable' must be a non-empty allowlisted command name \
    (e.g. 'cat', 'ls', 'gh'); never the empty string ''. Never collapse the entire \
    command into a single string like \"'' -c 'ls -la'\" — that is shell-style and \

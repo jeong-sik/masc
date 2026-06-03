@@ -139,7 +139,6 @@
   keeper_discovered_tools
   keeper_tool_affinity
   keeper_tool_shared_runtime
-   keeper_path_check_error
    keeper_tool_board_runtime
    keeper_tool_filesystem_runtime
    keeper_tool_registered_runtime
@@ -243,11 +242,6 @@
   worker_container_types
   worker_container
   worker_container_runners
-  exec_policy_paths
-  exec_policy_log_sanitize
-  exec_policy_command_syntax
-  exec_policy_mutation_classifier
-  exec_policy_path_arg_descriptor
   exec_shell_adapter
   ;; keeper_memory sub-modules
   keeper_memory_policy_summary_filter
@@ -379,6 +373,12 @@
    ;; leaf sub-library. The parent library still references those modules
    ;; unqualified, so it must depend on the leaf explicitly.
    masc.tool_types
+   ;; RFC-0056 Phase 1L — Attribution envelope extracted to lib/attribution/.
+   ;; Pure Attribution + phantom-tagged helpers, deps: stdlib + Yojson only.
+   masc.attribution
+   ;; RFC-0056 Phase 1M — Execution policy extracted to lib/exec_policy/.
+   ;; Owns Shell IR command/path policy, allowlists, and typed path-check errors.
+   masc.exec_policy
    ;; RFC-0132 PR-1 — Boundary_redaction SSOT for external-surface
    ;; provider/model label redaction. Codemod in PR-2 routes "runtime"
    ;; literals in lib/runtime and lib/keeper through this leaf.

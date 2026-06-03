@@ -16,9 +16,9 @@ let with_temp_dir f =
 
 (** Helper: parse command string to Shell_ir.t via Exec_policy. *)
 let parse_ir cmd =
-  match Masc.Exec_policy.parse_string_to_ir ~mode:Masc.Exec_policy.Strict cmd with
+  match Exec_policy.parse_string_to_ir ~mode:Exec_policy.Strict cmd with
   | Ok ir -> ir
-  | Error reason -> failf "parse failed: %s" (Masc.Exec_policy.block_reason_to_string reason)
+  | Error reason -> failf "parse failed: %s" (Exec_policy.block_reason_to_string reason)
 ;;
 
 (** {1 Gh PR operations} *)

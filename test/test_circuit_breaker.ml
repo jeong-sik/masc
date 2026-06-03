@@ -2,7 +2,7 @@ open Alcotest
 
 module CB = Masc.Keeper_failure_circuit_breaker
 module KAP = Masc.Keeper_alerting_path
-module PCE = Masc.Keeper_path_check_error
+module PCE = Keeper_path_check_error
 
 let path_not_found_msg raw =
   KAP.rejection_to_user_message (KAP.Not_found_relative { raw })

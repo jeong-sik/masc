@@ -130,9 +130,9 @@ g1_total_refs=$(count_code_refs "$g1_pattern")
 #      it must parse directly to avoid a cycle.
 g1_allowed_files=(
   "lib/exec/command_gate/shell_command_gate.ml"
-  "lib/exec_policy.ml"
-  "lib/exec_policy_command_syntax.ml"
-  "lib/exec_policy_log_sanitize.ml"
+  "lib/exec_policy/exec_policy.ml"
+  "lib/exec_policy/exec_policy_command_syntax.ml"
+  "lib/exec_policy/exec_policy_log_sanitize.ml"
 )
 g1_current_files=$(list_code_files "$g1_pattern" \
   | rg -v '/dune$|\.dune$' \
@@ -148,8 +148,8 @@ done <<< "$g1_current_files"
 
 # ---- G2: classifier signature ----
 # Heuristic: scan let signatures of is_write_operation / is_destructive_bash_operation
-g2_string_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) [a-z]+ ?=' lib/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
-g2_ir_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) \(.*: Shell_ir' lib/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
+g2_string_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) [a-z]+ ?=' lib/exec_policy/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
+g2_ir_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) \(.*: Shell_ir' lib/exec_policy/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
 
 # ---- G3: Shell IR centralized dispatcher adoption ----
 # Architecture: all typed Execute commands route through Agent_tool_execute_shell_ir
@@ -173,7 +173,7 @@ g4_dispatch_decided=$(rg -l 'dispatch_decided' lib/ 2>/dev/null \
 # ---- G5: validate_shell_ir_paths callers ----
 g5_callers=$(rg -l 'validate_shell_ir_paths' lib/ 2>/dev/null \
   | rg -v '/test/' \
-  | rg -v 'exec_policy\.ml$|exec_policy\.mli$' \
+  | rg -v 'exec_policy/exec_policy\.ml$|exec_policy/exec_policy\.mli$' \
   | wc -l | tr -d ' ')
 
 # ---- G6: TLA+ spec ----

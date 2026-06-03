@@ -4,7 +4,7 @@
     filter, summary outcome counts, reset. *)
 
 module DA = Masc.Dashboard_attribution
-module A = Masc.Attribution
+module A = Attribution
 
 let ev = `Null
 

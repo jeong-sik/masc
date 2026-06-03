@@ -51,7 +51,7 @@ let deliverable_claims_completion ~task_id deliverable =
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
   let request_kind, request_summary, next_action, board_type, board_title, board_content =
-    match Planning_eio.load config ~task_id:task.id with
+    match Masc_task_handlers.Planning_eio.load config ~task_id:task.id with
     | Ok plan_ctx
       when deliverable_claims_completion ~task_id:task.id plan_ctx.deliverable ->
         ( "conflict_triage",

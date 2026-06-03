@@ -258,7 +258,7 @@ let ingest_pr_event_from_descriptor
     ~output_text
     ~tool_name
   =
-  if String.equal tool_name "execute" then
+  if String.equal (String.lowercase_ascii tool_name) "execute" then
     match extract_descriptor_from_output output_text with
     | Some (Ide_event_types.Gh_pr_create { title; base = _; draft = _ }) ->
       (* PR was created — try to get PR number from output URL *)
@@ -326,7 +326,7 @@ let ingest_pr_event_from_descriptor
     | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
     | None ->
       (* Not a PR operation — fall back to heuristic output parsing *)
-      if String.equal tool_name "execute" then
+      if String.equal (String.lowercase_ascii tool_name) "execute" then
         match parse_pr_url_from_output output_text with
         | Some (pr_number, pr_url) ->
           let repo =
@@ -363,7 +363,7 @@ let ingest_pr_event_from_hook
     ~output_text
     ~tool_name
   =
-  if String.equal tool_name "execute" then
+  if String.equal (String.lowercase_ascii tool_name) "execute" then
     match parse_pr_url_from_output output_text with
     | Some (pr_number, pr_url) ->
       let repo =

@@ -378,9 +378,8 @@ let compact_if_needed_typed
     in
     bump_pair_repair "downgraded_tool_use" pair_repair_stats.downgraded_tool_uses;
     bump_pair_repair "downgraded_tool_result" pair_repair_stats.downgraded_tool_results;
-    Log.emit
+    Log.Harness.emit
       Log.Info
-      ~module_name:"Harness"
       ~details:
         (`Assoc
             [ "keeper_name", `String meta.name

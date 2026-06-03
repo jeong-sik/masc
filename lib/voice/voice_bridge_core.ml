@@ -114,13 +114,13 @@ let voice_mcp_port () =
 let log_prefix = "[VoiceBridge]"
 
 let log_info msg =
-  Log.info "%s %s" log_prefix msg
+  Log.Voice.info "%s %s" log_prefix msg
 
 let log_error msg =
-  Log.error "%s %s" log_prefix msg
+  Log.Voice.error "%s %s" log_prefix msg
 
 let log_debug msg =
-  Log.debug "%s %s" log_prefix msg
+  Log.Voice.debug "%s %s" log_prefix msg
 
 let with_voice_output_turn ~agent_id:_ f =
   Eio.Mutex.use_rw ~protect:true playback_mu f

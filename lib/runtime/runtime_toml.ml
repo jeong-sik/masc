@@ -113,11 +113,9 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
          propagate. *)
       (try Otoml.get_array Otoml.get_string v with
        | Otoml.Type_error _ ->
-         Logs.warn (fun m ->
-           m
-             "runtime_toml: %s.capabilities.%s — expected string array, ignoring"
+         Log.Runtime.warn "runtime_toml: %s.capabilities.%s — expected string array, ignoring"
              path
-             key);
+             key;
          [])
   in
   let positive_int_opt_field key =
@@ -127,12 +125,10 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
     | None -> None
     | Some n when n > 0 -> Some n
     | Some n ->
-      Logs.warn (fun m ->
-        m
-          "runtime_toml: %s.capabilities.%s = %d — expected positive integer, ignoring"
+      Log.Runtime.warn "runtime_toml: %s.capabilities.%s = %d — expected positive integer, ignoring"
           path
           key
-          n);
+          n;
       None
   in
   { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
@@ -163,10 +159,8 @@ let parse_headers (tbl : Otoml.t) (path : string) : (string * string) list =
   (* RFC-0145 — narrow to the only exception [Otoml.get_table] raises
      on a non-table value.  Unrelated runtime exceptions propagate. *)
   | exception Otoml.Type_error _ ->
-    Logs.warn (fun m ->
-      m
-        "runtime_toml: %s — expected TOML table, got non-table value; treating as empty"
-        path);
+    Log.Runtime.warn "runtime_toml: %s — expected TOML table, got non-table value; treating as empty"
+        path;
     []
   | entries ->
     let pairs =
@@ -177,8 +171,7 @@ let parse_headers (tbl : Otoml.t) (path : string) : (string * string) list =
            (* RFC-0145 — narrow to the only exception [Otoml.get_string]
               raises on a non-string value. *)
            | exception Otoml.Type_error _ ->
-             Logs.warn (fun m ->
-               m "runtime_toml: %s.%s — non-string header value, ignoring" path k);
+             Log.Runtime.warn "runtime_toml: %s.%s — non-string header value, ignoring" path k;
              None)
         entries
     in
@@ -229,7 +222,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
              | [] -> "<empty error list>"
              | e :: _ -> Printf.sprintf "%s: %s" e.path e.message
            in
-           Logs.warn (fun m -> m "runtime_toml: %s" detail);
+           Log.Runtime.warn "runtime_toml: %s" detail;
            None)
       | None -> None
     in
@@ -280,12 +273,10 @@ let parse_thinking_control_format ~(path : string) (raw : string)
   | "thinking-object" | "thinking_object" -> Runtime_schema.Thinking_object
   | "chat-template-kwargs" | "chat_template_kwargs" -> Runtime_schema.Chat_template_kwargs
   | other ->
-    Logs.warn (fun m ->
-      m
-        "runtime_toml: %s.capabilities.thinking-control-format = %S — expected one of \
+    Log.Runtime.warn "runtime_toml: %s.capabilities.thinking-control-format = %S — expected one of \
          none|thinking-object|chat-template-kwargs, defaulting to none"
         path
-        other);
+        other;
     Runtime_schema.No_thinking_control
 ;;
 
@@ -299,12 +290,10 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     | None -> None
     | Some n when n > 0 -> Some n
     | Some n ->
-      Logs.warn (fun m ->
-        m
-          "runtime_toml: %s.capabilities.%s = %d — expected positive integer, ignoring"
+      Log.Runtime.warn "runtime_toml: %s.capabilities.%s = %d — expected positive integer, ignoring"
           path
           key
-          n);
+          n;
       None
   in
   let thinking_control_format =
@@ -379,14 +368,12 @@ let parse_model (id : string) (tbl : Otoml.t)
              let trimmed = String.trim s in
              if String.length trimmed = 0
              then (
-               Logs.warn (fun m ->
-                 m "runtime_toml: %s.match-prefixes contains empty entry, ignoring" path);
+               Log.Runtime.warn "runtime_toml: %s.match-prefixes contains empty entry, ignoring" path;
                None)
              else Some trimmed)
          with
          | Otoml.Type_error _ ->
-           Logs.warn (fun m ->
-             m "runtime_toml: %s.match-prefixes — expected string array, ignoring" path);
+           Log.Runtime.warn "runtime_toml: %s.match-prefixes — expected string array, ignoring" path;
            [])
     in
     Ok

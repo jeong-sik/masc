@@ -543,7 +543,7 @@ module KeeperWatchdog = struct
     in
     if raw > KeeperKeepalive.turn_timeout_sec
     then (
-      Log.warn
+      Log.Config.warn
         "MASC_KEEPER_WATCHDOG_STALE_SEC (%.1f) exceeds turn_timeout_sec (%.1f); clamping \
          to turn_timeout_sec"
         raw
@@ -568,7 +568,7 @@ module KeeperWatchdog = struct
     in
     if raw > KeeperKeepalive.turn_timeout_sec
     then (
-      Log.warn
+      Log.Config.warn
         "MASC_KEEPER_WATCHDOG_PROGRESS_SEC (%.1f) exceeds turn_timeout_sec (%.1f); \
          clamping to turn_timeout_sec"
         raw

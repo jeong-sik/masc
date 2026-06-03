@@ -77,12 +77,10 @@ let frame_to_input frame =
     None
 
 let log_effect level message =
-  let prefix = match level with
-    | `Info -> "[discord] "
-    | `Warn -> "[discord WARN] "
-    | `Error -> "[discord ERROR] "
-  in
-  prerr_endline (prefix ^ message)
+  match level with
+  | `Info -> Log.Discord.info "%s" message
+  | `Warn -> Log.Discord.warn "%s" message
+  | `Error -> Log.Discord.error "%s" message
 
 let run ~sw ~env ~token ~intents ~trigger_policy ~on_event () =
   let config : Discord_gateway_state.config = {

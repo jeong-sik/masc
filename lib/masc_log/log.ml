@@ -898,3 +898,33 @@ module Planner = Make(struct let name = "Planner" end)
 module Compact = Make(struct let name = "Compact" end)
 module Harness = Make(struct let name = "Harness" end)
 module Discovery = Make(struct let name = "Discovery" end)
+
+(* Logging-consistency migration (refactor/logging-consistency-harness):
+   modules added so that former top-level [Log.info ~ctx:"<name>"] call sites
+   route through a dedicated per-module logger while preserving the exact
+   component string operators see in [ts] [LEVEL] [<name>] output. The [name]
+   string is the original [~ctx] value verbatim; the module identifier is its
+   Capitalized form. See docs/LOGGING.md. *)
+module Heuristic_metrics = Make(struct let name = "heuristic_metrics" end)
+module Dashboard_provider_runs = Make(struct let name = "dashboard_provider_runs" end)
+module Otel = Make(struct let name = "otel" end)
+module Agent_health = Make(struct let name = "agent_health" end)
+module Relay = Make(struct let name = "relay" end)
+module Runtime_verify = Make(struct let name = "runtime_verify" end)
+module Checkpoint = Make(struct let name = "checkpoint" end)
+module Jsonl_atomic = Make(struct let name = "jsonl_atomic" end)
+module Mcp_transport = Make(struct let name = "mcp_transport" end)
+module Startup = Make(struct let name = "startup" end)
+module Model_inference_metrics = Make(struct let name = "model_inference_metrics" end)
+module Oas_worker_exec = Make(struct let name = "oas_worker_exec" end)
+module Oas_event = Make(struct let name = "oas:event" end)
+module H2_gateway = Make(struct let name = "h2_gateway" end)
+
+(* Modules added for former raw-stderr / [Logs.*] server-runtime call sites
+   that carried no [~ctx]. Domain-named (no prior component string to
+   preserve); the migration adds a single [ts] [LEVEL] [<name>] prefix where
+   there was previously none. *)
+module Voice = Make(struct let name = "Voice" end)
+module Exec_tap = Make(struct let name = "ExecTap" end)
+module Tool_validation = Make(struct let name = "ToolValidation" end)
+module Discord = Make(struct let name = "Discord" end)

@@ -212,9 +212,7 @@ let ensure_dir path =
     try Unix.mkdir dir 0o755 with
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
     | Unix.Unix_error (err, _, _) ->
-      Log.warn
-        ~ctx:"heuristic_metrics"
-        "cannot mkdir %s: %s"
+      Log.Heuristic_metrics.warn "cannot mkdir %s: %s"
         dir
         (Unix.error_message err))
 ;;
@@ -230,13 +228,11 @@ let do_flush () =
        match
          try Ok (open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path) with
          | Sys_error msg ->
-           Log.warn ~ctx:"heuristic_metrics" "cannot open %s: %s" path msg;
+           Log.Heuristic_metrics.warn "cannot open %s: %s" path msg;
            Error msg
        with
        | Error _ ->
-         Log.warn
-           ~ctx:"heuristic_metrics"
-           "flush skipped: %d records remain buffered"
+         Log.Heuristic_metrics.warn "flush skipped: %d records remain buffered"
            (Queue.length buffer)
        | Ok oc ->
          Eio_guard.protect
@@ -257,9 +253,7 @@ let warn_uninitialized_record_once () =
   if not !uninitialized_record_warned_ref
   then (
     uninitialized_record_warned_ref := true;
-    Log.warn
-      ~ctx:"heuristic_metrics"
-      "record called before init; buffering metric events until init installs a base_path")
+    Log.Heuristic_metrics.warn "record called before init; buffering metric events until init installs a base_path")
 ;;
 
 (* #9919: the pre-fix emit at [keeper_hooks_oas.post_tool_use_failure]
@@ -289,7 +283,7 @@ let scrub_legacy_degenerate_rows path =
   else (
     match Safe_ops.read_file_safe path with
     | Error msg ->
-      Log.warn ~ctx:"heuristic_metrics" "#9919 scrub skipped — read failed: %s" msg;
+      Log.Heuristic_metrics.warn "#9919 scrub skipped — read failed: %s" msg;
       0
     | Ok content ->
       let lines =
@@ -335,7 +329,7 @@ let scrub_legacy_degenerate_rows path =
           ndrop
         with
         | Sys_error msg ->
-          Log.warn ~ctx:"heuristic_metrics" "#9919 scrub skipped — write failed: %s" msg;
+          Log.Heuristic_metrics.warn "#9919 scrub skipped — write failed: %s" msg;
           (try Sys.remove tmp with
            | Sys_error _ -> ());
           0))
@@ -375,7 +369,7 @@ let recent n =
     else (
       match Safe_ops.read_file_safe path with
       | Error msg ->
-        Log.warn ~ctx:"heuristic_metrics" "recent_entries read failed: %s" msg;
+        Log.Heuristic_metrics.warn "recent_entries read failed: %s" msg;
         []
       | Ok content ->
         let lines =
@@ -393,7 +387,7 @@ let recent n =
         |> List.filter_map (fun line ->
           try Some (Yojson.Safe.from_string line) with
           | Yojson.Json_error msg ->
-            Log.warn ~ctx:"heuristic_metrics" "dropping malformed line: %s" msg;
+            Log.Heuristic_metrics.warn "dropping malformed line: %s" msg;
             None))
 ;;
 

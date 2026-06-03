@@ -46,8 +46,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_memory_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_persona_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_persona_runtime.mli` - execution-dispatch
-- `lib/keeper/keeper_tool_remote_mcp_runtime.ml` - execution-dispatch
-- `lib/keeper/keeper_tool_remote_mcp_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_registered_runtime.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_registered_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_shared_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_shared_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_command_runtime.ml` - execution-dispatch

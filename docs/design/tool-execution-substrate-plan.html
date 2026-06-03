@@ -357,9 +357,9 @@
           <div class="note"><code>Execute</code>, file/search, and web evidence tools.</div>
         </div>
         <div class="card metric">
-          <div class="value">4</div>
+          <div class="value">3</div>
           <div class="label">Executor classes</div>
-          <div class="note"><code>Shell_ir</code>, <code>Filesystem</code>, <code>Remote_mcp</code>, <code>In_process</code>.</div>
+          <div class="note"><code>Shell_ir</code>, <code>Filesystem</code>, <code>In_process</code>.</div>
         </div>
         <div class="card metric">
           <div class="value">0</div>
@@ -535,12 +535,6 @@
             <td>Semantic file reads and writes with reviewable path/content shape.</td>
             <td><code>Read</code>, <code>Edit</code>, <code>Write</code></td>
             <td>Ad hoc shell redirection or command-generated file mutation.</td>
-          </tr>
-          <tr>
-            <td><code>Remote_mcp</code></td>
-            <td>Remote evidence or MCP capability boundary.</td>
-            <td><code>WebSearch</code>, <code>WebFetch</code></td>
-            <td>Mirroring every remote operation as a first-class tool.</td>
           </tr>
           <tr>
             <td><code>In_process</code></td>
@@ -880,7 +874,7 @@
         <tbody>
           <tr>
             <td>Descriptor executor enum</td>
-            <td><code>Shell_ir</code>, <code>Filesystem</code>, <code>Remote_mcp</code>, <code>In_process</code>.</td>
+            <td><code>Shell_ir</code>, <code>Filesystem</code>, <code>In_process</code>.</td>
           </tr>
           <tr>
             <td>Shell IR audit</td>
@@ -892,7 +886,7 @@
           </tr>
           <tr>
             <td>Keeper prompt web aliases</td>
-            <td>Keeper-facing prompts and the capability matrix use <code>WebSearch</code> / <code>WebFetch</code>; <code>masc_web_search</code> / <code>masc_web_fetch</code> remain outside these model-facing guidance surfaces.</td>
+            <td>Keeper-facing prompts and the capability matrix use <code>WebSearch</code> / <code>WebFetch</code>; <code>masc_web_search</code> / <code>masc_web_fetch</code> remain internal backend names and are not part of the MCP public tool surface.</td>
           </tr>
           <tr>
             <td>Known caveat</td>

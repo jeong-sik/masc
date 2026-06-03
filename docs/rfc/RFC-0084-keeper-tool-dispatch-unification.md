@@ -111,8 +111,8 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.result optio
 
 | Caller | Entry | Pre-hook | Observer | Capability gate | Trace span |
 |---|---|---|---|---|---|
-| `agent_tool_remote_mcp_runtime.ml:164` (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ unrestricted¹ | ✗ |
-| `agent_tool_remote_mcp_runtime.ml:218` (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ | ✗ |
+| legacy keeper registered-runtime site 1 (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ unrestricted¹ | ✗ |
+| legacy keeper registered-runtime site 2 (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ | ✗ |
 | `mcp_server_eio_execute.ml:817` (MCP) | manual `run_pre_hooks` + `dispatch` | ✓ manual | ~ if result≠None | ‖ profile filter² | ✗ |
 | `mcp_server_eio_execute.ml:999` (MCP) | manual `run_pre_hooks` + `dispatch` | ✓ manual | ~ if result≠None | ‖ profile filter² | ✗ |
 | `keeper_tag_dispatch.ml` (fallback) | Entry 3 | ✗ | ? | ✗ | ✗ |
@@ -123,7 +123,7 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.result optio
 
 ### §1.2 Telemetry 4-Tuple Emission Gap
 
-`Tracing.with_span`은 oas `lib/agent/agent_tools.ml:161 invoke_hook`에서 hook 호출을 wrap하지만, **masc-mcp `lib/tool_dispatch.ml`이나 `lib/keeper/agent_tool_remote_mcp_runtime.ml`에 0건** (verify: `rg -n 'Tracing\.with_span' lib/tool_dispatch.ml lib/keeper/agent_tool_remote_mcp_runtime.ml` = 0 매치).
+`Tracing.with_span`은 oas `lib/agent/agent_tools.ml:161 invoke_hook`에서 hook 호출을 wrap하지만, **masc-mcp `lib/tool_dispatch.ml`이나 legacy keeper registered-runtime path에 0건**이었다.
 
 | Tuple slot | 현재 상태 |
 |---|---|
@@ -380,7 +380,7 @@ RFC-OAS-013 §2.1 v2의 `if meta.name = "imseonghan"` 패턴 거부. 대신 *con
 | PR-4 | parity test: 기존 5 set 모든 admit이 typed Capability로 동일 결과 | single-PR revert |
 | PR-5 | boot warn 540 → 0 측정 | revert + 4-variant 복귀 |
 | PR-6 | **24h shadow mode**: both paths 동시 실행, divergence log. 0 divergence면 PR-7 진행 | single-PR revert |
-| PR-7 | **Pre-hook log-only mode 1 deploy cycle** → enforce. Capability gate advisory mode 처음 24h | `agent_tool_remote_mcp_runtime.ml` 2-line revert |
+| PR-7 | **Pre-hook log-only mode 1 deploy cycle** → enforce. Capability gate advisory mode 처음 24h | keeper registered-runtime 2-line revert |
 | PR-8~9 | 동일 path 적용 | single-PR revert |
 | PR-10 | observer signature 변경 5 site 일제 (compile-time 강제) | single-PR revert |
 | PR-11 | dead code 제거 (PR-7~10 후) | single-PR revert (cherrry-pick) |
@@ -485,7 +485,7 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 - `lib/keeper/tool_resolution.ml:56-103` — `resolve` 13-source short-circuit
 - `lib/keeper/tool_resolution.ml:81-86, 143-149` — `surfaces_to_check` 4 variants
 - `lib/keeper/keeper_tool_resolution.ml` — runtime routing projection
-- `lib/keeper/agent_tool_remote_mcp_runtime.ml:164, 218` — keeper turn `dispatch` direct
+- legacy keeper registered-runtime dispatch sites — keeper turn `dispatch` direct
 - `lib/keeper/capability_registry.ml:358-362` — "Internal dispatch unrestricted" 코멘트
 - `lib/mcp_server_eio_execute.ml:817, 999` — manual `run_pre_hooks` + `dispatch`
 - `lib/keeper/keeper_tag_dispatch.ml` — Entry 3 fallback

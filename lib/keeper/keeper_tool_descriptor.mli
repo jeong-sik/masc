@@ -8,14 +8,12 @@
 type executor =
   | Shell_ir
   | Filesystem
-  | Remote_mcp
   | In_process
 
 type backend =
   | Ocaml_runtime
   | Host_process
   | Sandbox_process
-  | Remote_service
 
 type sandbox =
   | No_sandbox
@@ -37,7 +35,6 @@ type runtime_handler =
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
-  | Tool_remote_mcp
   | Tool_time_now
   | Tool_stay_silent
   | Tool_tools_list

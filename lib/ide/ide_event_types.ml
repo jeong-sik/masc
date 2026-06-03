@@ -14,6 +14,9 @@ type command_descriptor =
   | Gh_issue_close of { issue_number : int }
   | Git_push of { remote : string; branch : string; force : bool }
   | Git_commit of { message : string }
+  | Gh_api_pr_create of { repo : string; title : string; base : string }
+  | Gh_api_pr_merge of { repo : string; pr_number : int }
+  | Gh_api_pr_comment of { repo : string; pr_number : int; body : string }
   | Generic
 
 let command_descriptor_to_json = function
@@ -37,6 +40,12 @@ let command_descriptor_to_json = function
     `Assoc [ "kind", `String "git_push"; "remote", `String remote; "branch", `String branch; "force", `Bool force ]
   | Git_commit { message } ->
     `Assoc [ "kind", `String "git_commit"; "message", `String message ]
+  | Gh_api_pr_create { repo; title; base } ->
+    `Assoc [ "kind", `String "gh_api_pr_create"; "repo", `String repo; "title", `String title; "base", `String base ]
+  | Gh_api_pr_merge { repo; pr_number } ->
+    `Assoc [ "kind", `String "gh_api_pr_merge"; "repo", `String repo; "pr_number", `Int pr_number ]
+  | Gh_api_pr_comment { repo; pr_number; body } ->
+    `Assoc [ "kind", `String "gh_api_pr_comment"; "repo", `String repo; "pr_number", `Int pr_number; "body", `String body ]
   | Generic ->
     `Assoc [ "kind", `String "generic" ]
 

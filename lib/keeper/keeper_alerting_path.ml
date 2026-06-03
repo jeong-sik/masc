@@ -13,6 +13,7 @@ type keeper_path_rejection =
   | Outside_sandbox of { raw : string }
   | Not_found_relative of { raw : string }
   | Ambiguous_relative_read_path of { raw : string; candidate_count : int }
+  | Task_state_file_path_blocked of { raw : string }
 
 (** LLM-facing opaque message. *)
 let rejection_to_user_message = function
@@ -42,6 +43,11 @@ let rejection_to_user_message = function
        relative segment)"
       raw
       candidate_count
+  | Task_state_file_path_blocked { raw } ->
+    Printf.sprintf
+      "task_state_file_path_blocked: %s (use keeper_tasks_list for task/backlog \
+       state, not direct file access)"
+      raw
 ;;
 
 let rejection_message_prefix = function
@@ -52,6 +58,7 @@ let rejection_message_prefix = function
   | Outside_sandbox _ -> "path_outside_sandbox:"
   | Not_found_relative _ -> "path_not_found_under_allowed_roots:"
   | Ambiguous_relative_read_path _ -> "ambiguous_relative_read_path:"
+  | Task_state_file_path_blocked _ -> "task_state_file_path_blocked:"
 ;;
 
 let starts_with_ci ~prefix s =
@@ -74,6 +81,8 @@ let parse_rejection_prefix msg =
   then Some (Not_found_relative { raw = "" })
   else if starts_with_ci ~prefix:"ambiguous_relative_read_path:" trimmed
   then Some (Ambiguous_relative_read_path { raw = ""; candidate_count = 0 })
+  else if starts_with_ci ~prefix:"task_state_file_path_blocked:" trimmed
+  then Some (Task_state_file_path_blocked { raw = "" })
   else None
 ;;
 
@@ -90,6 +99,7 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
     | Outside_sandbox _ -> "out_of_roots"
     | Not_found_relative _ -> "not_found_relative"
     | Ambiguous_relative_read_path _ -> "ambiguous_relative_read_path"
+    | Task_state_file_path_blocked _ -> "task_state_file_path_blocked"
   in
   Prometheus.inc_counter
     Keeper_metrics.(to_string PathRejection)
@@ -321,6 +331,22 @@ let raw_looks_like_playground_subdir (raw : string) : bool =
   || raw = "mind"
 ;;
 
+(** Detect paths that reference .masc/ internal state files.
+    These are workspace-level directories that should not be accessed
+    directly from a keeper's cwd (which is inside repos/<name>/).
+    Keepers should use keeper_tasks_list / keeper_context_status instead. *)
+let is_masc_internal_state_path (raw : string) : bool =
+  (* Match ".masc/", "./.masc/", ".masc" at end, "*/backlog.json" *)
+  (String.starts_with ~prefix:".masc/" raw)
+  || (String.starts_with ~prefix:"./.masc/" raw)
+  || (String.equal raw ".masc")
+  || (String.equal raw "./.masc")
+  || (let len = String.length raw in
+      len >= 12
+      && String.sub raw (len - 12) 12 = "backlog.json"
+      && (len = 12 || raw.[len - 13] = '/'))
+;;
+
 let resolve_keeper_target_path
       ~(config : Workspace.config)
       ~(allowed_paths : string list)
@@ -330,6 +356,11 @@ let resolve_keeper_target_path
   let raw = String.trim raw_path in
   if raw = ""
   then Error Path_required
+  else if is_masc_internal_state_path raw
+  then (
+    let rej = Task_state_file_path_blocked { raw } in
+    rejection_to_telemetry rej;
+    Error rej)
   else (
     let root = project_root_of_config config in
     let candidate = if Filename.is_relative raw then Filename.concat root raw else raw in
@@ -452,6 +483,14 @@ let resolve_keeper_read_path
        Reject at the gate; the keeper should use sandbox-relative
        paths such as 'repos/X/lib/foo.ml'. *)
     let rej = Absolute_path_rejected { raw } in
+    rejection_to_telemetry rej;
+    Error rej)
+  else if is_masc_internal_state_path raw
+  then (
+    (* Block direct access to .masc/ internal state files.
+       Keepers should use keeper_tasks_list / keeper_context_status
+       instead of probing .masc/backlog.json, .masc/tasks/, etc. *)
+    let rej = Task_state_file_path_blocked { raw } in
     rejection_to_telemetry rej;
     Error rej)
   else (

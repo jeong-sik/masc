@@ -73,7 +73,7 @@ fi
 # guards below fire on a clean target that never compiles.  The subcommand
 # is the first positional token after any leading global-option flags.
 #
-# Two follow-up reviews (codex-connector P2, 2026-05-05):
+# Two follow-up reviews (P2, 2026-05-05):
 #   - `--auto-promote` is a boolean flag, NOT value-taking (per
 #     `dune build --help` common options).  Removed from value list.
 #   - `-p PACKAGES` and `-x VAL` ARE value-taking short options

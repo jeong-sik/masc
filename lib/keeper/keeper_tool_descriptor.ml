@@ -865,10 +865,14 @@ let internal_descriptors : t list =
       ~id:"keeper.stay_silent"
       ~name:"keeper_stay_silent"
       ~description:
-        "Signal that the keeper will not emit further output this turn. \
-         Returns {status:\"silent\"}. Optionally pass no_work_reason when an \
-         actionable signal is present but no work fits this keeper, to record a \
-         typed no-work proof and complete the turn."
+        "STOP searching and call this when you have investigated but no task \
+         fits your role/surface. Returns {status:\"silent\"}. IMPORTANT: when \
+         unclaimed tasks or board activity exists (actionable signal), you \
+         MUST pass no_work_reason (one of: no_actionable_fit, \
+         no_eligible_work, deferred_to_other_keeper) or the turn fails. On \
+         idle turns with no signal, a bare {} call is fine. Do NOT keep \
+         calling keeper_tool_search in a loop — if nothing fits after a few \
+         searches, call this."
       ~input_schema:stay_silent_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_stay_silent

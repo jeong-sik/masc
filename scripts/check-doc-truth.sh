@@ -95,7 +95,7 @@ require_not_contains docs/TUI-GUIDE.md './start-masc.sh --tui'
 
 require_contains docs/QUICK-START.md '"method":"initialize"'
 require_contains docs/QUICK-START.md 'Mcp-Session-Id: ${SESSION_ID}'
-require_contains docs/QUICK-START.md 'masc_bind(agent_name="cli-agent")'
+require_contains docs/QUICK-START.md '수동 제어가 필요해도 기본 온보딩은 `masc_start(path=...)` 를 유지한다.'
 require_contains docs/QUICK-START.md '운영 기준은 항상 `<base-path>/.masc`다.'
 require_contains docs/QUICK-START.md 'scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md'
 

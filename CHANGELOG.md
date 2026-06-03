@@ -32,6 +32,18 @@
   routes (`/api/v1/gate/message` etc.) remain unchanged and continue
   to serve the other external connectors.
 
+## [0.19.36] - 2026-06-04
+
+### Changed
+- Bumped the OAS pin to `v0.200.10` and the package metadata to
+  `0.19.36`, keeping `dune-project` and the generated opam metadata on
+  the same release train.
+
+### Fixed
+- Restored release truth alignment across the roadmap, product operating
+  plan, and specification index so CI version/doc guards use the current
+  package baseline.
+
 ## [0.19.35] - 2026-05-27
 
 ### Added

@@ -369,7 +369,7 @@ let () =
                                             ; degraded_retry_applied = degraded
                                             ; runtime_fallback_applied = fallback
                                             ; runtime_outcome
-                                            ; tool_contract_result = tcr
+                                            ; completion_contract_result = tcr
                                             ; tools_used
                                             ; outcome
                                             }
@@ -405,7 +405,7 @@ let () =
                                                 false))
                                        outcomes)
                                   tools_used_variants)
-                             tool_contract_results)
+                             completion_contract_results)
                         runtime_outcomes)
                    fallback_bools)
               degraded_bools)

@@ -93,10 +93,16 @@ let parse_pr_url_from_output (output : string) : (int * string) option =
   match find_prefix 0 with
   | None -> None
   | Some start ->
-    let rest = String.sub output start (output_len - start) in
-    let parts = String.split_on_char '/' rest in
+    (* Extract the path after "https://github.com/" *)
+    let path_start = start + prefix_len in
+    let path_len = output_len - path_start in
+    let path = String.sub output path_start path_len in
+    (* path = "owner/repo/pull/123..." or "owner/repo/pull/123/files..." *)
+    let parts = String.split_on_char '/' path in
     (match parts with
      | owner :: repo :: "pull" :: number_str :: _ ->
+       (* Trim any trailing whitespace/newlines from the number *)
+       let number_str = String.trim number_str in
        (try
           let number = int_of_string number_str in
           let url = Printf.sprintf "https://github.com/%s/%s/pull/%d" owner repo number in

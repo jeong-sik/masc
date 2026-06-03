@@ -262,7 +262,7 @@ let reset_for_tests () =
   Atomic.set system_fd_cache None
 ;;
 
-external native_nofile_soft_limit : unit -> int option = "masc_mcp_nofile_soft_limit"
+external native_nofile_soft_limit : unit -> int option = "masc_nofile_soft_limit"
 
 (* Detect the host's nofile soft limit with a direct [getrlimit(RLIMIT_NOFILE)]
    stub. This is intentionally not a shell probe: spawning a process just to

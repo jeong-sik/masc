@@ -3,49 +3,87 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
+(** {1 Rest field parsing helpers}
+
+    The [rest : string list] field in GADT constructors captures arguments
+    that the typed IR doesn't model. These helpers extract structured data
+    from [rest] robustly, handling eq-form (--flag=VALUE), space-form
+    (--flag VALUE), and short flags (-f VALUE). *)
+
+(** Extract a flag value from a string list.
+    Handles: ["--base"; "main"], ["--base=main"], ["-b"; "main"]
+    Returns [default] if flag not found. *)
+let extract_flag_from_rest (rest : string list) ~(flag : string) ~(short : string option) ~(default : string) : string =
+  let flag_eq = flag ^ "=" in
+  let rec scan = function
+    | [] -> default
+    | arg :: value :: _ when String.equal arg flag -> value
+    | arg :: _ when String.length arg > String.length flag_eq
+        && String.sub arg 0 (String.length flag_eq) = flag_eq ->
+      String.sub arg (String.length flag_eq) (String.length arg - String.length flag_eq)
+    | arg :: value :: _ when (match short with Some s -> String.equal arg s | None -> false) -> value
+    | _ :: rest -> scan rest
+  in
+  scan rest
+;;
+
+(** Extract the first numeric argument from a string list.
+    Used for PR/issue numbers. Returns [0] if not found. *)
+let extract_number_from_rest (rest : string list) : int =
+  let rec scan = function
+    | [] -> 0
+    | s :: _ when (match int_of_string_opt s with Some n -> n > 0 | None -> false) ->
+      (match int_of_string_opt s with Some n -> n | None -> 0)
+    | _ :: rest -> scan rest
+  in
+  scan rest
+;;
+
 (** Compute a structured command descriptor from Shell IR.
     Used by the IDE bridge for deterministic PR/issue event detection. *)
-let first_int_arg args =
-  List.find_map int_of_string_opt args |> Option.value ~default:0
-
 let compute_command_descriptor (ir : Masc_exec.Shell_ir.t) : Ide_event_types.command_descriptor =
   match ir with
   | Masc_exec.Shell_ir.Simple simple ->
     (match Masc_exec.Shell_ir_typed.of_simple simple with
-     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Gh { subcommand; action; title; draft; squash; delete_branch = _; body; rest }) ->
+     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Gh { subcommand; action; title; draft; squash; delete_branch; body; rest }) ->
        (match subcommand, action with
+        (* PR operations *)
         | "pr", Some "create" ->
-          let base = List.fold_left (fun acc -> function
-            | "--base" :: b :: _ -> b
-            | "--base=" :: b :: _ -> (match String.split_on_char '=' b with [ _; v ] -> v | _ -> acc)
-            | _ -> acc
-          ) "main" (List.map (fun s -> String.split_on_char ' ' s) rest) in
+          let base = extract_flag_from_rest rest ~flag:"--base" ~short:(Some "-b") ~default:"main" in
           Gh_pr_create { title = Option.value title ~default:""; base; draft }
         | "pr", Some "merge" ->
-          let pr_number = first_int_arg rest in
-          Gh_pr_merge { pr_number; squash }
+          Gh_pr_merge { pr_number = extract_number_from_rest rest; squash }
         | "pr", Some "comment" ->
-          let pr_number = first_int_arg rest in
-          Gh_pr_comment { pr_number; body = Option.value body ~default:"" }
+          Gh_pr_comment { pr_number = extract_number_from_rest rest; body = Option.value body ~default:"" }
         | "pr", Some "close" ->
-          let pr_number = first_int_arg rest in
-          Gh_pr_close { pr_number }
+          Gh_pr_close { pr_number = extract_number_from_rest rest }
         | "pr", Some "edit" ->
-          let pr_number = first_int_arg rest in
-          Gh_pr_edit { pr_number; title }
+          Gh_pr_edit { pr_number = extract_number_from_rest rest; title }
         | "pr", Some "review" ->
-          let pr_number = first_int_arg rest in
-          Gh_pr_review { pr_number }
+          Gh_pr_review { pr_number = extract_number_from_rest rest }
+        | "pr", Some "reopen" ->
+          Gh_pr_close { pr_number = extract_number_from_rest rest } (* reopen uses same structure *)
+        | "pr", Some "ready" ->
+          Gh_pr_review { pr_number = extract_number_from_rest rest }
+        (* Issue operations *)
         | "issue", Some "create" ->
           Gh_issue_create { title = Option.value title ~default:""; body = Option.value body ~default:"" }
         | "issue", Some "close" ->
-          let issue_number = first_int_arg rest in
-          Gh_issue_close { issue_number }
+          Gh_issue_close { issue_number = extract_number_from_rest rest }
+        | "issue", Some "reopen" ->
+          Gh_issue_close { issue_number = extract_number_from_rest rest }
+        (* Unknown gh subcommand *)
         | _ -> Generic)
-     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Git_push { force; force_with_lease = _; set_upstream = _; remote; branch }) ->
-       Git_push { remote = Option.value remote ~default:"origin"; branch = Option.value branch ~default:"main"; force }
-     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Git_commit { message; amend = _ }) ->
-       Git_commit { message }
+     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Git_push { force; force_with_lease; set_upstream = _; remote; branch }) ->
+       Git_push {
+         remote = Option.value remote ~default:"origin";
+         branch = Option.value branch ~default:"main";
+         force = force || force_with_lease
+       }
+     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Git_commit { message; amend }) ->
+       Git_commit { message = if amend then message ^ " (amend)" else message }
+     | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Git_merge { squash; branch; _ }) ->
+       Gh_pr_merge { pr_number = 0; squash } (* git merge is analogous to pr merge *)
      | Masc_exec.Shell_ir_typed_types.W (Masc_exec.Shell_ir_typed_types.Curl { url; method_; body; _ }) ->
        (* Detect GitHub API PR operations via curl *)
        let is_github_api = String.length url > 23 && String.sub url 0 23 = "https://api.github.com/" in
@@ -339,7 +377,7 @@ let handle_tool_execute_typed
             ~deterministic_reason:
               Keeper_tool_deterministic_error.Destructive_operation_blocked
             ~error:"destructive_operation_blocked"
-            ~reason:"This typed command is destructive and is blocked for all Execute surfaces."
+            ~reason:"This typed command is destructive and is blocked for all tool_access lists."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
             ()
         else if (not write_enabled)

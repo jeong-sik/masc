@@ -22,7 +22,13 @@ let () =
 let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
     ~cost_usd =
   if usage_missing then cost_label_usage_missing
-  else if not usage_trusted then cost_label_usage_untrusted
+  (* token⊥cost: an untrusted *token count* does not gate the provider's
+     authoritative cost_usd. A positive cost_usd is labelled [computed] even when
+     token usage is untrusted; only zero/absent cost on an untrusted turn keeps
+     the [usage_untrusted] source label. Keeps the value and the source label in
+     sync with [cost_status_for_event]. *)
+  else if (not usage_trusted) && not (cost_usd > 0.0) then
+    cost_label_usage_untrusted
   else if runtime_unmetered then cost_source_unmetered_provider
   else if cost_usd > 0.0 then cost_source_computed
   else cost_label_oas_cost_unreported
@@ -89,8 +95,12 @@ let assemble_cost_event_payload
   let provider = runtime_lane_label in
   let runtime_unknown = false in
   let runtime_unmetered = false in
-  (* Classify cost_status using raw cost_usd so OAS-reported cost is
-     considered before the safe-value mask below. *)
+  (* Classify cost_status from the raw cost_usd. cost_usd is the provider's
+     authoritative cost field and is accounted independently of token-count
+     trust (token⊥cost): a positive cost_usd yields Cost_reported (and is kept
+     by the safe-value mask below) even when token usage is untrusted. Only the
+     token COUNTS are zeroed for untrusted usage (safe_input/output_tokens
+     above). *)
   let cost_status =
     cost_status_for_event
       ~runtime_unknown

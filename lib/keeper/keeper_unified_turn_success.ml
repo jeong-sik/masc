@@ -10,16 +10,9 @@ open Keeper_meta_contract
 let runtime_lane_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
-let turn_cost result =
-  let usage_trust_for_cost =
-    KUM.classify_usage_trust
-      ~usage_reported:result.Keeper_agent_run.usage_reported
-      ~usage:result.usage
-      ~context_max:0
-  in
-  KUM.estimate_trusted_usage_cost_usd
-    ~usage_trusted:(KUM.usage_trust_is_trusted usage_trust_for_cost)
-    result.usage
+(* cost_usd is accounted independently of token-count trust (token⊥cost), so the
+   turn cost no longer needs a usage-trust classification. *)
+let turn_cost result = KUM.estimate_usage_cost_usd result.Keeper_agent_run.usage
 ;;
 
 let apply_lifecycle ~config ~base_dir ~meta ~final_execution ~current_turn_blocker_info result =

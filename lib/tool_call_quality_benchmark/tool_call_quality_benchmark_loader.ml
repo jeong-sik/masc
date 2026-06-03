@@ -140,9 +140,8 @@ let benchmark_case_of_yojson json =
   let* expected_tools = string_list_field json "expected_tools" in
   let* forbidden_tools = string_list_field json "forbidden_tools" in
   let* category =
-    Json_util.get_string json "category"
-    |> Option.value ~default:"tool_expected"
-    |> case_category_of_string
+    let* raw_category = required_string_field json "category" in
+    case_category_of_string raw_category
   in
   let* arg_check_items = list_field json "arg_checks" in
   let* arg_checks = map_m parse_arg_check arg_check_items in

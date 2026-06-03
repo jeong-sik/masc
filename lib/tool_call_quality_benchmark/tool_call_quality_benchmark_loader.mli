@@ -43,10 +43,11 @@ val load_cases_from_file :
     - [success_checks] (non-empty list)
     - [prompt] (non-empty trimmed string)
     - [max_tool_calls] >= 0
+    - [category] ([tool_expected], [tool_forbidden],
+      [recovery_required], or [multi_step])
 
     Plus optional fields with documented defaults:
-    - [category] defaults to [["tool_expected"]] when absent;
-      unknown categories return [Error "unknown tool-call-quality
+    - unknown categories return [Error "unknown tool-call-quality
       category: <other>"]
     - [forbidden_tools] / [expected_tools] / [arg_checks]
       default to empty lists

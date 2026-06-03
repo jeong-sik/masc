@@ -185,12 +185,15 @@ let record_turn_latency_by_model_bucket
 
 let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
 
-let estimate_trusted_usage_cost_usd ~usage_trusted usage =
-  if usage_trusted then
-    match usage.Agent_sdk.Types.cost_usd with
-    | Some cost when cost > 0.0 -> cost
-    | Some _ | None -> 0.0
-  else 0.0
+(* cost_usd is the provider's authoritative cost field; it is independent of
+   whether token *counts* are trusted (token⊥cost). This function accounts the
+   reported cost directly and does NOT gate it on token-trust. Token counts may
+   still be zeroed for untrusted usage — that is the separate token-metrics
+   concern handled by callers, not a reason to drop a real reported cost. *)
+let estimate_usage_cost_usd usage =
+  match usage.Agent_sdk.Types.cost_usd with
+  | Some cost when cost > 0.0 -> cost
+  | Some _ | None -> 0.0
 
 let usage_trust_to_string = Keeper_usage_trust.to_string
 

@@ -45,11 +45,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let trusted_total_tokens =
     if usage_trusted then Keeper_context_runtime.total_tokens result.usage else 0
   in
-  let turn_cost =
-    estimate_trusted_usage_cost_usd
-      ~usage_trusted
-      result.usage
-  in
+  (* Token counts above are zeroed when usage is untrusted; cost is accounted
+     independently of token-trust (token⊥cost). *)
+  let turn_cost = estimate_usage_cost_usd result.usage in
   let substantive_tool_call_count =
     result.tools_used
     |> List.filter (fun name -> not (is_observation_only_tool_name name))

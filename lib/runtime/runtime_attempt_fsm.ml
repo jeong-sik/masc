@@ -49,7 +49,7 @@ let to_user_message = function
       "HTTP %d: %s"
       code
       (String_util.utf8_safe
-         ~max_bytes:(Llm_provider.Constants.Truncation.max_error_body_length + 3)
+         ~max_bytes:(Runtime_provider_defaults.max_error_body_length + 3)
          ~suffix:"..."
          body
        |> String_util.to_string)

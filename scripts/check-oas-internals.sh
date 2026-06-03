@@ -19,7 +19,7 @@
 #       (informational; allowed uses include serialization, type
 #       annotations, local-module aliases, and comments).
 #     - `Llm_provider.Constants` qualified access outside
-#       lib/oas_compat/ and lib/runtime/provider_kind_resolver.{ml,mli}
+#       lib/oas_compat/ and runtime provider boundary helpers.
 #       (informational; runtime subsystem currently legitimately
 #       reads default inference params).
 #
@@ -118,17 +118,18 @@ scan_warn_provider_kind_external() {
 }
 
 scan_warn_constants_external() {
-  # Llm_provider.Constants outside oas_compat / runtime/provider_kind_resolver.
+  # Llm_provider.Constants outside oas_compat / runtime provider boundary helpers.
   local matches
   matches="$(rg -n 'Llm_provider\.Constants' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
     | grep -v 'lib/oas_compat/' \
     | grep -v 'lib/runtime/provider_kind_resolver\.' \
+    | grep -v 'lib/runtime/runtime_provider_defaults\.' \
     | filter_noise || true)"
   if [[ -n "$matches" ]]; then
     if [[ "$strict_internals" -eq 1 ]]; then
-      echo "FAIL [internals]: Llm_provider.Constants raw access outside oas_compat / runtime/provider_kind_resolver" >&2
+      echo "FAIL [internals]: Llm_provider.Constants raw access outside oas_compat / runtime provider boundary helpers" >&2
     else
-      echo "WARN [internals]: Llm_provider.Constants raw access outside oas_compat / runtime/provider_kind_resolver" >&2
+      echo "WARN [internals]: Llm_provider.Constants raw access outside oas_compat / runtime provider boundary helpers" >&2
     fi
     echo "$matches" >&2
     return 1

@@ -80,8 +80,8 @@ let run_model_by_label
     ?(max_turns = 20)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
-    ?(temperature = Llm_provider.Constants.Inference_profile.agent_default.temperature)
-    ?(max_tokens = Llm_provider.Constants.Inference_profile.agent_default.max_tokens)
+    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+    ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec
@@ -169,8 +169,8 @@ let run_named_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
-    ?(temperature = Llm_provider.Constants.Inference_profile.agent_default.temperature)
-    ?(max_tokens = Llm_provider.Constants.Inference_profile.agent_default.max_tokens)
+    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+    ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec
@@ -219,8 +219,8 @@ let run_model_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
-    ?(temperature = Llm_provider.Constants.Inference_profile.agent_default.temperature)
-    ?(max_tokens = Llm_provider.Constants.Inference_profile.agent_default.max_tokens)
+    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+    ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
     ?wait_timeout_sec

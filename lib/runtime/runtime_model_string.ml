@@ -162,8 +162,8 @@ let make_registry_config
     {!Provider_kind_resolver} (Provider_registry as SSOT) — unknown specs are
     never flattened to [OpenAI_compat]. *)
 let parse_model_string
-  ?(temperature = Llm_provider.Constants.Inference_profile.agent_default.temperature)
-  ?(max_tokens = Llm_provider.Constants.Inference_profile.agent_default.max_tokens)
+  ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+  ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
   ?system_prompt
   ?(api_key_env_overrides = [])
   ?supports_tool_choice_override

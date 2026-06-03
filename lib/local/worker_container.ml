@@ -466,7 +466,7 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       system_prompt = Some system_prompt;
       max_tokens = Some (local_worker_max_tokens ());
       max_turns;
-      temperature = Some Llm_provider.Constants.Inference_profile.worker_default.temperature;
+      temperature = Some Runtime_provider_defaults.worker_default_temperature;
       top_p = Some 0.95;
       top_k = Some 40;
       (* min_p is effectively disabled (0.0) and some cloud providers

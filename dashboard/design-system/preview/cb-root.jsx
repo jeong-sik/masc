@@ -211,7 +211,7 @@ function App() {
 
       <DCSection id="cost" title="O4 · Cost & Latency" subtitle="Per-agent token spend, provider×model heatmap, latency histogram.">
         <DCArtboard id="ct-agt" label="A · Per-agent table"                width={1080} height={460}><CostPerAgent/></DCArtboard>
-        <DCArtboard id="ct-mtx" label="B · Provider × model heatmap"       width={920}  height={260}><CostMatrix/></DCArtboard>
+        <DCArtboard id="ct-mtx" label="B · Runtime slot x capability tier heatmap"       width={920}  height={260}><CostMatrix/></DCArtboard>
         <DCArtboard id="ct-lat" label="C · Latency histogram + buckets"    width={920}  height={340}><CostLatency/></DCArtboard>
       </DCSection>
 

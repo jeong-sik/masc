@@ -79,10 +79,10 @@ function OutputPanel() {
       { t: "01:38:32", lv: "info",  txt: "tick complete · 7.4ms" },
     ],
     "runtime-router": [
-      { t: "01:39:14", lv: "info", txt: "router.dispatch  prompt-id=p_8821a1  primary=provider-a/agent-llm-a-model-a" },
-      { t: "01:39:14", lv: "info", txt: "  step 1  provider-a         200ms · 0.012$" },
-      { t: "01:39:14", lv: "warn", txt: "  step 1  provider-a         RATE_LIMIT (60s)" },
-      { t: "01:39:14", lv: "info", txt: "  step 2  provider-b          318ms · 0.004$" },
+      { t: "01:39:14", lv: "info", txt: "router.dispatch  prompt-id=p_8821a1  primary=runtime-slot-a/capability-tier-a" },
+      { t: "01:39:14", lv: "info", txt: "  step 1  runtime-slot-a         200ms · 0.012$" },
+      { t: "01:39:14", lv: "warn", txt: "  step 1  runtime-slot-a         RATE_LIMIT (60s)" },
+      { t: "01:39:14", lv: "info", txt: "  step 2  runtime-slot-b          318ms · 0.004$" },
       { t: "01:39:15", lv: "ok",   txt: "  → resolved at step=2 (runtime hit, 5/47 today)" },
     ],
     "keeper-shell": [
@@ -205,9 +205,9 @@ function AuditPanel() {
 function CostPanel() {
   // mock cost breakdown
   const providers = [
-    { name: "provider-a",  used: 0.812, share: 0.42, calls: 1428, lat: 198 },
-    { name: "provider-b",   used: 0.341, share: 0.18, calls: 612,  lat: 312 },
-    { name: "provider-d",     used: 0.602, share: 0.31, calls: 891,  lat: 224 },
+    { name: "runtime-slot-a",  used: 0.812, share: 0.42, calls: 1428, lat: 198 },
+    { name: "runtime-slot-b",   used: 0.341, share: 0.18, calls: 612,  lat: 312 },
+    { name: "runtime-slot-c",     used: 0.602, share: 0.31, calls: 891,  lat: 224 },
     { name: "openrouter", used: 0.171, share: 0.09, calls: 244,  lat: 401 },
   ];
   const total = providers.reduce((a, p) => a + p.used, 0);
@@ -231,7 +231,7 @@ function CostPanel() {
           ))}
         </div>
         <div className="dr-cost-foot">
-          <span className="tip">Tip: provider-a at 42% share — runtime fallback to provider-b saved ~$0.18/h vs primary-only.</span>
+          <span className="tip">Tip: runtime-slot-a at 42% share — runtime fallback to runtime-slot-b saved ~$0.18/h vs primary-only.</span>
         </div>
       </div>
     </div>

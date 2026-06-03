@@ -171,27 +171,41 @@ let handle_tool_call
   T.ToolCallResponse.to_bytes result
 ;;
 
-(** LspCall handler placeholder.
+(** LspCall handler — forwards JSON-RPC LSP requests to the language server.
 
-    The actual LSP message routing lives in [Server_ide_lsp_proxy] /
-    [Lsp_process_manager] and currently requires an [Eio] switch + filesystem
-    capability that this gRPC service does not yet receive. Until that wiring
-    lands, [handle_lsp_call] returns a structured [error_message] so callers
-    on the dashboard side observe an explicit "not yet implemented" instead
-    of a transport error.
+    The [lsp_dispatcher] closure encapsulates the Eio capabilities (switch,
+    process manager, clock) and per-server LSP process cache. It mirrors
+    the WebSocket endpoint's [ensure_lsp_process + send_request] flow but
+    uses a server-scoped (not connection-scoped) process cache, since gRPC
+    calls are stateless unary RPCs.
 
-    Success semantics follow [ToolCallResponse]: [error_message = ""] means
-    the JSON-RPC response in [jsonrpc_response_json] is valid; otherwise the
-    request was rejected before reaching the LSP process. *)
-let handle_lsp_call (bytes : string) : string =
-  let _req =
+    Success semantics: [error_message = ""] means the JSON-RPC response in
+    [jsonrpc_response_json] is valid; otherwise the request was rejected
+    before reaching the LSP process. *)
+let handle_lsp_call
+      (lsp_dispatcher :
+         language_id:string
+         -> jsonrpc_request_json:string
+         -> workspace_root:string option
+         -> (string, string) result)
+      (bytes : string)
+  : string
+  =
+  let req =
     decode_request_or_raise ~rpc:"LspCall" T.LspRequest.of_bytes_result bytes
   in
+  let result =
+    lsp_dispatcher
+      ~language_id:req.language_id
+      ~jsonrpc_request_json:req.jsonrpc_request_json
+      ~workspace_root:req.workspace_root
+  in
   let resp =
-    T.LspResponse.
-      { jsonrpc_response_json = ""
-      ; error_message = "LspCall: server-side LSP dispatcher not yet wired"
-      }
+    match result with
+    | Ok jsonrpc_response_json ->
+      T.LspResponse.{ jsonrpc_response_json; error_message = "" }
+    | Error msg ->
+      T.LspResponse.{ jsonrpc_response_json = ""; error_message = msg }
   in
   T.LspResponse.to_bytes resp
 ;;
@@ -537,17 +551,24 @@ let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (
 
     @param workspace_config The MASC workspace configuration.
     @param tool_dispatcher Function that dispatches tool calls:
-      [tool_name -> arguments_json -> (result_json, error_message) result]. *)
+      [tool_name -> arguments_json -> (result_json, error_message) result].
+    @param lsp_dispatcher Function that forwards LSP JSON-RPC requests:
+      [language_id -> jsonrpc_request_json -> workspace_root -> (response_json, error) result]. *)
 let create_service
       ~(workspace_config : Workspace_utils_backend_setup.config)
       ~(tool_dispatcher : string -> string -> (string, string) result)
+      ~(lsp_dispatcher :
+          language_id:string
+          -> jsonrpc_request_json:string
+          -> workspace_root:string option
+          -> (string, string) result)
   : Grpc_eio.Service.t
   =
   Grpc_eio.Service.create service_name
   |> Grpc_eio.Service.add_unary "Broadcast" (handle_broadcast workspace_config)
   |> Grpc_eio.Service.add_unary "GetStatus" (handle_get_status workspace_config)
   |> Grpc_eio.Service.add_unary "ToolCall" (handle_tool_call tool_dispatcher)
-  |> Grpc_eio.Service.add_unary "LspCall" handle_lsp_call
+  |> Grpc_eio.Service.add_unary "LspCall" (handle_lsp_call lsp_dispatcher)
   |> Grpc_eio.Service.add_server_streaming "Subscribe" (handle_subscribe workspace_config)
   |> Grpc_eio.Service.add_bidi_streaming "Heartbeat" (handle_heartbeat workspace_config)
 ;;

@@ -346,6 +346,8 @@ let test_grpc_server_registers_health_service () =
              ~port:Masc_mcp.Masc_grpc_server.default_port
              ~workspace_config
              ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+             ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+               Error "test stub")
          in
          let services = Grpc_eio.Server.list_services server in
          Alcotest.(check bool)
@@ -384,6 +386,8 @@ let test_get_status_projects_backlog_tasks () =
       Masc_mcp.Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "GetStatus" with
     | Some { handler = `Unary handler; _ } ->
@@ -497,6 +501,8 @@ let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
       Masc_mcp.Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "ToolCall" with
     | Some { handler = `Unary handler; _ } ->
@@ -519,6 +525,8 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
       Masc_mcp.Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Subscribe" with
     | Some { handler = `ServerStreaming handler; _ } ->
@@ -544,6 +552,8 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
       Masc_mcp.Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Heartbeat" with
     | Some { handler = `Bidi handler; _ } ->

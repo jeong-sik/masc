@@ -18,8 +18,14 @@ val stream_max_buffer : unit -> int
 
     @param workspace_config The MASC workspace configuration.
     @param tool_dispatcher Function that dispatches tool calls:
-      [tool_name -> arguments_json -> (result_json, error_message) result]. *)
+      [tool_name -> arguments_json -> (result_json, error_message) result].
+    @param lsp_dispatcher Function that forwards LSP JSON-RPC requests:
+      [language_id -> jsonrpc_request_json -> workspace_root -> (response_json, error) result]. *)
 val create_service :
   workspace_config:Workspace_utils_backend_setup.config ->
   tool_dispatcher:(string -> string -> (string, string) result) ->
+  lsp_dispatcher:(language_id:string ->
+                   jsonrpc_request_json:string ->
+                   workspace_root:string option ->
+                   (string, string) result) ->
   Grpc_eio.Service.t

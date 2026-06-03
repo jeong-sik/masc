@@ -121,6 +121,37 @@ val record_thompson_result_fn :
 val push_task_event_fn :
   (event_type:string -> details:(string * Yojson.Safe.t) list -> unit) Atomic.t
 
+val verification_submit_request_fn :
+  (Workspace_utils_backend_setup.config ->
+   task:Masc_domain.task ->
+   assignee:string ->
+   verification_id:string ->
+   evidence_refs:string list ->
+   (unit, string) result) Atomic.t
+
+val verification_record_verdict_fn :
+  (Workspace_utils_backend_setup.config ->
+   task_id:string ->
+   verifier:string ->
+   verification_id:string ->
+   decision:[ `Approve of string | `Reject of string ] ->
+   (unit, string) result) Atomic.t
+
+val verification_notify_submit_fn :
+  (Workspace_utils_backend_setup.config ->
+   task:Masc_domain.task ->
+   assignee:string ->
+   verification_id:string ->
+   evidence_refs:string list ->
+   unit) Atomic.t
+
+val verification_notify_verdict_fn :
+  (task_id:string ->
+   verifier:string ->
+   verification_id:string ->
+   decision:[ `Approve of string | `Reject of string ] ->
+   unit) Atomic.t
+
 val is_admin_agent_fn :
   (base_path:string -> agent_name:string -> bool) Atomic.t
 
@@ -136,5 +167,4 @@ val cdal_evidence_gate_decide_fn :
    unit ->
    evidence_gate_verdict)
   Atomic.t
-
 

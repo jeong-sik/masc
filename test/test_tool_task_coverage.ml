@@ -44,7 +44,18 @@ let ensure_test_runtime =
         | Sys_error _ -> ())
       (fun () ->
          match Runtime.init_default ~config_path:path with
-         | Ok () -> Atomic.set initialized true
+         | Ok () ->
+             Atomic.set Workspace_hooks.get_default_runtime_id_fn
+               Runtime.get_default_runtime_id;
+             Atomic.set Task.Handlers.record_verdict_fn
+               (fun ~task_id ~req ~result () ->
+                  Eval_calibration.record_verdict ~task_id ~req ~result ());
+             Atomic.set Task.Handlers.sse_broadcast_fn (fun _ -> ());
+             Atomic.set Task.Handlers.push_event_to_sessions_fn (fun _ -> ());
+             Atomic.set Task.Handlers.get_few_shot_block_fn (fun () ->
+               Eval_calibration.format_few_shot_block
+                 (Eval_calibration.select_examples ~max_examples:3));
+             Atomic.set initialized true
          | Error msg -> failwith msg)
   in
   fun () ->

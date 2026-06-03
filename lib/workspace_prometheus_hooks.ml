@@ -365,7 +365,8 @@ let record_telemetry_observe_failure kind =
     ~labels:[("kind", kind)] ()
 ;;
 
-let record_anti_rationalization_excuse_pattern ~pattern ~decision =
+let record_anti_rationalization_excuse_pattern ~pattern ~outcome =
+  let decision = Task.Anti_rationalization.excuse_pattern_decision_to_string outcome in
   Prometheus.inc_counter
     Prometheus.metric_anti_rationalization_excuse_pattern
     ~labels:[ "pattern", pattern; "decision", decision ]
@@ -480,7 +481,7 @@ let install () =
       match Task.Anti_rationalization.parse_review_verdict_from_json args with
       | Ok v ->
         verdict_ref := Some v;
-        Masc_tool_dispatch.Tool_result.error
+        Tool_result.error
           ~tool_name:name
           ~start_time
           (match v with
@@ -490,10 +491,10 @@ let install () =
         Log.Task.warn
           "[anti-rationalization] structured verdict parse failed: %s"
           msg;
-        Masc_tool_dispatch.Tool_result.error
+        Tool_result.error
           ~tool_name:name
           ~start_time
-          (sprintf "Invalid verdict format: %s" msg)
+          (Printf.sprintf "Invalid verdict format: %s" msg)
     in
     match
       Masc_oas_bridge.run_with_caller
@@ -558,6 +559,58 @@ let install () =
     ) in
     Subscriptions.push_event_to_sessions payload);
 
+  Atomic.set Workspace_hooks.verification_submit_request_fn
+    (fun config ~task ~assignee ~verification_id ~evidence_refs ->
+       Verification_protocol.create_submit_request
+         ~config
+         ~task
+         ~assignee
+         ~verification_id
+         ~evidence_refs);
+
+  Atomic.set Workspace_hooks.verification_record_verdict_fn
+    (fun config ~task_id ~verifier ~verification_id ~decision ->
+       match decision with
+       | `Approve notes ->
+         Verification_protocol.record_approve_verification
+           ~config
+           ~task_id
+           ~verifier
+           ~verification_id
+           ~notes
+       | `Reject reason ->
+         Verification_protocol.record_reject_verification
+           ~config
+           ~task_id
+           ~verifier
+           ~verification_id
+           ~reason);
+
+  Atomic.set Workspace_hooks.verification_notify_submit_fn
+    (fun config ~task ~assignee ~verification_id ~evidence_refs ->
+       Verification_protocol.notify_submit_for_verification
+         ~config
+         ~task
+         ~assignee
+         ~verification_id
+         ~evidence_refs);
+
+  Atomic.set Workspace_hooks.verification_notify_verdict_fn
+    (fun ~task_id ~verifier ~verification_id ~decision ->
+       match decision with
+       | `Approve notes ->
+         Verification_protocol.notify_approve_verification
+           ~task_id
+           ~verifier
+           ~verification_id
+           ~notes
+       | `Reject reason ->
+         Verification_protocol.notify_reject_verification
+           ~task_id
+           ~verifier
+           ~verification_id
+           ~reason);
+
   Atomic.set Workspace_hooks.is_admin_agent_fn (fun ~base_path ~agent_name ->
     match Auth.read_initial_admin base_path with
     | Some admin when String.equal agent_name admin -> true
@@ -597,4 +650,3 @@ let install () =
   in
   Atomic.set Workspace_hooks.cdal_evidence_gate_decide_fn decide_hook
 ;;
-

@@ -230,3 +230,29 @@ module Planner : LOGGER
 module Compact : LOGGER
 module Harness : LOGGER
 module Discovery : LOGGER
+
+(** {2 Logging-consistency migration modules}
+
+    Added by [refactor/logging-consistency-harness]. The first group replaces
+    former [Log.info ~ctx:"<name>"] call sites; each [name] preserves the exact
+    component string operators see ([ts] [LEVEL] [<name>]). The second group
+    replaces former raw-stderr / [Logs.*] sites that carried no context and are
+    named after their domain. See [docs/LOGGING.md]. *)
+module Heuristic_metrics : LOGGER
+module Dashboard_provider_runs : LOGGER
+module Otel : LOGGER
+module Agent_health : LOGGER
+module Relay : LOGGER
+module Runtime_verify : LOGGER
+module Checkpoint : LOGGER
+module Jsonl_atomic : LOGGER
+module Mcp_transport : LOGGER
+module Startup : LOGGER
+module Model_inference_metrics : LOGGER
+module Oas_worker_exec : LOGGER
+module Oas_event : LOGGER
+module H2_gateway : LOGGER
+module Voice : LOGGER
+module Exec_tap : LOGGER
+module Tool_validation : LOGGER
+module Discord : LOGGER

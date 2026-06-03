@@ -771,8 +771,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                      "skipped_runtime_unavailable"
                in
                forget_mcp_session session_id;
-               Log.info ~ctx:"mcp_transport"
-                 "Session terminated: %s reason=client_delete profile=%s \
+               Log.Mcp_transport.info "Session terminated: %s reason=client_delete profile=%s \
                   protocol_version=%s sse_active_before_stop=%b \
                   resource_cleanup=%s"
                  session_id (profile_label profile) protocol_version

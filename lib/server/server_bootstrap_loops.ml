@@ -1029,7 +1029,7 @@ let start_keeper_loops
         "fleet_capacity_supervisor"
         start_fleet_capacity_supervisor_loop));
   (* Phase 5: unified startup subsystem summary *)
-  Log.info ~ctx:"startup" "subsystems: keeper loops started"
+  Log.Startup.info "subsystems: keeper loops started"
 ;;
 
 

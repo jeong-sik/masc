@@ -494,7 +494,7 @@ let guarded_execute
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           let msg = Printexc.to_string exn in
           error_ref := Some msg;
-          Log.info "eval_gate tool %s failed: %s" tool_name msg;
+          Log.Harness.info "eval_gate tool %s failed: %s" tool_name msg;
           Yojson.Safe.to_string (`Assoc [
             ("error", `String "Tool execution failed (internal error)");
             ("tool", `String tool_name);

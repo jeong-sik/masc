@@ -94,13 +94,13 @@ let filter_healthy (agents : (string * 'a) list) : (string * 'a) list * (string 
         healthy := (name, data) :: !healthy
     | Unhealthy reason ->
         skipped := (name, reason) :: !skipped;
-        Log.debug ~ctx:"agent_health" "Skipping %s: %s" name reason
+        Log.Agent_health.debug "Skipping %s: %s" name reason
     | Unknown raw ->
         (* Issue #8607: fail-closed for unrecognised breaker states.
            Surface the raw value so operators can investigate. *)
         let reason = Printf.sprintf "unknown breaker state %S" raw in
         skipped := (name, reason) :: !skipped;
-        Log.debug ~ctx:"agent_health" "Skipping %s: %s" name reason
+        Log.Agent_health.debug "Skipping %s: %s" name reason
   ) agents;
   (List.rev !healthy, List.rev !skipped)
 

@@ -172,9 +172,9 @@ let start_eviction_fiber t =
          | exn ->
              t.counters.evict_failure_count_total
                <- t.counters.evict_failure_count_total + 1;
-             Printf.eprintf
+             Log.Http.error
                "[masc_http_client.pool] eviction fiber caught \
-                exception (count=%d): %s\n%!"
+                exception (count=%d): %s"
                t.counters.evict_failure_count_total
                (Printexc.to_string exn));
         loop ()

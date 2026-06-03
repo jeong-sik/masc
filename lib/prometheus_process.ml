@@ -24,7 +24,7 @@ let update_fd_gauges ~set_gauge ~metric_open_fds =
   if count >= fd_warn_threshold && not (Atomic.get fd_warned_once)
   then (
     Atomic.set fd_warned_once true;
-    Log.warn
+    Log.Metrics.warn
       "process open fd count %d reached warn threshold %d — likely socket/file leak"
       count
       fd_warn_threshold)

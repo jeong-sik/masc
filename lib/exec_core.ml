@@ -583,7 +583,7 @@ let recovery_hint_for_output ~cmd ~output classification semantic_status =
 
 let ensure_exec_artifact_dir path =
   try Fs_compat.mkdir_p path with
-  | Sys_error msg -> Logs.warn (fun f -> f "exec artifact mkdir failed: %s" msg)
+  | Sys_error msg -> Log.Backend.warn "exec artifact mkdir failed: %s" msg
 ;;
 
 let persist_artifact_if_needed ~base_path ~keeper_name ~cmd ~output =
@@ -616,7 +616,7 @@ let persist_artifact_if_needed ~base_path ~keeper_name ~cmd ~output =
     match Fs_compat.save_file_atomic path output with
     | Ok () -> Some { path; bytes = String.length output; storage = Filesystem }
     | Error err ->
-      Logs.warn (fun f -> f "exec artifact persist failed: %s" err);
+      Log.Backend.warn "exec artifact persist failed: %s" err;
       None)
 ;;
 

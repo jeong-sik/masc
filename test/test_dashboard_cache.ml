@@ -388,7 +388,7 @@ let test_invalidate_all_wakes_waiters () =
     the cache.  The caller receives the stale value immediately, and the
     background fiber's Compute_timeout exception triggers the restore path.
     A subsequent cache lookup must return the stale value, not timeout-error
-    JSON.  (Regression test for Codex review P2 on PR #1314.) *)
+    JSON.  (Regression test for review P2 on PR #1314.) *)
 let test_stale_preserved_on_timeout ~clock ~sw () =
   Dashboard_cache.invalidate_all ();
   Eio_context.set_switch sw;

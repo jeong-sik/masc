@@ -2161,7 +2161,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
           Alcotest.(check bool) "canonical tool present" true
             (List.mem "masc_status" tool_names)))
 
-let test_main_eio_self_heals_codex_mcp_token_file () =
+let test_main_eio_self_heals_cli_agent_mcp_token_file () =
   with_temp_dir "startup-agent_code-token-selfheal" (fun dir ->
       let exe = find_main_eio_exe () in
       let port = find_free_port () in
@@ -2853,7 +2853,7 @@ let () =
             `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
           Alcotest.test_case
             "main_eio self-heals agent_code mcp token file"
-            `Slow test_main_eio_self_heals_codex_mcp_token_file;
+            `Slow test_main_eio_self_heals_cli_agent_mcp_token_file;
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"
             `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;

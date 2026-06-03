@@ -942,7 +942,7 @@ let test_clean_subcommand_with_eq_flag_skips_pin_guard () =
         0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-(* Codex-connector follow-ups (#13117, 2026-05-05):
+(* CLI-connector follow-ups (#13117, 2026-05-05):
    - `--auto-promote` is a BOOLEAN common option (no arg).  Treating
      it as value-taking made `--auto-promote clean` skip both tokens
      and fall back to `build`.

@@ -706,7 +706,7 @@ let history_user_messages_from_lines
               Behavior preserved — we still drop this line and return
               [None]; only logging + counter are added.
 
-              Codex P1 follow-up: the [exception_class] label is now a
+              P1 follow-up: the [exception_class] label is now a
               4-value closed sum from [Keeper_memory_recall_exn_class]
               (constructor-level match on the [exn] type, not a
               substring scan on [Printexc.to_string]) so the metric

@@ -134,7 +134,7 @@ val check_tool_expectations :
 val compute_pass_at_k : k:int -> n:int -> c:int -> float
 (** Probability of at least one pass in [k] independent runs given
     [c] successes out of [n] total. The unbiased estimator from the
-    Codex / METR papers. *)
+    agent-eval / METR literature. *)
 
 val summarize_runs :
   scenario:scenario -> k:int -> eval_run list -> eval_result

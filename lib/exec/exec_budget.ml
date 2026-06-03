@@ -3,8 +3,8 @@
    warnings when the agent approaches or exceeds the configured limit.
    Soft limit = warning in response; hard limit = execution blocked.
 
-   Inspired by OpenAI Codex Harness "loop budget" — one of the top-3
-   safety requirements for autonomous agents. *)
+   Inspired by the agent harness "loop budget" concept — one of the
+   top-3 safety requirements for autonomous agents. *)
 
 type t = {
   mutable count : int;

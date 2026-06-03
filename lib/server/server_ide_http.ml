@@ -449,7 +449,7 @@ let add_routes router =
                ("line_start", `Int a.line_start);
                ("line_end", `Int a.line_end);
                ("keeper_id", `String a.keeper_id);
-               ("created_at_ms", `Int (Int64.to_int a.created_at_ms));
+               ("created_at_ms", `Intlit (Int64.to_string a.created_at_ms));
                ("goal_id", (match a.goal_id with Some g -> `String g | None -> `Null));
                ("task_id", (match a.task_id with Some t -> `String t | None -> `Null));
              ])

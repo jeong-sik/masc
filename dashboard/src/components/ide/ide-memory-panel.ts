@@ -76,7 +76,15 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
     <div class="ide-memory-panel" data-testid="ide-memory-panel">
       <div class="ide-memory-panel__header">
         <span class="ide-memory-panel__title">Memory</span>
-        <span class="ide-memory-panel__count">${total}</span>
+        <span>
+          <button
+            class="ide-memory-panel__refresh"
+            onClick=${fetchMemory}
+            disabled=${loading}
+            title="Refresh memory entries"
+          >↻</button>
+          <span class="ide-memory-panel__count">${total}</span>
+        </span>
       </div>
       ${loading
         ? html`<div class="ide-memory-panel__loading">Loading...</div>`

@@ -2,18 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Dev instance (port 8935). Prod uses com.jeong-sik.masc-mcp-prod (port 8945, see scripts/deploy.sh). -->
+    <!-- Dev instance (port 8935). Prod uses com.jeong-sik.masc-prod (port 8945, see scripts/deploy.sh). -->
     <key>Label</key>
-    <string>com.jeong-sik.masc-mcp</string>
+    <string>com.jeong-sik.masc</string>
 
     <!-- NOTE: Paths below are machine-specific. Adjust for your setup:
-         - ProgramArguments: path to start-masc-mcp.sh in the repo
+         - ProgramArguments: path to start-masc.sh in the repo
          - StandardOutPath/StandardErrorPath: log directory
          - MASC_BASE_PATH / WorkingDirectory: your base path -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/dancer/me/workspace/yousleepwhen/masc-mcp/start-masc-mcp.sh</string>
+        <string>/Users/dancer/me/workspace/yousleepwhen/masc/start-masc.sh</string>
         <string>--http</string>
         <string>--port</string>
         <string>8935</string>
@@ -34,10 +34,10 @@
     <integer>30</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/dancer/me/logs/masc-mcp-launchd.out.log</string>
+    <string>/Users/dancer/me/logs/masc-launchd.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/dancer/me/logs/masc-mcp-launchd.err.log</string>
+    <string>/Users/dancer/me/logs/masc-launchd.err.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>

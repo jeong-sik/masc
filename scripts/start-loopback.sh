@@ -8,4 +8,4 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # explicitly, but do not autoboot a whole keeper set on 8935 unless requested.
 export MASC_KEEPER_BOOTSTRAP_ENABLED="${MASC_KEEPER_BOOTSTRAP_ENABLED:-false}"
 
-exec "$REPO_ROOT/start-masc-mcp.sh" --http --host 127.0.0.1 --port 8935 "$@"
+exec "$REPO_ROOT/start-masc.sh" --http --host 127.0.0.1 --port 8935 "$@"

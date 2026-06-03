@@ -1,4 +1,4 @@
-# Periodic stale/merged worktree cleanup for masc-mcp hosts.
+# Periodic stale/merged worktree cleanup for masc hosts.
 # Wraps scripts/cleanup-stale-worktrees.sh + cleanup-merged-worktrees.sh,
 # both of which are in-tree but had no scheduling layer prior to this
 # unit (closing report matrix item #33).
@@ -21,20 +21,20 @@
 
 [Unit]
 Description=MASC MCP worktree cleanup (stale + merged)
-Documentation=https://github.com/jeong-sik/masc-mcp
+Documentation=https://github.com/jeong-sik/masc
 After=network.target
 
 [Service]
 Type=oneshot
 User=masc
 Group=masc
-WorkingDirectory=/opt/masc-mcp
+WorkingDirectory=/opt/masc
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 
 # Stale: drops worktrees older than 7 days (default in script).
-ExecStart=/opt/masc-mcp/scripts/cleanup-stale-worktrees.sh --apply
+ExecStart=/opt/masc/scripts/cleanup-stale-worktrees.sh --apply
 # Merged: drops worktrees whose branch is fully merged.
-ExecStart=/opt/masc-mcp/scripts/cleanup-merged-worktrees.sh --apply
+ExecStart=/opt/masc/scripts/cleanup-merged-worktrees.sh --apply
 
 # Conservative timeout — if git worktree prune blocks longer than this,
 # something else (lock file, NFS hang) needs human investigation.
@@ -46,7 +46,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/opt/masc-mcp
+ReadWritePaths=/opt/masc
 
 StandardOutput=journal
 StandardError=journal

@@ -1,6 +1,6 @@
 name: PR-0.2.G — Dashboard WS Load (k6)
 
-# k6 100-VU WebSocket load harness against the masc-mcp dashboard endpoint.
+# k6 100-VU WebSocket load harness against the masc dashboard endpoint.
 # Sibling of:
 #   - .github/workflows/perf-baseline.yml          (PR-0.2.F)
 #   - lib/transport_metrics.ml WS histogram        (PR-0.2.B, #12015 MERGED)

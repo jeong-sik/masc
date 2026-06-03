@@ -166,7 +166,7 @@ jobs:
         run: bash scripts/lint/no-fabricated-telemetry.sh
 
   no-oas-prefix-in-lib:
-    name: No oas_* prefix in masc-mcp lib/ (RFC-0047)
+    name: No oas_* prefix in masc lib/ (RFC-0047)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

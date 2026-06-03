@@ -6,7 +6,7 @@
 
 [Unit]
 Description=Daily MASC MCP worktree cleanup
-Documentation=https://github.com/jeong-sik/masc-mcp
+Documentation=https://github.com/jeong-sik/masc
 
 [Timer]
 OnCalendar=*-*-* 03:17:00

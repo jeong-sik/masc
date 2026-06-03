@@ -1,7 +1,7 @@
 name: Perf Baseline (Manual)
 
 # Validates scripts/perf-baseline.sh on demand and records the dry-run
-# output as an artifact. The script targets a live masc-mcp server at
+# output as an artifact. The script targets a live masc server at
 # :8935; in GitHub-hosted CI no server is running, so scheduled runs only
 # produced fake green artifacts for the expected "server unreachable" path.
 #

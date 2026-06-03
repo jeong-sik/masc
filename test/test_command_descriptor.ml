@@ -162,9 +162,97 @@ let test_generic_unknown () =
 let test_generic_pipeline () =
   let ir = parse_ir "cat file.txt | grep pattern" in
   match Desc.compute_command_descriptor ir with
-  | Ide_event_types.Generic -> ()
-  | other -> failf "expected Generic for pipeline, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
+  | Ide_event_types.Pipe_chain { first_cmd; last_cmd; length } ->
+    check string "first_cmd" "cat" first_cmd;
+    check string "last_cmd" "grep" last_cmd;
+    check int "length" 2 length
+  | other -> failf "expected Pipe_chain, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
 ;;
+
+(** {1 Pipe chain classification} *)
+
+let test_pipe_chain_rg_grep_head () =
+  let ir = parse_ir "rg foo | grep bar | head" in
+  match Desc.compute_command_descriptor ir with
+  | Ide_event_types.Pipe_chain { first_cmd; last_cmd; length } ->
+    check string "first_cmd" "rg" first_cmd;
+    check string "last_cmd" "head" last_cmd;
+    check int "length" 3 length
+  | other -> failf "expected Pipe_chain, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
+;;
+
+let test_pipe_chain_gh_in_last () =
+  (* When the last command is gh, the pipeline should resolve to the gh descriptor *)
+  let ir = parse_ir "cat file.txt | gh pr create --title test" in
+  match Desc.compute_command_descriptor ir with
+  | Ide_event_types.Gh_pr_create { title; _ } ->
+    check string "title" "test" title
+  | other -> failf "expected Gh_pr_create, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
+;;
+
+let test_pipe_chain_git_push () =
+  (* When the last command is git push, use that directly *)
+  let ir = parse_ir "echo pushing | git push origin main" in
+  match Desc.compute_command_descriptor ir with
+  | Ide_event_types.Git_push { remote; branch; _ } ->
+    check string "remote" "origin" remote;
+    check string "branch" "main" branch
+  | other -> failf "expected Git_push, got %s" (Yojson.Safe.to_string (Ide_event_types.command_descriptor_to_json other))
+;;
+
+(** {1 Exit code semantics} *)
+
+let test_exit_code_grep_no_match () =
+  match Ide_event_types.interpret_exit_code ~cmd_name:"grep" ~exit_code:1 with
+  | Ide_event_types.No_matches -> ()
+  | other -> failf "expected No_matches, got different"
+
+let test_exit_code_grep_error () =
+  match Ide_event_types.interpret_exit_code ~cmd_name:"grep" ~exit_code:2 with
+  | Ide_event_types.Error _ -> ()
+  | _ -> failf "expected Error"
+
+let test_exit_code_diff_files_differ () =
+  match Ide_event_types.interpret_exit_code ~cmd_name:"diff" ~exit_code:1 with
+  | Ide_event_types.Files_differ -> ()
+  | _ -> failf "expected Files_differ"
+
+let test_exit_code_general_success () =
+  match Ide_event_types.interpret_exit_code ~cmd_name:"ls" ~exit_code:0 with
+  | Ide_event_types.Success -> ()
+  | _ -> failf "expected Success"
+
+let test_exit_code_general_error () =
+  match Ide_event_types.interpret_exit_code ~cmd_name:"ls" ~exit_code:1 with
+  | Ide_event_types.Error _ -> ()
+  | _ -> failf "expected Error"
+
+(** {1 Command category classification} *)
+
+let test_category_search () =
+  match Ide_event_types.classify_cmd_category ~cmd_name:"rg" with
+  | Ide_event_types.Search_cmd -> ()
+  | _ -> failf "expected Search_cmd"
+
+let test_category_read () =
+  match Ide_event_types.classify_cmd_category ~cmd_name:"cat" with
+  | Ide_event_types.Read_cmd -> ()
+  | _ -> failf "expected Read_cmd"
+
+let test_category_list () =
+  match Ide_event_types.classify_cmd_category ~cmd_name:"ls" with
+  | Ide_event_types.List_cmd -> ()
+  | _ -> failf "expected List_cmd"
+
+let test_category_silent () =
+  match Ide_event_types.classify_cmd_category ~cmd_name:"mv" with
+  | Ide_event_types.Silent_cmd -> ()
+  | _ -> failf "expected Silent_cmd"
+
+let test_category_write () =
+  match Ide_event_types.classify_cmd_category ~cmd_name:"dune" with
+  | Ide_event_types.Write_cmd -> ()
+  | _ -> failf "expected Write_cmd"
 
 (** {1 Bridge integration} *)
 
@@ -248,6 +336,25 @@ let () =
     ; ( "generic"
       , [ test_case "unknown command" `Quick test_generic_unknown
         ; test_case "pipeline" `Quick test_generic_pipeline
+        ] )
+    ; ( "pipe_chain"
+      , [ test_case "rg|grep|head" `Quick test_pipe_chain_rg_grep_head
+        ; test_case "gh in last position" `Quick test_pipe_chain_gh_in_last
+        ; test_case "git push in last" `Quick test_pipe_chain_git_push
+        ] )
+    ; ( "exit_code_semantics"
+      , [ test_case "grep no match" `Quick test_exit_code_grep_no_match
+        ; test_case "grep error" `Quick test_exit_code_grep_error
+        ; test_case "diff files differ" `Quick test_exit_code_diff_files_differ
+        ; test_case "general success" `Quick test_exit_code_general_success
+        ; test_case "general error" `Quick test_exit_code_general_error
+        ] )
+    ; ( "cmd_category"
+      , [ test_case "search" `Quick test_category_search
+        ; test_case "read" `Quick test_category_read
+        ; test_case "list" `Quick test_category_list
+        ; test_case "silent" `Quick test_category_silent
+        ; test_case "write" `Quick test_category_write
         ] )
     ; ( "bridge_integration"
       , [ test_case "extract descriptor" `Quick test_extract_descriptor_gh_pr_create

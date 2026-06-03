@@ -1,13 +1,11 @@
-(** Keeper_tool_progress - tool progress classification and required-action
-    contract helpers.
+(** Keeper_tool_progress - tool progress classification helpers.
 
     This module owns whether a tool call is passive, claim/context binding,
     execution progress, or completion. It is deliberately separate from tool
     disclosure/selection so liveness and contract semantics do not live in the
     prompt-surface module. *)
 
-(** Tool progress class shared by required-tool validation, runtime receipts,
-    and liveness metrics. *)
+(** Tool progress class shared by runtime receipts and liveness metrics. *)
 type tool_progress_class =
   | Passive_status
   | Claim_context

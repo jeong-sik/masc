@@ -32,7 +32,7 @@ export function asKeeperRuntimeBlockerClass(
 // additional dashboard-only synthetic classes (`synthetic_stall`,
 // `self_imposed_idle`) and the runtime trust pipeline emits
 // dashboard-conditioned ones (`provider_runtime_error`,
-// `tool_required_unsatisfied`, `stale_termination_storm`,
+// `stale_termination_storm`,
 // `heartbeat_failures`, `turn_failures`, `exception`,
 // `awaiting_operator`, `awaiting_sandbox_egress`, `supervisor_paused`).
 // These are NOT in `keeper_meta_contract` and so do not appear in this

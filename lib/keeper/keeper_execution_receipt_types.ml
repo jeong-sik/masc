@@ -133,8 +133,8 @@ let runtime_outcome_to_string = function
      3. Six outcomes mirrored from
         [Keeper_contract_classifier.contract_status_label]:
         [Contract_tool_surface_mismatch], [Contract_claim_only_after_owned_task],
-        [Contract_needs_execution_progress],
-        [Contract_passive_only], [Contract_satisfied_completion],
+        [Contract_needs_execution_progress], [Contract_passive_only],
+        [Contract_satisfied_completion],
         [Contract_satisfied_execution].
    JSON wire form is the lowercase string via
    [tool_contract_result_to_string].  No raw ["satisfied"] variant —
@@ -166,7 +166,7 @@ let tool_contract_result_to_string = function
 ;;
 
 (* Lift the typed [Keeper_contract_classifier.contract_status] into the
-   receipt-level [tool_contract_result].  Bridges the seven classifier
+   receipt-level [tool_contract_result].  Bridges the six classifier
    outcomes; the four boundary states are emitted only by producer sites
    that already know they hold one of those states. *)
 let tool_contract_result_of_contract_status

@@ -58,7 +58,6 @@ function blockedStatus() {
             expected_findings_total: 206,
             itemized_findings_total: 19,
             missing_itemized_findings: 187,
-            strict_row_corpus_validated: false,
           },
         },
       },
@@ -99,7 +98,7 @@ describe('GoalLoopPanel', () => {
     mocks.navigate.mockReset()
   })
 
-  it('renders phase table, audit, next action, and the strict corpus blocker', () => {
+  it('renders phase table, audit, and next action', () => {
     render(html`<${GoalLoopPanel} initialStatus=${blockedStatus()} />`)
 
     expect(screen.getByTestId('goal-loop-panel')).toBeTruthy()
@@ -116,7 +115,6 @@ describe('GoalLoopPanel', () => {
       expected_findings_total: 206,
       itemized_findings_total: 206,
       missing_itemized_findings: 0,
-      strict_row_corpus_validated: true,
     }
 
     render(html`<${GoalLoopPanel} initialStatus=${status} />`)
@@ -125,7 +123,6 @@ describe('GoalLoopPanel', () => {
     expect(audit.textContent).toContain('COMPLETE')
     expect(audit.textContent).toContain('206')
     expect(screen.getByTestId('goal-loop-corpus-missing').textContent).toContain('0')
-    expect(audit.textContent).toContain('true')
   })
 
   it('renders an explicit missing audit catalog state', () => {

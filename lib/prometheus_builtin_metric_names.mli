@@ -123,7 +123,7 @@ include module type of Prometheus_policy_metric_names
 
 (** Total stimuli consumed at turn entry, classified by [stimulus_class].
     Labels: [keeper], [class]
-    (board_signal|bootstrap|alive_but_stuck_recovery|unsupported).
+    (board_signal|bootstrap|stay_silent_recovery|unsupported).
     Pairs with [masc_keeper_unsupported_stimulus_total] for unsupported-only
     drill-down with payload prefix. *)
 
@@ -140,18 +140,6 @@ include module type of Prometheus_policy_metric_names
 
 (** Total supervisor restart outcomes. Labels:
     [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
-
-(** #12801 Total Liveness Recovery Supervisor scan attempts to auto-recover
-    Dead keepers. Increments each time a Dead keeper passes eligibility
-    checks and a recovery is launched. Labels: [keeper]. *)
-
-(** #12801 Total Liveness Recovery Supervisor outcomes. Labels:
-    [keeper, outcome]. Outcome is one of:
-    - [started]: keeper re-registered and fiber launched successfully
-    - [not_running]: keeper re-registered but not in Running state after launch
-    - [meta_missing]: no keeper meta file found — recovery skipped
-    - [meta_read_failed]: meta read I/O error — recovery skipped
-    - [meta_write_failed]: meta write to clear [paused] failed *)
 
 (** PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes.
     Labeled by [keeper] and [outcome]:

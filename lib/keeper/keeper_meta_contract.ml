@@ -118,7 +118,7 @@ type runtime_exhaustion_reason =
         [Soft_fail_turn + Provider_cooldown] path. *)
   | No_tool_capable of no_tool_capable_detail option
     (** Runtime exhausted because no configured provider can satisfy the
-        required tool set.  Previously a standalone [blocker_class] variant;
+        requested tool surface.  Previously a standalone [blocker_class] variant;
         reclassified here because the runtime rotation filtered all candidates
         before dispatch — a semantic subset of runtime exhaustion.
         The optional detail carries telemetry from the former
@@ -275,7 +275,7 @@ let runtime_exhaustion_summary = function
   | Capacity_exhausted ->
     "Runtime exhausted; all providers reported capacity backpressure."
   | No_tool_capable _ ->
-    "Runtime exhausted; no configured provider can satisfy the required tool set."
+    "Runtime exhausted; no configured provider can satisfy the requested tool surface."
   | Other_detail _ ->
     "Runtime exhausted; inspect runtime attempts for the dominant root cause."
 ;;

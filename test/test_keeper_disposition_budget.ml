@@ -4,11 +4,9 @@
    wall-clock ceiling ([AgentExecutionTimeout]), or the progress-aware idle
    watchdog ([AgentExecutionIdleTimeout]) is auto-recoverable: the keeper
    checkpoints and the supervisor resumes. Before this fix those terminal
-   reasons matched none of [operator_disposition]'s early branches and fell
-   through to the generic tool-contract check, where a cut-off turn's empty
-   [tools_used] on a [Required] lane produced
-   [Disp_pause_human, Reason_tool_required_unsatisfied] — falsely paging an
-   operator while the keeper silently auto-resumed.
+   reasons matched none of [operator_disposition]'s early branches and could
+   be misread as a contract failure, falsely paging an operator while the
+   keeper silently auto-resumed.
 
    The literal strings below are the exact wire form emitted by
    [Keeper_agent_error.agent_error_terminal_reason_code] (which now builds them
@@ -43,7 +41,7 @@ let () =
     ; "agent_error_tripwire_violation:tripwire=y"
     ; "agent_error_idle_detected:consecutive_idle_turns=3"
     ; "agent_error_exit_condition_met:turn=4"
-    ; "completion_contract_violation:require_tool_use"
+    ; "completion_contract_violation:tool_contract"
     ; "api_error_timeout"
     ; "provider_error"
     ; "runtime_exhausted"

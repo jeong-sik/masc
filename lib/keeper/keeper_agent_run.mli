@@ -14,8 +14,7 @@ module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
 val tool_contract_result_for_observed_tools
-  :  missing_visible_required:string list
-  -> had_owned_active_task_at_turn_start:bool
+  :  had_owned_active_task_at_turn_start:bool
   -> actual_keeper_tool_names:string list
   -> Keeper_execution_receipt.tool_contract_result
 
@@ -57,7 +56,7 @@ val per_provider_timeout_for_turn
      @param user_message The user's message to the keeper
     @param runtime_id Typed runtime profile name for model selection
      @param world_observation Structured keeper world snapshot used by
-            required-tool contract checks. When omitted, the contract gate
+            advisory execution-progress checks. When omitted, the progress check
             does not infer world state from prompt text.
     @param provider_filter Optional provider restriction
     @param generation Current generation counter

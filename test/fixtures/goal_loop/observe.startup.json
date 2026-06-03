@@ -4,16 +4,6 @@
   ],
   "matched_lines": 79,
   "patterns": {
-    "alive_but_stuck": {
-      "count": 6,
-      "samples": [
-        {
-          "line": "[WARN] [Keeper] nick0cave: alive-but-stuck detected (elapsed=924857s, threshold=1800s)",
-          "line_no": 31
-        }
-      ],
-      "severity": "critical"
-    },
     "config_unknown_key": {
       "count": 2,
       "samples": [

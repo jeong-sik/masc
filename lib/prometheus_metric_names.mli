@@ -25,20 +25,6 @@
 (** #10530: keeper required-tool-contract violations.
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 
-(** #12838: keepers detected as alive-but-stuck.  Bounded to one
-    increment per dedup window per keeper. Labels: keeper. *)
-
-(** Current alive-but-stuck elapsed seconds. Labels: [keeper_name]. *)
-
-(** Alive-but-stuck detector threshold seconds. Labels: [keeper_name]. *)
-
-(** #12838 follow-up: alive-but-stuck recovery requests.  Each increment
-    means the supervisor requested a supervised restart via
-    [failure_reason] plus [fiber_stop]/[fiber_wakeup]. Labels: keeper. *)
-
-(** #12838 follow-up: bounded recovery wakeups queued by
-    [Keeper_supervisor.alive_but_stuck_scan]. Labels: keeper, outcome. *)
-
 (** #9953: bucketed counter for observed [context_max] values.
     Labels: [keeper, model_used, resolved_model_id,
     context_max_bucket].  Bucket vocabulary:
@@ -272,11 +258,8 @@ val metric_egress_audit_stale_orphan : string
     execution or completion progress. Incremented once per loop episode.
     Labels: [keeper_name]. *)
 
-(** Task-138 Current consecutive-idle streak (passive-only turns) per
-    keeper.  Resets to 0 on the next execution/completion turn.  Pairs
-    with [metric_keeper_passive_loop_detected_total]: the counter fires
-    only at the threshold crossing, this gauge lets dashboards see the
-    streak rising before the latch.  Labels: [keeper]. *)
+(** Task-138 Current consecutive-idle streak per keeper. Resets to 0 on
+    the next execution/completion turn. Labels: [keeper]. *)
 
 (** Task-138 Unix timestamp of the most recent productive turn
     (execution/completion class) per keeper.  Reads as 0 until the

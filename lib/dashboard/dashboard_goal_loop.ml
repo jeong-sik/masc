@@ -27,15 +27,6 @@ let unknown_phase reason =
       ("summary", `Assoc [ ("reason", `String reason) ]);
     ]
 
-let known_corpus_blocker_json =
-  `Assoc
-    [
-      ("id", `String "strict_row_level_catalog_complete");
-      ("status", `String "BLOCKED");
-      ("issue", `String "#13265");
-      ("description", `String "strict 206-row audit corpus remains incomplete");
-    ]
-
 let fallback_status_json ~overall_status ~source ~reason =
   `Assoc
     [
@@ -55,7 +46,7 @@ let fallback_status_json ~overall_status ~source ~reason =
       ("next_action", `Null);
       ("system_health_signals", `Assoc []);
       ("dashboard_source", source);
-      ("known_blockers", `List [ known_corpus_blocker_json ]);
+      ("known_blockers", `List []);
     ]
 
 let missing_status_json ~base_path =

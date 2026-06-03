@@ -1056,7 +1056,7 @@ def audit_keeper(
     require_provider_turn_evidence: bool,
     require_checkpoint_evidence: bool,
     require_history_evidence: bool,
-    require_tool_call_log_evidence: bool,
+    tool_call_log_evidence_required: bool,
 ) -> KeeperAudit:
     name = config_path.stem
     config = load_keeper_config(config_path)
@@ -1171,7 +1171,7 @@ def audit_keeper(
         failures.append("checkpoint_evidence_missing")
     if require_history_evidence and not history_evidence:
         failures.append("history_evidence_missing")
-    if require_tool_call_log_evidence and not tool_call_log_evidence:
+    if tool_call_log_evidence_required and not tool_call_log_evidence:
         failures.append("tool_call_log_evidence_missing")
 
     return KeeperAudit(
@@ -1246,8 +1246,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             require_history_evidence=(
                 args.require_history_evidence or args.require_persistent_work_evidence
             ),
-            require_tool_call_log_evidence=(
-                args.require_tool_call_log_evidence
+            tool_call_log_evidence_required=(
+                args.tool_call_log_evidence_required
                 or args.require_persistent_work_evidence
             ),
         )
@@ -1278,7 +1278,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "require_provider_turn_evidence": args.require_provider_turn_evidence,
             "require_checkpoint_evidence": args.require_checkpoint_evidence,
             "require_history_evidence": args.require_history_evidence,
-            "require_tool_call_log_evidence": args.require_tool_call_log_evidence,
+            "tool_call_log_evidence_required": args.tool_call_log_evidence_required,
             "require_persistent_work_evidence": args.require_persistent_work_evidence,
         },
         "fleet_failures": fleet_failures,
@@ -1442,8 +1442,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--require-tool-call-log-evidence",
+        "--tool-call-log-evidence-required",
         action="store_true",
+        dest="tool_call_log_evidence_required",
         help=(
             "Fail unless each keeper has a turn_finished manifest row whose "
             "linked tool-call log contains a matching row."

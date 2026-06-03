@@ -104,8 +104,8 @@ let removed_keeper_msg_input_key_names =
     "new_desires";
 
     (* Tool-task coupling purged (#19806): keeper turns no longer accept
-       required-tool hints; reject them so older harnesses fail loud rather
-       than have the keys silently ignored. *)
+       per-message tool forcing hints; reject them so older harnesses fail
+       loud rather than have the keys silently ignored. *)
     "required_tools";
     "required_tool_names";
   ]

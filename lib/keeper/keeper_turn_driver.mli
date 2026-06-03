@@ -109,7 +109,6 @@ val run_named :
   ?context_reducer:Agent_sdk.Context_reducer.t ->
   ?memory:Agent_sdk.Memory.t ->
   ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
-  ?required_tool_satisfaction:Agent_sdk.Completion_contract.required_tool_satisfaction ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->

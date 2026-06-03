@@ -7,10 +7,6 @@
   "D-EMERGENCY-2": [
     "PR#13124 provider health probes"
   ],
-  "D-P1-1": [
-    "PR#13123 alive-stuck recovery",
-    "PR#13190 partial stale-turn recovery"
-  ],
   "D-P2-1": [
     "PR#13138 keeper TOML unknown keys"
   ],

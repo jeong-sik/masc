@@ -220,8 +220,6 @@ let make_hooks
         typed_outcome:Keeper_tool_outcome.t option -> unit =
         fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
-    ?(passive_loop_nudge : unit -> string option =
-        fun () -> None)
     ()
   : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
@@ -266,42 +264,11 @@ let make_hooks
   in
   let non_gate_hooks =
     { Agent_sdk.Hooks.empty with
-
-    (* Passive loop action injection (#12799 P1/5). The callback owns its
-       policy and returns Some text only when there is actionable content to
-       surface. Hook stays domain-agnostic: it wraps payloads in a Nudge so the
-       next LLM turn sees it as ambient observation. Returns Continue when the
-       callback yields None — silent no-op, no token cost. *)
     before_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurn _ ->
         record_progress "sdk_before_turn";
-        let loop_alert = passive_loop_nudge () in
-        let combined_with_source =
-          match loop_alert with
-          | None -> None
-          | Some a -> Some (a, "passive_loop_nudge")
-        in
-        (match combined_with_source with
-         | None -> Agent_sdk.Hooks.Continue
-         | Some (text, _) when String.trim text = "" ->
-           Agent_sdk.Hooks.Continue
-         | Some (text, _) when not (String.is_valid_utf_8 text) ->
-           (* Defensive: nudge path producers source strings from external
-              input (task titles, operator guidance, board posts). A byte-
-              level truncation upstream can leave an orphan UTF-8 continuation
-              byte, and agent_code CLI rejects the resulting argv with "invalid
-              UTF-8 was detected in one or more arguments" at parse time
-              (non-cascadable). This gate prevents polluted nudges from ever
-              reaching transport argv, regardless of which producer introduced
-              the drift. See #9036 for the first observed producer fix. *)
-           Log.Keeper.warn "keeper:%s before_turn: dropped invalid UTF-8 nudge (%d bytes)"
-             (!meta_ref).name (String.length text);
-           Agent_sdk.Hooks.Continue
-         | Some (text, source) ->
-           Log.Keeper.info "keeper:%s before_turn: injecting %s (%d chars)"
-             (!meta_ref).name source (String.length text);
-           Agent_sdk.Hooks.Nudge text)
+        Agent_sdk.Hooks.Continue
       | _event -> Agent_sdk.Hooks.Continue);
 
     after_turn = Some (fun event ->

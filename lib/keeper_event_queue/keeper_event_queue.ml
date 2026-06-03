@@ -74,7 +74,6 @@ let sort_by_urgency (queue : t) : t =
 type stimulus_class =
   | Board_signal
   | Bootstrap
-  | Alive_but_stuck_recovery
   | Stay_silent_recovery
   | Unsupported of string
 
@@ -86,8 +85,6 @@ let classify (s : stimulus) : stimulus_class =
     && String.equal (String.sub s.payload 0 prefix_len) prefix
   in
   if String.equal s.payload "Keeper bootstrap signal" then Bootstrap
-  else if has_prefix "{\"source\":\"alive_but_stuck_recovery\"" then
-    Alive_but_stuck_recovery
   else if has_prefix "{\"source\":\"stay_silent_recovery\"" then
     Stay_silent_recovery
   (* Board signals carry JSON with "source":"board_signal". Lightweight

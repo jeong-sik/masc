@@ -1,5 +1,5 @@
 (** Tests for [Keeper_runtime_config] — per-base-path keeper runtime
-    tuning loaded from [<resolved config root>/keeper_runtime.toml].
+    tuning loaded from [<resolved config root>/runtime.toml].
 
     Uses [resolve_overrides] with injected env_lookup to avoid global
     process env dependence. The load_and_apply integration path records
@@ -23,13 +23,14 @@ let with_base_path f =
   Unix.mkdir dir 0o755;
   Unix.mkdir (Filename.concat dir Common.masc_dirname) 0o755;
   Unix.mkdir (Filename.concat dir ".masc/config") 0o755;
-  let oc = open_out (Filename.concat dir ".masc/config/keeper_runtime.toml") in
-  output_string oc "";
-  close_out oc;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
 let write_toml base_path content =
-  let path = Filename.concat base_path ".masc/config/keeper_runtime.toml" in
+  let path =
+    Filename.concat
+      (Filename.concat base_path ".masc/config")
+      Config_dir_resolver.runtime_toml_filename
+  in
   let oc = open_out path in
   output_string oc content;
   close_out oc
@@ -213,31 +214,6 @@ let test_applies_proactive_min_interval_override () =
   check (option string) "proactive min interval"
     (Some "1234")
     (List.assoc_opt "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" overrides)
-
-let test_applies_watchdog_overrides () =
-  let doc = parse_or_fail
-    "[watchdog]\n\
-     stale_sec = 600\n\
-     poll_sec = 15\n\
-     noop_threshold = 4\n\
-     grace_sec = 900\n"
-  in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied 4" 4 count;
-  check (option string) "watchdog stale threshold"
-    (Some "600")
-    (List.assoc_opt "MASC_KEEPER_WATCHDOG_STALE_SEC" overrides);
-  check (option string) "watchdog poll"
-    (Some "15")
-    (List.assoc_opt "MASC_KEEPER_WATCHDOG_POLL_SEC" overrides);
-  check (option string) "watchdog noop threshold"
-    (Some "4")
-    (List.assoc_opt "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD" overrides);
-  check (option string) "watchdog grace"
-    (Some "900")
-    (List.assoc_opt "MASC_KEEPER_WATCHDOG_GRACE_SEC" overrides)
 
 let test_applies_memory_overrides () =
   let doc = parse_or_fail
@@ -608,7 +584,7 @@ let test_budget_invariant_at_minimum_turn_timeout () =
     true (budget_remaining >= 0.0)
 
 let () =
-  run "keeper_runtime_toml"
+  run "runtime_toml_overrides"
     [ ( "resolve_overrides"
       , [ test_case "missing file returns 0 overrides" `Quick test_missing_file_returns_zero
         ; test_case "missing file keeps cost gate disabled by default" `Quick test_missing_file_keeps_cost_gate_disabled_by_default
@@ -617,7 +593,6 @@ let () =
         ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies proactive min interval override" `Quick test_applies_proactive_min_interval_override
-        ; test_case "applies watchdog overrides" `Quick test_applies_watchdog_overrides
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
         ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs
         ; test_case "caller env wins over TOML" `Quick test_caller_env_wins_over_toml

@@ -148,7 +148,7 @@ type runtime_exhaustion_reason =
           and triggering the harsher failure policy. *)
   | No_tool_capable of no_tool_capable_detail option
       (** Runtime exhausted because no configured provider can satisfy the
-          required tool set.  Previously a standalone [blocker_class] variant;
+          requested tool surface.  Previously a standalone [blocker_class] variant;
           reclassified here because the runtime rotation filtered all candidates
           before dispatch — a semantic subset of runtime exhaustion.
           The optional detail carries telemetry from the former

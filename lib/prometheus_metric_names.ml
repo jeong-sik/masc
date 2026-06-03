@@ -24,22 +24,6 @@
     text-only turns rejected by the keeper agent loop).
     Labels: keeper_name, kind \in \{passive,text_only\}. *)
 
-(** #12838: keepers detected as alive-but-stuck — non-Dead, non-paused,
-    keepalive_running, but [proactive_rt.last_ts] has been frozen while
-    autonomous turns kept advancing.  Per-keeper dedup window
-    ([alive_but_stuck_dedup_ttl_sec]) bounds emission rate so a single
-    stuck keeper does not flood the counter on every 30s sweep.
-    Labels: keeper. *)
-
-(** #12838 follow-up: supervisor recovery requests emitted after an
-    alive-but-stuck detection.  Each increment means the supervisor set
-    [failure_reason] + [fiber_stop]/[fiber_wakeup] so the existing sweep
-    path can force a crash/restart instead of leaving the keeper at
-    detection-only.  Labels: keeper. *)
-
-(** #12838 follow-up: bounded recovery wakeups queued by
-    [alive_but_stuck_scan].  Labels: keeper, outcome. *)
-
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
    [keeper_unified_turn.ml] used to be log-only, masking state/metric
    divergence. Surface as a counter so dashboards can alert on silent

@@ -185,7 +185,7 @@
   keeper_tool_capability_axis
   keeper_turn_telemetry
   keeper_agent_prompt_metrics keeper_agent_tool_surface
-  keeper_agent_run_phase0_telemetry keeper_agent_run_post_turn_memory keeper_agent_run_phase5_task_link keeper_agent_run_contract_retry
+  keeper_agent_run_phase0_telemetry keeper_agent_run_post_turn_memory keeper_agent_run_phase5_task_link
   keeper_agent_run_contract_helpers keeper_agent_run_response_text keeper_agent_run_thinking_trajectory
   keeper_agent_run_tool_observation keeper_agent_run_tool_surface_violation keeper_agent_run_receipt_append keeper_agent_run_receipt keeper_agent_run_sidecar keeper_agent_run_finalize_response
   keeper_agent_result keeper_agent_error
@@ -230,8 +230,6 @@
   keeper_event_bus
   keeper_heartbeat_loop_observations
   keeper_supervisor_startup_helpers
-  keeper_supervisor_alive_but_stuck
-  keeper_supervisor_liveness_recovery
   keeper_supervisor_restart_noop
   keeper_supervisor_self_preservation
   ;; keeper_event_queue: promoted to lib/keeper_event_queue/ sub-library

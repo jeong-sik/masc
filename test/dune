@@ -110,7 +110,6 @@
   test_cost_token_decouple
   test_response_model_empty_10083
   test_keeper_proactive_skip_counter
-  test_keeper_tool_selection_passive_streak
   test_keeper_health_probe
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
@@ -142,7 +141,6 @@
   test_keeper_accountability
   test_reputation_ledger_v2
   test_reputation_multi_dim
-  test_keeper_goal_repair
   test_accountability_emit_skip_10314
   test_keeper_adaptive_thinking
   test_keeper_lifecycle_registry_dispatch
@@ -181,8 +179,7 @@
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
   test_keeper_toml
-  test_keeper_runtime_toml
-  test_runtime_required_tool_fallback
+  test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
   test_keeper_tool_visibility_projection
@@ -280,7 +277,6 @@
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
   test_keeper_relevance_check
-  test_stale_kill_class
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_cognitive_gravity
@@ -373,7 +369,6 @@
   test_cost_token_decouple
   test_response_model_empty_10083
   test_keeper_proactive_skip_counter
-  test_keeper_tool_selection_passive_streak
   test_keeper_health_probe
   test_oas_empty_response_diagnostic
   test_board_author_identity_10297
@@ -405,7 +400,6 @@
   test_keeper_accountability
   test_reputation_ledger_v2
   test_reputation_multi_dim
-  test_keeper_goal_repair
   test_accountability_emit_skip_10314
   test_keeper_adaptive_thinking
   test_keeper_lifecycle_registry_dispatch
@@ -444,8 +438,7 @@
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
   test_keeper_toml
-  test_keeper_runtime_toml
-  test_runtime_required_tool_fallback
+  test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_keeper_tool_policy_config
   test_keeper_tool_visibility_projection
@@ -548,7 +541,6 @@
   test_keeper_event_queue
   test_keeper_relevance_check
   test_actionable_path_action
-  test_stale_kill_class
   test_keeper_synthetic_marker
   test_keeper_turn_fsm_wired_sites
   test_effective_oas_env
@@ -1256,8 +1248,6 @@
 
 (include stanzas/test_keeper_production_readiness_gate.inc)
 
-(include stanzas/test_keeper_turn_driver_exhaustion_log_source.inc)
-
 
 
 (include stanzas/test_channel_gate.inc)
@@ -1439,8 +1429,6 @@
 
 
 (include stanzas/test_keeper_path_roots_leak_10349.inc)
-
-(include stanzas/test_keeper_passive_loop_detector.inc)
 
 (include stanzas/test_keeper_pause_silent_failure_source.inc)
 

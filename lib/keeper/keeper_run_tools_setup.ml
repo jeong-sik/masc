@@ -93,7 +93,6 @@ let prepare_agent_setup
     ; requested_tool_names_seen = []
     ; receipt_tool_contract_result =
         Keeper_execution_receipt.Contract_unknown
-    ; contract_violation_retries = 0
     }
   in
   let agent_ref : Agent_sdk.Agent.t option ref = ref None in
@@ -697,13 +696,6 @@ let prepare_agent_setup
           turn_visible_tool_names
       else turn_visible_tool_names
     in
-    let passive_streak =
-      Keeper_passive_loop_detector.current_streak ~keeper_name:meta.name
-    in
-    Prometheus.set_gauge
-      Keeper_metrics.(to_string PassiveLoopStreak)
-      ~labels:[ "keeper", meta.name ]
-      (float_of_int passive_streak);
     let tool_gate_requested =
       tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn
     in
@@ -716,18 +708,13 @@ let prepare_agent_setup
       else Surface_mixed
     in
     let tool_requirement =
-      if visible_tool_count = 0
-      then No_tools
-      else if tool_gate_requested
-      then Required
-      else Optional
+      if visible_tool_count = 0 then No_tools else Optional
     in
     let lane : Keeper_agent_tool_surface.turn_lane =
       if is_retry
       then Lane_retry
       else (
         match tool_requirement with
-        | Required -> Lane_tool_required
         | Optional -> Lane_tool_optional
         | No_tools ->
           (match current_tool_choice with

@@ -62,7 +62,7 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_provider_turn_evidence=False,
         require_checkpoint_evidence=False,
         require_history_evidence=False,
-        require_tool_call_log_evidence=False,
+        tool_call_log_evidence_required=False,
         require_persistent_work_evidence=False,
     )
 

@@ -1,8 +1,7 @@
-(** Keeper_tool_progress - tool progress classification and required-action
-    contract helpers. *)
+(** Keeper_tool_progress - tool progress classification helpers. *)
 
-(** Keeper tool progress classes are the shared contract between required-tool
-    validation, runtime receipts, and liveness metrics. Keep these classes
+(** Keeper tool progress classes are shared by runtime receipts and liveness
+    metrics. Keep these classes
     conservative: state/reporting tools do not count as productive progress,
     and claim tools only bind work; execution or completion tools are what
     prove the keeper is alive past task pickup. *)

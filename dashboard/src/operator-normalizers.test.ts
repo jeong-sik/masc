@@ -515,14 +515,14 @@ describe('normalizeOperatorSnapshot', () => {
           name: 'blocked-keeper',
           status: 'paused',
           needs_attention: true,
-          attention_reason: 'tool_required_unsatisfied',
+          attention_reason: 'tool_route_recoverable_failure',
           next_human_action: 'inspect_provider_tool_contract',
         },
       ],
     })
     const k = result.keepers[0]
     expect(k?.needs_attention).toBe(true)
-    expect(k?.attention_reason).toBe('tool_required_unsatisfied')
+    expect(k?.attention_reason).toBe('tool_route_recoverable_failure')
     expect(k?.next_human_action).toBe('inspect_provider_tool_contract')
   })
 

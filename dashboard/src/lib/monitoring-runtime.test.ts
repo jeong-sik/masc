@@ -222,7 +222,7 @@ describe('summarizeKeeperMonitoring', () => {
       circuit_breaker: { state: 'closed' },
       is_live: false,
       execution: {
-        tool_contract_result: 'missing_required_tool_use',
+        tool_contract_result: 'tool_surface_mismatch',
       },
       runtime_attention: {
         blocked: false,
@@ -240,6 +240,6 @@ describe('summarizeKeeperMonitoring', () => {
     } as Keeper, compositeToolAttention)
 
     expect(summary.band.key).toBe('attention')
-    expect(summary.hint).toBe('도구 계약 결과가 missing_required_tool_use입니다.')
+    expect(summary.hint).toBe('도구 계약 결과가 tool_surface_mismatch입니다.')
   })
 })

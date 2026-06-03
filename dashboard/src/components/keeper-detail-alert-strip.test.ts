@@ -42,7 +42,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(container.textContent).not.toContain('증명')
   })
 
-  it('closes 모순 #2: simultaneous failure verdict + tool-contract success collapse into one verdict', () => {
+  it('closes 모순 #2: completion failure verdict renders as one runtime-blocked verdict', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         needs_attention: true,
@@ -59,11 +59,6 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).toContain('검증')
     expect(text).toContain('runtime_blocked')
     expect(text).not.toContain('completion_contract_violation')
-    // The tool contract success is preserved but tagged as scope
-    // evidence ("도구 계약"), not as a sibling "증명" claim that would
-    // read as the surface contradicting itself.
-    expect(text).toContain('도구 계약')
-    expect(text).toContain('계약 충족 (실행)')
     expect(text).not.toContain('증명')
   })
 

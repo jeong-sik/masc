@@ -17,7 +17,7 @@ let fleet_fsm_message_payload ~keeper_name ~reason ~snapshot ~execution =
     Printf.sprintf
       "Fleet FSM supervised resolve request for %s.\n\
        Reason: %s.\n\
-       Inspect the latest runtime evidence, distinguish configuration/tool-contract \
+       Inspect the latest runtime evidence, distinguish configuration/tool-surface \
        blockers from restartable runtime stalls, and reply with the safest next operator \
        action. Do not self-restart."
       keeper_name

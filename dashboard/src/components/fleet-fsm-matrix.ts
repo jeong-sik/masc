@@ -1024,7 +1024,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 <span
                   data-runtime-truth="blocked"
                   class="rounded-[var(--r-1)] border px-2 py-0.5 text-xs ${runtimeTallies.blocked === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.blocked}"
-                  title="운영자 disposition, 터미널 에러, 또는 tool contract 위반 evidence 가 있는 row"
+                  title="운영자 disposition 또는 터미널 execution blocker evidence 가 있는 row"
                 >
                   근거 차단: ${runtimeTallies.blocked}
                 </span>

@@ -129,7 +129,7 @@ val parse_verdict : string -> (verdict, string) result
     @since 2.223.0 *)
 val parse_review_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
 
-val excuse_pattern_observer_fn : (pattern:string -> decision:string -> unit) Atomic.t
+val excuse_pattern_observer_fn : (pattern:string -> outcome:string -> unit) Atomic.t
 val fallback_observer_fn : (mode:string -> runtime:string -> unit) Atomic.t
 val run_llm_reviewer_fn :
   (?sw:Eio.Switch.t ->

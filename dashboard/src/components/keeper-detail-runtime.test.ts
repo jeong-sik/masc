@@ -780,7 +780,7 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('corr corr-1 · run run-1')).toBeInTheDocument()
     expect(screen.getByText('memory evidence')).toBeInTheDocument()
     expect(screen.getByText('inj 1/1 · flush success 1 · error 0 · ep/proc ep 2 · proc 1')).toBeInTheDocument()
-    expect(screen.getAllByText('keeper_task_done').length).toBeGreaterThan(0)
+    expect(screen.queryByText('keeper_task_done')).not.toBeInTheDocument()
     expect(screen.getByText('Provider')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
     expect(screen.getAllByText('tool_not_materialized').length).toBeGreaterThan(0)
@@ -805,12 +805,11 @@ describe('RuntimeLensSection', () => {
     })
 
     expect(summary.headline).toBe('조치 필요')
-    expect(summary.rows.find(row => row.label === '동기화')?.detail).toContain('tool needs_execution_progress')
     expect(summary.rows.find(row => row.label === '동기화')?.detail).toContain('KSM running')
     expect(summary.rows.find(row => row.label === '런타임')?.value).toBe('fiber alive')
     expect(summary.rows.find(row => row.label === '현재 턴')?.value).toBe('no live turn')
     expect(summary.rows.find(row => row.label === '최신 증거')?.value).toBe('turn #7 finished')
-    expect(summary.rows.find(row => row.label === '차단')?.detail).toContain('needs_execution_progress')
+    expect(summary.rows.find(row => row.label === '차단')?.detail).toContain('healthy')
     // RFC-0046 §4.3 partial closure: the FSM lane is now rendered exclusively
     // by FsmHub mode='detail' under this panel. Asserting the absence here
     // prevents regressing back to dual-rendering of KSM/KTC.

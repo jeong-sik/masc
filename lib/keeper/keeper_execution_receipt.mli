@@ -276,7 +276,7 @@ val terminal_prefix_idle_timeout : string
 (** [true] when [terminal_reason] is a turn/time-budget cut-off
     ([MaxTurnsExceeded] / [AgentExecutionTimeout] / [AgentExecutionIdleTimeout]):
     auto-recoverable, the keeper resumes from its checkpoint, so it must NOT be
-    classified as a tool-contract failure. *)
+    classified as a tool-surface failure. *)
 val is_auto_recoverable_turn_budget_terminal : string -> bool
 
 (** Derived display pair (disposition, reason) computed from receipt fields.

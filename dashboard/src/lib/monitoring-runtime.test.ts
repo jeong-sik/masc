@@ -211,8 +211,8 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
   })
 
-  it('routes current tool-contract attention through the runtime projection', () => {
-    const compositeToolAttention = {
+  it('does not synthesize retired tool-surface attention from empty execution evidence', () => {
+    const compositeWithoutAttention = {
       keeper: 'keeper-tool',
       phase: 'running',
       turn_phase: 'idle',
@@ -236,9 +236,9 @@ describe('summarizeKeeperMonitoring', () => {
       phase: 'Running',
       last_heartbeat: new Date().toISOString(),
       keepalive_running: true,
-    } as Keeper, compositeToolAttention)
+    } as Keeper, compositeWithoutAttention)
 
-    expect(summary.band.key).toBe('attention')
-    expect(summary.hint).toBe('도구 계약 결과가 tool_surface_mismatch입니다.')
+    expect(summary.band.key).toBe('active')
+    expect(summary.hint).toBeNull()
   })
 })

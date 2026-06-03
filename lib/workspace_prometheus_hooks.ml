@@ -365,10 +365,10 @@ let record_telemetry_observe_failure kind =
     ~labels:[("kind", kind)] ()
 ;;
 
-let record_anti_rationalization_excuse_pattern ~pattern ~decision =
+let record_anti_rationalization_excuse_pattern ~pattern ~outcome =
   Prometheus.inc_counter
     Prometheus.metric_anti_rationalization_excuse_pattern
-    ~labels:[ "pattern", pattern; "decision", decision ]
+    ~labels:[ "pattern", pattern; "decision", outcome ]
     ()
 ;;
 

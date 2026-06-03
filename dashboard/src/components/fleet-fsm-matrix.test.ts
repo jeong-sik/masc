@@ -430,7 +430,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 300)
   })
 
-  it('surfaces execution receipt mismatch without required-tool detail', () => {
+  it('surfaces execution receipt mismatch without retired tool detail', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({
@@ -453,7 +453,7 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.reason).toContain('turn_lane=tool_optional')
     expect(attention.reason).toContain('visible_tools=0')
     expect(attention.reason).toContain('tool_surface_fallback=true')
-    expect(attention.nextStep).toContain('latest execution receipt 확인')
+    expect(attention.nextStep).toContain('blocker gate/approval 상태와 최신 receipt 확인')
   })
 
   it('routes provider timeout blockers away from generic approval guidance', () => {
@@ -842,7 +842,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
               target_type: 'keeper',
               target_id: 'blocked',
               severity: 'warn',
-              reason: 'Inspect tool-contract blocker: tool_route_recoverable_failure',
+              reason: 'Inspect runtime blocker: tool_route_recoverable_failure',
               confirm_required: false,
               suggested_payload: {
                 source: 'fleet_fsm',
@@ -856,7 +856,7 @@ describe('FleetFsmMatrix streaming fallback', () => {
 
     render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
 
-    const button = await screen.findByRole('button', { name: 'Inspect tool-contract blocker: tool_route_recoverable_failure' })
+    const button = await screen.findByRole('button', { name: 'Inspect runtime blocker: tool_route_recoverable_failure' })
     await act(async () => {
       fireEvent.click(button)
     })

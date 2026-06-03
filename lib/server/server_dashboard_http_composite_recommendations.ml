@@ -81,6 +81,11 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
       [ probe ("Inspect keeper claim scope: " ^ reason)
       ; message ("Resolve keeper claim scope before retry: " ^ reason)
       ]
+    else if composite_execution_tool_route_blocked execution
+    then
+      [ probe ("Inspect tool-route blocker: " ^ reason)
+      ; message ("Resolve tool-route blocker: " ^ reason)
+      ]
     else if composite_execution_config_blocked execution
     then
       [ probe ("Inspect configuration/auth blocker: " ^ reason)

@@ -62,7 +62,11 @@ let compact_receipt_runtime_json receipt =
 ;;
 
 let compact_receipt_tool_surface_json receipt =
-  let surface = json_member "tool_surface" receipt in
+  let surface =
+    match json_member "tool_surface" receipt with
+    | `Assoc _ as surface -> surface
+    | _ -> json_member "tool_contract" receipt
+  in
   match surface with
   | `Assoc _ as surface ->
     let tool_requirement = json_string "tool_requirement" surface in

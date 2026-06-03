@@ -15,6 +15,8 @@
 
     @since 0.7.0 *)
 
+module Workspace = Workspace_core
+
 (** {1 Backend variant} *)
 
 type task_backend =

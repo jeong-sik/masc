@@ -1,7 +1,0 @@
-(include_subdirs no)
-(library
- (name task_transition_state)
- (public_name masc.task_transition_state)
- (modules task_transition_state)
- (libraries masc.bounded_event_dedupe)
- (flags (:standard -w +4)))

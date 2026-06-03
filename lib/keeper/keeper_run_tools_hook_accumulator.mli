@@ -10,8 +10,8 @@ type hook_accumulator =
   ; mutable tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   ; mutable requested_tool_names : string list
   ; mutable requested_tool_names_seen : string list
-  ; mutable receipt_completion_contract_result :
-      Keeper_execution_receipt.completion_contract_result
+  ; mutable receipt_tool_contract_result :
+      Keeper_execution_receipt.tool_contract_result
   }
 
 type hook_outputs =
@@ -23,8 +23,8 @@ type hook_outputs =
   ; out_tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   ; out_requested_tool_names : string list
   ; out_requested_tool_names_seen : string list
-  ; out_receipt_completion_contract_result :
-      Keeper_execution_receipt.completion_contract_result
+  ; out_receipt_tool_contract_result :
+      Keeper_execution_receipt.tool_contract_result
   }
 
 val freeze : hook_accumulator -> hook_outputs

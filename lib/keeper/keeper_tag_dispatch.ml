@@ -134,8 +134,8 @@ let dispatch
       Some (if success then ok message else err message)
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
     | Mod_task ->
-      Tool_task.dispatch
-        { Tool_task.config; agent_name; sw = Eio_context.get_switch_opt () }
+      Task.Tool.dispatch
+        { Task.Tool.config; agent_name; sw = Eio_context.get_switch_opt () }
         ~name
         ~args
     | Mod_external ->

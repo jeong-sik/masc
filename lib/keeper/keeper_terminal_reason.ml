@@ -63,12 +63,6 @@ let contains_config_or_auth lowered =
   || String_util.contains_substring lowered "auth"
 ;;
 
-let is_completion_contract_violation_wire lowered =
-  match Keeper_execution_receipt_types.decode_contract_violation_reason lowered with
-  | Some _ -> true
-  | None -> false
-;;
-
 (* Priority-ranked partition. The bucket order replicates the [if/else]
    order of the pre-typing [operator_disposition] string predicates;
    [of_wire] returns the FIRST matching bucket. The original
@@ -86,7 +80,7 @@ let of_wire wire =
     String.starts_with ~prefix:"api_error_" lowered
     || String.equal lowered "provider_error"
   then Provider_runtime_failure wire
-  else if is_completion_contract_violation_wire lowered
+  else if String.starts_with ~prefix:"completion_contract_violation:" lowered
   then Completion_contract_violation wire
   else if String.starts_with ~prefix:"turn_livelock:" lowered
   then Turn_livelock wire

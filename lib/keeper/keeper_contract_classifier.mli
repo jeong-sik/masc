@@ -8,6 +8,7 @@ type actionable_signal =
           world snapshot. *)
 
 type contract_status =
+  | Tool_surface_mismatch of { missing : string list }
   | Claim_only_after_owned_task
   | Needs_execution_progress
   | Passive_only

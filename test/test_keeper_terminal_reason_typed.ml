@@ -18,7 +18,6 @@
       caught here. *)
 
 module R = Masc.Keeper_execution_receipt
-module Rt = Masc.Keeper_execution_receipt_types
 module Tr = Masc.Keeper_terminal_reason
 
 let failures = ref []
@@ -63,7 +62,7 @@ let roundtrip_corpus =
   ; "provider_error_server:500"
   ; "provider_error_missing_api_key"
   ; "provider_error_hard_quota:openai"
-  ; "no_capable_provider"
+  ; "no_tool_capable_provider"
   ; "mcp_error"
   ; "serialization_error"
   ; "io_error"
@@ -87,30 +86,6 @@ let () =
        check
          (Printf.sprintf "roundtrip: %S -> %S" s got)
          (String.equal got s))
-    roundtrip_corpus
-;;
-
-let () =
-  List.iter
-    (fun s ->
-       let decoded =
-         Rt.decode_contract_violation_reason (String.lowercase_ascii s)
-       in
-       let classified =
-         match Tr.of_wire s with
-         | Tr.Completion_contract_violation _ -> true
-         | Tr.Runtime_exhausted _
-         | Tr.Config_or_auth _
-         | Tr.Provider_runtime_failure _
-         | Tr.Turn_livelock _
-         | Tr.Internal_error _
-         | Tr.Auto_recoverable_budget _
-         | Tr.Pre_dispatch_success _
-         | Tr.Other _ -> false
-       in
-       check
-         (Printf.sprintf "contract decoder alignment: %S" s)
-         (Option.is_some decoded = classified))
     roundtrip_corpus
 ;;
 
@@ -206,7 +181,21 @@ let frozen_operator_disposition (receipt : R.t)
   else if frozen_is_auto_recoverable_turn_budget_terminal terminal_reason
   then R.Disp_pass, R.Reason_turn_budget_exhausted
   else (
-    if
+    let tool_route_failure =
+      List.mem
+        receipt.tool_contract_result
+        [ R.Contract_tool_surface_mismatch; R.Contract_no_tool_capable_provider ]
+    in
+    if tool_route_failure
+    then
+      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+      then R.Disp_fail_open_next_runtime, R.Reason_tool_route_recoverable_failure
+      else if
+        receipt.runtime_fallback_applied
+        || receipt.runtime_outcome = R.Runtime_passed_to_next_model
+      then R.Disp_pass_next_model, R.Reason_tool_route_recoverable_failure
+      else R.Disp_pause_human, R.Reason_tool_route_recoverable_failure
+    else if
       receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
     then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
     else if
@@ -216,6 +205,7 @@ let frozen_operator_disposition (receipt : R.t)
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = R.Runtime_not_dispatched
+      && receipt.tool_contract_result = R.Contract_not_dispatched
       && String.equal terminal_reason "pre_dispatch_success"
     then R.Disp_pass, R.Reason_healthy
     else (
@@ -265,7 +255,7 @@ let base_receipt : R.t =
   ; canonical_tools = []
   ; unexpected_tools = []
   ; tools_used = []
-  ; completion_contract_result = R.Contract_unknown
+  ; tool_contract_result = R.Contract_unknown
   ; tool_surface = base_tool_surface
   ; sandbox_kind = Masc.Keeper_types_profile_sandbox.Local
   ; sandbox_root = None
@@ -323,9 +313,11 @@ let runtime_outcomes =
   ; R.Runtime_not_dispatched
   ]
 
-let completion_contract_results =
+let tool_contract_results =
   [ R.Contract_unknown
   ; R.Contract_not_dispatched
+  ; R.Contract_no_tool_capable_provider
+  ; R.Contract_tool_surface_mismatch
   ; R.Contract_needs_execution_progress
   ; R.Contract_satisfied_completion
   ]
@@ -396,7 +388,7 @@ let () =
                                                    (R.outcome_kind_to_string outcome)
                                                    (R.runtime_outcome_to_string
                                                       runtime_outcome)
-                                                   (R.completion_contract_result_to_string tcr)
+                                                   (R.tool_contract_result_to_string tcr)
                                                    (tools_used <> [])
                                                    degraded
                                                    fallback

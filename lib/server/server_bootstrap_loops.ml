@@ -519,7 +519,7 @@ let start_keeper_loops
     let config = state.workspace_config in
     let agent_name = actor in
     let ctx_workspace : Tool_workspace.context = { config; agent_name } in
-    let ctx_task : Tool_task.context = { config; agent_name; sw = Some sw } in
+    let ctx_task : Task.Tool.context = { config; agent_name; sw = Some sw } in
     let ctx_agent : Tool_agent.context = { config; agent_name } in
     match name with
     | "masc_status" ->
@@ -534,7 +534,7 @@ let start_keeper_loops
            ~failure_class:(Some Tool_result.Runtime_failure)
            ~tool_name:name ~start_time "masc_status: dispatch failed")
     | "masc_tasks" ->
-      (match Tool_task.dispatch ctx_task ~name ~args with
+      (match Task.Tool.dispatch ctx_task ~name ~args with
        | Some result -> result
        | None ->
          Tool_result.error

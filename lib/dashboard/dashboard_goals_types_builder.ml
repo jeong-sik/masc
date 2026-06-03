@@ -182,8 +182,8 @@ let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_meta_contract.ke
       ( "execution_summary",
         `Assoc
           [
-            ( "completion_contract_result",
-              Option.value ~default:`Null (Json_util.assoc_member_opt "completion_contract_result" receipt) );
+            ( "tool_contract_result",
+              Option.value ~default:`Null (Json_util.assoc_member_opt "tool_contract_result" receipt) );
             ("latest_receipt_at", `String ts);
           ] );
       ("runtime_blockers", `Assoc runtime_blocker_fields);

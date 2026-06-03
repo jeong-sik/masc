@@ -208,6 +208,7 @@ let test_is_actionable_matches_variants () =
 let all_contract_statuses
     : Keeper_contract_classifier.contract_status list =
   [
+    Tool_surface_mismatch { missing = [ "x" ] };
     Claim_only_after_owned_task;
     Needs_execution_progress;
     Passive_only;
@@ -222,6 +223,26 @@ let test_contract_status_labels_unique () =
   in
   Alcotest.(check (list string))
     "no duplicate contract_status labels" [] (duplicates labels)
+
+let test_pp_contract_status_surfaces_missing_list () =
+  let s =
+    format_to_string Keeper_contract_classifier.pp_contract_status
+      (Tool_surface_mismatch { missing = [ "keeper_task_claim"; "masc_claim_next" ] })
+  in
+  Alcotest.(check bool)
+    "pp_contract_status surfaces first missing tool"
+    true
+    (try
+       ignore (Str.search_forward (Str.regexp_string "keeper_task_claim") s 0);
+       true
+     with Not_found -> false);
+  Alcotest.(check bool)
+    "pp_contract_status surfaces second missing tool"
+    true
+    (try
+       ignore (Str.search_forward (Str.regexp_string "masc_claim_next") s 0);
+       true
+     with Not_found -> false)
 
 (* ── Test runner ─────────────────────────────────────────────── *)
 
@@ -266,5 +287,7 @@ let () =
         [
           Alcotest.test_case "labels unique" `Quick
             test_contract_status_labels_unique;
+          Alcotest.test_case "pp surfaces missing list" `Quick
+            test_pp_contract_status_surfaces_missing_list;
         ] );
     ]

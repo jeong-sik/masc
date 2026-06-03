@@ -70,7 +70,7 @@ Scope: MASC keeper autonomy, handoff/compaction stability, small-society behavio
 `DRY_RUN=1` 모드로 하네스 로직/집계/파일출력만 검증한다.
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 DRY_RUN=1 ROUNDS=2 ARMS=baseline ./scripts/run_keeper_social_experiment.sh
 ```
 
@@ -82,8 +82,8 @@ DRY_RUN=1 ROUNDS=2 ARMS=baseline ./scripts/run_keeper_social_experiment.sh
 ### 7.2 Integration smoke (local server)
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp
-./start-masc-mcp.sh
+cd ~/me/workspace/yousleepwhen/masc
+./start-masc.sh
 ROUNDS=2 ARMS=baseline ./scripts/run_keeper_social_experiment.sh
 ```
 

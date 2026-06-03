@@ -6,8 +6,8 @@ MASC (Multi-Agent Shared Context) is an OCaml 5.x MCP server for alignment multi
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/jeong-sik/masc-mcp.git
-cd masc-mcp
+git clone https://github.com/jeong-sik/masc.git
+cd masc
 
 # 2. Pin external OCaml dependencies
 chmod +x scripts/opam-pin-external-deps.sh
@@ -23,7 +23,7 @@ dune build --root .
 make test
 
 # 6. Start server (HTTP mode)
-./start-masc-mcp.sh --http
+./start-masc.sh --http
 ```
 
 ## Development Guidelines
@@ -140,7 +140,7 @@ chore: bump version to 0.9.0
 
 ## GitHub Planning Rules
 
-`masc-mcp` uses GitHub as an operating system for product planning.
+`masc` uses GitHub as an operating system for product planning.
 
 Every new issue should end with:
 
@@ -237,7 +237,7 @@ When reporting issues, please include:
 2. **OS and version**
 3. **Steps to reproduce**
 4. **Expected vs actual behavior**
-5. **Error messages/logs** (`start-masc-mcp.sh` stdout/stderr or relevant harness output)
+5. **Error messages/logs** (`start-masc.sh` stdout/stderr or relevant harness output)
 
 ## License
 

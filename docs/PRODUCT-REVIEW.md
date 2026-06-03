@@ -11,7 +11,7 @@ code_refs:
 
 ## Summary
 
-- As a repo-workspace collaboration OSS product, `masc-mcp` is already useful.
+- As a repo-workspace collaboration OSS product, `masc` is already useful.
 - As a keeper-supervised delivery system, it is promising but still an advanced path.
 - As a remote or internal-ops product, it is still held back by auth posture, API contract truth, and release hygiene.
 

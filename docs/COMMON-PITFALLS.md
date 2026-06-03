@@ -302,7 +302,7 @@ Dashboard는 OCaml build와 독립적으로 빌드되어야 한다.
 ```bash
 dune build --root .  # ✅ OCaml 빌드 성공
 # dashboard는 빌드되지 않음!
-./start-masc-mcp.sh --http  # dashboard가 404 또는 stale
+./start-masc.sh --http  # dashboard가 404 또는 stale
 ```
 
 **Correct Flow:**
@@ -314,7 +314,7 @@ dune build --root .
 cd dashboard && pnpm run build
 
 # 또는 자동 빌드 script 사용
-./start-masc-mcp.sh --http  # pnpm 있으면 자동 빌드
+./start-masc.sh --http  # pnpm 있으면 자동 빌드
 ```
 
 **CI에서:**
@@ -335,7 +335,7 @@ cd dashboard && pnpm run build
 cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:8935" pnpm run dev
 
 # Vite port를 5173이 아닌 값으로 바꾸면 서버 쪽 allowlist도 같이 맞춘다.
-MASC_HTTP_DEV_MUTATION_ORIGINS="http://localhost:4173" ./start-masc-mcp.sh
+MASC_HTTP_DEV_MUTATION_ORIGINS="http://localhost:4173" ./start-masc.sh
 
 # Production build (static assets in dist/)
 cd dashboard && pnpm run build
@@ -445,7 +445,7 @@ rg -nP 'inc_counter' lib/keeper/keeper_state_machine.ml lib/keeper/keeper_runtim
 
 ### 14.2. Variant 추가 시 Sweep 강제
 
-ADT variant 추가 PR이 모든 매치 사이트를 sweep 안 하면 strict mode partial-match로 runtime. 실제 사례: masc-mcp #10574 (Stale_turn_timeout), #10510/#10511 (InferenceTelemetry), #10516/#10521 (OperatorPauseBroadcast).
+ADT variant 추가 PR이 모든 매치 사이트를 sweep 안 하면 strict mode partial-match로 runtime. 실제 사례: masc #10574 (Stale_turn_timeout), #10510/#10511 (InferenceTelemetry), #10516/#10521 (OperatorPauseBroadcast).
 
 **규칙:** variant 정의 변경 commit과 같은 PR에 모든 match arm 업데이트.
 

@@ -866,11 +866,11 @@ masc_keeper_up(name: "sangsu")
 
 ### 8.3 base-path 주의사항
 
-`--base-path` CLI 인자는 workspace/base 경로다. runtime root는 항상 `<base-path>/.masc/`로 계산한다. `scripts/run-local.sh`는 `MASC_BASE_PATH=<target>` 및 `--base-path <target>`을 넘기며, 그 결과 data root가 `<target>/.masc/`가 된다. `start-masc-mcp.sh`는 shared/full-runtime 경로로 유지된다.
+`--base-path` CLI 인자는 workspace/base 경로다. runtime root는 항상 `<base-path>/.masc/`로 계산한다. `scripts/run-local.sh`는 `MASC_BASE_PATH=<target>` 및 `--base-path <target>`을 넘기며, 그 결과 data root가 `<target>/.masc/`가 된다. `start-masc.sh`는 shared/full-runtime 경로로 유지된다.
 
 dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이다. 공유 keeper 상태가 필요하면 shared/full-runtime 경로를 사용해야 한다.
 
-해결: dir-local 개발은 `scripts/run-local.sh --target-dir <dir>`를 사용하고, shared `.masc/`를 봐야 할 때만 `./start-masc-mcp.sh --http` 또는 explicit `--base-path`를 사용한다.
+해결: dir-local 개발은 `scripts/run-local.sh --target-dir <dir>`를 사용하고, shared `.masc/`를 봐야 할 때만 `./start-masc.sh --http` 또는 explicit `--base-path`를 사용한다.
 
 이 값은 workspace/base 경로이며, explicit `MASC_CONFIG_DIR`가 없을 때는 `<MASC_BASE_PATH>/.masc/config`를 resolved config root의 첫 후보로도 사용한다. bare `~/.masc`는 `/Users/dancer/.masc`로 해석될 수 있으므로 runbook에서는 `<base-path>/.masc` 또는 fully resolved path를 쓴다.
 

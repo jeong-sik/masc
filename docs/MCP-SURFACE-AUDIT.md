@@ -9,7 +9,7 @@ code_refs:
 
 # MCP Surface Audit
 
-Current-state audit of `masc-mcp` MCP exposure, public design, and documentation boundaries.
+Current-state audit of `masc` MCP exposure, public design, and documentation boundaries.
 
 As of `2026-04-16`, the supported front door is repo workspace collaboration plus keeper/runtime visibility. Operator remains a reduced supporting surface; team-session and command-plane are retired historical surfaces.
 

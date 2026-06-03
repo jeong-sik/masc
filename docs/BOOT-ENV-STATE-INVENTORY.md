@@ -4,7 +4,7 @@ last_verified: 2026-04-17
 code_refs:
   - lib/config/
   - lib/config/env_config.mli
-  - start-masc-mcp.sh
+  - start-masc.sh
 ---
 
 # Boot, Path, and Runtime State Inventory
@@ -333,7 +333,7 @@ Allowed path model:
 Current host note:
 
 - The inspected host also contains auxiliary event and telemetry lanes such as `activity-events/`, `events/`, `telemetry/`, and `data/tool-metrics/`.
-- Repo-local `masc-mcp/logs/` directories are non-canonical historical or
+- Repo-local `masc/logs/` directories are non-canonical historical or
   harness captures. Live runtime service logs belong under `<runtime_root>/logs/`.
 
 ### 3.9 Auth, Connectors, and Voice
@@ -390,7 +390,7 @@ These still exist because some execution and proof surfaces have not been fully 
 Current observed state on the inspected host:
 
 - Live server process:
-  - `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/_build/default/bin/main_eio.exe --host=127.0.0.1 --port=8935 --base-path=/Users/dancer/me`
+  - `/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin/main_eio.exe --host=127.0.0.1 --port=8935 --base-path=/Users/dancer/me`
 - Effective base path:
   - `/Users/dancer/me`
 - Effective runtime root:
@@ -399,7 +399,7 @@ Current observed state on the inspected host:
   - `/Users/dancer/me/.masc/config`
   - Reason: live `/health` reports `startup.config_resolution.config_root.path` as `/Users/dancer/me/.masc/config`.
 - Checked-in fallback/default config tree:
-  - `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config`
+  - `/Users/dancer/me/workspace/yousleepwhen/masc/config`
 - Both of these trees exist at the same time:
   - `/Users/dancer/me/.masc/*`
   - `/Users/dancer/me/.masc/.masc/*`

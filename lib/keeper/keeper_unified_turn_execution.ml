@@ -673,16 +673,55 @@ let run (ctx : ctx)
               ; "phase", Keeper_oas_execution_error_phase.(to_label Recoverable_runtime_transient)
               ]
             ();
+          (* Release the outer turn slot for the duration of the transient
+             backoff so a stalled/retrying keeper does not hold a concurrency
+             slot it is not actively using. This matches the degraded-retry
+             path above (release_for_retry before the gap,
+             reacquire_after_retry before recursing). *)
+          (match turn_slot_control with
+           | Some slot_control ->
+             slot_control.Keeper_turn_slot.release_for_retry ()
+           | None -> ());
           Eio.Time.sleep clock delay;
-          retry_loop
-            { run_meta
-            ; execution
-            ; run_generation
-            ; attempt = attempt + 1
-            ; is_retry = true
-            ; allow_degraded_wall_clock_retry_budget = false
-            ; attempted_runtimes
-            }
+          let run_retry () =
+            retry_loop
+              { run_meta
+              ; execution
+              ; run_generation
+              ; attempt = attempt + 1
+              ; is_retry = true
+              ; allow_degraded_wall_clock_retry_budget = false
+              ; attempted_runtimes
+              }
+          in
+          (match turn_slot_control with
+           | None -> run_retry ()
+           | Some slot_control ->
+             (match
+                slot_control.Keeper_turn_slot.reacquire_after_retry ()
+              with
+              | Ok wait_ms ->
+                Log.Keeper.info
+                  "%s: reacquired keeper turn slot for transient retry on \
+                   runtime=%s wait_ms=%d"
+                  meta.name
+                  execution_runtime_id
+                  wait_ms;
+                run_retry ()
+              | Error (`Semaphore_wait_timeout timeout) ->
+                let slot_err =
+                  sdk_error_of_retry_slot_reacquire_timeout
+                    ~keeper_name:meta.name
+                    timeout
+                in
+                Log.Keeper.warn
+                  "%s: transient retry on runtime=%s skipped because turn \
+                   slot reacquire timed out: %s"
+                  meta.name
+                  execution_runtime_id
+                  (short_preview (Agent_sdk.Error.to_string slot_err));
+                mark_terminal_error slot_err;
+                Error slot_err))
         | No_degraded_retry when EC.is_context_overflow err ->
           let current_turn_event_bus =
             drain_turn_event_bus ~site:"context_overflow_capture" ()

@@ -520,6 +520,56 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('old blocker that should stay out of the roster')
   })
 
+  it('treats keeper-only rows as first-class runtime rows when agent registry is empty', async () => {
+    agents.value = []
+    keepers.value = [
+      {
+        name: 'albini',
+        agent_name: 'keeper-albini-agent',
+        status: 'idle',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        recent_tool_names: ['keeper_tools_list'],
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('albini')
+    expect(text).toContain('keeper_tools_list')
+    expect(text).toContain('Source mismatch')
+    expect(text).toContain('agent registry 0')
+    expect(text).not.toContain('파생')
+  })
+
+  it('surfaces source mismatch on default keeper ops when agent registry is empty', async () => {
+    agents.value = []
+    keepers.value = [
+      {
+        name: 'albini',
+        status: 'idle',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        recent_tool_names: ['keeper_board_list'],
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('albini')
+    expect(text).toContain('Source mismatch')
+    expect(text).toContain('keeper projection 1')
+    expect(text).not.toContain('파생')
+  })
+
   it('renders the operations list with a selected detail pane', async () => {
     agents.value = [
       makeAgent({ name: 'alpha-agent', current_task: 'alpha task' }),

@@ -290,6 +290,7 @@ function findKeeperRuntimeForAgent(
 }
 
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
+type RosterAgent = Agent & { rosterSource?: 'agent_registry' | 'keeper_runtime' }
 
 function isRuntimeBackedKeeper(keeper: Keeper): boolean {
   if (keeper.registered === false && keeper.keepalive_running === false) return false
@@ -429,7 +430,7 @@ function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'>): string 
   return runtimeName && runtimeName.length > 0 ? runtimeName : source.name
 }
 
-function synthesizeAgentFromKeeper(source: Keeper): Agent | null {
+function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
   const displayName = keeperPrimaryName(source.name, source.agent_name) ?? keeperRuntimeName(source)
   if (!displayName) return null
 
@@ -458,15 +459,17 @@ function synthesizeAgentFromKeeper(source: Keeper): Agent | null {
     traits: source.traits,
     activityLevel: source.activityLevel,
     primaryValue: source.primaryValue,
-    synthetic: true,
+    rosterSource: 'keeper_runtime',
   }
 }
 
-function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agent {
+function mergeRosterAgent(existing: RosterAgent | undefined, next: RosterAgent): RosterAgent {
   if (!existing) return next
+  const nextIsKeeperProjection = next.rosterSource === 'keeper_runtime'
+  const existingIsKeeperProjection = existing.rosterSource === 'keeper_runtime'
   return {
     ...existing,
-    name: next.synthetic && !existing.synthetic ? next.name : existing.name,
+    name: nextIsKeeperProjection && !existingIsKeeperProjection ? next.name : existing.name,
     keeper_name: existing.keeper_name ?? next.keeper_name ?? null,
     keeper_id: existing.keeper_id ?? next.keeper_id ?? null,
     agent_type: existing.agent_type ?? next.agent_type,
@@ -488,9 +491,9 @@ function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agent {
 function buildAgentRoster(
   agentList: Agent[],
   keeperList: Keeper[],
-): Agent[] {
+): RosterAgent[] {
   const keeperLookup = buildKeeperRuntimeLookup(keeperList)
-  const roster = new Map<string, Agent>()
+  const roster = new Map<string, RosterAgent>()
 
   for (const agent of agentList) {
     const keeper = findKeeperRuntimeForAgent(agent, keeperLookup)
@@ -501,22 +504,23 @@ function buildAgentRoster(
         keeper?.agent_name ?? agent.name,
       )
       ?? agent.name
-    const normalizedAgent =
+    const normalizedAgent: RosterAgent =
       keeper != null
         ? {
             ...agent,
             keeper_name: agent.keeper_name ?? keeper.name,
             keeper_id: agent.keeper_id ?? keeper.keeper_id ?? null,
+            rosterSource: 'agent_registry',
           }
-        : agent
+        : { ...agent, rosterSource: 'agent_registry' }
     roster.set(key, mergeRosterAgent(roster.get(key), normalizedAgent))
   }
 
   for (const source of keeperList) {
-    const synthetic = synthesizeAgentFromKeeper(source)
-    if (!synthetic) continue
-    const key = keeperPrincipalKey(source.keeper_id ?? null, source.name, source.agent_name) ?? synthetic.name
-    roster.set(key, mergeRosterAgent(roster.get(key), synthetic))
+    const keeperRuntimeAgent = keeperRuntimeAgentProjection(source)
+    if (!keeperRuntimeAgent) continue
+    const key = keeperPrincipalKey(source.keeper_id ?? null, source.name, source.agent_name) ?? keeperRuntimeAgent.name
+    roster.set(key, mergeRosterAgent(roster.get(key), keeperRuntimeAgent))
   }
 
   return Array.from(roster.values())
@@ -770,6 +774,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     keeperFilter === 'agent-only' || configuredKeeperDelta === 0
       ? null
       : `일시정지/미기동 ${configuredKeeperDelta}개`
+  const sourceMismatchNotice =
+    keeperFilter !== 'agent-only' && agentList.length === 0 && keeperList.length > 0
+      ? {
+          title: 'Source mismatch',
+          message: `agent registry 0 · keeper projection ${keeperList.length} 기준입니다. live presence는 keeper runtime 상태에서만 표시됩니다.`,
+        }
+      : null
   const fallbackStateTitle =
     executionError.value
       ? '상세 상태 불러오기 실패'
@@ -949,6 +960,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
               `
             : null}
+
+          ${sourceMismatchNotice ? html`
+            <div class="rounded-[var(--r-1)] border border-[var(--warn-border)] bg-[var(--warn-10)] px-4 py-3 shadow-[var(--shadow-panel)]">
+              <div class="flex flex-col gap-2">
+                <div class="flex flex-wrap items-center gap-2">
+                  <strong class="text-xs font-semibold text-[var(--color-fg-secondary)]">${sourceMismatchNotice.title}</strong>
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">keeper fleet</span>
+                </div>
+                <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-primary)]">${sourceMismatchNotice.message}</p>
+              </div>
+            </div>
+          ` : null}
         </div>
       </section>
 
@@ -1028,7 +1051,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                       <span class="block truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${row.displayName}</span>
                       <span class="mt-0.5 flex flex-wrap items-center gap-1.5 text-3xs text-[var(--color-fg-muted)]">
                         <${AgentPresence} status=${row.presenceDisplay.status} detail=${row.presenceDisplay.detail} size="sm" />
-                        ${row.agent.synthetic ? html`<span class="rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] px-1.5 py-0.5 italic">파생</span>` : null}
+                        ${row.agent.synthetic && !row.isKeeper ? html`<span class="rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] px-1.5 py-0.5 italic">파생</span>` : null}
                       </span>
                     </span>
                   </span>

@@ -128,6 +128,7 @@
   test_memory_jsonl_truncation
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
+  test_keeper_tool_audit_snapshot
   test_ide_annotations
   test_ide_bridge
   test_command_descriptor
@@ -389,6 +390,7 @@
   test_memory_jsonl_truncation
   test_keeper_chat_store
   test_keeper_runtime_trust_snapshot
+  test_keeper_tool_audit_snapshot
   test_ide_annotations
   test_ide_bridge
   test_command_descriptor

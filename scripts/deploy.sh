@@ -10,7 +10,7 @@
 #
 # Management modes:
 #   manual: preferred default, uses nohup + PID file
-#   launchd: optional legacy mode if com.jeong-sik.masc-mcp-prod is already loaded
+#   launchd: optional legacy mode if com.jeong-sik.masc-prod is already loaded
 
 set -euo pipefail
 
@@ -30,7 +30,7 @@ BASE_PATH="$(default_base_path)"
 RUNTIME_ROOT="${BASE_PATH}/.masc"
 PID_FILE="${RUNTIME_ROOT}/masc-prod.pid"
 LOG_DIR="${RUNTIME_ROOT}/logs"
-LAUNCHD_LABEL="com.jeong-sik.masc-mcp-prod"
+LAUNCHD_LABEL="com.jeong-sik.masc-prod"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 
 SKIP_BUILD=false

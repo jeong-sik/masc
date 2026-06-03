@@ -122,7 +122,7 @@ else
     MASC_ORCHESTRATOR_ENABLED=false \
     MASC_AUTONOMY_ENABLED=false \
     MASC_DASHBOARD_BRIEFING_MODELS=disabled \
-    "$REPO_ROOT/start-masc-mcp.sh" --port "$PORT" --base-path "$BASE_PATH" >"$SERVER_LOG" 2>&1 &
+    "$REPO_ROOT/start-masc.sh" --port "$PORT" --base-path "$BASE_PATH" >"$SERVER_LOG" 2>&1 &
 fi
 SERVER_PID=$!
 log "server_pid=$SERVER_PID log=$SERVER_LOG"

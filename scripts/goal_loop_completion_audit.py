@@ -35,10 +35,10 @@ POST_ACT_EVIDENCE_KINDS = {
 }
 PROMPT_CHECKLIST_STATUSES = {"PASS", "PARTIAL", "BLOCKED"}
 PROMPT_CHECKLIST_ISSUE_REF_RE = re.compile(
-    r"^https://github\.com/jeong-sik/masc-mcp/issues/\d+$"
+    r"^https://github\.com/jeong-sik/masc/issues/\d+$"
 )
 PROMPT_CHECKLIST_PR_REF_RE = re.compile(
-    r"^https://github\.com/jeong-sik/masc-mcp/pull/\d+$"
+    r"^https://github\.com/jeong-sik/masc/pull/\d+$"
 )
 AUTOBOOT_WARMUP_FAIRNESS_ALGORITHM = "int32_djb2_bounded_jitter"
 AUTOBOOT_WARMUP_REQUIRED_KEEPERS = (

@@ -88,10 +88,10 @@ changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.m
 [[ "$spec_baseline" == "$package_version" ]] || \
   fail "SPEC-INDEX snapshot baseline ($spec_baseline) != current package version ($package_version)"
 
-require_contains docs/MCP-TEMPLATE.md '"command": "masc-mcp-stdio"'
+require_contains docs/MCP-TEMPLATE.md '"command": "masc-stdio"'
 require_not_contains docs/MCP-TEMPLATE.md '"args": ["--stdio"]'
 
-require_not_contains docs/TUI-GUIDE.md './start-masc-mcp.sh --tui'
+require_not_contains docs/TUI-GUIDE.md './start-masc.sh --tui'
 
 require_contains docs/QUICK-START.md '"method":"initialize"'
 require_contains docs/QUICK-START.md 'Mcp-Session-Id: ${SESSION_ID}'

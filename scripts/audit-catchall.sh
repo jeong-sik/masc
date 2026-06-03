@@ -2,7 +2,7 @@
 # Classify OCaml catch-all arms across the tree.
 #
 # Motivation: the 2026-05-19 code-smell audit
-# (memory/masc-mcp-code-smell-report-2026-05-19.html, Hotspot #5)
+# (memory/masc-code-smell-report-2026-05-19.html, Hotspot #5)
 # counted 3,417 catch-all arms. The raw count mixes legitimate
 # variant catch-alls (e.g. `| _ -> acc` in a fold) with the
 # §AI 안티패턴 §4 (FSM Sparse Match) and §AI 안티패턴 §2

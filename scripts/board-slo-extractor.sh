@@ -312,7 +312,7 @@ m_dashboard_proof_endpoints() {
 m_live_defect_issues() {
   [[ "$OFFLINE_MODE" -eq 0 ]] || { echo "null"; return; }
   command -v gh >/dev/null || { echo "null"; return; }
-  gh issue list --repo jeong-sik/masc-mcp --label live-defect --state open --json number 2>/dev/null \
+  gh issue list --repo jeong-sik/masc --label live-defect --state open --json number 2>/dev/null \
     | jq 'length' || echo "null"
 }
 

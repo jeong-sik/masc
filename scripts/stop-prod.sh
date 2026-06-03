@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PID_FILE="$REPO_DIR/masc-prod.pid"
 PROD_PORT=8945
-LAUNCHD_LABEL="com.jeong-sik.masc-mcp-prod"
+LAUNCHD_LABEL="com.jeong-sik.masc-prod"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
 FORCE=false
 

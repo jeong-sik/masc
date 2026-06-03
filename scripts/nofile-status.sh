@@ -12,7 +12,7 @@ Usage: scripts/nofile-status.sh [options]
 
 Options:
   --kill-bare-dune    SIGTERM unwrapped Dune processes reported as bypasses.
-  --kill-repo-scans   SIGTERM broad find/bfs scans over ~/me or masc-mcp.
+  --kill-repo-scans   SIGTERM broad find/bfs scans over ~/me or masc.
   --kill-risky        Enable both kill options above.
   --watch [seconds]   Repeat until interrupted. Defaults to 5 seconds.
   --once              Run one snapshot even when invoked from watch mode.
@@ -231,7 +231,7 @@ if [[ "${ps_available}" -eq 1 ]]; then
           /(^|[[:space:]])(bfs|find)[[:space:]]/ &&
           (/\/Users\/dancer([[:space:]]|\/|$)/ ||
            /\/Users\/dancer\/me([[:space:]]|\/|$)/ ||
-           /masc-mcp/ ||
+           /masc/ ||
            /~\/me/ ||
            /[[:space:]]~([[:space:]]|\/|$)/) {
             print

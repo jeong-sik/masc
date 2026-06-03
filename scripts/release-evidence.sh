@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/release-evidence.sh [PATH_TO_BINARY] [OUTPUT_MARKDOWN]
 
-Captures a reproducible release-evidence bundle for a built masc-mcp binary.
+Captures a reproducible release-evidence bundle for a built masc binary.
 The bundle includes:
   - artifact install smoke (`--version` from an installed location)
   - local boot + /health capture
@@ -42,7 +42,7 @@ out_dir="$(cd "$(dirname "$OUTFILE")" && pwd)"
 tmp="$(mktemp -d -t masc-release-evidence.XXXXXX)"
 base_path="$tmp/base"
 prefix_dir="$tmp/prefix"
-installed_bin="$prefix_dir/masc-mcp"
+installed_bin="$prefix_dir/masc"
 server_log="$out_dir/server.log"
 health_json="$out_dir/health.json"
 initialize_headers="$out_dir/initialize.headers"

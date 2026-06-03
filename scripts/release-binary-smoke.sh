@@ -91,7 +91,7 @@ actual_subcmds=$(awk '
 
 # Subcommands the README claims exist. Restrict to lines/segments inside
 # backticks (inline `code` or ``` fenced blocks ```), so prose like
-# "use masc-mcp in Claude" never trips the gate.
+# "use masc in Claude" never trips the gate.
 readme_subcmds=$(awk '
   /^```/        { in_fence = !in_fence; next }
   in_fence      { print; next }
@@ -103,7 +103,7 @@ readme_subcmds=$(awk '
     }
   }
 ' README.md \
-  | grep -hoE '(main_eio\.exe|masc-mcp) +[a-z][a-z0-9_-]*' \
+  | grep -hoE '(main_eio\.exe|masc) +[a-z][a-z0-9_-]*' \
   | awk '{print $2}' | sort -u)
 
 drift=0

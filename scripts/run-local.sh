@@ -43,7 +43,7 @@ Dir-local local-dev launcher:
   - --bootstrap-only materializes local config/build state but does not start the server
   - checked-in keeper manifests are excluded by default; pass --bootstrap-keepers to seed config/keepers
 
-For shared repo/full-runtime startup, use ./start-masc-mcp.sh instead.
+For shared repo/full-runtime startup, use ./start-masc.sh instead.
 EOF
 }
 

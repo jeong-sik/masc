@@ -40,7 +40,7 @@ def test_severity_symbols_render_prefix() -> None:
 def test_title_uses_underline_style_not_markdown_heading() -> None:
     """제목은 전통적 underline 스타일 (`Title\\n=====`) 로 렌더돼야 한다.
 
-    `masc-mcp diagnostics all` 섹션 divider (``====``) 와 일관된 외형 유지,
+    `masc diagnostics all` 섹션 divider (``====``) 와 일관된 외형 유지,
     그리고 pretty 출력에서 markdown 기호(`# `) 가 보이지 않도록.
     """
 

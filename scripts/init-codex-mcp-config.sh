@@ -35,7 +35,7 @@ the MASC auth diagnostics (diagnostics) expects:
 
 After writing the stanza, mint a codex-mcp-client bearer token (if missing):
   BASE_PATH="${MASC_BASE_PATH:-<script default base path>}"
-  eval "$(masc-mcp login \
+  eval "$(masc login \
     --base-path "$BASE_PATH" --agent codex-mcp-client --role worker --shell)"
   export MASC_MCP_TOKEN  # export to Codex's shell environment
 
@@ -43,7 +43,7 @@ Security notes:
   - Never write the raw bearer token into ~/.codex/config.toml.
   - Use bearer_token_env_var so Codex reads the token from the environment
     at runtime; this avoids persisting the literal token in the config file.
-  - Run `masc-mcp login --json` to verify the config is correct.
+  - Run `masc login --json` to verify the config is correct.
 
 Env:
   MASC_BASE_PATH         Base path for the MASC data root (default: MASC_BASE_PATH, then repo root)
@@ -67,7 +67,7 @@ MCP_URL="http://${HOST}:${PORT}/mcp"
 
 # The canonical [mcp_servers.masc] stanza.
 # bearer_token_env_var is used instead of a hardcoded Authorization header.
-# This is what `masc-mcp login --json` checks for in codex_mcp.config.stages.
+# This is what `masc login --json` checks for in codex_mcp.config.stages.
 MASC_STANZA=$(cat <<EOF
 [mcp_servers.masc]
 url = "${MCP_URL}"
@@ -89,8 +89,8 @@ if [ "$DRY_RUN" = "1" ]; then
   echo "     remove that line — use bearer_token_env_var instead."
   echo "  3. Add or replace the stanza with the output above."
   echo "  4. Mint a codex-mcp-client token and export it:"
-  echo "     eval \"\$(masc-mcp login --base-path '${BASE_PATH}' --agent codex-mcp-client --role worker --shell)\""
-  echo "  5. Run: MASC_SYNC_CODEX_MCP_CONFIG=1 masc-mcp --base-path '${BASE_PATH}'"
+  echo "     eval \"\$(masc login --base-path '${BASE_PATH}' --agent codex-mcp-client --role worker --shell)\""
+  echo "  5. Run: MASC_SYNC_CODEX_MCP_CONFIG=1 masc --base-path '${BASE_PATH}'"
   exit 0
 fi
 
@@ -104,8 +104,8 @@ if [ ! -f "$CODEX_CONFIG_PATH" ]; then
 elif grep -qE '^\[mcp_servers\.masc\]' "$CODEX_CONFIG_PATH" 2>/dev/null; then
   # Stanza already present.
   echo "==> [mcp_servers.masc] already present in ${CODEX_CONFIG_PATH}." >&2
-  echo "    Run: MASC_SYNC_CODEX_MCP_CONFIG=1 masc-mcp --base-path '${BASE_PATH}'" >&2
-  echo "    Or:  MASC_SYNC_CODEX_MCP_CONFIG=1 masc-mcp --base-path '${BASE_PATH}'" >&2
+  echo "    Run: MASC_SYNC_CODEX_MCP_CONFIG=1 masc --base-path '${BASE_PATH}'" >&2
+  echo "    Or:  MASC_SYNC_CODEX_MCP_CONFIG=1 masc --base-path '${BASE_PATH}'" >&2
   echo "    to check and repair bearer_token_env_var / Authorization drift." >&2
 else
   # Append the stanza to the existing config.
@@ -120,8 +120,8 @@ echo "    Use bearer_token_env_var = \"MASC_MCP_TOKEN\" and export the token" >&
 echo "    in the shell that starts Codex — never write the raw token to disk." >&2
 echo "" >&2
 echo "==> Mint / verify codex-mcp-client bearer token:" >&2
-echo "    eval \"\$(masc-mcp login --base-path '${BASE_PATH}' --agent codex-mcp-client --role worker --shell)\"" >&2
+echo "    eval \"\$(masc login --base-path '${BASE_PATH}' --agent codex-mcp-client --role worker --shell)\"" >&2
 echo "    export MASC_MCP_TOKEN" >&2
 echo "" >&2
 echo "==> Verify config with auth diagnostics:" >&2
-echo "    MASC_SYNC_CODEX_MCP_CONFIG=1 masc-mcp --base-path '${BASE_PATH}'" >&2
+echo "    MASC_SYNC_CODEX_MCP_CONFIG=1 masc --base-path '${BASE_PATH}'" >&2

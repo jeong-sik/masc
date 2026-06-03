@@ -129,10 +129,10 @@ async def check_gate_reachable() -> Check:
             severity=Severity.error if "connect" in res else Severity.warn,
             detail=url,
             message=res,
-            hint="MASC 서버 기동 여부 확인 (./start-masc-mcp.sh)",
+            hint="MASC 서버 기동 여부 확인 (./start-masc.sh)",
             auto_fix=AutoFix(
-                description="MASC 서버를 다른 터미널에서 기동: ./start-masc-mcp.sh",
-                command="./start-masc-mcp.sh",
+                description="MASC 서버를 다른 터미널에서 기동: ./start-masc.sh",
+                command="./start-masc.sh",
             ),
         )
     if res.status_code >= 500:

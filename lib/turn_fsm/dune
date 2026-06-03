@@ -7,7 +7,7 @@
 ;; the keeper-side shim can `include Turn_fsm`.
 (library
  (name masc_turn)
- (public_name masc_mcp.masc_turn)
+ (public_name masc.masc_turn)
  (wrapped false)
  (preprocess
   (pps ppx_tla)))

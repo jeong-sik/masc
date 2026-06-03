@@ -1,4 +1,4 @@
-; RFC-0056 Phase 1A — extract Trajectory leaf module from flat masc_mcp.
+; RFC-0056 Phase 1A — extract Trajectory leaf module from flat masc.
 ;
 ; Trajectory is dependency-leaf in lib/ flat namespace: no references to
 ; other lib/ root modules (Keeper.X mentions are Log.Keeper.X submodule
@@ -16,7 +16,7 @@
 
 (library
  (name masc_mcp_trajectory)
- (public_name masc_mcp.trajectory)
+ (public_name masc.trajectory)
  (wrapped false)
  (flags (:standard -w +4))
  (libraries

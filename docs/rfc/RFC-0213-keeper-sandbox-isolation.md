@@ -150,3 +150,48 @@ VM dependency; A alone leaves the host exposed if a tool escapes the path gate.
 - Is there ANY kernel-level confinement for `local` today, or is it purely the
   path-string gate (§2 reads as the latter)?
 - Re-verify §3 against current product docs (this pass was lost to a session limit).
+
+## 7. Implementation plan (concrete, ordered)
+
+### 7.1 Confirmed (code investigation, main HEAD e0eb8c0d8b)
+- The playground repo is a **git CLONE**, not a worktree: `keeper_repo_readiness.ml`
+  header — "read-only probe for the single keeper sandbox repo *clone* under
+  [playground]"; `clone_path ~config ~meta ~repo_name`; dir layout in
+  `lib/config/playground_paths.ml` (one dir per repo). Git ops via
+  `lib/repo_manager/repo_git.ml`.
+- The readiness probe runs `git -C <path> --no-optional-locks rev-parse
+  --show-toplevel`; `top.ok=false` (or `<none>`) → `sandbox_repo_not_ready`
+  (`keeper_tool_execute_path.ml:repo_cwd_not_ready_error`).
+- The failing path was a **nested `.worktrees/task-630` inside the clone** whose
+  `--show-toplevel` did not resolve.
+
+### 7.2 UNRESOLVED prerequisite (resolve before any code — guarded subsystem)
+WHO creates `.worktrees/task-<id>` inside a playground clone, and WHY its
+`git_toplevel` is `<none>`? Candidate causes to check: (a) a keeper ran
+`git worktree add` itself and it failed/partial; (b) the clone is shallow/partial
+so `worktree add` produces a broken `.git` pointer; (c) the worktree was orphaned
+(clone re-provisioned underneath it). The creator is NOT in `lib/keeper/` or
+`lib/repo_manager/` (3 greps empty) — search the tool layer / orchestrator /
+any masc worktree tooling. **Do not code Option A until this is answered**; a
+blind fix on a guarded subsystem is the MANIFEST anti-pattern.
+
+### 7.3 Option A steps (after 7.2)
+1. If keepers should NOT use nested worktrees: route task work to the clone root
+   (`cwd=clone_path`), not `.worktrees/task-<id>`.
+2. If per-task worktrees ARE intended: ensure `git worktree add` from the clone
+   yields a valid checkout (non-shallow clone + worktree registered in
+   `<clone>/.git/worktrees/`).
+3. Replace the hard `sandbox_repo_not_ready` block with a **re-provision/repair**
+   path (reclone or recreate the worktree) — the error already names "Repair or
+   reclone" but (per audit) has no automatic path.
+
+### 7.4 Verify
+A keeper exec under a freshly-provisioned task path passes the readiness probe
+(`--show-toplevel` resolves). Add a `keeper_repo_readiness` test for the
+not-ready → repair → ready transition.
+
+### 7.5 Guard + sequencing
+- Guarded subsystem (`keeper_sandbox*`/`keeper_shell_*`/`repo_manager`) → this
+  RFC + human review (no direct agent PR without RFC citation).
+- Durable isolation (Option B, seatbelt/Docker) is a SEPARATE follow-up
+  RFC-implementation; A only unblocks, it does not add containment.

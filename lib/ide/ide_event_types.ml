@@ -3,6 +3,7 @@
 type ide_event =
   | Tool_event of tool_event
   | Turn_event of turn_event
+  | Pr_event of pr_event
 
 and tool_event =
   { tool_name : string
@@ -24,6 +25,19 @@ and turn_event =
   ; tools_used : string list
   ; stop_reason : string option
   ; duration_ms : int option
+  ; timestamp_ms : int64
+  }
+
+and pr_event =
+  { pr_number : int
+  ; pr_url : string
+  ; pr_title : string
+  ; pr_state : string
+  ; repo : string
+  ; keeper_id : string
+  ; turn_id : string
+  ; comment_count : int
+  ; review_status : string option
   ; timestamp_ms : int64
   }
 
@@ -54,6 +68,22 @@ let turn_event_to_json (e : turn_event) : Yojson.Safe.t =
     ; "timestamp_ms", `Intlit (Int64.to_string e.timestamp_ms)
     ]
 
+let pr_event_to_json (e : pr_event) : Yojson.Safe.t =
+  `Assoc
+    [ "type", `String "pr"
+    ; "pr_number", `Int e.pr_number
+    ; "pr_url", `String e.pr_url
+    ; "pr_title", `String e.pr_title
+    ; "pr_state", `String e.pr_state
+    ; "repo", `String e.repo
+    ; "keeper_id", `String e.keeper_id
+    ; "turn_id", `String e.turn_id
+    ; "comment_count", `Int e.comment_count
+    ; "review_status", (match e.review_status with Some s -> `String s | None -> `Null)
+    ; "timestamp_ms", `Intlit (Int64.to_string e.timestamp_ms)
+    ]
+
 let ide_event_to_json = function
   | Tool_event e -> tool_event_to_json e
   | Turn_event e -> turn_event_to_json e
+  | Pr_event e -> pr_event_to_json e

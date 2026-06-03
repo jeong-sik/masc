@@ -12,6 +12,7 @@ let append_event ~base_dir ~partition ~(event : ide_event) =
     match event with
     | Tool_event _ -> "tool_events.jsonl"
     | Turn_event _ -> "turn_events.jsonl"
+    | Pr_event _ -> "pr_events.jsonl"
   in
   let path = Filename.concat dir file_name in
   let json = ide_event_to_json event in
@@ -81,6 +82,37 @@ let ingest_turn_event
    with exn ->
      Printf.eprintf "Ide_bridge.ingest_turn_event error: %s\n%!" (Printexc.to_string exn))
 
+let ingest_pr_event
+    ~base_path
+    ~pr_number
+    ~pr_url
+    ~pr_title
+    ~pr_state
+    ~repo
+    ~keeper_id
+    ~turn_id
+    ~comment_count
+    ~review_status
+    ~timestamp_ms
+  =
+  let event =
+    Pr_event
+      { pr_number
+      ; pr_url
+      ; pr_title
+      ; pr_state
+      ; repo
+      ; keeper_id
+      ; turn_id
+      ; comment_count
+      ; review_status
+      ; timestamp_ms
+      }
+  in
+  (try append_event ~base_dir:base_path ~partition:default_partition ~event
+   with exn ->
+     Printf.eprintf "Ide_bridge.ingest_pr_event error: %s\n%!" (Printexc.to_string exn))
+
 (** Extract tool event parameters from raw hook data and ingest.
     This is the function called from [keeper_run_tools_hooks.on_tool_executed].
     Separated for direct testability. *)
@@ -147,3 +179,41 @@ let parse_pr_url_from_output (output : string) : (int * string) option =
           Some (number, url)
         with Failure _ -> None)
      | _ -> None)
+
+(** Try to detect PR creation from Execute tool output and ingest a PR event.
+    Only fires when [tool_name = "execute"] and output contains a GitHub PR URL. *)
+let ingest_pr_event_from_hook
+    ~base_path
+    ~keeper_id
+    ~turn_id
+    ~output_text
+    ~tool_name
+  =
+  if String.equal tool_name "execute" then
+    match parse_pr_url_from_output output_text with
+    | Some (pr_number, pr_url) ->
+      let repo =
+        let prefix = "https://github.com/" in
+        let prefix_len = String.length prefix in
+        let url_len = String.length pr_url in
+        if url_len > prefix_len then
+          let path = String.sub pr_url prefix_len (url_len - prefix_len) in
+          let parts = String.split_on_char '/' path in
+          match parts with
+          | owner :: repo_name :: _ -> owner ^ "/" ^ repo_name
+          | _ -> "unknown"
+        else "unknown"
+      in
+      ingest_pr_event
+        ~base_path
+        ~pr_number
+        ~pr_url
+        ~pr_title:""
+        ~pr_state:"open"
+        ~repo
+        ~keeper_id
+        ~turn_id
+        ~comment_count:0
+        ~review_status:None
+        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    | None -> ()

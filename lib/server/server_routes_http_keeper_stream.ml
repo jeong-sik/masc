@@ -60,7 +60,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
   Audit_log.log_tool_call state.Mcp_server.workspace_config
     ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
-    Log.emit Log.Error ~module_name:"Keeper"
+    Log.Keeper.emit Log.Error
       ~details:
         (`Assoc
           [
@@ -285,7 +285,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
   Audit_log.log_tool_call state.Mcp_server.workspace_config ~agent_id:agent_name
     ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
-    Log.emit Log.Error ~module_name:"Keeper"
+    Log.Keeper.emit Log.Error
       ~details:
         (`Assoc
           [

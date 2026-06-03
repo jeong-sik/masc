@@ -43,10 +43,10 @@ let payload_agent_name payload =
 
 let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
   let log_at level message =
-    Log.emit level ~module_name:"oas:event" ~details:json message
+    Log.Oas_event.emit level ~details:json message
   in
   let log_routine message =
-    Log.emit_routine ~module_name:"oas:event" ~details:json message
+    Log.Oas_event.routine ~details:json "%s" message
   in
   let log message = log_at Log.Info message in
   match evt.payload with

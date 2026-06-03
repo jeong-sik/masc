@@ -57,7 +57,7 @@ let get_or_create_mutex key =
         m)
 
 let warn_io_failure ~op ~path exn =
-  Log.warn ~ctx:"jsonl_atomic" "%s failed for %s: %s" op path (Printexc.to_string exn)
+  Log.Jsonl_atomic.warn "%s failed for %s: %s" op path (Printexc.to_string exn)
 
 let open_writer ~sw ~fs ~path =
   (* Create parent directories *within the provided fs root* — using

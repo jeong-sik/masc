@@ -67,14 +67,14 @@ let n_errors = Atomic.make 0
 let n_dropped = Atomic.make 0
 
 let report_err_ = function
-  | `Sysbreak -> Log.warn "opentelemetry: ctrl-c captured, stopping"
-  | `Failure msg -> Log.warn "opentelemetry: export failed: %s" msg
+  | `Sysbreak -> Log.Telemetry.warn "opentelemetry: ctrl-c captured, stopping"
+  | `Failure msg -> Log.Telemetry.warn "opentelemetry: export failed: %s" msg
   | `Status (code, { Opentelemetry.Proto.Status.code = scode; message; details }) ->
     let details_str =
       List.map (fun s -> Bytes.unsafe_to_string s) details
       |> String.concat "; "
     in
-    Log.warn
+    Log.Telemetry.warn
       "opentelemetry: export failed with http code=%d status={code=%ld; message=%S; \
        details=[%s]}"
       code
@@ -225,7 +225,7 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
       match r with
       | Ok () -> ()
       | Error `Sysbreak ->
-        Log.warn "opentelemetry: ctrl-c captured, stopping";
+        Log.Telemetry.warn "opentelemetry: ctrl-c captured, stopping";
         Atomic.set stop true
       | Error err ->
         Atomic.incr n_errors;
@@ -261,7 +261,7 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
       try f () with
       | e ->
         let bt = Printexc.get_backtrace () in
-        Log.warn
+        Log.Telemetry.warn
           "opentelemetry-eio: uncaught exception in %s: %s\n%s"
           where
           (Printexc.to_string e)
@@ -314,7 +314,7 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
       List.iter
         (fun f ->
            try f () with
-           | e -> Log.warn "opentelemetry: on tick callback raised: %s" (Printexc.to_string e))
+           | e -> Log.Telemetry.warn "opentelemetry: on tick callback raised: %s" (Printexc.to_string e))
         (AList.get @@ Atomic.get on_tick_cbs_)
     ;;
   end in
@@ -326,14 +326,14 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
 
     let tick () =
       if Config.Env.get_debug ()
-      then Log.debug "opentelemetry: tick (from domain %d)" (Domain.self () :> int);
+      then Log.Telemetry.debug "opentelemetry: tick (from domain %d)" (Domain.self () :> int);
       run_tick_callbacks ();
       sample_gc_metrics_if_needed ();
       emit_all ~force:false
     ;;
 
     let cleanup ~on_done () =
-      if Config.Env.get_debug () then Log.debug "opentelemetry: exiting...";
+      if Config.Env.get_debug () then Log.Telemetry.debug "opentelemetry: exiting...";
       Atomic.set stop true;
       run_tick_callbacks ();
       sample_gc_metrics_if_needed ();
@@ -356,7 +356,7 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
           (if Config.Env.get_debug ()
            then
              let@ () = Lock.with_lock in
-             Log.debug "opentelemetry: send spans %s"
+             Log.Telemetry.debug "opentelemetry: send spans %s"
                (Format.asprintf "%a"
                   (Format.pp_print_list Trace.pp_resource_spans) l));
           push_trace l;
@@ -369,7 +369,7 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
 
   let signal_emit_gc_metrics () =
     if Config.Env.get_debug ()
-    then Log.debug "opentelemetry: emit GC metrics requested";
+    then Log.Telemetry.debug "opentelemetry: emit GC metrics requested";
     Atomic.set needs_gc_metrics true
   ;;
 
@@ -412,7 +412,7 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
           (if Config.Env.get_debug ()
            then
              let@ () = Lock.with_lock in
-             Log.debug "opentelemetry: send metrics %s"
+             Log.Telemetry.debug "opentelemetry: send metrics %s"
                (Format.asprintf "%a"
                   (Format.pp_print_list Metrics.pp_resource_metrics) m));
           let m = List.rev_append (additional_metrics ()) m in
@@ -427,7 +427,7 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
           (if Config.Env.get_debug ()
            then
              let@ () = Lock.with_lock in
-             Log.debug "opentelemetry: send logs %s"
+             Log.Telemetry.debug "opentelemetry: send logs %s"
                (Format.asprintf "%a"
                   (Format.pp_print_list Logs.pp_resource_logs) m));
           push_logs m;

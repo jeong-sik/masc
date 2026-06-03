@@ -298,7 +298,7 @@ let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
 
 let reject_validation ~name ~reason ~message =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
-  Log.info "tool_input_validation rejected %s: %s" name message;
+  Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
   Tool_dispatch.Reject
     (Error
        { Tool_result.class_ = Tool_result.Policy_rejection
@@ -323,7 +323,7 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
       error_text
   in
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"validation_exception";
-  Log.error "%s" message;
+  Log.Tool_validation.error "%s" message;
   Tool_dispatch.Reject
     (Error
        { Tool_result.class_ = Tool_result.Runtime_failure
@@ -415,7 +415,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
     | Agent_sdk.Tool_middleware.Pass when not (Yojson.Safe.equal prepared_args args) ->
       let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
       emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
-      Log.debug "tool_input_validation normalized args for %s" name;
+      Log.Tool_validation.debug "tool_input_validation normalized args for %s" name;
       Tool_dispatch.Proceed prepared_args
     | Agent_sdk.Tool_middleware.Pass ->
       let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
@@ -423,11 +423,11 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       Tool_dispatch.Pass
     | Agent_sdk.Tool_middleware.Proceed coerced ->
       emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"coerced";
-      Log.debug "tool_input_validation coerced args for %s" name;
+      Log.Tool_validation.debug "tool_input_validation coerced args for %s" name;
       Tool_dispatch.Proceed coerced
     | Agent_sdk.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
-      Log.info "tool_input_validation rejected %s: %s" name message;
+      Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
       (* Input-schema / policy rejection — classify so the
          dispatch-level metric label (failure_class) reflects the
          actual category instead of bucketing as "unclassified". *)

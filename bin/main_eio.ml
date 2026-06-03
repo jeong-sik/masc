@@ -696,7 +696,7 @@ let run_cmd host port base_path =
          let dst = Filename.concat log_dir fname in
          if not (Sys.file_exists dst) then
            (try Sys.rename src dst;
-                Log.info "log migration: moved %s -> .masc/logs/" fname
+                Log.Server.info "log migration: moved %s -> .masc/logs/" fname
             with Sys_error _ -> ())
           end) files);
   Log.Ring.init_file_sink log_dir;

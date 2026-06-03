@@ -24,9 +24,7 @@ let resolve_provider_config_of_label (label : string)
   match Runtime_model_string.parse_model_string label with
   | Some pc -> Ok pc
   | None ->
-    Log.error
-      ~ctx:"oas_worker_exec"
-      "refusing unresolved explicit model label=%S; execution never falls back to \
+    Log.Oas_worker_exec.error "refusing unresolved explicit model label=%S; execution never falls back to \
        discovery-only models"
       label;
     Error (Invalid_model_label label)

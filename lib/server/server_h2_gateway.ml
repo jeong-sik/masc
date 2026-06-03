@@ -502,8 +502,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                              stop_sse_session session_id;
                              Sse.unregister session_id;
                              forget_mcp_session session_id;
-                             Log.info ~ctx:"h2_gateway"
-                               "Session terminated: %s reason=client_delete \
+                             Log.H2_gateway.info "Session terminated: %s reason=client_delete \
                                 profile=%s protocol_version=%s \
                                 sse_active_before_stop=%b"
                                session_id

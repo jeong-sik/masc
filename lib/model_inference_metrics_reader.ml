@@ -41,9 +41,7 @@ let read_all_decisions ~base_path ~since_unix : raw_entry list =
                | Error err ->
                  if parse_error_is_schema_violation err
                  then
-                   Log.warn
-                     ~ctx:"model_inference_metrics"
-                     "decisions.jsonl parse drop: %s:%d reason=%s"
+                   Log.Model_inference_metrics.warn "decisions.jsonl parse drop: %s:%d reason=%s"
                      path
                      line_no
                      (parse_error_label err);
@@ -71,9 +69,7 @@ let read_cost_entries_legacy ~base_path ~since_unix : raw_entry list =
           | Error err ->
             if parse_error_is_schema_violation err
             then
-              Log.warn
-                ~ctx:"model_inference_metrics"
-                "costs.jsonl parse drop: %s:%d reason=%s"
+              Log.Model_inference_metrics.warn "costs.jsonl parse drop: %s:%d reason=%s"
                 path
                 line_no
                 (parse_error_label err);
@@ -107,9 +103,7 @@ let read_cost_entries_dated ~base_path ~since_unix : raw_entry list =
         | Ok (Error err) ->
           if parse_error_is_schema_violation err
           then
-            Log.warn
-              ~ctx:"model_inference_metrics"
-              "costs/dated parse drop: reason=%s"
+            Log.Model_inference_metrics.warn "costs/dated parse drop: reason=%s"
               (parse_error_label err);
           None
         | Error () -> None)

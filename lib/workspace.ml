@@ -107,9 +107,8 @@ let warn_telemetry_drop ~(event : Workspace_telemetry_drop_event.t) exn =
      caller contract. [Eio.Cancel.Cancelled] is still preserved. (#13096 review,
      copilot P1; supersedes the single-try wrapping noted in agent_code P2.) *)
   Telemetry_observe.observe_silent ~kind:"workspace_telemetry_drop_log" (fun () ->
-    Log.emit
+    Log.Workspace.emit
       Log.Warn
-      ~module_name:"Workspace"
       ~details
       (Printf.sprintf
          "telemetry/audit dropped (non-Eio context): %s/%s"
@@ -174,7 +173,7 @@ let observe_agent_lifecycle
     | Session_rebound -> Printf.sprintf "agent session rebound: %s" agent_id
     | Session_ended -> Printf.sprintf "agent session ended: %s" agent_id
   in
-  Log.emit level ~module_name:"Workspace" ~details message;
+  Log.Workspace.emit level ~details message;
   (match event with
    | Session_ended -> Prometheus.dec_gauge Prometheus.metric_active_agents ()
    | Session_bound | Session_rebound ->
@@ -253,7 +252,7 @@ let observe_task_transition_event
     | Masc_domain.Reject_verification -> Log.Info
   in
   let message = Printf.sprintf "task %s %s by %s" task_id transition_s agent_name in
-  Log.emit level ~module_name:"Task" ~details message;
+  Log.Task.emit level ~details message;
   (try
      Audit_log.log_action
        config

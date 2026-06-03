@@ -44,13 +44,12 @@ let setup_exporter_with ?(enabled = Otel_config.enabled) ~endpoint ~setup () =
     try
       setup ();
       Atomic.set exporter_active true;
-      Log.info ~ctx:"otel" "OTLP exporter started -> %s" endpoint
+      Log.Otel.info "OTLP exporter started -> %s" endpoint
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
         Atomic.set exporter_active false;
-        Log.warn ~ctx:"otel"
-          "OTLP exporter unavailable, continuing without export (%s): %s"
+        Log.Otel.warn "OTLP exporter unavailable, continuing without export (%s): %s"
           endpoint (Printexc.to_string exn)
   end
 
@@ -69,7 +68,7 @@ let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =
 let shutdown ?(enabled = Otel_config.enabled) () =
   if enabled && Atomic.get exporter_active then begin
     Opentelemetry_client_cohttp_eio.remove_backend ();
-    Log.info ~ctx:"otel" "OTLP exporter stopped"
+    Log.Otel.info "OTLP exporter stopped"
   end;
   Atomic.set exporter_active false;
   Atomic.set initialized false

@@ -1,0 +1,75 @@
+# Logging-consistency allowlist (consumed by scripts/ci/check-logging-consistency.sh)
+#
+# Each non-comment, non-blank line is a path PREFIX. A logging violation is
+# suppressed when its file path starts with one of these prefixes. Use a
+# trailing "/" to allowlist a whole directory; use a full filename to
+# allowlist one file.
+#
+# Allowlisting is for logging that CANNOT route through the canonical
+# Log.<Module>.{info,warn,error,debug,routine} surface. Every entry below has a
+# stated reason. Do not add entries to silence a migrate-able call site — fix
+# the call site instead. See docs/LOGGING.md.
+
+# --- The Log system itself ---
+# log.ml emits the structured records; it cannot log through itself. Its
+# Printf.eprintf calls are the terminal stderr sink + operator warnings for
+# unparsable env vars / file-sink rotation failures.
+lib/masc_log/
+
+# --- Pre-runtime / low-level filesystem fallback ---
+# fs_compat runs below the logging stack (masc_log depends on fs_compat, not the
+# reverse). Its eprintf are last-resort diagnostics when even the ring buffer
+# may be unavailable.
+lib/fs_compat/
+
+# --- Server boot guards + FATAL handlers + CLI subcommands (bin/main_eio.ml) ---
+# eprintf here are either (a) pre-Log-init base-path guards ("[FATAL] --base-path
+# points to the server's own source repo", "[FATAL] Server refused to start"),
+# (b) FATAL exception handlers for Out_of_memory / Stack_overflow that must not
+# allocate through the logging stack, or (c) the `login` / `init` CLI
+# subcommands whose stderr/stdout is user-facing CLI output, not server logs.
+# The legacy_stderr "[FATAL] Another MASC server ... already running" lines are
+# the RFC-0079 raw-passthrough bridge (embedded [FATAL] prefix; migrating would
+# double-prefix the operator-visible message).
+bin/main_eio.ml
+
+# --- Standalone CLI tools (not the server runtime) ---
+# These are one-shot CLI binaries; their stdout/stderr is the tool's user
+# interface, not structured server logging.
+bin/masc_trace.ml
+bin/trace_to_tla.ml
+bin/masc_tui_loader.ml
+bin/masc_cost.ml
+bin/masc_compaction_audit.ml
+bin/keeper_feature_proof_report.ml
+bin/env_knob_catalog.ml
+
+# --- RFC-0079 legacy raw-stderr bridge (embedded [LEVEL] prefix) ---
+# Log.legacy_stderr / Log.legacy_traceln deliberately emit a raw, unprefixed
+# stderr line AND mirror it into the ring with a Legacy_stderr / Legacy_traceln
+# source tag (read back by dashboard/src/api/schemas/logs.ts). Every call site
+# embeds its own [FATAL] / [WARN] / [DEBUG] marker in the message body, so
+# migrating to Log.<Module>.<lvl> would (a) double-prefix the message and
+# (b) drop the Legacy_* source classification. They stay as the documented
+# bridge. (lib/server/server_startup_takeover.ml is allowlisted whole because
+# its only non-canonical logging is these legacy_stderr lines.)
+lib/server/server_startup_takeover.ml
+lib/backend/backend.ml
+lib/workspace/workspace_query.ml
+lib/mcp_server_eio_resource.ml
+
+# --- Dynamic component (runtime variable) ---
+# Log.warn ~ctx:context / Log.info ~ctx:context use a runtime-computed component
+# string; there is no static module that preserves the per-call value. Migrating
+# would drop the dynamic component from operator output.
+lib/config_dir_resolver/config_dir_resolver.ml
+
+# --- Runtime-computed component on Log.emit ---
+# agent_sdk_log_bridge.ml uses Log.emit with ~module_name:("oas:" ^
+# record.module_name) — the component is built at runtime from a per-record
+# value, so no static module preserves it. The top-level Log.emit is required
+# here to carry the dynamic component string.
+# (keeper_event_bridge.ml previously appeared here for ~module_name:"oas:event";
+#  that is a static literal and is now the Oas_event module — a module name
+#  string may contain a colon even though the OCaml identifier cannot.)
+lib/agent_sdk_log_bridge.ml

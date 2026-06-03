@@ -90,12 +90,10 @@ let record_actual_tokens ~estimated ~actual =
     | None -> ()
     | Some (new_factor, prev_factor, n) ->
       if new_factor > 1.5 || new_factor < 0.5 then
-        Log.warn ~ctx:"relay"
-          "calibration drift: correction_factor=%.2f (was %.2f, %d samples)"
+        Log.Relay.warn "calibration drift: correction_factor=%.2f (was %.2f, %d samples)"
           new_factor prev_factor n
       else if abs_float (new_factor -. prev_factor) > 0.1 then
-        Log.debug ~ctx:"relay"
-          "calibration updated: correction_factor=%.2f (was %.2f)"
+        Log.Relay.debug "calibration updated: correction_factor=%.2f (was %.2f)"
           new_factor prev_factor
   end
 
@@ -346,7 +344,7 @@ let save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics =
     } in
     let cps = cp :: !checkpoints in
     checkpoints := List.filteri (fun i _ -> i < max_checkpoints) cps;
-    Log.info ~ctx:"checkpoint" "Saved at %.1f%% context usage"
+    Log.Checkpoint.info "Saved at %.1f%% context usage"
       (metrics.usage_ratio *. 100.0);
     cp)
 

@@ -503,8 +503,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
   match label_result with
   | Error _ as error -> error
   | Ok label -> (
-      Log.info ~ctx:"dashboard_provider_runs"
-        "single-agent run resolved run_id=%s provider=%s requested_model=%s model_label=%s"
+      Log.Dashboard_provider_runs.info "single-agent run resolved run_id=%s provider=%s requested_model=%s model_label=%s"
         run_id provider model label;
       (* Validate label parses *)
       match Runtime_model_string.parse_model_string label with
@@ -561,13 +560,11 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
         }
       in
       set_run_record run;
-      Log.info ~ctx:"dashboard_provider_runs"
-        "single-agent run queued run_id=%s provider=%s model=%s"
+      Log.Dashboard_provider_runs.info "single-agent run queued run_id=%s provider=%s model=%s"
         run.run_id run.provider run.model;
       Eio.Fiber.fork ~sw (fun () ->
           let mark_failed message =
-            Log.warn ~ctx:"dashboard_provider_runs"
-              "single-agent run failed run_id=%s provider=%s model=%s error=%s"
+            Log.Dashboard_provider_runs.warn "single-agent run failed run_id=%s provider=%s model=%s error=%s"
               run.run_id run.provider run.model message;
             update_run_record run.run_id (fun current ->
                 current.status <- Failed;
@@ -587,8 +584,7 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
                 ~prompt:run.prompt
             with
             | Ok output ->
-                Log.info ~ctx:"dashboard_provider_runs"
-                  "single-agent run completed run_id=%s provider=%s model=%s"
+                Log.Dashboard_provider_runs.info "single-agent run completed run_id=%s provider=%s model=%s"
                   run.run_id run.provider run.model;
                 update_run_record run.run_id (fun current ->
                     current.status <- Completed;

@@ -32,7 +32,7 @@ let with_eio_temp_base_path f =
     ~finally:(fun () ->
       (match prev with
        | Some v -> Unix.putenv "MASC_BASE_PATH" v
-       | None -> ());
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
       cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->

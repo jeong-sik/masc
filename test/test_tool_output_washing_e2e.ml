@@ -106,6 +106,7 @@ let test_full_flow_externalize_hydrate_serve () =
                   content = marker;
                   is_error = false;
                   json = None;
+                  content_blocks = None;
                 };
             ];
           name = None;
@@ -163,7 +164,12 @@ let test_recency_budget_holds_across_modules () =
           content =
             [
               T.ToolResult
-                { tool_use_id = id; content; is_error = false; json = None };
+                { tool_use_id = id
+                ; content
+                ; is_error = false
+                ; json = None
+                ; content_blocks = None
+                };
             ];
           name = None;
           tool_call_id = Some id;

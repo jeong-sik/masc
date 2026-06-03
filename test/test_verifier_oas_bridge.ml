@@ -34,7 +34,7 @@ let make_gate
   }
 
 let make_schema name : Agent_sdk.Types.tool_schema =
-  { name; description = ""; parameters = [] }
+  { name; description = ""; parameters = []; strict = None }
 
 (* ================================================================ *)
 (* eval_gate_to_oas_guardrails                                       *)

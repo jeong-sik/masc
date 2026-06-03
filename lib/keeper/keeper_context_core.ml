@@ -249,7 +249,8 @@ let sanitize_checkpoint_message
                    { tool_use_id;
                      content = stub_content;
                      is_error;
-                     json = None }
+                     json = None;
+                     content_blocks = None }
                in
                ( stub :: kept_rev,
                  kept_text_blocks, kept_text_chars,
@@ -279,7 +280,12 @@ let sanitize_checkpoint_message
                in
                let block =
                  Agent_sdk.Types.ToolResult
-                   { tool_use_id; content = capped; is_error; json = None }
+                   { tool_use_id
+                   ; content = capped
+                   ; is_error
+                   ; json = None
+                   ; content_blocks = None
+                   }
                in
                ( block :: kept_rev,
                  kept_text_blocks, kept_text_chars,
@@ -383,11 +389,12 @@ let cap_checkpoint_message_to_remaining_content
            match block with
            | Agent_sdk.Types.Text text ->
                cap_content (fun text -> Agent_sdk.Types.Text text) text
-           | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
+           | Agent_sdk.Types.ToolResult
+               { tool_use_id; content; is_error; content_blocks; _ } ->
                cap_content
                  (fun content ->
                    Agent_sdk.Types.ToolResult
-                     { tool_use_id; content; is_error; json = None })
+                     { tool_use_id; content; is_error; json = None; content_blocks })
                  content
            | Agent_sdk.Types.Thinking { content; _ } ->
                cap_content (fun text -> Agent_sdk.Types.Text text) content

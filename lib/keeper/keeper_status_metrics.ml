@@ -504,6 +504,30 @@ let has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source =
   || Option.fold ~none:false ~some:(fun count -> count > 0) raw_tool_call_count
   || Option.is_some action_source
 
+let merge_tool_name_lists primary secondary =
+  let seen = Hashtbl.create 8 in
+  let add acc raw_name =
+    let name = String.trim raw_name in
+    if name = "" || Hashtbl.mem seen name
+    then acc
+    else (
+      Hashtbl.replace seen name ();
+      name :: acc)
+  in
+  List.rev (List.fold_left add [] (List.concat [ primary; secondary ]))
+
+let single_tool_name_members json =
+  [ "tool"; "tool_name"; "last_tool_name" ]
+  |> List.filter_map (fun key ->
+         match Safe_ops.json_string_opt key json with
+         | Some value when String.trim value <> "" -> Some value
+         | _ -> None)
+
+let tool_names_of_audit_json json =
+  merge_tool_name_lists
+    (single_tool_name_members json)
+    (Json_util.json_string_list_member "tools_used" json)
+
 let json_iso_opt json =
   match Safe_ops.json_string_opt "ts" json with
   | Some text ->
@@ -569,7 +593,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
                 ~detail:"decision log row is not a JSON object";
               raise Exit
         in
-        let tools = Json_util.json_string_list_member "tools_used" json in
+        let tools = tool_names_of_audit_json json in
         let raw_tool_call_count = Json_util.get_int json "tool_call_count" in
         let tool_call_count =
           match raw_tool_call_count with
@@ -582,7 +606,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
         else
           Some
             {
-              latest_tool_names = List.sort_uniq String.compare tools;
+              latest_tool_names = tools;
               latest_tool_call_count = tool_call_count;
               latest_action_source = action_source;
               tool_audit_source = Some "keeper_decision_log";
@@ -627,10 +651,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
               ~detail:"keeper metrics row is not a JSON object";
             raise Exit
       in
-      let tools =
-        Json_util.json_string_list_member "tools_used" json
-        |> List.sort_uniq String.compare
-      in
+      let tools = tool_names_of_audit_json json in
       let raw_tool_call_count = Json_util.get_int json "tool_call_count" in
       let tool_call_count =
         match raw_tool_call_count with

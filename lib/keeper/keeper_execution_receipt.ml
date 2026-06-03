@@ -231,53 +231,64 @@ let operator_disposition_reason_to_string = function
 ;;
 
 (* Terminal-reason prefixes for OAS agent-execution errors that exhaust a
-   turn/time budget before the turn completes. SSOT shared with the encoder
-   [Keeper_agent_error.agent_error_terminal_reason_code]. A turn cut off by
-   the per-call turn cap ([MaxTurnsExceeded]), the wall-clock ceiling
-   ([AgentExecutionTimeout]), or the progress-aware idle watchdog
-   ([AgentExecutionIdleTimeout]) did NOT violate the tool contract — it never
-   reached a verdict. The keeper checkpoints and the supervisor auto-resumes
-   ([Keeper_error_classify.is_auto_recoverable_turn_error] /
-   [Keeper_supervisor] auto_resume). Scope is deliberately narrow: token/cost
+   turn/time budget before the turn completes. The SSOT now lives in
+   [Keeper_terminal_reason] (RFC-0042 PR-4) so the typed classifier owns
+   the constants the [Auto_recoverable_budget] bucket matches; these
+   re-exports keep [Keeper_agent_error] and the public [.mli] byte-stable.
+   A turn cut off by the per-call turn cap ([MaxTurnsExceeded]), the
+   wall-clock ceiling ([AgentExecutionTimeout]), or the progress-aware idle
+   watchdog ([AgentExecutionIdleTimeout]) did NOT violate the tool
+   contract — it never reached a verdict. The keeper checkpoints and the
+   supervisor auto-resumes. Scope is deliberately narrow: token/cost
    budget, guardrail, and tripwire terminals stay out, since those are
    genuine ceilings an operator should see, not transient turn cut-offs. *)
-let terminal_prefix_max_turns_exceeded = "agent_error_max_turns_exceeded"
-let terminal_prefix_execution_timeout = "agent_error_execution_timeout"
-let terminal_prefix_idle_timeout = "agent_error_idle_timeout"
+let terminal_prefix_max_turns_exceeded =
+  Keeper_terminal_reason.terminal_prefix_max_turns_exceeded
+;;
 
-let is_auto_recoverable_turn_budget_terminal terminal_reason =
-  String.starts_with ~prefix:terminal_prefix_max_turns_exceeded terminal_reason
-  || String.starts_with ~prefix:terminal_prefix_execution_timeout terminal_reason
-  || String.starts_with ~prefix:terminal_prefix_idle_timeout terminal_reason
+let terminal_prefix_execution_timeout =
+  Keeper_terminal_reason.terminal_prefix_execution_timeout
+;;
+
+let terminal_prefix_idle_timeout = Keeper_terminal_reason.terminal_prefix_idle_timeout
+
+let is_auto_recoverable_turn_budget_terminal =
+  Keeper_terminal_reason.is_auto_recoverable_turn_budget_terminal
 ;;
 
 let operator_disposition (receipt : t)
   : operator_disposition_kind * operator_disposition_reason
   =
-  let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
+  (* Parse the wire string ONCE into the typed classification
+     ([Keeper_terminal_reason], RFC-0042 PR-4). The earlier
+     [String.starts_with] / [string_contains] chain is now a single
+     [of_wire] call; each former string predicate is a variant test,
+     preserving the original [if/else] priority order. The error_kind
+     sub-predicates stay here (they read the receipt record, not the wire
+     string) and remain OR'd with the variant test at the same branch. *)
+  let terminal_reason = Keeper_terminal_reason.of_wire receipt.terminal_reason_code in
   let error_kind =
     Option.map
       (fun kind -> String.lowercase_ascii (error_kind_to_string kind))
       receipt.error_kind
   in
   let provider_runtime_failure =
-    String.starts_with ~prefix:"api_error_" terminal_reason
-    || String.equal terminal_reason "provider_error"
+    (match terminal_reason with
+     | Keeper_terminal_reason.Provider_runtime_failure _ -> true
+     | _ -> false)
     ||
     match error_kind with
     | Some ("api" | "mcp" | "io" | "orchestration" | "serialization") -> true
     | Some _ | None -> false
   in
   let preflight_config_failure =
+    (match terminal_reason with
+     | Keeper_terminal_reason.Config_or_auth _ -> true
+     | _ -> false)
+    ||
     match error_kind with
-    | Some kind ->
-      string_contains_ci kind "config"
-      || string_contains_ci kind "auth"
-      || string_contains_ci terminal_reason "config"
-      || string_contains_ci terminal_reason "auth"
-    | None ->
-      string_contains_ci terminal_reason "config"
-      || string_contains_ci terminal_reason "auth"
+    | Some kind -> string_contains_ci kind "config" || string_contains_ci kind "auth"
+    | None -> false
   in
   (* Pre-typing, this branch also matched runtime_outcome="runtime_exhausted"
      and "exhausted" — neither is in the producer's closed [runtime_outcome]
@@ -285,23 +296,24 @@ let operator_disposition (receipt : t)
      [_not_dispatched]).  Those branches were unreachable workarounds; the
      typed migration drops them.  Runtime exhaustion still reaches this
      branch via [terminal_reason="runtime_exhausted"]. *)
-  if String.equal terminal_reason "runtime_exhausted"
-  then Disp_alert_exhausted, Reason_runtime_exhausted
-  else if preflight_config_failure
-  then Disp_pause_human, Reason_preflight_config_error
-  else if
-    provider_runtime_failure
-    && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime)
-  then Disp_fail_open_next_runtime, Reason_degraded_retry
-  else if
-    provider_runtime_failure
-    && (receipt.runtime_fallback_applied
-        || receipt.runtime_outcome = Runtime_passed_to_next_model)
-  then Disp_pass_next_model, Reason_runtime_fallback
-  else if provider_runtime_failure
-  then Disp_pause_human, Reason_provider_runtime_error
-  else if String.starts_with ~prefix:"completion_contract_violation:" terminal_reason
-  then
+  match terminal_reason with
+  | Keeper_terminal_reason.Runtime_exhausted _ ->
+    Disp_alert_exhausted, Reason_runtime_exhausted
+  | _ when preflight_config_failure ->
+    Disp_pause_human, Reason_preflight_config_error
+  | _
+    when provider_runtime_failure
+         && (receipt.degraded_retry_applied
+             || Option.is_some receipt.degraded_retry_runtime) ->
+    Disp_fail_open_next_runtime, Reason_degraded_retry
+  | _
+    when provider_runtime_failure
+         && (receipt.runtime_fallback_applied
+             || receipt.runtime_outcome = Runtime_passed_to_next_model) ->
+    Disp_pass_next_model, Reason_runtime_fallback
+  | _ when provider_runtime_failure ->
+    Disp_pause_human, Reason_provider_runtime_error
+  | Keeper_terminal_reason.Completion_contract_violation _ ->
     (* The downstream completion-contract layer has already decided the turn
        violated [require_tool_use] (or another contract sub-clause) and emits
        [terminal_reason="completion_contract_violation:<sub_clause>"]. The
@@ -312,22 +324,21 @@ let operator_disposition (receipt : t)
        authoritative — the disposition is the same as the explicit
        [tool_required_unsatisfied] branch below. *)
     Disp_pause_human, Reason_tool_required_unsatisfied
-  else if
-    String.starts_with ~prefix:"turn_livelock:" terminal_reason
-    ||
-    match error_kind with
-    | Some "turn_livelock_blocked" -> true
-    | Some _ | None -> false
-  then Disp_pause_human, Reason_turn_livelock_blocked
-  else if
-    String.equal terminal_reason "internal_error"
-    ||
-    match error_kind with
-    | Some "internal" -> true
-    | Some _ | None -> false
-  then Disp_pause_human, Reason_internal_error
-  else if is_auto_recoverable_turn_budget_terminal terminal_reason
-  then
+  | Keeper_terminal_reason.Turn_livelock _ ->
+    Disp_pause_human, Reason_turn_livelock_blocked
+  | _
+    when (match error_kind with
+          | Some "turn_livelock_blocked" -> true
+          | Some _ | None -> false) ->
+    Disp_pause_human, Reason_turn_livelock_blocked
+  | Keeper_terminal_reason.Internal_error _ ->
+    Disp_pause_human, Reason_internal_error
+  | _
+    when (match error_kind with
+          | Some "internal" -> true
+          | Some _ | None -> false) ->
+    Disp_pause_human, Reason_internal_error
+  | Keeper_terminal_reason.Auto_recoverable_budget _ ->
     (* The turn was cut off by its per-call turn cap / wall-clock ceiling /
        idle watchdog before producing a verdict. This is auto-recoverable
        (the supervisor resumes from the checkpoint), NOT a tool-contract
@@ -339,7 +350,17 @@ let operator_disposition (receipt : t)
        #19714 removed the blunt default wall-clock; this closes the
        disposition-side half of the same mis-signal. *)
     Disp_pass, Reason_turn_budget_exhausted
-  else
+  | Config_or_auth _
+  | Provider_runtime_failure _
+  | Pre_dispatch_success _
+  | Other _ ->
+    (* Generic tool-gate fall-through. [Config_or_auth] and
+       [Provider_runtime_failure] are caught by the guarded branches above
+       (their constructors force [preflight_config_failure] /
+       [provider_runtime_failure] true), so only [Pre_dispatch_success] and
+       [Other] reach here in practice; the first two are listed to keep the
+       match exhaustive without a wildcard. This block reproduces the
+       pre-typing [else] branch verbatim. *)
     let canonical_names names =
       names
       |> List.map Keeper_tool_resolution.canonical_tool_name
@@ -418,7 +439,17 @@ let operator_disposition (receipt : t)
       receipt.outcome = `Ok
       && receipt.runtime_outcome = Runtime_not_dispatched
       && receipt.tool_contract_result = Contract_not_dispatched
-      && String.equal terminal_reason "pre_dispatch_success"
+      &&
+      (match terminal_reason with
+       | Keeper_terminal_reason.Pre_dispatch_success _ -> true
+       | Runtime_exhausted _
+       | Config_or_auth _
+       | Provider_runtime_failure _
+       | Completion_contract_violation _
+       | Turn_livelock _
+       | Internal_error _
+       | Auto_recoverable_budget _
+       | Other _ -> false)
     then Disp_pass, Reason_healthy
     (* "healthy" requires an explicit success signal: turn completed without
        error AND runtime reached the configured terminal. Any other fallthrough
@@ -457,7 +488,7 @@ let operator_disposition (receipt : t)
            regression of #11651 silent-path fix"
           (outcome_kind_to_string receipt.outcome)
           (runtime_outcome_to_string receipt.runtime_outcome)
-          terminal_reason
+          receipt.terminal_reason_code
           (tool_contract_result_to_string receipt.tool_contract_result)
           (Option.value
              (Option.map error_kind_to_string receipt.error_kind)

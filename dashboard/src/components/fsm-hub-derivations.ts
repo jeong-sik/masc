@@ -131,7 +131,7 @@ export function deriveTopTransitions(
     can attribute without additional event-bus signals. */
 export function inferTransitionReason(field: string, from: string, to: string): string | null {
   if (field === 'KTC') {
-    if (from === 'idle' && to === 'executing') return '턴이 시작되었습니다 — OAS worker 호출 진행'
+    if (from === 'idle' && to === 'executing') return '턴이 시작되었습니다 — runtime 호출 진행'
     if (from === 'executing' && to === 'idle') return '턴이 정상 종료되어 대기 상태로 복귀'
     if (to === 'compacting') return 'KMC 가 compaction 단계를 시작 — 컨텍스트 압축 중'
     if (to === 'finalizing') return '턴 마무리 — checkpoint/메트릭 emit'

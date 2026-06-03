@@ -90,7 +90,7 @@ dashboard runtime info / keeper list 가 가장 hot. 64 keeper 이상 prod 에�
 
 ## 4. Provider-A streaming 응답 backpressure (다른 축)
 
-본 audit 범위는 *masc-mcp 서버 응답* 측. *Provider-A API 호출 응답* (oas/agent_sdk 의 streaming) 은 별도 repo. 외부 `oas` (Open Agent Stack) 의 streaming.ml 에 ToolUse JSON 을 block 완성 후 일괄 파싱하는 패턴 보고됨 — 그건 oas repo 의 별도 PR 대상. (구체 위치는 oas repo 의 lib/streaming.ml 참조.)
+본 audit 범위는 *masc 서버 응답* 측. *Provider-A API 호출 응답* (oas/agent_sdk 의 streaming) 은 별도 repo. 외부 `oas` (Open Agent Stack) 의 streaming.ml 에 ToolUse JSON 을 block 완성 후 일괄 파싱하는 패턴 보고됨 — 그건 oas repo 의 별도 PR 대상. (구체 위치는 oas repo 의 lib/streaming.ml 참조.)
 
 ## 5. 권고 우선순위
 

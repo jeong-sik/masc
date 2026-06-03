@@ -17,7 +17,7 @@
 
 ## Summary
 
-`masc-mcp` should describe keeper continuity as a bounded advanced feature.
+`masc` should describe keeper continuity as a bounded advanced feature.
 
 The product promise is:
 

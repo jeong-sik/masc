@@ -38,12 +38,12 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 
 ## 1.1 Document Ownership
 
-- `/home/runner/work/masc-mcp/masc-mcp/docs/OAS-MASC-BOUNDARY.md` is the boundary contract SSOT.
+- `/home/runner/work/masc/masc/docs/OAS-MASC-BOUNDARY.md` is the boundary contract SSOT.
 - This spec keeps the implementation map, bridge inventory, and open structural gaps.
-- `/home/runner/work/masc-mcp/masc-mcp/docs/design/oas-masc-state-boundary.md` is a historical audit / migration backlog, not the primary boundary contract.
-- `/home/runner/work/masc-mcp/masc-mcp/docs/design/checkpoint-truth-and-replay-rfc.md` keeps checkpoint truth hierarchy, replay semantics, and side-effect boundary language.
-- `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md` is evidence, not contract.
-- `/home/runner/work/masc-mcp/masc-mcp/docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md` records the OAS observability producer -> bridge -> durable store -> dashboard consumer chain.
+- `/home/runner/work/masc/masc/docs/design/oas-masc-state-boundary.md` is a historical audit / migration backlog, not the primary boundary contract.
+- `/home/runner/work/masc/masc/docs/design/checkpoint-truth-and-replay-rfc.md` keeps checkpoint truth hierarchy, replay semantics, and side-effect boundary language.
+- `/home/runner/work/masc/masc/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md` is evidence, not contract.
+- `/home/runner/work/masc/masc/docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md` records the OAS observability producer -> bridge -> durable store -> dashboard consumer chain.
 
 ---
 

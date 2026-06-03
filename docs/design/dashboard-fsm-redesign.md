@@ -11,7 +11,7 @@ code_refs:
 
 **Status**: Design (기획 단계)
 **Date**: 2026-04-14
-**Scope**: `masc-mcp` 대시보드의 FSM/TLA 정보 아키텍처 재구성 + 데이터 파이프라인 dynamic화
+**Scope**: `masc` 대시보드의 FSM/TLA 정보 아키텍처 재구성 + 데이터 파이프라인 dynamic화
 **One sentence**: Keeper detail 한 페이지에 갇혀 있고 Runtime/Decision 그래프가 하드코딩된 현 대시보드를, RFC-0003 composite observer를 소스로 삼는 4-페이지 체계로 재구성한다.
 
 ## Related Documents

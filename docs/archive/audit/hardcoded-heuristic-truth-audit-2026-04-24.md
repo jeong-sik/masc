@@ -1,6 +1,6 @@
 # Hardcoded / Heuristic Truth Audit - 2026-04-24
 
-Scope: active `masc-mcp` source, tests, scripts, and CI surfaces. The goal is to
+Scope: active `masc` source, tests, scripts, and CI surfaces. The goal is to
 separate confirmed semantic debt from broad grep noise, then remove the most
 dangerous hardcoded boundary.
 

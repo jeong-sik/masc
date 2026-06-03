@@ -67,7 +67,7 @@ Sub-library 추출 비율: 12/~300 = 4%.
 ### 2.4 Circular Dependencies
 
 `masc_mcp.ml` wrapper module이 모든 sub-library를 re-export하는 facade.
-새 모듈 추가 시 masc_mcp.ml + lib/dune에서 additive conflict이 항상 발생한다 (memory: masc-mcp-module-conflict-hotspot).
+새 모듈 추가 시 masc_mcp.ml + lib/dune에서 additive conflict이 항상 발생한다 (memory: masc-module-conflict-hotspot).
 
 ### 2.5 Configuration Sprawl
 

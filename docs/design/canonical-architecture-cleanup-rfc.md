@@ -26,7 +26,7 @@ code_refs:
 
 ## Problem Statement
 
-`masc-mcp` has a credible core design:
+`masc` has a credible core design:
 
 - repo-local workspace collaboration for multiple coding agents
 - OAS-backed keeper runtime for long-running execution

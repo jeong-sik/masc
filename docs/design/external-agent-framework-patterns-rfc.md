@@ -13,7 +13,7 @@ Updated: 2026-04-12
 
 ## Goal
 
-Morph의 agent framework 비교 글을 출발점으로 삼되, `masc-mcp`에 바로 적용 가능한 패턴만 추려서
+Morph의 agent framework 비교 글을 출발점으로 삼되, `masc`에 바로 적용 가능한 패턴만 추려서
 설계 우선순위와 landing point를 고정한다.
 
 이 문서의 핵심 질문은 "어느 프레임워크로 갈아탈 것인가"가 아니라
@@ -35,13 +35,13 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc-mcp`에 바
 ## Non-goals
 
 - Agent-LLM-A Agent SDK, Provider-D Agents SDK, Google ADK, CrewAI, LangGraph를
-  `masc-mcp` core runtime 위에 직접 embedding 하는 것
+  `masc` core runtime 위에 직접 embedding 하는 것
 - role-play crew abstraction을 workspace collaboration core로 채택하는 것
 - code-generating execution model을 keeper default로 바꾸는 것
 
 ## Decision Summary
 
-1. `masc-mcp`는 orchestration/control plane으로 유지하고, single-agent runtime은 계속 OAS에 둔다.
+1. `masc`는 orchestration/control plane으로 유지하고, single-agent runtime은 계속 OAS에 둔다.
 2. 외부 비교에서 가장 먼저 가져올 패턴은 LangGraph류의 `checkpoint truth + replay discipline`이다.
 3. 두 번째는 Provider-D Agents SDK가 보여주는 `typed workflow surface + guardrail/eval-friendly tracing`이다.
 4. 세 번째는 Morph 글이 강조한 `framework보다 infra primitive가 중요하다`는 관점이다.
@@ -49,13 +49,13 @@ Morph의 agent framework 비교 글을 출발점으로 삼되, `masc-mcp`에 바
 
 ## Comparison
 
-| External pattern | External claim | Current `masc-mcp` state | Decision |
+| External pattern | External claim | Current `masc` state | Decision |
 |---|---|---|---|
 | LangGraph durable execution | checkpoint, resume, replay/fork are first-class | keeper checkpoint는 실재하지만 truth/replay contract가 아직 분산됨 | adopt |
 | Provider-D workflow primitives | handoff, guardrails, traces, evals are workflow-level building blocks | verification/proof/handoff는 있으나 envelope family가 분산됨 | adopt selectively |
 | Google ADK + A2A | Agent Cards and protocol boundary for remote discovery | Agent Card/A2A surface는 이미 존재하나 canonical contract가 흩어져 있음 | adopt selectively |
 | Morph infra-first view | orchestration보다 apply/search/sandbox/compaction primitive quality가 중요 | search/apply/sandbox/compaction이 각각 존재하지만 shared infra model이 없음 | adopt |
-| CrewAI role-based crews | natural-language role composition | `masc-mcp`의 문제는 역할극보다 correctness / observability / state truth | reject for core |
+| CrewAI role-based crews | natural-language role composition | `masc`의 문제는 역할극보다 correctness / observability / state truth | reject for core |
 | Smolagents code agent default | code generation drives tool invocation | keeper write path는 playground containment가 핵심 guardrail | reject for core |
 
 ## What to Keep
@@ -201,7 +201,7 @@ Reason:
 
 ## Explicit Rejections
 
-- provider-native framework 전체를 `masc-mcp` core로 들여오지 않는다.
+- provider-native framework 전체를 `masc` core로 들여오지 않는다.
 - LangGraph를 orchestration engine으로 통째로 바꾸지 않는다.
 - CrewAI role-play abstraction을 keeper/team-session core로 채택하지 않는다.
 - Smolagents식 code-exec-first runtime을 keeper default로 만들지 않는다.

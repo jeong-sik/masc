@@ -1,6 +1,6 @@
 # Performance Baseline 측정 프로토콜 (RFC PR-0.2)
 
-masc-mcp v0.18.11 (OCaml 5.4 + Eio) 의 14 일 baseline 측정 인프라
+masc v0.18.11 (OCaml 5.4 + Eio) 의 14 일 baseline 측정 인프라
 정의. 본 문서는 향후 모든 최적화 PR (캐시, GC, WebSocket, MCP
 latency 등) 의 머지 조건이 되는 baseline 계측 방법을 한 곳에 모은
 SSOT 다.
@@ -148,9 +148,9 @@ bash scripts/perf-baseline.sh
 
 ```cron
 # 매일 03:00 UTC, OCAMLRUNPARAM=e 로 서버가 실행 중일 때
-0 3 * * * cd /path/to/masc-mcp && \
+0 3 * * * cd /path/to/masc && \
   OLLY_TRACE=0 bash scripts/perf-baseline.sh \
-  >> /var/log/masc-mcp/perf-baseline.cron.log 2>&1
+  >> /var/log/masc/perf-baseline.cron.log 2>&1
 ```
 
 `OLLY_TRACE=1` 은 30 초 동안 olly 가 마스터 process 에 attach

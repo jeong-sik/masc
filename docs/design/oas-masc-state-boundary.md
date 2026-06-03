@@ -4,8 +4,8 @@ Issue: #1736
 
 > Status: historical audit + migration backlog
 >
-> Boundary contract SSOT lives in `/home/runner/work/masc-mcp/masc-mcp/docs/OAS-MASC-BOUNDARY.md`.
-> Implementation status / open ledger lives in `/home/runner/work/masc-mcp/masc-mcp/docs/spec/13-oas-integration.md`.
+> Boundary contract SSOT lives in `/home/runner/work/masc/masc/docs/OAS-MASC-BOUNDARY.md`.
+> Implementation status / open ledger lives in `/home/runner/work/masc/masc/docs/spec/13-oas-integration.md`.
 
 ## Related
 

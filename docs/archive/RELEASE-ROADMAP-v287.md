@@ -1,6 +1,6 @@
 # Prepare v2.87.0 Minor Release
 
-`masc-mcp`의 현재 release closeout 기준입니다.
+`masc`의 현재 release closeout 기준입니다.
 
 기준 시점:
 - current release SemVer: `2.86.0`

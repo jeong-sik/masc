@@ -30,7 +30,7 @@ This document is the contract. **A new `Log.*` callsite must match exactly one r
 
 ## 1. Audience
 
-- **Operator** — reads `WARN`/`ERROR` lines on `journalctl -u masc-mcp -p warning`. Expects every line to be actionable.
+- **Operator** — reads `WARN`/`ERROR` lines on `journalctl -u masc -p warning`. Expects every line to be actionable.
 - **Developer** — reads `INFO`/`DEBUG` for lifecycle/tracing. Tolerates volume.
 - **Alerting** — pages on `ERROR`. Anything else is dashboard-only.
 

@@ -73,9 +73,9 @@ let keeper_trust_json ?(include_receipt = false)
         match latest_receipt with
         | Some receipt -> Option.value ~default:(`String "no_receipt") (Json_util.assoc_member_opt "operator_disposition_reason" receipt)
         | None -> `String "no_receipt" );
-      ( "tool_contract_result",
+      ( "completion_contract_result",
         match latest_receipt with
-        | Some receipt -> Option.value ~default:(`String "unknown") (Json_util.assoc_member_opt "tool_contract_result" receipt)
+        | Some receipt -> Option.value ~default:(`String "unknown") (Json_util.assoc_member_opt "completion_contract_result" receipt)
         | None -> `String "unknown" );
       ("requested_tool_count", `Int (List.length requested_tools));
       ("tools_used", `List (List.map (fun value -> `String value) tools_used));

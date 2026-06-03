@@ -7,7 +7,7 @@ let default_partition = Ide_paths.Orphan
 
 let append_event ~base_dir ~partition ~(event : ide_event) =
   let dir = Ide_paths.partition_store_dir ~base_dir partition in
-  (try ignore (Sys.command (Printf.sprintf "mkdir -p %s" dir)) with _ -> ());
+  Fs_compat.mkdir_p dir;
   let file_name =
     match event with
     | Tool_event _ -> "tool_events.jsonl"

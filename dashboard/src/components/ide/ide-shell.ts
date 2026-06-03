@@ -24,6 +24,7 @@ import { OverlayKeeperTrace } from './overlay-keeper-trace'
 import { IdePersistencePanel } from './ide-persistence-panel'
 import { IdeBranchContextPanel } from './ide-branch-context-panel'
 import { IdeMemoryPanel } from './ide-memory-panel'
+import { IdeToolTimeline } from './ide-tool-timeline'
 import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
 import { routeLinksForContext } from './ide-context-lens'
 import { navigate, route } from '../../router'
@@ -702,6 +703,7 @@ export function IdeShell() {
                 <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                 <${IdePersistencePanel} keeperName=${terminalKeeper} />
                 <${IdeMemoryPanel} keeperName=${terminalKeeper} />
+                <${IdeToolTimeline} keeperName=${terminalKeeper} />
                 <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
               </div>
               <div

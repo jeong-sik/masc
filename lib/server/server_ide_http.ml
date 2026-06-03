@@ -470,4 +470,98 @@ let add_routes router =
          Httpun.Reqd.respond_with_string inner_reqd response body)
       request
       reqd)
+  |> Http.Router.get "/api/v1/ide/events" (fun request reqd ->
+    with_public_read
+      (fun state _req inner_reqd ->
+         let uri = Uri.of_string request.target in
+         let base = base_path_of_state state in
+         let limit =
+           match Uri.get_query_param uri "limit" with
+           | Some s -> (try int_of_string s with _ -> 100)
+           | None -> 100
+         in
+         let keeper_id =
+           match Uri.get_query_param uri "keeper_id" with
+           | Some k when k <> "" -> Some k
+           | _ -> None
+         in
+         let events = Ide_bridge.list_all_events ~base_dir:base () in
+         let filtered =
+           match keeper_id with
+           | Some kid ->
+             List.filter (fun json ->
+               match Yojson.Safe.Util.member "keeper_id" json with
+               | `String k -> k = kid
+               | _ -> false
+             ) events
+           | None -> events
+         in
+         let limited = List.filteri (fun i _ -> i < limit) filtered in
+         let result =
+           `Assoc
+             [ "events", `List limited
+             ; "total", `Int (List.length filtered)
+             ; "limit", `Int limit
+             ]
+         in
+         let origin = get_origin request in
+         let headers =
+           Httpun.Headers.of_list
+             (("content-type", "application/json") :: cors_headers origin)
+         in
+         let body = Yojson.Safe.to_string result in
+         let response = Httpun.Response.create ~headers `OK in
+         Httpun.Reqd.respond_with_string inner_reqd response body)
+      request
+      reqd)
+  |> Http.Router.get "/api/v1/ide/events/stream" (fun request reqd ->
+    with_public_read
+      (fun state _req inner_reqd ->
+         let origin = get_origin request in
+         let headers =
+           Httpun.Headers.of_list
+             ([ "content-type", "text/event-stream"
+              ; "cache-control", "no-cache"
+              ; "connection", "keep-alive"
+              ; "x-accel-buffering", "no"
+              ]
+              @ cors_headers origin)
+         in
+         let response = Httpun.Response.create ~headers `OK in
+         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
+         let base = base_path_of_state state in
+         let send_snapshot () =
+           let events = Ide_bridge.list_all_events ~base_dir:base () in
+           let recent = List.filteri (fun i _ -> i < 20) events in
+           let json = `Assoc [ "events", `List recent ] in
+           let event = Printf.sprintf "data: %s\n\n" (Yojson.Safe.to_string json) in
+           Httpun.Body.Writer.write_string writer event
+         in
+         send_snapshot ();
+         match state.Mcp_server.sw, state.Mcp_server.clock with
+         | Some sw, Some clock ->
+           Eio.Fiber.fork ~sw (fun () ->
+             let rec loop () =
+               (try
+                  Eio.Time.sleep clock 5.0;
+                  send_snapshot ();
+                  loop ()
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Server.debug
+                    "IDE events SSE ping loop error: %s"
+                    (Printexc.to_string exn));
+               Httpun.Body.Writer.close writer
+             in
+             try loop () with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Server.error
+                 "IDE events SSE loop exited: %s"
+                 (Printexc.to_string exn);
+               Httpun.Body.Writer.close writer)
+         | _ -> Httpun.Body.Writer.close writer)
+      request
+      reqd)
 ;;

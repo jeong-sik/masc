@@ -181,7 +181,13 @@ let parse_pr_url_from_output (output : string) : (int * string) option =
      | _ -> None)
 
 (** Try to detect PR creation from Execute tool output and ingest a PR event.
-    Only fires when [tool_name = "execute"] and output contains a GitHub PR URL. *)
+    Only fires when [tool_name = "execute"] and output contains a GitHub PR URL.
+
+    FIXME: This is a heuristic. It parses stdout/stderr for GitHub PR URLs
+    which is fragile — output format changes, non-GitHub hosts, or URL
+    in unexpected position will silently miss. A dedicated [Pr_create] tool
+    in the keeper vocabulary would make this deterministic. Until then,
+    this is best-effort and may produce false negatives. *)
 let ingest_pr_event_from_hook
     ~base_path
     ~keeper_id

@@ -128,15 +128,13 @@ let effect_domain_for_tool_name name =
   Keeper_tool_descriptor_resolution.effect_domain_for_tool_name name
 ;;
 
-let tool_name_can_satisfy_required_contract name =
+let tool_name_counts_as_execution_progress name =
   let observation_alias = is_keeper_observation_alias name in
   let name = Keeper_tool_resolution.canonical_tool_name name in
   (* Completion tools (stay_silent, release, done, etc.) intentionally satisfy
-     the contract even though their effect_domain is Read_only. Without this
-     exemption, analyst/janitor keepers that correctly call keeper_stay_silent
-     alongside status reads trigger false contract violations - observed
-     2026-04-28 when agent_code-spark returned stay_silent + keeper_task_list
-     on an actionable signal. *)
+     execution progress even though their effect_domain is Read_only. Without
+     this exemption, analyst/janitor keepers that correctly call
+     keeper_stay_silent alongside status reads look like passive-loop turns. *)
   if observation_alias
   then false
   else if is_completion_tool_name name
@@ -194,7 +192,7 @@ let classify_tool_progress name =
     then Completion
     else if is_claim_context_tool_name name
     then Claim_context
-    else if tool_name_can_satisfy_required_contract name
+    else if tool_name_counts_as_execution_progress name
     then Execution
     else Passive_status)
 ;;

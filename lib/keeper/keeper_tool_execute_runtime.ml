@@ -87,6 +87,7 @@ module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let deterministic_retry_fields_for_process_result =
     deterministic_retry_fields_for_process_result
+  let compute_command_descriptor = compute_command_descriptor
 end
 
 (* Typed Execute input projections extracted to

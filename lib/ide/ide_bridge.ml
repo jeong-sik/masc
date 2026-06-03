@@ -170,12 +170,18 @@ let parse_pr_url_from_output (output : string) : (int * string) option =
     let parts = String.split_on_char '/' path in
     (match parts with
      | owner :: repo :: "pull" :: number_str :: _ ->
-       let number_str = String.trim number_str in
-       (try
-          let number = int_of_string number_str in
+       (* Extract leading digits from number_str — handles URLs followed by
+          non-numeric characters (e.g., JSON quotes, path segments) *)
+       let number_digits =
+         let buf = Buffer.create 8 in
+         String.iter (fun c -> if c >= '0' && c <= '9' then Buffer.add_char buf c else ()) number_str;
+         Buffer.contents buf
+       in
+       (match int_of_string_opt number_digits with
+        | Some number when number > 0 ->
           let url = Printf.sprintf "https://github.com/%s/%s/pull/%d" owner repo number in
           Some (number, url)
-        with Failure _ -> None)
+        | _ -> None)
      | _ -> None)
 
 (** Extract command_descriptor from tool result JSON.
@@ -205,7 +211,9 @@ let extract_descriptor_from_output (output_text : string) : Ide_event_types.comm
          Some (Ide_event_types.Gh_pr_close { pr_number })
        | "gh_pr_edit" ->
          let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
-         let title = Yojson.Safe.Util.to_option Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "title" descriptor_json) in
+         let title = (match Yojson.Safe.Util.member "title" descriptor_json with
+           | `String s -> Some s
+           | _ -> None) in
          Some (Ide_event_types.Gh_pr_edit { pr_number; title })
        | "gh_pr_review" ->
          let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in

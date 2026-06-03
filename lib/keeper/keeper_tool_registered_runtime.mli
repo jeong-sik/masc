@@ -1,4 +1,4 @@
-(** Runtime adapter for descriptor-backed Remote_mcp agent tools. *)
+(** Runtime adapter for registered backend tools available to keeper turns. *)
 
 val handle_masc_tool :
   config:Workspace.config ->
@@ -7,7 +7,7 @@ val handle_masc_tool :
   args:Yojson.Safe.t ->
   string
 
-val handle_registered_remote_tool :
+val handle_registered_tool :
   config:Workspace.config ->
   keeper_name:string ->
   name:string ->

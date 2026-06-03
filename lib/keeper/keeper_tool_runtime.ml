@@ -48,7 +48,6 @@ let handle_filesystem ctx descriptor args =
          ~args)
   | Tool_execute
   | Tool_search_files
-  | Tool_remote_mcp
   | Tool_time_now
   | Tool_stay_silent
   | Tool_tools_list
@@ -101,59 +100,6 @@ let handle_shell_ir ctx descriptor args =
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
-  | Tool_read_file
-  | Tool_edit_file
-  | Tool_write_file
-  | Tool_remote_mcp
-  | Tool_time_now
-  | Tool_stay_silent
-  | Tool_tools_list
-  | Tool_tool_search
-  | Tool_context_status
-  | Tool_memory_search
-  | Tool_memory_write
-  | Tool_library_search
-  | Tool_library_read
-  | Tool_ide_annotate
-  | Tool_voice_dispatch
-  | Tool_task_dispatch
-  | Tool_board_dispatch
-  | Tool_masc_board_dispatch
-  | Tool_masc_task_dispatch
-  | Tool_masc_plan_dispatch
-  | Tool_masc_run_dispatch
-  | Tool_masc_agent_dispatch
-  | Tool_masc_workspace_dispatch
-  | Tool_masc_misc_dispatch
-  | Tool_masc_control_dispatch
-  | Tool_masc_agent_timeline_dispatch
-  | Tool_masc_local_runtime_dispatch
-  | Tool_masc_tool_shard_dispatch
-  | Tool_masc_approval_dispatch
-  | Tool_masc_persona_dispatch
-  | Tool_masc_keeper_dispatch
-  | Tool_masc_surface_audit -> None
-;;
-
-let handle_remote_mcp ctx descriptor args =
-  match descriptor.Keeper_tool_descriptor.runtime_handler with
-  | Tool_remote_mcp ->
-    Some
-      (match
-         Keeper_tool_remote_mcp_runtime.handle_registered_remote_tool
-           ~config:ctx.config
-           ~keeper_name:ctx.meta.name
-           ~name:descriptor.internal_name
-           ~args
-       with
-       | Some raw_output -> raw_output
-       | None ->
-         Keeper_tool_shared_runtime.error_json
-           (Printf.sprintf
-              "descriptor remote tool handler is not registered: %s"
-              descriptor.internal_name))
-  | Tool_execute
-  | Tool_search_files
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
@@ -329,15 +275,13 @@ let handle_in_process ctx descriptor args =
   | Tool_search_files
   | Tool_read_file
   | Tool_edit_file
-  | Tool_write_file
-  | Tool_remote_mcp -> None
+  | Tool_write_file -> None
 ;;
 
 let handle ctx ~descriptor ~args =
   match descriptor.Keeper_tool_descriptor.executor with
   | Filesystem -> handle_filesystem ctx descriptor args
   | Shell_ir -> handle_shell_ir ctx descriptor args
-  | Remote_mcp -> handle_remote_mcp ctx descriptor args
   | In_process -> handle_in_process ctx descriptor args
 ;;
 

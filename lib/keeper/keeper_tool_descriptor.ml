@@ -3,14 +3,12 @@
 type executor =
   | Shell_ir
   | Filesystem
-  | Remote_mcp
   | In_process
 
 type backend =
   | Ocaml_runtime
   | Host_process
   | Sandbox_process
-  | Remote_service
 
 type sandbox =
   | No_sandbox
@@ -32,7 +30,6 @@ type runtime_handler =
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
-  | Tool_remote_mcp
   | Tool_time_now
   | Tool_stay_silent
   | Tool_tools_list
@@ -90,7 +87,6 @@ type t =
 let executor_to_string = function
   | Shell_ir -> "shell_ir"
   | Filesystem -> "filesystem"
-  | Remote_mcp -> "remote_mcp"
   | In_process -> "in_process"
 ;;
 
@@ -98,7 +94,6 @@ let backend_to_string = function
   | Ocaml_runtime -> "ocaml_runtime"
   | Host_process -> "host_process"
   | Sandbox_process -> "sandbox_process"
-  | Remote_service -> "remote_service"
 ;;
 
 let sandbox_to_string = function
@@ -121,7 +116,6 @@ let runtime_handler_to_string = function
   | Tool_read_file -> "tool_read_file"
   | Tool_edit_file -> "tool_edit_file"
   | Tool_write_file -> "tool_write_file"
-  | Tool_remote_mcp -> "tool_remote_mcp"
   | Tool_time_now -> "tool_time_now"
   | Tool_stay_silent -> "tool_stay_silent"
   | Tool_tools_list -> "tool_tools_list"
@@ -509,10 +503,10 @@ let public_descriptors =
            ~approval:Policy_selected
            ~retryable:true
            ())
-      ~executor:Remote_mcp
-      ~backend:Remote_service
+      ~executor:In_process
+      ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
-      ~runtime_handler:Tool_remote_mcp
+      ~runtime_handler:Tool_masc_misc_dispatch
       ~translate:translate_identity
   ; descriptor
       ~id:"agent.fetch_web"
@@ -527,10 +521,10 @@ let public_descriptors =
            ~approval:Policy_selected
            ~retryable:true
            ())
-      ~executor:Remote_mcp
-      ~backend:Remote_service
+      ~executor:In_process
+      ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
-      ~runtime_handler:Tool_remote_mcp
+      ~runtime_handler:Tool_masc_misc_dispatch
       ~translate:translate_identity
   ]
 ;;

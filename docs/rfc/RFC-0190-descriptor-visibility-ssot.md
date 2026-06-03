@@ -30,14 +30,14 @@ Result:
 
 Two SSOTs that should be one. RFC-0179 + RFC-0182 brought descriptors to *most* of the `masc_*` operator surface, but **9 lifecycle/authoring tools never entered the descriptor system at all** because their handlers live in `lib/tool_inline_dispatch.ml` (MCP server-level inline path), not in `Tool_workspace.dispatch` or the cluster `*_dispatch_ref` references the descriptor `runtime_handler` enum routes to.
 
-The descriptor enum (`In_process | Filesystem | Shell_ir | Remote_mcp`) is closed and assumes the descriptor *owns* execution. Tools handled by inline dispatch have no slot.
+The descriptor enum (`In_process | Filesystem | Shell_ir`) is closed and assumes the descriptor *owns* execution. Tools handled by inline dispatch have no slot.
 
 ## 1. Hypothesis the audit invalidated
 
 RFC-0179 framed coverage as "every tool the LLM can call needs a descriptor." That framing assumes a single dispatch axis. The audit shows two distinct axes:
 
 - **Visibility axis** (`policy.visibility`): who can see/call this tool — `Public_mcp | Keeper_internal | Spawned_agent | Local_worker | Admin | Keeper_denied | …`.
-- **Execution axis** (`executor`): how the call is dispatched — `In_process | Filesystem | Shell_ir | Remote_mcp`.
+- **Execution axis** (`executor`): how the call is dispatched — `In_process | Filesystem | Shell_ir`.
 
 Today `Agent_tool_descriptor.t` collapses both axes into one record, but coverage is asymmetric — the execution axis demands the descriptor own dispatch, which the inline-path tools cannot satisfy without being moved.
 
@@ -63,7 +63,6 @@ Make `Agent_tool_descriptor.t` the single source of truth for *visibility and me
 type executor =
   | Shell_ir
   | Filesystem
-  | Remote_mcp
   | In_process
   | External_inline  (* NEW: descriptor is metadata-only;
                         execution owned by tool_inline_dispatch *)
@@ -80,7 +79,6 @@ let handle ctx ~descriptor ~args =
   match descriptor.executor with
   | Filesystem      -> handle_filesystem ctx descriptor args
   | Shell_ir        -> handle_shell_ir   ctx descriptor args
-  | Remote_mcp      -> handle_remote_mcp ctx descriptor args
   | In_process      -> handle_in_process ctx descriptor args
   | External_inline -> None  (* fall through to inline_dispatch *)
 ```

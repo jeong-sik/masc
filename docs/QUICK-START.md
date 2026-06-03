@@ -220,11 +220,11 @@ curl -sS "http://127.0.0.1:${PORT}/mcp" \
   -d '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"include_hidden":true}}'
 ```
 
-Allowlist SSOT: `lib/tool_catalog.ml` > `public_mcp_tools`
+Allowlist SSOT: `lib/tool/tool_catalog.ml` > `public_mcp_tools`
 
-`masc_web_search` 메모:
+Keeper WebSearch/WebFetch backend 메모:
 
-- read-only 현재 정보 조회용 도구다.
+- `masc_web_search` / `masc_web_fetch`는 Keeper-internal backend 이름이며 MCP `tools/list` public surface에는 노출되지 않는다.
 - `MASC_SEARXNG_URL` 설정 시 self-hosted SearXNG가 최우선 provider로 작동한다.
 - 기본 auto 모드는 공식 provider key가 있으면 `searxng`, `brave`, `tavily`, `exa`, `bing_api` 순으로 먼저 시도한다.
 - 공식 provider가 없거나 실패하면 `duckduckgo`, `bing_rss` 순으로 fallback 한다.

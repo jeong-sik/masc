@@ -50,19 +50,18 @@ The key split is intentional:
 
 | Group | Public Discovery Path | Canonical Examples | Notes |
 |------|------------------------|--------------------|-------|
-| Canonical MCP tools | `tools/list` | `masc_start`, `masc_transition`, `masc_keeper_status`, `masc_board_post`, `masc_web_search` | Default surface for normal clients |
+| Canonical MCP tools | `tools/list` | `masc_start`, `masc_transition`, `masc_keeper_status`, `masc_board_post` | Default surface for normal clients |
 | Managed agent MCP | `/mcp/managed` | `masc_status`, `masc_tasks`, `masc_claim_next`, `masc_transition` | Internal managed-agent surface with canonical task-control tools plus curated passthrough tools; hidden call-only aliases are not supported |
 | Removed alias ghosts | Not discoverable; not supported | `masc_claim`, `experiment_start`, `masc_trpg_*` | Do not preserve or reintroduce; use canonical task-control tools and current public schemas |
 | MCP prompts | `prompts/list`, `prompts/get` | `tool_help` | Explanation/help layer, not runtime prompt registry |
 | MCP resources | `resources/list/read` | `masc://status`, `masc://tasks`, `masc://tool-help-index` | Snapshot/read layer |
 | Internal prompt/runtime plane | Not MCP-discoverable | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Used by chains, keepers, dashboard judges, and runtime execution |
 
-`masc_web_search` public contract note:
+Web tool contract note:
 
-- Public tool name remains `masc_web_search`.
-- Request contract remains `query` + optional `limit`.
-- Response contract remains `{status:"ok", result:{query, engine, search_url, result_count, results[]}}`, with normalized per-result metadata (`source`, `rank`, optional `published_at`) added inside `results[]`.
-- Runtime selection is config/env driven: official APIs first when configured, scraping fallback second.
+- `masc_web_search` / `masc_web_fetch` are Keeper-internal backend tool names for the `WebSearch` / `WebFetch` aliases.
+- They are not part of the canonical MCP `tools/list` public surface.
+- Runtime selection remains config/env driven for Keeper web access: official APIs first when configured, scraping fallback second.
 
 ## Public Surface Map
 

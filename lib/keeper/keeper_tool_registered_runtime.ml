@@ -3,7 +3,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_tool_shared_runtime
 
-(** Runtime adapter for descriptor-backed Remote_mcp agent tools. *)
+(** Runtime adapter for registered backend tools available to keeper turns. *)
 let masc_path_blocked
       ~(config : Workspace.config)
       ~(keeper_name : string)
@@ -134,7 +134,7 @@ let handle_masc_tool
                      [ "error", `String "unregistered_masc_tool"; "tool", `String name ]))))
 ;;
 
-let handle_registered_remote_tool
+let handle_registered_tool
       ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(name : string)

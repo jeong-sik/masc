@@ -855,7 +855,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
 export async function fetchRuntimeProviders(opts?: AbortableRequestOptions): Promise<DashboardRuntimeProvidersResponse> {
   const raw = await get<Record<string, unknown>>('/api/v1/providers', { signal: opts?.signal })
   const decoded = decodeRuntimeProvidersResponse(raw)
-  if (!decoded) throw new Error('유효하지 않은 runtime providers payload')
+  if (!decoded) throw new Error('유효하지 않은 runtime lanes payload')
   return decoded
 }
 

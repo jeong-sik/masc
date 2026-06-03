@@ -5,7 +5,7 @@
 //
 // Progressive-disclosure default view (density reduction, 2026-04):
 //   Signal layer     — OasHealthChip always expanded (summary StatCells)
-//   Diagnostic layer — Providers & Models via CollapsibleSection (closed)
+//   Diagnostic layer — Runtime lanes via CollapsibleSection (closed)
 //   Raw layer        — Prometheus metrics, Formal specs via CollapsibleSection (closed)
 // NN/g progressive disclosure: respect working-memory limits, defer detail.
 //
@@ -18,7 +18,7 @@
 // Per-view dispatch:
 //   default      — Signal strip + collapsed diagnostic/raw accordions
 //   providers    — OAS health chip + runtime monitor only
-//   inspector    — runtime strategy trace / provider health drill-down
+//   inspector    — runtime strategy trace / lane health drill-down
 //   cost / audit / heuristics / stress — TelemetryPanel → CostDashboard
 //   prometheus   — raw Prometheus metrics only
 //   verification — formal specs only

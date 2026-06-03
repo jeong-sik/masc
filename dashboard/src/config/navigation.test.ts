@@ -118,7 +118,7 @@ describe('monitoring navigation labels', () => {
     expect(descriptions).toMatchObject({
       agents: 'Live and configured keeper roster.',
       'fleet-health': 'Tool quality and governance signals.',
-      runtime: 'Runtime provider health.',
+      runtime: 'Runtime lane health.',
       observatory: 'Activity and runtime evidence.',
     })
 

@@ -484,7 +484,7 @@ describe('runtimeAttentionForSnapshot', () => {
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
-    expect(attention.nextStep).toBe('provider timeout budget/runtime lane 확인')
+    expect(attention.nextStep).toBe('runtime timeout budget/lane 확인')
   })
 })
 

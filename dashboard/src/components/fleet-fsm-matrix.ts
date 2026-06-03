@@ -462,10 +462,10 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
     return '모델이 keeper tool을 호출하도록 prompt/tool-choice 경로 확인'
   }
   if (execution.terminal_reason_code === 'api_error_invalid_request') {
-    return 'provider auth/model/config receipt 확인'
+    return 'runtime auth/config receipt 확인'
   }
   if (execution.terminal_reason_code === 'api_error_timeout') {
-    return 'provider timeout budget/runtime lane 확인'
+    return 'runtime timeout budget/lane 확인'
   }
   if (execution.operator_disposition === 'pause_human') {
     return 'blocker gate/approval 상태와 최신 receipt 확인'

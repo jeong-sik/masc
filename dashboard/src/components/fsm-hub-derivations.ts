@@ -149,9 +149,9 @@ export function inferTransitionReason(field: string, from: string, to: string): 
     if (to === 'tool_policy_selected') return '호출 가능한 도구 목록이 정해짐'
   }
   if (field === 'KCL') {
-    if (to === 'trying') return 'runtime 의 provider 호출 진행 중'
-    if (to === 'exhausted') return '모든 runtime provider 가 실패 — fallback 도 소진'
-    if (from === 'trying' && to === 'idle') return 'provider 호출 종료 (성공/실패와 무관)'
+    if (to === 'trying') return 'runtime 호출 진행 중'
+    if (to === 'exhausted') return '모든 runtime lane 실패 — failover 소진'
+    if (from === 'trying' && to === 'idle') return 'runtime 호출 종료 (성공/실패와 무관)'
   }
   if (field === 'KMC') {
     if (to === 'compacting') return '컨텍스트 압축 작업 시작 (KMC 동기화)'

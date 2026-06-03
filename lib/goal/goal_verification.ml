@@ -415,6 +415,9 @@ type quorum_result =
 let requests_path config =
   Filename.concat (Workspace_utils.masc_dir config) "goal_verifications.json"
 
+let requests_recovery_path config =
+  requests_path config ^ ".last-good"
+
 let events_path config =
   Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
 
@@ -424,14 +427,69 @@ let default_state () =
 let read_state config =
   let path = requests_path config in
   if Workspace_utils.path_exists config path then
-    match state_of_yojson (Workspace_utils.read_json config path) with
-    | Ok state -> state
-    | Error _ -> default_state ()
+    match Workspace_utils.read_json_result config path with
+    | Ok json ->
+        (match state_of_yojson json with
+         | Ok state -> state
+         | Error primary_msg ->
+             let recovery = requests_recovery_path config in
+             if Workspace_utils.path_exists config recovery then
+               match Workspace_utils.read_json_result config recovery with
+               | Ok recovery_json ->
+                   (match state_of_yojson recovery_json with
+                    | Ok state ->
+                        Log.Misc.warn
+                          "goal_verification: primary goal_verifications.json corrupt (%s), recovered from %s"
+                          primary_msg recovery;
+                        state
+                    | Error recovery_msg ->
+                        Log.Misc.error
+                          "goal_verification: both primary and recovery corrupt (primary: %s, recovery: %s)"
+                          primary_msg recovery_msg;
+                        default_state ())
+               | Error recovery_read_msg ->
+                   Log.Misc.warn
+                     "goal_verification: primary corrupt (%s), recovery read failed: %s"
+                     primary_msg recovery_read_msg;
+                   default_state ()
+             else
+               (Log.Misc.warn
+                  "goal_verification: goal_verifications.json corrupt (%s), no .last-good available"
+                  primary_msg;
+                default_state ()))
+    | Error primary_msg ->
+        let recovery = requests_recovery_path config in
+        if Workspace_utils.path_exists config recovery then
+          match Workspace_utils.read_json_result config recovery with
+          | Ok recovery_json ->
+              (match state_of_yojson recovery_json with
+               | Ok state ->
+                   Log.Misc.warn
+                     "goal_verification: primary unreadable (%s), recovered from %s"
+                     primary_msg recovery;
+                   state
+               | Error recovery_msg ->
+                   Log.Misc.error
+                     "goal_verification: primary unreadable (%s), recovery corrupt (%s)"
+                     primary_msg recovery_msg;
+                   default_state ())
+          | Error recovery_msg ->
+              Log.Misc.error
+                "goal_verification: primary unreadable (%s), recovery unreadable (%s)"
+                primary_msg recovery_msg;
+              default_state ()
+        else
+          (Log.Misc.warn
+             "goal_verification: goal_verifications.json unreadable (%s), no .last-good available"
+             primary_msg;
+           default_state ())
   else
     default_state ()
 
 let write_state config (state : state) =
-  Workspace_utils.write_json config (requests_path config) (state_to_yojson state)
+  let json = state_to_yojson state in
+  Workspace_utils.write_json config (requests_path config) json;
+  Workspace_utils.write_json config (requests_recovery_path config) json
 
 let principal_key (principal : goal_principal) =
   Printf.sprintf "%s:%s" (principal_kind_to_string principal.kind) principal.id

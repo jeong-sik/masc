@@ -348,6 +348,9 @@ let parse_refresh_mode s =
 let goals_path config =
   Filename.concat (Workspace_utils.masc_dir config) "goals.json"
 
+let goals_recovery_path config =
+  goals_path config ^ ".last-good"
+
 let snapshots_dir config =
   Filename.concat (Workspace_utils.masc_dir config) "goals_snapshots"
 
@@ -365,15 +368,70 @@ let read_state config =
   ensure_dirs config;
   let path = goals_path config in
   if Workspace_utils.path_exists config path then
-    match state_of_yojson (Workspace_utils.read_json config path) with
-    | Ok state -> { state with goals = List.map normalize_goal state.goals }
-    | Error _ -> default_state ()
+    match Workspace_utils.read_json_result config path with
+    | Ok json ->
+        (match state_of_yojson json with
+         | Ok state -> { state with goals = List.map normalize_goal state.goals }
+         | Error primary_msg ->
+             let recovery = goals_recovery_path config in
+             if Workspace_utils.path_exists config recovery then
+               match Workspace_utils.read_json_result config recovery with
+               | Ok recovery_json ->
+                   (match state_of_yojson recovery_json with
+                    | Ok state ->
+                        Log.Misc.warn
+                          "goal_store: primary goals.json corrupt (%s), recovered from %s"
+                          primary_msg recovery;
+                        { state with goals = List.map normalize_goal state.goals }
+                    | Error recovery_msg ->
+                        Log.Misc.error
+                          "goal_store: both primary and recovery goals.json corrupt (primary: %s, recovery: %s)"
+                          primary_msg recovery_msg;
+                        default_state ())
+               | Error recovery_read_msg ->
+                   Log.Misc.warn
+                     "goal_store: goals.json corrupt (%s), recovery read failed: %s"
+                     primary_msg recovery_read_msg;
+                   default_state ()
+             else
+               (Log.Misc.warn
+                  "goal_store: goals.json corrupt (%s), no .last-good available"
+                  primary_msg;
+                default_state ()))
+    | Error primary_msg ->
+        let recovery = goals_recovery_path config in
+        if Workspace_utils.path_exists config recovery then
+          match Workspace_utils.read_json_result config recovery with
+          | Ok recovery_json ->
+              (match state_of_yojson recovery_json with
+               | Ok state ->
+                   Log.Misc.warn
+                     "goal_store: primary goals.json unreadable (%s), recovered from %s"
+                     primary_msg recovery;
+                   { state with goals = List.map normalize_goal state.goals }
+               | Error recovery_msg ->
+                   Log.Misc.error
+                     "goal_store: primary unreadable (%s), recovery corrupt (%s)"
+                     primary_msg recovery_msg;
+                   default_state ())
+          | Error recovery_msg ->
+              Log.Misc.error
+                "goal_store: primary unreadable (%s), recovery unreadable (%s)"
+                primary_msg recovery_msg;
+              default_state ()
+        else
+          (Log.Misc.warn
+             "goal_store: goals.json unreadable (%s), no .last-good available"
+             primary_msg;
+           default_state ())
   else
     default_state ()
 
 let write_state config state =
   ensure_dirs config;
-  Workspace_utils.write_json config (goals_path config) (state_to_yojson state)
+  let json = state_to_yojson state in
+  Workspace_utils.write_json config (goals_path config) json;
+  Workspace_utils.write_json config (goals_recovery_path config) json
 
 let now_ms () =
   int_of_float (Time_compat.now () *. 1000.0)

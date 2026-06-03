@@ -333,7 +333,6 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                linked_session_id =
                  Option.bind links.session_id (fun value -> String_util.trim_to_option value);
                status = Some status;
-               stage = Option.map Task_stage.to_string task.stage;
                detachment_status = None;
                objective = String_util.trim_to_option task.title;
                updated_at = Some (task_operation_updated_at task);
@@ -352,7 +351,6 @@ let operation_badge_json (operation : operation_context) =
     [
       ("operation_id", `String operation.operation_id);
       ("status", `String status_str);
-      ("stage", Json_util.string_opt_to_json operation.stage);
       ("detachment_status", Json_util.string_opt_to_json detachment_status_str);
       ("objective", Json_util.string_opt_to_json operation.objective);
       ("updated_at", Json_util.string_opt_to_json operation.updated_at);

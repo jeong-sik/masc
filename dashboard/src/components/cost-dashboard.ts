@@ -1324,7 +1324,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
         />
 
         ${t ? html`
-          <div class="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-6">
+          <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
             <${StatTile}
               label="Total Cost"
               value=${formatCost(t.totalCost)}
@@ -1348,6 +1348,18 @@ function CostDashboardContent({ view }: { view: CostView }) {
               delta=${{ direction: 'flat', text: mode === 'model' && modelTotals.value ? `${formatTokens(modelTotals.value.totalReasoning)} total` : 'keeper view' }}
             />
             <${StatTile}
+              label="Error Rate"
+              value=${t.errorRate != null ? formatPct1(t.errorRate) : '—'}
+              status=${t.errorRate != null ? (t.errorRate > 0.1 ? 'crit' : t.errorRate > 0 ? 'warn' : 'ok') : undefined}
+              delta=${{ direction: 'flat', text: `${t.totalError} errors / ${t.totalSuccess} success` }}
+            />
+            <${StatTile}
+              label="Avg TTFRC"
+              value=${t.avgTtfrc != null ? `${t.avgTtfrc}ms` : '—'}
+              status=${t.avgTtfrc != null && t.avgTtfrc > 3000 ? 'warn' : undefined}
+              delta=${{ direction: 'flat', text: 'streaming first chunk' }}
+            />
+            <${StatTile}
               label="p50 Latency (avg)"
               value=${`${Math.round(t.p50Avg)}ms`}
               delta=${{ direction: 'flat', text: 'across entries' }}
@@ -1359,22 +1371,6 @@ function CostDashboardContent({ view }: { view: CostView }) {
               delta=${{ direction: t.p95Max > 8000 ? 'down' : 'flat', text: t.p95Max > 8000 ? 'over 8s budget' : 'within budget' }}
             />
           </div>
-          ${mode === 'model' ? html`
-            <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <${StatTile}
-                label="Error Rate"
-                value=${t.errorRate != null ? formatPct1(t.errorRate) : '—'}
-                status=${t.errorRate != null ? (t.errorRate > 0.1 ? 'crit' : t.errorRate > 0 ? 'warn' : 'ok') : undefined}
-                delta=${{ direction: 'flat', text: `${t.totalError} errors / ${t.totalSuccess} success` }}
-              />
-              <${StatTile}
-                label="Avg TTFRC"
-                value=${t.avgTtfrc != null ? `${t.avgTtfrc}ms` : '—'}
-                status=${t.avgTtfrc != null && t.avgTtfrc > 3000 ? 'warn' : undefined}
-                delta=${{ direction: 'flat', text: 'streaming first chunk' }}
-              />
-            </div>
-          ` : null}
         ` : null}
 
         ${showMatrix ? html`<${CostMatrix} models=${activeState.data as DashboardRuntimeModelMetric[]} />` : null}

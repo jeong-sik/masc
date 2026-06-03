@@ -530,7 +530,6 @@ type task = {
   created_at: string;
   created_by: string option; [@default None]
   goal_id: string option; [@default None]  (** Structured goal linkage SSOT *)
-  stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
@@ -629,15 +628,10 @@ let task_to_yojson t =
     | None -> with_created_by
     | Some goal_id -> with_created_by @ [("goal_id", `String goal_id)]
   in
-  (* Add stage if present *)
-  let with_stage = match t.stage with
-    | None -> with_goal_id
-    | Some s -> with_goal_id @ [("stage", Task_stage.to_yojson s)]
-  in
   let with_contract = match t.contract with
-    | None -> with_stage
+    | None -> with_goal_id
     | Some contract ->
-        with_stage @ [ ("contract", task_contract_to_yojson contract) ]
+        with_goal_id @ [ ("contract", task_contract_to_yojson contract) ]
   in
   let with_handoff_context = match t.handoff_context with
     | None -> with_contract
@@ -681,10 +675,6 @@ let task_of_yojson json =
     let created_at = req "created_at" in
     let created_by = opt "created_by" in
     let goal_id = opt "goal_id" in
-    let stage = match opt "stage" with
-      | Some s -> (match Task_stage.of_string s with Ok st -> Some st | Error _ -> None)
-      | None -> None
-    in
     let contract = match m "contract" with
       | `Null -> None
       | contract_json ->
@@ -722,7 +712,6 @@ let task_of_yojson json =
             created_at;
             created_by;
             goal_id;
-            stage;
             contract;
             handoff_context;
             cycle_count;

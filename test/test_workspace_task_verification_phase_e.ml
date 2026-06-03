@@ -22,7 +22,6 @@ let dummy_task ?contract ?handoff_context () : Masc_domain.task =
   ; task_status = Masc_domain.Todo
   ; priority = 5
   ; created_by = None
-  ; stage = None
   ; contract
   ; handoff_context
   ; cycle_count = 0

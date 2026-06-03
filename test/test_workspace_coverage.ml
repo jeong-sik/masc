@@ -1825,7 +1825,6 @@ let test_append_archive_tasks () =
       ; files = []
       ; created_at = "2026-01-01T00:00:00Z"
       ; created_by = None
-      ; stage = None
       ; contract = None
       ; handoff_context = None
       ; cycle_count = 0

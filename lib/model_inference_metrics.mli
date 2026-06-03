@@ -91,6 +91,7 @@ type model_stats = {
   total_input_tokens : int option;
   total_output_tokens : int option;
   total_cache_read_tokens : int option;
+  total_cache_creation_tokens : int option;
   total_reasoning_tokens : int option;
   usage_sample_count : int;
   telemetry_sample_count : int;

@@ -122,6 +122,33 @@ val terminal_prefix_max_turns_exceeded : string
 val terminal_prefix_execution_timeout : string
 val terminal_prefix_idle_timeout : string
 
+(** {1 Transient provider-runtime wire codes (SSOT)}
+
+    The two retry-recoverable transient wire codes inside the
+    [Provider_runtime_failure] / [api_error_*] family: a plain
+    (non-structural) [Api.Timeout] and an [Api.NetworkError]. These mirror
+    exactly the [Agent_sdk.Error] variants
+    [Keeper_error_classify.is_transient_network_error] reports as transient.
+    The encoder [Keeper_agent_error.api_error_terminal_reason_code]
+    references these so producer and consumer cannot drift.
+
+    The structural OAS budget timeout is a distinct producer code
+    ([api_error_oas_agent_execution_timeout]) and is deliberately excluded —
+    it is non-transient and must still page a human. *)
+val wire_api_error_timeout : string
+
+val wire_api_error_network : string
+
+(** [true] when [t] is a [Provider_runtime_failure] carrying one of the
+    transient wire codes ([wire_api_error_timeout] / [wire_api_error_network])
+    — a retry-recoverable transient the in-turn retry self-heals. EXACT (not
+    prefix) match on the wire payload, so [api_error_oas_agent_execution_timeout]
+    and every other [api_error_*] code return [false]. Every non-
+    [Provider_runtime_failure] variant is [false]. The disposition classifier
+    routes a [true] result to a runtime-advance disposition instead of
+    [Disp_pause_human]. *)
+val is_transient_provider_runtime_failure : t -> bool
+
 (** [true] when [terminal_reason] (assumed already lowercased by the
     caller, as [operator_disposition] does) is a turn/time-budget cut-off:
     auto-recoverable, the keeper resumes from its checkpoint, so it must

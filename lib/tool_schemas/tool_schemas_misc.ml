@@ -43,5 +43,18 @@ let config_category_enum_strings =
   ]
 ;;
 
-let schemas : tool_schema list = Tool_descriptors_gen.schemas
+let keeper_internal_web_tool_names =
+  [ "masc_web_search"; "masc_web_fetch" ]
+;;
+
+let is_keeper_internal_web_tool (schema : tool_schema) =
+  List.mem schema.name keeper_internal_web_tool_names
+;;
+
+let internal_handler_schemas : tool_schema list = Tool_descriptors_gen.schemas
+
+let schemas : tool_schema list =
+  List.filter
+    (fun schema -> not (is_keeper_internal_web_tool schema))
+    internal_handler_schemas
 ;;

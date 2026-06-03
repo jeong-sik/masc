@@ -223,6 +223,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas
+let internal_handler_schemas = Tool_schemas_misc.internal_handler_schemas
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -260,7 +261,7 @@ let () =
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ?required_permission:(tool_required_permission s.name)
            ()))
-    schemas
+    internal_handler_schemas
 let looks_like_rss_payload = Tool_misc_web_search.looks_like_rss_payload
 let parse_bing_rss_items = Tool_misc_web_search.parse_bing_rss_items
 let parse_searxng_json = Tool_misc_web_search.parse_searxng_json

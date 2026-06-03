@@ -25,7 +25,8 @@ After that work landed, an audit (2026-05-26) of the broader tool ecosystem foun
 | Layer | Count | Descriptor-backed |
 |---|---|---|
 | LLM-native public | 7 | 7 (100%) |
-| `masc_*` MCP public | ~106 | 2 (`masc_web_search`, `masc_web_fetch` via `Remote_mcp`) |
+| `masc_*` MCP public | ~104 | 0 |
+| Keeper web backend names | 2 (`masc_web_search`, `masc_web_fetch`, not MCP `tools/list` public) | 2 (via `In_process` / `Tool_masc_misc_dispatch`) |
 | `keeper_*` internal workspace collaboration | ~37 | 0 |
 | **Total** | **~286** | **7 (~2.5%)** |
 
@@ -80,7 +81,7 @@ Trade-offs:
 
 ### Option C — Leave workspace collaboration tools out of descriptor model
 
-Workspace tools (`keeper_*`, `masc_*` non-Remote_mcp) stay in `Agent_tool_dispatch_runtime` legacy match chain forever. Descriptor model is *intentionally* LLM-native-only.
+Workspace tools (`keeper_*`, `masc_*` non-descriptor-backed) stay in `Agent_tool_dispatch_runtime` legacy match chain forever. Descriptor model is *intentionally* LLM-native-only.
 
 Trade-offs:
 - ✅ No architectural churn. Status quo holds.

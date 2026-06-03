@@ -149,7 +149,7 @@
    keeper_path_check_error
    keeper_tool_board_runtime
    keeper_tool_filesystem_runtime
-   keeper_tool_remote_mcp_runtime
+   keeper_tool_registered_runtime
    keeper_tool_ide_runtime
    keeper_sandbox_docker
    keeper_workspace_op keeper_tool_execute_timeout keeper_tool_execute_runtime_paths keeper_tool_execute_path

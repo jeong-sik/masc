@@ -43,11 +43,13 @@ safety model.
 Current main already points in the right direction.
 
 - `Agent_tool_descriptor.executor` is a closed set of `Shell_ir`,
-  `Filesystem`, `Remote_mcp`, and `In_process`.
+  `Filesystem`, and `In_process`.
 - `Execute` and `Grep` are descriptor-routed through `Shell_ir`.
 - `Read`, `Edit`, and `Write` are descriptor-routed through
   `Filesystem`.
-- `WebSearch` and `WebFetch` are descriptor-routed through `Remote_mcp`.
+- `WebSearch` and `WebFetch` are keeper-internal web backend names routed
+  through `In_process` and `Tool_masc_misc_dispatch`; they are not MCP
+  `tools/list` entries.
 - RFC-0160 is implemented: typed Execute lowers once to Shell IR, classifies
   the resulting IR, gates write/destructive behavior, validates paths, and
   dispatches via the decided IR path.
@@ -169,7 +171,6 @@ Descriptor executors remain:
 
 - `Shell_ir`
 - `Filesystem`
-- `Remote_mcp`
 - `In_process`
 
 Rejected executor variants:
@@ -279,10 +280,10 @@ Normalize keeper-facing prompts to the active public names:
 - `Write`
 - `Execute`
 
-Keep the `masc_web_search` / `masc_web_fetch` MCP contract documented only
-where MCP public compatibility requires it. Model-facing keeper instructions
-should not ask keepers to call `masc_web_search` when the active public alias is
-`WebSearch`.
+Keep `masc_web_search` / `masc_web_fetch` documented as Keeper-internal backend
+names only. They should not appear in the MCP public tool surface, and
+model-facing keeper instructions should call the active aliases `WebSearch` /
+`WebFetch`.
 
 Validation:
 
@@ -376,9 +377,9 @@ If answers 1 or 2 are yes, do not add a tool.
 
 ## Evidence
 
-[evidence] 2026-05-27, confidence High: local repo
-`lib/keeper/agent_tool_descriptor.mli` defines executor variants as `Shell_ir`,
-`Filesystem`, `Remote_mcp`, and `In_process`.
+[evidence] 2026-06-03, confidence High: local repo
+`lib/keeper/keeper_tool_descriptor.mli` defines executor variants as
+`Shell_ir`, `Filesystem`, and `In_process`.
 
 [evidence] 2026-05-27, confidence High: local repo
 `lib/keeper/agent_tool_execute_runtime.ml` lowers typed Execute input to Shell

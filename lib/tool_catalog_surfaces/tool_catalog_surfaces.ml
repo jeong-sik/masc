@@ -90,8 +90,6 @@ let public_mcp_surface_tools =
   ; "masc_dashboard"
   ; (* Utility *)
     "masc_tool_help"
-  ; "masc_web_search"
-  ; "masc_web_fetch"
   ; "masc_check"
   ; (* Approval queue/detail *)
     "masc_approval_pending"
@@ -135,8 +133,6 @@ let spawned_agent_surface_tools =
   ; "masc_board_sub_board_update"
   ; "masc_board_sub_board_delete"
   ; "masc_tool_help"
-  ; "masc_web_search"
-  ; "masc_web_fetch"
   ; (* Phase 2: surface SSOT *)
     "masc_deliver"
   ; "masc_plan_clear_task"

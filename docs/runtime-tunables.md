@@ -172,11 +172,11 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 471 | Idle-gap timeout for streaming OAS provider responses. This bounds time between streamed lines, not total turn durati... |
 | `MASC_KEEPER_TERMINATION_WINDOW_SEC` | typed:float | unclassified | unclassified | 600 | Sliding window for stale-termination escalation tracking. Default: 21600 (6 hours). |
 | `MASC_KEEPER_TURN_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 359 | Wall-clock timeout in seconds for a single unified turn (including all retries and runtime fallbacks). Prevents indef... |
-| `MASC_KEEPER_WATCHDOG_GRACE_SEC` | typed:float | unclassified | unclassified | 594 | Grace period after fiber start before idle-stale detection activates. Prevents false positives on server restart when... |
-| `MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD` | typed:int | unclassified | unclassified | 586 | Consecutive noop turns before considering the keeper stuck in a failure loop. Must be >= 2. Default: 3. |
-| `MASC_KEEPER_WATCHDOG_POLL_SEC` | typed:float | unclassified | unclassified | 582 | Watchdog poll interval in seconds. Must be >= 5. Default: 30. |
-| `MASC_KEEPER_WATCHDOG_PROGRESS_SEC` | typed:float | Timeouts | operator | 567 | Seconds since the last in-turn progress signal before an active turn is considered mid-turn-stale. Default: 300 (5 mi... |
-| `MASC_KEEPER_WATCHDOG_STALE_SEC` | typed:float | unclassified | unclassified | 542 | Seconds since last turn before a Running keeper is considered idle-stale. Must be >= 60. Default: 300 (5 minutes). In... |
+| `MASC_KEEPER_WATCHDOG_GRACE_SEC` *(dormant)* | | typed:float | unclassified | unclassified | 594 | Grace period after fiber start before idle-stale detection activates. Prevents false positives on server restart when... |
+| `MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD` *(dormant)* | | typed:int | unclassified | unclassified | 586 | Consecutive noop turns before considering the keeper stuck in a failure loop. Must be >= 2. Default: 3. |
+| `MASC_KEEPER_WATCHDOG_POLL_SEC` *(dormant)* | | typed:float | unclassified | unclassified | 582 | Watchdog poll interval in seconds. Must be >= 5. Default: 30. |
+| `MASC_KEEPER_WATCHDOG_PROGRESS_SEC` *(dormant)* | | typed:float | Timeouts | operator | 567 | Seconds since the last in-turn progress signal before an active turn is considered mid-turn-stale. Default: 300 (5 mi... |
+| `MASC_KEEPER_WATCHDOG_STALE_SEC` *(dormant)* | | typed:float | unclassified | unclassified | 542 | Seconds since last turn before a Running keeper is considered idle-stale. Must be >= 60. Default: 300 (5 minutes). In... |
 | `MASC_KEEPER_WORK_AS_HEARTBEAT` | feature_flag | n/a | n/a | 240 | Master switch. When true, successful Workspace.heartbeat after a unified turn counts as presence proof, allowing the ... |
 | `MASC_PAYLOAD_TELEMETRY` | typed:bool | unclassified | unclassified | 729 | Master switch for wake-payload measurement. Default off so the hot path is untouched until a baseline sweep is explic... |
 | `MASC_RUNTIME_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 743 | {1 Runtime Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Runtime_saturation_signal.t] emission from... |
@@ -203,11 +203,11 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_AUTO_RESUME_MAX_SEC` | typed:float | Timeouts | operator | 90 | Maximum auto-resume backoff delay (seconds).  Default: 86400 (24 hours). @category Timeouts @ops_class operator |
 | `MASC_KEEPER_DEAD_TTL_SEC` | typed:float | Timeouts | operator | 67 | Dead tombstone TTL: seconds before Dead entries are cleaned up. @category Timeouts @ops_class operator |
 | `MASC_KEEPER_DOMAIN_POOL_ENABLED` | feature_flag | n/a | n/a | 12 | Historical keeper Domain_pool pilot flag. The supervisor still reads this for observability, but keepalive fibers rem... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_BASE_SEC` | typed:float | Timeouts | operator | 115 | Base backoff delay (seconds) between liveness recovery attempts per keeper. Exponential: attempt 0 = base, 1 = 2*base... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_MAX_SEC` | typed:float | Timeouts | operator | 124 | Maximum backoff delay cap (seconds) for liveness recovery. Default: 3600 (1 hour). @category Timeouts @ops_class oper... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_ENABLED` | typed:bool | Policies | operator | 97 | Liveness Recovery Supervisor (#12801): enable auto-recovery of Dead keepers whose root cause has cleared.  Set to fal... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_MAX_ATTEMPTS` | typed:int | Thresholds | operator | 131 | Maximum total liveness recovery attempts per keeper before giving up permanently.  Default: 5. @category Thresholds @... |
-| `MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC` | typed:float | Timeouts | operator | 105 | Minimum time (seconds) a keeper must have been Dead before a liveness recovery attempt is made.  Allows transient roo... |
+| `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_BASE_SEC` *(dormant)* | | typed:float | Timeouts | operator | 115 | Base backoff delay (seconds) between liveness recovery attempts per keeper. Exponential: attempt 0 = base, 1 = 2*base... |
+| `MASC_KEEPER_LIVENESS_RECOVERY_BACKOFF_MAX_SEC` *(dormant)* | | typed:float | Timeouts | operator | 124 | Maximum backoff delay cap (seconds) for liveness recovery. Default: 3600 (1 hour). @category Timeouts @ops_class oper... |
+| `MASC_KEEPER_LIVENESS_RECOVERY_ENABLED` *(dormant)* | | typed:bool | Policies | operator | 97 | Liveness Recovery Supervisor (#12801): enable auto-recovery of Dead keepers whose root cause has cleared.  Set to fal... |
+| `MASC_KEEPER_LIVENESS_RECOVERY_MAX_ATTEMPTS` *(dormant)* | | typed:int | Thresholds | operator | 131 | Maximum total liveness recovery attempts per keeper before giving up permanently.  Default: 5. @category Thresholds @... |
+| `MASC_KEEPER_LIVENESS_RECOVERY_MIN_DEAD_SEC` *(dormant)* | | typed:float | Timeouts | operator | 105 | Minimum time (seconds) a keeper must have been Dead before a liveness recovery attempt is made.  Allows transient roo... |
 | `MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC` | typed:float | Timeouts | operator | 75 | Paused keeper file TTL: seconds before stale paused keeper meta files are removed from disk. Default: 86400 (24 hours... |
 | `MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES` | typed:int | Thresholds | operator | 62 | Self-preservation: minimum crashed candidates to trigger. @category Thresholds @ops_class operator |
 | `MASC_KEEPER_SELF_PRESERVATION_RATIO` | typed:float | Thresholds | operator | 56 | Self-preservation: ratio of crashed keepers to trigger suppression. @category Thresholds @ops_class operator |

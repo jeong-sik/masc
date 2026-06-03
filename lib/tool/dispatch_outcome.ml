@@ -1,43 +1,36 @@
-(* RFC-0084 §3.3, §6 D3 — Typed 5-arm tool dispatch outcome.
-   See dispatch_outcome.mli for the contract. *)
+(* RFC-0084 §3.3, §6 D3 — Typed tool dispatch outcome.
+   See dispatch_outcome.mli for the contract.
+
+   Collapsed from a 5-arm sum to the two arms the system actually
+   produces ([Handled] / [No_handler]).  The dropped arms
+   ([Rejected_by_capability], [Rejected_by_pre_hook], [Handler_error])
+   had zero producers: capability rejection returns an error result
+   (classified [Handled]), a pre-hook [Reject] becomes [Some error]
+   (classified [Handled]), and handler exceptions are captured as
+   [Some (make_err_of_exn ...)] (classified [Handled]).  Keeping
+   unproduced arms made illegal states representable but never reached
+   (CLAUDE.md anti-pattern #4). *)
 
 type t =
   | Handled
-  | Rejected_by_capability of { missing : string list }
-  | Rejected_by_pre_hook of { reason : string }
   | No_handler
-  | Handler_error of { exn : string }
 [@@deriving show, eq]
 
 let to_string = function
   | Handled -> "handled"
-  | Rejected_by_capability _ -> "rejected_by_capability"
-  | Rejected_by_pre_hook _ -> "rejected_by_pre_hook"
   | No_handler -> "no_handler"
-  | Handler_error _ -> "handler_error"
 ;;
 
 let of_string = function
   | "handled" -> Some Handled
-  | "rejected_by_capability" -> Some (Rejected_by_capability { missing = [] })
-  | "rejected_by_pre_hook" -> Some (Rejected_by_pre_hook { reason = "" })
   | "no_handler" -> Some No_handler
-  | "handler_error" -> Some (Handler_error { exn = "" })
   | _unknown -> None
 ;;
 
-let all_arms =
-  [ Handled
-  ; Rejected_by_capability { missing = [] }
-  ; Rejected_by_pre_hook { reason = "" }
-  ; No_handler
-  ; Handler_error { exn = "" }
-  ]
-;;
+let all_arms = [ Handled; No_handler ]
 
-let classify_result_option ?exn r =
-  match exn, r with
-  | Some s, _ -> Handler_error { exn = s }
-  | None, Some _ -> Handled
-  | None, None -> No_handler
+let classify_result_option r =
+  match r with
+  | Some _ -> Handled
+  | None -> No_handler
 ;;

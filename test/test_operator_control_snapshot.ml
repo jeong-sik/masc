@@ -381,7 +381,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
                       ~detail:
-                         "Completion contract [tool_contract] violated: no ToolUse block"
+                         "Completion contract [response_schema] violated: invalid structured response"
                        Keeper_meta_contract.Completion_contract_violation);
               };
           }
@@ -401,17 +401,13 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ("turn_count", `Int 12);
             ("outcome", `String "error");
             ( "terminal_reason_code",
-              `String "completion_contract_violation:tool_contract" );
+              `String "completion_contract_violation:response_schema" );
             ("operator_disposition", `String "pause_human");
             ( "operator_disposition_reason",
               `String "unmapped_runtime_state" );
-            ( "tool_contract_result",
-              `String "violated" );
-            ("tools_used", `List []);
             ( "tool_surface",
               `Assoc
                 [
-                  ("tool_requirement", `String "optional");
                   ("visible_tool_count", `Int 8);
                 ] );
             ( "sandbox",
@@ -457,7 +453,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
         "unmapped_runtime_state"
         (trust |> member "operator_disposition_reason" |> to_string);
       Alcotest.(check string) "terminal code preserved"
-        "completion_contract_violation:tool_contract"
+        "completion_contract_violation:response_schema"
         (trust |> member "latest_terminal_reason" |> member "code"
        |> to_string);
       Operator_control.invalidate_snapshot_cache ();
@@ -536,7 +532,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
               last_blocker =
                 Some
                   (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"Completion contract requires a keeper tool call"
+                     ~detail:"Completion contract [response_schema] failed"
                      Keeper_meta_contract.Completion_contract_violation);
             };
         }
@@ -643,8 +639,6 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
             ("outcome", `String "ok");
             ("operator_disposition", `String "pass");
             ("operator_disposition_reason", `String "healthy");
-            ("tool_contract_result", `String "satisfied");
-            ("tools_used", `List [ `String "keeper_status" ]);
             ("requested_tools", `List [ `String "keeper_status" ]);
             ( "runtime",
               `Assoc
@@ -909,7 +903,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("ts", `String (Masc_domain.now_iso ()));
             ("channel", `String "turn");
             ("tool_call_count", `Int 2);
-            ("tools_used", `List [ `String "masc_status"; `String "masc_tasks" ]);
+            ("observed_tool_names", `List [ `String "masc_status"; `String "masc_tasks" ]);
           ]);
       Dated_jsonl.append metrics_store
         (`Assoc
@@ -917,7 +911,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("ts", `String (Masc_domain.now_iso ()));
             ("channel", `String "turn");
             ("tool_call_count", `Int 0);
-            ("tools_used", `List []);
+            ("observed_tool_names", `List []);
           ]);
       let meta =
         match Keeper_meta_store.read_meta config keeper_name with
@@ -1017,7 +1011,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             ("ts", `String (Masc_domain.now_iso ()));
             ("selected_mode", `String "tool_use");
             ("tool_call_count", `Int 2);
-            ("tools_used", `List [ `String "masc_status"; `String "masc_tasks" ]);
+            ("observed_tool_names", `List [ `String "masc_status"; `String "masc_tasks" ]);
           ]);
       for _ = 1 to 20 do
         Fs_compat.append_jsonl decision_path
@@ -1026,7 +1020,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
               ("ts", `String (Masc_domain.now_iso ()));
               ("selected_mode", `String "text_response");
               ("tool_call_count", `Int 0);
-              ("tools_used", `List []);
+              ("observed_tool_names", `List []);
             ])
       done;
       let meta =

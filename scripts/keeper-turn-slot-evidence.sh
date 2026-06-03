@@ -92,8 +92,7 @@ for f in "${files[@]}"; do
           sort | .[(length * $p / 100 | floor) | if . >= length then length-1 else . end]
         end;
       def tool_count:
-        (.tool_call_count | n) as $top
-        | if $top > 0 then $top else (.tool_contract.tool_call_count | n) end;
+        (.tool_call_count | n);
       def turn_mode: (.turn_mode // .result_kind // "");
       def is_normal_success:
         (.outcome == "success")

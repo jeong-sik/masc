@@ -25,7 +25,6 @@ type runtime_pressure_class =
   | Provider_error
   | Turn_stale_timeout
   | Keeper_liveness_failure
-  | Tool_contract_failure
   | Runtime_failure
 
 val runtime_pressure_class_to_string : runtime_pressure_class -> string

@@ -1,4 +1,4 @@
-(** Tool-surface gating, selection constants, and backlog task
+(** Tool-surface visibility, selection constants, and backlog task
     reconciliation. *)
 
 (** Per-keeper dedupe set used by [should_log_unexpected_tool_partial_once]
@@ -12,16 +12,6 @@ val unexpected_tool_partial_warn_mu : Eio.Mutex.t
     sorted unexpected_tool_names) tuple has been seen. *)
 val should_log_unexpected_tool_partial_once :
   keeper_name:string -> unexpected_tool_names:string list -> bool
-
-(** Whether tools are available or absent for this turn.
-    Tool calls are never mandatory; the visible tool surface is advisory. *)
-type tool_requirement =
-  | Optional
-  | No_tools
-
-val tool_requirement_to_string : tool_requirement -> string
-val tool_requirement_of_string : string -> tool_requirement option
-val tool_requirement_to_yojson : tool_requirement -> Yojson.Safe.t
 
 (** Per-turn lane classification.  Closed sum type; the OCaml side
     pins the alphabet emitted by keeper_run_tools
@@ -68,12 +58,9 @@ val tool_selection_mode_of_string : string -> tool_selection_mode option
 val tool_selection_mode_to_yojson : tool_selection_mode -> Yojson.Safe.t
 
 
-(** Classification of the per-turn tool surface.  Closed sum type; the
-    OCaml side mirrors the RFC-0065 §3.2.2 KeeperToolSurface
-    SurfaceClassSet ({"none", "public_only", "mixed"}).
-    [@@deriving tla] emits [all_symbols : string list] so the
-    correspondence harness can parity-check against the spec catalog
-    without hand-pinning the label list. *)
+(** Classification of the per-turn tool surface.  Closed sum type; the wire
+    labels are fixed by [@@deriving tla] symbols so JSON, Prometheus labels,
+    and dashboard surfaces stay aligned. *)
 type tool_surface_class =
   | Surface_none [@tla.symbol "none"]
   | Surface_public_only [@tla.symbol "public_only"]
@@ -88,9 +75,7 @@ val tool_surface_class_to_yojson : tool_surface_class -> Yojson.Safe.t
 type tool_surface_metrics =
   { turn_lane : turn_lane
   ; tool_surface_class : tool_surface_class
-  ; tool_requirement : tool_requirement
   ; visible_tool_count : int
-  ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; config_root : string
   ; runtime_config_path : string option
@@ -116,15 +101,13 @@ type computed_tool_surface =
   ; is_last_turn : bool
   ; is_warning_zone : bool
   ; tool_surface_class : tool_surface_class
-  ; tool_requirement : tool_requirement
-  ; tool_gate_requested : bool
   ; claim_context_allowed : bool
   ; tool_surface_fallback_used : bool
   ; lane : turn_lane
   ; query_text : string
   }
 
-(** Affordances that influence per-turn tool gating. *)
+(** Affordances that influence per-turn tool visibility. *)
 type turn_affordance =
   | Board_curation
   | Board_post_or_comment
@@ -138,12 +121,6 @@ val turn_affordance_of_string : string -> turn_affordance option
 (** Tools worth keeping visible for an affordance. This is advisory surface
     shaping only; it must not force a tool call or reject text. *)
 val tools_for_affordance : turn_affordance -> string list
-
-(** Compute the satisfying tools for a set of turn affordances,
-    intersected with [allowed_tool_names] and deduplicated.
-    Used to provide actionable alternatives in retry messages. *)
-val satisfying_tools_for_turn :
-  turn_affordances:string list -> allowed_tool_names:string list -> string list
 
 (** Specific tools that should be force-included/preferred for an
     affordance, when the active runtime schema exposes them. *)

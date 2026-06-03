@@ -262,8 +262,6 @@ describe('normalizeOperatorSnapshot', () => {
             needs_attention: true,
             operator_disposition: 'pause_human',
             execution: {
-              tool_contract_result: 'violated',
-              missing_required_tools: ['masc_board_post'],
               provider_selected_model: 'provider:runtime-lane',
             },
             latest_terminal_reason: {
@@ -281,8 +279,6 @@ describe('normalizeOperatorSnapshot', () => {
       needs_attention: true,
       operator_disposition: 'pause_human',
       execution_summary: {
-        tool_contract_result: 'violated',
-        missing_required_tools: ['masc_board_post'],
         provider_selected_model: 'provider:runtime-lane',
       },
       latest_terminal_reason: {

@@ -185,21 +185,12 @@ StreamComplete ==
     /\ turn_state' = "completing"
     /\ UNCHANGED << receipt_outcome, stop_signaled >>
 
-\* Contract validation passes → terminal Done.
-ContractOk ==
+\* Completion passes → terminal Done.
+CompletionOk ==
     /\ turn_state = "completing"
     /\ ~stop_signaled
     /\ turn_state' = "done"
     /\ receipt_outcome' = "receipt_done"
-    /\ UNCHANGED stop_signaled
-
-\* Contract violation (passive_only / needs_execution_progress).
-\* Receipt outcome = failed (failure_reason = Tool_contract_violation).
-ContractViolation ==
-    /\ turn_state = "completing"
-    /\ ~stop_signaled
-    /\ turn_state' = "failed"
-    /\ receipt_outcome' = "receipt_failed"
     /\ UNCHANGED stop_signaled
 
 \* Receipt I/O failure during a happy-path completion. Models
@@ -273,8 +264,7 @@ Next ==
     \/ StreamYieldsTool
     \/ ToolReturned
     \/ StreamComplete
-    \/ ContractOk
-    \/ ContractViolation
+    \/ CompletionOk
     \/ ReceiptLost
     \/ SupervisorRequestsStop
     \/ HonorStopSignal
@@ -299,7 +289,7 @@ Fairness ==
     /\ WF_vars(ProviderResponded \/ ProviderTimeout)
     /\ SF_vars(StreamComplete)
     /\ WF_vars(ToolReturned)
-    /\ WF_vars(ContractOk \/ ContractViolation \/ ReceiptLost)
+    /\ WF_vars(CompletionOk \/ ReceiptLost)
     /\ WF_vars(HonorStopSignal)
 
 Spec      == Init /\ [][Next]_vars      /\ Fairness

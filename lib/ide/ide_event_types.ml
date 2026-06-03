@@ -74,7 +74,7 @@ and turn_event =
   ; keeper_id : string
   ; phase : string
   ; model_used : string option
-  ; tools_used : string list
+  ; observed_tool_names : string list
   ; stop_reason : string option
   ; duration_ms : int option
   ; timestamp_ms : int64
@@ -114,7 +114,7 @@ let turn_event_to_json (e : turn_event) : Yojson.Safe.t =
     ; "keeper_id", `String e.keeper_id
     ; "phase", `String e.phase
     ; "model_used", (match e.model_used with Some m -> `String m | None -> `Null)
-    ; "tools_used", `List (List.map (fun s -> `String s) e.tools_used)
+    ; "observed_tool_names", `List (List.map (fun s -> `String s) e.observed_tool_names)
     ; "stop_reason", (match e.stop_reason with Some r -> `String r | None -> `Null)
     ; "duration_ms", (match e.duration_ms with Some d -> `Int d | None -> `Null)
     ; "timestamp_ms", `Intlit (Int64.to_string e.timestamp_ms)

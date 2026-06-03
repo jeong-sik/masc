@@ -228,15 +228,6 @@ def matching_receipt_rows(
     return matched
 
 
-def receipt_tools_used(base_path: Path, rows: list[dict[str, Any]]) -> int:
-    count = 0
-    for receipt_row in matching_receipt_rows(base_path, rows):
-        tools = receipt_row.get("tools_used")
-        if isinstance(tools, list):
-            count += len(tools)
-    return count
-
-
 def matching_tool_log_rows(
     base_path: Path, rows: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -471,14 +462,11 @@ def evaluate(
         if provider and success and event_rows(rows, "memory_injected"):
             metrics.memory_ok_turns += 1
 
-        tools_used = receipt_tools_used(base_path, rows)
-        if tools_used > 0:
+        tool_log_rows = matching_tool_log_rows(base_path, rows)
+        if tool_log_rows:
             metrics.tool_used_turns += 1
             keeper_metric.tool_used_turns += 1
-            if tool_log_ok(base_path, rows):
-                metrics.tool_log_ok_turns += 1
-            else:
-                metrics.missing_artifacts += 1
+            metrics.tool_log_ok_turns += 1
 
         order_violations, evidence_span = check_timestamp_order(rows)
         metrics.order_violations += order_violations
@@ -654,7 +642,7 @@ def write_fixture_turn(
     tool_log_path = base_path / ".masc" / "tool_calls" / "2026-05" / f"{turn:02d}.jsonl"
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint_path.write_text('{"ok":true}\n', encoding="utf-8")
-    tools_used = fixture_tools(tools)
+    observed_tool_names = fixture_tools(tools)
     write_jsonl(
         receipt_path,
         [
@@ -664,11 +652,10 @@ def write_fixture_turn(
                 "trace_id": trace,
                 "turn_count": turn,
                 "outcome": "success",
-                "tools_used": tools_used,
             }
         ],
     )
-    if tools_used and tool_log:
+    if observed_tool_names and tool_log:
         append_jsonl(
             tool_log_path,
             [
@@ -681,7 +668,7 @@ def write_fixture_turn(
                     "tool": tool,
                     "success": True,
                 }
-                for tool in tools_used
+                for tool in observed_tool_names
             ],
         )
 
@@ -738,7 +725,7 @@ def write_fixture_turn(
             row["links"] = {
                 "receipt_path": None,
                 "checkpoint_path": None,
-                "tool_call_log_path": str(tool_log_path) if tools_used else None,
+                "tool_call_log_path": str(tool_log_path) if observed_tool_names else None,
             }
         rows.append(row)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)

@@ -72,7 +72,6 @@ type degraded_retry_budget_decision =
 val next_fail_open_runtime_for_turn_with_budget
   :  base_runtime:string
   -> effective_runtime:string
-  -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
   -> attempted_runtimes:string list
   -> estimated_input_tokens:int
   -> max_turns:int
@@ -199,14 +198,13 @@ val turn_plan_manifest_status : turn_plan -> string
 val turn_plan_manifest_decision : turn_plan -> Yojson.Safe.t
 
 (** Resolve the next runtime to try after an auto-recoverable failure.
-    Uses the current effective runtime, the turn tool requirement, and
-    the default degraded rotation candidate, then suppresses suggestions
+    Uses the current effective runtime and the default degraded rotation
+    candidate, then suppresses suggestions
     that would loop back to a runtime already attempted during the current
     turn. Exposed for targeted tests. *)
 val next_fail_open_runtime_for_turn
   :  base_runtime:string
   -> effective_runtime:string
-  -> tool_requirement:Keeper_agent_tool_surface.tool_requirement
   -> attempted_runtimes:string list
   -> Agent_sdk.Error.sdk_error
   -> Keeper_error_classify.degraded_retry option

@@ -1,6 +1,4 @@
-(** Tool-surface gating, selection constants, and backlog task reconciliation. *)
-
-module String_set = Set_util.StringSet
+(** Tool-surface visibility, selection constants, and backlog task reconciliation. *)
 
 let unexpected_tool_partial_warned : (string, unit) Hashtbl.t =
   Hashtbl.create 32
@@ -17,23 +15,6 @@ let should_log_unexpected_tool_partial_once ~keeper_name ~unexpected_tool_names 
       else (
         Hashtbl.replace unexpected_tool_partial_warned key ();
         true))
-
-type tool_requirement =
-  | Optional
-  | No_tools
-
-let tool_requirement_to_string = function
-  | Optional -> "optional"
-  | No_tools -> "none"
-
-let tool_requirement_of_string = function
-  | "optional" -> Some Optional
-  | "none" -> Some No_tools
-  | _ -> None
-
-let tool_requirement_to_yojson = function
-  | Optional -> `String "optional"
-  | No_tools -> `String "none"
 
 (* Closed sum type for turn_lane.  Two producers emit values:
    - keeper_run_tools.ml emits the per-turn lanes
@@ -90,11 +71,8 @@ let tool_selection_mode_to_yojson m =
   `String (tool_selection_mode_to_string m)
 
 
-(* Closed sum type for tool_surface_class.  Mirrors RFC-0065 §3.2.2
-   KeeperToolSurface SurfaceClassSet so the correspondence harness can
-   drop the hand-pinned label list.  [@tla.symbol "…"] fixes the wire
-   representation across JSON, Prometheus labels, dashboard surface,
-   and the .tla catalog. *)
+(* Closed sum type for tool_surface_class. [@tla.symbol "…"] fixes the wire
+   representation across JSON, Prometheus labels, and dashboard surface. *)
 type tool_surface_class =
   | Surface_none [@tla.symbol "none"]
   | Surface_public_only [@tla.symbol "public_only"]
@@ -120,9 +98,7 @@ let tool_surface_class_to_yojson cls =
 type tool_surface_metrics =
   { turn_lane : turn_lane
   ; tool_surface_class : tool_surface_class
-  ; tool_requirement : tool_requirement
   ; visible_tool_count : int
-  ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; config_root : string
   ; runtime_config_path : string option
@@ -146,8 +122,6 @@ type computed_tool_surface =
   ; is_last_turn : bool
   ; is_warning_zone : bool
   ; tool_surface_class : tool_surface_class
-  ; tool_requirement : tool_requirement
-  ; tool_gate_requested : bool
   ; claim_context_allowed : bool
   ; tool_surface_fallback_used : bool
   ; lane : turn_lane
@@ -197,25 +171,6 @@ let tools_for_affordance = function
     [ "keeper_tasks_list"; "keeper_tasks_audit";
       "keeper_task_done"; "keeper_task_submit_for_verification";
       "masc_transition" ]
-
-let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
-  : string list
-  =
-  let canonicalize = Keeper_tool_resolution.canonical_tool_name in
-  let allowed_set =
-    List.fold_left
-      (fun s n -> String_set.add (canonicalize n) s)
-      String_set.empty
-      allowed_tool_names
-  in
-  turn_affordances
-  |> List.concat_map (fun aff ->
-    match turn_affordance_of_string aff with
-    | Some affordance ->
-      tools_for_affordance affordance
-      |> List.filter (fun n -> String_set.mem (canonicalize n) allowed_set)
-    | None -> [])
-  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 
 let preferred_tool_names_for_turn_affordances turn_affordances =
   turn_affordances

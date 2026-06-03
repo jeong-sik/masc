@@ -276,7 +276,7 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 4. `make_tools` (keeper tool bridge) + `make_hooks` (safety gates) 생성
 5. `Keeper_turn_driver.run_named` -> OAS `Agent.run` loop (tool calls -> hooks -> response)
 6. `persist_message` (assistant 응답 영속화)
-7. 결과 반환: `run_result { response_text, model_used, turn_count, tool_calls_made, usage, tools_used }`
+7. 결과 반환: `run_result { response_text, model_used, turn_count, tool_calls_made, usage, observed_tool_names }`
 
 ### 5.2 Unified Keeper Turn (heartbeat 경로)
 

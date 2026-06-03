@@ -53,14 +53,11 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Bounded.tla | Bounded | manual | 2 | 1 | clean={inv:TypeOK, inv:Termination, inv:TokenBudget} buggy={inv:Termination, inv:TokenBudget} | d22f3d75f262 |
 | Cancellation.tla | Cancellation | manual | 2 | 1 | clean={inv:TypeOK, inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} buggy={inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} | bbed415483ac |
 | KeeperContinueGate.tla | KeeperContinueGate | manual | 2 | 1 | clean={inv:Safety, prop:PendingEventuallyResolves} buggy={inv:ApprovedResolutionClearsFailure} | 7f71fad0d4cb |
-| KeeperContractViolated.tla | KeeperContractViolated | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 3085ca4d11bb |
-| KeeperEmptyToolUniverse.tla | KeeperEmptyToolUniverse | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 588dbb775130 |
 | KeeperRecoveryOrchestration.tla | KeeperRecoveryOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | de89116db669 |
 | KeeperStaleKilled.tla | KeeperStaleKilled | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 0a6650d26696 |
 | KeeperTurnScheduler.tla | KeeperTurnScheduler | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 3506f025e94c |
 | KeeperTurnTerminal.tla | KeeperTurnTerminal | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 8c8557a68da6 |
 | SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:DockerImpliesDockerVia} buggy={inv:DockerImpliesDockerVia} | f052eb5728c0 |
-| ToolCallContract.tla | ToolCallContract | manual | 2 | 1 | clean={inv:Safety} buggy={inv:NeverDropSilently} | a33a3185f14e |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:OasBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | 0790cfbf9572 |
 
 ### specs/bug-models (20 specs)
@@ -132,7 +129,6 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperSocialModelMagenticLedger.tla | KeeperSocialModelMagenticLedger | manual | 2 | 1 | clean={inv:TypeOK, inv:ClassifyTypeOK, inv:StalledNeedsGoalOrFailure, prop:ProgressDominates, prop:ReactiveDominatesIdleTimeout, prop:StalledStickyWithGoal, prop:QuietWhenNoDrivers} buggy={inv:StalledNeedsGoalOrFailureMustHold} | 1dd4fa238ae4 |
 | KeeperStateMachine.tla | KeeperStateMachine | manual | 3 | 2 | clean={inv:TypeOK, prop:DeadIsForever, prop:StoppedIsForever, prop:ZombieIsForever, prop:BudgetNeverRevives, prop:RestartCountMonotonic, prop:RunningRequiresFiber, prop:StoppedRequiresDrain, prop:DeadRequiresNoBudget, prop:OfflineRequiresLaunchPending, prop:ZombieRequiresTerminalFailureLatched, prop:FailingResolves, prop:CrashedRestartsEventually, prop:DrainingResolves, prop:CompactingResolves, prop:HandoffResolves, prop:CompactionClearsOverflow, prop:OverflowedResolves} buggy={inv:TypeOK} overflow-buggy={inv:TypeOK} | f23ad5705391 |
 | KeeperTaskAcquisition.tla | KeeperTaskAcquisition | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | cd9f3f8545c5 |
-| KeeperToolSurface.tla | KeeperToolSurface | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 68a837adbd60 |
 | KeeperTraceSpec.tla | KeeperTraceSpec | manual | 2 | 1 | clean={inv:TypeOK, inv:RunningRequiresFiber, inv:OfflineRequiresLaunchPending, inv:StoppedRequiresDrain, inv:DeadRequiresNoBudget, inv:DerivePhaseAgreement, prop:RestartCountMonotonic, prop:BudgetNeverRevives, prop:TransitionMatrixAgreement} buggy={inv:TypeOK, inv:DerivePhaseAgreementMustHold} | 733248761720 |
 | KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | d6d719d016a0 |
 | KeeperTurnSlot.tla | KeeperTurnSlot | manual | 2 | 1 | clean={inv:Safety} buggy={inv:RetryPhaseRequiresReleased} | a9e690736bb8 |

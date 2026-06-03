@@ -210,16 +210,13 @@ describe('keeper runtime trace', () => {
         axes: {
           tool_surface: {
             requested_tools: ['read_file'],
-            required_tools: ['keeper_task_done'],
             materialized_tools: ['read_file'],
-            missing_required_tools: ['keeper_task_done'],
             terminal_status: 'missing_required_tool',
           },
           provider_lane: {
             resolved: false,
             status: 'error',
             resolved_lane: 'inline',
-            missing_required_tools: ['keeper_task_done'],
           },
           provider_attempt: {
             started_count: 1,

@@ -10,7 +10,7 @@ type observed =
 let analyze
       ~base_path
       ~keeper_name
-      ~requested_tool_names_seen
+      ~visible_tool_names
       ~tool_usage_before
       ~tool_calls
       content
@@ -50,7 +50,7 @@ let analyze
   in
   let unexpected_tool_names =
     Keeper_tool_observation.unexpected_tool_names
-      ~allowed_tool_names:requested_tool_names_seen
+      ~allowed_tool_names:visible_tool_names
       ~tool_names:canonical_tool_names
   in
   let valid_tool_calls_present =

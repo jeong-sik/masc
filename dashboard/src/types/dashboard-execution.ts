@@ -858,15 +858,10 @@ export interface GoalKeeperTrustApprovalState {
 }
 
 export interface GoalKeeperTrustExecutionSummary {
-  tool_contract_result?: string | null
   runtime_proof_status?: string | null
-  required_tools?: string[] | null
-  missing_required_tools?: string[] | null
   requested_tools?: string[] | null
-  tools_used?: string[] | null
   unexpected_tools?: string[] | null
   requested_tool_count?: number | null
-  tools_used_count?: number | null
   unexpected_tool_count?: number | null
   provider_attempt_count?: number | null
   provider_fallback_applied?: boolean | null

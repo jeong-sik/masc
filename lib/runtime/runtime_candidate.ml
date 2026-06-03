@@ -26,8 +26,8 @@ let health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config 
 let model_health_key (t : t) = Runtime_provider_binding.provider_health_key_of_config t
 let health_keys (t : t) = [ Runtime_provider_binding.provider_health_key_of_config t ]
 
-let resolve_tool_lane_for_oas_tools ?agent_name ?tool_requirement ~tools (t : t) =
-  Runtime_agent.resolve_tool_lane_for_oas_tools ?agent_name ?tool_requirement
+let resolve_tool_lane_for_oas_tools ?agent_name ~tools (t : t) =
+  Runtime_agent.resolve_tool_lane_for_oas_tools ?agent_name
     ~provider_cfg:t ~tools ()
 
 let runtime_mcp_policy_for_agent ~agent_name (t : t) runtime_mcp_policy =
@@ -197,18 +197,6 @@ let effective_attempt_timeout_resolution ~is_last ~configured_timeout_s (_ : t) 
 
 let effective_attempt_timeout_s ~is_last ~configured_timeout_s t =
   (effective_attempt_timeout_resolution ~is_last ~configured_timeout_s t).timeout_s
-
-let tool_filter_rejection_label ~keeper_name ?runtime_mcp_policy ~tools
-    ~require_tool_choice_support ~require_tool_support (t : t) =
-  let _ =
-    ( keeper_name,
-      runtime_mcp_policy,
-      tools,
-      require_tool_choice_support,
-      require_tool_support,
-      t )
-  in
-  None
 
 let capacity_key (t : t) = health_key t
 

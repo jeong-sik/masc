@@ -30,7 +30,7 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).toContain('task-151')
     expect(container.textContent).toContain('Fix agent-code runtime config')
     expect(container.textContent).toContain('tool_route_recoverable_failure')
-    expect(container.textContent).toContain('inspect_provider_tool_contract')
+    expect(container.textContent).toContain('inspect_runtime_attempts')
     expect(container.textContent).toContain('masc_claim_next')
   })
 
@@ -201,7 +201,7 @@ function keeperFixture(): Keeper {
       latest_terminal_reason: {
         code: 'tool_route_recoverable_failure',
         summary: 'actionable keeper signal was present, but no keeper tools were called',
-        next_action: 'inspect_provider_tool_contract',
+        next_action: 'inspect_runtime_attempts',
       },
     },
     recent_output_preview: 'tool route recoverable failure',

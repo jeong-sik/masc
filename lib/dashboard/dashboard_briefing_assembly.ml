@@ -175,9 +175,8 @@ let action_matches_incident incident action =
       List.mem action_type (incident_action_types (string_field "kind" incident))
 
 let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t list) =
-  let all_entries = Keeper_registry.all ~base_path:config.base_path () in
   let registry_lookup name =
-    List.find_opt (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name) all_entries
+    Keeper_registry.get ~base_path:config.base_path name
   in
   keepers
   |> List.filter_map (fun keeper ->

@@ -64,7 +64,7 @@ type t =
           internal). The payload is the existing parametrised wire
           format produced by [Keeper_agent_error.terminal_reason_code_of_sdk_error]
           (e.g. ["agent_error_max_turns_exceeded:turns=10,limit=10"],
-          ["completion_contract_violation:tool_contract"],
+          ["completion_contract_violation:response_schema"],
           ["api_error_server:502"]). PR-2.5 wraps the existing typed
           accessors in this variant so the typed bridge becomes a
           single source of truth for [Keeper_turn_terminal.t.code]

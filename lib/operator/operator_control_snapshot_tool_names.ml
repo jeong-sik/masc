@@ -18,13 +18,15 @@ let merge_tool_name_lists primary secondary =
 ;;
 
 let tool_names_of_recent_json (json : Yojson.Safe.t) =
-  let tools_used = Json_util.get_string_list json "tools_used" in
+  let observed_tool_names =
+    Json_util.get_string_list json "observed_tool_names"
+  in
   let single_tool =
     match Json_util.get_string json "tool" with
     | Some value when String.trim value <> "" -> [ value ]
     | _ -> []
   in
-  merge_tool_name_lists single_tool tools_used
+  merge_tool_name_lists single_tool observed_tool_names
 ;;
 
 let collect_recent_tool_names ?(limit = 8) (lines : string list) =
@@ -48,4 +50,3 @@ let collect_recent_tool_names ?(limit = 8) (lines : string list) =
   in
   loop [] limit ordered
 ;;
-

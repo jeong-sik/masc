@@ -131,7 +131,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
       [ "schema", `String "keeper.execution_receipt.v1"
       ; "trace_id", `String "trace-1"
       ; "outcome", `String "receipt_failed"
-      ; "terminal_reason_code", `String "tool_contract_violation"
+      ; "terminal_reason_code", `String "runtime_error"
       ]
   in
   Keeper_reaction_ledger.record_execution_receipt_reaction
@@ -142,7 +142,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
     ~current_task_id:(Some "task-275")
     ~goal_ids:[ "goal-world-reactivity-p0-20260517" ]
     ~outcome:"receipt_failed"
-    ~terminal_reason_code:"tool_contract_violation"
+    ~terminal_reason_code:"runtime_error"
     ~receipt_json
     ();
   let row =
@@ -155,7 +155,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
   check_member_string "terminal reaction kind" "terminal_reason" "kind" reaction;
   check_member_string
     "terminal reason"
-    "tool_contract_violation"
+    "runtime_error"
     "terminal_reason_code"
     reaction;
   check_member_string

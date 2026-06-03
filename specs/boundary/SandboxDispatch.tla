@@ -19,13 +19,10 @@
 \*   host-fallback path at the runtime; this spec proves the routing
 \*   contract is enforceable.
 \*
-\* Why this is its own module (not a ToolCallContract.tla extension):
-\*   ToolCallContract is the telemetry boundary contract; its outcome
-\*   axis {none, text, tool_use, error} does not carry a "via" axis,
-\*   so adding one would force every existing action's UNCHANGED
-\*   clauses to grow and obscure the original intent. SandboxDispatch
-\*   is the routing-layer contract, kept narrow on the variables that
-\*   matter.
+\* Why this is its own module:
+\*   SandboxDispatch is the routing-layer contract, kept narrow on the
+\*   variables that matter. It does not depend on keeper turn-level
+\*   tool-use telemetry or completion policy.
 \*
 \* Bug Model (memory: TLA+ Bug Model pattern):
 \*   - Spec       (clean): all dispatches respect the profile contract.

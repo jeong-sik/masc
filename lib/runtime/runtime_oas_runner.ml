@@ -43,8 +43,6 @@ let runtime_catalog_error_to_sdk_error detail =
     bypassing the old Model_spec facade. *)
 let resolve_runtime_providers
       ?provider_filter:_
-      ?require_tool_choice_support:_
-      ?require_tool_support:_
       ?runtime_mcp_policy:_
       ~runtime_id:_
       ()
@@ -121,12 +119,6 @@ let agent_internal_tool_names_for_runtime_surface
   ignore keeper_name;
   ignore tools;
   []
-
-let agent_internal_tools_require_materialized_runtime_surface
-      ~(keeper_name : string)
-      (tools : Agent_sdk.Tool.t list)
-  =
-  agent_internal_tool_names_for_runtime_surface ~keeper_name tools <> []
 
 let runtime_mcp_policy_for_provider
       ~(keeper_name : string)

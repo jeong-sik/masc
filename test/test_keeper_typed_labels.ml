@@ -11,10 +11,8 @@
     - [Keeper_turn_fsm.cancel_reason] (4 variants, Step 4a)
     - [Keeper_turn_fsm.failure_reason] (6 variants, Step 4a)
     - [Keeper_turn_fsm.turn_state]     (10 variants, Step 4a)
-    - [Keeper_contract_classifier.actionable_signal] (4 variants, Step 6a)
-    - [Keeper_contract_classifier.contract_status]   (7 variants, Step 6a)
+    - [Keeper_contract_classifier.actionable_signal] (3 variants, Step 6a)
     - [Keeper_turn_fsm.pp_failure_reason] surfaces record-bearing fields
-    - [Keeper_contract_classifier.pp_contract_status] surfaces missing list
 *)
 
 open Masc
@@ -62,7 +60,6 @@ let all_failure_reasons : Keeper_turn_fsm.failure_reason list =
     Failure_runtime_unavailable { base = "x"; resolved = None };
     Failure_no_tool_capable_provider { runtime_id = "x"; detail = "d" };
     Failure_provider_error { kind = "k"; detail = "d" };
-    Failure_tool_contract_violation { reason_code = "rc" };
     Failure_receipt_lost { primary_error = "e"; fallback_path = None };
     Failure_runtime_error "msg";
     Failure_unexpected_exception { exn = "exn"; backtrace = None };
@@ -152,7 +149,7 @@ let test_actionable_signal_labels_unique () =
   Alcotest.(check (list string))
     "no duplicate actionable_signal labels" [] (duplicates labels)
 
-(* Precedence is documented contract in [keeper_contract_classifier.mli]:
+(* Precedence is documented in [keeper_contract_classifier.mli]:
    unclaimed_tasks > board_activity. The caller in
    [keeper_agent_run.ml] (issue #11266 Track 2c) relies on this ordering
    to attribute violation log lines to the strongest available signal. *)
@@ -203,47 +200,6 @@ let test_is_actionable_matches_variants () =
   Alcotest.(check bool) "No_actionable_signal is not actionable" false
     (Keeper_contract_classifier.is_actionable No_actionable_signal)
 
-(* ── Keeper_contract_classifier.contract_status ──────────────── *)
-
-let all_contract_statuses
-    : Keeper_contract_classifier.contract_status list =
-  [
-    Tool_surface_mismatch { missing = [ "x" ] };
-    Claim_only_after_owned_task;
-    Needs_execution_progress;
-    Passive_only;
-    Satisfied_completion;
-    Satisfied_execution;
-  ]
-
-let test_contract_status_labels_unique () =
-  let labels =
-    List.map Keeper_contract_classifier.contract_status_label
-      all_contract_statuses
-  in
-  Alcotest.(check (list string))
-    "no duplicate contract_status labels" [] (duplicates labels)
-
-let test_pp_contract_status_surfaces_missing_list () =
-  let s =
-    format_to_string Keeper_contract_classifier.pp_contract_status
-      (Tool_surface_mismatch { missing = [ "keeper_task_claim"; "masc_claim_next" ] })
-  in
-  Alcotest.(check bool)
-    "pp_contract_status surfaces first missing tool"
-    true
-    (try
-       ignore (Str.search_forward (Str.regexp_string "keeper_task_claim") s 0);
-       true
-     with Not_found -> false);
-  Alcotest.(check bool)
-    "pp_contract_status surfaces second missing tool"
-    true
-    (try
-       ignore (Str.search_forward (Str.regexp_string "masc_claim_next") s 0);
-       true
-     with Not_found -> false)
-
 (* ── Test runner ─────────────────────────────────────────────── *)
 
 let () =
@@ -282,12 +238,5 @@ let () =
             test_classify_no_signal_returns_no_actionable;
           Alcotest.test_case "is_actionable matches all variants" `Quick
             test_is_actionable_matches_variants;
-        ] );
-      ( "contract_status",
-        [
-          Alcotest.test_case "labels unique" `Quick
-            test_contract_status_labels_unique;
-          Alcotest.test_case "pp surfaces missing list" `Quick
-            test_pp_contract_status_surfaces_missing_list;
         ] );
     ]

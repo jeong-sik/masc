@@ -1483,15 +1483,10 @@ function decodeGoalKeeperTrustApprovalState(raw: unknown): GoalKeeperTrustApprov
 function decodeGoalKeeperTrustExecutionSummary(raw: unknown): GoalKeeperTrustExecutionSummary | null {
   if (!isRecord(raw)) return null
   return {
-    tool_contract_result: asNullableString(raw.tool_contract_result),
     runtime_proof_status: asNullableString(raw.runtime_proof_status),
-    required_tools: asStringArray(raw.required_tools),
-    missing_required_tools: asStringArray(raw.missing_required_tools),
     requested_tools: asStringArray(raw.requested_tools),
-    tools_used: asStringArray(raw.tools_used),
     unexpected_tools: asStringArray(raw.unexpected_tools),
     requested_tool_count: asInt(raw.requested_tool_count) ?? null,
-    tools_used_count: asInt(raw.tools_used_count) ?? null,
     unexpected_tool_count: asInt(raw.unexpected_tool_count) ?? null,
     provider_attempt_count: asInt(raw.provider_attempt_count) ?? null,
     provider_fallback_applied:

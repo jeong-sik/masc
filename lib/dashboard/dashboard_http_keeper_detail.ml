@@ -201,12 +201,12 @@ let compute_metrics_window
         let memory_compaction_before_notes_now = Safe_ops.json_int ~default:0 "memory_compaction_before_notes" j in
         let memory_compaction_dropped_notes_now = Safe_ops.json_int ~default:0 "memory_compaction_dropped_notes" j in
         let memory_compaction_invalid_dropped_now = Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j in
-        let tools_used =
-          match j |> m "tools_used" with
+        let observed_tool_names =
+          match j |> m "observed_tool_names" with
           | `List xs -> List.filter_map (function `String s when String.trim s <> "" -> Some s | _ -> None) xs
           | _ -> []
         in
-        let tool_call_count_now = Safe_ops.json_int ~default:(List.length tools_used) "tool_call_count" j in
+        let tool_call_count_now = Safe_ops.json_int ~default:(List.length observed_tool_names) "tool_call_count" j in
         let metric_event = Safe_ops.json_string ~default:"" "metric_event" j in
         let memory_is_weather = match memory_expected_topic with Some "weather" -> true | _ -> false in
         let work_kind =
@@ -311,7 +311,7 @@ let compute_metrics_window
             in
             count_table_incr work_kind_counts work_kind;
             if model_bucket <> "" then count_table_incr model_counts_window model_bucket;
-            List.iter (count_table_incr tool_counts_window) tools_used;
+            List.iter (count_table_incr tool_counts_window) observed_tool_names;
             let acc = { acc with
               ma_tool_call_count = acc.ma_tool_call_count + tool_call_count_now;
               ma_memory_notes_added = acc.ma_memory_notes_added + memory_notes_added_now;
@@ -377,7 +377,7 @@ let compute_metrics_window
             if gen_stats.first_ts <= 0.0 || ts_unix < gen_stats.first_ts then gen_stats.first_ts <- ts_unix;
             if ts_unix > gen_stats.last_ts then gen_stats.last_ts <- ts_unix;
             if model_bucket <> "" then count_table_incr gen_stats.models model_bucket;
-            List.iter (count_table_incr gen_stats.tools) tools_used;
+            List.iter (count_table_incr gen_stats.tools) observed_tool_names;
 
             acc
           end else acc
@@ -428,7 +428,7 @@ let compute_metrics_window
               ("work_kind", `String work_kind);
               ("metric_event", `String metric_event);
               ("tool_call_count", `Int tool_call_count_now);
-              ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+              ("observed_tool_names", `List (List.map (fun s -> `String s) observed_tool_names));
               ("proactive_fallback_applied", `Bool proactive_fallback_applied_now);
               ("proactive_preview", Json_util.string_opt_to_json proactive_preview_now);
               ("drift_applied", `Bool drift_applied_now);

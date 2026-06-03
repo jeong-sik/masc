@@ -33,9 +33,9 @@ let append_decision_record
   let now_ts = Time_compat.now () in
   let trigger_signals = observed_triggers_of_observation ~meta observation in
   let affordances = observed_affordances_of_observation ~meta observation in
-  let tools_used =
+  let observed_tool_names =
     match result with
-    | Some r -> r.tools_used
+    | Some r -> r.observed_tool_names
     | None -> []
   in
   let response_preview =
@@ -95,7 +95,7 @@ let append_decision_record
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in
   let claim_executed =
-    List.exists Keeper_tool_progress.is_claim_tool_name tools_used
+    List.exists Keeper_tool_progress.is_claim_tool_name observed_tool_names
   in
   let social_fields =
     match social_state with
@@ -162,7 +162,6 @@ let append_decision_record
                terminal_reason.Keeper_turn_terminal.severity) );
         ("terminal_reason_source", `String terminal_reason.source);
         ("provider_context", provider_context_json ~meta result);
-        ("tool_contract", tool_contract_json ~tool_call_count ~tools_used result);
         ("pending_approval_count", `Int pending_approval_count);
         ("approval_mode", Json_util.string_opt_to_json approval_mode);
         ("channel", `String (decision_channel_of_observation observation));
@@ -200,7 +199,7 @@ let append_decision_record
               ("active_agent_count", `Int observation.active_agent_count);
             ] );
         ("tool_call_count", `Int tool_call_count);
-        ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+        ("observed_tool_names", `List (List.map (fun s -> `String s) observed_tool_names));
         ("tool_calls", `List (List.map tool_call_detail_to_json tool_calls));
         ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_matched_available", `Bool (observation.claimable_task_count > 0));
@@ -288,9 +287,7 @@ let append_decision_record
                   ( "tool_surface_class"
                   , Keeper_agent_tool_surface.tool_surface_class_to_yojson
                       r.tool_surface.tool_surface_class );
-                  ("tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson r.tool_surface.tool_requirement);
                   ("visible_tool_count", `Int r.tool_surface.visible_tool_count);
-                  ("tool_gate_enabled", `Bool r.tool_surface.tool_gate_enabled);
                   ( "tool_surface_fallback_used",
                     `Bool r.tool_surface.tool_surface_fallback_used );
                   ("config_root", `String r.tool_surface.config_root);

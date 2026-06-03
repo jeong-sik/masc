@@ -156,7 +156,7 @@ val valid_memory_kind_strings : string list
 val cap_for_kind : (string * int) list -> string -> int
 val synthesize_state_from_run_result :
   goal:string ->
-  tools_used:string list ->
+  observed_tool_names:string list ->
   stop_reason:string -> response_text:string -> keeper_state_snapshot
 val render_state_block : keeper_state_snapshot -> string
 val with_stdlib_mutex : Mutex.t -> (unit -> 'a) -> 'a

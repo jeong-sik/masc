@@ -138,17 +138,9 @@ function countPendingVerification(tasksInput: readonly Task[]): number {
   return tasksInput.filter(task => task.status === 'awaiting_verification').length
 }
 
-// Closed set of wire-format values emitted by the backend
-// keeper_execution_receipt.tool_contract_result_to_string (11 variants).
-// Both runtime_proof_status and tool_contract_result use the same values.
+// Closed set of runtime proof values that should contribute to attention.
 const EXECUTION_ATTENTION_SET: ReadonlySet<string> = new Set([
   'violated',
-  'tool_surface_mismatch',
-  'no_tool_capable_provider',
-  'claim_only_after_owned_task',
-  'needs_execution_progress',
-  'passive_only',
-  'not_dispatched',
 ])
 
 function isExecutionAttentionCode(value: string | null | undefined): boolean {
@@ -166,9 +158,7 @@ function hasExecutionAttentionEvidence(keeper: Keeper): boolean {
   if (terminalSeverity === 'bad' || terminalSeverity === 'warn') return true
   const execution = trust?.execution_summary
   if (!execution) return false
-  if ((execution.missing_required_tools ?? []).length > 0) return true
   return isExecutionAttentionCode(execution.runtime_proof_status)
-    || isExecutionAttentionCode(execution.tool_contract_result)
 }
 
 function countKeeperAttention(keeperInput: readonly Keeper[]): number {

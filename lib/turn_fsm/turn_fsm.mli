@@ -31,7 +31,6 @@ type failure_reason =
       detail : string;
     }
   | Failure_provider_error of { kind : string; detail : string }
-  | Failure_tool_contract_violation of { reason_code : string }
   | Failure_receipt_lost of {
       primary_error : string;
       fallback_path : string option;
@@ -81,8 +80,7 @@ type transition_action =
   | StreamYieldsTool
   | ToolReturned
   | StreamComplete
-  | ContractOk
-  | ContractViolation
+  | CompletionOk
   | ReceiptLost
   | LivelockBlocked
   | NoToolCapableProvider

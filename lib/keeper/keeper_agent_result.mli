@@ -21,7 +21,7 @@ type run_result =
   ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
-  ; tools_used : string list
+  ; observed_tool_names : string list
   ; tool_calls : tool_call_detail list
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option

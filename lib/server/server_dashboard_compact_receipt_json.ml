@@ -65,30 +65,17 @@ let compact_receipt_tool_surface_json receipt =
   let surface =
     match json_member "tool_surface" receipt with
     | `Assoc _ as surface -> surface
-    | _ -> json_member "tool_contract" receipt
+    | _ -> `Null
   in
   match surface with
   | `Assoc _ as surface ->
-    let tool_requirement = json_string "tool_requirement" surface in
     let unexpected_tools = Json_util.get_string_list receipt "unexpected_tools" in
-    let turn_lane =
-      (* Wire values come from [Keeper_agent_tool_surface.tool_requirement_to_yojson]:
-         "optional" or "none". *)
-      match json_string "turn_lane" surface, tool_requirement with
-      | Some value, _ -> Some value
-      | None, Some "optional" -> Some "tool_optional"
-      | None, Some "none" -> Some "text_only"
-      | None, _ -> None
-    in
     `Assoc
-      [ "tool_requirement", Json_util.string_opt_to_json tool_requirement
-      ; "turn_lane", Json_util.string_opt_to_json turn_lane
+      [ "turn_lane", Json_util.string_opt_to_json (json_string "turn_lane" surface)
       ; ( "tool_surface_class"
         , Json_util.string_opt_to_json (json_string "tool_surface_class" surface) )
       ; ( "visible_tool_count"
         , Json_util.int_opt_to_json (json_int "visible_tool_count" surface) )
-      ; ( "tool_gate_enabled"
-        , Json_util.bool_opt_to_json (json_bool "tool_gate_enabled" surface) )
       ; ( "tool_surface_fallback_used"
         , Json_util.bool_opt_to_json
             (json_bool "tool_surface_fallback_used" surface) )

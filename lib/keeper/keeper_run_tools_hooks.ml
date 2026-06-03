@@ -6,7 +6,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
-open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator
@@ -19,7 +18,6 @@ type agent_setup =
   ; memory : Agent_sdk.Memory.t
   ; acc : hook_accumulator
   ; initial_tool_surface : computed_tool_surface
-  ; initial_tool_surface_blocker : Agent_sdk.Error.sdk_error option ref
   ; all_tool_names : string list
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
@@ -108,6 +106,7 @@ let assemble_hooks
   let tool_usage_before = ctx.tool_usage_before in
   let tools = ctx.tools in
   let all_tool_names = ctx.all_tool_names in
+  ignore turn_affordances;
   let initial_tool_surface =
     compute_tool_surface
       ~turn:(start_turn_count + 1)
@@ -119,10 +118,8 @@ let assemble_hooks
   acc.tool_surface
   <- { turn_lane = initial_tool_surface.lane
      ; tool_surface_class = initial_tool_surface.tool_surface_class
-     ; tool_requirement = initial_tool_surface.tool_requirement
      ; visible_tool_count =
          List.length initial_tool_surface.turn_visible_tool_names
-     ; tool_gate_enabled = initial_tool_surface.tool_gate_requested
      ; tool_surface_fallback_used = initial_tool_surface.tool_surface_fallback_used
      ; config_root
      ; runtime_config_path
@@ -130,39 +127,7 @@ let assemble_hooks
      ; approval_mode_effective
      ; approval_mode_derived
      };
-  let initial_tool_surface_blocker = ref None in
-  let initial_tool_surface_result =
-    if
-      initial_tool_surface.tool_gate_requested
-      && initial_tool_surface.turn_visible_tool_names = []
-    then (
-      acc.receipt_tool_contract_result <-
-        Keeper_execution_receipt.Contract_no_tool_capable_provider;
-      Prometheus.inc_counter
-        Prometheus.metric_empty_tool_universe_observed
-        ~labels:
-          [ "keeper_name", meta.name
-          ; ( "turn_lane"
-            , Keeper_agent_tool_surface.turn_lane_to_string
-                initial_tool_surface.lane )
-          ; ( "fallback_used"
-            , string_of_bool initial_tool_surface.tool_surface_fallback_used )
-          ]
-        ();
-      initial_tool_surface_blocker
-      := Some
-           (sdk_error_of_keeper_internal_error
-              (Keeper_tool_surface_empty
-                 { keeper_name = meta.name
-                 ; turn_lane =
-                     Keeper_agent_tool_surface.turn_lane_to_string
-                       initial_tool_surface.lane
-                 ; affordances = turn_affordances
-                 ; fallback_used = initial_tool_surface.tool_surface_fallback_used
-                 }));
-      Ok initial_tool_surface)
-    else Ok initial_tool_surface
-  in
+  let initial_tool_surface_result = Ok initial_tool_surface in
   match initial_tool_surface_result with
   | Error err -> Error err
   | Ok initial_tool_surface ->
@@ -495,9 +460,7 @@ let assemble_hooks
                 acc.tool_surface
                 <- { turn_lane = lane
                    ; tool_surface_class = computed_surface.tool_surface_class
-                   ; tool_requirement = computed_surface.tool_requirement
                    ; visible_tool_count = List.length turn_visible_tool_names
-                   ; tool_gate_enabled = computed_surface.tool_gate_requested
                    ; tool_surface_fallback_used =
                        computed_surface.tool_surface_fallback_used
                    ; config_root
@@ -601,11 +564,8 @@ let assemble_hooks
                      ; ( "tool_surface_class"
                        , Keeper_agent_tool_surface.tool_surface_class_to_yojson
                            computed_surface.tool_surface_class )
-                     ; ( "tool_requirement"
-                       , tool_requirement_to_yojson computed_surface.tool_requirement )
-                     ; "tool_gate_enabled", `Bool computed_surface.tool_gate_requested
-                     ; ( "tool_surface_fallback_used"
-                       , `Bool computed_surface.tool_surface_fallback_used )
+                    ; ( "tool_surface_fallback_used"
+                      , `Bool computed_surface.tool_surface_fallback_used )
                      ; "hook_ms", `Float hook_elapsed_ms
                      ]
                  in
@@ -735,7 +695,6 @@ let assemble_hooks
       ; memory
       ; acc
       ; initial_tool_surface
-      ; initial_tool_surface_blocker
       ; all_tool_names
       ; tool_usage_before
       ; receipt_turn_count_ref

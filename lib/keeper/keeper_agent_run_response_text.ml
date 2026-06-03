@@ -33,7 +33,7 @@ let state_snapshot ~keeper_name ~goal ~actual_keeper_tool_names ~fallback_tool_n
     let synth =
       Keeper_memory_policy.synthesize_state_from_run_result
         ~goal
-        ~tools_used:final_tool_names
+        ~observed_tool_names:final_tool_names
         ~stop_reason:stop_reason_str
         ~response_text:raw_response_text
     in

@@ -77,7 +77,7 @@ val key_metric_event : string
 val key_agent_name : string
 val key_tool_name : string
 val key_tool_call_count : string
-val key_tools_used : string
+val key_observed_tool_names : string
 val key_duration_ms : string
 val key_channel : string
 val key_error : string

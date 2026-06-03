@@ -11,7 +11,7 @@ type t =
   | TurnScheduled
   | TurnCompleted
   | IdleSeconds
-  | ContractViolations
+  | ToolSurfaceViolations
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts

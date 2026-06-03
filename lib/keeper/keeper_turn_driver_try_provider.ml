@@ -23,8 +23,6 @@ type try_provider_ctx =
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
     goal : string
-  ; require_tool_choice_support : bool
-  ; require_tool_support : bool
   ; priority : Llm_provider.Request_priority.t option
   ; session_id : string option
   ; system_prompt : string
@@ -209,7 +207,6 @@ let run_try_provider
     match
       Runtime_candidate.resolve_tool_lane_for_oas_tools
         ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt ctx.keeper_name)
-        ~tool_requirement:`Optional
         ~tools:ctx.tools
         candidate
     with
@@ -257,8 +254,6 @@ let run_try_provider
               ("resolved_lane", `String resolved_lane);
               ("effective_tool_count", `Int (List.length effective_tools));
               ("runtime_mcp_policy_present", `Bool (Option.is_some runtime_mcp_policy));
-              ( "tool_requirement",
-                `String "optional" );
             ])
         Keeper_runtime_manifest.Provider_lane_resolved;
       Ok

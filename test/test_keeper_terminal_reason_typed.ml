@@ -50,8 +50,8 @@ let roundtrip_corpus =
   ; "api_error_context_overflow"
   ; "api_error_oas_agent_execution_timeout"
     (* completion-contract-violation (legacy + enriched forms) *)
-  ; "completion_contract_violation:tool_contract"
-  ; "completion_contract_violation:tool_contract:called[a,b]:satisfying[c]"
+  ; "completion_contract_violation:response_schema"
+  ; "completion_contract_violation:response_schema:called[a,b]:satisfying[c]"
     (* turn-livelock *)
   ; "turn_livelock:stuck_age_exceeded"
     (* budget cut-offs *)
@@ -181,22 +181,7 @@ let frozen_operator_disposition (receipt : R.t)
   else if frozen_is_auto_recoverable_turn_budget_terminal terminal_reason
   then R.Disp_pass, R.Reason_turn_budget_exhausted
   else (
-    let tool_route_failure =
-      List.mem
-        receipt.tool_contract_result
-        [ R.Contract_tool_surface_mismatch; R.Contract_no_tool_capable_provider ]
-    in
-    if tool_route_failure
-    then
-      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
-      then R.Disp_fail_open_next_runtime, R.Reason_tool_route_recoverable_failure
-      else if
-        receipt.runtime_fallback_applied
-        || receipt.runtime_outcome = R.Runtime_passed_to_next_model
-      then R.Disp_pass_next_model, R.Reason_tool_route_recoverable_failure
-      else R.Disp_pause_human, R.Reason_tool_route_recoverable_failure
-    else if
-      receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+    if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
     then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
     else if
       receipt.runtime_fallback_applied
@@ -205,7 +190,6 @@ let frozen_operator_disposition (receipt : R.t)
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = R.Runtime_not_dispatched
-      && receipt.tool_contract_result = R.Contract_not_dispatched
       && String.equal terminal_reason "pre_dispatch_success"
     then R.Disp_pass, R.Reason_healthy
     else (
@@ -226,9 +210,7 @@ let frozen_operator_disposition (receipt : R.t)
 let base_tool_surface : R.tool_surface =
   { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional
   ; tool_surface_class = Masc.Keeper_agent_tool_surface.Surface_public_only
-  ; tool_requirement = Masc.Keeper_agent_tool_surface.Optional
   ; visible_tool_count = 3
-  ; tool_gate_enabled = true
   ; tool_surface_fallback_used = false
   ; materialized_tools = []
   }
@@ -254,8 +236,6 @@ let base_receipt : R.t =
   ; observed_tools = []
   ; canonical_tools = []
   ; unexpected_tools = []
-  ; tools_used = []
-  ; tool_contract_result = R.Contract_unknown
   ; tool_surface = base_tool_surface
   ; sandbox_kind = Masc.Keeper_types_profile_sandbox.Local
   ; sandbox_root = None
@@ -313,16 +293,6 @@ let runtime_outcomes =
   ; R.Runtime_not_dispatched
   ]
 
-let tool_contract_results =
-  [ R.Contract_unknown
-  ; R.Contract_not_dispatched
-  ; R.Contract_no_tool_capable_provider
-  ; R.Contract_tool_surface_mismatch
-  ; R.Contract_needs_execution_progress
-  ; R.Contract_satisfied_completion
-  ]
-
-let tools_used_variants = [ []; [ "some_tool" ] ]
 let outcomes = [ `Ok; `Error; `Cancelled; `Skipped ]
 
 let disp_pair_to_string (d, r) =
@@ -349,55 +319,45 @@ let () =
                       List.iter
                         (fun runtime_outcome ->
                            List.iter
-                             (fun tcr ->
-                                List.iter
-                                  (fun tools_used ->
-                                     List.iter
-                                       (fun outcome ->
-                                          let receipt =
-                                            { base_receipt with
-                                              terminal_reason_code = code
-                                            ; error_kind
-                                            ; degraded_retry_applied = degraded
-                                            ; runtime_fallback_applied = fallback
-                                            ; runtime_outcome
-                                            ; tool_contract_result = tcr
-                                            ; tools_used
-                                            ; outcome
-                                            }
-                                          in
-                                          incr count;
-                                          let want =
-                                            frozen_operator_disposition receipt
-                                          in
-                                          let got =
-                                            R.operator_disposition receipt
-                                          in
-                                          if want <> got
-                                          then (
-                                            incr mismatches;
-                                            if !mismatches <= 20
-                                            then
-                                              check
-                                                (Printf.sprintf
-                                                   "disp-mismatch code=%S ek=%s out=%s ro=%s tcr=%s tools=%b deg=%b fb=%b want=%s got=%s"
-                                                   code
-                                                   (match error_kind with
-                                                    | None -> "none"
-                                                    | Some k -> R.error_kind_to_string k)
-                                                   (R.outcome_kind_to_string outcome)
-                                                   (R.runtime_outcome_to_string
-                                                      runtime_outcome)
-                                                   (R.tool_contract_result_to_string tcr)
-                                                   (tools_used <> [])
-                                                   degraded
-                                                   fallback
-                                                   (disp_pair_to_string want)
-                                                   (disp_pair_to_string got))
-                                                false))
-                                       outcomes)
-                                  tools_used_variants)
-                             tool_contract_results)
+                             (fun outcome ->
+                                let receipt =
+                                  { base_receipt with
+                                    terminal_reason_code = code
+                                  ; error_kind
+                                  ; degraded_retry_applied = degraded
+                                  ; runtime_fallback_applied = fallback
+                                  ; runtime_outcome
+                                  ; outcome
+                                  }
+                                in
+                                incr count;
+                                let want =
+                                  frozen_operator_disposition receipt
+                                in
+                                let got =
+                                  R.operator_disposition receipt
+                                in
+                                if want <> got
+                                then (
+                                  incr mismatches;
+                                  if !mismatches <= 20
+                                  then
+                                    check
+                                      (Printf.sprintf
+                                         "disp-mismatch code=%S ek=%s out=%s ro=%s deg=%b fb=%b want=%s got=%s"
+                                         code
+                                         (match error_kind with
+                                          | None -> "none"
+                                          | Some k -> R.error_kind_to_string k)
+                                         (R.outcome_kind_to_string outcome)
+                                         (R.runtime_outcome_to_string
+                                            runtime_outcome)
+                                         degraded
+                                         fallback
+                                         (disp_pair_to_string want)
+                                         (disp_pair_to_string got))
+                                      false))
+                             outcomes)
                         runtime_outcomes)
                    fallback_bools)
               degraded_bools)

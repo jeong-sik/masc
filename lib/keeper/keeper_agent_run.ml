@@ -13,24 +13,10 @@ module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
 let per_provider_timeout_for_turn = Turn_helpers.per_provider_timeout_for_turn
-let progress_keeper_tool_names_for_contract =
-  Contract_helpers.progress_keeper_tool_names_for_contract
-;;
-
-let no_progress_success_tool_names_for_contract =
-  Contract_helpers.no_progress_success_tool_names_for_contract
-;;
-
-let tool_contract_result_for_observed_tools =
-  Turn_helpers.tool_contract_result_for_observed_tools
 
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
-  let progress_keeper_tool_names_for_contract =
-    Contract_helpers.progress_keeper_tool_names_for_contract
-  let no_progress_success_tool_names_for_contract =
-    Contract_helpers.no_progress_success_tool_names_for_contract
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -110,7 +96,7 @@ let run_turn
     ~keeper_id:meta.name
     ~phase:"started"
     ~model_used:None
-    ~tools_used:[]
+    ~observed_tool_names:[]
     ~stop_reason:None
     ~duration_ms:None
     ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0));
@@ -134,7 +120,7 @@ let run_turn
         ~keeper_id:meta.name
         ~phase:"completed"
         ~model_used:None
-        ~tools_used:[]
+        ~observed_tool_names:[]
         ~stop_reason:None
         ~duration_ms:(Some duration_ms)
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
@@ -388,12 +374,7 @@ let run_turn
               `String
                 (tool_surface_class_to_string
                    acc.tool_surface.tool_surface_class) );
-            ( "tool_requirement",
-              `String
-                (tool_requirement_to_string acc.tool_surface.tool_requirement)
-            );
             ("visible_tool_count", `Int acc.tool_surface.visible_tool_count);
-            ("tool_gate_enabled", `Bool acc.tool_surface.tool_gate_enabled);
             ( "tool_surface_fallback_used",
               `Bool acc.tool_surface.tool_surface_fallback_used );
             ("config_root", `String acc.tool_surface.config_root);
@@ -401,9 +382,6 @@ let run_turn
       Keeper_runtime_manifest.Tool_surface_selected;
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
     let initial_tool_surface = s.Keeper_run_tools.initial_tool_surface in
-    let initial_tool_surface_blocker_ref =
-      s.Keeper_run_tools.initial_tool_surface_blocker
-    in
     let tool_usage_before = s.Keeper_run_tools.tool_usage_before in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
     let receipt_model_used_ref = s.Keeper_run_tools.receipt_model_used_ref in
@@ -420,12 +398,6 @@ let run_turn
     let unexpected_tool_names_ref = s.Keeper_run_tools.unexpected_tool_names_ref in
     let actual_keeper_tool_names_ref = s.Keeper_run_tools.actual_keeper_tool_names_ref in
     let materialized_tool_names_ref : string list ref = ref [] in
-    let keeper_has_owned_active_task () =
-      Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
-    in
-    (* A claim tool mutates [acc.meta.current_task_id_id] during this run; contract
-     gating must judge claim-context tools against ownership at turn entry. *)
-    let had_owned_active_task_at_turn_start = keeper_has_owned_active_task () in
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
@@ -457,8 +429,6 @@ let run_turn
      with
      | Error e -> Error (Agent_sdk.Error.Internal e)
      | Ok oas_allowed_paths ->
-       let require_tool_support = false in
-       let require_tool_choice_support = false in
        let timeout_s =
          match oas_timeout_s with
          | Some value -> value
@@ -495,9 +465,6 @@ let run_turn
            (match pre_dispatch_max_tokens_error with
             | Some err -> Error err
             | None ->
-             (match !initial_tool_surface_blocker_ref with
-            | Some err -> Error err
-            | None ->
               let call_run_named ~initial_messages =
                 let bridge_timeout_s =
                   Keeper_llm_bridge.with_hitl_approval_headroom timeout_s
@@ -508,10 +475,8 @@ let run_turn
                           Keeper_turn_driver.run_named
                             ~runtime_id:runtime_id_string
                             ~base_path:config.base_path
-                            ~keeper_name:meta.name
+                    ~keeper_name:meta.name
                     ?provider_filter
-                    ~require_tool_choice_support
-                    ~require_tool_support
                     ~goal:user_message
                     ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -627,7 +592,7 @@ let run_turn
                    Keeper_agent_run_tool_observation.analyze
                      ~base_path:config.base_path
                      ~keeper_name:meta.name
-                     ~requested_tool_names_seen:acc.requested_tool_names_seen
+                     ~visible_tool_names:acc.requested_tool_names
                      ~tool_usage_before
                      ~tool_calls:acc.tool_calls
                      result.response.content
@@ -677,13 +642,11 @@ let run_turn
                  if valid_tool_calls_present then acc.keeper_surface_tool_used <- true;
                  if unexpected_tool_names <> [] && not valid_tool_calls_present
                  then (
-                   acc.receipt_tool_contract_result <-
-                     Keeper_execution_receipt.Contract_violated;
                    Error
                      (Keeper_agent_run_tool_surface_violation.to_sdk_error
                         ~keeper_name:meta.name
                         ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
-                        ~requested_tool_names_seen:acc.requested_tool_names_seen
+                        ~visible_tool_names:acc.requested_tool_names
                         ~unexpected_tool_names))
                  else (
                    let should_log_unexpected_tool_partial =
@@ -712,15 +675,9 @@ let run_turn
                      Keeper_tool_observation.final_keeper_tool_names
                        ~reported_tool_names
                        ~observed_tool_names
-                       ~allowed_tool_names:acc.requested_tool_names_seen
+                       ~allowed_tool_names:acc.requested_tool_names
                    in
                    actual_keeper_tool_names_ref := actual_keeper_tool_names;
-                   let progress_keeper_tool_names =
-                     progress_keeper_tool_names_for_contract
-                       ~allowed_tool_names:acc.requested_tool_names_seen
-                       ~actual_keeper_tool_names
-                       ~tool_calls:acc.tool_calls
-                   in
                    let usage = Keeper_context_runtime.usage_of_response result.response in
                    let ctx_composition =
                      build_ctx_composition_metrics
@@ -732,14 +689,7 @@ let run_turn
                        ~history_messages
                        ~actual_input_tokens:(Some usage.input_tokens)
                    in
-                   let tool_contract_status ()
-                       : Keeper_execution_receipt.tool_contract_result =
-                     Contract_helpers.observed_tool_contract_status
-                       ~had_owned_active_task_at_turn_start
-                       ~actual_keeper_tool_names:progress_keeper_tool_names
-                   in
                    let text_result =
-                     acc.receipt_tool_contract_result <- tool_contract_status ();
                      Ok (`Provider_text text)
                    in
                    match text_result with
@@ -767,7 +717,7 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
-                          ())))))
+                          ()))))
                in
        Keeper_agent_run_receipt.finalize
          ~config

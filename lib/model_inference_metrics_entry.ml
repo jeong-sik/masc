@@ -173,7 +173,7 @@ type raw_entry =
   ; fallback_applied : bool
   ; cost_usd : float option
   ; tool_call_count : int
-  ; tools_used : string list
+  ; observed_tool_names : string list
   ; usage_reported : bool option
   ; telemetry_reported : bool option
   ; usage_trust : string option

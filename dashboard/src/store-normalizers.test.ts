@@ -122,7 +122,7 @@ describe('normalizeExecutionQueueItem', () => {
       target_id: 'sangsu',
       runtime_blocker_class: 'no_tool_capable_provider',
       runtime_blocker_summary: 'no provider can satisfy tool surface',
-      attention_reason: 'tool_contract_failed',
+      attention_reason: 'runtime_error',
     })).toMatchObject({
       stop_cause: {
         code: 'no_tool_capable_provider',

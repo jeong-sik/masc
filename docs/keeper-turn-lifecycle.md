@@ -214,7 +214,6 @@ stateDiagram-v2
     Awaiting_tool_result --> Streaming: tool result returned
     Streaming --> Completing: stop_reason received
     Completing --> Done: receipt ok
-    Completing --> Failed: contract violation (Failure_tool_contract_violation)
     Completing --> Failed: receipt write failed (Failure_receipt_lost)
     Streaming --> Cancelled: supervisor stop (Cancelled_supervisor_stop)
     Streaming --> Cancelled: provider timeout (Cancelled_provider_timeout)

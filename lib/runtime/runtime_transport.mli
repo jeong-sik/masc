@@ -138,12 +138,10 @@ val provider_label : Llm_provider.Provider_config.t -> string
     Cli_tool_a + keeper-bound actor tools use the per-keeper raw bearer
     token when it is available, routed through OAS [bearer_token_env_var].
     When no per-keeper token exists, they trigger the [#10097] omission
-    counter/log path. Required turns reject because the omitted tools cannot
-    satisfy the tool contract; optional turns keep the prior degraded
-    discovery path and exclude those tools from the resulting policy. *)
+    counter/log path. Omitted tools are now excluded from the resulting policy
+    instead of turning tool availability into a completion contract. *)
 val resolve_tool_lane_for_oas_tools :
   ?agent_name:string ->
-  ?tool_requirement:[ `Required | `Optional ] ->
   provider_cfg:Llm_provider.Provider_config.t ->
   tools:Agent_sdk.Tool.t list ->
   unit ->

@@ -62,7 +62,7 @@ include Keeper_unified_turn_phase_plan   (*  84 LOC *)
 |-------|------------|-----|---------|
 | Setup | L77-129 | 53 | nested let bindings |
 | **Phase Gate** | L130-242 | 113 | 3 typed outcomes (supervisor_stop / non_executable_phase / registry_missing → Ok meta or Error) |
-| Runtime & tool resolution | L243-? | TBD | sets effective_runtime, tool_requirement, timeout_budget |
+| Runtime & tool resolution | L243-? | TBD | sets effective_runtime, tool surface snapshot, timeout_budget |
 | Retry loop | ?-1900 | TBD | OAS Agent.run + runtime rotation + error classify |
 | Success/Failure dispatch | L1904-1940 | 37 | already extracted to `Keeper_unified_turn_(success|failure)` |
 

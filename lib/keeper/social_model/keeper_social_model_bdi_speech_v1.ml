@@ -192,7 +192,7 @@ let tool_only_state ~(meta : keeper_meta)
     ~(previous_state : state option)
     ~(result : Keeper_agent_run.run_result) =
   let output, transition_reason =
-    match inferred_tool_surface result.tools_used with
+    match inferred_tool_surface result.observed_tool_names with
     | Some routed -> routed
     | None ->
         ( {
@@ -329,7 +329,7 @@ let transition (previous_state : state option) (input : input) =
   let meta = input.meta in
   let observation = input.observation in
   let result = input.result in
-  if result.tools_used <> [] then
+  if result.observed_tool_names <> [] then
     tool_only_state ~meta ~observation ~previous_state ~result
   else if input.headers <> [] then
     let state, output, transition_reason =
@@ -372,31 +372,31 @@ let apply_output_to_result ~(meta : keeper_meta)
     ~(result : Keeper_agent_run.run_result)
     ~(visible_response_body : string) (state : Types.social_state) =
   match state.speech_act, state.delivery_surface with
-  | Request_help, Board_post when result.tools_used = [] ->
+  | Request_help, Board_post when result.observed_tool_names = [] ->
       (match deliver_request_help_post ~meta ~state with
       | Request_help_posted ->
-          let tools_used =
+          let observed_tool_names =
             dedupe_keep_order
-              ("keeper_board_post" :: result.tools_used)
+              ("keeper_board_post" :: result.observed_tool_names)
           in
           ( { result with
               response_text = "";
-              tools_used;
-              tool_calls_made = List.length tools_used;
+              observed_tool_names;
+              tool_calls_made = List.length observed_tool_names;
             },
             state )
       | Request_help_deduped | Request_help_failed ->
           ({ result with response_text = "" }, state))
   | Defer, Silent ->
       ({ result with response_text = "" }, state)
-  | Stay_silent, Silent when result.tools_used = [] ->
+  | Stay_silent, Silent when result.observed_tool_names = [] ->
       ({ result with response_text = "" }, state)
   | _ ->
       let response_text =
         match
           Keeper_tool_response.normalize_response_text
             ~text:visible_response_body
-            ~tool_names:result.tools_used ()
+            ~tool_names:result.observed_tool_names ()
         with
         | Ok normalized -> normalized
         | Error _ -> visible_response_body

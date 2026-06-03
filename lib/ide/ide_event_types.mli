@@ -66,7 +66,7 @@ and turn_event =
   ; keeper_id : string
   ; phase : string
   ; model_used : string option
-  ; tools_used : string list
+  ; observed_tool_names : string list
   ; stop_reason : string option
   ; duration_ms : int option
   ; timestamp_ms : int64

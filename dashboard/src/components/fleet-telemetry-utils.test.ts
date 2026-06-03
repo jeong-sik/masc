@@ -238,7 +238,7 @@ describe('buildFleetRows runtime labels', () => {
           label: 'no tool capable provider',
           summary: 'no provider can satisfy tool surface',
           severity: 'warn',
-          next_action: 'inspect_provider_tool_contract',
+          next_action: 'inspect_runtime_attempts',
         },
       },
     ], EMPTY_TOOL_QUALITY)

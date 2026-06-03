@@ -99,7 +99,7 @@ let shell_constraints_to_json (shell : Tool.shell_constraints) =
     ]
 ;;
 
-let tool_contracts_to_json tools =
+let tool_descriptors_to_json tools =
   `List
     (List.map
        (fun (tool : Tool.t) ->
@@ -562,7 +562,7 @@ let persist ~agent ~raw_trace ~(options : options) () =
           ~content:raw_trace_json
       in
       let tool_catalog_json =
-        tool_contracts_to_json (Tool_set.to_list (Agent.tools agent))
+        tool_descriptors_to_json (Tool_set.to_list (Agent.tools agent))
         |> Yojson.Safe.pretty_to_string
       in
       let* tool_catalog_artifact =

@@ -81,7 +81,7 @@ let test_ingest_turn_event () =
       ~keeper_id:"keeper-beta"
       ~phase:"completed"
       ~model_used:(Some "claude-sonnet-4-6")
-      ~tools_used:["fs_write"; "execute"]
+      ~observed_tool_names:["fs_write"; "execute"]
       ~stop_reason:(Some "end_turn")
       ~duration_ms:(Some 5000)
       ~timestamp_ms:1717400000000L;

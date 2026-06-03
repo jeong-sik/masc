@@ -56,7 +56,6 @@ val effective_attempt_timeout_s :
 
 val resolve_tool_lane_for_oas_tools :
   ?agent_name:string ->
-  ?tool_requirement:[ `Optional | `Required ] ->
   tools:Agent_sdk.Tool.t list ->
   t ->
   ( Agent_sdk.Tool.t list
@@ -69,15 +68,6 @@ val runtime_mcp_policy_for_agent :
   t ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
-
-val tool_filter_rejection_label :
-  keeper_name:string ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  tools:Agent_sdk.Tool.t list ->
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  t ->
-  string option
 
 val capacity_key : t -> string
 val capacity_keys : t list -> string list

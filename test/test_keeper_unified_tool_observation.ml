@@ -90,38 +90,6 @@ let test_final_keeper_tool_names_ignores_legacy_mcp_alias () =
     final_tools
 ;;
 
-let test_requested_tool_names_seen_preserves_prior_turn_surface () =
-  let seen =
-    Masc.Keeper_run_tools.merge_requested_tool_names_seen
-      ~seen:[]
-      [ "keeper_board_curation_submit"; "keeper_board_post" ]
-  in
-  let seen =
-    Masc.Keeper_run_tools.merge_requested_tool_names_seen
-      ~seen
-      [ "keeper_board_post"; "keeper_board_comment" ]
-  in
-  check
-    (list string)
-    "run surface keeps prior-turn tools"
-    [ "keeper_board_curation_submit"; "keeper_board_post"; "keeper_board_comment" ]
-    seen;
-  check
-    (list string)
-    "prior-turn observed tool remains expected for run-level validation"
-    []
-    (KTO.unexpected_tool_names
-       ~allowed_tool_names:seen
-       ~tool_names:[ "keeper_board_curation_submit" ]);
-  check
-    (list string)
-    "last-turn-only surface would have false-positive unexpected tool"
-    [ "keeper_board_curation_submit" ]
-    (KTO.unexpected_tool_names
-       ~allowed_tool_names:[ "keeper_board_post"; "keeper_board_comment" ]
-       ~tool_names:[ "keeper_board_curation_submit" ])
-;;
-
 let () =
   run
     "keeper_unified_tool_observation"
@@ -154,10 +122,6 @@ let () =
             "final keeper tool names ignore legacy MCP keeper alias"
             `Quick
             test_final_keeper_tool_names_ignores_legacy_mcp_alias
-        ; test_case
-            "requested tool names seen preserves prior turn surface"
-            `Quick
-            test_requested_tool_names_seen_preserves_prior_turn_surface
         ] )
     ]
 ;;

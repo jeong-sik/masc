@@ -1,17 +1,17 @@
 let to_sdk_error
       ~keeper_name
       ~runtime_id
-      ~requested_tool_names_seen
+      ~visible_tool_names
       ~unexpected_tool_names
   =
   let requested_preview =
-    requested_tool_names_seen
+    visible_tool_names
     |> List.filteri (fun i _ -> i < 8)
     |> String.concat ", "
   in
   let omitted =
-    List.length requested_tool_names_seen
-    - min 8 (List.length requested_tool_names_seen)
+    List.length visible_tool_names
+    - min 8 (List.length visible_tool_names)
   in
   let requested_suffix =
     if omitted > 0 then Printf.sprintf " (+%d more)" omitted else ""
@@ -25,7 +25,7 @@ let to_sdk_error
       requested_suffix
   in
   Prometheus.inc_counter
-    Keeper_metrics.(to_string ContractViolations)
+    Keeper_metrics.(to_string ToolSurfaceViolations)
     ~labels:
       [ "keeper_name", keeper_name
       ; "kind", "tool_surface_violation"

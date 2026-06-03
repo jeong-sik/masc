@@ -66,7 +66,7 @@ val record_turn_latency_by_model_bucket :
 
 val is_observation_only_tool_name : string -> bool
 val has_substantive_tool_calls : string list -> bool
-val is_noop_cycle : has_text:bool -> tools_used:string list -> bool
+val is_noop_cycle : has_text:bool -> observed_tool_names:string list -> bool
 
 val visible_run_validation :
   Keeper_agent_run.run_result -> Agent_sdk.Raw_trace.run_validation option

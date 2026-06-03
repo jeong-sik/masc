@@ -28,7 +28,7 @@ let constructor_cases : (string * T.t) list =
   ; "of_code/explicit", T.of_code "post_commit_ambiguous"
   ; "of_code/legacy_persisted/completed", T.of_code "completed"
   ; ( "of_code/sdk_error/contract_violation"
-    , T.of_code "completion_contract_violation:tool_contract" )
+    , T.of_code "completion_contract_violation:response_schema" )
   ; "of_code/sdk_error/api_error_timeout", T.of_code "api_error_timeout"
   ; "of_code/sdk_error/api_error_overloaded", T.of_code "api_error_overloaded"
   ; ( "of_code/sdk_error/agent_error_max_turns"
@@ -38,7 +38,6 @@ let constructor_cases : (string * T.t) list =
   ; "of_code/turn_wall_clock", T.of_code "turn_wall_clock_timeout"
   ; "of_code/turn_overflow_pause", T.of_code "turn_overflow_pause"
   ; "of_code/turn_livelock_pause", T.of_code "turn_livelock_pause"
-  ; "of_code/tool_contract", T.of_code "tool_contract_no_tool_call"
   ]
 ;;
 

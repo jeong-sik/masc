@@ -8,7 +8,7 @@ let metric ?(channel = "turn") tools =
     [
       ("ts_unix", `Float 1.0);
       ("channel", `String channel);
-      ("tools_used", `List (List.map (fun tool -> `String tool) tools));
+      ("observed_tool_names", `List (List.map (fun tool -> `String tool) tools));
       ("tool_call_count", `Int (List.length tools));
     ]
 
@@ -18,7 +18,7 @@ let sparse_tool_event () =
       ("ts_unix", `Float 3.0);
       ("channel", `String "tool_event");
       ("tool_call_count", `Int 0);
-      ("tools_used", `List []);
+      ("observed_tool_names", `List []);
     ]
 
 let context_snapshot ?(ts_unix = 10.0) ?(context_ratio = 0.75) () =
@@ -31,7 +31,7 @@ let context_snapshot ?(ts_unix = 10.0) ?(context_ratio = 0.75) () =
       ("context_max", `Int 1000);
       ("message_count", `Int 12);
       ("tool_call_count", `Int 0);
-      ("tools_used", `List []);
+      ("observed_tool_names", `List []);
     ]
 
 let json_line json = Yojson.Safe.to_string json

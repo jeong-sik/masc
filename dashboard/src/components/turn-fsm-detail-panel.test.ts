@@ -105,10 +105,9 @@ describe("TurnFsmDetailPanel", () => {
         latest_receipt_present: true,
         recorded_at: "2026-05-01T16:00:00Z",
         outcome: "failed",
-        terminal_reason_code: "tool_contract",
+        terminal_reason_code: "runtime_error",
         operator_disposition: null,
         operator_disposition_reason: null,
-        tool_contract_result: "violated",
         model_used: "provider-k-4.5",
         stop_reason: null,
         duration_ms: null,
@@ -124,8 +123,7 @@ describe("TurnFsmDetailPanel", () => {
     expect(chips.map(chip => chip.textContent?.trim())).toEqual(expect.arrayContaining([
       "실행 중",
       "receipt failed",
-      "reason tool_contract",
-      "tool 도구 계약 위반",
+      "reason runtime_error",
     ]))
     expect(chips.map(chip => chip.getAttribute("data-status-chip-tone"))).toEqual(expect.arrayContaining([
       "info",

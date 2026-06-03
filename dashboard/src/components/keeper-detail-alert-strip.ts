@@ -208,36 +208,27 @@ function assertNever(value: never): never {
 
 // Exhaustive render over `KeeperVerdict.kind`. Adding a new arm to
 // `KeeperVerdict` will fail typecheck on the assertNever default
-// rather than silently falling through to a default render. The tool
-// contract result, when present, is always shown as scope-tagged
-// evidence ("도구 계약") attached to the verdict rather than as a
-// sibling claim — this is what closes 모순 #2.
+// rather than silently falling through to a default render.
 function renderVerdict(verdict: KeeperVerdict) {
-  const toolContractEvidence = verdict.toolContract
-    ? html`<span><${StrongSecondary}>도구 계약</${StrongSecondary}> · ${verdict.toolContract.label}</span>`
-    : null
   switch (verdict.kind) {
     case 'failed':
       return html`
         <span><${StrongSecondary}>검증</${StrongSecondary}> · ${verdict.reasonLabel}</span>
-        ${toolContractEvidence}
       `
     case 'pending':
       return html`
         ${verdict.reasonLabel
           ? html`<span><${StrongSecondary}>검증</${StrongSecondary}> · ${verdict.reasonLabel}</span>`
           : null}
-        ${toolContractEvidence}
       `
     case 'verified':
       return html`
         ${verdict.reasonLabel
           ? html`<span><${StrongSecondary}>검증</${StrongSecondary}> · ${verdict.reasonLabel}</span>`
           : null}
-        ${toolContractEvidence}
       `
     case 'no_verdict':
-      return toolContractEvidence
+      return null
     default:
       return assertNever(verdict)
   }
@@ -330,25 +321,13 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const shouldShowOperatorDispositionReason =
     operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
   const executionSummary = keeper.trust?.execution_summary ?? null
-  // Backend emits `runtime_proof_status` as a copy of
-  // `tool_contract_result` (lib/keeper/keeper_runtime_trust_snapshot.ml:1063-1065).
-  // Reading either yields the same closed-sum tool contract code, so
-  // we collapse to a single canonical input for the verdict helper.
-  const toolContractResult =
-    executionSummary?.runtime_proof_status?.trim()
-    || executionSummary?.tool_contract_result?.trim()
-    || null
   // Single typed verdict replaces the prior sibling "검증" / "증명"
   // spans. Exhaustive switch on `verdict.kind` below; new arms force
   // a compile error rather than silently falling through.
   const verdict: KeeperVerdict = computeKeeperVerdict({
     trustDisposition,
     trustSummary,
-    toolContractResult,
   })
-  const requiredTools = executionSummary?.required_tools ?? []
-  const missingRequiredTools = executionSummary?.missing_required_tools ?? []
-  const usedTools = executionSummary?.tools_used ?? []
   const unexpectedTools = executionSummary?.unexpected_tools ?? []
   const providerAttempts = executionSummary?.provider_attempt_count
   const providerFallback = executionSummary?.provider_fallback_applied
@@ -406,11 +385,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || (latestRuntimeMetric?.fallback_applied === true && Boolean(fallbackReason || fallbackHops > 0))
   const hasExecutionEvidenceSignal =
     verdict.kind !== 'no_verdict'
-    || verdict.toolContract !== null
-    || requiredTools.length > 0
-    || usedTools.length > 0
     || unexpectedTools.length > 0
-    || missingRequiredTools.length > 0
     || Boolean(stopCause)
     || Boolean(latestTerminalCode)
     || Boolean(latestNextAction)
@@ -597,17 +572,8 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             `
           : null}
         ${renderVerdict(verdict)}
-        ${requiredTools.length > 0
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">필요 도구</strong> · ${requiredTools.join(', ')}</span>`
-          : null}
-        ${usedTools.length > 0
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">사용 도구</strong> · ${usedTools.join(', ')}</span>`
-          : null}
         ${unexpectedTools.length > 0
-          ? html`<span class="text-[var(--color-status-err)]" title="키퍼 persona의 허용 도구 목록 외부에서 호출된 도구 — 계약 위반"><strong>허용 외 도구</strong> · ${unexpectedTools.join(', ')}</span>`
-          : null}
-        ${missingRequiredTools.length > 0
-          ? html`<span class="text-[var(--color-status-err)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`
+          ? html`<span class="text-[var(--color-status-err)]" title="현재 노출된 도구 표면 밖에서 보고된 도구"><strong>노출 외 도구</strong> · ${unexpectedTools.join(', ')}</span>`
           : null}
         ${runtimeLabel
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">런타임</strong> · ${runtimeLabel}</span>`

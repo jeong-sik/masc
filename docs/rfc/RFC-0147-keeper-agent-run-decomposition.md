@@ -41,7 +41,7 @@ RFC-0136 (`keeper_unified_turn` decomposition) 의 자매 RFC — 동일 *single
 |-------|------|------|
 | L17-22 | 6 re-exports from `Turn_helpers` | sibling re-export |
 | L24 | 1 re-export from `Contract_helpers` | sibling re-export |
-| L25-78 | 5 small helpers (`progress_keeper_tool_names_for_contract`, `tool_contract_result_for_observed_tools` 등) | inline helper |
+| L25-78 | response/tool observation helpers | inline helper |
 | **L80** | **`run_turn`** | **main mega-function L80-L2103 = 2023 LoC (전체 96%)** |
 
 interface (`.mli`, 346 LOC) 의 surface 는 `run_turn` + 7 re-exports.

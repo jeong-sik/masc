@@ -370,7 +370,7 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
          |> Option.value ~default:"unknown"
        in
        let context_ratio = Safe_ops.json_float_opt "context_ratio" e.payload in
-       let tools_used = Safe_ops.json_string_list "tools_used" e.payload in
+       let observed_tool_names = Safe_ops.json_string_list "observed_tool_names" e.payload in
        let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key e.payload) in
        let optional_fields =
          let reasoning =
@@ -413,7 +413,7 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
                  ("model_used", `String model_used);
                  ("work_kind", `String work_kind);
                  ("context_ratio", Json_util.float_opt_to_json context_ratio);
-                 ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+                 ("observed_tool_names", `List (List.map (fun s -> `String s) observed_tool_names));
                ] @ optional_fields);
          })
   |> take limit

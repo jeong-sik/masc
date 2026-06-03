@@ -811,12 +811,12 @@ let cap_for_kind (caps : (string * int) list) (kind : string) : int =
     downstream consumers to distinguish from model-generated blocks. *)
 let synthesize_state_from_run_result
     ~(goal : string)
-    ~(tools_used : string list)
+    ~(observed_tool_names : string list)
     ~(stop_reason : string)
     ~(response_text : string)
     : keeper_state_snapshot =
   let progress =
-    match tools_used with
+    match observed_tool_names with
     | [] -> Some "No tools used this generation"
     | ts ->
       let unique = List.sort_uniq String.compare ts in

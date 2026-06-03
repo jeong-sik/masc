@@ -25,30 +25,21 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('renders execution receipt evidence even when the attention flag is false', () => {
+  it('renders unexpected tool evidence even when the attention flag is false', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         needs_attention: false,
         trust: {
           execution_summary: {
-            tool_contract_result: 'tool_surface_mismatch',
-            required_tools: ['keeper_task_done'],
-            missing_required_tools: ['keeper_task_done'],
+            unexpected_tools: ['keeper_task_done'],
           },
         },
       }),
     }))
 
-    // Tool contract result is now rendered as scope-tagged evidence
-    // ("도구 계약") attached to a single typed verdict, using the Korean
-    // label from `toolContractLabel`. The prior sibling "증명" span and
-    // its raw English token are intentionally removed (모순 #2).
-    expect(container.textContent).toContain('도구 계약')
-    expect(container.textContent).toContain('도구 표면 불일치')
-    expect(container.textContent).not.toContain('증명')
-    expect(container.textContent).toContain('필요 도구')
+    expect(container.textContent).toContain('노출 외 도구')
     expect(container.textContent).toContain('keeper_task_done')
-    expect(container.textContent).toContain('누락')
+    expect(container.textContent).not.toContain('증명')
   })
 
   it('closes 모순 #2: simultaneous failure verdict + tool-contract success collapse into one verdict', () => {
@@ -58,9 +49,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         trust: {
           disposition: 'Alert',
           attention_reason: 'completion_contract_violation',
-          execution_summary: {
-            tool_contract_result: 'satisfied_execution',
-          },
+          execution_summary: {},
         },
       }),
     }))
@@ -168,7 +157,6 @@ describe('KeeperRuntimeAlertStrip', () => {
         },
         trust: {
           execution_summary: {
-            tool_contract_result: 'satisfied_execution',
             runtime_outcome: 'completed',
             provider_attempt_count: 1,
           },

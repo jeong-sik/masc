@@ -430,7 +430,7 @@ function entryPreview(e: TelemetryEntry): string {
     case 'keeper_metric': {
       const name = asNullableString(e.name) ?? '-'
       const channel = asNullableString(e.channel) ?? '-'
-      const tools = asStringArray(e.tools_used)
+      const tools = asStringArray(e.observed_tool_names)
       const toolCount = typeof e.tool_call_count === 'number' ? e.tool_call_count : tools.length
       return `${name} [${channel}] tools=${toolCount}`
     }

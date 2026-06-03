@@ -222,7 +222,6 @@ describe('summarizeKeeperMonitoring', () => {
       circuit_breaker: { state: 'closed' },
       is_live: false,
       execution: {
-        tool_contract_result: 'tool_surface_mismatch',
       },
       runtime_attention: {
         blocked: false,

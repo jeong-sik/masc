@@ -52,7 +52,7 @@ type log_entry = {
   le_latency_ms : int option;
   le_cost_usd : float option;
   le_work_kind : string option;
-  le_tools_used : string list;
+  le_observed_tool_names : string list;
   le_compacted : bool option;
   le_goal_alignment : float option;
   le_repetition_risk : float option;

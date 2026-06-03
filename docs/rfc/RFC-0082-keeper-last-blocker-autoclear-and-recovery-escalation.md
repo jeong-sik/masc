@@ -357,7 +357,7 @@ Of the 5 remaining latched keepers (`provider-k-coding`, `imseonghan`, `janitor`
 - 1 carries `klass = stale_turn_timeout` (`active=625s` > `threshold=600s`)
 - 4 carry `klass = stale_fleet_batch` (mostly with `root_cause=stale_turn_timeout` and active times 2132–2167 s)
 
-All 5 share: `set_at = None` (no timestamp on the latch dict — legacy shape), `paused = false` (so dispatch is not gated), and `last_proactive_reason` in {`text_response`, `tools=[...]`, `removed_tool_contract` error} — *they are running turns*. Their *running* turns do not pass through any of the six clear sites. This is the real defect.
+All 5 share: `set_at = None` (no timestamp on the latch dict — legacy shape), `paused = false` (so dispatch is not gated), and `last_proactive_reason` in {`text_response`, `tools=[...]`, runtime error} — *they are running turns*. Their *running* turns do not pass through any of the six clear sites. This is the real defect.
 
 ### §12.4 Measurement caveat — initial 17/1 was inflated
 

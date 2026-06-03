@@ -21,9 +21,6 @@ type hook_accumulator =
   ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
-  ; mutable requested_tool_names_seen : string list
-  ; mutable receipt_tool_contract_result :
-      Keeper_execution_receipt.tool_contract_result
   }
 
 type hook_outputs =
@@ -34,9 +31,6 @@ type hook_outputs =
   ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
-  ; out_requested_tool_names_seen : string list
-  ; out_receipt_tool_contract_result :
-      Keeper_execution_receipt.tool_contract_result
   }
 
 let freeze (acc : hook_accumulator) : hook_outputs =
@@ -47,17 +41,9 @@ let freeze (acc : hook_accumulator) : hook_outputs =
   ; out_tool_overlay = acc.tool_overlay
   ; out_tool_surface = acc.tool_surface
   ; out_requested_tool_names = acc.requested_tool_names
-  ; out_requested_tool_names_seen = acc.requested_tool_names_seen
-  ; out_receipt_tool_contract_result = acc.receipt_tool_contract_result
   }
 ;;
 
-let merge_requested_tool_names_seen ~seen requested =
-  Keeper_types_profile_toml_normalizers.dedupe_keep_order (seen @ requested)
-;;
-
 let record_requested_tool_names (acc : hook_accumulator) requested =
-  acc.requested_tool_names <- requested;
-  acc.requested_tool_names_seen <-
-    merge_requested_tool_names_seen ~seen:acc.requested_tool_names_seen requested
+  acc.requested_tool_names <- requested
 ;;

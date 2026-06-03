@@ -426,7 +426,7 @@ let test_recent_decision_without_claim_exposes_coverage_gap () =
              ("keeper_name", `String "sangsu");
              ("agent_name", `String "keeper-sangsu-agent");
              ("outcome", `String "success");
-             ("tools_used", `List [ `String "keeper_task_claim" ]);
+             ("observed_tool_names", `List [ `String "keeper_task_claim" ]);
            ]);
       let summary =
         Keeper_accountability.accountability_summary_json config

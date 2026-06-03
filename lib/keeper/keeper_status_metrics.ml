@@ -526,7 +526,7 @@ let single_tool_name_members json =
 let tool_names_of_audit_json json =
   merge_tool_name_lists
     (single_tool_name_members json)
-    (Json_util.json_string_list_member "tools_used" json)
+    (Json_util.json_string_list_member "observed_tool_names" json)
 
 let json_iso_opt json =
   match Safe_ops.json_string_opt "ts" json with

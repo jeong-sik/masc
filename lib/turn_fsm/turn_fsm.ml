@@ -31,7 +31,6 @@ type failure_reason =
       detail : string;
     }
   | Failure_provider_error of { kind : string; detail : string }
-  | Failure_tool_contract_violation of { reason_code : string }
   | Failure_receipt_lost of {
       primary_error : string;
       fallback_path : string option;
@@ -104,7 +103,6 @@ let failure_reason_label = function
   | Failure_runtime_unavailable _ -> "runtime_unavailable"
   | Failure_no_tool_capable_provider _ -> "no_tool_capable_provider"
   | Failure_provider_error _ -> "provider_error"
-  | Failure_tool_contract_violation _ -> "tool_contract_violation"
   | Failure_receipt_lost _ -> "receipt_lost"
   | Failure_turn_livelock_blocked _ -> "turn_livelock_blocked"
   | Failure_runtime_error _ -> "runtime_error"
@@ -130,8 +128,6 @@ let pp_failure_reason fmt = function
         runtime_id detail
   | Failure_provider_error { kind; detail } ->
       Format.fprintf fmt "provider_error(kind=%s,detail=%s)" kind detail
-  | Failure_tool_contract_violation { reason_code } ->
-      Format.fprintf fmt "tool_contract_violation(%s)" reason_code
   | Failure_receipt_lost { primary_error; fallback_path } ->
       Format.fprintf fmt "receipt_lost(err=%s,fallback=%s)"
         primary_error
@@ -157,8 +153,7 @@ type transition_action =
   | StreamYieldsTool
   | ToolReturned
   | StreamComplete
-  | ContractOk
-  | ContractViolation
+  | CompletionOk
   | ReceiptLost
   | LivelockBlocked
   | NoToolCapableProvider
@@ -179,8 +174,7 @@ let transition_action_label = function
   | StreamYieldsTool -> "StreamYieldsTool"
   | ToolReturned -> "ToolReturned"
   | StreamComplete -> "StreamComplete"
-  | ContractOk -> "ContractOk"
-  | ContractViolation -> "ContractViolation"
+  | CompletionOk -> "CompletionOk"
   | ReceiptLost -> "ReceiptLost"
   | LivelockBlocked -> "LivelockBlocked"
   | NoToolCapableProvider -> "NoToolCapableProvider"
@@ -274,9 +268,6 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
       Some ToolReturned
   | Any Streaming, Any Completing when not stop_signaled_before ->
       Some StreamComplete
-  | Any Streaming, Any (Failed (Failure_tool_contract_violation _))
-    when not stop_signaled_before ->
-      Some ContractViolation
   | Any Streaming, Any (Failed (Failure_receipt_lost _))
     when not stop_signaled_before ->
       Some ReceiptLost
@@ -287,10 +278,7 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
     when not stop_signaled_before ->
       Some ProviderTimeout
   | Any Completing, Any Done when not stop_signaled_before ->
-      Some ContractOk
-  | Any Completing, Any (Failed (Failure_tool_contract_violation _))
-    when not stop_signaled_before ->
-      Some ContractViolation
+      Some CompletionOk
   | Any Completing, Any (Failed (Failure_receipt_lost _))
     when not stop_signaled_before ->
       Some ReceiptLost

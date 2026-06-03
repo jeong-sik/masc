@@ -89,8 +89,8 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
         | Some (`Int n) -> n
         | _ -> 0
       in
-      let outer_tools_used =
-        match List.assoc_opt "tools_used" fields with
+      let outer_observed_tool_names =
+        match List.assoc_opt "observed_tool_names" fields with
         | Some (`List xs) ->
           List.filter_map
             (function
@@ -152,7 +152,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; fallback_applied = false
              ; cost_usd = None
              ; tool_call_count = outer_tool_call_count
-             ; tools_used = outer_tools_used
+             ; observed_tool_names = outer_observed_tool_names
              ; usage_reported = json_bool_field_opt "usage_reported" tfields
              ; telemetry_reported = json_bool_field_opt "telemetry_reported" tfields
              ; usage_trust = json_string_field_opt "usage_trust" tfields
@@ -325,7 +325,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; fallback_applied
              ; cost_usd
              ; tool_call_count = outer_tool_call_count
-             ; tools_used = outer_tools_used
+             ; observed_tool_names = outer_observed_tool_names
              ; usage_reported
              ; telemetry_reported
              ; usage_trust
@@ -523,7 +523,7 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          ; cost_usd =
              (if usage_untrusted then None else json_float_field_opt "cost_usd" fields)
          ; tool_call_count = 0
-         ; tools_used = []
+         ; observed_tool_names = []
          ; usage_reported = Some usage_reported
          ; telemetry_reported = Some telemetry_reported
          ; usage_trust

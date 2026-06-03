@@ -13,23 +13,23 @@ let is_noop = M.is_noop_cycle
 
 let test_is_noop_cycle_text_only () =
   (* Text-only turn with no tools: noop *)
-  check bool "text + no tools = noop" true (is_noop ~has_text:true ~tools_used:[])
+  check bool "text + no tools = noop" true (is_noop ~has_text:true ~observed_tool_names:[])
 
 let test_is_noop_cycle_passive_tool () =
   (* Turn with only passive status tools and no text: noop *)
-  check bool "no text + passive tools = noop" true (is_noop ~has_text:false ~tools_used:["board_list"])
+  check bool "no text + passive tools = noop" true (is_noop ~has_text:false ~observed_tool_names:["board_list"])
 
 let test_is_noop_cycle_not_noop_with_text () =
   (* Turn with text: not noop even if tools are passive *)
-  check bool "text + passive tools = not noop" false (is_noop ~has_text:true ~tools_used:["board_list"])
+  check bool "text + passive tools = not noop" false (is_noop ~has_text:true ~observed_tool_names:["board_list"])
 
 let test_is_noop_cycle_not_noop_with_substantive_tool () =
   (* Turn with substantive tool: not noop *)
-  check bool "no text + substantive tool = not noop" false (is_noop ~has_text:false ~tools_used:["tool_execute"])
+  check bool "no text + substantive tool = not noop" false (is_noop ~has_text:false ~observed_tool_names:["tool_execute"])
 
 let test_is_noop_cycle_empty () =
   (* Empty turn: noop *)
-  check bool "no text + no tools = noop" true (is_noop ~has_text:false ~tools_used:[])
+  check bool "no text + no tools = noop" true (is_noop ~has_text:false ~observed_tool_names:[])
 
 let () =
   run "keeper_noop_backoff"

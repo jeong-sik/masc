@@ -54,7 +54,7 @@ type log_entry = {
   le_latency_ms : int option;
   le_cost_usd : float option;
   le_work_kind : string option;
-  le_tools_used : string list;
+  le_observed_tool_names : string list;
   le_compacted : bool option;
   le_goal_alignment : float option;
   le_repetition_risk : float option;
@@ -295,17 +295,17 @@ let parse_log_entry line =
   let* le_latency_ms = optional_int json "latency_ms" in
   let* le_cost_usd = optional_float json "cost_usd" in
   let* le_work_kind = optional_string json "work_kind" in
-  let le_tools_used =
-    match member "tools_used" json with
+  let le_observed_tool_names =
+    match member "observed_tool_names" json with
     | `Null -> Ok []
-    | `List _ -> require_string_list json "tools_used"
+    | `List _ -> require_string_list json "observed_tool_names"
     | other ->
         Error
           (Printf.sprintf
-             "field 'tools_used' must be an array (received %s)"
+             "field 'observed_tool_names' must be an array (received %s)"
              (Json_util.kind_name other))
   in
-  let* le_tools_used = le_tools_used in
+  let* le_observed_tool_names = le_observed_tool_names in
   let* le_compacted = optional_bool json "compacted" in
   let* le_goal_alignment = optional_float json "goal_alignment" in
   let* le_repetition_risk = optional_float json "repetition_risk" in
@@ -324,7 +324,7 @@ let parse_log_entry line =
       le_latency_ms;
       le_cost_usd;
       le_work_kind;
-      le_tools_used;
+      le_observed_tool_names;
       le_compacted;
       le_goal_alignment;
       le_repetition_risk;

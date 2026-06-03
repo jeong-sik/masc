@@ -50,11 +50,11 @@ let active_desire_of_phase = function
   | Fsm.Stalled -> Some "recover_forward_motion"
   | Fsm.Quiet -> Some "maintain_progress_ledger"
 
-let current_intention_of_phase ~(phase : Fsm.phase) ~(tools_used : string list)
+let current_intention_of_phase ~(phase : Fsm.phase) ~(observed_tool_names : string list)
     ~(has_text_reply : bool) =
-  if List.exists Keeper_tool_progress.is_claim_tool_name tools_used
+  if List.exists Keeper_tool_progress.is_claim_tool_name observed_tool_names
   then Some "capture_next_task"
-  else if tools_used <> [] then Some "record_progress_evidence"
+  else if observed_tool_names <> [] then Some "record_progress_evidence"
   else if has_text_reply then Some "publish_progress_update"
   else
     match phase with
@@ -64,26 +64,26 @@ let current_intention_of_phase ~(phase : Fsm.phase) ~(tools_used : string list)
     | Fsm.Advancing -> Some "record_progress_evidence"
 
 let blocker_of_phase ~(phase : Fsm.phase)
-    ~(base_state : Types.social_state) ~(tools_used : string list)
+    ~(base_state : Types.social_state) ~(observed_tool_names : string list)
     ~(has_text_reply : bool) =
   match base_state.speech_act with
   | Types.Request_help | Types.Defer when Option.is_some base_state.blocker ->
       base_state.blocker
   | _ -> (
       match phase with
-      | Fsm.Stalled when tools_used = [] && not has_text_reply ->
+      | Fsm.Stalled when observed_tool_names = [] && not has_text_reply ->
           Some "stalled_without_progress_evidence"
       | _ -> None)
 
 let need_of_phase ~(phase : Fsm.phase)
-    ~(base_state : Types.social_state) ~(tools_used : string list)
+    ~(base_state : Types.social_state) ~(observed_tool_names : string list)
     ~(has_text_reply : bool) =
   match base_state.speech_act with
   | Types.Request_help when Option.is_some base_state.need -> base_state.need
   | _ -> (
       match phase with
       | Fsm.Stalled -> Some "fresh_plan_or_external_delta"
-      | Fsm.Reactive when tools_used = [] && not has_text_reply ->
+      | Fsm.Reactive when observed_tool_names = [] && not has_text_reply ->
           Some "next_actionable_prioritization"
       | _ -> None)
 
@@ -119,7 +119,7 @@ let overlay_ledger_state ~(observation : Keeper_world_observation.world_observat
     Fsm.classify_event ~previous:previous_snapshot
       {
         Fsm.has_progress_evidence =
-          result.tools_used <> [] || has_text_reply;
+          result.observed_tool_names <> [] || has_text_reply;
         has_reactive_signal =
           reactive_signal_count observation > 0 || backlog_count observation > 0;
         has_active_goals = observation.active_goals <> [];
@@ -132,19 +132,19 @@ let overlay_ledger_state ~(observation : Keeper_world_observation.world_observat
     social_model = model_name;
     belief_summary =
       belief_summary_of_snapshot ~snapshot ~event ~observation
-        ~tool_count:(List.length result.tools_used);
+        ~tool_count:(List.length result.observed_tool_names);
     active_desire = active_desire_of_phase snapshot.phase;
     current_intention =
       current_intention_of_phase ~phase:snapshot.phase
-        ~tools_used:result.tools_used
+        ~observed_tool_names:result.observed_tool_names
         ~has_text_reply;
     blocker =
       blocker_of_phase ~phase:snapshot.phase ~base_state
-        ~tools_used:result.tools_used
+        ~observed_tool_names:result.observed_tool_names
         ~has_text_reply;
     need =
       need_of_phase ~phase:snapshot.phase ~base_state
-        ~tools_used:result.tools_used
+        ~observed_tool_names:result.observed_tool_names
         ~has_text_reply;
   }
 

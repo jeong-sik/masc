@@ -337,17 +337,11 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
       : null,
     execution_summary: isRecord(executionRaw)
       ? {
-          tool_contract_result: asString(executionRaw.tool_contract_result) ?? null,
           runtime_proof_status: asString(executionRaw.runtime_proof_status) ?? null,
-          required_tools: asStringArray(executionRaw.required_tools) ?? [],
-          missing_required_tools:
-            asStringArray(executionRaw.missing_required_tools) ?? [],
           requested_tools: asStringArray(executionRaw.requested_tools) ?? [],
-          tools_used: asStringArray(executionRaw.tools_used) ?? [],
           unexpected_tools: asStringArray(executionRaw.unexpected_tools) ?? [],
           requested_tool_count:
             asNumber(executionRaw.requested_tool_count) ?? null,
-          tools_used_count: asNumber(executionRaw.tools_used_count) ?? null,
           unexpected_tool_count:
             asNumber(executionRaw.unexpected_tool_count) ?? null,
           provider_attempt_count:

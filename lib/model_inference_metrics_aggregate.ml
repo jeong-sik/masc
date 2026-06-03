@@ -166,7 +166,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
                           in
                           StringMap.add t (prev + 1) m)
                        m
-                       e.tools_used)
+                       e.observed_tool_names)
                   StringMap.empty
                   entries
               in

@@ -5,7 +5,7 @@ module Config = Masc.Config
 module Workspace = Masc.Workspace
 
 let temp_dir () =
-  let dir = Filename.temp_file "test_tool_contract_truth_" "" in
+  let dir = Filename.temp_file "test_tool_descriptor_truth_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
@@ -81,7 +81,7 @@ let test_visible_tools_expose_only_truthful_statuses () =
             (String.equal status "real" || String.equal status "adapter"))
         tools)
 
-let test_selected_tools_report_contract_status () =
+let test_selected_tools_report_descriptor_status () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
@@ -104,8 +104,8 @@ let test_selected_tools_report_contract_status () =
         (tool_string_field canonical "implementationStatus"))
 
 let () =
-  run "tool contract truth"
+  run "tool descriptor truth"
     [
       ("visible", [ test_case "visible tools stay truthful" `Quick test_visible_tools_expose_only_truthful_statuses ]);
-      ("hidden", [ test_case "selected tools expose implementation status" `Quick test_selected_tools_report_contract_status ]);
+      ("hidden", [ test_case "selected tools expose implementation status" `Quick test_selected_tools_report_descriptor_status ]);
     ]

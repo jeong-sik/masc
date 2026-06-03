@@ -662,7 +662,7 @@ Unified keeper의 내부 decision record는 `{keeper_dir}/{name}.decisions.jsonl
 - `trigger_signals`: turn 시점에 관찰된 트리거 후보 (`direct_mention`, `board_activity`, `new_unclaimed_task` 등)
 - `observed_affordances`: 당시 가능한 액션 후보 (`task_claim`, `reply_in_workspace`, `board_post_or_comment` 등)
 - `turn_mode`: 실제 최종 결과 분류 (`tool_use`, `text_response`, `skip_text`, `noop`). 에러 여부는 `outcome`이 담당한다.
-- `tools_used`: 실제 호출된 tool 목록
+- `tool_call_count` / `observed_tool_names`: 실제 호출된 tool 관측값. 이는 디버깅/학습용 통계이며 completion contract나 필수 도구 판정으로 쓰지 않는다.
 - `claim_was_available` / `claim_executed`: task claim 기회와 실행 여부
 - `response_preview`: 최종 응답 미리보기
 - `response_requests_confirmation`: keeper가 사람 확인을 요청했는지 여부

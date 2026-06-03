@@ -186,9 +186,7 @@ let post_turn_complete_task ~(cycle_completed : bool ref) = ignore cycle_complet
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch
   ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
-  ; tool_requirement = No_tools
   ; visible_tool_count = 0
-  ; tool_gate_enabled = false
   ; tool_surface_fallback_used = false
   ; materialized_tools = []
   }
@@ -243,8 +241,6 @@ let record_pre_dispatch_terminal_observation
     ; observed_tools = []
     ; canonical_tools = []
     ; unexpected_tools = []
-    ; tools_used = []
-    ; tool_contract_result = Keeper_execution_receipt.Contract_not_dispatched
     ; tool_surface = pre_dispatch_tool_surface
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some (Keeper_sandbox.host_root_abs_of_meta ~config meta)

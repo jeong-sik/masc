@@ -1,31 +1,4 @@
-(** Error translation helpers for keeper Agent.run orchestration. *)
-
-type keeper_internal_error =
-  | Keeper_tool_surface_empty of
-      { keeper_name : string
-      ; turn_lane : string
-      ; affordances : string list
-      ; fallback_used : bool
-      }
-
-let keeper_internal_error_prefix = "[keeper_internal_error] "
-
-let keeper_internal_error_to_json = function
-  | Keeper_tool_surface_empty { keeper_name; turn_lane; affordances; fallback_used } ->
-    `Assoc
-      [ "kind", `String "keeper_tool_surface_empty"
-      ; "keeper_name", `String keeper_name
-      ; "turn_lane", `String turn_lane
-      ; "affordances", `List (List.map (fun value -> `String value) affordances)
-      ; "fallback_used", `Bool fallback_used
-      ]
-;;
-
-let sdk_error_of_keeper_internal_error err =
-  Agent_sdk.Error.Internal
-    (keeper_internal_error_prefix
-     ^ Yojson.Safe.to_string (keeper_internal_error_to_json err))
-;;
+(** Error classification helpers for keeper Agent.run orchestration. *)
 
 let sdk_error_kind = function
   | Agent_sdk.Error.Api _ -> "api"

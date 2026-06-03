@@ -85,10 +85,10 @@ jq -s '
     total: length,
     success: ([.[] | select(.success)] | length),
     fail: ([.[] | select(.success | not)] | length),
-    tools_used: ([.[] | .tool] | unique | length),
+    observed_tool_count: ([.[] | .tool] | unique | length),
     avg_ms: (([.[] | .duration_ms] | add) / length | . * 10 | floor / 10),
   }) | sort_by(-.total) | .[] |
-  "\(.keeper)\t\(.total)\t\(.success)/\(.fail)\t\(.tools_used) tools\t\(.avg_ms)ms"
+  "\(.keeper)\t\(.total)\t\(.success)/\(.fail)\t\(.observed_tool_count) tools\t\(.avg_ms)ms"
 ' "${FILES[@]}" | (echo -e "KEEPER\tCALLS\tOK/FAIL\tTOOLS\tAVG_MS"; cat) | column -t -s $'\t'
 echo ""
 

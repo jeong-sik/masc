@@ -756,14 +756,10 @@ export interface KeeperRuntimeLensLifecycleAxis {
 
 export interface KeeperRuntimeLensToolSurfaceAxis {
   requested_tools: string[]
-  required_tools: string[]
   materialized_tools: string[]
-  missing_required_tools: string[]
   turn_lane: string | null
   tool_surface_class: string | null
-  tool_requirement: string | null
   visible_tool_count: number | null
-  tool_gate_enabled: boolean | null
   tool_surface_fallback_used: boolean | null
   terminal_status: string
 }
@@ -774,9 +770,7 @@ export interface KeeperRuntimeLensProviderLaneAxis {
   resolved_lane: string | null
   effective_tool_count: number | null
   runtime_mcp_policy_present: boolean | null
-  required_tools: string[]
   materialized_tools: string[]
-  missing_required_tools: string[]
 }
 
 export interface KeeperRuntimeLensProviderAttemptAxis {
@@ -1166,14 +1160,10 @@ function parseRuntimeLensToolSurfaceAxis(raw: unknown): KeeperRuntimeLensToolSur
   const obj = isRecord(raw) ? raw : {}
   return {
     requested_tools: stringListField(obj, 'requested_tools'),
-    required_tools: stringListField(obj, 'required_tools'),
     materialized_tools: stringListField(obj, 'materialized_tools'),
-    missing_required_tools: stringListField(obj, 'missing_required_tools'),
     turn_lane: nullableStringField(obj, 'turn_lane'),
     tool_surface_class: nullableStringField(obj, 'tool_surface_class'),
-    tool_requirement: nullableStringField(obj, 'tool_requirement'),
     visible_tool_count: nullableNumberField(obj, 'visible_tool_count'),
-    tool_gate_enabled: nullableBooleanField(obj, 'tool_gate_enabled'),
     tool_surface_fallback_used: nullableBooleanField(obj, 'tool_surface_fallback_used'),
     terminal_status: stringField(obj, 'terminal_status') || 'unknown',
   }
@@ -1187,9 +1177,7 @@ function parseRuntimeLensProviderLaneAxis(raw: unknown): KeeperRuntimeLensProvid
     resolved_lane: nullableStringField(obj, 'resolved_lane'),
     effective_tool_count: nullableNumberField(obj, 'effective_tool_count'),
     runtime_mcp_policy_present: nullableBooleanField(obj, 'runtime_mcp_policy_present'),
-    required_tools: stringListField(obj, 'required_tools'),
     materialized_tools: stringListField(obj, 'materialized_tools'),
-    missing_required_tools: stringListField(obj, 'missing_required_tools'),
   }
 }
 

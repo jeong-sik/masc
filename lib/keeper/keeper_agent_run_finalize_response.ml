@@ -189,7 +189,7 @@ let finalize
       ; tool_calls_made = List.length actual_keeper_tool_names
       ; usage
       ; usage_reported = Option.is_some result.response.usage
-      ; tools_used = actual_keeper_tool_names
+      ; observed_tool_names = actual_keeper_tool_names
       ; tool_calls = List.rev acc.tool_calls
       ; checkpoint = saved_checkpoint
       ; trace_ref = result.trace_ref

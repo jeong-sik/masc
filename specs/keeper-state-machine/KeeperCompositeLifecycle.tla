@@ -91,8 +91,9 @@ VARIABLES
     \* Three new sub-FSM projections coupled into this observer per
     \* RFC-0065 §3.4.  Each is the smallest abstraction sufficient
     \* for one joint invariant; the detailed transitions belong to
-    \* their owning specs (KeeperRuntimeAttemptFSM, KeeperToolSurface,
-    \* KeeperPostTurnOrchestration).
+    \* their owning specs (KeeperRuntimeAttemptFSM,
+    \* KeeperPostTurnOrchestration). Tool-surface details are modeled here
+    \* only as a readiness ghost; there is no required-tool sub-spec.
 
     kcaf_attempt_phase, \* B1 (KeeperRuntimeAttemptFSM) projection.
                         \* Values: "idle", "attempting", "terminal".
@@ -101,11 +102,10 @@ VARIABLES
                         \* response/success/exhausted_normal/exhausted_
                         \* hard_quota) collapses to 3 here.
 
-    kts_surface_ready,  \* B2 (KeeperToolSurface) projection.
+    kts_surface_ready,  \* Tool-surface readiness projection.
                         \* BOOLEAN — TRUE iff the tool-surface pipeline
                         \* has produced a non-empty emitted set this
-                        \* turn.  Mirrors KeeperToolSurface.tla phase =
-                        \* "computed" with emitted /= {}.
+                        \* turn.
 
     kpto_phase          \* B3 (KeeperPostTurnOrchestration) projection.
                         \* Values: "idle", "active", "persisted".
@@ -276,7 +276,7 @@ SelectToolPolicy ==
                    turn_tick, kcaf_attempt_phase, kts_surface_ready,
                    kpto_phase>>
 
-\* ComputeToolSurface — B2 (KeeperToolSurface) projection step.  Runs
+\* ComputeToolSurface — tool-surface readiness projection step.  Runs
 \* after a tool policy is selected and before the runtime attempts
 \* anything; produces the kts_surface_ready ghost that ToolSurfaceFeedsAttempt
 \* checks downstream.  Mirrors the keeper_run_tools.ml::compute_tool_surface

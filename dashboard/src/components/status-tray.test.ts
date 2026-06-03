@@ -144,12 +144,9 @@ describe('summarizeStatusTray', () => {
       lastDisconnectedAt: 0,
       keepers: [
         keeper('gamma', {
-          needs_attention: false,
+          needs_attention: true,
           trust: {
-            execution_summary: {
-              tool_contract_result: 'tool_surface_mismatch',
-              missing_required_tools: ['Execute'],
-            },
+            execution_summary: {},
           },
         }),
       ],
@@ -167,11 +164,7 @@ describe('summarizeStatusTray', () => {
     expect(summary.items.attention.value).toBe('1')
   })
 
-  it.each([
-    'tool_surface_mismatch',
-    'no_tool_capable_provider',
-    'claim_only_after_owned_task',
-  ] as const)('detects previously-missed attention code: %s', (code) => {
+  it('detects runtime proof attention code', () => {
     const summary = summarizeStatusTray({
       wsOnly: false,
       sseConnected: true,
@@ -189,7 +182,7 @@ describe('summarizeStatusTray', () => {
           needs_attention: false,
           trust: {
             execution_summary: {
-              tool_contract_result: code,
+              runtime_proof_status: 'violated',
             },
           },
         }),

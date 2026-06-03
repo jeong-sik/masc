@@ -6,8 +6,6 @@ type try_provider_ctx =
   ; keeper_name : string
   ; name : string
   ; goal : string
-  ; require_tool_choice_support : bool
-  ; require_tool_support : bool
   ; priority : Llm_provider.Request_priority.t option
   ; session_id : string option
   ; system_prompt : string

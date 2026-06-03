@@ -238,7 +238,6 @@ type degraded_retry_budget_decision =
 let next_fail_open_runtime_for_turn_with_budget
     ~(base_runtime : string)
     ~(effective_runtime : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
     ~(attempted_runtimes : string list)
     ~(estimated_input_tokens : int)
     ~(max_turns : int)
@@ -247,20 +246,20 @@ let next_fail_open_runtime_for_turn_with_budget
     (err : Agent_sdk.Error.sdk_error) : degraded_retry_budget_decision =
   match
     next_fail_open_runtime_for_turn
-      ~base_runtime ~effective_runtime ~tool_requirement
+      ~base_runtime ~effective_runtime
       ~attempted_runtimes err
   with
   | None -> No_degraded_retry
   | Some retry ->
       (* The candidate is always a retry, so use per-attempt budget semantics
          regardless of whether the current attempt was itself a retry. *)
-      let first_contract_rotation = false in
+      let first_retry_rotation = false in
       if
         match time_spent_in_turn_s with
         | Some time_spent_in_turn_s ->
             (not (degraded_retry_slot_phase_available ~time_spent_in_turn_s))
             && not (degraded_retry_bypasses_slot_phase_guard err)
-            && not first_contract_rotation
+            && not first_retry_rotation
         | None -> false
       then Degraded_retry_slot_phase_exhausted retry
       else if

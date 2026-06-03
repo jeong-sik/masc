@@ -13,11 +13,6 @@ include module type of Keeper_agent_checkpoint_hygiene
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
-val tool_contract_result_for_observed_tools
-  :  had_owned_active_task_at_turn_start:bool
-  -> actual_keeper_tool_names:string list
-  -> Keeper_execution_receipt.tool_contract_result
-
 module For_testing : sig
   val sse_event_progress_kind : Agent_sdk.Types.sse_event -> string option
   val registry_progress_on_event
@@ -25,15 +20,6 @@ module For_testing : sig
     -> (Agent_sdk.Types.sse_event -> unit) option
     -> Agent_sdk.Types.sse_event
     -> unit
-  val progress_keeper_tool_names_for_contract
-    :  allowed_tool_names:string list
-    -> actual_keeper_tool_names:string list
-    -> tool_calls:tool_call_detail list
-    -> string list
-  val no_progress_success_tool_names_for_contract
-    :  allowed_tool_names:string list
-    -> tool_calls:tool_call_detail list
-    -> string list
 end
 
 val per_provider_timeout_for_turn

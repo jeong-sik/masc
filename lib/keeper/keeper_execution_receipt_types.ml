@@ -50,14 +50,10 @@ let assert_receipt_authoritative ~outcome ~turn_state =
   | (`Error | `Cancelled), _ -> Ok ()
 ;;
 
-type tool_requirement = Keeper_agent_tool_surface.tool_requirement
-
 type tool_surface =
   { turn_lane : Keeper_agent_tool_surface.turn_lane
   ; tool_surface_class : Keeper_agent_tool_surface.tool_surface_class
-  ; tool_requirement : Keeper_agent_tool_surface.tool_requirement
   ; visible_tool_count : int
-  ; tool_gate_enabled : bool
   ; tool_surface_fallback_used : bool
   ; materialized_tools : string list
   }
@@ -121,63 +117,6 @@ let runtime_outcome_to_string = function
   | Runtime_completed -> "completed"
   | Runtime_not_observed -> "not_observed"
   | Runtime_not_dispatched -> "not_dispatched"
-;;
-
-(* Receipt-level result of the tool-contract evaluation for the turn.
-   Closed union of three producer paths:
-     1. Initial-state sentinel from [keeper_run_tools]: [Contract_unknown].
-     2. Boundary-state overrides: [Contract_violated] (agent_run
-        CompletionContractViolation), [Contract_not_dispatched]
-        (turn_helpers pre-dispatch), [Contract_no_tool_capable_provider]
-        (run_tools no-provider escape).
-     3. Six outcomes mirrored from
-        [Keeper_contract_classifier.contract_status_label]:
-        [Contract_tool_surface_mismatch], [Contract_claim_only_after_owned_task],
-        [Contract_needs_execution_progress], [Contract_passive_only],
-        [Contract_satisfied_completion],
-        [Contract_satisfied_execution].
-   JSON wire form is the lowercase string via
-   [tool_contract_result_to_string].  No raw ["satisfied"] variant —
-   producer never emits it; closed type makes the fictional test fixture
-   string unrepresentable. *)
-type tool_contract_result =
-  | Contract_unknown
-  | Contract_not_dispatched
-  | Contract_violated
-  | Contract_tool_surface_mismatch
-  | Contract_no_tool_capable_provider
-  | Contract_claim_only_after_owned_task
-  | Contract_needs_execution_progress
-  | Contract_passive_only
-  | Contract_satisfied_completion
-  | Contract_satisfied_execution
-
-let tool_contract_result_to_string = function
-  | Contract_unknown -> "unknown"
-  | Contract_not_dispatched -> "not_dispatched"
-  | Contract_violated -> "violated"
-  | Contract_tool_surface_mismatch -> "tool_surface_mismatch"
-  | Contract_no_tool_capable_provider -> "no_tool_capable_provider"
-  | Contract_claim_only_after_owned_task -> "claim_only_after_owned_task"
-  | Contract_needs_execution_progress -> "needs_execution_progress"
-  | Contract_passive_only -> "passive_only"
-  | Contract_satisfied_completion -> "satisfied_completion"
-  | Contract_satisfied_execution -> "satisfied_execution"
-;;
-
-(* Lift the typed [Keeper_contract_classifier.contract_status] into the
-   receipt-level [tool_contract_result].  Bridges the six classifier
-   outcomes; the four boundary states are emitted only by producer sites
-   that already know they hold one of those states. *)
-let tool_contract_result_of_contract_status
-  : Keeper_contract_classifier.contract_status -> tool_contract_result
-  = function
-  | Tool_surface_mismatch _ -> Contract_tool_surface_mismatch
-  | Claim_only_after_owned_task -> Contract_claim_only_after_owned_task
-  | Needs_execution_progress -> Contract_needs_execution_progress
-  | Passive_only -> Contract_passive_only
-  | Satisfied_completion -> Contract_satisfied_completion
-  | Satisfied_execution -> Contract_satisfied_execution
 ;;
 
 (* Structured contract-violation terminal_reason_code encoding.
@@ -287,8 +226,6 @@ type t =
   ; observed_tools : string list
   ; canonical_tools : string list
   ; unexpected_tools : string list
-  ; tools_used : string list
-  ; tool_contract_result : tool_contract_result
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
   ; sandbox_root : string option
@@ -332,7 +269,7 @@ let stop_reason_to_string = function
 (* Build an extended terminal_reason_code from a receipt whose
    terminal_reason_code is already set to the legacy
    "completion_contract_violation:<id>" form. Uses the receipt's
-   canonical_tools + observed_tools + tools_used as called_tools.
+   canonical_tools + observed_tools as called_tools.
    Returns the original code unchanged if it is not a contract-violation
    code or is already enriched. *)
 let enrich_contract_violation_reason (receipt : t) : string =
@@ -349,7 +286,7 @@ let enrich_contract_violation_reason (receipt : t) : string =
       in
       let called =
         canonical_names
-          (receipt.canonical_tools @ receipt.observed_tools @ receipt.tools_used)
+          (receipt.canonical_tools @ receipt.observed_tools)
       in
       encode_contract_violation_reason
         ~called_tools:called

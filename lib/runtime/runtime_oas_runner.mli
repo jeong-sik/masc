@@ -36,8 +36,6 @@ val runtime_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 
 val resolve_runtime_providers :
   ?provider_filter:string list ->
-  ?require_tool_choice_support:bool ->
-  ?require_tool_support:bool ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   runtime_id:string -> unit ->
   (Llm_provider.Provider_config.t list, string) result
@@ -73,11 +71,6 @@ val agent_internal_tool_names_for_runtime_surface :
 (** Keeper-internal tool names that require a keeper-bound runtime surface for
     the given keeper. Empty when [keeper_name] is blank. *)
 
-val agent_internal_tools_require_materialized_runtime_surface :
-  keeper_name:string -> Agent_sdk.Tool.t list -> bool
-(** [true] when the active tool surface contains agent-internal tools that
-    must not be silently dropped by an optional CLI/runtime-MCP lane. *)
-
 val runtime_mcp_policy_for_provider :
   keeper_name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
@@ -94,4 +87,3 @@ val cli_tool_a_cannot_carry_keeper_bound_runtime_mcp :
 (** [true] when the provider is cli_tool_a and the policy includes tools that
     require a bound-actor (keeper-scoped) runtime MCP — cli_tool_a cannot
     carry these across its CLI subprocess boundary. *)
-

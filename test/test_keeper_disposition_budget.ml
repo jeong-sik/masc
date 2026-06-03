@@ -41,7 +41,7 @@ let () =
     ; "agent_error_tripwire_violation:tripwire=y"
     ; "agent_error_idle_detected:consecutive_idle_turns=3"
     ; "agent_error_exit_condition_met:turn=4"
-    ; "completion_contract_violation:tool_contract"
+    ; "completion_contract_violation:response_schema"
     ; "api_error_timeout"
     ; "provider_error"
     ; "runtime_exhausted"

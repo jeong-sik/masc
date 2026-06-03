@@ -27,9 +27,6 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
-  ; mutable requested_tool_names_seen : string list
-  ; mutable receipt_tool_contract_result :
-      Keeper_execution_receipt.tool_contract_result
   }
 
 type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
@@ -40,13 +37,9 @@ type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
   ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
-  ; out_requested_tool_names_seen : string list
-  ; out_receipt_tool_contract_result :
-      Keeper_execution_receipt.tool_contract_result
   }
 
 let freeze = Keeper_run_tools_hook_accumulator.freeze
-let merge_requested_tool_names_seen = Keeper_run_tools_hook_accumulator.merge_requested_tool_names_seen
 let record_requested_tool_names = Keeper_run_tools_hook_accumulator.record_requested_tool_names
 
 let task_scope_tool_names = Keeper_run_tools_task_scope.task_scope_tool_names
@@ -75,7 +68,6 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; memory : Agent_sdk.Memory.t
   ; acc : hook_accumulator
   ; initial_tool_surface : computed_tool_surface
-  ; initial_tool_surface_blocker : Agent_sdk.Error.sdk_error option ref
   ; all_tool_names : string list
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref

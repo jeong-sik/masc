@@ -20,7 +20,7 @@ type t =
   | TurnScheduled
   | TurnCompleted
   | IdleSeconds
-  | ContractViolations
+  | ToolSurfaceViolations
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
@@ -236,7 +236,7 @@ let to_string = function
   | TurnScheduled -> "masc_keeper_turn_scheduled_total"
   | TurnCompleted -> "masc_keeper_turn_completed_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
-  | ContractViolations -> "masc_keeper_contract_violations_total"
+  | ToolSurfaceViolations -> "masc_keeper_tool_surface_violations_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
   | ContextMaxObserved -> "masc_keeper_context_max_observed_total"
   | TurnStarts -> "masc_keeper_turn_starts_total"

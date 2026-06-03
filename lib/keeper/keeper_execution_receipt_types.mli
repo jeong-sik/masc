@@ -16,13 +16,10 @@ type receipt_authority_violation = { outcome : string; turn_state : string; }
 val assert_receipt_authoritative :
   outcome:[< `Cancelled | `Error | `Ok | `Skipped ] ->
   turn_state:string -> (unit, receipt_authority_violation) result
-type tool_requirement = Keeper_agent_tool_surface.tool_requirement
 type tool_surface = {
   turn_lane : Keeper_agent_tool_surface.turn_lane;
   tool_surface_class : Keeper_agent_tool_surface.tool_surface_class;
-  tool_requirement : Keeper_agent_tool_surface.tool_requirement;
   visible_tool_count : int;
-  tool_gate_enabled : bool;
   tool_surface_fallback_used : bool;
   materialized_tools : string list;
 }
@@ -53,20 +50,6 @@ type runtime_outcome =
   | Runtime_not_observed
   | Runtime_not_dispatched
 val runtime_outcome_to_string : runtime_outcome -> string
-type tool_contract_result =
-    Contract_unknown
-  | Contract_not_dispatched
-  | Contract_violated
-  | Contract_tool_surface_mismatch
-  | Contract_no_tool_capable_provider
-  | Contract_claim_only_after_owned_task
-  | Contract_needs_execution_progress
-  | Contract_passive_only
-  | Contract_satisfied_completion
-  | Contract_satisfied_execution
-val tool_contract_result_to_string : tool_contract_result -> string
-val tool_contract_result_of_contract_status :
-  Keeper_contract_classifier.contract_status -> tool_contract_result
 val encode_tool_list : string list -> string
 val encode_contract_violation_reason :
   called_tools:string list ->
@@ -106,8 +89,6 @@ type t = {
   observed_tools : string list;
   canonical_tools : string list;
   unexpected_tools : string list;
-  tools_used : string list;
-  tool_contract_result : tool_contract_result;
   tool_surface : tool_surface;
   sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile;
   sandbox_root : string option;

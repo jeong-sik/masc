@@ -154,7 +154,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
               `String (proactive_cycle_outcome_to_string outcome)
           | None -> `Null );
         ("tool_call_count", `Int result.tool_calls_made);
-        ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
+        ("observed_tool_names", `List (List.map (fun s -> `String s) result.observed_tool_names));
         ( "action_source",
           match deliberation_execution with
           | Some execution ->

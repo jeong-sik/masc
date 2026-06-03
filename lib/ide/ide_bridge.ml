@@ -62,7 +62,7 @@ let ingest_turn_event
     ~keeper_id
     ~phase
     ~model_used
-    ~tools_used
+    ~observed_tool_names
     ~stop_reason
     ~duration_ms
     ~timestamp_ms
@@ -73,7 +73,7 @@ let ingest_turn_event
       ; keeper_id
       ; phase
       ; model_used
-      ; tools_used
+      ; observed_tool_names
       ; stop_reason
       ; duration_ms
       ; timestamp_ms

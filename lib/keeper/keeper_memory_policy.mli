@@ -341,7 +341,7 @@ val cap_for_kind : (string * int) list -> string -> int
 
 val synthesize_state_from_run_result :
   goal:string ->
-  tools_used:string list ->
+  observed_tool_names:string list ->
   stop_reason:string -> response_text:string -> keeper_state_snapshot
 (** Build a snapshot from a turn's run result when the assistant did
     not emit a [STATE] block. *)

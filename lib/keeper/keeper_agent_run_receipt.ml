@@ -125,11 +125,6 @@ let finalize
       ( Some (Keeper_execution_receipt.error_kind_of_string (Keeper_agent_error.sdk_error_kind err))
       , Some (Agent_sdk.Error.to_string err) )
   in
-  let tool_contract_result
-      : Keeper_execution_receipt.tool_contract_result =
-    match turn_result with
-    | _ -> acc.receipt_tool_contract_result
-  in
   let terminal_reason_code =
     match turn_result with
     | Ok _ ->
@@ -171,19 +166,15 @@ let finalize
     ; terminal_reason_code
     ; response_text_present = !receipt_response_text_present_ref
     ; model_used = !receipt_model_used_ref
-    ; requested_tools = acc.requested_tool_names_seen
+    ; requested_tools = acc.requested_tool_names
     ; reported_tools = !reported_tool_names_ref
     ; observed_tools = !observed_tool_names_ref
     ; canonical_tools = !canonical_tool_names_ref
     ; unexpected_tools = !unexpected_tool_names_ref
-    ; tools_used = !actual_keeper_tool_names_ref
-    ; tool_contract_result
     ; tool_surface =
         { turn_lane = acc.tool_surface.turn_lane
         ; tool_surface_class = acc.tool_surface.tool_surface_class
-        ; tool_requirement = acc.tool_surface.tool_requirement
         ; visible_tool_count = acc.tool_surface.visible_tool_count
-        ; tool_gate_enabled = acc.tool_surface.tool_gate_enabled
         ; tool_surface_fallback_used = acc.tool_surface.tool_surface_fallback_used
         ; materialized_tools = !materialized_tool_names_ref
         }
@@ -252,7 +243,6 @@ let finalize
         ("reported_tools", Json_util.json_string_list receipt.reported_tools);
         ("observed_tools", Json_util.json_string_list receipt.observed_tools);
         ("canonical_tools", Json_util.json_string_list receipt.canonical_tools);
-        ("tools_used", Json_util.json_string_list receipt.tools_used);
         ( "receipt_append_ok",
           match receipt_append_ok with
           | None -> `Null
@@ -273,9 +263,9 @@ let finalize
       | None -> receipt_manifest_decision ()
     in
     let tool_call_log_path =
-      match receipt.tools_used with
+      match acc.tool_calls with
       | [] -> None
-      | _ -> Keeper_tool_call_log.current_log_path ()
+      | _ :: _ -> Keeper_tool_call_log.current_log_path ()
     in
     let clock_refs =
       Keeper_runtime_manifest.clock_refs_for_context

@@ -92,7 +92,6 @@ function execution(
     operator_disposition_reason: 'healthy',
     model_used: 'auto',
     stop_reason: 'completed',
-    tool_contract_result: 'satisfied_execution',
     duration_ms: 12_000,
     error: null,
     runtime: null,
@@ -209,7 +208,6 @@ describe('runtimeAttentionForSnapshot', () => {
         terminal_reason_code: 'api_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
-        tool_contract_result: 'unknown',
         error: {
           kind: 'api',
           message_preview: 'Timeout after 1170s',
@@ -235,7 +233,6 @@ describe('runtimeAttentionForSnapshot', () => {
         terminal_reason_code: 'completed',
         operator_disposition: 'pass',
         operator_disposition_reason: 'healthy',
-        tool_contract_result: 'passive_only',
       }),
       runtime_attention: {
         state: 'blocked',
@@ -324,7 +321,6 @@ describe('runtimeAttentionForSnapshot', () => {
         terminal_reason_code: 'runtime_exhausted',
         operator_disposition: 'alert_exhausted',
         operator_disposition_reason: 'runtime_exhausted',
-        tool_contract_result: 'unknown',
         error: {
           kind: 'internal',
           message_preview: 'runtime exhausted',
@@ -434,21 +430,18 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 300)
   })
 
-  it('surfaces tool contract mismatch without required-tool detail', () => {
+  it('surfaces execution receipt mismatch without required-tool detail', () => {
     const snap = snapshot({
       is_live: false,
       execution: execution({
         outcome: 'receipt_failed',
-        terminal_reason_code: 'completion_contract_violation:tool_contract',
+        terminal_reason_code: 'completion_contract_violation:response_schema',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
-        tool_contract_result: 'tool_surface_mismatch',
         tool_surface: {
-          tool_requirement: 'optional',
           turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
           visible_tool_count: 0,
-          tool_gate_enabled: true,
           tool_surface_fallback_used: true,
         },
       }),
@@ -456,11 +449,11 @@ describe('runtimeAttentionForSnapshot', () => {
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
-    expect(attention.cause).toContain('tool_surface_mismatch')
+    expect(attention.cause).toContain('completion_contract_violation:response_schema')
     expect(attention.reason).toContain('turn_lane=tool_optional')
     expect(attention.reason).toContain('visible_tools=0')
     expect(attention.reason).toContain('tool_surface_fallback=true')
-    expect(attention.nextStep).toContain('tool surface 또는 runtime lane 설정 확인')
+    expect(attention.nextStep).toContain('latest execution receipt 확인')
   })
 
   it('routes provider timeout blockers away from generic approval guidance', () => {
@@ -471,7 +464,6 @@ describe('runtimeAttentionForSnapshot', () => {
         terminal_reason_code: 'api_error_timeout',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
-        tool_contract_result: 'unknown',
         error: {
           kind: 'api',
           message_preview: 'Timeout after 1785s',
@@ -499,14 +491,10 @@ describe('fleetCellPresentation', () => {
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
         tool_surface: {
-          tool_requirement: 'required',
           turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
           visible_tool_count: 0,
-          tool_gate_enabled: true,
           tool_surface_fallback_used: true,
-          missing_required_tools: ['Execute'],
-          required_tools: ['Execute'],
         },
       }),
     })
@@ -550,14 +538,10 @@ describe('buildRuntimeAssistPrompt', () => {
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
         tool_surface: {
-          tool_requirement: 'required',
           turn_lane: 'tool_optional',
           tool_surface_class: 'mixed',
           visible_tool_count: 0,
-          tool_gate_enabled: true,
           tool_surface_fallback_used: true,
-          missing_required_tools: ['Execute'],
-          required_tools: ['Execute'],
         },
       }),
     })

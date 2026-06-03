@@ -457,7 +457,6 @@ let run_keeper_cycle
                            ; keeper_profile
                            ; max_idle_turns
                            ; max_turns
-                           ; initial_tool_requirement
                            }
                          =
                          Keeper_unified_turn_retry_setup.build
@@ -505,7 +504,6 @@ let run_keeper_cycle
                           ~keeper_profile
                           ~max_turns
                           ~max_idle_turns
-                          ~initial_tool_requirement
                           ~user_message
                           ~registry_base_path
                           ~degraded_retry_slot_phase_budget_sec

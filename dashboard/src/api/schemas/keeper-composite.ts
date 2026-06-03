@@ -138,7 +138,6 @@ const KeeperCompositeExecutionSchema = object({
   operator_disposition_reason: nullable(string()),
   model_used: nullable(string()),
   stop_reason: nullable(string()),
-  tool_contract_result: nullable(string()),
   unexpected_tools: optional(array(string())),
   unexpected_tool_count: optional(number()),
   duration_ms: nullable(number()),
@@ -163,17 +162,10 @@ const KeeperCompositeExecutionSchema = object({
   ),
   tool_surface: nullable(
     object({
-      tool_requirement: nullable(string()),
       turn_lane: optional(nullable(string())),
       tool_surface_class: optional(nullable(string())),
       visible_tool_count: optional(nullable(number())),
-      tool_gate_enabled: nullable(boolean()),
       tool_surface_fallback_used: optional(nullable(boolean())),
-      // Tool-task coupling purged server-side (#19806): these fields may be
-      // absent from newer runtimes. Kept optional for backward tolerance while
-      // the dashboard UI render paths are migrated in a follow-up.
-      missing_required_tools: optional(array(string())),
-      required_tools: optional(array(string())),
       unexpected_tools: optional(array(string())),
       unexpected_tool_count: optional(number()),
     }),

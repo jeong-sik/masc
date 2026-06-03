@@ -274,8 +274,8 @@ let work_kind_of_turn_mode = Turn_mode_codec.work_kind_of_turn_mode
 let is_observation_only_tool_name name =
   not (Keeper_tool_progress.is_execution_progress_tool_name name)
 
-let has_substantive_tool_calls (tools_used : string list) : bool =
-  List.exists Keeper_tool_progress.is_execution_progress_tool_name tools_used
+let has_substantive_tool_calls (observed_tool_names : string list) : bool =
+  List.exists Keeper_tool_progress.is_execution_progress_tool_name observed_tool_names
 
 (** A cycle is noop when it produced no text AND all tools used (if any)
     are passive-status only (e.g. board_list, context_status).  A turn whose
@@ -286,9 +286,9 @@ let has_substantive_tool_calls (tools_used : string list) : bool =
     #7168 to penalise the [board_list]-only pattern; sweeping
     [Claim_context] into noop was an unintended side-effect that pinned
     real keepers at the 8x cooldown cap. *)
-let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
+let is_noop_cycle ~has_text ~(observed_tool_names : string list) : bool =
   not has_text
-  && List.for_all Keeper_tool_progress.is_passive_status_tool_name tools_used
+  && List.for_all Keeper_tool_progress.is_passive_status_tool_name observed_tool_names
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
     Agent_sdk.Raw_trace.run_validation option =
@@ -357,7 +357,7 @@ let error_category_of_no_result_outcome ~outcome ~error =
   | _ -> None
 
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
-  has_substantive_tool_calls result.tools_used
+  has_substantive_tool_calls result.observed_tool_names
   || Option.is_some (visible_run_validation result)
 
 let validated_evidence_preview
@@ -377,7 +377,7 @@ let accountability_evidence_refs
     ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
   let tool_refs =
     let stay_silent = "keeper_stay_silent" in
-    result.tools_used
+    result.observed_tool_names
     |> List.filter_map (fun tool_name ->
            let trimmed = String.trim tool_name in
            if trimmed = "" || String.equal trimmed stay_silent then None

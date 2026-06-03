@@ -183,7 +183,7 @@ let run
           ; "turn", `Int turn
           ; "oas_turn_count", `Int oas_turn_count
           ; "goal_alignment", `Float goal_score
-          ; ( "tools_used_count"
+          ; ( "observed_tool_count"
             , `Int (List.length actual_tools) )
           ; "used_memory_search", `Bool used_search
           ; "post_turn_ms", `Float post_turn_ms

@@ -179,8 +179,8 @@ export function deriveKeeperLiveTruth({
             ? compactToken(compositeSnapshot?.runtime_attention?.state, 'blocked')
             : 'none',
         detail: staleBlocker !== null
-          ? `${projection.runtimeReason} · ${projection.toolContract} · 이전 차단: ${staleBlocker}`
-          : `${projection.runtimeReason} · ${projection.toolContract}`,
+          ? `${projection.runtimeReason} · 이전 차단: ${staleBlocker}`
+          : projection.runtimeReason,
         tone: blocked ? 'warn' : 'ok',
       },
     ],
@@ -1067,9 +1067,7 @@ export function RuntimeLensSection({
         <${SignalRow} label="keeper / agent turn" value=${`${clock.keeper_turn_id ?? '-'} / ${clock.max_oas_turn_count ?? '-'}`} />
         <${SignalRow} label="terminal event" value=${clock.terminal_event_present ? clock.terminal_event ?? 'present' : 'missing'} />
         <${SignalRow} label="runtime lane" value=${lane.resolved_lane ?? lane.status ?? 'unknown'} />
-        <${SignalRow} label="tool required" value=${formatLensList(tool.required_tools)} />
         <${SignalRow} label="tool materialized" value=${formatLensList(tool.materialized_tools)} />
-        <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
         <${SignalRow} label="tool lineage" value=${formatToolLineage(lens.axes.tool_lineage)} />
         <${SignalRow} label="payload role" value=${formatPayloadRole(lens.axes.payload_role)} />
         <${SignalRow} label="source clock" value=${formatSourceClock(lens.axes.source_clock)} />

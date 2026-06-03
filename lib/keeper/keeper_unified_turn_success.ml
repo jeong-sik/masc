@@ -188,8 +188,8 @@ let emit_activity_graph
                         (KUM.usage_trust_reasons usage_trust)) )
                ; "turn_mode", `String turn_mode_label
                ; "context_ratio", `Float lifecycle.KEC.context_ratio
-               ; ( "tools_used"
-                 , `List (List.map (fun s -> `String s) result.tools_used) )
+               ; ( "observed_tool_names"
+                 , `List (List.map (fun s -> `String s) result.observed_tool_names) )
                ]
                @ (match wall_tokens_per_second with
                   | Some v -> [ "tokens_per_second", `Float v ]
@@ -233,7 +233,7 @@ let record_accountability ~config ~updated_meta ~social_state ~result claim =
   let trace_id = Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id in
   let validated_evidence = KUM.visible_run_validation result in
   let strong_evidence =
-    KUM.has_substantive_tool_calls result.Keeper_agent_run.tools_used
+    KUM.has_substantive_tool_calls result.Keeper_agent_run.observed_tool_names
     || Option.is_some validated_evidence
   in
   Keeper_accountability.record_completion_claim

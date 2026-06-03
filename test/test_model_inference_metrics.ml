@@ -87,7 +87,7 @@ let contains_substring haystack needle =
 let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
     ?provider ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
-    ?(cost_usd=0.01) ?(tools_used=[]) () =
+    ?(cost_usd=0.01) ?(observed_tool_names=[]) () =
   let extra_telemetry_fields =
     (match prompt_per_second with
      | Some v -> [("prompt_per_second", `Float v)]
@@ -119,8 +119,8 @@ let success_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
   in
   `Assoc [
     ("ts_unix", `Float ts);
-    ("tool_call_count", `Int (List.length tools_used));
-    ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+    ("tool_call_count", `Int (List.length observed_tool_names));
+    ("observed_tool_names", `List (List.map (fun s -> `String s) observed_tool_names));
     ("telemetry", `Assoc ([
       ("model_used", `String model);
       ("outcome", `String "success");
@@ -165,7 +165,7 @@ let error_entry ~runtime_id ~ts ?provider () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
-    ("tools_used", `List []);
+    ("observed_tool_names", `List []);
     ("telemetry", `Assoc [
       ("provider",
         match provider with
@@ -208,7 +208,7 @@ let success_entry_without_usage ~model ~ts ?provider
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
-    ("tools_used", `List []);
+    ("observed_tool_names", `List []);
     ("telemetry", `Assoc ([
       ("model_used", `String model);
       ("outcome", `String "success");
@@ -220,7 +220,7 @@ let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int tool_count);
-    ("tools_used", `List [ `String "keeper_board_comment" ]);
+    ("observed_tool_names", `List [ `String "keeper_board_comment" ]);
     ( "telemetry",
       `Assoc [
         ("model_used", `Null);
@@ -241,7 +241,7 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
     ("ts_unix", `Float ts);
     ("outcome", `String outcome);
     ("tool_call_count", `Int 0);
-    ("tools_used", `List []);
+    ("observed_tool_names", `List []);
     ( "provider_context",
       `Assoc [
         ("runtime_id", `String runtime_id);
@@ -284,10 +284,10 @@ let test_single_model_success () =
       success_entry ~model:"agent_llm_a-sonnet" ~ts:(ts -. 10.0)
         ~input_tokens:200 ~output_tokens:100 ~latency_ms:1000
         ~provider:"agent_llm_a" ~cost_usd:0.005
-        ~tools_used:["shell"; "read"] ();
+        ~observed_tool_names:["shell"; "read"] ();
       success_entry ~model:"agent_llm_a-sonnet" ~ts:(ts -. 5.0)
         ~input_tokens:150 ~output_tokens:80 ~latency_ms:800
-        ~provider:"agent_llm_a" ~cost_usd:0.003 ~tools_used:["shell"] ();
+        ~provider:"agent_llm_a" ~cost_usd:0.003 ~observed_tool_names:["shell"] ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
@@ -398,11 +398,11 @@ let test_multi_model () =
     let ts = now_unix () in
     write_decisions path [
       success_entry ~model:"agent_llm_a-sonnet" ~ts:(ts -. 30.0)
-        ~tools_used:["read"; "write"] ();
+        ~observed_tool_names:["read"; "write"] ();
       success_entry ~model:"model-d" ~ts:(ts -. 20.0)
-        ~tools_used:["search"] ();
+        ~observed_tool_names:["search"] ();
       success_entry ~model:"agent_llm_a-sonnet" ~ts:(ts -. 10.0)
-        ~tools_used:["read"] ();
+        ~observed_tool_names:["read"] ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 3 agg.total_entries;
@@ -419,9 +419,9 @@ let test_top_tools_per_model () =
     let ts = now_unix () in
     write_decisions path [
       success_entry ~model:"m1" ~ts:(ts -. 30.0)
-        ~tools_used:["shell"; "shell"; "read"] ();
+        ~observed_tool_names:["shell"; "shell"; "read"] ();
       success_entry ~model:"m1" ~ts:(ts -. 20.0)
-        ~tools_used:["shell"; "write"] ();
+        ~observed_tool_names:["shell"; "write"] ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
@@ -468,7 +468,7 @@ let test_json_roundtrip () =
     let ts = now_unix () in
     write_decisions path [
       success_entry ~model:"test-model" ~ts:(ts -. 10.0)
-        ~tools_used:["t1"] ~cost_usd:0.05 ();
+        ~observed_tool_names:["t1"] ~cost_usd:0.05 ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     let json = M.to_json agg in
@@ -885,7 +885,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
       `Assoc [
         ("ts_unix", `Float (ts -. 10.0));
         ("tool_call_count", `Int 0);
-        ("tools_used", `List []);
+        ("observed_tool_names", `List []);
         ("telemetry", `Assoc [
           ("model_used", `String "unlatenced-model");
           ("outcome", `String "success");
@@ -920,7 +920,7 @@ let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
-    ("tools_used", `List []);
+    ("observed_tool_names", `List []);
     ("telemetry", `Assoc ([
       ("model_used", `String model);
       ("outcome", `String "success");
@@ -1005,7 +1005,7 @@ let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
-    ("tools_used", `List []);
+    ("observed_tool_names", `List []);
     ("telemetry", `Assoc [
       ("model_used", `String model);
       ("outcome", `String "success");

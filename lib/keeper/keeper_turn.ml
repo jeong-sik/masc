@@ -606,14 +606,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     Keeper_id.Trace_id.to_string updated_meta.runtime.trace_id
                   in
                   let strong_evidence =
-                    result.tools_used
+                    result.observed_tool_names
                     |> List.exists (fun tool_name ->
                            let trimmed = String.trim tool_name in
                            trimmed <> ""
                            && not (String.equal trimmed "keeper_stay_silent"))
                   in
                   let tool_refs =
-                    result.tools_used
+                    result.observed_tool_names
                     |> List.filter_map (fun tool_name ->
                            let trimmed = String.trim tool_name in
                            if trimmed = ""

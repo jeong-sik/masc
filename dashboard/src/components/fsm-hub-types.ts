@@ -304,10 +304,8 @@ export function executionOutcomeLabel(value: string | null | undefined): string 
 }
 
 
-/** Korean labels for the three tool-surface axes emitted by
+/** Korean labels for the tool-surface visibility axes emitted by
  *  `lib/keeper/keeper_agent_tool_surface.ml`:
- *  - `tool_requirement` (3 values, line 24-27):
- *    required / optional / none.
  *  - `tool_surface_class` (3 values, line 103-107, RFC-0065 §3.2.2):
  *    none / public_only / mixed.
  *  - `turn_lane` (6 values, line 57-63):
@@ -317,12 +315,6 @@ export function executionOutcomeLabel(value: string | null | undefined): string 
  *  `fleet-fsm-matrix.ts:289-295` currently interpolate these as raw
  *  English tokens. Each helper keeps the raw token as fallback so a
  *  backend-ahead variant still surfaces verbatim. */
-const TOOL_REQUIREMENT_LABELS: Record<string, string> = {
-  required: '필수',
-  optional: '선택',
-  none: '없음',
-}
-
 const TOOL_SURFACE_CLASS_LABELS: Record<string, string> = {
   none: '도구 없음',
   public_only: '공개 도구만',
@@ -335,11 +327,6 @@ const TURN_LANE_LABELS: Record<string, string> = {
   tool_optional: '도구 선택',
   tool_disabled: '도구 비활성',
   retry: '재시도',
-}
-
-export function toolRequirementLabel(value: string | null | undefined): string | null {
-  if (!value) return null
-  return TOOL_REQUIREMENT_LABELS[value] ?? value
 }
 
 export function toolSurfaceClassLabel(value: string | null | undefined): string | null {
@@ -376,44 +363,25 @@ export function trustDispositionLabel(value: string | null | undefined): string 
 
 /** Discriminated verdict for the keeper detail alert strip.
  *
- *  The strip previously rendered `trustSummary` (the disposition reason
- *  / attention reason / mutation guard summary, joined via `||`) and
- *  `runtime_proof_status` (the tool contract result) as two sibling
- *  spans labelled "검증" and "증명". The two fields are independent on
- *  the wire — a keeper can simultaneously surface
- *  `attention_reason = completion_contract_violation` (verdict failure) and
- *  `tool_contract_result = satisfied_execution` (tools that *were*
- *  called fulfilled their contract). With sibling rendering this
- *  appeared as "검증 · completion_contract_violation" *and* "증명 ·
- *  satisfied_execution" at the same time, which an operator reads as
- *  the surface contradicting itself.
- *
- *  This union collapses the two facets into a single typed verdict
- *  with explicit kind precedence (`failed > pending > verified >
- *  no_verdict`) and renders the tool contract as scope-tagged
- *  evidence ("도구 계약") rather than a sibling "증명" claim. The
- *  rendering site uses an exhaustive switch over `kind` so adding a
- *  new arm in the future fails the build instead of silently
- *  reintroducing the `||` fallthrough. */
+ *  This union keeps trust/disposition verdict rendering separate from
+ *  tool-surface telemetry. The rendering site uses an exhaustive switch
+ *  over `kind` so adding a new arm fails the build instead of silently
+ *  reintroducing `||` fallthrough. */
 export type KeeperVerdict =
   | {
       kind: 'failed'
       reasonLabel: string
-      toolContract: { code: string; label: string } | null
     }
   | {
       kind: 'pending'
       reasonLabel: string | null
-      toolContract: { code: string; label: string } | null
     }
   | {
       kind: 'verified'
       reasonLabel: string | null
-      toolContract: { code: string; label: string } | null
     }
   | {
       kind: 'no_verdict'
-      toolContract: { code: string; label: string } | null
     }
 
 /** Trust disposition values that imply a failed verdict. The backend
@@ -430,15 +398,7 @@ const FAILED_TRUST_DISPOSITIONS = new Set<string>(['Alert', 'Blocked', 'Pause'])
 export function computeKeeperVerdict(input: {
   trustDisposition: string | null
   trustSummary: string | null
-  toolContractResult: string | null
 }): KeeperVerdict {
-  const toolContractCode = input.toolContractResult?.trim() || null
-  const toolContract = toolContractCode
-    ? {
-        code: toolContractCode,
-        label: toolContractLabel(toolContractCode) ?? toolContractCode,
-      }
-    : null
   const trustDisposition = input.trustDisposition?.trim() || null
   const trustSummary = input.trustSummary?.trim() || null
 
@@ -446,20 +406,19 @@ export function computeKeeperVerdict(input: {
     return {
       kind: 'failed',
       reasonLabel: trustSummary ?? (trustDispositionLabel(trustDisposition) ?? trustDisposition),
-      toolContract,
     }
   }
   if (trustDisposition === 'Pass') {
-    return { kind: 'verified', reasonLabel: trustSummary, toolContract }
+    return { kind: 'verified', reasonLabel: trustSummary }
   }
   if (trustSummary) {
     // Disposition unknown, but the trust subsystem already surfaced a
     // human-readable summary — treat as pending rather than verified
     // so the operator does not see a green check while the FSM is
     // still settling.
-    return { kind: 'pending', reasonLabel: trustSummary, toolContract }
+    return { kind: 'pending', reasonLabel: trustSummary }
   }
-  return { kind: 'no_verdict', toolContract }
+  return { kind: 'no_verdict' }
 }
 
 /** Scope tag for runtime-outcome rendering.
@@ -509,36 +468,6 @@ export function isTurnTerminalFailureCode(code: string | null | undefined): bool
   if (!code) return false
   return TURN_TERMINAL_FAILURE_CODES.has(code)
 }
-
-
-/** Korean labels for `execution.tool_contract_result`.
- *  closed-sum values via `Keeper_execution_receipt.tool_contract_result_to_string`
- *  (lib/keeper/keeper_execution_receipt.ml:181-193). The labels are
- *  intentionally NOT folded into `STATE_DISPLAY_NAMES` because that map
- *  is the shared FSM-axis facade and accepting generic keys like
- *  `unknown` / `violated` there would risk collisions with future axes
- *  that emit the same English token. Consumers route through
- *  {!toolContractLabel} instead so the chip surface (turn-fsm-detail-panel,
- *  fleet-fsm-matrix) shows Korean for known wire values and the raw
- *  token for unknown ones, matching the `displayState` fallback shape. */
-const TOOL_CONTRACT_LABELS: Record<string, string> = {
-  unknown: '도구 계약 미상',
-  not_dispatched: '도구 호출 미발생',
-  violated: '도구 계약 위반',
-  tool_surface_mismatch: '도구 표면 불일치',
-  no_tool_capable_provider: '도구 가능 런타임 없음',
-  claim_only_after_owned_task: 'claim 전용 (소유 task 후)',
-  needs_execution_progress: '실행 진척 필요',
-  passive_only: 'passive 만 수행',
-  satisfied_completion: '계약 충족 (완료)',
-  satisfied_execution: '계약 충족 (실행)',
-}
-
-export function toolContractLabel(value: string | null | undefined): string | null {
-  if (!value) return null
-  return TOOL_CONTRACT_LABELS[value] ?? value
-}
-
 
 
 /** Korean labels for `execution.operator_disposition`. Backend emits 8
@@ -597,9 +526,7 @@ export function operatorDispositionReasonLabel(
  *  `Keeper_execution_receipt.runtime_outcome_to_string`
  *  (lib/keeper/keeper_execution_receipt.ml:144-149). Kept separate
  *  from `STATE_DISPLAY_NAMES` because `completed` and
- *  `not_observed` are generic tokens other axes may emit (same
- *  isolation pattern as TOOL_CONTRACT_LABELS in #16374 and
- *  OPERATOR_DISPOSITION_LABELS in #16377). */
+ *  `not_observed` are generic tokens other axes may emit. */
 const RUNTIME_OUTCOME_LABELS: Record<string, string> = {
   passed_to_next_model: '다음 모델로 진행',
   completed: '완료',
@@ -625,9 +552,8 @@ export function runtimeOutcomeLabel(value: string | null | undefined): string | 
  *  - `keeper_execution_receipt.ml:492` recognises the
  *    `completion_contract_violation:<detail>` prefix.
  *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like
- *  `completed` / `healthy` are also emitted by other axes (same isolation
- *  pattern as TOOL_CONTRACT_LABELS in #16374). Parameterized codes fall
- *  through to a prefix match below before the raw fallback. */
+ *  `completed` / `healthy` are also emitted by other axes. Parameterized codes
+ *  fall through to a prefix match below before the raw fallback. */
 const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
   // Keeper_turn_terminal_code.to_wire
   healthy: '정상',

@@ -10,7 +10,7 @@ type observed =
 val analyze
   :  base_path:string
   -> keeper_name:string
-  -> requested_tool_names_seen:string list
+  -> visible_tool_names:string list
   -> tool_usage_before:(string * int) list
   -> tool_calls:Keeper_agent_result.tool_call_detail list
   -> Agent_sdk.Types.content_block list

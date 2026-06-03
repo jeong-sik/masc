@@ -21,7 +21,6 @@ let last_tool_name receipt =
   choose
     [ receipt.observed_tools
     ; receipt.canonical_tools
-    ; receipt.tools_used
     ; receipt.reported_tools
     ; receipt.requested_tools
     ]
@@ -115,7 +114,6 @@ let tool_descriptor_summary_json receipt =
   let descriptors =
     receipt.observed_tools
     @ receipt.canonical_tools
-    @ receipt.tools_used
     @ receipt.reported_tools
     |> Keeper_tool_descriptor_resolution.descriptors_for_tool_names
   in
@@ -368,22 +366,7 @@ let operator_disposition (receipt : t)
        [provider_runtime_failure] true), so only [Pre_dispatch_success] and
        [Other] reach here in practice; the first two are listed to keep the
        match exhaustive without a wildcard. *)
-    let tool_route_failure =
-      List.mem
-        receipt.tool_contract_result
-        [ Contract_tool_surface_mismatch; Contract_no_tool_capable_provider ]
-    in
-    if tool_route_failure
-    then
-      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
-      then Disp_fail_open_next_runtime, Reason_tool_route_recoverable_failure
-      else if
-        receipt.runtime_fallback_applied
-        || receipt.runtime_outcome = Runtime_passed_to_next_model
-      then Disp_pass_next_model, Reason_tool_route_recoverable_failure
-      else Disp_pause_human, Reason_tool_route_recoverable_failure
-    else if
-      receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+    if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
     then Disp_fail_open_next_runtime, Reason_degraded_retry
     else if
       receipt.runtime_fallback_applied
@@ -392,7 +375,6 @@ let operator_disposition (receipt : t)
     else if
       receipt.outcome = `Ok
       && receipt.runtime_outcome = Runtime_not_dispatched
-      && receipt.tool_contract_result = Contract_not_dispatched
       &&
       (match terminal_reason with
        | Keeper_terminal_reason.Pre_dispatch_success _ -> true
@@ -438,12 +420,11 @@ let operator_disposition (receipt : t)
           ();
         Log.Keeper.warn
           "operator_disposition: unmapped (outcome=%s runtime_outcome=%s \
-           terminal_reason=%s tool_contract_result=%s error_kind=%s) — investigate \
+           terminal_reason=%s error_kind=%s) — investigate \
            regression of #11651 silent-path fix"
           (outcome_kind_to_string receipt.outcome)
           (runtime_outcome_to_string receipt.runtime_outcome)
           receipt.terminal_reason_code
-          (tool_contract_result_to_string receipt.tool_contract_result)
           (Option.value
              (Option.map error_kind_to_string receipt.error_kind)
              ~default:"<none>");
@@ -530,10 +511,7 @@ let to_json (receipt : t) =
     ; "observed_tools", list_json receipt.observed_tools
     ; "canonical_tools", list_json receipt.canonical_tools
     ; "unexpected_tools", list_json receipt.unexpected_tools
-    ; "tools_used", list_json receipt.tools_used
     ; "tool_descriptor_summary", tool_descriptor_summary_json receipt
-    ; ( "tool_contract_result"
-      , `String (tool_contract_result_to_string receipt.tool_contract_result) )
     ; ( "tool_surface"
       , `Assoc
           [ ( "turn_lane"
@@ -542,11 +520,7 @@ let to_json (receipt : t) =
           ; ( "tool_surface_class"
             , Keeper_agent_tool_surface.tool_surface_class_to_yojson
                 receipt.tool_surface.tool_surface_class )
-          ; ( "tool_requirement"
-            , Keeper_agent_tool_surface.tool_requirement_to_yojson
-                receipt.tool_surface.tool_requirement )
           ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
-          ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
           ; ( "tool_surface_fallback_used"
             , `Bool receipt.tool_surface.tool_surface_fallback_used )
           ; ( "materialized_tools"
@@ -731,10 +705,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "response_text_present", `Bool receipt.response_text_present
     ; "runtime_id", `String (receipt.runtime_id)
     ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
-    ; ( "tool_contract_result"
-      , `String (tool_contract_result_to_string receipt.tool_contract_result) )
     ; ( "last_tool_name", string_opt_json (last_tool_name receipt) )
-    ; "tools_used", list_json receipt.tools_used
     ; ( "contract_violation_detail"
       , match decode_contract_violation_reason terminal_reason_code with
         | None -> `Null
@@ -744,26 +715,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
             ; "called_tools", list_json called
             ; "satisfying_tools", list_json satisfying
             ] )
-    ; ( "tool_contract"
-      , `Assoc
-          [ ( "result"
-            , `String (tool_contract_result_to_string receipt.tool_contract_result) )
-          ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
-          ; ( "tool_requirement"
-            , Keeper_agent_tool_surface.tool_requirement_to_yojson
-                receipt.tool_surface.tool_requirement )
-          ; ( "turn_lane"
-            , Keeper_agent_tool_surface.turn_lane_to_yojson
-                receipt.tool_surface.turn_lane )
-          ; ( "tool_surface_class"
-            , Keeper_agent_tool_surface.tool_surface_class_to_yojson
-                receipt.tool_surface.tool_surface_class )
-          ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
-          ; ( "tool_surface_fallback_used"
-            , `Bool receipt.tool_surface.tool_surface_fallback_used )
-          ; ( "materialized_tools"
-            , list_json receipt.tool_surface.materialized_tools )
-          ] )
     ; ( "sandbox"
       , `Assoc
           [ "kind", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)

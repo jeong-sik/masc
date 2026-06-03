@@ -339,9 +339,9 @@ let test_docker_relative_repos_path_resolves_inside_playground () =
 let test_docker_relative_repos_cwd_resolves_inside_playground () =
   setup ~keeper_name:"provider_k-coding" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
-  let repo = Filename.concat playground "repos/masc-mcp" in
+  let repo = Filename.concat playground "repos/masc" in
   ensure_dir repo;
-  let args = `Assoc [ ("cwd", `String "repos/masc-mcp") ] in
+  let args = `Assoc [ ("cwd", `String "repos/masc") ] in
   match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
   | Ok cwd ->
     Alcotest.(check string)
@@ -355,13 +355,13 @@ let test_docker_container_cwd_maps_to_host_worktree () =
   setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let host_worktree =
-    Filename.concat playground "repos/masc-mcp/.worktrees/task-186"
+    Filename.concat playground "repos/masc/.worktrees/task-186"
   in
   ensure_dir host_worktree;
   let container_worktree =
     Filename.concat
       (Keeper_sandbox.container_root meta.name)
-      "repos/masc-mcp/.worktrees/task-186"
+      "repos/masc/.worktrees/task-186"
   in
   let args = `Assoc [ ("cwd", `String container_worktree) ] in
   let expect = normalize_realpath host_worktree in
@@ -381,14 +381,14 @@ let test_docker_container_file_path_maps_to_host_worktree () =
   @@ fun ~base:_ ~config ~meta ~playground ->
   let host_file =
     Filename.concat playground
-      "repos/masc-mcp/.worktrees/task-186/lib/keeper/keeper_tool_policy.ml"
+      "repos/masc/.worktrees/task-186/lib/keeper/keeper_tool_policy.ml"
   in
   ensure_dir (Filename.dirname host_file);
   ignore (Fs_compat.save_file_atomic host_file "let touched = true\n");
   let container_file =
     Filename.concat
       (Keeper_sandbox.container_root meta.name)
-      "repos/masc-mcp/.worktrees/task-186/lib/keeper/keeper_tool_policy.ml"
+      "repos/masc/.worktrees/task-186/lib/keeper/keeper_tool_policy.ml"
   in
   let args =
     `Assoc [ ("op", `String "head"); ("path", `String container_file) ]
@@ -405,7 +405,7 @@ let test_docker_other_container_root_stays_blocked () =
   let other_container_cwd =
     Filename.concat
       (Keeper_sandbox.container_root "analyst")
-      "repos/masc-mcp"
+      "repos/masc"
   in
   let args = `Assoc [ ("cwd", `String other_container_cwd) ] in
   match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with

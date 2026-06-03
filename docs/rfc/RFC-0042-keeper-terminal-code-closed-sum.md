@@ -11,7 +11,7 @@ implementation_prs: []
 - **Status**: Active (Closed sum landed via #11717/#12256/#13301/#13433/#13918; PR-3 deferred per RFC-0068 §6. Synced to YAML frontmatter `status: Active`.)
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-08
-- **Number**: jeong-sik/masc-mcp 의 RFC 번호는 PR Draft 시점에 점유되는 패턴이라
+- **Number**: jeong-sik/masc 의 RFC 번호는 PR Draft 시점에 점유되는 패턴이라
   본 RFC 번호 `0042` 는 잠정. PR #13918 (RFC-0039), PR #14157 (RFC-0041) 가 같은 시점
   Draft 점유 중이며 본 번호도 maintainer 가 머지 시점 재배정 가능.
 - **Related**:

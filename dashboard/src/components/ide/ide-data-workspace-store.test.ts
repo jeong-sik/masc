@@ -24,27 +24,27 @@ function repo(
 describe('selectPreferredIdeRepositoryId', () => {
   it('keeps the current repository when it is still present', () => {
     const repositories = [
-      repo('masc-mcp', '/Users/dancer/me/workspace/yousleepwhen/masc-mcp'),
+      repo('masc', '/Users/dancer/me/workspace/yousleepwhen/masc'),
       repo('oas', '.masc/repos/oas'),
     ]
 
     expect(selectPreferredIdeRepositoryId(repositories, 'oas')).toBe('oas')
   })
 
-  it('prefers the actual masc-mcp workspace over managed mirrors', () => {
+  it('prefers the actual masc workspace over managed mirrors', () => {
     const repositories = [
       repo('masc', '.masc/repos/masc'),
       repo('oas', '.masc/repos/oas'),
-      repo('masc-mcp', '/Users/dancer/me/workspace/yousleepwhen/masc-mcp'),
+      repo('masc', '/Users/dancer/me/workspace/yousleepwhen/masc'),
     ]
 
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('masc-mcp')
+    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('masc')
   })
 
-  it('prefers a masc-mcp workspace when a same-name mirror appears first', () => {
+  it('prefers a masc workspace when a same-name mirror appears first', () => {
     const repositories = [
-      repo('mirror-masc', '.masc/repos/mirror-masc', 'masc-mcp'),
-      repo('workspace-masc', '/Users/dancer/me/workspace/yousleepwhen/masc-mcp', 'masc-mcp'),
+      repo('mirror-masc', '.masc/repos/mirror-masc', 'masc'),
+      repo('workspace-masc', '/Users/dancer/me/workspace/yousleepwhen/masc', 'masc'),
     ]
 
     expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('workspace-masc')
@@ -52,7 +52,7 @@ describe('selectPreferredIdeRepositoryId', () => {
 
   it('does not treat absolute .masc/repos mirrors as workspace checkouts', () => {
     const repositories = [
-      repo('mirror-masc', '/Users/dancer/me/.masc/repos/mirror-masc', 'masc-mcp'),
+      repo('mirror-masc', '/Users/dancer/me/.masc/repos/mirror-masc', 'masc'),
       repo('workspace-oas', '/Users/dancer/me/workspace/yousleepwhen/oas', 'oas'),
     ]
 

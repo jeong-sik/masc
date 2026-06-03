@@ -51,7 +51,7 @@ val interpret :
     {2 Reason string locale}
 
     {!Meta_cognition_types.interpretation.reason} is rendered in
-    Korean (the operator-language convention for masc-mcp dashboard
+    Korean (the operator-language convention for masc dashboard
     surface cards).  Adding a non-Korean locale requires extending
     the contract, not silently switching at this layer. *)
 

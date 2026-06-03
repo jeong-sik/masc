@@ -7,7 +7,7 @@ RFC issues that own the remainder of the work.
 
 ## What "closure" means here
 
-The original plan (`/Users/dancer/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md`)
+The original plan (`/Users/dancer/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-h-curious-dusk.md`)
 divided Phase 2 work into Phases C / D / E / F. Direct verification +
 follow-up audits showed that the original "15 zones with zero production
 surface" classification was inflated by name-grep mismatches. After

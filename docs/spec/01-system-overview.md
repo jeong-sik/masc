@@ -89,13 +89,13 @@ MASC가 명시적으로 **하지 않는 것**:
 | GraphQL | HTTP client | Neo4j 접근은 Railway GraphQL API 경유. |
 | AI | agent_sdk (OAS) | Agent.run, Context_reducer, Swarm engine. |
 | Inference | Runtime | llama (local) -> Provider-K Cloud (fallback) -> skip. |
-| Build | dune 3.13+ | `dune-project` 기반. opam package: `masc_mcp`. |
+| Build | dune 3.13+ | `dune-project` 기반. opam package: `masc`. |
 | Coverage | bisect_ppx | `BISECT_FILE` 환경변수 필수. |
 | Dashboard | Preact + HTM + Vite | TypeScript SPA. `dashboard/` 소스, `assets/dashboard/` 빌드 산출물. |
 
 ## 5. Library Structure
 
-MASC는 단일 public library(`masc_mcp`)로 구성된다. `lib/` 아래 기능별 하위 디렉토리가 있으며, 이들은 별도 dune library가 아니라 `masc_mcp` library의 일부다.
+MASC는 단일 public library(`masc`)로 구성된다. `lib/` 아래 기능별 하위 디렉토리가 있으며, 이들은 별도 dune library가 아니라 `masc` library의 일부다.
 
 ### 주요 기능별 디렉토리
 

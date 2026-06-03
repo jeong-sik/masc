@@ -52,9 +52,9 @@ val partition_store_dir : base_dir:string -> partition -> string
 val canonical_url_of_remote : string -> string option
 (** [canonical_url_of_remote remote] normalises a git remote string
     into a host_path slug, e.g.
-    [https://github.com/jeong-sik/masc-mcp(.git)?] and
-    [git@github.com:jeong-sik/masc-mcp(.git)?] both produce
-    [Some "github.com_jeong-sik_masc-mcp"].
+    [https://github.com/jeong-sik/masc(.git)?] and
+    [git@github.com:jeong-sik/masc(.git)?] both produce
+    [Some "github.com_jeong-sik_masc"].
 
     Returns [None] when:
     - the input is empty

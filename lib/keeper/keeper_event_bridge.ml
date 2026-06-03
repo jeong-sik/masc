@@ -406,7 +406,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          dashboards can render it as a placeholder rather than treating
          it as a complete payload, and tell the operator *where* to add
          the explicit arm.  The warn log gives operators a per-process
-         signal that an OAS variant has shipped without a masc-mcp
+         signal that an OAS variant has shipped without a masc
          consumer migration; the
          [masc_oas_bridge_unmigrated_payload_kind_total{kind}] counter
          gives them the per-process *rate*, surfaced on the Prometheus

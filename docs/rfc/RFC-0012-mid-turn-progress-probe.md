@@ -76,7 +76,7 @@ progress" from "hung turn that will never complete".
 - Changing OAS execution to use chunked reads. That is an OAS-level
   change; the user explicitly noted in
   `feedback_oas_execution_uncancellable_mid_turn` that
-  "masc-mcp 단독 fix 영역 zero".
+  "masc 단독 fix 영역 zero".
 - Changing runtime routing. Tracked separately in the
   `diag/27b-fallback-trace` worktree.
 

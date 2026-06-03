@@ -814,7 +814,7 @@ let () =
       Alcotest.test_case "keeps escaped pipe inside quoted rg pattern" `Quick (fun () ->
         match
           validate_command_tool_execute_text
-            {|rg -n "task-259\|task-270\|task-272" repos/masc-mcp/.masc/backlog.json|}
+            {|rg -n "task-259\|task-270\|task-272" repos/masc/.masc/backlog.json|}
         with
         | Ok () -> ()
         | Error e ->
@@ -826,7 +826,7 @@ let () =
         (fun () ->
           match
             validate_command_tool_execute_text
-              {|grep -E 'task-259|task-270' repos/masc-mcp/.masc/backlog.json|}
+              {|grep -E 'task-259|task-270' repos/masc/.masc/backlog.json|}
           with
           | Ok () -> ()
           | Error e ->
@@ -894,8 +894,8 @@ let () =
             | Ok () -> Alcotest.fail ("should reject env-wrapped bare dune: " ^ cmd))
           [
             "env -- dune build";
-            "env -C repos/masc-mcp dune build";
-            "env --chdir repos/masc-mcp -- dune build";
+            "env -C repos/masc dune build";
+            "env --chdir repos/masc -- dune build";
             "env -i -- DUNE_JOBS=1 dune build";
           ]);
       Alcotest.test_case "blocks env-wrapped disallowed command" `Quick (fun () ->
@@ -1047,7 +1047,7 @@ let () =
         (fun () ->
            match
              validate_command_tool_execute_text
-               "rg \"task-317\" repos/masc-mcp/ --files-with-matches 2>/dev/null | head -5"
+               "rg \"task-317\" repos/masc/ --files-with-matches 2>/dev/null | head -5"
            with
            | Error _ -> ()
            | Ok () -> Alcotest.fail "strict gate should reject fd sink syntax");

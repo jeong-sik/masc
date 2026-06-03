@@ -108,4 +108,4 @@ val provider_satisfies_profile :
 
 - `feedback_no-string-matching-classification`: profile classification은 `Provider_tool_support.capabilities` record 기반, string matching 없음
 - `feedback_periodic_scanner_must_transition_state_after_acting`: 본 PR은 scanner 변경 없음 (schema only)
-- `feedback_masc_mcp_draft_guard_blocks_agent_ready`: agent-authored PR Draft 유지
+- `feedback_masc_draft_guard_blocks_agent_ready`: agent-authored PR Draft 유지

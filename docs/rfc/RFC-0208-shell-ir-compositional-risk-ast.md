@@ -136,9 +136,9 @@ decided decided_ir (single risk_class)  ── single gate ── dispatch
 Facts and the decisions they force:
 
 - **License = GPL3** (+ Section 7 POSIX-reprint notice that must propagate to
-  "any product containing this material"). masc-mcp is **internal infra, not
+  "any product containing this material"). masc is **internal infra, not
   distributed** → linking GPL3 is permissible for internal use. Conscious
-  cost: this **blocks future open-sourcing / distribution** of masc-mcp while
+  cost: this **blocks future open-sourcing / distribution** of masc while
   morbig is linked. Mitigation path if that changes: invoke `morbig --as json`
   across a **process boundary** (aggregation, not derivative work — copyleft
   does not propagate), trading per-command process-spawn latency for license

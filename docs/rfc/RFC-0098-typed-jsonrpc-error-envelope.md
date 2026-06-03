@@ -63,7 +63,7 @@ The two surfaces are coupled at the **boundary contract**: an internal silent fa
 
 - **Re-typing existing persistence writes.** [[RFC-0077]] owns that. This RFC will *consume* `Write_failure_reason.t` once it lands; it does not redefine it.
 - **Counter removal.** [[RFC-0088]] is the umbrella for telemetry-as-fix migration; this RFC adds a new emission shape (typed JSON-RPC error envelope) without removing existing Prometheus counters.
-- **OAS / `agent_sdk` API change.** A separate RFC (forthcoming in the IMPROVE-series, see §9) covers `oas/lib/api_common.ml` `Error_type.t`. RFC-0098 stops at the masc-mcp boundary.
+- **OAS / `agent_sdk` API change.** A separate RFC (forthcoming in the IMPROVE-series, see §9) covers `oas/lib/api_common.ml` `Error_type.t`. RFC-0098 stops at the masc boundary.
 - **`failure_envelope.ml` redesign.** That module is operator-visible **tool-host attachment** (severity / recoverability / operator action) and is orthogonal. The new envelope produced here may *embed* a `failure_envelope.t` in `data.evidence_ref`, but does not replace it.
 - **JSON-RPC error code spec change.** The set of well-known codes (`-32700`, `-32600`, `-32601`, `-32602`, `-32603`) is fixed by the spec. This RFC introduces **server-defined codes in `-32000` to `-32099`** per JSON-RPC 2.0 §5.1 ("reserved for implementation-defined server-errors").
 - **Replacing `with _ -> ()` everywhere.** Some of the 15 sites are legitimate (e.g., best-effort log writes during shutdown). Audit is per-cohort, not bulk rewrite.

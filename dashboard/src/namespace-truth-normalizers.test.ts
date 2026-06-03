@@ -79,7 +79,7 @@ describe('normalizeNamespaceTruth', () => {
           workspace_path: '/path/to/ws',
           workspace_differs: true,
           cluster: 'local',
-          project: 'masc-mcp',
+          project: 'masc',
           paused: false,
           version: '1.0.0',
           generated_at: '2026-04-17T10:00:00Z',

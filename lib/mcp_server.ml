@@ -94,13 +94,13 @@ let server_icons = [ themed_icon ~label:"MM" ~bg:"#7C3AED" ~fg:"#F5F3FF" ]
 let server_info =
   `Assoc
     [
-      ("name", `String "masc-mcp");
+      ("name", `String "masc");
       ("title", `String "MASC MCP Server");
       ("version", `String Version.version);
       ( "description",
         `String
           "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources." );
-      ("websiteUrl", `String "https://github.com/yousleepwhen/masc-mcp");
+      ("websiteUrl", `String "https://github.com/yousleepwhen/masc");
       ("icons", `List (List.map icon_to_json server_icons));
     ]
 

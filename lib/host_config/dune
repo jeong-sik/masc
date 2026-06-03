@@ -1,5 +1,5 @@
 ; RFC-0056 Phase 1C — extract Host_config leaf module from flat
-; masc_mcp namespace. Stacked on Phase 1B (keeper_skill_routing).
+; masc namespace. Stacked on Phase 1B (keeper_skill_routing).
 ;
 ; Host_config is dependency-leaf: stdlib (Filename, Format, String,
 ; Sys, Unix) + Workspace (already its own sub-library). Authored under
@@ -11,7 +11,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_host_config)
+ (name masc_host_config)
  (public_name masc.host_config)
  (wrapped false)
  (flags (:standard -w +4))

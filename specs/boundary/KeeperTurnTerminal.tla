@@ -13,7 +13,7 @@
 \* This spec models the bug with a [SilentAliasKeep] action and proves
 \* the safety invariant [NoSilentAliasKeep] catches it.  Pattern (clean
 \* Spec + buggy SpecBuggy gated by a separate Bug action) follows the
-\* masc-mcp convention — see KeeperContinueGate.tla and the TLA+ Bug
+\* masc convention — see KeeperContinueGate.tla and the TLA+ Bug
 \* Model entry in /Users/dancer/me/instructions/software-development.md.
 \*
 \* State space is intentionally minimal: per-keeper booleans for

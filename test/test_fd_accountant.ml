@@ -306,20 +306,20 @@ let test_autonomy_exec_uses_sandbox_slot () =
   Eio_guard.enable () ;
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
+      Masc_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
       Eio_guard.disable ())
     (fun () ->
-      Masc_mcp_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
+      Masc_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
       FA.install_autonomy_exec_sandbox_exec_guard () ;
       let clock = Eio.Stdenv.clock env in
       let () =
         Eio.Switch.run @@ fun sw ->
         Eio.Fiber.fork ~sw (fun () ->
             ignore
-              (Masc_mcp_cdal_runtime.Autonomy_exec.run
+              (Masc_cdal_runtime.Autonomy_exec.run
                  ~sw
                  ~clock
-                 ~config:Masc_mcp_cdal_runtime.Autonomy_exec.default_config
+                 ~config:Masc_cdal_runtime.Autonomy_exec.default_config
                  ~argv:[ "/bin/sleep"; "0.05" ]
                  ~timeout_s:2.0)) ;
         check bool "Autonomy_exec holds sandbox slot while child runs" true

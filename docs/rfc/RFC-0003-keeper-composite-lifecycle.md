@@ -11,7 +11,7 @@ code_refs:
 
 **Status**: Draft
 **Date**: 2026-04-14
-**Scope**: `masc-mcp` cross-spec joint invariants + dashboard observer contract
+**Scope**: `masc` cross-spec joint invariants + dashboard observer contract
 **One sentence**: Decision/Runtime/Memory/Compaction의 turn 단위 상호작용을 1급으로 관찰하기 위한 composition observer를 도입하고, runtime projection과 TLA state set을 1:1로 고정한다.
 
 > Runtime note (2026-04-16)
@@ -39,7 +39,7 @@ code_refs:
 
 ## 1. Context & Motivation
 
-`masc-mcp` 저장소는 이미 세 개의 부분 합성 spec을 가진다.
+`masc` 저장소는 이미 세 개의 부분 합성 spec을 가진다.
 
 | Spec | 합성 축 | 커버 | 미커버 |
 |------|---------|------|--------|

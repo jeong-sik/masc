@@ -1118,7 +1118,7 @@ Follow-up to v0.18.2 stability hardening. This release closes two long-standing 
 
 ### Bumps
 - dune-project version 0.18.2 → 0.18.3
-- masc_mcp.opam version 0.18.2 → 0.18.3
+- masc.opam version 0.18.2 → 0.18.3
 - CHANGELOG.md: v0.18.3 entry added (0.18.2 history preserved)
 - ROADMAP.md / docs/PRODUCT-OPERATING-PLAN.md / docs/spec/SPEC-INDEX.md: version refs synced
 
@@ -1440,7 +1440,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   `agent_sdk >= 0.171.0` for the new contract hook.
 - **OAS pin bump → `main@031c7e6b` (`v0.170.5`).**
   `scripts/oas-agent-sdk-pin.sh` now tracks the merged OAS truth-layer evidence
-  primitives, and the dependency floor in `dune-project` / `masc_mcp.opam` is
+  primitives, and the dependency floor in `dune-project` / `masc.opam` is
   raised to `agent_sdk >= 0.170.5`. Keeper metrics now separate
   `raw_evidence_ref_count` from `violation_count`, so OAS
   `evidence/effects.json` rows are treated as advisory effect-decision evidence
@@ -1452,7 +1452,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 - **OAS pin bump → `main@8b5bf30a` (`v0.170.4`).**
   `scripts/oas-agent-sdk-pin.sh` now tracks the merged OAS Kimi CLI session
   reuse fix on upstream `main`, and the dependency floor in `dune-project` /
-  `masc_mcp.opam` is raised to `agent_sdk >= 0.170.4`. Generated keeper OAS
+  `masc.opam` is raised to `agent_sdk >= 0.170.4`. Generated keeper OAS
   pin docs are re-synced from the shared pin script so the declared base
   version, runtime SHA, and floor stay aligned.
 - **OAS pin refresh → `main@09a19698` (`v0.170.3`).**
@@ -1469,7 +1469,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
   mounting is no longer a separate profile. Old
   profile strings are rejected instead of compat-mapped. See
   RFC-0006 §8 Addendum.
-- **OAS pin bump → `main@3dabe7a8` (`v0.164.0`).** `scripts/oas-agent-sdk-pin.sh` now follows `jeong-sik/oas` `main` instead of the older retired runtime branch, and the dependency floor in `dune-project` / `masc_mcp.opam` is raised to `agent_sdk >= 0.164.0`. This matches the upstream version-boundary fix where current OAS `main` advertises `0.164.0` after post-`0.163.0` public API growth, so downstream pin metadata no longer conflates branch head with the older `0.163.0` line.
+- **OAS pin bump → `main@3dabe7a8` (`v0.164.0`).** `scripts/oas-agent-sdk-pin.sh` now follows `jeong-sik/oas` `main` instead of the older retired runtime branch, and the dependency floor in `dune-project` / `masc.opam` is raised to `agent_sdk >= 0.164.0`. This matches the upstream version-boundary fix where current OAS `main` advertises `0.164.0` after post-`0.163.0` public API growth, so downstream pin metadata no longer conflates branch head with the older `0.163.0` line.
 
 ### Added
 
@@ -1792,7 +1792,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 
 ### Changed
 
-- **OAS pin bump → `main@36490371` (v0.163.0).** Single-commit upstream bump for `pipeline: handle Nudge decision in before_turn` (oas#1065). Without this, `before_turn` hooks returning `Hooks.Nudge` were silently dropped by `pipeline.ml stage_input` (`_ -> ()` fall-through). Effect on masc: the work-discovery nudge wired in PR #8805 (1089-char Samchon schema text) now actually reaches the LLM. 3 SSOT axes bumped per `feedback_oas-pin-must-bump-version-floor`: `scripts/oas-agent-sdk-pin.sh`, `dune-project`, `masc_mcp.opam`. Generated docs re-synced via `scripts/sync-oas-pin-docs.sh`. Live verification: post-deploy, `keeper:<name> before_turn: injecting work_discovery nudge` log lines should be followed by `tool_call` events from the same keeper (currently 10 fires + 0 follow-up actions over the live server's 2 hour uptime).
+- **OAS pin bump → `main@36490371` (v0.163.0).** Single-commit upstream bump for `pipeline: handle Nudge decision in before_turn` (oas#1065). Without this, `before_turn` hooks returning `Hooks.Nudge` were silently dropped by `pipeline.ml stage_input` (`_ -> ()` fall-through). Effect on masc: the work-discovery nudge wired in PR #8805 (1089-char Samchon schema text) now actually reaches the LLM. 3 SSOT axes bumped per `feedback_oas-pin-must-bump-version-floor`: `scripts/oas-agent-sdk-pin.sh`, `dune-project`, `masc.opam`. Generated docs re-synced via `scripts/sync-oas-pin-docs.sh`. Live verification: post-deploy, `keeper:<name> before_turn: injecting work_discovery nudge` log lines should be followed by `tool_call` events from the same keeper (currently 10 fires + 0 follow-up actions over the live server's 2 hour uptime).
 
 - **OAS pin bump → `main@2798831c` (v0.162.0 + 7 follow-ups).** Carries
   upstream OAS commits since the last `54f4aeab` pin:
@@ -1880,7 +1880,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 ### Changed
 
 - **OAS pin bump → `v0.160.1`.** `agent_sdk` floor raised from `0.160.0`
-  to `0.160.1` (dune-project + masc_mcp.opam + pin script SHA
+  to `0.160.1` (dune-project + masc.opam + pin script SHA
   `f70fd95e79bbe5f53ddd6687d3438e39f7b2c59f`). Picks up OAS #1001's
   `completion_contract` fix: `validate_response` now accepts no-ToolUse
   responses when `stop_reason` is `MaxTokens` or `Unknown "pause_turn"`
@@ -1964,7 +1964,7 @@ observation and fix — silent cost of the pre-fix contract shape.
   - `oas_sse_bridge` surfaces `keeper_name` on envelope `agent_name` (#8261).
 
 - **OAS pin bump → `v0.160.1`.** `agent_sdk` floor raised from `0.159.0`
-  to `0.160.1` (dune-project + masc_mcp.opam + pin script SHA
+  to `0.160.1` (dune-project + masc.opam + pin script SHA
   `43527e8095f2f0c35aa84853d941025a0031aea0`). Keeps the event-bus
   backpressure-policy API (`Block` / `Drop_oldest` / `Drop_newest`),
   per-subscription + per-bus stats, and `subscribe ?purpose` labels from
@@ -2151,7 +2151,7 @@ Bulk merge cycle (2 `/loop` batches, admin override) covering dashboard UX, keep
 ### Changed
 
 - **README facts aligned with code (PR #7730).**
-  - OAS pin floor in badge + Tech Stack: `0.118.2` → `0.153.0` (matches `masc_mcp.opam` and `dune-project`).
+  - OAS pin floor in badge + Tech Stack: `0.118.2` → `0.153.0` (matches `masc.opam` and `dune-project`).
   - Keeper lifecycle diagram corrected from "11-state" to the actual **12 states** in `lib/keeper/keeper_state_machine.mli` (`Overflowed` was missing).
   - WebRTC signaling endpoints made precise: `POST /webrtc/offer`, `POST /webrtc/answer`, gated by `Server_webrtc_transport.is_enabled`.
   - Personal-project disclaimer added (Korean + English) at the top.
@@ -2467,7 +2467,7 @@ had the full Phase 2 release to migrate.
   to `wrapped false`. Prerequisite for the planned standalone `gate-mcp` repo.
 - **Pulse library extraction** (#7452 B1b): the beat engine moved to
   `lib/pulse/` as the `masc_pulse` sub-library. Unblocks Gate's dependency on
-  Pulse without routing the arrow back through `masc_mcp`.
+  Pulse without routing the arrow back through `masc`.
 - **OAS pin → v0.148.0** (from v0.141.0) (#7394 + prior pins). Legacy runtime
   API removed from OAS across v0.142.0–v0.148.0 — `Judge.judge` and
   `Tool_selector.default_rerank_fn` now take a single `Provider_config.t`, and
@@ -2597,7 +2597,7 @@ had the full Phase 2 release to migrate.
 - Concurrency and observability fixes carried over from the 0.5.x line.
 
 ### Notes
-- Version bumped in `dune-project` and `masc_mcp.opam` by #7009. This
+- Version bumped in `dune-project` and `masc.opam` by #7009. This
   entry finalizes the release docs that were omitted in that bump, so
   `scripts/check-version-truth.sh` stops failing on every main-base PR.
 

@@ -1,7 +1,7 @@
 (include_subdirs no)
 
 ;; Tool dispatch substrate — the neutral Tool layer, decoupled from the
-;; masc_mcp mega-library (PR-S3, RFC-0056 LANE 2). The compiler now enforces
+;; masc mega-library (PR-S3, RFC-0056 LANE 2). The compiler now enforces
 ;; "Tool is just Tool": this library CANNOT reference keeper / runtime / goal /
 ;; task / board modules because none of them appear in (libraries) below.
 ;;

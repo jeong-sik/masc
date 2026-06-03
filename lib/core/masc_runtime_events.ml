@@ -1,4 +1,4 @@
-(** Runtime_events event registrations for masc-mcp (Wave 2A).
+(** Runtime_events event registrations for masc (Wave 2A).
 
     Registers a user event handle for agent turns and provides a
     start helper so that Olly (or a custom [Runtime_events.Callbacks]

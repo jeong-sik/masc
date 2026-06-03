@@ -72,7 +72,7 @@ LLM 이 호출하는 tool 들의 *실패 분류* 가 현재 `Failure msg` (catch
 
 ## §1 문제: catch-all `Printexc.to_string exn` 의 LLM-facing 노출
 
-2026-05-20 18-log audit (`memory/masc-mcp-log-audit-2026-05-20-final-synthesis.html`) Sweep1 §2 가 추정한 "HIGH 8 sites" 는 **실측 결과 stale** 였다 — `tool_dispatch.ml` / `retired_file_tool.ml` 의 site 들은 *이미 다른 PR* (예: PR #16783 Retired_file_tool_read_core SSOT) 로 typed 화되었거나 패턴 변경됨. **본 RFC §1.1 은 2026-05-20 PR-2 작성 시점 (RFC 머지 ~1일 후) 의 실측 재측정 결과** 로 정정한다.
+2026-05-20 18-log audit (`memory/masc-log-audit-2026-05-20-final-synthesis.html`) Sweep1 §2 가 추정한 "HIGH 8 sites" 는 **실측 결과 stale** 였다 — `tool_dispatch.ml` / `retired_file_tool.ml` 의 site 들은 *이미 다른 PR* (예: PR #16783 Retired_file_tool_read_core SSOT) 로 typed 화되었거나 패턴 변경됨. **본 RFC §1.1 은 2026-05-20 PR-2 작성 시점 (RFC 머지 ~1일 후) 의 실측 재측정 결과** 로 정정한다.
 
 ### 1.1 실측 LLM-facing 6 사이트 (PR-2 codemod 대상)
 
@@ -106,7 +106,7 @@ rg 'Tool_result\.error.*Printexc\.to_string|let\s+\w+\s*=\s*Printexc\.to_string'
 
 ### 1.3 원본 audit hallucination
 
-2026-05-20 audit HTML (`memory/masc-mcp-log-audit-2026-05-20-final-synthesis.html` §"5. 12 RFC candidates" line 127) 의 원본 인용 *8 sites* 중:
+2026-05-20 audit HTML (`memory/masc-log-audit-2026-05-20-final-synthesis.html` §"5. 12 RFC candidates" line 127) 의 원본 인용 *8 sites* 중:
 
 - `tool_dispatch.ml:203` — **존재 안 함**. lib/tool_dispatch.ml 에 `Failure` 패턴 0건.
 - `retired_file_tool.ml:529, 584` — **존재 안 함**. `retired_file_tool.ml` 의 catch-all 은 `Retired_file_tool_read_core.read_error` typed variant 로 이미 변환됨 (PR #16783).
@@ -230,7 +230,7 @@ LLM-side prompt 는 *kind* field 만으로 1차 분류 가능. *detail* 은 user
 
 ## §8 메모리 / 컨텍스트
 
-- `memory/masc-mcp-log-audit-2026-05-20-final-synthesis.html` §"5. 12 RFC candidates" line 127 (HIGH 8 sites enum)
+- `memory/masc-log-audit-2026-05-20-final-synthesis.html` §"5. 12 RFC candidates" line 127 (HIGH 8 sites enum)
 - `feedback_fallback_constant_to_discriminated_union` (2026-05-14): closed sum type 으로 *unknown→permissive default* 박멸 사례
 - `feedback_exhaustive_match_sweep_type_plus_arm` (2026-05-12): repo 전수 grep 시 *type+arm shape* 로 patten 잡기 — PR-2 의 codemod 가 이 패턴 따름
 - RFC-0098 `Openai_compat_error_map` — SDK 레벨 error mapping (본 RFC 와 *비-목표 boundary*)

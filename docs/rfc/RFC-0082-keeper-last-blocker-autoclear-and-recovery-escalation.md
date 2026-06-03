@@ -279,7 +279,7 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
    Both pass governance (unlike `masc_keeper_reset` which is `risk_level=critical`). Result: `last_blocker = null`, `paused = false`, `trace_id` preserved. Server keeps running. *This is the recommended Tier 1 recovery.*
 1. **Server stop + JSON edit + restart** *(legacy — only if `masc_keeper_*` is unavailable)*:
    ```bash
-   # Identify masc-mcp main_eio process
+   # Identify masc main_eio process
    lsof -nP -i :8935 | rg LISTEN
    # Stop server (SIGTERM)
    kill $(lsof -nP -i :8935 | rg LISTEN | awk '{print $2}')
@@ -327,7 +327,7 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
 - Production state evidence: `<base-path>/.masc/keepers/masc-improver.json` + `<base-path>/.masc/keepers/masc-improver/execution-receipts/2026-05/14.jsonl` (2026-05-14)
 - Dashboard screenshots, masc-improver detail panel, 2026-05-14
 - 3-axis code-path investigation, sub-agent transcripts at `/private/tmp/claude-502/-Users-dancer-me/<session>/tasks/{ad8ec8979cef72647,a2b20180f03ae2f55,a8c42e55f427f68da}.output`
-- `MEMORY.md` `project_masc_mcp_fleet_idle_quartet` — 4-axis configured-but-idle pattern; this RFC addresses a 2-axis tight variant (latch + dead UI)
+- `MEMORY.md` `project_masc_fleet_idle_quartet` — 4-axis configured-but-idle pattern; this RFC addresses a 2-axis tight variant (latch + dead UI)
 - AGENT-LLM-A.md §"워크어라운드 거부 기준" — telemetry-as-fix (#1) and N-of-M (#3) self-checks applied at each phase
 
 ## §12 Correction (2026-05-15) — falsifying measurements

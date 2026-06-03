@@ -6,7 +6,7 @@
 | Supersedes-in-part | RFC-0168 §6 (deferred SPEC.md + preview sync) |
 | Related | RFC-0165 / 0166 / 0167 / 0168 / 0169 (client-agnostic family) |
 | Scope | `dashboard/design-system/tokens.generated.css`, `dashboard/design-system/ui_kits/cockpit/tokens.generated.css`, `dashboard/design-system/SPEC.md`, `dashboard/design-system/preview/colors.html`, `dashboard/design-system/preview/index.html` |
-| Repos | masc-mcp |
+| Repos | masc |
 
 ## 1. Problem
 
@@ -33,7 +33,7 @@ RFC-0168 (PR #18219) removed 14 closed-roster `--p-<vendor>` color tokens (`prov
 | `dashboard/design-system/audits/*.md` | Historical design audit reports; same role as RFC body citation — preserved for design history. |
 | `dashboard/design-system/preview/cb-*.jsx`, `preview/*.html` mock data | Design canvas snapshot; vendor names inside mock UI text are part of the original design illustration (runtime chip examples, status bar mocks, etc.). Rewriting to generic strings would erase design history without removing any token / code path. |
 | `dashboard/design-system/RFC/00{21,23}*.md` | Internal design RFC bodies; same as above. |
-| `dashboard/src/**/*.test.ts`, `test/` OCaml fixtures | These mirror backend wire format (`model_id: 'model-c:cloud'`, `actor: 'agent-llm-a'`, `Llm_provider.Provider_config.Kimi_cli` etc.). The vendor names are *protocol-level model IDs* from external SDKs and *closed-sum variant constructors* defined in the `agent_sdk.llm_provider` opam package — neither is within masc-mcp's scope to rename. |
+| `dashboard/src/**/*.test.ts`, `test/` OCaml fixtures | These mirror backend wire format (`model_id: 'model-c:cloud'`, `actor: 'agent-llm-a'`, `Llm_provider.Provider_config.Kimi_cli` etc.). The vendor names are *protocol-level model IDs* from external SDKs and *closed-sum variant constructors* defined in the `agent_sdk.llm_provider` opam package — neither is within masc's scope to rename. |
 | `docs/` history references | RFC body and audit citations; same as audits/. |
 
 ## 4. Verification

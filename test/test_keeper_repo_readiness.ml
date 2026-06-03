@@ -60,11 +60,11 @@ let test_missing_clone () =
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
-      ~meta ~repo:"jeong-sik/masc-mcp" ()
+      ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
   check string "state" "missing_clone" (json_string "state" json);
-  check string "repo_name" "masc-mcp" (json_string "repo_name" json);
+  check string "repo_name" "masc" (json_string "repo_name" json);
   check bool "exists" false (json_bool "exists" json)
 
 let test_non_git_clone () =
@@ -73,12 +73,12 @@ let test_non_git_clone () =
   let meta = make_meta "keeper-one" in
   let clone_path =
     Masc_mcp.Keeper_repo_readiness.clone_path ~config
-      ~meta ~repo_name:"masc-mcp"
+      ~meta ~repo_name:"masc"
   in
   mkdir_p clone_path;
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
-      ~meta ~repo:"jeong-sik/masc-mcp" ()
+      ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
   check string "state" "not_git_repo" (json_string "state" json);
@@ -144,12 +144,12 @@ let test_parent_git_checkout_does_not_count_as_clone () =
   let meta = make_meta "keeper-one" in
   let clone_path =
     Masc_mcp.Keeper_repo_readiness.clone_path ~config
-      ~meta ~repo_name:"masc-mcp"
+      ~meta ~repo_name:"masc"
   in
   mkdir_p clone_path;
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
-      ~meta ~repo:"jeong-sik/masc-mcp" ()
+      ~meta ~repo:"jeong-sik/masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
   check string "state" "not_git_repo" (json_string "state" json);
@@ -190,13 +190,13 @@ let set_workspace_origin_to_github ~repo =
       "remote";
       "set-url";
       "origin";
-      "https://github.com/jeong-sik/masc-mcp.git";
+      "https://github.com/jeong-sik/masc.git";
     ]
 
 let test_auto_provisionable_workspace_repo () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
-  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
   mkdir_p (Filename.dirname repo);
   git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
   git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo ];
@@ -214,14 +214,14 @@ let test_auto_provisionable_workspace_repo () =
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
-      ~meta ~repo_name:"masc-mcp" ()
+      ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
   check string "state" "auto_provisionable" (json_string "state" json);
   check string "workspace repo match" repo
     Yojson.Safe.Util.(json |> member "workspace_repo_match" |> to_string);
   check string "workspace repo origin"
-    "jeong-sik/masc-mcp"
+    "jeong-sik/masc"
     Yojson.Safe.Util.(
       json |> member "workspace_repo_origin" |> to_string
       |> fun url ->
@@ -229,8 +229,8 @@ let test_auto_provisionable_workspace_repo () =
 
 let test_missing_clone_skips_workspace_discovery () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
-  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
   mkdir_p (Filename.dirname repo);
   git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
   git_ok ~cwd:base_path [ "clone"; "-q"; remote; repo ];
@@ -248,15 +248,15 @@ let test_missing_clone_skips_workspace_discovery () =
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config ~meta
-      ~repo_name:"masc-mcp" ()
+      ~repo_name:"masc" ()
   in
   check bool "not ok" false (json_bool "ok" json);
   check string "state" "missing_clone" (json_string "state" json)
 
 let test_auto_provisionable_workspace_repo_after_file_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
-  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
   create_file_storm ~base_path ~count:4005;
   mkdir_p (Filename.dirname repo);
   git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
@@ -275,7 +275,7 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
-      ~meta ~repo_name:"masc-mcp" ()
+      ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
   check string "state" "auto_provisionable" (json_string "state" json);
@@ -284,8 +284,8 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
 
 let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
-  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
   create_hidden_dir_storm ~base_path ~count:4005;
   mkdir_p (Filename.dirname repo);
   git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
@@ -304,7 +304,7 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
-      ~meta ~repo_name:"masc-mcp" ()
+      ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
   check string "state" "auto_provisionable" (json_string "state" json);
@@ -313,8 +313,8 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
 
 let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
-  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
-  let remote = Filename.concat base_path ".remote-masc-mcp.git" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
   create_wide_workspace_storm ~base_path ~count:4005;
   mkdir_p (Filename.dirname repo);
   git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
@@ -333,7 +333,7 @@ let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config
-      ~meta ~repo_name:"masc-mcp" ()
+      ~meta ~repo_name:"masc" ()
   in
   check bool "ok" true (json_bool "ok" json);
   check string "state" "auto_provisionable" (json_string "state" json);

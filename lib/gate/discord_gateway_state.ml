@@ -367,8 +367,8 @@ let identify_frame ~config =
   let properties =
     `Assoc
       [ ("os", `String "linux")
-      ; ("browser", `String "masc-mcp")
-      ; ("device", `String "masc-mcp")
+      ; ("browser", `String "masc")
+      ; ("device", `String "masc")
       ]
   in
   let payload =

@@ -1493,7 +1493,7 @@ let task_submit_evidence_notes =
 let () = test "transition_submit_pr_evidence_accepts_todo_pr_url_alias" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/13169" in
+    let pr_url = "https://github.com/jeong-sik/masc/pull/13169" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
     let result =
       Tool_task.handle_transition
@@ -1530,7 +1530,7 @@ let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () -
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Typed pr_url normalize" [ "tool_execute" ];
-    let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/77777" in
+    let pr_url = "https://github.com/jeong-sik/masc/pull/77777" in
     let submit_result =
       Tool_task.handle_transition
         ~tool_name:"test_tool" ~start_time:0.0
@@ -1561,7 +1561,7 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"pr_url merge" [ "tool_execute" ];
     let existing_ref = "logs/run-42.json" in
-    let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/88888" in
+    let pr_url = "https://github.com/jeong-sik/masc/pull/88888" in
     let submit_result =
       Tool_task.handle_transition
         ~tool_name:"test_tool" ~start_time:0.0
@@ -1603,7 +1603,7 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence" (fun () -
           [
             ("task_id", `String "task-001");
             ("action", `String "submit_pr_evidence");
-            ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
+            ("pr_url", `String "https://github.com/jeong-sik/masc/pull/13169");
             ("notes", `String task_submit_evidence_notes);
           ])
     in
@@ -1777,7 +1777,7 @@ let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun
             ("task_id", `String "task-001");
             ("action", `String "submit_pr_evidence");
             ("notes", `String task_submit_evidence_notes);
-            ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
+            ("pr_url", `String "https://github.com/jeong-sik/masc/pull/13169");
           ])
     in
     if not (Tool_result.is_success result) then

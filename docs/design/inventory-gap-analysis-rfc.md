@@ -314,7 +314,7 @@ let handle_voice_transcript (_ctx : 'a context) _args : result =
 | 파일 | 버전 |
 |------|------|
 | `dune-project` | 2.161.0 |
-| `masc_mcp.opam` | 2.161.0 |
+| `masc.opam` | 2.161.0 |
 | `CHANGELOG.md` 최신 | 2.160.0 |
 | `ROADMAP.md` | 2.159.0 |
 | `PRODUCT-OPERATING-PLAN.md` | 2.153.0 |

@@ -106,7 +106,7 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 
 `test/dune`은 다음 구조로 테스트를 구성한다:
 
-1. **Pure synchronous tests** (최대 묶음, `(tests ...)` 블록): 44개 테스트를 단일 `(libraries masc_mcp alcotest ...)` 의존으로 묶음
+1. **Pure synchronous tests** (최대 묶음, `(tests ...)` 블록): 44개 테스트를 단일 `(libraries masc alcotest ...)` 의존으로 묶음
 2. **Eio-dependent tests** (개별 `(test ...)` 블록): Eio.Mutex, Session.with_lock 등을 사용하는 테스트는 `eio eio_main` 의존으로 개별 빌드
 3. **OAS bridge tests**: `agent_sdk` 의존
 4. **Script tests**: CI/harness 스크립트의 동작을 검증하는 테스트 (`test_ci_hardening_source.ml`, `test_ci_run_tests_script.ml`)
@@ -287,7 +287,7 @@ bisect-ppx-report html --coverage-path _coverage
 | 라이브러리 | 용도 |
 |-----------|------|
 | `alcotest` | 테스트 프레임워크 (assertion, test case 구조화) |
-| `masc_mcp` | 서버 라이브러리 |
+| `masc` | 서버 라이브러리 |
 | `agent_sdk` | OAS 에이전트 SDK |
 | `eio`, `eio_main` | Eio 동시성 (Mutex, 스케줄러) |
 | `yojson` | JSON 직렬화/역직렬화 |

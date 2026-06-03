@@ -11,7 +11,7 @@ code_refs:
 
 **Status**: Draft
 **Date**: 2026-04-14
-**Scope**: `masc-mcp` composite observer mutation model + snapshot schema
+**Scope**: `masc` composite observer mutation model + snapshot schema
 **One sentence**: Decision/Runtime sub-FSM의 live state를 관찰하기 위한 mutation 모델 결정 — single-writer invariant를 깨지 않으면서 stale state도 만들지 않는 설계.
 
 ## Related Documents

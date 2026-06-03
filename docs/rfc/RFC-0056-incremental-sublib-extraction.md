@@ -1,12 +1,12 @@
 ---
-title: Incremental Sub-Library Extraction from Flat masc_mcp Library
+title: Incremental Sub-Library Extraction from Flat masc Library
 rfc: 0056
 status: Active
 created: 2026-05-09
 implementation_prs: []
 ---
 
-# RFC-0056 — Incremental Sub-Library Extraction from Flat masc_mcp Library
+# RFC-0056 — Incremental Sub-Library Extraction from Flat masc Library
 
 Status: Active · Phase 0 PoC included (frontmatter SSOT)
 Author: jeong-sik (with Agent-LLM-A Opus 4.7)
@@ -20,7 +20,7 @@ Related: existing `lib/cdal_runtime/dune` (template), prior PR #14166 (prometheu
 
 ```
 (include_subdirs unqualified)
-(library (name masc_mcp) ...)
+(library (name masc) ...)
 ```
 
 This single stanza absorbs every `.ml` file under `lib/` — except sub-folders that have their own `dune` — into one library namespace. Effects measured on `main` 2026-05-09:
@@ -29,14 +29,14 @@ This single stanza absorbs every `.ml` file under `lib/` — except sub-folders 
 |---|---|
 | `.ml` files under `lib/` | 961 |
 | Sub-libraries with own `dune` | 42 |
-| `.ml` files in flat `masc_mcp` namespace | ~880 |
+| `.ml` files in flat `masc` namespace | ~880 |
 | `lib/keeper/` (largest single domain in flat ns) | 208 files |
 | Flat-ns `.ml` with external fan-in == 0 | 39 |
 | Flat-ns `.ml` with external fan-in == 1 (≥ 200 LoC) | 30 |
 
 Two structural consequences:
 
-1. **dune does not enforce dependency direction inside the flat namespace.** Two flat modules can reference each other freely; the `masc_mcp` library accepts the cycle because both are members. OCaml's strongest static guarantee (acyclic library DAG) is disabled for ~880 modules.
+1. **dune does not enforce dependency direction inside the flat namespace.** Two flat modules can reference each other freely; the `masc` library accepts the cycle because both are members. OCaml's strongest static guarantee (acyclic library DAG) is disabled for ~880 modules.
 
 2. **Domain prefixes are aspirational, not load-bearing.** Audit of the `cdal_*` prefix (2026-05-09):
 
@@ -63,11 +63,11 @@ A directory `lib/<X>/` may be promoted to a wrapped sub-library if and only if a
 
 | Gate | Definition | Verification |
 |---|---|---|
-| **G1: No cycle** | The candidate's outbound module references resolve to (a) sub-libraries declared in its `dune` `(libraries ...)`, (b) the proposed sub-library's own modules, or (c) modules that the new sub-library declares as dependencies. No reference goes back into `masc_mcp` flat namespace. | `python3 scripts/audit-sublib-cycle.py lib/<X>` (to be added) |
+| **G1: No cycle** | The candidate's outbound module references resolve to (a) sub-libraries declared in its `dune` `(libraries ...)`, (b) the proposed sub-library's own modules, or (c) modules that the new sub-library declares as dependencies. No reference goes back into `masc` flat namespace. | `python3 scripts/audit-sublib-cycle.py lib/<X>` (to be added) |
 | **G2: No `.mli` change** | Public interfaces of moved modules remain byte-identical. Phase 0 may not narrow or widen any signature. | `git diff --stat lib/**/<X>*.mli == 0` |
 | **G3: No caller rename** | Callers of moved modules continue to write `Foo` (not `Bar.Foo`). Achieved via `(wrapped false)` on the new library. | `git diff lib/ test/ bin/` shows no `open` / module-prefix changes outside the moved files |
 | **G4: Build green on `@check`** | `dune build @check` succeeds locally and on CI Fundamental. | CI status |
-| **G5: Caller delta budget** | Number of files outside the candidate directory that change is bounded. The only allowed caller change in Phase 0 is **redundant-qualifier removal of moved modules** — when a caller previously wrote `Masc_mcp.X` it must rewrite to `X`, because `X` no longer lives inside the wrapped `masc_mcp` library. Anything beyond `s/Masc_mcp\.<Module>/<Module>/g` (signature changes, `open` additions, semantic accommodations) violates G5 and means the candidate is not a leaf. Phase 1+ may state larger budgets per-PR with explicit justification. | `git diff` outside `lib/<X>/` shows only the qualifier-removal pattern |
+| **G5: Caller delta budget** | Number of files outside the candidate directory that change is bounded. The only allowed caller change in Phase 0 is **redundant-qualifier removal of moved modules** — when a caller previously wrote `Masc_mcp.X` it must rewrite to `X`, because `X` no longer lives inside the wrapped `masc` library. Anything beyond `s/Masc_mcp\.<Module>/<Module>/g` (signature changes, `open` additions, semantic accommodations) violates G5 and means the candidate is not a leaf. Phase 1+ may state larger budgets per-PR with explicit justification. | `git diff` outside `lib/<X>/` shows only the qualifier-removal pattern |
 
 Failure of any gate → reject. No "WORKAROUND:" override path; reject means the candidate is not yet a leaf.
 
@@ -104,7 +104,7 @@ This deferred set is not a TODO — it is the explicit Phase 1 ask, with the gat
 **dune (new file `lib/cdal/dune`):**
 
 ```
-; RFC-0056 Phase 0 — extract CDAL Phase 1A evaluator from flat masc_mcp.
+; RFC-0056 Phase 0 — extract CDAL Phase 1A evaluator from flat masc.
 ; Mirrors lib/cdal_runtime/dune: (include_subdirs no) opts out of the
 ; parent's (include_subdirs unqualified), letting this directory compile
 ; as its own library. (wrapped false) keeps module names unqualified so
@@ -116,8 +116,8 @@ This deferred set is not a TODO — it is the explicit Phase 1 ask, with the gat
 (include_subdirs no)
 
 (library
- (name masc_mcp_cdal)
- (public_name masc_mcp.cdal)
+ (name masc_cdal)
+ (public_name masc.cdal)
  (wrapped false)
  (libraries
   yojson
@@ -128,11 +128,11 @@ This deferred set is not a TODO — it is the explicit Phase 1 ask, with the gat
 
 **`lib/dune` change:**
 
-Add `masc_mcp.cdal` to the existing `(libraries ...)` list.
+Add `masc.cdal` to the existing `(libraries ...)` list.
 
 **`test/deps/dune` change:**
 
-Add `(re_export masc_mcp.cdal)` mirroring the existing `(re_export masc_mcp.cdal_runtime)` line — so test modules referencing `Cdal_types`, `Adversarial_eval`, `Labeling` keep resolving.
+Add `(re_export masc.cdal)` mirroring the existing `(re_export masc.cdal_runtime)` line — so test modules referencing `Cdal_types`, `Adversarial_eval`, `Labeling` keep resolving.
 
 **Caller delta after PoC build:** 9 files (1 in `bin/`, 8 in `test/`), each a single-line `s/Masc_mcp\.Cdal_types/Cdal_types/g` or `s/Masc_mcp\.Labeling/Labeling/g` — the qualifier-removal pattern G5 explicitly permits. The 11 callers that already wrote unprefixed `Cdal_types` / `Adversarial_eval` / `Labeling` (the unwrapped-import style) needed no change. `tool_deep_review.ml` (`Adversarial_eval` consumer) was unchanged. `lib/dune` adds one library to its deps; `test/deps/dune` adds one `re_export`; `bin/dune` adds the new sub-library to `cdal_label`'s deps so its qualifier removal still resolves.
 
@@ -166,7 +166,7 @@ These findings update the audit script (G1 verification) requirements: future ex
 ## 5. Risks
 
 - **`lib/exec` / `lib/core` not yet exposing required public_names.** If their `dune` doesn't have a usable `(public_name ...)`, the new sub-library cannot list them as deps without touching their dune. Verified against `main`: both have `public_name` and are already used as deps by `cdal_runtime`. Risk → low.
-- **`(wrapped false)` namespace pollution.** Every module name in the sub-library becomes a top-level identifier visible to anyone depending on `masc_mcp.cdal`. CDAL prefix already discriminates these names; collision risk near zero. Phase 2 may revisit by switching to wrapped + adding caller rewrites.
+- **`(wrapped false)` namespace pollution.** Every module name in the sub-library becomes a top-level identifier visible to anyone depending on `masc.cdal`. CDAL prefix already discriminates these names; collision risk near zero. Phase 2 may revisit by switching to wrapped + adding caller rewrites.
 - **Cycle discovered post-merge.** Mitigated by `dune build @check` which fails fast on dependency cycles before merge.
 
 ## 6. Decision

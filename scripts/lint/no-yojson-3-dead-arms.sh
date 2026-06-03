@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # no-yojson-3-dead-arms.sh — Block `` `Tuple _ `` and `` `Variant _ ``
 # match arms inside `Yojson.Safe.t -> string` (or any) classifier
-# helpers.  Yojson 3.0.0 (pinned in masc_mcp.opam.locked) removed
+# helpers.  Yojson 3.0.0 (pinned in masc.opam.locked) removed
 # these two constructors from `Yojson.Safe.t`; an arm matching them
 # is dead at best (when the inferred type is broader) and a compile
 # error at worst (when unification narrows the input to

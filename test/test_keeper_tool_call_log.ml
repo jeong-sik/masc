@@ -401,10 +401,10 @@ let test_route_evidence_stored_for_git_push () =
                  "git push -u origin keeper/executor-direct-clone-pr-proof-20260506-1039"
              );
              ( "cwd",
-               `String "repos/masc-mcp-keeper-direct-proof-20260506-1039" );
+               `String "repos/masc-keeper-direct-proof-20260506-1039" );
            ])
       ~output_text:
-        {|{"ok":true,"via":"docker","cwd":"repos/masc-mcp-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+        {|{"ok":true,"via":"docker","cwd":"repos/masc-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
       ~success:true
       ~duration_ms:42.0
       ();
@@ -465,7 +465,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
         (`Assoc
            [
              ("cmd", `String "git push -u origin keeper/large-route-proof");
-             ("cwd", `String "repos/masc-mcp-keeper-direct-proof");
+             ("cwd", `String "repos/masc-keeper-direct-proof");
            ])
       ~output_text:sentinel
       ~success:true

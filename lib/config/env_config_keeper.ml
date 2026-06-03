@@ -196,7 +196,7 @@ end
 
     Controls for the {!Agent_sdk.Context_reducer} stages applied to the
     keeper message history before each turn.  Extracted from a hardcoded
-    literal (masc-mcp PR #xxxx) so the reducer cap can be tuned per
+    literal (masc PR #xxxx) so the reducer cap can be tuned per
     deployment without a rebuild.  Default preserves the prior value. *)
 
 module KeeperReducer = struct

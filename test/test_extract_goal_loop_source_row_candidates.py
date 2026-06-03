@@ -77,7 +77,7 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
                 [goal_loop, derived, deep, llm, no_rows],
                 expected_total=6,
                 no_row_tracking_issue_refs=[
-                    "https://github.com/jeong-sik/masc-mcp/issues/13636"
+                    "https://github.com/jeong-sik/masc/issues/13636"
                 ],
             )
 
@@ -129,7 +129,7 @@ class ExtractGoalLoopSourceRowCandidatesTest(unittest.TestCase):
                     "bullet_items": 1,
                     "unstructured_marker_total": 5,
                     "tracking_issue_refs": [
-                        "https://github.com/jeong-sik/masc-mcp/issues/13636"
+                        "https://github.com/jeong-sik/masc/issues/13636"
                     ],
                 }
             ],

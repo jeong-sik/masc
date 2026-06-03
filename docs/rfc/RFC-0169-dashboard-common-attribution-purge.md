@@ -5,7 +5,7 @@
 | Status | Draft |
 | Related | RFC-0165 (auth client-agnostic), RFC-0166 (server big-bang sweep), RFC-0167 (agent-code/llama purge), RFC-0168 (provider palette) |
 | Scope | `dashboard/src/components/common/*.ts` JSDoc header comments, `dashboard/src/api/dev-token.ts` inline comment |
-| Repos | masc-mcp |
+| Repos | masc |
 
 ## 1. Problem
 

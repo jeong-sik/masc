@@ -563,9 +563,9 @@ let mentions_task_state_file text =
     (lowercase_contains text)
     [ ".masc/backlog.json"
     ; ".masc/state/backlog.json"
-    ; "repos/masc-mcp/.masc/backlog.json"
-    ; "repos/masc-mcp/.masc/tasks/backlog.json"
-    ; "repos/masc-mcp/backlog.json"
+    ; "repos/masc/.masc/backlog.json"
+    ; "repos/masc/.masc/tasks/backlog.json"
+    ; "repos/masc/backlog.json"
     ; "tasks/backlog.json"
     ]
 

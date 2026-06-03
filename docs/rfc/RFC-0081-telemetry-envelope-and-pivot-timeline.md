@@ -17,11 +17,11 @@ implementation_prs: [15137]
 - **Author**: vincent (yousleepwhen)
 - **Created**: 2026-05-14
 - **Related**: RFC-0046 (keeper detail FSM Hub SSOT — same UI surface), RFC-0049 (surface telemetry foundation), RFC-0063 (telemetry feedback loop — same consumer fiber), **RFC-OAS-019** (upstream stream lifecycle aggregation in `agent_sdk`)
-- **Supersedes**: closed PR #15128 (RFC-0073) — same operator-facing goal but mis-located the emission source inside masc-mcp; RFC-0081 carves the work into the correct boundary (developer: `agent_sdk` for emission via RFC-OAS-019, masc-mcp for envelope context and pivot UI here)
+- **Supersedes**: closed PR #15128 (RFC-0073) — same operator-facing goal but mis-located the emission source inside masc; RFC-0081 carves the work into the correct boundary (developer: `agent_sdk` for emission via RFC-OAS-019, masc for envelope context and pivot UI here)
 
 ## 0. Summary
 
-Two operator-facing defects in masc-mcp's telemetry view of OAS streams are addressed here. Per-chunk noise — the third defect originally bundled in the closed RFC-0073 — is the upstream `agent_sdk` repo's emission surface and is now scoped under **RFC-OAS-019** in `~/me/workspace/yousleepwhen/oas`.
+Two operator-facing defects in masc's telemetry view of OAS streams are addressed here. Per-chunk noise — the third defect originally bundled in the closed RFC-0073 — is the upstream `agent_sdk` repo's emission surface and is now scoped under **RFC-OAS-019** in `~/me/workspace/yousleepwhen/oas`.
 
 1. **Envelope context null** — every `oas:telemetry_event` record written to `.masc/oas-events/YYYY-MM/DD.jsonl` (the durable OAS-event store; see `lib/telemetry_unified.ml:105` and `lib/runtime/runtime_event_bridge.ml:1086`) has `agent_name`, `task_id`, `turn` as `null`. Operators cannot answer "which keeper, which turn, which goal produced this record?" from the raw jsonl alone.
 
@@ -33,16 +33,16 @@ The emission-side change (per-chunk noise) is RFC-OAS-019's responsibility.
 
 ## 1. Cross-repo boundary (why this RFC exists separately)
 
-`agent_sdk` is consumed via opam pin `git+https://github.com/jeong-sik/oas.git#<sha>` (`dune-project` line 44: `(agent_sdk (>= 0.193.10))`). The `Streaming_chunk_n` payload variant lives in `lib/llm_provider/telemetry_event.ml:20-24` of the `oas` repo, not in masc-mcp. masc-mcp receives `Event_bus.Custom("telemetry_event", json)` payloads via the upstream SDK, filters them in `keeper_telemetry_consumer.ml` (counter-only, no deserialization), and relays them to a dated JSONL store at `lib/runtime/runtime_event_bridge.ml:1086` under `.masc/oas-events/<YYYY-MM>/<DD>.jsonl`. (Earlier drafts of this RFC referenced `lib/telemetry_eio.ml:114` for this surface; that path is the *agent_event* surface, `.masc/telemetry/`, with a different typed event set — corrected here after grep verification.)
+`agent_sdk` is consumed via opam pin `git+https://github.com/jeong-sik/oas.git#<sha>` (`dune-project` line 44: `(agent_sdk (>= 0.193.10))`). The `Streaming_chunk_n` payload variant lives in `lib/llm_provider/telemetry_event.ml:20-24` of the `oas` repo, not in masc. masc receives `Event_bus.Custom("telemetry_event", json)` payloads via the upstream SDK, filters them in `keeper_telemetry_consumer.ml` (counter-only, no deserialization), and relays them to a dated JSONL store at `lib/runtime/runtime_event_bridge.ml:1086` under `.masc/oas-events/<YYYY-MM>/<DD>.jsonl`. (Earlier drafts of this RFC referenced `lib/telemetry_eio.ml:114` for this surface; that path is the *agent_event* surface, `.masc/telemetry/`, with a different typed event set — corrected here after grep verification.)
 
 | Concern | Owner repo | RFC |
 |---|---|---|
 | Per-chunk emission → lifecycle summary | `oas` (`agent_sdk`) | **RFC-OAS-019** |
-| Turn boundary index in `keeper_runtime_manifest` | `masc-mcp` | This RFC §4.2 |
-| Read-time join (oas-events ⨝ manifest) | `masc-mcp` | This RFC §4.1, §4.3 |
-| Pivot API + UI | `masc-mcp` | This RFC §4.3–4.4 |
+| Turn boundary index in `keeper_runtime_manifest` | `masc` | This RFC §4.2 |
+| Read-time join (oas-events ⨝ manifest) | `masc` | This RFC §4.1, §4.3 |
+| Pivot API + UI | `masc` | This RFC §4.3–4.4 |
 
-Mixing the two would break the SDK Independence Gate that `oas` enforces on Ready (per `~/me/memory/reference_oas_pr_policy_vs_masc_mcp.md`). This RFC names no `oas` internal identifiers in `lib/`; it only consumes the public `Telemetry_event` variants as published by `agent_sdk` ≥ 0.194.0 (RFC-OAS-019's target version).
+Mixing the two would break the SDK Independence Gate that `oas` enforces on Ready (per `~/me/memory/reference_oas_pr_policy_vs_masc.md`). This RFC names no `oas` internal identifiers in `lib/`; it only consumes the public `Telemetry_event` variants as published by `agent_sdk` ≥ 0.194.0 (RFC-OAS-019's target version).
 
 ## 2. Goal
 
@@ -54,7 +54,7 @@ Mixing the two would break the SDK Independence Gate that `oas` enforces on Read
 ## 3. Non-goals
 
 - Modify `runtime_event_bridge.ml` or anything else on the write side. The relay path remains unchanged.
-- Re-emit, throttle, or deduplicate any upstream `oas:telemetry_event` payload. The bus contents are RFC-OAS-019's responsibility. masc-mcp consumes whatever the SDK publishes.
+- Re-emit, throttle, or deduplicate any upstream `oas:telemetry_event` payload. The bus contents are RFC-OAS-019's responsibility. masc consumes whatever the SDK publishes.
 - Stamp envelope fields directly into `.masc/oas-events/` jsonl. Three rounds of grep verification showed write-time stamping does not fit OAS event-envelope semantics; the read-time join is the structural fix.
 - Rewrite the dashboard timeline framework. `vis-timeline` is already loaded by `fsm-hub-timeline-panels.ts` — reuse, don't replace.
 - Add a new aggregation engine. Extend `tool_agent_timeline` 6-source merger by adding key branches; do not duplicate the merger.
@@ -164,16 +164,16 @@ If RFC-OAS-019 ships before RFC-0081, the pivot UI shows the typed `Streaming_su
 
 If RFC-0081 ships first, the pivot UI groups raw `Streaming_chunk_n` records (still hundreds per attempt). The grouping is correct but each turn balloons. This is operationally usable (filter by `payload[0] == "Streaming_summary"` once RFC-OAS-019 lands) and not a regression versus today.
 
-If RFC-0081 ships and RFC-OAS-019 stalls, masc-mcp does *not* take on receive-side aggregation as a workaround. AGENT-LLM-A.md §Workaround Rejection Bar §1 (telemetry-as-fix). Wait for upstream.
+If RFC-0081 ships and RFC-OAS-019 stalls, masc does *not* take on receive-side aggregation as a workaround. AGENT-LLM-A.md §Workaround Rejection Bar §1 (telemetry-as-fix). Wait for upstream.
 
 ### 5.3 Cross-RFC interlock
 
 | RFC | Interaction |
 |---|---|
 | RFC-OAS-019 (oas) | Upstream emission shape. Pivot UI gains clarity once `Streaming_summary` is emitted, but RFC-0081 does not block on RFC-OAS-019 merge. |
-| RFC-0046 (masc-mcp) | Same `keeper-detail-state.ts` slot layout. Sync with RFC-0046 author before Phase 2 frontend merge: timeline above/below FsmHub. |
-| RFC-0063 (masc-mcp) | Same consumer fiber. RFC-0063's drain-yield contract is preserved without modification — read-time join is on the API path, not the consumer fiber. |
-| RFC-0049 (masc-mcp) | Surface telemetry foundation; the manifest-field extension is a foundation-layer additive change. |
+| RFC-0046 (masc) | Same `keeper-detail-state.ts` slot layout. Sync with RFC-0046 author before Phase 2 frontend merge: timeline above/below FsmHub. |
+| RFC-0063 (masc) | Same consumer fiber. RFC-0063's drain-yield contract is preserved without modification — read-time join is on the API path, not the consumer fiber. |
+| RFC-0049 (masc) | Surface telemetry foundation; the manifest-field extension is a foundation-layer additive change. |
 
 ## 6. Verification
 
@@ -241,7 +241,7 @@ Rejected. The current dashboard `useEffect`-free pattern relies on `useQuery` ov
 
 ### 8.8 Alternative — modify agent_sdk to carry a `keeper_owned_run_id` in the envelope
 
-Deferred. The OAS publishers do not currently surface an external `client_correlation_id` field on `event_envelope.t`. Adding it would let masc-mcp pass a stable turn id at `Agent.run` invocation and re-enable write-time stamping. That is a separate OAS-side RFC and a workspace collaboration problem; the read-time join works without it. If the manifest-field approach proves insufficient over time, this alternative is the upgrade path — not the entry path.
+Deferred. The OAS publishers do not currently surface an external `client_correlation_id` field on `event_envelope.t`. Adding it would let masc pass a stable turn id at `Agent.run` invocation and re-enable write-time stamping. That is a separate OAS-side RFC and a workspace collaboration problem; the read-time join works without it. If the manifest-field approach proves insufficient over time, this alternative is the upgrade path — not the entry path.
 
 ## 9. Open items
 

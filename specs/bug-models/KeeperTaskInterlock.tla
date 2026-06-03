@@ -9,7 +9,7 @@
 \* observability and subsequent consumers cannot tell whether a
 \* claimed task is making progress or is orphaned.
 \*
-\* masc-mcp reference:
+\* masc reference:
 \*   lib/keeper/keeper_state_machine.ml (12-phase keeper FSM:
 \*     Offline | Running | Failing | Overflowed | Compacting | HandingOff
 \*     | Draining | Paused | Stopped | Crashed | Restarting | Dead)

@@ -101,8 +101,8 @@ if ! grep -Eq "\\(agent_sdk (\\(>= ${min_version_re}\\)|\\(and \\(>= ${min_versi
   exit 1
 fi
 
-if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"" "${REPO_ROOT}/masc_mcp.opam"; then
-  echo "masc_mcp.opam agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"" "${REPO_ROOT}/masc.opam"; then
+  echo "masc.opam agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   exit 1
 fi
 

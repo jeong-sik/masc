@@ -743,7 +743,7 @@ let test_claim_next_ignores_routing_handoff_text () =
              ; do_not_reclaim_reason =
                  Some
                    "Auto-claimed via auto_goal_fallback; sandbox-isolated keeper has no \
-                    access to masc-mcp source. Releasing for keeper with repo access."
+                    access to masc source. Releasing for keeper with repo access."
              }
            else t)
         backlog.tasks

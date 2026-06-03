@@ -478,8 +478,8 @@
 
 	    <div class="section">
 	      <h2>Acceptance Checks</h2>
-      <pre>git -C /Users/dancer/me/workspace/yousleepwhen/masc-mcp fetch origin main
-git -C /Users/dancer/me/workspace/yousleepwhen/masc-mcp status --short --branch
+      <pre>git -C /Users/dancer/me/workspace/yousleepwhen/masc fetch origin main
+git -C /Users/dancer/me/workspace/yousleepwhen/masc status --short --branch
 curl -fsS 'http://127.0.0.1:8935/health?full=1' | jq '{build, keeper_fibers, keeper_fleet_safety, keeper_config_schema_status}'
 masc_keeper_sandbox_status(name="analyst", include_preflight=true)
 masc_keeper_status(name="analyst", fast=true)

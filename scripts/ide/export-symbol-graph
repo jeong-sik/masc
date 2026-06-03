@@ -284,8 +284,8 @@ def validate(data: dict[str, Any], root: pathlib.Path, *, check_current_ranges: 
     errors: list[str] = []
     if data.get("schema_version") != SCHEMA_VERSION:
         errors.append(f"schema_version must be {SCHEMA_VERSION}")
-    if data.get("repo") != "masc-mcp":
-        errors.append("repo must be masc-mcp")
+    if data.get("repo") != "masc":
+        errors.append("repo must be masc")
 
     source = data.get("source", {})
     if not isinstance(source, dict):

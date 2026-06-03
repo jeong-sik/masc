@@ -121,7 +121,7 @@ let is_repetitive_tokens s =
     social communication in agent broadcasts, not filler. Penalizing them
     via Thompson Sampling suppresses agent autonomy for legitimate expression.
 
-    #10882: the original list was English-only — masc-mcp keeper personas
+    #10882: the original list was English-only — masc keeper personas
     output predominantly Korean, so 0 filler events fired across a 2-day
     window even for genuine low-substance posts.  This biases Thompson
     sampling Pass→[alpha boost] for Korean keepers regardless of actual

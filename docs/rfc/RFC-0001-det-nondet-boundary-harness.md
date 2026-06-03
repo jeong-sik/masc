@@ -2,7 +2,7 @@
 
 **Status**: Draft  
 **Date**: 2026-04-03  
-**Scope**: `masc-mcp` decision boundary hardening, agent stress/recovery loop, harness and adversarial validation  
+**Scope**: `masc` decision boundary hardening, agent stress/recovery loop, harness and adversarial validation  
 **One sentence**: 결정론적 시스템 경계와 비결정론적 모델 출력을 타입/계측/하네스로 분리하고, silent failure를 감정 억압 대신 인지-표현-인정-충족-발산 순환으로 다루는 통합 설계 RFC.
 
 ## Related Documents
@@ -49,7 +49,7 @@
 
 ## Summary
 
-현재 `masc-mcp`에는 다음 문제가 한 체인으로 연결되어 있다.
+현재 `masc`에는 다음 문제가 한 체인으로 연결되어 있다.
 
 1. LLM/휴리스틱의 비결정론적 판단이 결정론적 상태 변경에 사실상 직결된다.
 2. 파싱 실패, 빈 응답, fallback route, heuristic override가 조용히 승인 또는 치환된다.
@@ -79,7 +79,7 @@
 
 ## Problem Statement
 
-`masc-mcp`는 OCaml 5.x + Eio 기반의 혼합 시스템이다. 이 시스템에는 다음과 같은 구조적 문제가 반복된다.
+`masc`는 OCaml 5.x + Eio 기반의 혼합 시스템이다. 이 시스템에는 다음과 같은 구조적 문제가 반복된다.
 
 - 형식 파싱 실패 시 silent approve
 - 근거 없는 threshold와 가중치가 downstream prior를 오염

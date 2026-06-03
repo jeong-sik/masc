@@ -79,11 +79,11 @@ CLAUDE.md `sw-dev §"Magic Number 금지"` 의 예외: "단위 변환 계수 (10
 
 ### 2.5 Sub-library dune dep 안티패턴 (★ Main breakage 사례)
 
-**Incident**: PR #19099 가 `lib/dated_jsonl/dated_jsonl.ml` 에 `Masc_time_constants.day` 호출을 추가했지만 `lib/dated_jsonl/dune` 의 `(libraries ...)` 에 `masc_mcp.config` 의존성을 추가하지 않음 → origin/main 7시간 동안 `dune build lib/dated_jsonl` fail.
+**Incident**: PR #19099 가 `lib/dated_jsonl/dated_jsonl.ml` 에 `Masc_time_constants.day` 호출을 추가했지만 `lib/dated_jsonl/dune` 의 `(libraries ...)` 에 `masc.config` 의존성을 추가하지 않음 → origin/main 7시간 동안 `dune build lib/dated_jsonl` fail.
 
-**Silent 이유**: CI 의 `Build and Test` job 이 `Detect Changed Surfaces` gate 뒤라, dated_jsonl 영역 안 건드린 PR 머지는 build 검증 없이 통과 (memory: `reference_masc_mcp_ci_build_test_skips`).
+**Silent 이유**: CI 의 `Build and Test` job 이 `Detect Changed Surfaces` gate 뒤라, dated_jsonl 영역 안 건드린 PR 머지는 build 검증 없이 통과 (memory: `reference_masc_ci_build_test_skips`).
 
-**Root cause**: 단일 `dune build lib/` 검증이 *sub-library 단위* 검증을 hide. lib/ 가 *복합 library set* (root `masc_mcp` + sub `dated_jsonl`/`workspace`/`cdal`/...) 임을 모르고 작업.
+**Root cause**: 단일 `dune build lib/` 검증이 *sub-library 단위* 검증을 hide. lib/ 가 *복합 library set* (root `masc` + sub `dated_jsonl`/`workspace`/`cdal`/...) 임을 모르고 작업.
 
 **SOP 보강 (Step 7 신규)**:
 
@@ -197,6 +197,6 @@ fi
 - `lib/config/masc_time_constants.ml` — 시리즈 끝난 시점 SSOT 상태
 - CLAUDE.md `sw-dev §"Magic Number 금지"` — anti-pattern 정책
 - RFC-0088 §"N-of-M 패치" — half-migration anti-pattern (*제거* 방향 적용)
-- `~/me/memory/reference_masc_mcp_ci_build_test_skips.md` — silent main breakage 의 CI gate 측면
+- `~/me/memory/reference_masc_ci_build_test_skips.md` — silent main breakage 의 CI gate 측면
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

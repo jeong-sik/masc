@@ -1,6 +1,6 @@
 {
   "schema_version": "masc.symbol_graph.v1",
-  "repo": "masc-mcp",
+  "repo": "masc",
   "base_commit": "22f3665e5218",
   "generated_at": "2026-05-18T14:01:20Z",
   "collection_mode": "static_manifest_seed",

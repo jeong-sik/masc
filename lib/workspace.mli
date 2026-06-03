@@ -63,7 +63,7 @@ val record_fsm_drift : variant:string -> force:bool -> unit
 val fsm_drift_per_agent_metric : string
 (** Per-agent variant of {!fsm_drift_metric}. Labels:
     [("variant", _); ("agent_name", _); ("force", "true" | "false")].
-    Cardinality is bounded by fleet size (~10 keepers in masc-mcp),
+    Cardinality is bounded by fleet size (~10 keepers in masc),
     so the per-agent breakout is safe for Prometheus. *)
 
 val record_fsm_drift_with_agent :

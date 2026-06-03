@@ -15,7 +15,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_trajectory)
+ (name masc_trajectory)
  (public_name masc.trajectory)
  (wrapped false)
  (flags (:standard -w +4))

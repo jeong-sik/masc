@@ -513,7 +513,7 @@ let test_unknown_workspace_op_is_unsupported_before_docker () =
         (`Assoc
           [
             ("op", `String "future_repo_op");
-            ("url", `String "https://github.com/jeong-sik/masc-mcp.git");
+            ("url", `String "https://github.com/jeong-sik/masc.git");
           ])
   in
   Alcotest.(check (option bool)) "unknown op is unsupported" (Some false)
@@ -842,7 +842,7 @@ exit 2\n"
 let test_execute_git_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let raw =
@@ -862,7 +862,7 @@ let test_execute_git_uses_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
@@ -897,7 +897,7 @@ let test_execute_git_without_github_bundle_succeeds () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
@@ -935,7 +935,7 @@ let test_execute_git_c_option_missing_dir_blocks_before_docker () =
     Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "git"
-           ~argv:[ "-C"; "repos/masc-mcp/.worktrees/missing"; "status" ])
+           ~argv:[ "-C"; "repos/masc/.worktrees/missing"; "status" ])
       ()
   in
   Alcotest.(check bool) "typed cwd error" true
@@ -987,7 +987,7 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   let worktree = Filename.concat repo ".worktrees/task-229" in
   ensure_dir worktree;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1012,14 +1012,14 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   Alcotest.(check bool) "docker was invoked" true (Sys.file_exists log_path);
   let log = read_file log_path in
   Alcotest.(check bool) "docker cwd uses the sole repo" true
-    (contains_substring log "repos/masc-mcp")
+    (contains_substring log "repos/masc")
 
 let test_execute_git_push_requires_write_tool_access_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
@@ -1049,7 +1049,7 @@ let test_execute_git_push_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
@@ -1273,7 +1273,7 @@ let test_docker_shell_mounts_masc_config_runtime_paths () =
 
 let run_docker_shell_command ~config ~(meta : Keeper_meta_contract.keeper_meta) ~playground
     ~log_path =
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   if not (Sys.file_exists (Filename.concat repo ".git")) then
     git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1330,7 +1330,7 @@ let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
 let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let cwd, error =
@@ -1347,11 +1347,11 @@ let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
 let test_sandbox_root_git_c_container_path_preflight_uses_host_path () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let container_repo =
-    Filename.concat (Filename.concat (Keeper_sandbox.container_root meta.name) "repos") "masc-mcp"
+    Filename.concat (Filename.concat (Keeper_sandbox.container_root meta.name) "repos") "masc"
   in
   let cwd, error =
     resolve_sandbox_root_git_cwd_string ~config ~meta
@@ -1364,7 +1364,7 @@ let test_sandbox_root_git_c_container_path_preflight_uses_host_path () =
 let test_sandbox_root_git_c_missing_target_keeps_execution_cwd () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let missing = "repos/masc-mcp/.worktrees/missing" in
+  let missing = "repos/masc/.worktrees/missing" in
   let cwd, error =
     resolve_sandbox_root_git_cwd_string ~config ~meta
       ~cwd:playground
@@ -1382,7 +1382,7 @@ let test_sandbox_root_git_c_missing_target_keeps_execution_cwd () =
 let test_sandbox_root_git_c_repeated_missing_final_target () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let cwd, error =
@@ -1390,7 +1390,7 @@ let test_sandbox_root_git_c_repeated_missing_final_target () =
       ~config
       ~meta
       ~cwd:playground
-      ~cmd:"git -C repos/masc-mcp -C .worktrees/missing status"
+      ~cmd:"git -C repos/masc -C .worktrees/missing status"
   in
   Alcotest.(check string) "execution cwd remains sandbox root" playground cwd;
   match error with
@@ -1399,12 +1399,12 @@ let test_sandbox_root_git_c_repeated_missing_final_target () =
     Alcotest.(check bool)
       "error identifies repeated git -C final target"
       true
-      (contains_substring msg "repos/masc-mcp/.worktrees/missing")
+      (contains_substring msg "repos/masc/.worktrees/missing")
 
 let test_sandbox_root_git_c_pipeline_missing_later_target () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let cwd, error =
@@ -1412,7 +1412,7 @@ let test_sandbox_root_git_c_pipeline_missing_later_target () =
       ~config
       ~meta
       ~cwd:playground
-      ~cmd:"git -C repos/masc-mcp status | git -C repos/missing status"
+      ~cmd:"git -C repos/masc status | git -C repos/missing status"
   in
   Alcotest.(check string) "execution cwd remains sandbox root" playground cwd;
   match error with
@@ -1426,7 +1426,7 @@ let test_sandbox_root_git_c_pipeline_missing_later_target () =
 let test_sandbox_root_git_c_bare_worktree_missing_target () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let cwd, error =
@@ -1443,12 +1443,12 @@ let test_sandbox_root_git_c_bare_worktree_missing_target () =
     Alcotest.(check bool)
       "error identifies bare worktree under sole repo"
       true
-      (contains_substring msg "repos/masc-mcp/.worktrees/missing")
+      (contains_substring msg "repos/masc/.worktrees/missing")
 
 let test_sandbox_root_git_subcommand_c_is_not_cwd () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
-  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let cwd, error =
@@ -1498,7 +1498,7 @@ let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
   @@ fun ~config ~meta ~playground ->
   let repos = Filename.concat playground "repos" in
   let repo_a = Filename.concat repos "grpc-direct" in
-  let repo_b = Filename.concat repos "masc-mcp" in
+  let repo_b = Filename.concat repos "masc" in
   let worktree = Filename.concat repo_b ".worktrees/keeper-nick0cave-agent-task-236" in
   ensure_dir repo_a;
   ensure_dir worktree;
@@ -1507,7 +1507,7 @@ let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
   let cwd, error =
     resolve_sandbox_root_git_cwd_string ~config ~meta
       ~cwd:playground
-      ~cmd:"cd repos/masc-mcp/.worktrees/keeper-nick0cave-agent-task-236 && git status"
+      ~cmd:"cd repos/masc/.worktrees/keeper-nick0cave-agent-task-236 && git status"
   in
   Alcotest.(check string) "cwd remains sandbox root" playground cwd;
   Alcotest.(check (option string))
@@ -1528,7 +1528,7 @@ let test_cmd_prefix_uses_shell_command_words () =
   check
     "unsupported shell shape reports leading command"
     "cd"
-    "cd repos/masc-mcp && git status"
+    "cd repos/masc && git status"
 
 let detect_repo_hosting_cli_repo_api_misuse_of_string cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
@@ -1546,20 +1546,20 @@ let test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics () =
   in
   check
     "quoted repo arg"
-    (Some ("jeong-sik/masc-mcp", "repos/jeong-sik/masc-mcp/actions/runs"))
-    "gh --repo 'jeong-sik/masc-mcp' api repos/jeong-sik/masc-mcp/actions/runs";
+    (Some ("jeong-sik/masc", "repos/jeong-sik/masc/actions/runs"))
+    "gh --repo 'jeong-sik/masc' api repos/jeong-sik/masc/actions/runs";
   check
     "repo equals form"
-    (Some ("jeong-sik/masc-mcp", "repos/jeong-sik/masc-mcp/pulls"))
-    "gh --repo=jeong-sik/masc-mcp api repos/jeong-sik/masc-mcp/pulls";
+    (Some ("jeong-sik/masc", "repos/jeong-sik/masc/pulls"))
+    "gh --repo=jeong-sik/masc api repos/jeong-sik/masc/pulls";
   check
     "env prefix"
-    (Some ("jeong-sik/masc-mcp", "repos/jeong-sik/masc-mcp/issues"))
-    "env GH_TOKEN=redacted gh --repo jeong-sik/masc-mcp api repos/jeong-sik/masc-mcp/issues";
+    (Some ("jeong-sik/masc", "repos/jeong-sik/masc/issues"))
+    "env GH_TOKEN=redacted gh --repo jeong-sik/masc api repos/jeong-sik/masc/issues";
   check
     "subcommand repo flag is fine"
     None
-    "gh pr view --repo jeong-sik/masc-mcp 17214"
+    "gh pr view --repo jeong-sik/masc 17214"
 
 let test_docker_shell_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1687,7 +1687,7 @@ let test_execute_rg_no_match_remains_successful_in_docker_route () =
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let lib =
     Filename.concat
-      (Filename.concat (Filename.concat playground "repos") "masc-mcp")
+      (Filename.concat (Filename.concat playground "repos") "masc")
       "lib"
   in
   ensure_dir lib;
@@ -1699,7 +1699,7 @@ let test_execute_rg_no_match_remains_successful_in_docker_route () =
     Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "rg"
-           ~argv:[ "missing_one|missing_two"; "repos/masc-mcp/lib" ])
+           ~argv:[ "missing_one|missing_two"; "repos/masc/lib" ])
       ()
   in
   Alcotest.(check (option bool)) "rg no-match succeeds semantically"
@@ -1750,7 +1750,7 @@ let test_execute_repo_checks_routes_through_docker () =
     Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "gh"
-           ~argv:[ "pr"; "checks"; "15659"; "--repo"; "jeong-sik/masc-mcp" ])
+           ~argv:[ "pr"; "checks"; "15659"; "--repo"; "jeong-sik/masc" ])
       ()
   in
   Alcotest.(check (option bool)) "typed gh succeeds" (Some true)
@@ -1796,7 +1796,7 @@ let test_execute_rewrites_host_path_command_for_docker () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
   let container_root = Keeper_sandbox.container_root meta.name in
-  ensure_dir (Filename.concat (Filename.concat playground "repos") "masc-mcp");
+  ensure_dir (Filename.concat (Filename.concat playground "repos") "masc");
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory) ~exec_cache:None ~config ~meta
@@ -1804,7 +1804,7 @@ let test_execute_rewrites_host_path_command_for_docker () =
         (tool_execute_typed_exec_args ~cwd:playground "ls"
            ~argv:
              [
-               Printf.sprintf "%s/repos/masc-mcp"
+               Printf.sprintf "%s/repos/masc"
                  (Keeper_alerting_path.strip_trailing_slashes playground);
              ])
       ()
@@ -1813,13 +1813,13 @@ let test_execute_rewrites_host_path_command_for_docker () =
     (parse_bool_field raw "ok");
   Alcotest.(check bool) "command uses container path" true
     (response_mentions raw "output"
-       (Filename.concat container_root "repos/masc-mcp"));
+       (Filename.concat container_root "repos/masc"));
   Alcotest.(check bool) "command no longer leaks host playground path" false
     (response_mentions raw "output" playground)
 
 let test_docker_mount_failure_message_preserves_path () =
   let mount_path =
-    "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/masc-mcp/.worktrees/"
+    "/host_mnt/Users/dancer/me/.masc/playground/docker/repos/masc/.worktrees/"
     ^ String.make 320 'a'
     ^ "/repo"
   in

@@ -52,11 +52,11 @@ let cases : case list =
     ; rationale = "allowlisted executable + plain argv"
     }
   ; { name = "grep_recursive_logged_shape"
-    ; sample_cmd = "grep -rn try_acquire repos/masc-mcp/lib --include=*.ml"
+    ; sample_cmd = "grep -rn try_acquire repos/masc/lib --include=*.ml"
     ; typed =
         mk_exec
           "grep"
-          [ "-rn"; "try_acquire"; "repos/masc-mcp/lib"; "--include=*.ml" ]
+          [ "-rn"; "try_acquire"; "repos/masc/lib"; "--include=*.ml" ]
     ; expect_typed = true
     ; rationale =
         "safe grep search shape observed in keeper Execute logs stays allowlisted"
@@ -391,7 +391,7 @@ let test_of_json_preserves_duplicate_executable_argv0 () =
     parse_json_exn
       (`Assoc
           [ "executable", `String "cat"
-          ; "argv", `List [ `String "cat"; `String "repos/masc-mcp/README.md" ]
+          ; "argv", `List [ `String "cat"; `String "repos/masc/README.md" ]
           ])
   in
   match input with
@@ -399,7 +399,7 @@ let test_of_json_preserves_duplicate_executable_argv0 () =
     Alcotest.(check string) "executable" "cat" executable;
     Alcotest.(check (list string))
       "argv remains caller-authored"
-      [ "cat"; "repos/masc-mcp/README.md" ]
+      [ "cat"; "repos/masc/README.md" ]
       argv
   | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
 ;;

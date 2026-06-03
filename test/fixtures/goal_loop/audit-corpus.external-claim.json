@@ -53,7 +53,7 @@
       "sha256": "928c49553975b5a6d3de04a15285d4b4b2fa1b03fabfd7a7aa9ebf036836e73e",
       "line_count": 766,
       "line_refs": [1, 3, 4, 20, 44, 90],
-      "claim": "Claims 32 derived-state anti-patterns across masc-mcp, oas, and dashboard files, including 8 critical consistency risks."
+      "claim": "Claims 32 derived-state anti-patterns across masc, oas, and dashboard files, including 8 critical consistency risks."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",

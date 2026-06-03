@@ -182,9 +182,9 @@ olly_capture() {
     return 0
   fi
   local pid
-  pid="$(pgrep -f 'masc_mcp_server' | head -n 1 || true)"
+  pid="$(pgrep -f 'masc_server' | head -n 1 || true)"
   if [[ -z "$pid" ]]; then
-    echo "(olly) masc_mcp_server pid not found — skipping" >"$out"
+    echo "(olly) masc_server pid not found — skipping" >"$out"
     return 0
   fi
   # olly trace-format is version-dependent; we just capture stdout and
@@ -320,7 +320,7 @@ section_gc_rss() {
   # Capture the host view via /proc (Linux) or ps (macOS) to keep the
   # baseline self-contained, then flag the gap.
   local pid rss_kb
-  pid="$(pgrep -f 'masc_mcp_server' | head -n 1 || true)"
+  pid="$(pgrep -f 'masc_server' | head -n 1 || true)"
   if [[ -n "$pid" ]]; then
     if [[ "$(uname)" = "Linux" ]] && [[ -r "/proc/$pid/status" ]]; then
       rss_kb="$(awk '/^VmRSS:/ {print $2}' "/proc/$pid/status")"
@@ -397,7 +397,7 @@ main() {
 
   if ! server_reachable; then
     echo "perf-baseline.sh: masc not reachable at ${MASC_BASE_URL}" >&2
-    echo "  start with: dune exec masc_mcp_server -- --foreground" >&2
+    echo "  start with: dune exec masc_server -- --foreground" >&2
     exit 3
   fi
 

@@ -23,7 +23,7 @@
 ; dedupe state machine.
 ;
 ; Pure stdlib via Bounded_event_dedupe; no Eio link so the standalone
-; test executable builds in seconds without dragging the main masc_mcp
+; test executable builds in seconds without dragging the main masc
 ; library.
 ;
 ; (include_subdirs no) opts out of the parent (include_subdirs
@@ -33,7 +33,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_keeper_tool_hook_error_state)
+ (name masc_keeper_tool_hook_error_state)
  (public_name masc.keeper_tool_hook_error_state)
  (wrapped false)
  (libraries masc.bounded_event_dedupe))

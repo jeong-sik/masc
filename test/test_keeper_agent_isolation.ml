@@ -308,8 +308,8 @@ let test_canonical_keeper_name_from_legacy_keeper_name () =
 let test_canonical_keeper_name_preserves_plain_hyphenated_name () =
   Alcotest.(check (option string))
     "plain hyphenated keeper name is preserved"
-    (Some "masc-mcp-smoke")
-    (Keeper_identity.canonical_keeper_name "masc-mcp-smoke")
+    (Some "masc-smoke")
+    (Keeper_identity.canonical_keeper_name "masc-smoke")
 
 (* ============================================================
    Test runner

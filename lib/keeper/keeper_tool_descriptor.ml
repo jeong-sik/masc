@@ -192,7 +192,7 @@ let read_file_schema =
         "cwd"
         "string"
         "Optional sandbox-relative directory to resolve file_path from, e.g. \
-         repos/masc-mcp. This is explicit only; Read never inherits the previous \
+         repos/masc. This is explicit only; Read never inherits the previous \
          Execute cwd."
     ; property
         "limit"

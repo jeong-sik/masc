@@ -178,7 +178,7 @@ end
 
 ## §5 Alternatives
 
-| 접근법 | 강점 | 약점 | masc-mcp 적합도 |
+| 접근법 | 강점 | 약점 | masc 적합도 |
 |---|---|---|---|
 | Eio Capability Passing | Idiomatic OCaml 5, zero-cost, 공식 권장 | Compile-time 보증 없음, runtime convention | **높음** — 즉시 적용 가능, `ref` → capability 객체 |
 | Erlang OTP Supervision | Process isolation, fault containment | Eio fiber는 cooperative, true isolation 없음 | **중간** — supervisor 패턴 참고, fiber isolation은 convention |

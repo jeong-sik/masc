@@ -167,7 +167,7 @@ let run_result_of_yojson (json : Yojson.Safe.t) :
   (* Three distinct failure modes — the previous form returned the same
      "invalid worker helper run_result JSON" string for both syntactic
      and type-mismatch errors, and a bare [msg] (no context label) for
-     [Failure].  Operators reading the masc-mcp log now see which class
+     [Failure].  Operators reading the masc log now see which class
      of failure occurred:
 
        - [Yojson.Json_error]  → input not parseable as JSON at all

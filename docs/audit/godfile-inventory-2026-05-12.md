@@ -44,9 +44,9 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 
 - **tool_board.ml**: 2162 → 1706 lines (-456)
 - **tool_shard.ml**: 2152 → 2094 lines (-58)
-- **lib/ide/**: extracted as `masc_mcp.ide` sub-library
+- **lib/ide/**: extracted as `masc.ide` sub-library
 - **Total lines removed from god files**: ~530
-- **Build status**: dune build lib/masc_mcp.cma passes
+- **Build status**: dune build lib/masc.cma passes
 
 ## Phase Plan
 
@@ -59,11 +59,11 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 - [x] lib/provider_adapter.ml → removed after this audit
 
 ### Phase 2: Directory extraction (directories without dune files)
-- [x] lib/ide/ (7 files) → masc_mcp.ide sub-lib (zero flat-namespace deps)
-- [ ] lib/keeper/ (500 files) → masc_mcp.keeper sub-lib
-- [ ] lib/server/ (142 files) → masc_mcp.server sub-lib
-- [ ] lib/dashboard/ (104 files) → masc_mcp.dashboard sub-lib
-- [ ] lib/runtime/ (83 files) → masc_mcp.runtime sub-lib
+- [x] lib/ide/ (7 files) → masc.ide sub-lib (zero flat-namespace deps)
+- [ ] lib/keeper/ (500 files) → masc.keeper sub-lib
+- [ ] lib/server/ (142 files) → masc.server sub-lib
+- [ ] lib/dashboard/ (104 files) → masc.dashboard sub-lib
+- [ ] lib/runtime/ (83 files) → masc.runtime sub-lib
 
 ### Phase 3: Remaining directories
 - [ ] lib/operator/ (18 files) → sub-lib

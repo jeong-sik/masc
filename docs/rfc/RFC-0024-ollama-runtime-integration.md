@@ -7,7 +7,7 @@
 
 ## 1. Problem
 
-agent_sdk에 이미 `backend_ollama.ml`이 완전 구현되어 있으나 (`/api/chat`, `think` 제어, `keep_alive=-1` 기본, 스트리밍), masc-mcp의 `provider_adapter.ml`과 `runtime.toml`에 Ollama provider가 등록되어 있지 않아 로컬 모델을 runtime에서 사용할 수 없음.
+agent_sdk에 이미 `backend_ollama.ml`이 완전 구현되어 있으나 (`/api/chat`, `think` 제어, `keep_alive=-1` 기본, 스트리밍), masc의 `provider_adapter.ml`과 `runtime.toml`에 Ollama provider가 등록되어 있지 않아 로컬 모델을 runtime에서 사용할 수 없음.
 
 ## 2. Current State
 
@@ -20,7 +20,7 @@ agent_sdk `backend_ollama.ml` 지원:
 - `tool_use_recovery.ml`에서 Ollama 오류 복구 지원
 - provider.ml에 `Ollama` variant 이미 정의
 
-masc-mcp 누락:
+masc 누락:
 - `provider_adapter.ml`에 Ollama adapter entry 없음
 - `runtime.toml`에 Ollama model 없음
 - 로컬 런타임 프로브는 `tool_local_runtime_probe.ml`에 존재하나 runtime 라우팅과 연결 안 됨
@@ -29,7 +29,7 @@ masc-mcp 누락:
 
 | # | Principle | Rationale |
 |---|-----------|-----------|
-| P1 | **Register, don't build.** | Transport는 agent_sdk에 이미 있음. masc-mcp는 등록만. |
+| P1 | **Register, don't build.** | Transport는 agent_sdk에 이미 있음. masc는 등록만. |
 | P2 | **Optional runtime inclusion.** | Ollama는 로컬 전용. 기본 runtime에서 제외, operator가 명시적으로 추가. |
 | P3 | **keep_alive=-1 고정.** | 자동화 환경에서 모델 언로드 방지. 이미 agent_sdk 기본값. |
 

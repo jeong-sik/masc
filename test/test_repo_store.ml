@@ -529,7 +529,7 @@ let with_two_absolute_repos f =
     Unix.mkdir oas_path 0o755;
     let masc =
       { (sample_repo "masc") with
-        url = "https://github.com/jeong-sik/masc-mcp"
+        url = "https://github.com/jeong-sik/masc"
       ; local_path = masc_path
       }
     in
@@ -550,7 +550,7 @@ let test_find_url_by_id_known () =
     | Some url ->
       Alcotest.(check string)
         "masc url"
-        "https://github.com/jeong-sik/masc-mcp"
+        "https://github.com/jeong-sik/masc"
         url
     | None -> Alcotest.fail "expected Some url for masc")
 

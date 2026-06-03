@@ -712,7 +712,7 @@ let run_cmd host port base_path =
      Dashboard_cache.now() reads from Time_compat directly. *)
   Time_compat.set_clock (Eio.Stdenv.clock env);
 
-  (* Wire Runtime_events listener. After masc-mcp#18567 removed dead
+  (* Wire Runtime_events listener. After masc#18567 removed dead
      [Http_server_eio.start] (the only prior production caller), this
      would have been silently uninitialized. Idempotent-safe per
      [Masc_runtime_events] mli; consumed by Olly / custom callbacks
@@ -966,7 +966,7 @@ let init_cmd =
 
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
-  let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
+  let info = Cmd.info "masc" ~version:Masc_mcp.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
     info [ init_cmd; login_cmd ]
 

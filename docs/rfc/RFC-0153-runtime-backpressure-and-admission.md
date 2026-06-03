@@ -56,7 +56,7 @@ The closeout cohort that landed within the same week:
 
 # RFC-0153 — Runtime Backpressure & Tier Admission
 
-> Canonical HTML design doc: `~/me/memory/masc-mcp-rfc-0153-runtime-backpressure-2026-05-20.html` (full evidence tables, external research §7, design rationale).
+> Canonical HTML design doc: `~/me/memory/masc-rfc-0153-runtime-backpressure-2026-05-20.html` (full evidence tables, external research §7, design rationale).
 >
 > 본 markdown은 docs/rfc/ canonical 위치를 채우는 RFC body. 사용자 검토 후 Phase A.1 부터 단계별 PR.
 
@@ -374,7 +374,7 @@ let resume_backoff_ladder_sec = [|60; 300; 1500; 3600|]
 let billing_backoff_ladder_sec = [|18000; 86400|]  (* 5h → 24h *)
 ```
 
-**masc-mcp 실측 주기와의 정렬** (Q8 audit, 2026-05-20):
+**masc 실측 주기와의 정렬** (Q8 audit, 2026-05-20):
 
 | 항목 | 값 | 출처 |
 |---|---|---|
@@ -393,7 +393,7 @@ Ladder 단계별 의미:
 | `1500s` | 5 keepalive cycles | sustained outage; 운영자 인지 시간 |
 | `3600s` | max cap | 자동 회복의 상한 (이후 manual 또는 escalation) |
 
-OpenClaw 패턴(1m→5m→25m→1h)이 masc-mcp의 5분 keepalive 주기에 자연 정렬됨. 미세 조정은 D.1 머지 후 2주 데이터로 검증.
+OpenClaw 패턴(1m→5m→25m→1h)이 masc의 5분 keepalive 주기에 자연 정렬됨. 미세 조정은 D.1 머지 후 2주 데이터로 검증.
 
 #### D.2 — EWMA Decay (deferred, 측정 게이트)
 
@@ -498,7 +498,7 @@ Phase B/C/E는 세 framework 모두 안 함. **완화**: tower::limit::Concurren
 
 ### 7.4 종합
 
-세 framework 모두 masc-mcp `try_runtime`와 동일한 sequential per-call fallback chain. 결론:
+세 framework 모두 masc `try_runtime`와 동일한 sequential per-call fallback chain. 결론:
 
 - **시안 A**: OpenClaw가 직접 검증 (production).
 - **시안 D.1**: OpenClaw 1m→5m→25m→1h validated.
@@ -587,7 +587,7 @@ Phase B/C/E는 세 framework 모두 안 함. **완화**: tower::limit::Concurren
 5. ~~신규 회귀 `client_capacity_full` 486건/2일이 본 RFC와 관련 있나?~~ — **RESOLVED (§4.2.1 layer matrix)**: regression 아님. 기존 `Runtime_client_capacity` (per-URL) 백프레셔 작동 신호. 별도 트리아지 불필요.
 6. Phase E 데이터 기반 의사결정에 필요한 metric — Phase A signal 분포 + Phase B 거부율 + Phase C reject ratio. 6개월 데이터.
 7. Phase B nested runtime audit — 실제 코드에 nested runtime가 있나? Phase B prerequisite.
-8. D.1 fixed ladder의 단계(1m→5m→25m→1h)가 masc-mcp keeper turn 주기 (5-15분 compaction)에 맞는가? — 미세 조정.
+8. D.1 fixed ladder의 단계(1m→5m→25m→1h)가 masc keeper turn 주기 (5-15분 compaction)에 맞는가? — 미세 조정.
 
 ## 13. References
 
@@ -601,8 +601,8 @@ Phase B/C/E는 세 framework 모두 안 함. **완화**: tower::limit::Concurren
 
 ### 런타임 Evidence
 - `<base-path>/.masc/runtime_audit/2026-05/*.jsonl` — 14일치 8917 attempt
-- `<base-path>/.masc/logs/masc-mcp-provider-k-three-20260516T0152.log` — 02:34 peak 19/min stampede
-- `<base-path>/.masc/logs/masc-mcp-8935.log` — 03:22:47~48 sangsu 사건 사슬
+- `<base-path>/.masc/logs/masc-provider-k-three-20260516T0152.log` — 02:34 peak 19/min stampede
+- `<base-path>/.masc/logs/masc-8935.log` — 03:22:47~48 sangsu 사건 사슬
 
 ### 관련 RFC
 - RFC-0009 / 0022 / 0042 / 0082 / 0088 / 0102 / 0127 / 0152

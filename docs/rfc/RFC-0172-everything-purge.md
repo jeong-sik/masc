@@ -5,7 +5,7 @@
 | Status | Draft |
 | Related | RFC-0165 / 0166 / 0167 / 0168 / 0169 / 0170 / 0171 (client-agnostic family) |
 | Scope | 270 files: `docs/**/*.md`, `docs/**/*.{csv,toml,inc,tla,cfg,html}`, `dashboard/src/**/*.test.{ts,tsx}`, `dashboard/design-system/{audits,RFC,CHANGELOG,README,SKILL}.md` |
-| Repos | masc-mcp |
+| Repos | masc |
 | Out of scope | `test/` OCaml fixtures (168 files reverted — see §3) |
 
 ## 1. Problem

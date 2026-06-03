@@ -463,7 +463,7 @@ let assoc_string key json =
 let test_registered_hook_tool_edit_file_patch_args () =
   let args =
     `Assoc
-      [ "path", `String "repos/masc-mcp/.worktrees/task/lib/foo.ml"
+      [ "path", `String "repos/masc/.worktrees/task/lib/foo.ml"
       ; "mode", `String "patch"
       ; "old_string", `String "let x = 1"
       ; "new_string", `String "let x = 2"

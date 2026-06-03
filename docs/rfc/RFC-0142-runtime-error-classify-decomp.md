@@ -243,7 +243,7 @@ The variant has ~25 constructors; the audit will publish which are reachable fro
 
 ## 6. Non-goals
 
-- Replacing `Yojson` with a typed schema (e.g. `atd`). Out of scope; would touch every JSON boundary in masc-mcp.
+- Replacing `Yojson` with a typed schema (e.g. `atd`). Out of scope; would touch every JSON boundary in masc.
 - Touching `runtime_attempt_fsm.ml` 13-site substring classifier. Tracked separately (RFC-0042 / RFC-0057 follow-up).
 - ~~Touching `telemetry_unified.ml` 22 catch-alls. Tracked separately.~~ **Moved into Phase 1 scope on 2026-05-20** — see Phase 1 amendment.
 

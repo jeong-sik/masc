@@ -48,7 +48,7 @@ The parent IMPLEMENTATION-PLAN.md PR-0.2 entry already lists
 Two questions must be answered before code lands:
 
 1. **Eio scheduler interaction**: `Runtime_events.read_poll` reads
-   the per-domain ring buffer. The masc-mcp server runs under a
+   the per-domain ring buffer. The masc server runs under a
    single `Eio_main.run` with cooperatively scheduled fibers; a
    sampler fiber that polls every 30s must not block long enough
    to starve other fibers, and the read path must be safe to call
@@ -90,7 +90,7 @@ session does not re-derive the trade-off.
    `Io` span coverage > 95 % under simulated keeper load
    (`benchmarks/quick-bench.sh` lanes).
 3. **Cancellation**: confirm sampler fiber respects switch
-   cancellation in the standard masc-mcp shutdown path.
+   cancellation in the standard masc shutdown path.
 
 ## Non-goals
 

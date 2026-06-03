@@ -197,7 +197,7 @@ let ( let*! ) r f =
     and what was received, enabling deterministic self-correction.
 
     @since 2.170.0
-    @see <https://github.com/jeong-sik/masc-mcp/issues/4963> *)
+    @see <https://github.com/jeong-sik/masc/issues/4963> *)
 
 (** Validation constraint that a field must satisfy. *)
 type field_constraint =

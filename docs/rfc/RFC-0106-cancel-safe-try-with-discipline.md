@@ -57,7 +57,7 @@ complete cohort.
 
 ## 1. Context
 
-Eio 의 fiber cancellation 은 `Eio.Cancel.Cancelled` 예외로 신호된다. 이 예외가 switch boundary 까지 *반드시* 도달해야 fiber tree 가 올바르게 unwind 한다. 일반 예외 (`exn`) 를 catch-all 로 잡는 `try ... with | exn -> ...` 또는 `try ... with exn -> ...` 패턴은 *Cancelled 도 같이 삼킨다*. masc-mcp 는 Eio.Fiber.fork / Switch.run 으로 fiber tree 를 광범위하게 사용하므로 이 silent swallow 는 *cancellation discipline 위반*이다.
+Eio 의 fiber cancellation 은 `Eio.Cancel.Cancelled` 예외로 신호된다. 이 예외가 switch boundary 까지 *반드시* 도달해야 fiber tree 가 올바르게 unwind 한다. 일반 예외 (`exn`) 를 catch-all 로 잡는 `try ... with | exn -> ...` 또는 `try ... with exn -> ...` 패턴은 *Cancelled 도 같이 삼킨다*. masc 는 Eio.Fiber.fork / Switch.run 으로 fiber tree 를 광범위하게 사용하므로 이 silent swallow 는 *cancellation discipline 위반*이다.
 
 기존 안전망:
 

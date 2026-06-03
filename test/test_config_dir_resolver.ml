@@ -102,7 +102,7 @@ target = "runtime.primary"
   config
 
 let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
-    ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc-mcp") () =
+    ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc") () =
   Config_dir_resolver.
     {
       cwd;
@@ -116,8 +116,8 @@ let test_sanitize_inherited_test_env_opt_drops_captured_parent_shell_value () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
-      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
+      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
   in
   check (option string) "same captured parent-shell value ignored" None actual
 
@@ -125,7 +125,7 @@ let test_sanitize_inherited_test_env_opt_keeps_runtime_override () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
       ~current:(Some "/tmp/test-config-root")
   in
   check (option string) "runtime override preserved"
@@ -167,11 +167,11 @@ let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:true
-      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
-      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
+      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
   in
   check (option string) "opt-in preserves config-path override"
-    (Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config") actual
+    (Some "/Users/dancer/me/workspace/yousleepwhen/masc/config") actual
 
 let test_inputs_from_env_honors_config_path_override_opt_in () =
   with_temp_dir "config-dir-inputs-env-config" @@ fun root ->
@@ -271,7 +271,7 @@ let test_env_override_invalid_no_fallback () =
   let resolution =
     Config_dir_resolver.resolve_with
       (make_inputs ~env_config_dir:invalid ~cwd:"/tmp/other"
-         ~executable_name:"/tmp/other/bin/masc-mcp" ())
+         ~executable_name:"/tmp/other/bin/masc" ())
   in
   check string "status" "invalid_env"
     (Config_dir_resolver.status_to_string resolution.status);
@@ -312,7 +312,7 @@ let test_executable_relative_config_is_seed_only_not_fallback () =
   let _config = make_config_root repo in
   let bin_dir = Filename.concat repo "bin" in
   mkdir_p bin_dir;
-  let executable_name = Filename.concat bin_dir "masc-mcp" in
+  let executable_name = Filename.concat bin_dir "masc" in
   write_file executable_name "#!/bin/sh\n";
   let resolution =
     Config_dir_resolver.resolve_with
@@ -376,7 +376,7 @@ let test_local_masc_fallback_collapses_explicit_masc_dir () =
 let test_no_legacy_me_root_fallback () =
   with_temp_dir "config-dir-no-legacy" @@ fun me_root ->
   let _repo_root =
-    Filename.concat me_root "workspace/yousleepwhen/masc-mcp"
+    Filename.concat me_root "workspace/yousleepwhen/masc"
   in
   let resolution =
     Config_dir_resolver.resolve_with

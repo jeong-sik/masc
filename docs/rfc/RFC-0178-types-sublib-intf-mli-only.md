@@ -14,7 +14,7 @@ implementation_prs: []
 # RFC-0178 — Types Sub-library Extraction with `_intf.ml` mli-only Surface
 
 Status: Draft · Scaffold (Sprint 2 entry, see related work)
-Author: jeong-sik (with Claude Opus 4.7 via masc-mcp ocaml-bestpractice plan PR me#1175)
+Author: jeong-sik (with Claude Opus 4.7 via masc ocaml-bestpractice plan PR me#1175)
 Date: 2026-05-26
 Supersedes: —
 Related: RFC-0056 (Incremental Sub-Library Extraction — inherits G1-G5 gate machinery), RFC-0085 (Keeper Namespace Promotion — naming convention precedent), RFC-0005 (Typed Capability Substrate — caller-pattern alignment), RFC-0003 (Keeper Composite Lifecycle — sub-FSM module type targets)

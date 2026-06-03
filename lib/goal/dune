@@ -1,7 +1,7 @@
 (include_subdirs no)
 
 ;; Goal domain — pure goal logic (store / phase / verification / convergence /
-;; janitor). Decoupled from the masc_mcp mega-library: persistence goes through
+;; janitor). Decoupled from the masc mega-library: persistence goes through
 ;; the already-separate masc_workspace library (Workspace_utils), never the
 ;; mega-lib Workspace facade. Dependency direction is one-way: consumers
 ;; (workspace_goals adapter, dashboards) depend on masc_goal; masc_goal depends

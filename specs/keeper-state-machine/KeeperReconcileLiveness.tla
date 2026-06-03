@@ -20,7 +20,7 @@
 \* Verifies that manual_reconcile_required is not a one-way trap:
 \* once set, the system can always eventually clear it.
 \*
-\* Background (masc-mcp#6841+):
+\* Background (masc#6841+):
 \*   manual_reconcile_required was set to TRUE by OAS bridge failures
 \*   (committed external side effects during runtime errors), but the
 \*   heartbeat recovery path only dispatched Turn_succeeded without

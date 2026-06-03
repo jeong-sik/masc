@@ -3,23 +3,23 @@
 open Alcotest
 
 let test_parse_pr_url_simple () =
-  match Ide_bridge.parse_pr_url_from_output "https://github.com/jeong-sik/masc-mcp/pull/19872" with
+  match Ide_bridge.parse_pr_url_from_output "https://github.com/jeong-sik/masc/pull/19872" with
   | Some (number, url) ->
     check int "pr number" 19872 number;
-    check string "pr url" "https://github.com/jeong-sik/masc-mcp/pull/19872" url
+    check string "pr url" "https://github.com/jeong-sik/masc/pull/19872" url
   | None -> fail "expected Some"
 ;;
 
 let test_parse_pr_url_with_files () =
-  match Ide_bridge.parse_pr_url_from_output "https://github.com/jeong-sik/masc-mcp/pull/19872/files" with
+  match Ide_bridge.parse_pr_url_from_output "https://github.com/jeong-sik/masc/pull/19872/files" with
   | Some (number, url) ->
     check int "pr number" 19872 number;
-    check string "pr url" "https://github.com/jeong-sik/masc-mcp/pull/19872" url
+    check string "pr url" "https://github.com/jeong-sik/masc/pull/19872" url
   | None -> fail "expected Some"
 ;;
 
 let test_parse_pr_url_in_output () =
-  let output = "remote: Create a pull request for 'feat/branch' on GitHub by visiting:\nremote:      https://github.com/jeong-sik/masc-mcp/pull/123\n" in
+  let output = "remote: Create a pull request for 'feat/branch' on GitHub by visiting:\nremote:      https://github.com/jeong-sik/masc/pull/123\n" in
   match Ide_bridge.parse_pr_url_from_output output with
   | Some (number, _) -> check int "pr number" 123 number
   | None -> fail "expected Some"
@@ -250,10 +250,10 @@ let test_pr_event_ingest () =
     Ide_bridge.ingest_pr_event
       ~base_path:base_dir
       ~pr_number:19872
-      ~pr_url:"https://github.com/jeong-sik/masc-mcp/pull/19872"
+      ~pr_url:"https://github.com/jeong-sik/masc/pull/19872"
       ~pr_title:"feat(ide): auto-collect tool/turn events"
       ~pr_state:"open"
-      ~repo:"jeong-sik/masc-mcp"
+      ~repo:"jeong-sik/masc"
       ~keeper_id:"keeper-alpha"
       ~turn_id:"turn-123"
       ~comment_count:0
@@ -269,12 +269,12 @@ let test_pr_event_ingest () =
     let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
     let pr_url = Yojson.Safe.Util.member "pr_url" json |> Yojson.Safe.Util.to_string in
     check int "pr_number" 19872 pr_number;
-    check string "pr_url" "https://github.com/jeong-sik/masc-mcp/pull/19872" pr_url)
+    check string "pr_url" "https://github.com/jeong-sik/masc/pull/19872" pr_url)
 ;;
 
 let test_pr_event_from_hook_detects_url () =
   with_temp_dir (fun base_dir ->
-    let output = "remote: https://github.com/jeong-sik/masc-mcp/pull/123\n" in
+    let output = "remote: https://github.com/jeong-sik/masc/pull/123\n" in
     Ide_bridge.ingest_pr_event_from_hook
       ~base_path:base_dir
       ~keeper_id:"k1"

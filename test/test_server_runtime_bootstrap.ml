@@ -207,19 +207,19 @@ let find_main_eio_exe () =
     [
       Filename.concat root "bin/main_eio.exe";
       Filename.concat root "_build/default/bin/main_eio.exe";
-      Filename.concat root "_build/default/masc-mcp/bin/main_eio.exe";
+      Filename.concat root "_build/default/masc/bin/main_eio.exe";
     ]
     @ List.concat_map
         (fun base ->
           [
             Filename.concat base "bin/main_eio.exe";
             Filename.concat base "_build/default/bin/main_eio.exe";
-            Filename.concat base "_build/default/masc-mcp/bin/main_eio.exe";
+            Filename.concat base "_build/default/masc/bin/main_eio.exe";
           ])
         build_roots
     @ [
       Filename.concat shared_root "_build/default/bin/main_eio.exe";
-      Filename.concat shared_root "_build/default/masc-mcp/bin/main_eio.exe";
+      Filename.concat shared_root "_build/default/masc/bin/main_eio.exe";
     ]
   in
   match List.find_opt Sys.file_exists candidates with

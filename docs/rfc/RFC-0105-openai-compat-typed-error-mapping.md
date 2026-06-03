@@ -33,7 +33,7 @@ audit confirms the closeout — that file is clean. This RFC scopes the
 follow-up to the one remaining lossful boundary and proposes a typed
 mapping there, independent of RFC-0098's already-completed work.
 
-## 2. Evidence (measured 2026-05-17, masc-mcp main @ `f2f3963165`)
+## 2. Evidence (measured 2026-05-17, masc main @ `f2f3963165`)
 
 ### 2.1 transport_http confirmation (no work needed)
 

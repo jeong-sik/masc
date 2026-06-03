@@ -232,7 +232,7 @@ let record_bearer_token_mismatch ~expected_agent ~actual_agent =
 let bearer_token_owner_mismatch_message ~requested_agent ~token_owner =
   Printf.sprintf
     "No credential found for %s (bearer token belongs to %s). MCP identity mismatch: \
-     mint/sync a bearer for %s (`masc-mcp login --agent %s --role worker --shell`, then \
+     mint/sync a bearer for %s (`masc login --agent %s --role worker --shell`, then \
      `sb mcp sync`) or send the token owner's identity."
     requested_agent
     token_owner

@@ -12,8 +12,8 @@ function graph(): GitGraphResponse {
     generated_at: '2026-05-06T00:00:00Z',
     repos: [{
       id: 'masc',
-      root: '/workspace/masc-mcp',
-      label: 'masc-mcp',
+      root: '/workspace/masc',
+      label: 'masc',
       current_branch: 'main',
       head: 'abc123',
       dirty: false,
@@ -26,7 +26,7 @@ function graph(): GitGraphResponse {
       id: 'main',
       label: 'main',
       branch: 'main',
-      worktree_path: '/workspace/masc-mcp',
+      worktree_path: '/workspace/masc',
       color: '#d4a14a',
     }],
     nodes: [{
@@ -80,7 +80,7 @@ describe('IdeBranchContextPanel a11y', () => {
       container,
     )
 
-    await waitFor(() => expect(container.textContent).toContain('masc-mcp'))
+    await waitFor(() => expect(container.textContent).toContain('masc'))
     expect(await axe(container)).toHaveNoViolations()
   })
 

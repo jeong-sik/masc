@@ -103,7 +103,7 @@ include Prometheus_policy_metric_names
    the per-keeper drop count crosses [orphan_drop_threshold] inside
    [orphan_drop_window_sec]. Together they let operators tell a
    harmless single-update race from a stuck orphan fiber emitting 30+
-   drops per turn. See masc-mcp 2026-05-07 verifier-loop incident. *)
+   drops per turn. See masc 2026-05-07 verifier-loop incident. *)
 (* Self-healing circuit breaker: incremented each time [sweep_and_recover]
    auto-resumes a keeper after its back-off timer has elapsed.  A rate >0
    means the system is self-healing; a zero rate while keepers accumulate

@@ -1,7 +1,7 @@
 (** Regression: queue-head wait timeout clock must be reset after the keeper
     joins the FIFO, not inherited from slot-entry.
 
-    Production symptom (live log 2026-05-05 ~01:50 KST, masc-mcp):
+    Production symptom (live log 2026-05-05 ~01:50 KST, masc):
 
       [WARN] [Keeper] <name>: skipping turn (semaphore wait > 60s,
         peers holding slot, runtime=..., autonomous_available=6

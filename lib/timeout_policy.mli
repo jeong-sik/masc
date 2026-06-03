@@ -1,7 +1,7 @@
 (** Timeout policy SSOT for MASC-MCP.
 
     Consolidates the layered wall-clock deadline matrix enumerated in
-    https://github.com/jeong-sik/masc-mcp/issues/9639, and provides a typed
+    https://github.com/jeong-sik/masc/issues/9639, and provides a typed
     [Deadline.t] that can be propagated across subsystems.
 
     Cooperative-cancel overshoot: OCaml 5 / Eio cancellation is cooperative.

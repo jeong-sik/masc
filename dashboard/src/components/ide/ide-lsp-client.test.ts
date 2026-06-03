@@ -19,11 +19,11 @@ describe('resolveLspDiagnosticFilePath', () => {
 
   it('maps absolute diagnostic URIs only when they match the current IDE file suffix', () => {
     expect(resolveLspDiagnosticFilePath(
-      'file:///Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/current.ml',
+      'file:///Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/current.ml',
       'lib/keeper/current.ml',
     )).toBe('lib/keeper/current.ml')
     expect(resolveLspDiagnosticFilePath(
-      'file:///Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/other.ml',
+      'file:///Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/other.ml',
       'lib/keeper/current.ml',
     )).toBeNull()
   })

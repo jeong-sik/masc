@@ -58,7 +58,7 @@ not keeper-specific logic. The `Keeper_` prefix was misleading.
 
 ## 4. Verification
 
-- `dune build --root . lib/masc_mcp.cma` EXIT=0
+- `dune build --root . lib/masc.cma` EXIT=0
 - `dune build --root . @check` EXIT=0
 - Copilot review: 1 actionable comment (private_modules) — addressed
 

@@ -68,7 +68,7 @@ let runtime_mcp_policy_of_tool_names
           Auth_resolve.emit_resolution_trace
             ~runtime:"runtime_mcp_policy"
             ~keeper_id:(Some keeper_name)
-            ~provider_label:"masc-mcp"
+            ~provider_label:"masc"
             ~outcome:
               (Ok { Auth_resolve.raw = token; source = Auth_resolve.Internal_keeper_env });
           ("x-masc-internal-token", token)
@@ -78,7 +78,7 @@ let runtime_mcp_policy_of_tool_names
           let env_token = Mcp_policy_helpers.first_nonempty_env [ "MASC_MCP_TOKEN" ] in
           (* Phase A F1: when MASC_MCP_TOKEN is unset, fall back to the
              per-keeper raw token at <base_path>/.masc/auth/<agent_name>.token.
-             This wires CLI-spawned subprocesses that callback to masc-mcp tools
+             This wires CLI-spawned subprocesses that callback to masc tools
              but do not inherit the parent process env. *)
           let per_keeper_token =
             match env_token, agent_name with
@@ -98,7 +98,7 @@ let runtime_mcp_policy_of_tool_names
           Auth_resolve.emit_resolution_trace
             ~runtime:"runtime_mcp_policy"
             ~keeper_id:keeper_name
-            ~provider_label:"masc-mcp"
+            ~provider_label:"masc"
             ~outcome:resolved;
           (match resolved with
            | Ok { raw; _ } -> [ "Authorization", "Bearer " ^ raw ]

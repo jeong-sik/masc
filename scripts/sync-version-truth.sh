@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync-version-truth.sh — make masc_mcp.opam and ROADMAP.md match
+# sync-version-truth.sh — make masc.opam and ROADMAP.md match
 # the authoritative version in dune-project.
 #
 # Counterpart to scripts/check-version-truth.sh:
@@ -50,7 +50,7 @@ if [[ -z "$dune_version" ]]; then
 fi
 
 # ── Targets ──────────────────────────────────────────────────
-opam_version="$(sed -n 's/^version: "\([^"]*\)"/\1/p' masc_mcp.opam | head -n1)"
+opam_version="$(sed -n 's/^version: "\([^"]*\)"/\1/p' masc.opam | head -n1)"
 roadmap_version="$(sed -n 's/^> Current package version: v\([^ ]*\).*/\1/p' ROADMAP.md | head -n1)"
 
 info() {
@@ -64,7 +64,7 @@ opam_drift=false
 roadmap_drift=false
 
 if [[ "$opam_version" != "$dune_version" ]]; then
-  info "opam drift: masc_mcp.opam=$opam_version → $dune_version (will regenerate via dune)"
+  info "opam drift: masc.opam=$opam_version → $dune_version (will regenerate via dune)"
   opam_drift=true
   drift=$((drift + 1))
 fi
@@ -89,12 +89,12 @@ if ! $apply; then
 fi
 
 if $opam_drift; then
-  # dune regenerates masc_mcp.opam from dune-project when the (generate_opam_files true)
+  # dune regenerates masc.opam from dune-project when the (generate_opam_files true)
   # stanza is present. We don't hand-edit the file — that's what the "generated"
   # header tells every tool to expect.
-  info "running: scripts/dune-local.sh build masc_mcp.opam"
-  if ! scripts/dune-local.sh build masc_mcp.opam 2>/dev/null; then
-    echo "sync-version-truth: 'scripts/dune-local.sh build masc_mcp.opam' failed" >&2
+  info "running: scripts/dune-local.sh build masc.opam"
+  if ! scripts/dune-local.sh build masc.opam 2>/dev/null; then
+    echo "sync-version-truth: 'scripts/dune-local.sh build masc.opam' failed" >&2
     exit 1
   fi
 fi

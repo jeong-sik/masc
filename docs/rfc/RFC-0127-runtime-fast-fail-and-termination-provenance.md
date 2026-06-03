@@ -42,7 +42,7 @@ The RunPod pod `ur1wah58zebjov` returned HTTP `502` for ~30 minutes after its
 `llama-server` process aborted on `GGML_ASSERT(logits != nullptr) failed` at
 `/workspace/llama.cpp/common/sampling.cpp:154` (a speculative-decoding sampler
 corner-case introduced by upstream PR llama.cpp#22673). During that window the
-masc-mcp fleet of 10 keepers all entered `fiber_unresolved` and the supervisor
+masc fleet of 10 keepers all entered `fiber_unresolved` and the supervisor
 log filled with:
 
 ```

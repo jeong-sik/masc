@@ -506,7 +506,7 @@ let with_keeper_turn_slot_control ?(runtime_profile = "unknown") ~keeper_name ~c
            (`Semaphore_wait_timeout (semaphore_wait_timeout_snapshot ~phase ~holders ())))
     | None ->
       (* No Eio clock available: we are running outside an Eio main loop
-         (e.g. Alcotest without [Eio_main.run]). Production masc-mcp
+         (e.g. Alcotest without [Eio_main.run]). Production masc
          always provides a clock via [Masc_eio_env.init]; reaching this
          branch at runtime would indicate an environment-setup drift.  If
          the permit is immediately available we can still acquire without

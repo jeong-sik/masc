@@ -13,7 +13,7 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_keeper_invariant)
+ (name masc_keeper_invariant)
  (public_name masc.keeper_invariant)
  (wrapped false)
  (flags (:standard -w +4))

@@ -190,7 +190,7 @@ let transition_task_r ~identity ~task_state =
 
 ## §5 Alternatives
 
-| 접근법 | Canonical Form | Stability | Uniqueness | masc-mcp 적합도 |
+| 접근법 | Canonical Form | Stability | Uniqueness | masc 적합도 |
 |---|---|---|---|---|
 | ActivityPub `id` | HTTPS URI | ✅ Stable | ✅ Global (URI) | **높음** — `keeper_name`을 canonical ID로, `agent_name`을 alias로 |
 | OIDC `iss`+`sub` | issuer-scoped string | ✅ Immutable | ✅ Global (iss+sub) | **높음** — `keeper_name`을 immutable `sub`로 취급 |

@@ -213,6 +213,7 @@ let initialize_capabilities_json () =
     ; "selectionRangeProvider", `Bool true
     ; "documentLinkProvider", `Bool true
     ; "codeLensProvider", `Assoc [ "resolveProvider", `Bool false ]
+    ; "codeActionProvider", `Bool true
     ; "inlayHintProvider", `Bool true
     ; ( "diagnosticProvider"
       , `Assoc [ "interFileDependencies", `Bool false; "workspaceDiagnostics", `Bool false ]

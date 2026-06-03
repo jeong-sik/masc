@@ -51,33 +51,6 @@
       ]
     },
     {
-      "signal_id": "keeper_alive_but_stuck",
-      "metric_names": [
-        "masc_keeper_alive_but_stuck_seconds",
-        "masc_keeper_alive_but_stuck_threshold_seconds"
-      ],
-      "alert_names": [
-        "GoalLoopKeeperAliveButStuckCritical"
-      ],
-      "threshold_fragments": [
-        "> 2"
-      ]
-    },
-    {
-      "signal_id": "keeper_zombie_loop",
-      "metric_names": [
-        "masc_keeper_zombie_loop_detected_total"
-      ],
-      "alert_names": [
-        "GoalLoopKeeperZombieLoopCritical"
-      ],
-      "threshold_fragments": [
-        "increase(",
-        "[5m]",
-        "> 0"
-      ]
-    },
-    {
       "signal_id": "provider_health_probe_skipped",
       "metric_names": [
         "masc_provider_health_probe_skipped_total"

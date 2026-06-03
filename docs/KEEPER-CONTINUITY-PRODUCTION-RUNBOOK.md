@@ -102,7 +102,7 @@ Preferred evidence bundle:
 Run the existing harness in isolated mode:
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 KEEPER_MODELS="default" \
 scripts/harness_keeper_continuity_validation.sh
 ```

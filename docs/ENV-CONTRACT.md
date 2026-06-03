@@ -9,7 +9,7 @@ code_refs:
 # Environment Variable Contract
 
 This document defines the operator-facing contract for environment variables in
-`masc-mcp`.
+`masc`.
 
 The core rule is simple:
 
@@ -67,11 +67,11 @@ should be treated as restart-required.
 
 Representative code paths:
 
-- [`server_runtime_bootstrap.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/server/server_runtime_bootstrap.ml)
-- [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config_dir_resolver.ml)
-- [`server_bootstrap_http.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/server/server_bootstrap_http.ml)
-- [`keeper_runtime_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_runtime_config.ml)
-- [`keeper_tool_policy.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_tool_policy.ml)
+- [`server_runtime_bootstrap.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_runtime_bootstrap.ml)
+- [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config_dir_resolver.ml)
+- [`server_bootstrap_http.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_bootstrap_http.ml)
+- [`keeper_runtime_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_runtime_config.ml)
+- [`keeper_tool_policy.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_tool_policy.ml)
 
 ### 2. Env-backed defaults that become runtime-dynamic through `Runtime_params`
 
@@ -85,10 +85,10 @@ operator control plane is `Runtime_params`, not the parent shell env.
 
 Representative code paths:
 
-- [`runtime_params.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/runtime_params.ml)
-- [`governance_registry.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/governance_registry.ml)
-- [`keeper_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/keeper/keeper_config.ml)
-- [`server_routes_http_routes_activity.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/server/server_routes_http_routes_activity.ml)
+- [`runtime_params.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/runtime_params.ml)
+- [`governance_registry.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/governance_registry.ml)
+- [`keeper_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_config.ml)
+- [`server_routes_http_routes_activity.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_routes_http_routes_activity.ml)
 
 ### 3. Accessor-shaped env readers with limited live effect
 
@@ -105,10 +105,10 @@ consumer is known to act on every request/turn.
 Examples:
 
 - Transport feature flags in
-  [`env_config_runtime.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config/env_config_runtime.ml)
+  [`env_config_runtime.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/env_config_runtime.ml)
   are accessor-shaped, but listener lifecycles remain boot-static.
 - `Config_dir_resolver` helpers read env accessors, but
-  [`resolve()`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config_dir_resolver.ml#L321)
+  [`resolve()`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config_dir_resolver.ml#L321)
   caches the result, so root changes are boot-static.
 
 ### 4. Execute exec gates (`request_dynamic`, additive-only)
@@ -130,10 +130,10 @@ Operator rollout procedure and observer log interpretation: see
 
 Representative code paths:
 
-- [`exec_semantic.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/exec/exec_semantic.ml)
-- [`exec_buffer.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/exec/exec_buffer.ml)
-- [`cdal_judge.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/cdal_judge.ml)
-- [`worker_dev_tools.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/worker_dev_tools.ml) — Shell_command_gate caller integration
+- [`exec_semantic.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_semantic.ml)
+- [`exec_buffer.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_buffer.ml)
+- [`cdal_judge.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/cdal_judge.ml)
+- [`worker_dev_tools.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/worker_dev_tools.ml) — Shell_command_gate caller integration
 
 Because every flag here is `request_dynamic` on the Execute path
 (read at tool-invocation time), operators can flip a flag without a
@@ -153,8 +153,8 @@ production launch knobs.
 
 Representative code paths:
 
-- [`workspace_utils_backend_setup.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/workspace/workspace_utils_backend_setup.ml)
-- [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config_dir_resolver.ml)
+- [`workspace_utils_backend_setup.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/workspace/workspace_utils_backend_setup.ml)
+- [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config_dir_resolver.ml)
 
 ## Rules for New Environment Variables
 

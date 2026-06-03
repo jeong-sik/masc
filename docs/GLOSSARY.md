@@ -52,7 +52,7 @@ A keeper-owned writable sandbox under the runtime root:
 .masc/playground/{keeper}/
 
 # Example clone path
-.masc/playground/sangsu/repos/masc-mcp/
+.masc/playground/sangsu/repos/masc/
 ```
 
 Typical contents:

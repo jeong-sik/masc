@@ -9,7 +9,7 @@ CI fails on drift (`Env knob catalog drift gate`). To add a new
 `MASC_*` env var, declare it in the appropriate `env_config_*.ml`
 module and regenerate this file.
 
-See [#10733](https://github.com/jeong-sik/masc-mcp/issues/10733) for
+See [#10733](https://github.com/jeong-sik/masc/issues/10733) for
 the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.

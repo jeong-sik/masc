@@ -53,7 +53,7 @@ background task lifecycle are not part of the callable surface.
 Single process:
 
 ```json
-{ "executable": "rg", "argv": ["pattern", "lib"], "cwd": "repos/masc-mcp" }
+{ "executable": "rg", "argv": ["pattern", "lib"], "cwd": "repos/masc" }
 ```
 
 Pipeline:
@@ -64,7 +64,7 @@ Pipeline:
     { "executable": "rg", "argv": ["--files", "lib"] },
     { "executable": "head", "argv": ["-20"] }
   ],
-  "cwd": "repos/masc-mcp"
+  "cwd": "repos/masc"
 }
 ```
 

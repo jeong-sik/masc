@@ -1,6 +1,6 @@
 # Integrated Benchmark Runbook
 
-이 문서는 merged 기준 `masc-mcp`를 한 번에 검증할 때 쓰는 상위 runbook이다.
+이 문서는 merged 기준 `masc`를 한 번에 검증할 때 쓰는 상위 runbook이다.
 
 핵심 원칙:
 

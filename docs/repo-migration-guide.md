@@ -1,6 +1,6 @@
 # Repository Migration Guide
 
-This guide helps existing masc-mcp users migrate from the legacy single-repository
+This guide helps existing masc users migrate from the legacy single-repository
 model to the new multi-repository system introduced in Week 8.
 
 ## What Changed

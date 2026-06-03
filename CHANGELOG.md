@@ -1792,7 +1792,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 
 ### Changed
 
-- **OAS pin bump → `main@36490371` (v0.163.0).** Single-commit upstream bump for `pipeline: handle Nudge decision in before_turn` (oas#1065). Without this, `before_turn` hooks returning `Hooks.Nudge` were silently dropped by `pipeline.ml stage_input` (`_ -> ()` fall-through). Effect on masc-mcp: the work-discovery nudge wired in PR #8805 (1089-char Samchon schema text) now actually reaches the LLM. 3 SSOT axes bumped per `feedback_oas-pin-must-bump-version-floor`: `scripts/oas-agent-sdk-pin.sh`, `dune-project`, `masc_mcp.opam`. Generated docs re-synced via `scripts/sync-oas-pin-docs.sh`. Live verification: post-deploy, `keeper:<name> before_turn: injecting work_discovery nudge` log lines should be followed by `tool_call` events from the same keeper (currently 10 fires + 0 follow-up actions over the live server's 2 hour uptime).
+- **OAS pin bump → `main@36490371` (v0.163.0).** Single-commit upstream bump for `pipeline: handle Nudge decision in before_turn` (oas#1065). Without this, `before_turn` hooks returning `Hooks.Nudge` were silently dropped by `pipeline.ml stage_input` (`_ -> ()` fall-through). Effect on masc: the work-discovery nudge wired in PR #8805 (1089-char Samchon schema text) now actually reaches the LLM. 3 SSOT axes bumped per `feedback_oas-pin-must-bump-version-floor`: `scripts/oas-agent-sdk-pin.sh`, `dune-project`, `masc_mcp.opam`. Generated docs re-synced via `scripts/sync-oas-pin-docs.sh`. Live verification: post-deploy, `keeper:<name> before_turn: injecting work_discovery nudge` log lines should be followed by `tool_call` events from the same keeper (currently 10 fires + 0 follow-up actions over the live server's 2 hour uptime).
 
 - **OAS pin bump → `main@2798831c` (v0.162.0 + 7 follow-ups).** Carries
   upstream OAS commits since the last `54f4aeab` pin:
@@ -2191,7 +2191,7 @@ No code changes. Bump captures the documentation/hygiene cycle as a tagged relea
     `default_summarizer`.
   - Also picks up OAS PR #962 (Anthropic `cache_extended_ttl`), included
     transitively via the 0.151.0 release.
-  - No runtime behavior change in masc-mcp itself: this is a pin-only
+  - No runtime behavior change in masc itself: this is a pin-only
     bump. Registering a `[STATE]`-aware summarizer is the follow-up step
     and ships separately.
 
@@ -2616,7 +2616,7 @@ had the full Phase 2 release to migrate.
 - MASC-driven runtime FSM Phase 2: direct provider failover from MASC (#6776)
 - Event_bus envelope API adoption: correlation_id + run_id metadata (#6777)
 - Groq runtime fallback restored (#6566)
-- OAS log bridge to masc-mcp structured logging (#6618)
+- OAS log bridge to masc structured logging (#6618)
 - Keeper runtime provider allowlist env knob (#6478)
 - Cross-model enforcement rate on dashboard (#6565)
 - Keeper FSM dashboard exposure + TLA+ bug model (#6556)
@@ -2697,7 +2697,7 @@ had the full Phase 2 release to migrate.
 
 ### Added
 - Restore Groq runtime fallback, confirmed by OAS 0.121.0 (#6566)
-- Bridge Agent_sdk.Log to masc-mcp structured log (#6618)
+- Bridge Agent_sdk.Log to masc structured log (#6618)
 
 ### Fixed
 - CP unit: bound descendant_ids recursion with max_tree_depth guard (#6635)
@@ -2786,7 +2786,7 @@ had the full Phase 2 release to migrate.
 ### Fixed
 - Keeper: gate auto-clear of manual reconcile behind age threshold (#6497)
 - Keeper: should_run_turn now consults manual_reconcile_pending (#6518)
-- Keeper: SSOT playground paths, drop hardcoded masc-mcp and container root (#6468)
+- Keeper: SSOT playground paths, drop hardcoded masc and container root (#6468)
 - Keeper: convert parse_keeper_identity from failwith to Result (#6479)
 - Keeper FSM runtime integration (#6451)
 - Goal-janitor: surface write_meta Error instead of ignoring (#6513)
@@ -2913,7 +2913,7 @@ had the full Phase 2 release to migrate.
 ## [0.2.0] - 2026-04-09
 
 ### Changed
-- Release SemVer restarts at `0.y.z` to reflect that `masc-mcp` is still pre-1.0.
+- Release SemVer restarts at `0.y.z` to reflect that `masc` is still pre-1.0.
 - Release-train automation now compares tags within the active major series, so frozen legacy `v2.*` tags do not block the new `0.x` line.
 - Front-door docs, release policy, and issue templates now point at `v0.2.0` as the active package version.
 - The reset starts at `0.2.0` because historical `v0.1.0` and `v0.1.1` tags already exist in the repo.

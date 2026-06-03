@@ -2,7 +2,7 @@
 status: runbook
 last_verified: 2026-04-17
 code_refs:
-  - start-masc-mcp.sh
+  - start-masc.sh
   - bin/main_eio.ml
   - bin/main_stdio_eio.ml
 ---
@@ -15,8 +15,8 @@ code_refs:
 ## 1. 설치와 서버 시작
 
 ```bash
-git clone https://github.com/jeong-sik/masc-mcp.git
-cd masc-mcp
+git clone https://github.com/jeong-sik/masc.git
+cd masc
 
 chmod +x scripts/opam-pin-external-deps.sh
 scripts/opam-pin-external-deps.sh
@@ -24,8 +24,8 @@ scripts/opam-pin-external-deps.sh
 opam install . --deps-only
 dune build --root .
 
-./start-masc-mcp.sh --http
-PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this checkout
+./start-masc.sh --http
+PORT="$(./start-masc.sh --print-port)"  # query the effective port for this checkout
 ```
 
 기본 포트:
@@ -36,17 +36,17 @@ PORT="$(./start-masc-mcp.sh --print-port)"  # query the effective port for this 
 
 메모:
 
-- 현재 checkout의 기본 포트 확인: `./start-masc-mcp.sh --print-port`
+- 현재 checkout의 기본 포트 확인: `./start-masc.sh --print-port`
 - worktree에서 `--port`를 생략하면 script가 worktree별 기본 포트를 자동 선택한다.
-- `--print-port`는 현재 checkout의 기본 포트 조회용이다. 서버 시작은 보통 `./start-masc-mcp.sh --http`로 충분하다.
+- `--print-port`는 현재 checkout의 기본 포트 조회용이다. 서버 시작은 보통 `./start-masc.sh --http`로 충분하다.
 
 ### 서버 내부 기본 루프 순서도
 
-`./start-masc-mcp.sh --http` 로 띄우면 실제 런타임은 아래 흐름으로 돈다.
+`./start-masc.sh --http` 로 띄우면 실제 런타임은 아래 흐름으로 돈다.
 
 ```mermaid
 flowchart TD
-    A["./start-masc-mcp.sh --http"] --> B["bin/main_eio.ml / run_cmd"]
+    A["./start-masc.sh --http"] --> B["bin/main_eio.ml / run_cmd"]
     B --> C["Eio_main.run"]
     C --> D["Eio.Fiber.first"]
     D --> E["run_server"]
@@ -106,7 +106,7 @@ flowchart TD
 
 코드 기준 진입점:
 
-- `start-masc-mcp.sh`
+- `start-masc.sh`
 - `bin/main_eio.ml`
 - `lib/server/server_runtime_bootstrap.ml`
 - `lib/server/server_bootstrap_http.ml`
@@ -162,7 +162,7 @@ HTTP가 canonical public path다. 템플릿 전체는 `docs/MCP-TEMPLATE.md`를 
 }
 ```
 
-worktree에서는 `8935` 대신 `./start-masc-mcp.sh --print-port` 출력값으로 바꾼다.
+worktree에서는 `8935` 대신 `./start-masc.sh --print-port` 출력값으로 바꾼다.
 
 ## 4. 첫 Workflow
 
@@ -273,7 +273,7 @@ masc_keeper_up(name: "sangsu")
 - `PERSONAS_ROOT/<name>/profile.json`이 존재해야 한다 (또는 `CONFIG_ROOT/keepers/<name>.toml`)
 - `PERSONAS_ROOT`는 `MASC_PERSONAS_DIR` 우선, 없으면 resolved `CONFIG_ROOT/personas`를 사용한다.
 - 운영 기준은 항상 `<base-path>/.masc`다. 공유 keeper 상태를 보려면 `--base-path` 또는 `MASC_BASE_PATH`를 명시해서 서버와 같은 base path를 사용한다.
-- `start-masc-mcp.sh`는 worktree에서 실행해도 base-path 규칙을 그대로 따른다.
+- `start-masc.sh`는 worktree에서 실행해도 base-path 규칙을 그대로 따른다.
 - shared keeper 상태 대신 별도 `.masc/`를 쓰고 싶을 때만 `--base-path`를 다른 base path로 명시적으로 덮어쓴다.
 - resolved config root는 `MASC_CONFIG_DIR` 우선이며, 없으면 `<MASC_BASE_PATH>/.masc/config`를 초기화/사용한다. repo `config/`는 체크인된 default/example seed source이며, live root가 아니다.
 - `MASC_PERSONAS_DIR` 환경변수로 persona만 repo 밖 경로로 분리할 수 있다.
@@ -295,7 +295,7 @@ bundle contract와 해석 기준은 `docs/RELEASE-EVIDENCE.md`를 SSOT로 본다
 ```bash
 export MASC_CONFIG_DIR=/srv/masc/config
 export MASC_PERSONAS_DIR=/srv/masc/personas
-./start-masc-mcp.sh --http --port 8935 --base-path /srv/masc/runtime
+./start-masc.sh --http --port 8935 --base-path /srv/masc/runtime
 ```
 
 active root 기준: `MASC_CONFIG_DIR`가 있으면 그 값, 없으면 `/srv/masc/runtime/.masc/config`

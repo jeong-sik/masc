@@ -93,7 +93,7 @@ MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login --json \
 
 ## 4. Agent-Code MCP Bearer Login
 
-`masc-mcp` uses bearer-token MCP auth. It does not expose an OAuth
+`masc` uses bearer-token MCP auth. It does not expose an OAuth
 authorization endpoint, so `agent-code mcp login masc` is expected to fail with
 `No authorization support detected`.
 

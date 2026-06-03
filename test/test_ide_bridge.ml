@@ -320,6 +320,38 @@ let test_pr_event_from_hook_ignores_no_url () =
     check bool "file not created" false (Sys.file_exists path))
 ;;
 
+let test_concurrent_ingest () =
+  with_temp_dir (fun base_dir ->
+    (* Simulate parallel tool calls writing to the same file *)
+    let n = 50 in
+    let fibers = List.init n (fun i ->
+      fun () ->
+        Ide_bridge.ingest_tool_event
+          ~base_path:base_dir
+          ~tool_name:"fs_write"
+          ~keeper_id:"k1"
+          ~turn_id:(Printf.sprintf "t-%d" i)
+          ~outcome:"success"
+          ~typed_outcome:"progress"
+          ~latency_ms:i
+          ~summary:(Printf.sprintf "event %d" i)
+          ~file_path:None
+          ~timestamp_ms:(Int64.of_int (1000 + i)))
+    in
+    (* Run all fibers concurrently via Eio *)
+    Eio_main.run (fun _env ->
+      Eio.Switch.run (fun sw ->
+        List.iter (fun f -> Eio.Fiber.fork ~sw f) fibers));
+    (* Verify all events were written *)
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "tool_events.jsonl" in
+    let ic = open_in path in
+    let count = ref 0 in
+    (try while true do ignore (input_line ic); incr count done with End_of_file -> ());
+    close_in ic;
+    check int "all events written" n !count)
+;;
+
 let () =
   run
     "ide_bridge"
@@ -347,5 +379,8 @@ let () =
         ; test_case "from hook detects url" `Quick test_pr_event_from_hook_detects_url
         ; test_case "from hook ignores non-execute" `Quick test_pr_event_from_hook_ignores_non_execute
         ; test_case "from hook ignores no url" `Quick test_pr_event_from_hook_ignores_no_url
+        ] )
+    ; ( "concurrency"
+      , [ test_case "concurrent ingest" `Quick test_concurrent_ingest
         ] )
     ]

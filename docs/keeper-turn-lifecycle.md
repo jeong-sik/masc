@@ -92,7 +92,7 @@ flowchart TD
     C -- yes --> D[resolve runtime name from active runtime config]
     D --> E[resilience/API-key/local endpoint preflight]
     E --> F[build prompt callback]
-    F --> G[dynamic context: recovery snapshot, long-term memory, skills, worktree changes, telemetry, turn instructions, required tools]
+    F --> G[dynamic context: recovery snapshot, long-term memory, skills, worktree changes, telemetry, turn instructions, task tool context]
     G --> H[Keeper_agent_run.run_turn]
     H --> I[prepare_run_context: inference params, session dir, checkpoint, base prompt, pre-dispatch compaction]
     I --> J[build_turn_context: sanitize user, memory/temporal context, append user]
@@ -214,7 +214,7 @@ stateDiagram-v2
     Awaiting_tool_result --> Streaming: tool result returned
     Streaming --> Completing: stop_reason received
     Completing --> Done: receipt ok
-    Completing --> Failed: contract violation (Failure_tool_contract_violation)
+    Completing --> Failed: contract violation (Failure_completion_contract_violation)
     Completing --> Failed: receipt write failed (Failure_receipt_lost)
     Streaming --> Cancelled: supervisor stop (Cancelled_supervisor_stop)
     Streaming --> Cancelled: provider timeout (Cancelled_provider_timeout)

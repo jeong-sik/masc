@@ -76,7 +76,7 @@
       "stability": "operator_internal",
       "version_field": "schema",
       "external_refs": ["oas.raw_trace_record.v1"],
-      "notes": "Terminal keeper turn receipt, including tool contract and runtime outcome summary."
+      "notes": "Terminal keeper turn receipt, including completion contract and runtime outcome summary."
     },
     {
       "id": "masc.keeper_tool_call_log.jsonl.v1",

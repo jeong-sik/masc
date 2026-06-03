@@ -44,7 +44,7 @@ Bumped exactly once per `Keeper_turn_fsm.emit_transition` call.
 `failed:` reasons (`failure_reason_label`):
 - `runtime_unavailable` — ollama saturation, more generally runtime had no resolvable provider
 - `provider_error` — sdk error from a CLI subprocess or HTTP call (Step 4f redirect)
-- `tool_contract_violation`
+- `completion_contract_violation`
 - `receipt_lost` — Step 3 (RISKY) will surface this once enabled
 - `turn_livelock_blocked` — Step 4f variant; livelock guard rejected the turn pre-dispatch
 - `runtime_error` — typed catch-all for operational failures that don't fit the above
@@ -148,7 +148,7 @@ Pending edges (require `keeper_agent_run.ml run_turn` adoption — volume risk):
 
 Pending RISKY edges (require feature-flag / dual-emit infrastructure):
 - `Completing → Failed receipt_lost` (Step 3 — receipt authoritative)
-- `Streaming → Failed tool_contract_violation` (Step 6b-2 — typed classifier replacing string match)
+- `Streaming → Failed completion_contract_violation` (Step 6b-2 — typed classifier replacing string match)
 
 ## See also
 

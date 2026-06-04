@@ -88,10 +88,10 @@ VARIABLES
     turn_tick,          \* Monotone counter used for ordering checks.
 
     \* ── RFC-0065 Phase 5.1.b projections ────────────────────
-    \* Three new sub-FSM projections coupled into this observer per
+    \* Sub-FSM projections coupled into this observer per
     \* RFC-0065 §3.4.  Each is the smallest abstraction sufficient
     \* for one joint invariant; the detailed transitions belong to
-    \* their owning specs (KeeperRuntimeAttemptFSM, KeeperToolSurface,
+    \* their owning specs (KeeperRuntimeAttemptFSM,
     \* KeeperPostTurnOrchestration).
 
     kcaf_attempt_phase, \* B1 (KeeperRuntimeAttemptFSM) projection.
@@ -101,11 +101,12 @@ VARIABLES
                         \* response/success/exhausted_normal/exhausted_
                         \* hard_quota) collapses to 3 here.
 
-    kts_surface_ready,  \* B2 (KeeperToolSurface) projection.
-                        \* BOOLEAN — TRUE iff the tool-surface pipeline
-                        \* has produced a non-empty emitted set this
-                        \* turn.  Mirrors KeeperToolSurface.tla phase =
-                        \* "computed" with emitted /= {}.
+    kts_surface_ready,  \* B2 projection.
+                        \* BOOLEAN — TRUE iff the runtime-facing schema
+                        \* filter was computed for this turn. This is only
+                        \* a ghost ordering bit; the old detailed surface
+                        \* pipeline spec was retired with the Keeper-side
+                        \* tool/budget gates.
 
     kpto_phase          \* B3 (KeeperPostTurnOrchestration) projection.
                         \* Values: "idle", "active", "persisted".
@@ -276,11 +277,10 @@ SelectToolPolicy ==
                    turn_tick, kcaf_attempt_phase, kts_surface_ready,
                    kpto_phase>>
 
-\* ComputeToolSurface — B2 (KeeperToolSurface) projection step.  Runs
+\* ComputeToolSurface — B2 projection step.  Runs
 \* after a tool policy is selected and before the runtime attempts
 \* anything; produces the kts_surface_ready ghost that ToolSurfaceFeedsAttempt
-\* checks downstream.  Mirrors the keeper_run_tools.ml::compute_tool_surface
-\* call at the start of each Agent.run loop iteration.
+\* checks downstream.
 ComputeToolSurface ==
     /\ ktc_turn_phase = "prompting"
     /\ shared_measurement /= 0

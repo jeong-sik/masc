@@ -155,18 +155,16 @@ Idle → Attempting → Awaiting_response →
 
 LOC budget: ~220.
 
-#### 3.2.2 B2: `KeeperToolSurface.tla` — Stage 1
+#### 3.2.2 B2: schema-filter projection — retired detailed spec
 
-**Scope**: model the 11-step `compute_tool_surface` transform as an ordered pipeline.
+The detailed per-stage tool-surface model was retired after the Keeper-side
+tool/budget gates were removed. The composite lifecycle keeps only a ghost bit
+that proves the runtime-facing schema filter was computed before provider
+attempts begin.
 
-**Pipeline (abstract)**:
-```
-allowlist → universe → discovered → prefiltered → reranked → merged →
-required → affordance → overlay_composed → fallback_floored →
-last_turn_safe → passive_filtered → truncated → emitted
-```
-
-Each stage is a set transformation on `Tools` (the universe of tool names). Required tools are tracked as a separate set `Required`.
+The active implementation is a query/selection merge plus policy validation;
+it no longer carries a final-turn whitelist, required-tool injection, or
+fallback-floor stage.
 
 **Invariants**:
 - `AllowedSubsetEmitted` — equivalent of `keeper_run_tools.ml:998-1011` mismatch guard at model-checking time: `Allowed ⊆ emitted ∨ Allowed ∩ AlwaysAffordanceless ≠ ∅` (the surface-mismatch branch must fire).
@@ -247,14 +245,14 @@ Existing Composite spec observes 5 sub-FSMs (KSM, KTC, KDP, KMC, KCL) at 449 LOC
 KCompositeLifecycle EXTENDS
   ...
   KeeperRuntimeAttemptFSM,      (* new *)
-  KeeperToolSurface,            (* new *)
+  SchemaFilterProjection,       (* composite ghost bit *)
   KeeperPostTurnOrchestration   (* new *)
 ```
 
 New joint invariants (one per pair of interest):
 
 - `AttemptFSMRespectsAdmission` — historical invariant name; the live projection now means KeeperRuntimeAttemptFSM cannot enter `Attempting` before the turn measurement/semaphore entry signal.
-- `ToolSurfaceFeedsAttempt` — KeeperToolSurface's `emitted` is non-empty when KeeperRuntimeAttemptFSM enters `Attempting` (no empty-surface attempt).
+- `ToolSurfaceFeedsAttempt` — the schema-filter projection is complete before KeeperRuntimeAttemptFSM enters `Attempting`.
 - `PostTurnConsumesAttempt` — KeeperPostTurnOrchestration begins only when KeeperRuntimeAttemptFSM reaches a terminal state.
 
 Joint invariants stay weak (predicates over projections) — no full product state space is enumerated.

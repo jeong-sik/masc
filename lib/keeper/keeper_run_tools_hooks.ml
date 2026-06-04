@@ -16,7 +16,6 @@ type agent_setup =
   ; hooks : Agent_sdk.Hooks.hooks
   ; reducer : Agent_sdk.Context_reducer.t
   ; acc : hook_accumulator
-  ; initial_tool_surface : computed_tool_surface
   ; all_tool_names : string list
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
@@ -39,7 +38,7 @@ type ctx =
       turn:int -> messages:Agent_sdk.Types.message list ->
       current_tool_choice:Agent_sdk.Types.tool_choice option ->
       decay_discovered:bool -> unit ->
-      string list * computed_tool_surface
+      string list * turn_lane
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
   ; manifest_keeper_turn_id : int option
@@ -68,7 +67,6 @@ let assemble_hooks
       ~(shared_context : Agent_sdk.Context.t)
       ~(start_turn_count : int)
       ~(generation : int)
-      ~(max_turns : int)
       ~(runtime_id_string : string)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
@@ -104,7 +102,7 @@ let assemble_hooks
   let tool_usage_before = ctx.tool_usage_before in
   let tools = ctx.tools in
   let all_tool_names = ctx.all_tool_names in
-  let initial_schema_filter, initial_tool_surface =
+  let initial_schema_filter, initial_turn_lane =
     compute_tool_surface
       ~turn:(start_turn_count + 1)
       ~messages:history_messages
@@ -113,14 +111,13 @@ let assemble_hooks
       ()
   in
   acc.tool_surface
-  <- { turn_lane = initial_tool_surface.lane
+  <- { turn_lane = initial_turn_lane
      ; config_root
      ; runtime_config_path
      ; gemini_mcp_disabled
      ; approval_mode_effective
      ; approval_mode_derived
      };
-  let initial_tool_surface = initial_tool_surface in
   Keeper_run_tools_hook_accumulator.record_requested_tool_names
       acc
       initial_schema_filter;
@@ -307,51 +304,13 @@ let assemble_hooks
                     else ctx
                   | None -> ctx
                 in
-                let schema_filter, computed_surface =
+                let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn
                     ~messages
                     ~current_tool_choice:current_params.tool_choice
                     ~decay_discovered:true
                     ()
-                in
-                let tool_allowed name = List.mem name schema_filter in
-                let last_turn_decision_hint =
-                  if tool_allowed "keeper_board_post"
-                  then
-                    "(2) call keeper_board_post to hand off the current task \
-                     and ask another keeper or operator for judgment when the \
-                     work needs a decision you cannot make alone"
-                  else if tool_allowed "keeper_broadcast"
-                  then
-                    "(2) call keeper_broadcast to hand off the current task \
-                     when the work needs a decision you cannot make alone"
-                  else
-                    "(2) include the decision blocker in your [STATE] block \
-                     when the work needs a decision you cannot make alone"
-                in
-                let last_turn_task_close_hint =
-                  if tool_allowed "keeper_task_done" then
-                    "; (3) if you claimed a task, close it NOW before session \
-                     ends with keeper_task_done"
-                  else ""
-                in
-                let budget_blocker_hint =
-                  if tool_allowed "keeper_board_post"
-                  then
-                    "If you are blocked on a decision or external input, post \
-                     a question to the board via keeper_board_post rather than \
-                     burning turns retrying — that is the intended \
-                     judgment-escalation path."
-                  else if tool_allowed "keeper_broadcast"
-                  then
-                    "If you are blocked on a decision or external input, \
-                     broadcast the blocker via keeper_broadcast rather than \
-                     burning turns retrying."
-                  else
-                    "If you are blocked on a decision or external input, \
-                     record the blocker in [STATE] rather than burning turns \
-                     retrying."
                 in
                 let append_ctx ctx text =
                   Some
@@ -360,22 +319,7 @@ let assemble_hooks
                      | Some e -> e ^ "\n\n" ^ text)
                 in
                 let ctx =
-                  if computed_surface.is_last_turn
-                  then
-                    append_ctx
-                      ctx
-                      (Printf.sprintf
-                         "[LAST TURN] Per-call turn %d/%d. This is your final turn in \
-                          this Agent.run call. You MUST emit a [STATE]...[/STATE] block \
-                          now summarizing what you accomplished and what the next \
-                          generation should do. Do NOT start new tool work. Three escape \
-                          hatches, in priority order: (1) call extend_turns if the task \
-                          is almost finished and more turns will close it out; %s%s."
-                         computed_surface.per_call_turn
-                         computed_surface.per_call_max_turns
-                         last_turn_decision_hint
-                         last_turn_task_close_hint)
-                  else if is_retry
+                  if is_retry
                   then
                     append_ctx
                       ctx
@@ -384,30 +328,8 @@ let assemble_hooks
                           Stay concise, prefer already-loaded context, and only use the \
                           smallest essential tool set if a tool call is strictly \
                           necessary.")
-                  else if computed_surface.is_warning_zone
-                  then
-                    append_ctx
-                      ctx
-                      (Printf.sprintf
-                         "[BUDGET] %d/%d turns used in this Agent.run call. Wrap up \
-                          current work and emit a [STATE] block. If more turns will \
-                          genuinely finish the task, call extend_turns. %s"
-                         computed_surface.per_call_turn
-                         computed_surface.per_call_max_turns
-                         budget_blocker_hint)
                   else ctx
                 in
-                if computed_surface.is_warning_zone
-                then
-                  Log.Keeper.info
-                    "keeper:%s per_call_turn_budget absolute_turn=%d \
-                     checkpoint_start_turn=%d per_call_turn=%d/%d last_turn=%b"
-                    meta.name
-                    computed_surface.absolute_turn
-                    computed_surface.checkpoint_start_turn
-                    computed_surface.per_call_turn
-                    computed_surface.per_call_max_turns
-                    computed_surface.is_last_turn;
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList schema_filter
                 in
@@ -418,7 +340,7 @@ let assemble_hooks
                 let tool_choice =
                   clear_inherited_strict_tool_choice current_params.tool_choice
                 in
-                let lane = computed_surface.lane in
+                let lane = computed_turn_lane in
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names
                   acc
                   schema_filter;
@@ -579,7 +501,6 @@ let assemble_hooks
       ; hooks
       ; reducer
       ; acc
-      ; initial_tool_surface
       ; all_tool_names
       ; tool_usage_before
       ; receipt_turn_count_ref

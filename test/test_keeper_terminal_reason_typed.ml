@@ -18,7 +18,7 @@
       caught here. *)
 
 module R = Masc.Keeper_execution_receipt
-module Tr = Masc.Keeper_terminal_reason
+module Tr = Keeper_terminal_reason
 
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures

@@ -276,6 +276,11 @@
    ;; RFC-0056 Phase 1N — Keeper_state_* deterministic FSM cluster extracted to
    ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
    masc.keeper_state
+   ;; Keeper-owned pure/type leaves extracted from lib/keeper/.
+   masc.keeper_tool_name
+   masc.keeper_id
+   masc.keeper_terminal_reason
+   masc.keeper_timing
    ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
    ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
    masc.runtime_provider_labels

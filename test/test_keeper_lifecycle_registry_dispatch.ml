@@ -502,7 +502,7 @@ let test_heartbeat_history_fallback_counts_malformed_rows () =
       in
       ignore (KR.register ~base_path:config.base_path meta.name meta);
       let trace_id =
-        Masc.Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        Keeper_id.Trace_id.to_string meta.runtime.trace_id
       in
       let history_path = KTS.keeper_history_path config trace_id in
       write_lines history_path

@@ -50,7 +50,7 @@ let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
    as a function over [all_descriptors] and this test is rewritten to
    forbid any pending entries. *)
 let public_mcp_non_descriptor =
-  Masc.Keeper_tool_name.public_mcp_non_descriptor_names
+  Keeper_tool_name.public_mcp_non_descriptor_names
 ;;
 
 let descriptor_internal_name_set () =

@@ -1474,6 +1474,8 @@
 
 (include stanzas/test_keeper_toml_loader.inc)
 
+(include stanzas/test_keeper_runtime_config_leaf.inc)
+
 (include stanzas/test_keeper_turn_slot_release_cancel_safe.inc)
 
 

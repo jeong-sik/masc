@@ -165,53 +165,22 @@ let apply_one
 let resolve_overrides
     ?(env_lookup = Env_config_core.raw_value_opt)
     (doc : Keeper_toml_loader.toml_doc) =
-  let applied = ref [] in
-  let count =
+  let count, applied =
     List.fold_left
-      (fun acc (toml_key, env_name) ->
-        if env_is_set env_lookup env_name then acc
+      (fun (count, applied) (toml_key, env_name) ->
+        if env_is_set env_lookup env_name then (count, applied)
         else
           match List.assoc_opt toml_key doc with
-          | None -> acc
+          | None -> (count, applied)
           | Some v ->
             match value_to_string v with
-            | None -> acc
+            | None -> (count, applied)
             | Some s ->
-              applied := (env_name, s) :: !applied;
-              acc + 1)
-      0
+              (count + 1, (env_name, s) :: applied))
+      (0, [])
       key_to_env
   in
-  (count, List.rev !applied)
-
-(* Domain-owned Prometheus metric (RFC-0043 Phase 0): the bootstrap
-   caller (server_runtime_bootstrap.ml:284) already logs
-   Log.Server.warn on Error, so failures are not silent — but they
-   were not aggregated by Prometheus, forcing operators to scrape logs
-   to detect a degraded keeper config.  The counter below mirrors the
-   WARN event into a typed two-reason vocabulary so monitoring can
-   alert independently.  file_not_found is the [Ok 0] path (no
-   overrides applied) and is intentionally outside the counter.
-
-   Defined here (next to the bumper) rather than in lib/prometheus.ml
-   to keep that file under the godfile-size-regression cap. *)
-let metric_keeper_runtime_config_load_failures =
-  "masc_keeper_runtime_config_load_failures_total"
-
-let () =
-  Prometheus.register_counter
-    ~name:metric_keeper_runtime_config_load_failures
-    ~help:
-      "Total Keeper_runtime_config.load_and_apply failures. Bootstrap \
-       already logs WARN; this counter exposes the same event to monitoring \
-       aggregation. Labels: reason in {read_error | parse_error}."
-    ()
-
-let observe_load_failure reason =
-  Prometheus.inc_counter
-    metric_keeper_runtime_config_load_failures
-    ~labels:[ ("reason", reason) ]
-    ()
+  (count, List.rev applied)
 
 (* Shadow registry: stores every TOML value keyed by env name, even when
    the env var is already set.  This lets operator surfaces compare the
@@ -227,12 +196,10 @@ let load_and_apply ~base_path =
   else
     match read_file path with
     | Error msg ->
-      observe_load_failure "read_error";
       Error (Printf.sprintf "read %s: %s" path msg)
     | Ok content ->
       match Keeper_toml_loader.parse_toml content with
       | Error msg ->
-        observe_load_failure "parse_error";
         Error (Printf.sprintf "parse %s: %s" path msg)
       | Ok doc ->
         let count =

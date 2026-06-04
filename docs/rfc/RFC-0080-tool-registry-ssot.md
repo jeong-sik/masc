@@ -25,7 +25,7 @@ The mismatch is structural, not a typo. `is_known_policy_tool_name` (lib/keeper/
 let is_known_policy_tool_name name =
   let normalized = Keeper_tool_alias.strip_mcp_masc_prefix name in
   Tool_dispatch.is_registered normalized                              (* 1  *)
-  || Option.is_some (Tool_name.of_string normalized)                  (* 2  *)
+  || legacy_enum_admits normalized                                    (* 2  *)
   || Option.is_some (Keeper_tool_alias.route normalized)              (* 3  *)
   || Keeper_tool_alias.is_known_internal normalized                   (* 4  *)
   || Option.is_some (Keeper_tool_alias.public_masc_to_internal n)     (* 5  *)
@@ -168,7 +168,7 @@ AGENT-LLM-A.md §워크어라운드 거부 기준:
 | 시그니처 | 회피 방법 |
 |---|---|
 | Counter-as-fix (warn dump alone, no resolution) | Phase 1 shim **changes warn structure** from list-of-strings to typed `Unknown { tried = … }`. Reader sees *why* unknown, not just *that* unknown. Counter is bait. |
-| String/substring 분류기 보강 | `Tool_name.of_string` already exhaustive over 397 cases. No new substring matcher added. Aliases stay in `Keeper_tool_alias` but are addressed through `Alias_to` typed outcome, not free-form string. |
+| String/substring 분류기 보강 | Legacy enum parsing was exhaustive over hundreds of cases, but it is no longer an admission source. Aliases stay in `Keeper_tool_alias` but are addressed through `Alias_to` typed outcome, not free-form string. |
 | N-of-M 패치 (admits abstraction failure) | Phase 2 plan is *explicitly migration*, not "fix this one site." Each phase-2 PR body must declare ratio (e.g., *3/7 policy-loader sites migrated; remaining 4 in PR #N+1*). |
 | Cap / cooldown / log dedup | None proposed. |
 | Repair / sanitize at read | None. Resolution is at ingress, not at use. |
@@ -211,7 +211,7 @@ keeper_time_now
 keeper_tool_search
 keeper_tools_list
 keeper_voice_{agent,listen,session_end,session_start,sessions,speak}
-masc_add_task / masc_agent_card / masc_agents / masc_approval_pending /
+masc_add_task / masc_agent_card / masc_agents /
 masc_batch_add_tasks / masc_broadcast / masc_claim_next /
 masc_goal_{list,review,transition,upsert,verify} /
 masc_heartbeat / masc_bind / masc_keeper_{list,msg,msg_result,status} /

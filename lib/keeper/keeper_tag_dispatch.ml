@@ -138,16 +138,13 @@ let dispatch
         { Task.Tool.config; agent_name; sw = Eio_context.get_switch_opt () }
         ~name
         ~args
-    | Mod_external when String.equal name "masc_approval_pending" ->
-      Some (Keeper_tool_in_process_runtime.handle_masc_approval_result ~name ~args)
     | Mod_external ->
       (* [Mod_external] tools are dispatched at the MCP server boundary
          (mcp_server_eio_execute.dispatch_by_tag), which has the per-request
          config/agent_name/Eio resources these handlers need. From within a
          keeper turn that context is unavailable, so reject and direct the
          caller to the MCP client surface. Currently these are the
-         keeper-management tools registered by [Keeper_tool_surface].
-         [masc_approval_pending] is the read-only keeper-safe exception above. *)
+         keeper-management tools registered by [Keeper_tool_surface]. *)
       Some
         (workflow_err
            (Printf.sprintf "tool '%s' is a keeper management tool (use MCP client)" name))

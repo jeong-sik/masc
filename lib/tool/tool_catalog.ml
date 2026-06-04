@@ -171,7 +171,6 @@ let static_mcp_context_tool_names =
   [ "masc_start"
   ; "masc_broadcast"
   ; "masc_messages"
-  ; "masc_approval_get"
   ; "masc_session"
   ]
 
@@ -252,9 +251,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_check", read_state_tool);
     ("masc_web_search", read_state_tool);
     ("masc_web_fetch", read_state_tool);
-    ("masc_approval_pending", read_state_tool);
-    ("masc_approval_get", admin_read_tool);
-    ("masc_approval_resolve", admin_tool);
     ("masc_agent_fitness", read_state_tool);
     ("masc_agent_timeline", read_state_tool);
     ("masc_agent_update", broadcast_tool);

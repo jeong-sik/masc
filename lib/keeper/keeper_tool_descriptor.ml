@@ -54,7 +54,6 @@ type runtime_handler =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_masc_tool_shard_dispatch
-  | Tool_masc_approval_dispatch
   | Tool_masc_persona_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
@@ -144,7 +143,6 @@ let runtime_handler_to_string = function
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
   | Tool_masc_tool_shard_dispatch -> "tool_masc_tool_shard_dispatch"
-  | Tool_masc_approval_dispatch -> "tool_masc_approval_dispatch"
   | Tool_masc_persona_dispatch -> "tool_masc_persona_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
@@ -898,20 +896,6 @@ let masc_tool_shard_descriptor ?(last_turn_safe = false) id name description ~re
     ~maintenance_only:false
 ;;
 
-let masc_approval_descriptor ?(inline_safe = false) ?(last_turn_safe = false) id name
-      description ~readonly
-  =
-  cluster_descriptor
-    ~last_turn_safe
-    ~inline_safe
-    ~id:("masc.approval." ^ id)
-    ~name
-    ~description
-    ~handler:Tool_masc_approval_dispatch
-    ~readonly
-    ~maintenance_only:false
-;;
-
 let masc_persona_descriptor ?(last_turn_safe = false) id name description ~readonly =
   cluster_descriptor
     ~last_turn_safe
@@ -1267,13 +1251,6 @@ let internal_descriptors : t list =
       "Grant an agent a named tool shard." ~readonly:false
   ; masc_tool_shard_descriptor "revoke" "masc_tool_revoke"
       "Revoke a previously-granted tool shard from an agent." ~readonly:false
-  (* ── RFC-0182 §3.1 — masc_approval_* cluster (3 entries) ─────── *)
-  ; masc_approval_descriptor ~inline_safe:true "pending" "masc_approval_pending"
-      "List pending operator approval requests." ~readonly:true
-  ; masc_approval_descriptor "get" "masc_approval_get"
-      "Read a single pending approval by id." ~readonly:true
-  ; masc_approval_descriptor "resolve" "masc_approval_resolve"
-      "Resolve a pending approval (approve / reject)." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_persona_* cluster ──────── *)
   ; masc_persona_descriptor "list" "masc_persona_list"
       "List configured personas plus summary metadata." ~readonly:true

@@ -390,7 +390,6 @@ let essential_masc_minimum_names : string list = [
   "masc_status";
   "masc_web_search";
   "masc_web_fetch";
-  "masc_approval_pending";
 ]
 
 let failing_minimum_tool_names () : string list =

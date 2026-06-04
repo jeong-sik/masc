@@ -14,7 +14,6 @@
 
 type tried_source =
   | Dispatch_table              (** S1: Tool_dispatch.is_registered *)
-  | Tool_name_variant           (** S2: Tool_name.of_string *)
   | Public_descriptor           (** S3: Keeper_tool_descriptor.find_public *)
   | Alias_internal              (** S4: Keeper_tool_alias.is_known_internal *)
   | Registry_internal_candidate (** S5: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
@@ -35,7 +34,6 @@ let tool_schema_names schemas =
 
 let string_of_tried_source = function
   | Dispatch_table -> "dispatch_table"
-  | Tool_name_variant -> "tool_name_variant"
   | Public_descriptor -> "public_descriptor"
   | Alias_internal -> "alias_internal"
   | Registry_internal_candidate -> "registry_internal_candidate"
@@ -53,8 +51,6 @@ let resolve name =
   (* Collect sources in short-circuit order; return on first hit. *)
   if Tool_dispatch.is_registered normalized then
     Resolved { canonical = normalized; via = Dispatch_table }
-  else if Option.is_some (Tool_name.of_string normalized) then
-    Resolved { canonical = normalized; via = Tool_name_variant }
   else
     match Keeper_tool_descriptor.find_public normalized with
     | Some descriptor ->
@@ -98,7 +94,6 @@ let resolve name =
           { name
           ; tried =
               [ Dispatch_table
-              ; Tool_name_variant
               ; Public_descriptor
               ; Alias_internal
               ; Registry_internal_candidate
@@ -118,8 +113,6 @@ let all_admitting_sources name =
   let sources = ref [] in
   if Tool_dispatch.is_registered normalized then
     sources := Dispatch_table :: !sources;
-  if Option.is_some (Tool_name.of_string normalized) then
-    sources := Tool_name_variant :: !sources;
   if Option.is_some (Keeper_tool_descriptor.find_public normalized) then
     sources := Public_descriptor :: !sources;
   if Keeper_tool_alias.is_known_internal normalized then

@@ -8,7 +8,6 @@
 (** Which source admitted a tool name during resolution. *)
 type tried_source =
   | Dispatch_table              (** Tool_dispatch.is_registered *)
-  | Tool_name_variant           (** Tool_name.of_string *)
   | Public_descriptor           (** Keeper_tool_descriptor.find_public *)
   | Alias_internal              (** Keeper_tool_alias.is_known_internal *)
   | Registry_internal_candidate (** keeper_internal_candidate_tool_names *)

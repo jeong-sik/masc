@@ -259,9 +259,8 @@ let is_registered name = Hashtbl.mem registry name
     Known tool names map to module tags through a compile-time match or the
     tag registry. Handler registration does not authorize tool names. *)
 
-(* PR-S2 (tool⊥domain cut): [module_tag] is defined in the zero-dep leaf
-   [Tool_tag_types] so the domain side ([Tool_name.Domain_tool]) can produce it.
-   Re-exported here by type-equality, so external [Tool_dispatch.Mod_*] call
+(* [module_tag] is defined in the zero-dep leaf [Tool_tag_types] and
+   re-exported here by type-equality, so external [Tool_dispatch.Mod_*] call
    sites and [tool_dispatch.mli] are unchanged. *)
 type module_tag = Tool_tag_types.module_tag =
   | Mod_plan | Mod_operator
@@ -273,54 +272,6 @@ type module_tag = Tool_tag_types.module_tag =
   | Mod_library | Mod_external
   | Mod_inline
   | Mod_shard
-
-let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
-  match tool with
-  | Tool_name.Masc m ->
-    let open Tool_name.Masc in
-    match m with
-    (* Domain tool names are carried behind one neutral arm; the domain side
-       owns the per-domain tag. The substrate no longer enumerates any domain
-       constructor (Task/Board/Goal/Operator). Per-domain tags are unchanged:
-       Task->Mod_task, Board->Mod_inline, Goal->Mod_state, Operator->Mod_operator. *)
-    | Domain d -> Some (Tool_name.Domain_tool.module_tag d)
-    | Agent_fitness
-    | Agent_card
-    | Agent_update
-    | Agents
-    | Get_metrics -> Some Mod_agent
-    | Approval_get
-    | Approval_pending
-    | Approval_resolve -> Some Mod_external
-    | Broadcast
-    | Mcp_session
-    | Messages
-    | Start
-    -> Some Mod_inline
-    | Check
-    | Heartbeat
-    | Reset
-    | Status -> Some Mod_state
-    | Config
-    | Cleanup_zombies
-    | Dashboard
-    | Gc
-    | Tool_admin_snapshot
-    | Tool_admin_update
-    | Tool_help
-    | Tool_stats
-    | Web_fetch
-    | Web_search -> Some Mod_misc
-    | Deliver
-    | Note_add
-    | Plan_clear_task
-    | Plan_get
-    | Plan_get_task
-    | Plan_init
-    | Plan_set_task
-    | Plan_update -> Some Mod_plan
-    | Pause | Resume -> Some Mod_control
-    | Tool_grant | Tool_list | Tool_revoke -> Some Mod_shard
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = Atomic.make false
@@ -341,10 +292,7 @@ let register_module_tag ~(schemas : Masc_domain.tool_schema list) ~tag =
 let register_name_tag ~tool_name ~tag =
   with_dispatch_rw (fun () -> Hashtbl.replace tag_registry tool_name tag)
 
-let lookup_tag name =
-  match Tool_name.of_string name with
-  | Some tool -> static_tag_of_tool_name tool
-  | None -> with_dispatch_ro (fun () -> Hashtbl.find_opt tag_registry name)
+let lookup_tag name = with_dispatch_ro (fun () -> Hashtbl.find_opt tag_registry name)
 
 let lookup_schema name = with_dispatch_ro (fun () -> Hashtbl.find_opt schema_registry name)
 
@@ -353,18 +301,14 @@ let tag_registry_count () = with_dispatch_ro (fun () -> Hashtbl.length tag_regis
 let mark_tag_registry_initialized () = with_dispatch_rw (fun () -> Atomic.set tag_registry_initialized true)
 let is_tag_registry_initialized () = with_dispatch_ro (fun () -> Atomic.get tag_registry_initialized)
 
-(** Mint a [Tool_token.t] validated against static routes or the tag registry.
+(** Mint a [Tool_token.t] validated against the tag registry.
     Protected by dispatch_mu for thread safety (Copilot review).
-    Checks known typed tool names first, then runtime tag registrations.
     Handler-only registrations are executable only after a caller already
     holds a token minted through the canonical route registry. *)
 let mint_token ~name =
   with_dispatch_ro (fun () ->
     Tool_token.mint_with
-      ~validate:(fun n ->
-        match Tool_name.of_string n with
-        | Some tool -> Option.is_some (static_tag_of_tool_name tool)
-        | None -> Hashtbl.mem tag_registry n)
+      ~validate:(fun n -> Hashtbl.mem tag_registry n)
       ~name)
 
 (** Enumerate every tool name registered in the tag registry. Used by

@@ -52,12 +52,6 @@ let dispatch_inline ?(args = `Assoc []) config name =
     ~tag:Tool_dispatch.Mod_inline
     ~name ~args
 
-let dispatch_external ?(args = `Assoc []) config name =
-  Keeper_tag_dispatch.dispatch
-    ~config ~agent_name:"test-keeper"
-    ~tag:Tool_dispatch.Mod_external
-    ~name ~args
-
 (* masc_pause_status is read-only — should be allowed. *)
 let test_pause_status_allowed () =
   with_workspace (fun config ->
@@ -93,76 +87,6 @@ let test_resume_blocked () =
     | None ->
         fail "masc_resume returned None")
 
-let test_approval_pending_external_allowed () =
-  with_workspace (fun config ->
-    match dispatch_external config "masc_approval_pending" with
-    | Some tr when (Tool_result.is_success tr) ->
-        (match Yojson.Safe.from_string (Tool_result.message tr) with
-         | `List _ -> ()
-         | _ -> fail "masc_approval_pending should return a JSON list")
-    | Some tr ->
-        fail (Printf.sprintf "masc_approval_pending should succeed: %s"
-          (Tool_result.message tr))
-    | None ->
-        fail "masc_approval_pending returned None")
-
-let test_approval_get_missing_id_rejected () =
-  let tr =
-    Keeper_tool_in_process_runtime.handle_masc_approval_result
-      ~name:"masc_approval_get"
-      ~args:(`Assoc [])
-  in
-  if Tool_result.is_success tr
-  then fail "masc_approval_get should reject missing id"
-  else check string "message" "id is required" (Tool_result.message tr)
-
-let test_approval_get_not_found_rejected () =
-  let args = `Assoc [ "id", `String "appr_missing" ] in
-  let tr =
-    Keeper_tool_in_process_runtime.handle_masc_approval_result
-      ~name:"masc_approval_get"
-      ~args
-  in
-  if Tool_result.is_success tr
-  then fail "masc_approval_get should reject unknown id"
-  else
-    check bool "message mentions not found" true
-      (contains_substring (Tool_result.message tr) "no longer pending")
-
-let test_approval_resolve_allowed () =
-  with_workspace (fun config ->
-    let resolved = ref None in
-    let id =
-      Keeper_approval_queue.submit_pending
-        ~keeper_name:"test-keeper"
-        ~tool_name:"tool_edit_file"
-        ~input:(`Assoc [ "path", `String "demo.txt" ])
-        ~risk_level:Keeper_approval_queue.Critical
-        ~base_path:config.base_path
-        ~on_resolution:(fun decision -> resolved := Some decision)
-        ()
-    in
-    let args =
-      `Assoc [ "id", `String id; "decision", `String "approve" ]
-    in
-    let tr =
-      Keeper_tool_in_process_runtime.handle_masc_approval_result
-        ~name:"masc_approval_resolve"
-        ~args
-    in
-    if Tool_result.is_success tr
-    then
-        (match !resolved with
-         | Some Agent_sdk.Hooks.Approve -> ()
-         | Some (Agent_sdk.Hooks.Reject reason) ->
-             fail (Printf.sprintf "expected approve, got reject: %s" reason)
-         | Some (Agent_sdk.Hooks.Edit _) ->
-             fail "expected approve, got edit"
-         | None -> fail "approval callback was not invoked")
-    else
-      fail (Printf.sprintf "masc_approval_resolve should succeed: %s"
-        (Tool_result.message tr)))
-
 let test_other_inline_blocked () =
   with_workspace (fun config ->
     match dispatch_inline config "masc_agents" with
@@ -183,17 +107,5 @@ let () =
     ];
     "Mod_inline gate", [
       test_case "other inline tools blocked" `Quick test_other_inline_blocked;
-    ];
-    "Mod_external gate", [
-      test_case "masc_approval_pending allowed" `Quick
-        test_approval_pending_external_allowed;
-    ];
-    "Approval handler", [
-      test_case "masc_approval_get missing id rejected" `Quick
-        test_approval_get_missing_id_rejected;
-      test_case "masc_approval_get not found rejected" `Quick
-        test_approval_get_not_found_rejected;
-      test_case "masc_approval_resolve allowed" `Quick
-        test_approval_resolve_allowed;
     ];
   ]

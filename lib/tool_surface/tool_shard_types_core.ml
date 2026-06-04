@@ -35,9 +35,7 @@ let tool_spec_read_only = [ "masc_tool_list" ]
 let tool_spec_destructive = [ "masc_tool_grant"; "masc_tool_revoke" ]
 
 let tool_effect_domain name =
-  match Tool_name.of_string name with
-  | Some (Tool_name.Masc Tool_name.Masc.Tool_list) -> Some Tool_catalog.Read_only
-  | Some (Tool_name.Masc (Tool_name.Masc.Tool_grant | Tool_name.Masc.Tool_revoke)) ->
-    Some Tool_catalog.Masc_workspace
-  | Some _ | None -> None
+  if List.mem name tool_spec_read_only then Some Tool_catalog.Read_only
+  else if List.mem name tool_spec_destructive then Some Tool_catalog.Masc_workspace
+  else None
 ;;

@@ -44,8 +44,8 @@ let classify_name name =
 
 Compliant pattern (RFC-0193 의 target form):
 ```ocaml
-let capability_classification : (Tool_name.t * capability list) list = [
-  (Tool_name.Masc Masc.Plan_set_task, [State_modification_self_scoped]);
+let capability_classification : (tool_name * capability list) list = [
+  ("masc_plan_set_task", [State_modification_self_scoped]);
   ...
 ]
 (* + exhaustive match enforcement via principle §5 *)

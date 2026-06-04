@@ -476,20 +476,8 @@ let test_readonly_policy_projects_to_input_aware_registry () =
 let test_mcp_context_policy_uses_descriptor_resolution () =
   Alcotest.(check (list string))
     "safe inline tools project from descriptors"
-    [ "masc_approval_pending" ]
+    []
     (Descriptor.keeper_safe_inline_names ());
-  Alcotest.(check bool)
-    "approval_pending is keeper-safe for keeper turns"
-    true
-    (Policy.is_keeper_safe_inline_tool "masc_approval_pending");
-  Alcotest.(check bool)
-    "approval_get is not inline safe"
-    false
-    (Policy.is_keeper_safe_inline_tool "masc_approval_get");
-  Alcotest.(check bool)
-    "approval_resolve is not inline safe"
-    false
-    (Policy.is_keeper_safe_inline_tool "masc_approval_resolve");
   Alcotest.(check (list string))
     "maintenance-only tools project from descriptors"
     [ "masc_heartbeat" ]
@@ -517,23 +505,7 @@ let test_mcp_context_policy_uses_descriptor_resolution () =
   Alcotest.(check bool)
     "last-turn-safe fallback includes SDK core extend_turns"
     true
-    (List.mem "extend_turns" (Policy.last_turn_safe_tool_names ()));
-  Alcotest.(check bool)
-    "approval_pending does not require MCP session"
-    false
-    (Policy.is_keeper_mcp_context_required "masc_approval_pending");
-  Alcotest.(check bool)
-    "mcp-prefixed approval_pending remains keeper-safe without MCP session"
-    false
-    (Policy.is_keeper_mcp_context_required "mcp__masc__masc_approval_pending");
-  Alcotest.(check bool)
-    "approval_get still requires MCP session"
-    true
-    (Policy.is_keeper_mcp_context_required "masc_approval_get");
-  Alcotest.(check bool)
-    "mcp-prefixed approval_get still requires MCP session"
-    true
-    (Policy.is_keeper_mcp_context_required "mcp__masc__masc_approval_get")
+    (List.mem "extend_turns" (Policy.last_turn_safe_tool_names ()))
 ;;
 
 let test_public_name_projection_uses_descriptor_resolution () =
@@ -639,7 +611,7 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
        ~tool_name:"Execute"
        ~input:(`Assoc [ "executable", `String "git"; "argv", `List [ `String "status" ] ]))
 
-(* RFC-0182 §3.1 — verify the 21 new tool_shard / approval / persona /
+(* RFC-0182 §3.1 — verify the tool_shard / persona /
    keeper / surface_audit descriptors all project from name → descriptor
    via [descriptors_for_internal] with the expected [runtime_handler].
 
@@ -650,9 +622,6 @@ let cluster_projection_table =
   [ "masc_tool_list", "tool_masc_tool_shard_dispatch"
   ; "masc_tool_grant", "tool_masc_tool_shard_dispatch"
   ; "masc_tool_revoke", "tool_masc_tool_shard_dispatch"
-  ; "masc_approval_pending", "tool_masc_approval_dispatch"
-  ; "masc_approval_get", "tool_masc_approval_dispatch"
-  ; "masc_approval_resolve", "tool_masc_approval_dispatch"
   ; "masc_persona_list", "tool_masc_persona_dispatch"
   ; "masc_persona_schema", "tool_masc_persona_dispatch"
   ; "masc_persona_save", "tool_masc_persona_dispatch"

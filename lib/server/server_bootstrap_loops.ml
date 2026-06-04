@@ -508,9 +508,9 @@ let start_keeper_loops
   Keeper_subprocess_registry.register_default_cleanup_hook ();
   (* Build read-only tool surface shared by both judges. *)
   let judge_tool_names =
-    [ Tool_name.Masc.to_string Tool_name.Masc.Status
+    [ "masc_status"
     ; Tool_name.Task_name.to_string Tool_name.Task_name.Tasks
-    ; Tool_name.Masc.to_string Tool_name.Masc.Agents
+    ; "masc_agents"
     ; Tool_name.Board_name.to_string Tool_name.Board_name.Board_list
     ]
   in

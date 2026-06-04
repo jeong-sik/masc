@@ -90,9 +90,6 @@ let public_mcp_surface_tools =
   ; (* Utility *)
     "masc_tool_help"
   ; "masc_check"
-  ; (* Approval queue/detail *)
-    "masc_approval_pending"
-  ; "masc_approval_get"
   ; (* Board extended *)
     "masc_board_comment_vote"
   ; (* Agent discovery *)

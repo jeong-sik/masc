@@ -61,7 +61,6 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_masc_tool_shard_dispatch
-  | Tool_masc_approval_dispatch
   | Tool_masc_persona_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit -> true

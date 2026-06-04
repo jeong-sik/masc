@@ -77,7 +77,7 @@ let admin_only_tools () = Lazy.force admin_only_tools_lazy
 
 (* ================================================================ *)
 (* Worker-only tools (CanAddTask + CanClaimTask + CanCompleteTask + *)
-(*                    CanBroadcast + CanVote) *)
+(*                    CanBroadcast + CanVote)                        *)
 (* ================================================================ *)
 
 let worker_only_tools () = Lazy.force worker_only_tools_lazy

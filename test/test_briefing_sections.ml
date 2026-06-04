@@ -40,12 +40,11 @@ let briefing_summary ?(workspace_health = "ok") ?(incidents = 0)
       ("top_attention_summary", s_str top_attention);
     ]
 
-let session ?(broadcast = 0) ?(portal = 0) ?(mode = "unknown")
+let session ?(broadcast = 0) ?(mode = "unknown")
     ?(goal = "unassigned") () =
   `Assoc
     [
       ("broadcast_count", `Int broadcast);
-      ("portal_count", `Int portal);
       ("communication_mode", s_str mode);
       ("goal", s_str goal);
     ]
@@ -355,7 +354,7 @@ let test_evidence_capped_at_two () =
     List.init 5 (fun _ -> recent_msg ())
   in
   let s_with_signals =
-    session ~broadcast:5 ~portal:7 ~mode:"async" ()
+    session ~broadcast:5 ~mode:"async" ()
   in
   let _ws, sections =
     S.build_briefing_sections

@@ -1,7 +1,7 @@
 (** Tools — MCP tool schema assembly for MASC.
 
     Collects schemas from individual modules into a unified list.
-    Config.ml adds modules that depend on Config (Tool_control, Tool_a2a, Tool_misc).
+    Config.ml adds modules that depend on Config (Tool_control, Tool_misc).
 
     @since 0.1.0 *)
 

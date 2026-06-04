@@ -355,7 +355,6 @@ let extra_guard_fragments_for_name = function
   | "masc_board_migrate" -> [ "requires postgresql backend" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_library_promote" -> [ "no candidate matching" ]
-  | "masc_portal_send" -> [ "no portal open" ]
   | "masc_keeper_list" | "masc_keeper_msg" | "masc_keeper_msg_result"
   | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]

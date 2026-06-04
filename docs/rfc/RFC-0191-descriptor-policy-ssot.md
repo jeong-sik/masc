@@ -118,6 +118,14 @@ and audience_class =
 | **P5** | Drop everything in `keeper_tool_policy.ml` that has no agent-level role. Target: < 250 LoC, only agent-side state + path normalization + descriptor projections. | LoC reduction ~420. |
 | **P6** (follow-up RFC) | Re-evaluate whether `Keeper_tool_policy_config` (TOML loader) can be regenerated from descriptors instead of edited by operators. Likely no — operators tune policy bundles, not per-tool policy. | Out of scope. |
 
+Progress note (2026-06-04): P2 projections for inline-safe and
+maintenance-only tools are descriptor-owned, and the no-op denied set was
+removed. P3 now has a bridge field, `policy.last_turn_safe`, and
+`last_turn_safe_tool_names` uses that descriptor projection as the
+config-unloaded fallback while preserving the operator-tunable TOML group when
+loaded. `extend_turns` remains the explicit SDK/core exception outside the
+descriptor spine.
+
 P1's cross-check test is the central safety device. The test compares every descriptor's projected predicate against the existing `keeper_tool_policy` answer; **the migration is only permitted to advance if all descriptors agree**. Disagreements found in P1 are P1's job to resolve (by descriptor edit, never by changing the predicate to be more permissive).
 
 ## 6. Workaround-bar check

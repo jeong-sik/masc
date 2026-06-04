@@ -275,8 +275,6 @@
   tool_inline_dispatch_workspace
   tool_inline_dispatch_comm
   workspace_goals_verification
-  ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
-  tool_schema_dsl
   tool_misc_admin
   keeper_tool_persona_audit
   tool_misc_web_search
@@ -296,7 +294,6 @@
   tool_board_curation
   tool_board_registry
   tool_board_dispatch
-  tool_shard_schemas
   server_ide_http
   lsp_process_manager
   lsp_message_router
@@ -576,6 +573,10 @@
    ;; warm-up stats (Telemetry_eio) are injected at the composition root.
    ;; (wrapped false) keeps bare Tool_dispatch.X / Tool_catalog.X refs working.
    masc.masc_tool_dispatch
+   ;; RFC-0056 Phase 2 / LANE 6 — pure tool surface leaf, above the dispatch
+   ;; substrate. (libraries) admits no keeper/runtime/domain/server module, so a
+   ;; re-coupling is a dune cycle. Pure schema/vocab/policy, zero mega-outbound.
+   masc.masc_tool_surface
    ;; Thompson Sampling agent selection (extracted leaf — Health/Prometheus
    ;; edges inverted to callbacks; Board-callable record_vote without mega-lib cycle)
    masc_thompson

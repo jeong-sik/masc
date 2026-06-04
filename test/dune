@@ -1876,7 +1876,7 @@
 (test
  (name test_tool_dispatch_emit)
  (modules test_tool_dispatch_emit)
- (libraries alcotest masc masc.masc_tool_dispatch masc.tool_types unix))
+ (libraries alcotest masc masc.masc_tool_surface masc.masc_tool_dispatch masc.tool_types unix))
 
 ; Regression: an OAS input-validation failure reaches the dispatch
 ; observers (Tool_metrics) instead of being dropped by the prior
@@ -1885,7 +1885,7 @@
 (test
  (name test_dispatch_observer_validation_failure)
  (modules test_dispatch_observer_validation_failure)
- (libraries alcotest masc masc.masc_tool_dispatch masc.tool_types unix))
+ (libraries alcotest masc masc.masc_tool_surface masc.masc_tool_dispatch masc.tool_types unix))
 
 ; RFC-0085 PR-8 — config_dir_resolver env-derived path reads routed through
 ; Host_config.from_env; Env_config_core config_dir_opt + personas_dir_opt

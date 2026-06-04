@@ -1,8 +1,10 @@
 (** Keeper tool-access helpers.
 
-    A keeper's tool access is the list of tool names it may call —
-    [keeper_meta.tool_access : string list].  There is no wrapper type;
-    the allowlist IS the policy. *)
+    A keeper's [tool_access] is the persisted candidate profile list —
+    [keeper_meta.tool_access : string list]. It is only one policy input:
+    descriptor/registry availability, denylist filtering, per-turn OAS
+    allowlists, and eval gates still constrain execution. There is no wrapper
+    type. *)
 
 (** Returns true if any name in the list resolves to a keeper board wrapper or
     legacy public [masc_board_*] surface. Used to detect implicit board
@@ -12,11 +14,11 @@ val tool_names_include_board : string list -> bool
 (** Trim, drop blanks, dedupe (preserve first-seen order). *)
 val normalize_tool_names : string list -> string list
 
-(** Trim, drop blanks, dedupe a tool allowlist (alias of
+(** Trim, drop blanks, dedupe a tool candidate profile (alias of
     {!normalize_tool_names}, kept for call-site clarity). *)
 val normalize_tool_access : string list -> string list
 
-(** Encode a tool allowlist as a JSON array of tool names. *)
+(** Encode a tool candidate profile as a JSON array of tool names. *)
 val tool_access_to_json : string list -> Yojson.Safe.t
 
 (** True if [json] has a non-null member at [key] (top level). *)
@@ -38,7 +40,7 @@ val string_list_field_opt_result :
   Yojson.Safe.t ->
   (string list, string) result
 
-(** Default string tool allowlist from the full [Keeper_internal] surface.
+(** Default string tool candidate profile from the full [Keeper_internal] surface.
     Persisted meta JSON still must provide canonical [tool_access] arrays; this
     default is for explicit callers that need the runtime-wide surface. *)
 val default_tool_access_of_meta_json : unit -> string list

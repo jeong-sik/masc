@@ -1,9 +1,10 @@
 (** Keeper meta tool-access helpers.
 
     Included by [Keeper_meta_contract] so [Keeper_types.*] keeps the same
-    public API.  A keeper's tool access is simply the list of tool names it
-    may call — [keeper_meta.tool_access : string list].  There is no wrapper
-    type: the allowlist IS the policy. *)
+    public API. A keeper's [tool_access] is the persisted candidate profile
+    list — [keeper_meta.tool_access : string list]. Descriptor/registry
+    availability, denylist filtering, per-turn OAS allowlists, and eval gates
+    still constrain execution. There is no wrapper type. *)
 
 open Keeper_types_profile
 
@@ -23,7 +24,7 @@ let write_tools = [ "tool_edit_file"; "tool_write_file"; "tool_execute" ]
 
 let normalize_tool_access names = normalize_tool_names names
 
-(** Encode a tool allowlist as a JSON array of tool names. *)
+(** Encode a tool candidate profile as a JSON array of tool names. *)
 let tool_access_to_json names = `List (List.map (fun s -> `String s) names)
 
 let json_member_present key (json : Yojson.Safe.t) =
@@ -60,8 +61,9 @@ let string_list_field_opt_result ?label ~field_name (json : Yojson.Safe.t) =
 
 let default_tool_access_of_meta_json () =
   (* The Agent_internal surface was empty (agent_internal_surface_tools = []),
-     so the default tool_access for keepers without an explicit list has always
-     been the empty list; runtime filtering supplies the actual tool set.
+     so the default tool_access candidate profile for keepers without an
+     explicit list has always been the empty list; runtime filtering supplies
+     the actual tool set.
      Surface deleted in the surface-cut refactor.
      See fleet deadlock Layer 2 analysis (2026-05-30) + runtime provider
      gap analysis (2026-05-30). *)

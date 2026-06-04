@@ -289,8 +289,10 @@ fast diagnosis path sees only counts.
    observability gap without changing policy.
 2. **Done in PR #20055**: add a dedicated post-Execute working-tree status
    path for successful `Execute` calls with a concrete `cwd`.
-3. Split `tool_access` wording from execution semantics in docs/UI/API:
-   candidate surface, discovered visible surface, and denylist are distinct.
+3. **Done in PR #20055**: split `tool_access` wording from execution
+   semantics in docs/UI/API. The field now reads as a candidate profile; actual
+   execution still depends on descriptor/registry availability, denylist,
+   per-turn OAS allowlist, and eval gates.
 4. Decide whether active goal scope must remain advisory or become a hard task
    claim gate for specific Keeper profiles.
 5. Decide whether PR creation should become a structured Keeper workflow, or

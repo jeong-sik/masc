@@ -26,7 +26,7 @@ val keeper_internal_candidate_tool_names : string list
     so [make_tools] can build {!Agent_sdk.Tool.t} for the full search scope. *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
-(** Tool-access scoped universe: explicit allowlist + core_always - denied.
+(** Tool-access scoped universe: configured candidate profile list + core_always - denied.
     Strict subset of [keeper_universe_tool_names].  Used for BM25 indexing
     to reduce candidate pool size per keeper.  See #4637. *)
 val keeper_tool_search_scope : keeper_meta -> string list
@@ -34,7 +34,7 @@ val keeper_tool_search_scope : keeper_meta -> string list
 (** Tool-access scoped model tool schemas for BM25 indexing. *)
 val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
-(** Core tools that bypass [tool_access] filtering and seed the disclosure floor.
+(** Core tools that bypass [tool_access] candidate profile filtering and seed the disclosure floor.
     Runtime gating/pruning can still narrow their visibility on a given turn. *)
 val core_always_tools : string list
 
@@ -110,7 +110,7 @@ type tool_result_payload =
 
 (** Bridge-facing execution outcome.
     Structured tool errors, including [tool_not_allowed], are failures so
-    tool_access/policy rejections cannot silently end a keeper turn as success. *)
+    candidate/policy rejections cannot silently end a keeper turn as success. *)
 type execution_outcome =
   [ `Success
   | `Failure

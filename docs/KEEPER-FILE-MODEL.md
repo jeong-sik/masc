@@ -88,8 +88,8 @@ These are the identity fields that should live in persona by default.
 | `mid_goal` | Optional | Mid-horizon goal | Defaults to `goal` in create paths. |
 | `long_goal` | Optional | Long-horizon goal | Defaults to `goal` in create paths. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
-| `tool_access` | Optional | Default tool allowlist | String array of callable tool names; omitted means `[]`. |
-| `tool_denylist` | Optional | Tools to remove from the allowlist | Optional policy refinement. |
+| `tool_access` | Optional | Default tool candidate profile list | String array of tool names used as profile input; omitted means `[]`. It is not the complete execution gate. |
+| `tool_denylist` | Optional | Tools to remove after candidate profile resolution | Optional policy refinement. |
 | `policy_voice_enabled` | Optional | Whether voice tools should be surfaced | Policy default, not runtime state. |
 | `shards` | Optional | Default tool shards | Optional specialization hook. |
 
@@ -135,7 +135,7 @@ persona_name = "analyst"
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
 | `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container. Hard mode requires `docker`. |
 | `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none`; `local` defaults to `inherit`. Hard mode requires `none`. |
-| `tool_access` | Optional | Deployment-specific tool allowlist override | Only when intentionally overriding persona default. |
+| `tool_access` | Optional | Deployment-specific tool candidate profile override | Only when intentionally overriding persona default. |
 | `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` prefers tasks linked to these goals and reports scope health in audit/status surfaces. |
 
 ### Additional supported overlay fields
@@ -152,8 +152,8 @@ These are still accepted by the loader, but for consistency they should be used 
 | `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
 | `workspace_signal_prompt_enabled` | bool | Override workspace-signal prompt behavior |
 | `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on the single sandbox root |
-| `tool_access` | string array | Explicit callable tool names |
-| `tool_denylist` | string array | Tool names blocked after allowlist resolution |
+| `tool_access` | string array | Explicit tool candidate profile names |
+| `tool_denylist` | string array | Tool names blocked after candidate profile resolution |
 | `active_goal_ids` | string array | Declarative goal scope for task claim eligibility |
 | `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |
 | `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
@@ -168,7 +168,7 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | --- | --- |
 | `sandbox_profile` | `local`, `docker` |
 | `network_mode` | `none`, `inherit` |
-| `tool_access` | string array of registered tool names |
+| `tool_access` | string array of registered tool names used as the candidate profile list |
 | `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
 | `runtime_id` | keeper-assignable declarative runtime profiles exposed by the active catalog: route targets, tier names, or runtime names that are not marked `keeper-assignable = false` |
 
@@ -194,7 +194,7 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 
 | Field | Replacement / rationale |
 | --- | --- |
-| Retired tool-policy aliases | Tool policy is the canonical `tool_access` string-array allowlist. |
+| Retired tool-policy aliases | Tool policy uses the canonical `tool_access` string-array candidate profile list plus `tool_denylist`; runtime execution is still constrained by descriptor/registry availability, per-turn OAS allowlists, and eval gates. |
 | `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `runtime_id` → `runtime.toml`. Do not pin per-keeper. |
 | `allowed_providers` | Provider/model ownership lives in `runtime.toml` and OAS runtime receipts. Do not pin providers per keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |

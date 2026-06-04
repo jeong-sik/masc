@@ -822,7 +822,7 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
 - **Overlay fields**: `goal`, `tool_access`, `runtime_id`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용.
-- **Allowed value sets**: `tool_access`는 tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `runtime.toml`에 `<name>_models` 키로 존재해야 함.
+- **Allowed value sets**: `tool_access`는 candidate profile tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `runtime.toml`에 `<name>_models` 키로 존재해야 함. 실제 실행 가능 여부는 descriptor/registry availability, `tool_denylist`, per-turn OAS allowlist, eval gate까지 통과해야 한다.
 - **Removed / hard-rejected**: `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 

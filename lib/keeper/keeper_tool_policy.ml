@@ -112,11 +112,6 @@ let init_policy_config ~base_path =
   | Error msg ->
     Error msg
 
-(* ── Denied-tool set (O(1) lookup) ────────────────────────────── *)
-
-let keeper_denied_set : (string, unit) Hashtbl.t =
-  Hashtbl.create 0
-
 let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
   let seen = Hashtbl.create (max 16 (List.length schemas)) in
   List.filter
@@ -127,9 +122,6 @@ let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
         Hashtbl.replace seen schema.name ();
         true))
     schemas
-
-let is_keeper_denied (name : string) : bool =
-  Hashtbl.mem keeper_denied_set name
 
 (* ── Schema injection filter ──────────────────────────────────── *)
 
@@ -205,7 +197,6 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
       String.starts_with ~prefix:"masc_" s.name
       && not (is_keeper_mcp_context_required s.name)
       && supported_in_keeper s.name
-      && not (is_keeper_denied s.name)
       && not (has_keeper_board_wrapper s.name))
       schemas
 

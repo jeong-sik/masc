@@ -162,8 +162,5 @@ val dedupe_tool_schemas :
     Returns [None] for unknown tools. *)
 val tool_hint_of : string -> string option
 
-(** Check if a tool name is in the keeper denied set. *)
-val is_keeper_denied : string -> bool
-
 (** Check if a tool requires MCP context injection. *)
 val is_keeper_mcp_context_required : string -> bool

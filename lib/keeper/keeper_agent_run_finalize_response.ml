@@ -174,6 +174,7 @@ let finalize
       ~response_text
       ~actual_tools:actual_keeper_tool_names
       ~state_snapshot
+      ~state_snapshot_source
       ~post_turn_t0
       ?provider_filter
       ~runtime_id:runtime_id_string

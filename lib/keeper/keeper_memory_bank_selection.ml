@@ -37,6 +37,9 @@ type candidate_selection_result = {
   dropped_by_total_cap: int;
 }
 
+let empty_candidate_selection =
+  { selected = []; dropped_by_kind = []; dropped_by_total_cap = 0 }
+
 let select_memory_candidates
     (rows : (string * string * int) list) : candidate_selection_result =
   let total_cap = total_cap () in
@@ -271,3 +274,8 @@ let memory_candidates_from_snapshot
          if c <> 0 then c else String.compare ta tb)
   in
   select_memory_candidates raw
+
+let memory_candidates_from_snapshot_source ~state_snapshot_source snapshot =
+  if state_snapshot_source_is_synthetic state_snapshot_source
+  then empty_candidate_selection
+  else memory_candidates_from_snapshot snapshot

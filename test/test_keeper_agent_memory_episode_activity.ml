@@ -143,6 +143,36 @@ let test_zero_flush_is_noop () =
         ();
       check bool "zero flush does not call activity emit" false !called))
 
+let test_synthetic_success_snapshot_does_not_emit_episode () =
+  with_config (fun config ->
+    let keeper = "keeper-memory-activity-synthetic" in
+    let called = ref false in
+    let counting_emit _config ~actor:_ ?subject ~kind:_ ~payload:_ ~tags:_ () =
+      ignore subject;
+      called := true
+    in
+    let memory =
+      Memory_oas_bridge.create_memory
+        ~agent_name:keeper
+        ~base_dir:(Workspace_utils.masc_dir config)
+        ~session_id:"synthetic-source-test"
+        ()
+    in
+    let snapshot =
+      Keeper_memory_policy.synthesize_state_from_run_result
+        ~goal:"Fix task"
+        ~tools_used:["tool_execute"]
+        ~stop_reason:"budget_exhausted"
+        ~response_text:"[turn budget exhausted: 8/8 turns used]"
+    in
+    with_activity_emit counting_emit (fun () ->
+      Episode.record_success ~config ~keeper_name:keeper ~memory ~turn:12
+        ~oas_turn_count:8 ~trace_id:"trace-synthetic"
+        ~state_snapshot_source:"synthesized"
+        ~snapshot
+        ();
+      check bool "synthetic snapshot does not flush an episode" false !called))
+
 let () =
   run "keeper_agent_memory_episode_activity" [
     "activity emit visibility", [
@@ -153,5 +183,7 @@ let () =
       test_case "failure flush emit failure increments metric" `Quick
         test_activity_emit_failure_increments_failure_metric;
       test_case "zero flush remains a no-op" `Quick test_zero_flush_is_noop;
+      test_case "synthetic snapshot does not emit episode" `Quick
+        test_synthetic_success_snapshot_does_not_emit_episode;
     ];
   ]

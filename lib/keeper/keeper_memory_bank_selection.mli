@@ -194,3 +194,10 @@ val max_memory_text_length : unit -> int
 val is_meaningful_memory_text : string -> bool
 val memory_candidates_from_snapshot :
   keeper_state_snapshot -> candidate_selection_result
+
+val memory_candidates_from_snapshot_source :
+  state_snapshot_source:string ->
+  keeper_state_snapshot ->
+  candidate_selection_result
+  (** Source-aware variant used by post-turn persistence. Runtime-synthesized
+      snapshots are resume aids, not model-authored durable memory. *)

@@ -349,12 +349,16 @@ let institution_episode_of_oas ~(agent_name : string)
     Metadata keys match what [institution_episode_of_oas] expects, so
     the round-trip Institution_eio -> OAS -> Institution_eio is lossless. *)
 let store_episode_from_snapshot
+    ?state_snapshot_source
     ~(memory : Agent_sdk.Memory.t)
     ~(keeper_name : string)
     ~(turn : int)
     ?(oas_turn_count : int option)
     ~(trace_id : string)
     (snapshot : Keeper_memory_policy.keeper_state_snapshot) : unit =
+  match state_snapshot_source with
+  | Some source when Keeper_memory_policy.state_snapshot_source_is_synthetic source -> ()
+  | _ ->
   let parts =
     List.filter_map Fun.id
       [

@@ -62,11 +62,9 @@ val tool_name_set : string list -> StringSet.t
 (** Build a lookup structure from keeper metadata. *)
 val tool_access_lookup_of_meta : keeper_meta -> tool_access_lookup
 
-(** Check if a tool passes candidate + deny filters. *)
-val filter_by_access : lookup:tool_access_lookup -> string -> bool
-
-(** Check candidate membership minus denied.
-    Used as execution gate for BM25-discovered tools. *)
+(** Candidate reachability: registered candidate and not denied.
+    Per-keeper tool_access/allow does not gate execution — only the denylist
+    bites. Used as the execution gate for BM25-discovered tools. *)
 val filter_by_universe : lookup:tool_access_lookup -> string -> bool
 
 (** Execution gate: core tools bypass candidate_set; other tools must be
@@ -78,9 +76,6 @@ val can_execute : lookup:tool_access_lookup -> string -> bool
 
 (** Policy-filtered MASC tool names for a keeper. *)
 val keeper_masc_tool_names : keeper_meta -> string list
-
-(** Policy-filtered MASC tool schemas for a keeper. *)
-val keeper_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Universe (policy-independent) MASC tool schemas for BM25 indexing. *)
 val keeper_universe_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
@@ -135,10 +130,6 @@ val keeper_tool_search_scope : keeper_meta -> string list
 val last_turn_safe_tool_names : unit -> string list
 
 (** {1 Tool Schema Assembly} *)
-
-(** Active model tool schemas minus denied tools. *)
-val keeper_allowed_model_tools :
-  ?write_done:bool -> keeper_meta -> Masc_domain.tool_schema list
 
 (** Universe model tool schemas for Agent.run(). *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list

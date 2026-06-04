@@ -10,7 +10,7 @@
 \* claimed task is making progress or is orphaned.
 \*
 \* masc reference:
-\*   lib/keeper/keeper_state_machine.ml (12-phase keeper FSM:
+\*   lib/keeper_state/keeper_state_machine.ml (12-phase keeper FSM:
 \*     Offline | Running | Failing | Overflowed | Compacting | HandingOff
 \*     | Draining | Paused | Stopped | Crashed | Restarting | Dead)
 \*   lib/types/types_core.ml:task_status (6-state task FSM:

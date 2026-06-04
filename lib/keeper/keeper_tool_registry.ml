@@ -277,15 +277,6 @@ let masc_schemas_snapshot () =
   Stdlib.Mutex.protect masc_schemas_mutex (fun () -> !masc_schemas_state)
 ;;
 
-let with_masc_schemas_for_test schemas f =
-  let previous = masc_schemas_snapshot () in
-  Eio_guard.protect
-    ~finally:(fun () -> set_masc_schemas previous)
-    (fun () ->
-       set_masc_schemas schemas;
-       f ())
-;;
-
 let injected_masc_tool_names () =
   masc_schemas_snapshot ()
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)

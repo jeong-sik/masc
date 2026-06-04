@@ -75,9 +75,6 @@ val set_masc_schemas : Masc_domain.tool_schema list -> unit
 (** Immutable snapshot of injected MASC tool schemas. *)
 val masc_schemas_snapshot : unit -> Masc_domain.tool_schema list
 
-(** Scoped schema override for tests that need a synthetic MASC surface. *)
-val with_masc_schemas_for_test : Masc_domain.tool_schema list -> (unit -> 'a) -> 'a
-
 (** Injected masc_* tool names (populated at startup by [inject_masc_schemas]). *)
 val injected_masc_tool_names : unit -> string list
 

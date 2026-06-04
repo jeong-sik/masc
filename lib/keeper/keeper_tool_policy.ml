@@ -212,12 +212,6 @@ let keeper_supported_masc_tool_names_from_schemas schemas =
 let inject_masc_schemas (schemas : Masc_domain.tool_schema list) =
   set_masc_schemas (keeper_supported_masc_schemas schemas)
 
-let select_existing_masc_tool_names names =
-  let injected = injected_masc_tool_names () in
-  names
-  |> List.filter (fun name -> List.mem name injected)
-  |> dedupe_tool_names
-
 let is_keeper_maintenance_only_tool name =
   List.mem name (Keeper_tool_descriptor.keeper_maintenance_only_names ())
 

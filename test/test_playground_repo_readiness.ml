@@ -44,6 +44,20 @@ let mkdir_p path =
   in
   ensure path
 
+let read_file_trim path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       really_input_string ic len |> String.trim)
+
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+
 let json_bool key json =
   Yojson.Safe.Util.(json |> member key |> to_bool)
 
@@ -441,6 +455,58 @@ let test_ensure_worktree_ready_idempotent () =
   | Ok () -> ()
   | Error msg -> fail ("second call failed: " ^ msg)
 
+let test_ensure_worktree_ready_normalizes_gitdir_pointer () =
+  let base_path = temp_dir "masc-worktree-ready-gitdir" in
+  let remote = Filename.concat base_path ".remote-masc.git" in
+  git_ok ~cwd:base_path [ "init"; "--bare"; "-q"; "--initial-branch=main"; remote ];
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let clone_path =
+    Masc.Playground_repo_readiness.clone_path ~config ~meta ~repo_name:"masc"
+  in
+  mkdir_p (Filename.dirname clone_path);
+  git_ok ~cwd:base_path [ "clone"; "-q"; remote; clone_path ];
+  git_ok ~cwd:clone_path [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:clone_path [ "config"; "user.name"; "Test" ];
+  let readme = Filename.concat clone_path "README.md" in
+  write_file readme "# test\n";
+  git_ok ~cwd:clone_path [ "add"; "README.md" ];
+  git_ok ~cwd:clone_path [ "commit"; "-q"; "-m"; "init" ];
+  git_ok ~cwd:clone_path [ "push"; "-q"; "origin"; "main" ];
+  let task_name = "task-relative-gitdir-test" in
+  let worktree_path = Filename.concat clone_path (".worktrees/" ^ task_name) in
+  let r1 =
+    Masc.Playground_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name ~worktree_path ()
+  in
+  (match r1 with
+   | Ok () -> ()
+   | Error msg -> fail ("first call failed: " ^ msg));
+  let git_file = Filename.concat worktree_path ".git" in
+  let absolute_gitdir =
+    Filename.concat
+      (Filename.concat (Filename.concat clone_path ".git") "worktrees")
+      task_name
+  in
+  write_file git_file ("gitdir: " ^ absolute_gitdir ^ "\n");
+  let r2 =
+    Masc.Playground_repo_readiness.ensure_worktree_ready
+      ~config ~meta ~repo_name:"masc" ~task_name ~worktree_path ()
+  in
+  (match r2 with
+   | Ok () -> ()
+   | Error msg -> fail ("second call failed: " ^ msg));
+  check string "worktree gitdir is container-safe relative"
+    ("gitdir: ../../.git/worktrees/" ^ task_name)
+    (read_file_trim git_file);
+  let status =
+    Masc.Playground_repo_readiness.run_git
+      ~timeout_sec:Masc.Playground_repo_readiness.read_only_probe_timeout_sec
+      ~clone_path:worktree_path
+      [ "status"; "--short" ]
+  in
+  check bool "relative gitdir remains host-git usable" true status.ok
+
 let test_ensure_worktree_ready_rejects_nested_plain_directory () =
   let base_path = temp_dir "masc-worktree-ready-nested" in
   let remote = Filename.concat base_path ".remote-masc.git" in
@@ -657,6 +723,8 @@ let () =
           test_ensure_worktree_ready_creates_worktree;
         test_case "idempotent" `Quick
           test_ensure_worktree_ready_idempotent;
+        test_case "normalizes worktree gitdir pointer" `Quick
+          test_ensure_worktree_ready_normalizes_gitdir_pointer;
         test_case "rejects nested plain directory" `Quick
           test_ensure_worktree_ready_rejects_nested_plain_directory;
         test_case "creates worktree from dirty parent clone" `Quick

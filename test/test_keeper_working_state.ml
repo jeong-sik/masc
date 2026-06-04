@@ -140,7 +140,7 @@ let test_projector_ignores_budget_synthetic_summary_as_loop () =
       ~goal:"Fix task"
       ~tools_used:["tool_execute"]
       ~stop_reason:"budget_exhausted"
-      ~response_text:"[turn budget exhausted: 8/8 turns used]"
+      ~response_text:"Continuation checkpoint saved; keeper remains scheduled"
   in
   let state =
     Masc.Keeper_working_state_projector.of_state_snapshot

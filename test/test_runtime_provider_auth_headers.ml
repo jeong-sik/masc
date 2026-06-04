@@ -148,6 +148,17 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
   check string "attempt detail source" "runtime_agent_terminal"
     observation.attempt_details_source
 
+let test_runtime_agent_max_turns_is_continuation_checkpoint () =
+  let lifecycle =
+    Runtime_agent.worker_lifecycle_classification_of_result
+      (Error
+         (Agent_sdk.Error.Agent
+            (Agent_sdk.Error.MaxTurnsExceeded { turns = 24; limit = 24 })))
+  in
+  check string "event" "completed" lifecycle.event;
+  check string "status" "continuation_checkpoint" lifecycle.status;
+  check (option string) "no error" None lifecycle.error
+
 let () =
   run "runtime_provider_auth_headers"
     [ ( "provider_config"
@@ -163,5 +174,9 @@ let () =
             "runtime agent terminal observation carries model identity"
             `Quick
             test_runtime_agent_terminal_observation_uses_runtime_identity
+        ; test_case
+            "max turns is continuation checkpoint"
+            `Quick
+            test_runtime_agent_max_turns_is_continuation_checkpoint
         ] )
     ]

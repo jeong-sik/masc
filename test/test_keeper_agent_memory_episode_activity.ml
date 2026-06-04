@@ -163,7 +163,7 @@ let test_synthetic_success_snapshot_does_not_emit_episode () =
         ~goal:"Fix task"
         ~tools_used:["tool_execute"]
         ~stop_reason:"budget_exhausted"
-        ~response_text:"[turn budget exhausted: 8/8 turns used]"
+        ~response_text:"Continuation checkpoint saved; keeper remains scheduled"
     in
     with_activity_emit counting_emit (fun () ->
       Episode.record_success ~config ~keeper_name:keeper ~memory ~turn:12

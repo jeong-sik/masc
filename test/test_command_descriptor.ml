@@ -270,12 +270,12 @@ let test_descriptor_to_pr_event () =
   with_temp_dir (fun base_dir ->
     let output = {|{"ok":true,"output":"https://github.com/jeong-sik/masc/pull/999","command_descriptor":{"kind":"gh_pr_create","title":"test PR","base":"main","draft":false}}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
-      ~base_path:base_dir
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"execute"
-      ~success:true;
+      { Ide_bridge.pr_base_path = base_dir
+      ; pr_keeper_id = "k1"
+      ; pr_turn_id = "t1"
+      ; pr_output_text = output
+      ; pr_success = true
+      };
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
@@ -293,12 +293,12 @@ let test_descriptor_merge_event () =
   with_temp_dir (fun base_dir ->
     let output = {|{"ok":true,"output":"","command_descriptor":{"kind":"gh_pr_merge","pr_number":456,"squash":true}}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
-      ~base_path:base_dir
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"execute"
-      ~success:true;
+      { Ide_bridge.pr_base_path = base_dir
+      ; pr_keeper_id = "k1"
+      ; pr_turn_id = "t1"
+      ; pr_output_text = output
+      ; pr_success = true
+      };
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);

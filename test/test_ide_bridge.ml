@@ -275,65 +275,17 @@ let test_pr_event_ingest () =
     check string "pr_url" "https://github.com/jeong-sik/masc/pull/19872" pr_url)
 ;;
 
-let test_pr_event_from_hook_detects_url () =
-  with_temp_dir (fun base_dir ->
-    let output = "remote: https://github.com/jeong-sik/masc/pull/123\n" in
-    Ide_bridge.ingest_pr_event_from_hook
-      ~base_path:base_dir
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file exists" true (Sys.file_exists path);
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
-    check int "pr_number" 123 pr_number)
-;;
-
-let test_pr_event_from_hook_ignores_non_execute () =
-  with_temp_dir (fun base_dir ->
-    let output = "https://github.com/owner/repo/pull/456" in
-    Ide_bridge.ingest_pr_event_from_hook
-      ~base_path:base_dir
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"fs_write";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file not created" false (Sys.file_exists path))
-;;
-
-let test_pr_event_from_hook_ignores_no_url () =
-  with_temp_dir (fun base_dir ->
-    let output = "file written successfully\n" in
-    Ide_bridge.ingest_pr_event_from_hook
-      ~base_path:base_dir
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file not created" false (Sys.file_exists path))
-;;
-
 let test_descriptor_gated_on_success () =
   with_temp_dir (fun base_dir ->
     (* Failed gh pr create with command_descriptor in output should NOT produce PR event *)
     let failed_output = {|{"command_descriptor": {"kind": "gh_pr_create", "title": "feat: test", "base": "main", "draft": true}, "error": "authentication failed"}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
-      ~base_path:base_dir
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:failed_output
-      ~tool_name:"execute"
-      ~success:false;
+      { Ide_bridge.pr_base_path = base_dir
+      ; pr_keeper_id = "k1"
+      ; pr_turn_id = "t1"
+      ; pr_output_text = failed_output
+      ; pr_success = false
+      };
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file not created on failure" false (Sys.file_exists path))
@@ -344,12 +296,12 @@ let test_descriptor_ingested_on_success () =
     (* Successful gh pr create with command_descriptor should produce PR event *)
     let success_output = {|{"command_descriptor": {"kind": "gh_pr_create", "title": "feat: test", "base": "main", "draft": true}}|} in
     Ide_bridge.ingest_pr_event_from_descriptor
-      ~base_path:base_dir
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:success_output
-      ~tool_name:"execute"
-      ~success:true;
+      { Ide_bridge.pr_base_path = base_dir
+      ; pr_keeper_id = "k1"
+      ; pr_turn_id = "t1"
+      ; pr_output_text = success_output
+      ; pr_success = true
+      };
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file created on success" true (Sys.file_exists path);
@@ -418,9 +370,6 @@ let () =
         ] )
     ; ( "pr_event"
       , [ test_case "pr event ingest" `Quick test_pr_event_ingest
-        ; test_case "from hook detects url" `Quick test_pr_event_from_hook_detects_url
-        ; test_case "from hook ignores non-execute" `Quick test_pr_event_from_hook_ignores_non_execute
-        ; test_case "from hook ignores no url" `Quick test_pr_event_from_hook_ignores_no_url
         ; test_case "descriptor gated on success" `Quick test_descriptor_gated_on_success
         ; test_case "descriptor ingested on success" `Quick test_descriptor_ingested_on_success
         ] )

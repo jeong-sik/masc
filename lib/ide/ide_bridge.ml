@@ -5,6 +5,14 @@ open Ide_event_types
 
 let default_partition = Ide_paths.Orphan
 
+type pr_event_descriptor_ingest =
+  { pr_base_path : string
+  ; pr_keeper_id : string
+  ; pr_turn_id : string
+  ; pr_output_text : string
+  ; pr_success : bool
+  }
+
 let append_event ~base_dir ~partition ~(event : ide_event) =
   let dir = Ide_paths.partition_store_dir ~base_dir partition in
   Fs_compat.mkdir_p dir;
@@ -256,23 +264,22 @@ let parse_pr_url_from_output (output : string) : (int * string) option =
      | _ -> None)
 
 (** Ingest PR event from command_descriptor (deterministic).
-    Falls back to heuristic output parsing if descriptor is not available.
     Only proceeds when [success] is [true] — failed tool executions
     (auth/network/validation errors) must not produce phantom PR events. *)
 let ingest_pr_event_from_descriptor
-    ~base_path
-    ~keeper_id
-    ~turn_id
-    ~output_text
-    ~tool_name
-    ~success
+    { pr_base_path = base_path
+    ; pr_keeper_id = keeper_id
+    ; pr_turn_id = turn_id
+    ; pr_output_text = output_text
+    ; pr_success = success
+    }
   =
   (* Gate: only ingest PR events from successful tool executions.
      Failed commands (auth/network/validation errors) preserve the
      command_descriptor in their output, which would otherwise produce
      phantom PR #0 events. *)
   if not success then ()
-  else if String.equal (String.lowercase_ascii tool_name) "execute" then
+  else
     match extract_descriptor_from_output output_text with
     | Some (Ide_event_types.Gh_pr_create { title; base = _; draft = _ }) ->
       (* PR was created — try to get PR number from output URL *)
@@ -338,70 +345,4 @@ let ingest_pr_event_from_descriptor
         ~comment_count:1 ~review_status:None
         ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
-    | None ->
-      (* Not a PR operation — fall back to heuristic output parsing *)
-      if String.equal (String.lowercase_ascii tool_name) "execute" then
-        match parse_pr_url_from_output output_text with
-        | Some (pr_number, pr_url) ->
-          let repo =
-            let prefix = "https://github.com/" in
-            let prefix_len = String.length prefix in
-            let url_len = String.length pr_url in
-            if url_len > prefix_len then
-              let path = String.sub pr_url prefix_len (url_len - prefix_len) in
-              let parts = String.split_on_char '/' path in
-              match parts with
-              | owner :: repo_name :: _ -> owner ^ "/" ^ repo_name
-              | _ -> "unknown"
-            else "unknown"
-          in
-          ingest_pr_event
-            ~base_path ~pr_number ~pr_url ~pr_title:""
-            ~pr_state:"open" ~repo ~keeper_id ~turn_id
-            ~comment_count:0 ~review_status:None
-            ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
-        | None -> ()
-
-(** Try to detect PR creation from Execute tool output and ingest a PR event.
-    Only fires when [tool_name = "execute"] and output contains a GitHub PR URL.
-
-    FIXME: This is a heuristic. It parses stdout/stderr for GitHub PR URLs
-    which is fragile — output format changes, non-GitHub hosts, or URL
-    in unexpected position will silently miss. A dedicated [Pr_create] tool
-    in the keeper vocabulary would make this deterministic. Until then,
-    this is best-effort and may produce false negatives. *)
-let ingest_pr_event_from_hook
-    ~base_path
-    ~keeper_id
-    ~turn_id
-    ~output_text
-    ~tool_name
-  =
-  if String.equal (String.lowercase_ascii tool_name) "execute" then
-    match parse_pr_url_from_output output_text with
-    | Some (pr_number, pr_url) ->
-      let repo =
-        let prefix = "https://github.com/" in
-        let prefix_len = String.length prefix in
-        let url_len = String.length pr_url in
-        if url_len > prefix_len then
-          let path = String.sub pr_url prefix_len (url_len - prefix_len) in
-          let parts = String.split_on_char '/' path in
-          match parts with
-          | owner :: repo_name :: _ -> owner ^ "/" ^ repo_name
-          | _ -> "unknown"
-        else "unknown"
-      in
-      ingest_pr_event
-        ~base_path
-        ~pr_number
-        ~pr_url
-        ~pr_title:""
-        ~pr_state:"open"
-        ~repo
-        ~keeper_id
-        ~turn_id
-        ~comment_count:0
-        ~review_status:None
-        ~timestamp_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.0))
     | None -> ()

@@ -242,12 +242,12 @@ let assemble_hooks
              ~input;
            (* IDE Bridge: detect PR creation from command_descriptor *)
            Ide_bridge.ingest_pr_event_from_descriptor
-             ~base_path:config.base_path
-             ~keeper_id:acc.meta.name
-             ~turn_id
-             ~output_text
-             ~tool_name
-             ~success))
+             { Ide_bridge.pr_base_path = config.base_path
+             ; pr_keeper_id = acc.meta.name
+             ; pr_turn_id = turn_id
+             ; pr_output_text = output_text
+             ; pr_success = success
+             }))
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard
         ()
     in

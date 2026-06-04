@@ -11,11 +11,31 @@
    semantic change — only a wire-format widening. *)
 
 open Alcotest
-module S = Tool_shard_types_schemas_execute
+module S = Tool_shard_types
+
+let tool_execute_schema () =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "tool_execute")
+      S.typed_execute_tools
+  with
+  | Some schema -> schema
+  | None -> Alcotest.fail "tool_execute schema is missing"
+
+let timeout_sec_field () =
+  match (tool_execute_schema ()).input_schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc props) ->
+       (match List.assoc_opt "timeout_sec" props with
+        | Some field -> "timeout_sec", field
+        | None -> Alcotest.fail "timeout_sec field is missing")
+     | _ -> Alcotest.fail "properties object is missing")
+  | _ -> Alcotest.fail "tool_execute input_schema is not an object"
 
 (* Pull the JSON associated with the [timeout_sec] field's [type] key. *)
 let type_value () =
-  match S.tool_execute_timeout_sec_field with
+  match timeout_sec_field () with
   | _name, `Assoc fields ->
     (match List.assoc_opt "type" fields with
      | Some v -> v
@@ -48,7 +68,7 @@ let type_accepts_number_and_string () =
 (* The widening must preserve the user-facing description so the LLM
    keepers' prompt context does not lose the default/max hint. *)
 let description_mentions_default_and_max () =
-  let _name, body = S.tool_execute_timeout_sec_field in
+  let _name, body = timeout_sec_field () in
   let body = match body with `Assoc xs -> xs | _ -> Alcotest.fail "field not an object" in
   let desc =
     match List.assoc_opt "description" body with

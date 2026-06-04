@@ -74,6 +74,9 @@ val search_files_tools : Masc_domain.tool_schema list
 val typed_execute_tools : Masc_domain.tool_schema list
 (** Pure: typed execution tool schemas. *)
 
+val tool_execute_schema : Masc_domain.tool_schema
+(** Canonical typed Execute schema exposed through the public facade. *)
+
 val voice_tools : Masc_domain.tool_schema list
 (** Voice tool schemas. *)
 

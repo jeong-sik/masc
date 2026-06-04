@@ -4,6 +4,8 @@
 open Tool_args
 include Tool_task_handlers
 
+module Workspace = Workspace_core
+
 let task_log_info ~task_id fmt =
   Stdlib.Format.ksprintf
     (fun message -> Log.Task.info "task_id=%s %s" task_id message)

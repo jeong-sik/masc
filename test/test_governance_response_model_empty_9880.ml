@@ -52,16 +52,16 @@ let test_telemetry_resolved_branch () =
 
 (* When neither [response.model] nor telemetry resolves the model, the writer
    still projects the neutral runtime lane and counts under
-   [unknown_sentinel]. Distinct rows let dashboards separate "transport leaked
+   [unknown_source]. Distinct rows let dashboards separate "transport leaked
    but recovered" from "transport leaked and no recovery available" without
    exposing concrete provider/model identity. *)
-let test_unknown_sentinel_branch () =
-  let before = count_for ~source:"unknown_sentinel" in
-  Prom.inc_counter metric_name ~labels:[ "source", "unknown_sentinel" ] ();
+let test_unknown_source_branch () =
+  let before = count_for ~source:"unknown_source" in
+  Prom.inc_counter metric_name ~labels:[ "source", "unknown_source" ] ();
   Alcotest.(check (float 0.0001))
-    "unknown_sentinel row +1"
+    "unknown_source row +1"
     (before +. 1.0)
-    (count_for ~source:"unknown_sentinel")
+    (count_for ~source:"unknown_source")
 ;;
 
 (* Distinct sources land on distinct counter rows.  Necessary
@@ -70,17 +70,17 @@ let test_unknown_sentinel_branch () =
    "no recovery" (deeper provider failure). *)
 let test_distinct_sources_separate_rows () =
   let before_t = count_for ~source:"telemetry_resolved" in
-  let before_u = count_for ~source:"unknown_sentinel" in
+  let before_u = count_for ~source:"unknown_source" in
   Prom.inc_counter metric_name ~labels:[ "source", "telemetry_resolved" ] ();
-  Prom.inc_counter metric_name ~labels:[ "source", "unknown_sentinel" ] ();
+  Prom.inc_counter metric_name ~labels:[ "source", "unknown_source" ] ();
   Alcotest.(check (float 0.0001))
     "telemetry_resolved +1"
     (before_t +. 1.0)
     (count_for ~source:"telemetry_resolved");
   Alcotest.(check (float 0.0001))
-    "unknown_sentinel +1"
+    "unknown_source +1"
     (before_u +. 1.0)
-    (count_for ~source:"unknown_sentinel")
+    (count_for ~source:"unknown_source")
 ;;
 
 let check_resolution ~msg ~raw_model ~canonical_model_id ~expected_model ~expected_source =
@@ -112,22 +112,22 @@ let test_empty_raw_falls_back_to_telemetry () =
     ~expected_source:"telemetry_resolved"
 ;;
 
-let test_empty_everywhere_uses_unknown_sentinel () =
+let test_empty_everywhere_uses_unknown_source () =
   check_resolution
-    ~msg:"unknown sentinel"
+    ~msg:"unknown source"
     ~raw_model:""
     ~canonical_model_id:None
     ~expected_model:"runtime"
-    ~expected_source:"unknown_sentinel"
+    ~expected_source:"unknown_source"
 ;;
 
-let test_empty_canonical_id_uses_unknown_sentinel () =
+let test_empty_canonical_id_uses_unknown_source () =
   check_resolution
     ~msg:"empty canonical"
     ~raw_model:""
     ~canonical_model_id:(Some "")
     ~expected_model:"runtime"
-    ~expected_source:"unknown_sentinel"
+    ~expected_source:"unknown_source"
 ;;
 
 (* Prometheus text export must include the metric name and
@@ -161,7 +161,7 @@ let () =
             "telemetry_resolved branch"
             `Quick
             test_telemetry_resolved_branch
-        ; Alcotest.test_case "unknown_sentinel branch" `Quick test_unknown_sentinel_branch
+        ; Alcotest.test_case "unknown_source branch" `Quick test_unknown_source_branch
         ; Alcotest.test_case
             "distinct sources distinct rows"
             `Quick
@@ -174,13 +174,13 @@ let () =
             `Quick
             test_empty_raw_falls_back_to_telemetry
         ; Alcotest.test_case
-            "empty everywhere -> sentinel"
+            "empty everywhere -> unknown source"
             `Quick
-            test_empty_everywhere_uses_unknown_sentinel
+            test_empty_everywhere_uses_unknown_source
         ; Alcotest.test_case
-            "empty canonical_model_id -> sentinel"
+            "empty canonical_model_id -> unknown source"
             `Quick
-            test_empty_canonical_id_uses_unknown_sentinel
+            test_empty_canonical_id_uses_unknown_source
         ] )
     ; "export", [ Alcotest.test_case "metric + label key in /metrics" `Quick test_export ]
     ]

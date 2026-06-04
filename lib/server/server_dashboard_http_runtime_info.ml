@@ -799,7 +799,7 @@ let runtime_resolution_json (config : Workspace.config) =
          separate [add_binary_commit_unknown_warning] further down,
          forcing the dashboard reader to cross-reference two warnings
          to understand a single mismatch.  Inline the reason in the
-         sentinel itself so the warning is self-contained. *)
+         marker itself so the warning is self-contained. *)
       let runtime =
         match runtime_commit with
         | Some commit -> commit

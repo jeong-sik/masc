@@ -46,7 +46,7 @@ type state = {
    [masc_after_turn_response_model_empty_total] introduced by
    #10083; separate metric name keeps governance vs keeper
    attribution clean while sharing the [unknown_provider]
-   sentinel string so PromQL can union-aggregate across both. *)
+   marker string so PromQL can union-aggregate across both. *)
 let governance_response_model_empty_metric =
   "masc_governance_response_model_empty_total"
 
@@ -65,7 +65,7 @@ let () =
     ~help:
       "Count of governance compute_judgments cycles where \
        [response.model] was empty.  Labels: \
-       [source=telemetry_resolved | unknown_sentinel]."
+       [source=telemetry_resolved | unknown_source]."
     ();
   Prometheus.register_counter
     ~name:governance_compute_total_metric
@@ -87,12 +87,12 @@ let () =
 type governance_model_source =
   | Response_model
   | Telemetry_resolved
-  | Unknown_sentinel
+  | Unknown_source
 
 let governance_model_source_to_string = function
   | Response_model -> "response_model"
   | Telemetry_resolved -> "telemetry_resolved"
-  | Unknown_sentinel -> "unknown_sentinel"
+  | Unknown_source -> "unknown_source"
 
 let resolve_governance_model_used ~raw_model ~canonical_model_id =
   if String.trim raw_model <> "" then "runtime", Response_model
@@ -101,8 +101,8 @@ let resolve_governance_model_used ~raw_model ~canonical_model_id =
     | Some id ->
         let trimmed = String.trim id in
         if trimmed <> "" then "runtime", Telemetry_resolved
-        else "runtime", Unknown_sentinel
-    | None -> "runtime", Unknown_sentinel
+        else "runtime", Unknown_source
+    | None -> "runtime", Unknown_source
 
 let governance_dir base_path =
   Filename.concat
@@ -690,7 +690,7 @@ let compute_judgments
         begin
           match model_source with
           | Response_model -> ()
-          | Telemetry_resolved | Unknown_sentinel ->
+          | Telemetry_resolved | Unknown_source ->
               let source = governance_model_source_to_string model_source in
               Prometheus.inc_counter
                 governance_response_model_empty_metric

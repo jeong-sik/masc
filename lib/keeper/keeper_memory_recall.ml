@@ -320,7 +320,7 @@ let goal_alignment_score
     ~(user_message : string option)
     ~(assistant_reply : string option) : float =
   let goals = goal_horizon_candidates meta in
-  (* Unmeasurable → sentinel [1.0] so [plan_goal_alignment_threshold <= X]
+  (* Unmeasurable → marker [1.0] so [plan_goal_alignment_threshold <= X]
      and [guardrail_goal_alignment_threshold <= floor] gates do NOT
      fire; [goal_drift = 1.0 - alignment] then reads 0.0 (no drift).
      [0.0] was a permissive default that conflated "no goal data" with

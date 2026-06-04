@@ -855,7 +855,7 @@ describe('TelemetryUnified', () => {
     })
   })
 
-  it('does not group on turn=0 sentinel (turn-not-tracked records stay as entries)', async () => {
+  it('does not group on turn=0 marker (turn-not-tracked records stay as entries)', async () => {
     const { buildTelemetryDisplayItems } = await loadPanel(
       vi.fn().mockResolvedValue(baseTelemetry),
       vi.fn().mockResolvedValue(baseSummary),

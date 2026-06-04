@@ -129,8 +129,8 @@ function filterBoardPosts(
   })
 }
 
-// ── Scroll sentinel (IntersectionObserver auto-load) ──────────────
-function ScrollSentinel({ onVisible }: { onVisible: () => void }) {
+// ── Scroll marker (IntersectionObserver auto-load) ──────────────
+function ScrollMarker({ onVisible }: { onVisible: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const cb = useCallback(onVisible, [onVisible])
   useEffect(() => {
@@ -215,7 +215,7 @@ function renderCategorySection(
         ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
       </div>
       ${hasMore ? html`
-        <${ScrollSentinel} onVisible=${() => {
+        <${ScrollMarker} onVisible=${() => {
           if (loadingMore) return
           expandCategory(category, limits, limit, posts.length)
         }} />

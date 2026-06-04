@@ -73,7 +73,7 @@ let test_argv_program_basename () =
 ;;
 
 let test_argv_program_empty () =
-  Alcotest.(check string) "empty argv → sentinel" "<empty>" (Process_eio.argv_program [])
+  Alcotest.(check string) "empty argv → marker" "<empty>" (Process_eio.argv_program [])
 ;;
 
 let test_record_increments () =
@@ -199,7 +199,7 @@ let () =
         ] )
     ; ( "argv_program"
       , [ Alcotest.test_case "basename" `Quick test_argv_program_basename
-        ; Alcotest.test_case "empty sentinel" `Quick test_argv_program_empty
+        ; Alcotest.test_case "empty marker" `Quick test_argv_program_empty
         ] )
     ; "record", [ Alcotest.test_case "increments on call" `Quick test_record_increments ]
     ; ( "isolation"

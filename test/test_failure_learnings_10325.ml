@@ -8,7 +8,7 @@
     judge, anti-rationalization, future keeper turns) consume.  After
     the current contract, [learnings] carries [failure_kind: X] and
     [error_preview: Y] entries. Blank kinds normalize to the explicit
-    [unspecified] sentinel so rows stay queryable. *)
+    [unspecified] marker so rows stay queryable. *)
 
 open Alcotest
 open Masc
@@ -94,7 +94,7 @@ let test_unspecified_kind_when_both_blank () =
   let learnings =
     extract_failure_learnings ~error_kind:"" ~error_message:""
   in
-  check (list string) "explicit unspecified sentinel"
+  check (list string) "explicit unspecified marker"
     [ "failure_kind: unspecified" ] learnings
 
 let test_only_kind_when_message_blank () =
@@ -115,7 +115,7 @@ let () =
              test_kind_and_message_emitted_as_tags;
            test_case "legacy timeout budget loop kind is canonicalized" `Quick
              test_timeout_budget_loop_kind_canonicalized;
-           test_case "unspecified sentinel when both blank" `Quick
+           test_case "unspecified marker when both blank" `Quick
              test_unspecified_kind_when_both_blank;
            test_case "only error_kind when message blank" `Quick
              test_only_kind_when_message_blank;

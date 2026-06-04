@@ -146,7 +146,7 @@ let reset_cached_entry_count () = Atomic.set cached_entry_count (-1)
 let decrement_cached_entry_count () =
   (* Hand-rolled CAS loop replaced by [Lockfree_atomic.update].  The
      transform is intentionally a no-op when the counter sits at the
-     "unknown" sentinel (-1) so a stale decrement during cache reset
+     "unknown" marker (-1) so a stale decrement during cache reset
      does not push the cached count into bogus negative territory. *)
   Lockfree_atomic.update cached_entry_count (fun current ->
     if current < 0 then current else max 0 (current - 1))

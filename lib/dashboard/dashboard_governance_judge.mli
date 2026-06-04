@@ -124,7 +124,7 @@ type state = {
 type governance_model_source =
   | Response_model
   | Telemetry_resolved
-  | Unknown_sentinel
+  | Unknown_source
 (** Source of the model id used for a governance
     judgment.  Used by the per-cycle empty-model metric
     to attribute classifications to fall-through paths. *)
@@ -133,7 +133,7 @@ val governance_model_source_to_string :
   governance_model_source -> string
 (** [Response_model] → ["response_model"];
     [Telemetry_resolved] → ["telemetry_resolved"];
-    [Unknown_sentinel] → ["unknown_sentinel"]. *)
+    [Unknown_source] → ["unknown_source"]. *)
 
 val resolve_governance_model_used :
   raw_model:string ->
@@ -141,7 +141,7 @@ val resolve_governance_model_used :
   string * governance_model_source
 (** Picks the internal model id for empty-model diagnostics.
     [raw_model] (trimmed non-empty) wins for classification; otherwise
-    falls back to [canonical_model_id], otherwise the unknown sentinel branch.
+    falls back to [canonical_model_id], otherwise the unknown source branch.
     The returned id is always the neutral [runtime] lane so dashboard state does
     not expose concrete provider/model identity. *)
 

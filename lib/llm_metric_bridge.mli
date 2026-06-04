@@ -24,7 +24,7 @@ val emit_http_status :
 (** Emit a single latency observation to the Prometheus histogram.  Values
     below 1ms are recorded as 1ms so fast calls still produce a non-zero
     histogram sum; non-positive inputs also increment
-    [masc_llm_provider_request_latency_clamped_total] so sentinel or missing
+    [masc_llm_provider_request_latency_clamped_total] so marker or missing
     durations remain visible.  [?provider] is optional because the OAS
     [on_request_end] callback currently carries only [model_id]; when omitted,
     the bridge uses the provider most recently observed for that model from

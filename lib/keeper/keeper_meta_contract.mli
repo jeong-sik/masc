@@ -451,7 +451,7 @@ val map_proactive_rt :
   keeper_meta
 (** Nested update of [m.runtime.proactive_rt]. *)
 
-(** {1 Removed model-arg sentinel list} *)
+(** {1 Removed model-arg marker list} *)
 
 val removed_keeper_model_arg_names : string list
 (** Names of removed keeper-creation tool arguments that have

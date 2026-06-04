@@ -86,7 +86,7 @@ let validate_file_path_r path : (string, masc_error) result =
 (* Ensure initialized                           *)
 (* ============================================ *)
 
-(* Typed sentinel for the not-initialized case.
+(* Typed marker for the not-initialized case.
 
    Before: [ensure_initialized] raised [Invalid_argument "MASC not
    initialized. Use masc_init first."], and four downstream catch

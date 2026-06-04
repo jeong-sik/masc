@@ -222,7 +222,7 @@ let goal_event_timeline_json event =
            with any legitimate value named "unknown" in the producer
            event stream, so the operator cannot tell "the payload
            field was missing" apart from "the producer sent the
-           string 'unknown'".  Bracketed sentinels are not emitted by
+           string 'unknown'".  Bracketed markers are not emitted by
            any producer, so a non-zero appearance is an unambiguous
            producer-side fix signal. *)
         let phase =

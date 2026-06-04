@@ -43,7 +43,7 @@ let top_item items =
 
 (* session_payload_json, session_meta_json, session_summary_json,
    session_team_health_json, session_communication_json,
-   session_status_string, session_recent_events, event_detail_json
+   session_status_opt, session_recent_events, event_detail_json
    are provided by Dashboard_utils (included above). *)
 
 let event_summary event_json =

@@ -821,10 +821,10 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
 let test_shell_snapshot_wire_returns_snapshot_when_published () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel = `Assoc [ "wire_sentinel", `String "snapshot-path" ] in
+  let marker = `Assoc [ "wire_marker", `String "snapshot-path" ] in
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
-       ~shell:sentinel ~tools:`Null
+       ~shell:marker ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Lib.Server_timing.create () in
   let json =
@@ -833,9 +833,9 @@ let test_shell_snapshot_wire_returns_snapshot_when_published () =
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
-    "snapshot path returns published sentinel"
+    "snapshot path returns published marker"
     "snapshot-path"
-    (json |> member "wire_sentinel" |> to_string);
+    (json |> member "wire_marker" |> to_string);
   let header = Lib.Server_timing.to_header_value timing in
   Alcotest.(check bool)
     "Server-Timing header records snapshot_read phase on hit"
@@ -870,8 +870,8 @@ let test_shell_snapshot_wire_light_reads_shell_light () =
      recompute. *)
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Lib.Dashboard_snapshot.reset_for_test ();
-  let full = `Assoc [ "wire_sentinel", `String "full-shell" ] in
-  let light = `Assoc [ "wire_sentinel", `String "light-shell" ] in
+  let full = `Assoc [ "wire_marker", `String "full-shell" ] in
+  let light = `Assoc [ "wire_marker", `String "light-shell" ] in
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
        ~shell:full ~shell_light:light ~tools:`Null
@@ -885,7 +885,7 @@ let test_shell_snapshot_wire_light_reads_shell_light () =
   Alcotest.(check string)
     "light=true returns the published shell_light projection"
     "light-shell"
-    (json |> member "wire_sentinel" |> to_string);
+    (json |> member "wire_marker" |> to_string);
   let header = Lib.Server_timing.to_header_value timing in
   Alcotest.(check bool)
     "Server-Timing records snapshot_read on light hit"
@@ -964,10 +964,10 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
 let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel = `Assoc [ "tools_sentinel", `String "from-snapshot" ] in
+  let marker = `Assoc [ "tools_marker", `String "from-snapshot" ] in
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
-       ~shell:`Null ~tools:sentinel
+       ~shell:`Null ~tools:marker
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
   let timing = Lib.Server_timing.create () in
   let json =
@@ -976,9 +976,9 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
-    "actor-less snapshot path returns published sentinel"
+    "actor-less snapshot path returns published marker"
     "from-snapshot"
-    (json |> member "tools_sentinel" |> to_string);
+    (json |> member "tools_marker" |> to_string);
   Alcotest.(check bool)
     "Server-Timing header records snapshot_read phase on hit"
     true
@@ -1000,11 +1000,11 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
 let test_telemetry_summary_snapshot_wire_returns_snapshot () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel = `Assoc [ "tele_sentinel", `String "from-snapshot" ] in
+  let marker = `Assoc [ "tele_marker", `String "from-snapshot" ] in
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
        ~shell:`Null ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:sentinel ());
+       ~namespace_truth:`Null ~telemetry_summary:marker ());
   let timing = Lib.Server_timing.create () in
   let json =
     Lib.Server_dashboard_snapshot_select.select_telemetry_summary_json
@@ -1012,9 +1012,9 @@ let test_telemetry_summary_snapshot_wire_returns_snapshot () =
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
-    "telemetry_summary snapshot path returns published sentinel"
+    "telemetry_summary snapshot path returns published marker"
     "from-snapshot"
-    (json |> member "tele_sentinel" |> to_string);
+    (json |> member "tele_marker" |> to_string);
   Lib.Dashboard_snapshot.reset_for_test ()
 
 let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
@@ -1041,13 +1041,13 @@ let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
 let test_project_snapshot_wire_returns_snapshot_when_populated () =
   with_test_env @@ fun ~env ~sw ~config:_ ->
   Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel =
-    `Assoc [ "namespace_truth_sentinel", `String "from-snapshot" ]
+  let marker =
+    `Assoc [ "namespace_truth_marker", `String "from-snapshot" ]
   in
   Lib.Dashboard_snapshot.publish_for_test
     (Lib.Dashboard_snapshot.make_for_test
        ~shell:`Null ~tools:`Null
-       ~namespace_truth:sentinel ~telemetry_summary:`Null ());
+       ~namespace_truth:marker ~telemetry_summary:`Null ());
   let clock = Eio.Stdenv.clock env in
   let state = Lib.Mcp_server.create_state ~base_path:"/tmp/rfc-0138-step3" in
   let req = request "/api/v1/dashboard/project-snapshot" in
@@ -1058,9 +1058,9 @@ let test_project_snapshot_wire_returns_snapshot_when_populated () =
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
-    "populated snapshot path returns published sentinel"
+    "populated snapshot path returns published marker"
     "from-snapshot"
-    (json |> member "namespace_truth_sentinel" |> to_string);
+    (json |> member "namespace_truth_marker" |> to_string);
   Alcotest.(check bool)
     "Server-Timing header records snapshot_read phase on hit"
     true

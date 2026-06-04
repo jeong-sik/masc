@@ -117,7 +117,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          if is_error
          then (
            (* Error turns: first candidate model or runtime_id. No silent
-              [__error__] sentinel — refuse the row so caller sees the
+              [__error__] marker — refuse the row so caller sees the
               attribution gap typed. *)
            let model_result : (string, parse_error) result =
              match first_candidate_model model_attribution_field_sets with

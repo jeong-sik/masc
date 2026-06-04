@@ -138,11 +138,11 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0116 | KCR fallback cap mechanism parity — explicit counter at spec ↔ visited-list a... | Implemented | 0e03bdd30b 2026-06-01 | - |
 | 0117 | KCR item-health representation parity — typed Degraded variant + spec cooldow... | Implemented | a7b9f1f8d0 2026-05-31 | - |
 | 0118 | KCT NoTerminalRuntime S1 — typed Result at select_runtime boundary + Zombie m... | Implemented | a7b9f1f8d0 2026-05-31 | - |
-| 0119 | Observer spec mapping table drift lint — sentinel-marker validator for OCaml↔... | Implemented | 5d40169f17 2026-05-24 | - |
+| 0119 | Observer spec mapping table drift lint — guard-marker validator for OCaml↔... | Implemented | 5d40169f17 2026-05-24 | - |
 | 0120 | Cross-spec set-name divergence — 3-class classification framework (STALE / DE... | Implemented | a7b9f1f8d0 2026-05-31 | - |
 | 0121 | Config-dir resolution — single active root, no implicit fallback | Active | a7296801a7 2026-06-01 | - |
 | 0122 | Keeper disk pressure — process-local fleet failure mode beyond FD | Implemented | 7abc844904 2026-06-01 | - |
-| 0123 | Briefing last_event fabrication — option-typed write boundary, sunset read-si... | Implemented | 5d40169f17 2026-05-24 | - |
+| 0123 | Briefing last_event fabrication — option-typed write boundary | Implemented | 5d40169f17 2026-05-24 | - |
 | 0124 | Keeper Admission Denial Boundary | Draft | 649344f41d 2026-05-17 | - |
 | 0125 | Bounded subprocess discipline: per-call Switch scope + Fiber.first timeout race | Active | a7296801a7 2026-06-01 | - |
 | 0126 | Silent fallback discipline (typed split for option/result wildcard arms) | Implemented | a7b9f1f8d0 2026-05-31 | - |
@@ -317,9 +317,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 - [RFC-0116 — KCR fallback cap mechanism parity — explicit counter at spec ↔ visited-list at runtime](RFC-0116-kcr-fallback-cap-mechanism-parity.md)
 - [RFC-0117 — KCR item-health representation parity — typed Degraded variant + spec cooldown action + PerKeeperIsolation correction](RFC-0117-kcr-health-state-representation-parity.md)
 - [RFC-0118 — KCT NoTerminalRuntime S1 — typed Result at select_runtime boundary + Zombie mapping correction](RFC-0118-kct-terminal-runtime-contract.md)
-- [RFC-0119 — Observer spec mapping table drift lint — sentinel-marker validator for OCaml↔TLA+ collapse projections](RFC-0119-observer-spec-mapping-table-drift-lint.md)
+- [RFC-0119 — Observer spec mapping table drift lint — guard-marker validator for OCaml↔TLA+ collapse projections](RFC-0119-observer-spec-mapping-table-drift-lint.md)
 - [RFC-0122 — Keeper disk pressure — process-local fleet failure mode beyond FD](RFC-0122-keeper-disk-pressure.md)
-- [RFC-0123 — Briefing last_event fabrication — option-typed write boundary, sunset read-side sentinel](RFC-0123-briefing-last-event-fabrication-write-boundary.md)
+- [RFC-0123 — Briefing last_event fabrication — option-typed write boundary](RFC-0123-briefing-last-event-fabrication-write-boundary.md)
 - [RFC-0126 — Silent fallback discipline (typed split for option/result wildcard arms)](RFC-0126-silent-fallback-discipline.md)
 - [RFC-0129 — Runtime attempt idle-cap: kill the reserve_fraction band-aid](RFC-0129-http-idle-timeout-and-streaming-progress.md)
 - [RFC-0131 — Shell Command Gate facade — multi-caller IR-first validation](RFC-0131-shell-command-gate-facade.md)

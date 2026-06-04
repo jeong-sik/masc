@@ -167,9 +167,9 @@ let test_ensure_workspace_bootstrap_does_not_clobber_existing_state () =
       let config = Workspace.default_config dir in
       B.ensure_workspace_bootstrap config;
       let state_path = Workspace_utils.state_path config in
-      (* Replace the seeded state with a sentinel JSON. *)
+      (* Replace the seeded state with a marker JSON. *)
       let oc = open_out state_path in
-      output_string oc "{\"sentinel\":\"do not clobber\"}";
+      output_string oc "{\"marker\":\"do not clobber\"}";
       close_out oc;
       (* Re-bootstrap. *)
       B.ensure_workspace_bootstrap config;
@@ -180,7 +180,7 @@ let test_ensure_workspace_bootstrap_does_not_clobber_existing_state () =
         String.length body > 0
         && (try
               let _ = Str.search_forward
-                       (Str.regexp_string "sentinel") body 0
+                       (Str.regexp_string "marker") body 0
               in true
             with Not_found -> false)))
 

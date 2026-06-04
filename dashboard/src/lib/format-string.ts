@@ -1,7 +1,7 @@
 // Unified string formatting utilities.
 
 /**
- * User-visible sentinel string for missing scalar data in panel rows.
+ * User-visible marker string for missing scalar data in panel rows.
  *
  * `'--'` is the dashboard's convention for "value not present" in metadata
  * tables (RuntimeMetaRow, ConfigRow, supervisor cohort summary, fleet

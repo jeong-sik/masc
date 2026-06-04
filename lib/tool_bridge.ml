@@ -32,7 +32,7 @@ module Float = Stdlib.Float
 
     Tool outputs above [default_externalize_threshold_bytes] are stored
     in the content-addressed blob store ([Tool_blob_store]) and the
-    OAS [content] field carries a sentinel marker
+    OAS [content] field carries a blob marker
     ([Tool_output.encode_for_oas (Stored {...})]). Smaller outputs flow
     through unchanged.
 

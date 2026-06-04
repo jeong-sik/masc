@@ -285,6 +285,7 @@ const runtimeBlockerLabels = {
   runtime_exhausted: '런타임 후보 소진',
   no_tool_capable_provider: '도구 실행 런타임 없음',
   provider_runtime_error: '런타임 호출 오류',
+  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   fiber_unresolved: 'Fiber 미해결',
   stale_turn_timeout: '오래된 턴 만료',
   stale_termination_storm: 'Stale 종료 폭주',
@@ -349,7 +350,10 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
     return '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
   }
   if (blockerClass === 'no_tool_capable_provider') {
-    return '도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.'
+    return '요구 도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.'
+  }
+  if (blockerClass === 'tool_route_recoverable_failure') {
+    return '도구 라우팅이 복구 가능한 실패로 끝나 descriptor, tool surface, runtime lane 확인이 필요합니다.'
   }
   if (blockerClass === 'provider_runtime_error') {
     return '런타임 호출 경계가 keeper 진행 전에 실패했습니다.'

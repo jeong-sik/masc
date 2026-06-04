@@ -75,7 +75,7 @@ After three rounds of grep verification this RFC settled on a *read-time join* r
 
 At read time, `lib/telemetry_unified.ml` and `lib/tool_agent_timeline.ml` join each `.masc/oas-events/` row to the turn that owns it. The join is in two stages:
 
-1. **Time-overlap match** (primary). The row's `ts_unix` is checked against `keeper_runtime_manifest` (§4.2) turn windows `[turn_started_at, turn_ended_at]`. Each row belongs to the unique turn whose window contains its `ts_unix`. If no window contains the row (pre-deploy data, ungoverned bus events), the row is grouped under a sentinel `"unscoped"` bucket.
+1. **Time-overlap match** (primary). The row's `ts_unix` is checked against `keeper_runtime_manifest` (§4.2) turn windows `[turn_started_at, turn_ended_at]`. Each row belongs to the unique turn whose window contains its `ts_unix`. If no window contains the row (pre-deploy data, ungoverned bus events), the row is grouped under a marker `"unscoped"` bucket.
 2. **Id-prefix match** (fallback, optional). When multiple turns overlap the same wall-clock instant (concurrent keepers), the manifest also records `correlation_id_first` — the first OAS envelope id observed *during* the turn. Rows whose `correlation_id` shares the same provider-side prefix (an `evt-<pid>-<us_hex>-<n>` pattern, see `oas/lib/event_envelope.ml:24`) can be disambiguated by matching the prefix. This is a refinement; time-overlap alone resolves the common case.
 
 The result is the same envelope shape an in-jsonl stamp would produce, but assembled at the API boundary:
@@ -128,7 +128,7 @@ val read :
 
 - when `keeper_name` is set, scan `keeper_runtime_manifest` (§4.2) for matching turns, then merge the 6 sources keyed on those turn ids. `.masc/oas-events/` rows are joined to turns by the time-overlap algorithm in §4.1 (each row's `ts_unix` falls inside a `[turn_started_at, turn_ended_at]` window).
 - when `goal_id` is set, scan the manifest for turns with matching `goal_id`, then same merger + time-overlap join.
-- when `group_by = `Turn`, the merger output is post-grouped by `keeper_turn_id` with a chronological header per group. Rows that did not match any turn window go to a `"unscoped"` sentinel group at the tail.
+- when `group_by = `Turn`, the merger output is post-grouped by `keeper_turn_id` with a chronological header per group. Rows that did not match any turn window go to a `"unscoped"` marker group at the tail.
 
 Two HTTP routes mirror the `lib/dashboard_runtime.ml` shape:
 
@@ -188,7 +188,7 @@ If RFC-0081 ships and RFC-OAS-019 stalls, masc does *not* take on receive-side a
 1. `curl localhost:8935/api/v1/keeper/<name>/timeline?since=1h | jq -e '.groups | length > 0'`.
 2. `curl localhost:8935/api/v1/goal/<id>/timeline | jq '.groups[0].events[0].kind'` returns a known event kind.
 3. Time-overlap join: a synthetic `keeper_runtime_manifest` row with a known `[turn_started_at, turn_ended_at]` window plus 5 `.masc/oas-events/` rows whose `ts_unix` fall inside the window produce a `groups` array of length 1 with 5 events under the expected `keeper_turn_id`.
-4. Unscoped bucket: a `.masc/oas-events/` row outside any turn window is returned under the `"unscoped"` sentinel group, not silently dropped.
+4. Unscoped bucket: a `.masc/oas-events/` row outside any turn window is returned under the `"unscoped"` marker group, not silently dropped.
 
 ### Gate 3 — Pivot UI (Phase 2 frontend)
 

@@ -30,11 +30,11 @@ export function formatRelativeAgeMs(ageMs: number): string {
 }
 
 /**
- * Sentinel string returned when a time-related helper has no input to format.
+ * Marker string returned when a time-related helper has no input to format.
  *
  * Exposed so call sites that compare against it (e.g. unwrapping the
  * fallback back to `null` in keeper-shared.formatTime) don't have to
- * duplicate the literal — changing the displayed sentinel here updates
+ * duplicate the literal — changing the displayed marker here updates
  * every comparison automatically. Tests in `format-time.test.ts`
  * deliberately keep the literal so the assertion documents the
  * user-visible string.

@@ -70,7 +70,7 @@ CONSTANTS
 
 \* Abstract klass alphabet.  Pinned in the spec (not parameterized via
 \* CONSTANTS) so the OCaml ↔ TLA+ correspondence harness can grep the
-\* literal set.  "none" is the sentinel emitted when no blocker class
+\* literal set.  "none" is the marker emitted when no blocker class
 \* was stamped; "sdk_token_budget_exceeded" is the single overflow-
 \* relevant klass that Track A's blocker_class_indicates_overflow
 \* returns true for.  The other two are representative non-overflow

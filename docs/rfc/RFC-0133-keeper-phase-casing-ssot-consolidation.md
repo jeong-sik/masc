@@ -95,7 +95,7 @@ const KeeperCompositePhaseSchema = pipe(
 )
 ```
 
-Schema returns either a canonical `KeeperPhase` literal or a typed `{unknown: string}` carrier. Consumers `match` exhaustively; unknown variants surface explicitly in the UI rather than coercing to a sentinel.
+Schema returns either a canonical `KeeperPhase` literal or a typed `{unknown: string}` carrier. Consumers `match` exhaustively; unknown variants surface explicitly in the UI rather than coercing to a marker.
 
 ### 4.3 Display point
 

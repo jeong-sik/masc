@@ -14,7 +14,7 @@
 
     Tool outputs above [externalize_threshold_bytes ()] are stored in
     the content-addressed blob store ([Tool_blob_store]) and the OAS
-    [content] field carries a sentinel marker
+    [content] field carries a blob marker
     ([Tool_output.encode_for_oas (Stored ...)]).
 
     Disabled when [MASC_BASE_PATH] is unset OR when [MASC_TOOL_EXTERNALIZE]

@@ -172,7 +172,6 @@ type t =
   | LifecycleTransitions
   | LifecycleCallbackFailures
   | CompactionCallbackRecoveries
-  | BriefingSessionLastEventSource
   | EventBusDrain
   | SupervisorCleanupFailures
   | SlotForceReleased
@@ -399,8 +398,6 @@ let to_string = function
   | LifecycleCallbackFailures -> "masc_keeper_lifecycle_callback_failures_total"
   | CompactionCallbackRecoveries ->
     "masc_keeper_compaction_callback_recoveries_total"
-  | BriefingSessionLastEventSource ->
-    "masc_briefing_session_last_event_source_total"
   | EventBusDrain -> "masc_keeper_event_bus_drain_total"
   | SupervisorCleanupFailures -> "masc_keeper_supervisor_cleanup_failures_total"
   | SlotForceReleased -> "masc_keeper_slot_force_released_total"

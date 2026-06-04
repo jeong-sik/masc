@@ -51,7 +51,7 @@
 type error_kind =
   | Sandbox_docker (** ["sandbox docker exec failed ..."] family. *)
   | Stale_turn_timeout (** ["stale_turn_timeout(...)"] supervisor guard. *)
-  | Fiber_unresolved (** ["fiber_unresolved"] sentinel from turn lifecycle. *)
+  | Fiber_unresolved (** ["fiber_unresolved"] marker from turn lifecycle. *)
   | Provider_timeout
       (** Provider-timeout family. Legacy ["oas_timeout_budget_loop(...)"] text is
           normalized here instead of becoming its own root cause. *)

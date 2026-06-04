@@ -61,7 +61,7 @@ type session_seed = {
   session_id : string;
   goal : string;
   namespace : string option;
-  status : string;
+  status : string option;
   health : string;
   member_names : string list;
   last_activity_at : string option;
@@ -155,7 +155,7 @@ val session_meta_json : Yojson.Safe.t -> Yojson.Safe.t
 val session_summary_json : Yojson.Safe.t -> Yojson.Safe.t
 val session_team_health_json : Yojson.Safe.t -> Yojson.Safe.t
 val session_communication_json : Yojson.Safe.t -> Yojson.Safe.t
-val session_status_string : Yojson.Safe.t -> string
+val session_status_opt : Yojson.Safe.t -> string option
 val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
 val event_detail_json : Yojson.Safe.t -> Yojson.Safe.t
 val severity_rank : string -> int

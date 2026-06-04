@@ -18,7 +18,7 @@
     - 8 JSON field accessors now in {!Dashboard_utils}
       ([session_payload_json], [session_meta_json],
       [session_summary_json], [session_team_health_json],
-      [session_communication_json], [session_status_string],
+      [session_communication_json], [session_status_opt],
       [session_recent_events], [event_detail_json]),
       re-exported via {!Dashboard_execution_helpers}.
       [event_summary] stays private here.

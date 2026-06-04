@@ -440,7 +440,7 @@ A0 이후 이 9개 타입에 arm을 추가할 때:
 **Files**:
 - `lib/exec/parser/bash_lexer.mll` — token 분류, quote mode
 - `lib/exec/parser/bash_subset.mly` — 8-12 productions
-- `lib/exec/parser/bash.ml/.mli` — parse_string wrapper + 50ms timeout + PARSE_ABORTED sentinel
+- `lib/exec/parser/bash.ml/.mli` — parse_string wrapper + 50ms timeout + PARSE_ABORTED marker
 
 **Exit criteria**:
 - T0 corpus 재생: Parsed 비율 ≥ 70% simple+pipe+redir

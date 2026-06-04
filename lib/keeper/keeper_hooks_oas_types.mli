@@ -190,7 +190,7 @@ val stop_reason_label_stop_sequence : string
 val stop_reason_label_unknown : string
 
 val zero_usage : Agent_sdk.Types.api_usage
-(** Internal: zero-token api_usage sentinel used by classify_usage_trust
+(** Internal: zero-token api_usage marker used by classify_usage_trust
     when telemetry is missing. *)
 
 val telemetry_has_canonical_model_id :

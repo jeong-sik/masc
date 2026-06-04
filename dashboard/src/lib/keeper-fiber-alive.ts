@@ -35,7 +35,7 @@ interface FiberAliveInput {
   readonly composite: KeeperCompositeSnapshot | null
   /** Result of `linkedRuntimeState(keeper)` — a string state ('offline'
    *  or other). Pass through as-is; this module only checks the
-   *  offline sentinel to inform the lowest-priority fallback. */
+   *  offline marker to inform the lowest-priority fallback. */
   readonly linkedState: string
 }
 

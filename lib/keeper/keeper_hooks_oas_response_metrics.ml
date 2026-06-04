@@ -44,10 +44,10 @@ let resolve_after_turn_model ~keeper_name
   if String.equal raw_model "" then begin
     let source =
       let source_telemetry_resolved = "telemetry_resolved" in
-      let source_unknown_sentinel = "unknown_sentinel" in
+      let source_unknown_source = "unknown_source" in
       if telemetry_has_canonical_model_id response.telemetry then
         source_telemetry_resolved
-      else source_unknown_sentinel
+      else source_unknown_source
     in
     Prometheus.inc_counter empty_response_model_metric
       ~labels:[ (label_keeper, keeper_name); (label_source, source) ] ();

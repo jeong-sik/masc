@@ -54,15 +54,15 @@ let test_done_within_timeout () =
   | Bounded_proc.Timeout elapsed ->
     failf "unexpected timeout after %.3fs" elapsed
 
-(* Sentinel string lets the post-timeout pgrep probe distinguish our
+(* Marker string lets the post-timeout pgrep probe distinguish our
    subprocess from unrelated [sleep] commands on the host. *)
 let test_timeout_kills_process () =
   with_env @@ fun ~clock ~process_mgr ~cwd ->
-  let sentinel = "__bounded_proc_rfc0109_sentinel__" in
+  let marker = "__bounded_proc_rfc0109_marker__" in
   let outcome =
     Bounded_proc.run_argv_with_timeout ~clock ~process_mgr ~cwd
       ~timeout_s:0.5
-      [ "sh"; "-c"; Printf.sprintf "sleep 10 # %s" sentinel ]
+      [ "sh"; "-c"; Printf.sprintf "sleep 10 # %s" marker ]
   in
   (match outcome with
    | Bounded_proc.Timeout elapsed ->
@@ -70,7 +70,7 @@ let test_timeout_kills_process () =
    | Bounded_proc.Done _ ->
      failf "expected Timeout, got Done");
   check bool "OS process terminated after switch release" false
-    (process_exists sentinel)
+    (process_exists marker)
 
 let test_stderr_capture () =
   with_env @@ fun ~clock ~process_mgr ~cwd ->

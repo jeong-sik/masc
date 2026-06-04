@@ -227,7 +227,7 @@ let write_heartbeat_snapshot
         jaccard_similarity user_message assistant_message
       | _ ->
         (* Unmeasurable (status_tick, heartbeat, empty reply): use the
-           sentinel [1.0] so the plan gate [<= 0.100] and guardrail gate
+           marker [1.0] so the plan gate [<= 0.100] and guardrail gate
            [<= floor] do NOT fire. [0.0] was a permissive default that
            conflated "no alignment measurable" with "no alignment at
            all", triggering auto_plan on every status_tick (#10012).
@@ -235,7 +235,7 @@ let write_heartbeat_snapshot
         1.0
     in
     (* status_tick / heartbeat turns lack a user/assistant pair, so the 0.0
-       fallbacks above are sentinels, not measurements. Mark the snapshot
+       fallbacks above are markers, not measurements. Mark the snapshot
        non-measurable and let Keeper_guard fail-closed on similarity gates. *)
     let similarity_measurable =
       Option.is_some latest_user_message

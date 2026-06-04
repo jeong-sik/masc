@@ -43,7 +43,7 @@ OAS 0.159.0부터 비대화형 CLI transport(`transport_cli-tool-d`, `transport_
 | `OAS_CLI_TOOL_B_SANDBOX=read-only\|workspace-write\|danger-full-access` | CLI-Tool-B | `-s <v>` |
 | `OAS_CLI_TOOL_B_PROFILE=<name>` | CLI-Tool-B | `-p <name>` (`~/.agent-code/config.toml`의 profile) |
 | `OAS_CLI_TOOL_B_SKIP_GIT=1` | CLI-Tool-B | `--skip-git-repo-check` |
-| `OAS_CLI_TOOL_C_NO_MCP=1` | CLI-Tool-C | sentinel whitelist(`__oas_no_mcp__`)로 MCP 전부 OFF |
+| `OAS_CLI_TOOL_C_NO_MCP=1` | CLI-Tool-C | marker whitelist(`__oas_no_mcp__`)로 MCP 전부 OFF |
 | `OAS_CLI_TOOL_C_ALLOWED_MCP=a,b` | CLI-Tool-C | per-서버 whitelist |
 | `OAS_CLI_TOOL_C_APPROVAL_MODE=default\|auto_edit\|yolo\|plan` | CLI-Tool-C | `--approval-mode <v>`, set 되면 `config.yolo` 무시 |
 | `OAS_CLI_TOOL_C_EXTENSIONS=a,b` | CLI-Tool-C | 각 항목마다 `-e` |

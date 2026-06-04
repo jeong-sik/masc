@@ -70,7 +70,6 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
 (** Detect server-side request body parse errors (e.g. Ollama yyjson
@@ -117,7 +116,6 @@ let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _ -> false
   | Agent_sdk.Error.Io _ -> false
   | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.A2a _ -> false
   | Agent_sdk.Error.Internal _ -> false
 
 let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
@@ -135,7 +133,6 @@ let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _ -> false
   | Agent_sdk.Error.Io _ -> false
   | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.A2a _ -> false
   | Agent_sdk.Error.Internal _ -> false
 
 let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
@@ -157,7 +154,6 @@ let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _ -> false
   | Agent_sdk.Error.Io _ -> false
   | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.A2a _ -> false
 
 (** Provider-level timeout (not structural OAS wall-clock budget). *)
 let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
@@ -183,7 +179,6 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _ -> false
   | Agent_sdk.Error.Io _ -> false
   | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.A2a _ -> false
   | Agent_sdk.Error.Internal _ -> false
 
 (* 524 is Cloudflare's "origin responded too slowly" timeout. At keeper
@@ -510,7 +505,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Serialization _
          | Agent_sdk.Error.Io _
          | Agent_sdk.Error.Orchestration _
-         | Agent_sdk.Error.A2a _
          | Agent_sdk.Error.Internal _ -> None)
 
 let normalized_runtime_id ~catalog_names name =
@@ -583,20 +577,8 @@ let degraded_rotation_candidates
     or different runtime will not satisfy the contract. Non-contract
     errors (provider timeout, rate limit, server error) are transient
     and should allow cycling through candidates again. *)
-let is_completion_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
-    true
-  | Agent_sdk.Error.Api _
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
-  | Agent_sdk.Error.Internal _ -> false
+let is_completion_contract_violation (_ : Agent_sdk.Error.sdk_error) : bool =
+  false
 
 let degraded_rotation_after_recoverable_error
     ?fallback_hint
@@ -719,7 +701,6 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
   | Agent_sdk.Error.Agent (ToolRetryExhausted _)
-  | Agent_sdk.Error.Agent (CompletionContractViolation _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
   | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
@@ -730,7 +711,6 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
 (** Extract the [InputRequired] payload from an [sdk_error], if any.
@@ -759,7 +739,6 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
   | Agent_sdk.Error.Agent (ToolRetryExhausted _)
-  | Agent_sdk.Error.Agent (CompletionContractViolation _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
   | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
@@ -770,7 +749,6 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
 (** [true] when an error represents terminal runtime exhaustion or a

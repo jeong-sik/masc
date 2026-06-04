@@ -36,8 +36,7 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
       | Agent_sdk.Error.Config _
       | Agent_sdk.Error.Serialization _
       | Agent_sdk.Error.Io _
-      | Agent_sdk.Error.Orchestration _
-      | Agent_sdk.Error.A2a _ -> false)
+      | Agent_sdk.Error.Orchestration _ -> false)
   (* All other MASC-internal classifications are unambiguous failures. *)
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Capacity_backpressure _)
@@ -86,7 +85,6 @@ let reclassify_error_after_side_effect
       | Agent_sdk.Error.Serialization _
       | Agent_sdk.Error.Io _
       | Agent_sdk.Error.Orchestration _
-      | Agent_sdk.Error.A2a _
       | Agent_sdk.Error.Internal _ -> false
     in
     Keeper_turn_driver.sdk_error_of_masc_internal_error
@@ -116,7 +114,6 @@ let post_commit_failure_kind_of_error (err : Agent_sdk.Error.sdk_error) =
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> Keeper_registry.Post_commit_failure
 
 let summarize_post_commit_failure

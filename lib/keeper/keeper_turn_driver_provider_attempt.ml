@@ -219,7 +219,6 @@ let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
 let capacity_backpressure_indicators = [
@@ -315,7 +314,6 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> None
 
 let fallback_class_hard_quota = "hard_quota"

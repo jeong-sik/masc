@@ -44,31 +44,6 @@ let agent_completed_result_fields = function
     ]
 ;;
 
-;;
-
-let json_contract_violation_detail
-  (detail : Agent_sdk.Completion_contract_violation_detail.t option)
-  =
-  match detail with
-  | None -> `Null
-  | Some (detail : Agent_sdk.Completion_contract_violation_detail.t) ->
-    `Assoc
-      [ ( "called_tools"
-        , Json_util.json_string_list
-            detail.Agent_sdk.Completion_contract_violation_detail.called_tools )
-      ; ( "satisfying_tools"
-        , Json_util.json_string_list
-            detail.Agent_sdk.Completion_contract_violation_detail.satisfying_tools )
-      ; ( "rejection_reasons"
-        , `List
-            (List.map
-               (fun (tool_name, reason) ->
-                  `Assoc
-                    [ "tool_name", `String tool_name; "reason", `String reason ])
-               detail.Agent_sdk.Completion_contract_violation_detail.rejection_reasons) )
-      ]
-;;
-
 let network_error_kind_to_wire = function
   | Llm_provider.Http_client.Connection_refused -> "connection_refused"
   | Llm_provider.Http_client.Dns_failure -> "dns_failure"
@@ -146,13 +121,6 @@ let sdk_agent_error_fields = function
     ; "attempts", `Int attempts
     ; "limit", `Int limit
     ; "detail", `String detail
-    ]
-  | Agent_sdk.Error.CompletionContractViolation
-      { contract; reason; violation_detail } ->
-    [ "variant", `String "completion_contract_violation"
-    ; "contract", `String (Agent_sdk.Completion_contract_id.to_string contract)
-    ; "reason", `String reason
-    ; "violation_detail", json_contract_violation_detail violation_detail
     ]
   | Agent_sdk.Error.GuardrailViolation { validator; reason } ->
     [ "variant", `String "guardrail_violation"
@@ -256,29 +224,6 @@ let sdk_orchestration_error_fields = function
     [ "variant", `String "discovery_failed"
     ; "url", `String url
     ; "detail", `String detail
-    ]
-;;
-
-let sdk_a2a_error_fields = function
-  | Agent_sdk.Error.TaskNotFound { task_id } ->
-    [ "variant", `String "task_not_found"; "task_id", `String task_id ]
-  | Agent_sdk.Error.InvalidTransition { task_id; from_state; to_state } ->
-    [ "variant", `String "invalid_transition"
-    ; "task_id", `String task_id
-    ; "from_state", `String from_state
-    ; "to_state", `String to_state
-    ]
-  | Agent_sdk.Error.MessageSendFailed { task_id; detail } ->
-    [ "variant", `String "message_send_failed"
-    ; "task_id", `String task_id
-    ; "detail", `String detail
-    ]
-  | Agent_sdk.Error.ProtocolError { detail } ->
-    [ "variant", `String "protocol_error"; "detail", `String detail ]
-  | Agent_sdk.Error.StoreCapacityExceeded { current; max } ->
-    [ "variant", `String "store_capacity_exceeded"
-    ; "current", `Int current
-    ; "max", `Int max
     ]
 ;;
 
@@ -403,7 +348,6 @@ let sdk_error_detail_fields (error : Agent_sdk.Error.sdk_error) =
   | Agent_sdk.Error.Serialization error -> sdk_serialization_error_fields error
   | Agent_sdk.Error.Io error -> sdk_io_error_fields error
   | Agent_sdk.Error.Orchestration error -> sdk_orchestration_error_fields error
-  | Agent_sdk.Error.A2a error -> sdk_a2a_error_fields error
   | Agent_sdk.Error.Internal message ->
     [ "variant", `String "internal"; "message", `String message ]
 ;;

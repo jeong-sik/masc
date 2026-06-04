@@ -19,7 +19,6 @@ type sdk_termination_semantics =
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable
-  | Oas_contract_violation
   | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation

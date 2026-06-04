@@ -42,8 +42,8 @@ of `lib/`. Those numbers are stale. Re-derived against the current tree:
 | Direction | Count | Meaning |
 |---|---|---|
 | **rest → keeper** (cycle-creating) | **0** | No *extracted sub-library* holds a compile-time reference to a `Keeper_` module. |
-| keeper → flat-ns mega-lib (`masc`) | **~70 distinct modules** | The G1-relevant forward refs. These are co-resident in `masc` today; they decide whether a keeper sub-lib can be carved without a dune cycle. |
-| keeper → already-extracted sub-lib | **~63 distinct modules** | Not a blocker — declared as `(libraries ...)` deps in the new keeper `dune`. |
+| keeper → flat-ns mega-lib (`masc`) | **92 distinct modules** | The G1-relevant forward refs. These are co-resident in `masc` today; they decide whether a keeper sub-lib can be carved without a dune cycle. |
+| keeper → already-extracted sub-lib | **121 distinct modules** | Not a blocker — declared as `(libraries ...)` deps in the new keeper `dune`. |
 | flat-ns *top-level* `.ml` → keeper | **140 files** | Caller-delta input (G5), not a cycle. See §6. |
 
 Why `rest → keeper = 0` is a structural fact, not a two-sample induction: the
@@ -55,29 +55,38 @@ confirm this: `lib/types/types_core.ml:477` (`[Keeper_config_text]`) and
 `lib/cancel_safe/cancel_safe.ml:15` (`[Keeper_callback_failure.record]`) are
 both doc-comments; neither `dune` lists keeper as a dependency.
 
-**Measurement honesty.** The ~70 / ~63 split is a grep approximation
-(`\b[A-Z][a-z][A-Za-z0-9_]*\.` extraction, classified against extracted-sublib
-`(modules ...)` lists and flat-ns basenames). It is the *audit input*, not the
-source of truth. The authoritative per-PR check is
+**Measurement honesty.** The 92 / 121 split is a grep approximation
+(`\b[A-Z][a-z][A-Za-z0-9_]*\.` extraction; flat-ns vs sub-lib decided by
+walking `lib/` recursively and classifying each module by whether its directory
+falls under a dir that owns a `(library ...)` dune stanza). It is the *audit
+input*, not the source of truth, and the 92 is a **lower bound** at the file
+level — modules pulled in via `(modules :standard)` sub-lib dunes or via
+`Agent_sdk` submodules land in the opam/unresolved bucket and are not
+re-attributed. The authoritative per-PR check is
 `scripts/audit-sublib-cycle.py` (the G1 verifier, wired into CI in #19824) run
 against the real `dune describe` graph on the proposed final file set. Each PR
 self-checks with it before review — this is RFC-0056 §3.4's stance ("the audit
 script is the durable artifact").
 
-### 1.2 The ~70 flat-ns forward refs are the real blocker
+### 1.2 The 92 flat-ns forward refs are the real blocker
 
 The distinct flat-ns mega-lib modules keeper reaches (the G1 cycle risk) cluster
-into the execution / observability mesh:
+into the execution / runtime / observability mesh:
 
 ```
 Admission_queue Agent_sdk_metrics_bridge Agent_sdk_response Approval_callbacks
 Audit_log Auth Board Board_core_classify Board_dispatch Config
-Context_compact_oas Context_overflow_action_tracker Docker_spawn_throttle
-Drift_guard Eval_gate Eval_harness Exec_core Failure_envelope
-Governance_pipeline Governance_registry Inference_utils Llm_metric_bridge
-Lockfree_atomic Masc_context_injector Masc_eio_env Masc_event_bus
-Masc_oas_bridge Memory_hooks Memory_oas_bridge Observability_redact
-Persona_dispatch_ref Progress Prometheus Prometheus_hotpath
+Context_compact_oas Context_overflow_action_tracker Dashboard_attribution
+Dashboard_governance_metrics Dashboard_harness_health Dashboard_surface_readiness
+Docker_spawn_throttle Drift_guard Eval_gate Eval_harness Exec_core
+Failure_envelope Governance_pipeline Governance_registry Inference_utils
+Json_field Llm_metric_bridge Lockfree_atomic Masc_context_injector
+Masc_eio_env Masc_event_bus Masc_grpc_client Masc_grpc_transport
+Masc_grpc_types Masc_oas_bridge Memory_hooks Memory_oas_bridge
+Observability_redact Operator_control Operator_pending_confirm Otel_genai
+Persona_dispatch_ref Progress Prometheus Prometheus_hotpath Runtime
+Runtime_agent Runtime_agent_context Runtime_attempt_fsm Runtime_candidate
+Runtime_deadline Runtime_inference Runtime_metrics Runtime_oas_runner
 Runtime_observation Runtime_observation_query_operation Runtime_params
 Sandbox_error Server_startup_state Shutdown Sse Task Telemetry_coverage_gap
 Timeout_policy Token_count Tool_agent Tool_agent_timeline
@@ -85,15 +94,18 @@ Tool_assignment_telemetry Tool_board Tool_board_dispatch Tool_board_registry
 Tool_bridge Tool_control Tool_input_validation Tool_library
 Tool_local_runtime Tool_local_runtime_core Tool_misc Tool_misc_web_fetch
 Tool_plan Tool_resource_gate Tool_run Tool_shard Tool_telemetry
-Tool_workspace Transport_metrics Turn_mode_codec Verification Workspace
-Workspace_dispatch_ref
+Tool_workspace Transport_metrics Turn_mode_codec Verification Voice_bridge
+Voice_session_manager Workspace Workspace_dispatch_ref
 ```
 
-These fall into three families: cross-cutting infra (`Prometheus`,
+These fall into families: cross-cutting infra (`Prometheus`,
 `Governance_registry`, `Runtime_params`, `Shutdown`, `Sse`,
-`Telemetry_coverage_gap`), the tool surface (`Tool_*`), and the
-execution/board hub (`Board_*`, `Exec_core`, `Workspace`, `Eval_*`,
-`Verification`). A keeper sub-lib that references any of these would form
+`Telemetry_coverage_gap`), the runtime layer (`Runtime`, `Runtime_agent*`,
+`Runtime_candidate`, `Runtime_deadline`, `Runtime_oas_runner` — note RFC-0206's
+"runtime rebirth" is a separate flat-ns block keeper leans on heavily), the tool
+surface (`Tool_*`), the execution/board hub (`Board_*`, `Exec_core`,
+`Workspace`, `Eval_*`, `Verification`), and sinks (`Dashboard_*`, `Voice_*`,
+`Otel_genai`). A keeper sub-lib that references any of these would form
 `masc → masc.keeper → masc` — a cycle. Extraction order is therefore decided by
 **flat-ns fan-out** (what a cluster reaches *outward* into the mega-lib), not by
 fan-in.
@@ -176,30 +188,34 @@ Fan-in is shown for context but does not gate extraction.
 
 | Order | Cluster | Modules | flat-ns fan-out (G1 blockers) | Distinct flat-ns refs |
 |---|---|---|---|---|
-| 1 | credential (`keeper_persona_authoring*`) | 3 | **3** | `Agent_sdk_response`, `Approval_callbacks`, `Masc_oas_bridge` |
-| 2 | registry (`keeper_registry_*`) | 19 | 6 | `Admission_queue`, `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Sse` |
-| 3 | error-classify (`*failure*`, `*error_class*`) | 31 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Telemetry_coverage_gap`, `Workspace` |
-| 4 | runtime-binding (`keeper_heartbeat*`/`keeper_runtime*`/`keeper_attempt*`) | 30 | 6 | `Governance_registry`, `Prometheus`, `Runtime_params`, `Sse`, `Telemetry_coverage_gap`, `Workspace` |
+| 1 | credential (`keeper_persona_authoring*`) | 3 | **5** | `Agent_sdk_response`, `Approval_callbacks`, `Masc_oas_bridge`, `Runtime`, `Runtime_agent` |
+| 2 | registry (`keeper_registry_*`) | 19 | 7 | `Admission_queue`, `Dashboard_attribution`, `Governance_registry`, `Prometheus`, `Runtime_params`, `Shutdown`, `Sse` |
+| 3 | error-classify (`*failure*`, `*error_class*`) | 31 | 7 | `Governance_registry`, `Prometheus`, `Runtime`, `Runtime_params`, `Shutdown`, `Telemetry_coverage_gap`, `Workspace` |
+| 4 | runtime-binding (`keeper_heartbeat*`/`keeper_runtime*`/`keeper_attempt*`) | 30 | 7 | `Governance_registry`, `Prometheus`, `Runtime_attempt_fsm`, `Runtime_params`, `Sse`, `Telemetry_coverage_gap`, `Workspace` |
 | 5 | hooks (`keeper_hook_oas_*`, `keeper_guard_*`) | ~9 | TBD (medium per workflow audit) | re-run G1 before scheduling |
 | 6 | state-fsm (`keeper_turn_*`, `keeper_working_*`, `keeper_reconcile_*`, `keeper_lifecycle_*`) | ~41 | TBD | extract after 1–4 establish base |
 | 7 | observability (`keeper_alert_*`, `keeper_metric_*`, `keeper_event_*`, `keeper_trace_*`) | ~13 | TBD (sink — many writers) | mid-campaign |
 | 8 | execution (`keeper_agent_run_*`, `keeper_tool_*`, `keeper_sandbox_*`, `keeper_run_*`) | ~70 | highest | last — the mesh hub |
 
 **Recommended first extraction: credential (`keeper_persona_authoring*`).**
-It is the smallest *decoupling surface* — 3 modules, 3 flat-ns refs to invert.
-But note the honest caveat: those 3 refs (`Agent_sdk_response`,
-`Approval_callbacks`, `Masc_oas_bridge`) are **not** credential-domain, so they
-cannot move into the credential sub-lib; they must be inverted (callback /
-interface) in a pre-work PR (§4.3) before the `dune` stanza. Clusters 2–4 have
+It is the smallest *decoupling surface* — 3 modules, 5 flat-ns refs to invert.
+But note the honest caveat: those 5 refs (`Agent_sdk_response`,
+`Approval_callbacks`, `Masc_oas_bridge`, `Runtime`, `Runtime_agent`) are **not**
+credential-domain, so they cannot move into the credential sub-lib; they must be
+inverted (callback / interface) in a pre-work PR (§4.3) before the `dune`
+stanza. The `Runtime` / `Runtime_agent` refs make the inversion larger than the
+fan-out number alone suggests — those are RFC-0206 runtime-layer modules that
+keeper persona authoring calls to resolve a runtime binding, and inverting them
+is the same shape of work clusters 3–4 will also need. Clusters 2–4 have
 fan-out dominated by shared infra (`Prometheus`, `Governance_registry`,
 `Runtime_params`, `Sse`), which is harder to invert because it is genuinely
-cross-cutting. Credential's 3 refs are point fixes; the infra refs are systemic.
-That asymmetry — not fan-in — is why credential goes first.
+cross-cutting. Credential's 5 refs are mostly point fixes; the infra refs are
+systemic. That asymmetry — not fan-in — is why credential goes first.
 
 If the §4.3 inversion proves larger than a single PR, registry (cluster 2) is
-the fallback first move: its 6 refs are all shared-infra modules that several
-*future* clusters also reach, so an infra-facing interface built for registry
-amortizes across 2–4.
+the fallback first move: its 7 refs are all shared-infra / sink modules that
+several *future* clusters also reach, so an infra-facing interface built for
+registry amortizes across 2–4.
 
 ### 5.1 Per-PR shape
 
@@ -234,7 +250,7 @@ is more decoupling, not a catch-all or a lint suppression.
   requires a decoupling PR first. The campaign front-loads that cost.
 - **Two PRs per cluster doubles review count.** Eight clusters → up to 16 PRs,
   versus RFC-0086's single bulk promotion. The bulk approach was rejected
-  because the §1.2 mesh has no single clean cut: a bulk move would carry all 70
+  because the §1.2 mesh has no single clean cut: a bulk move would carry all 92
   flat-ns refs at once and fail G1 in aggregate, with no incremental signal
   about which ref caused the cycle. Sequencing trades PR count for a
   per-cluster G1 signal.

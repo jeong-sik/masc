@@ -78,6 +78,30 @@ describe('dashboardHealthChips', () => {
       .toBe('활성=shell runtime, paused=상세 행 lifecycle, 설정=shell keeper inventory.')
   })
 
+  it('does not label an intentional server/base split as data source mismatch', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 1 },
+      keepers: [{ name: 'keeper-a', status: 'running' } as any],
+      runtimeResolution: {
+        status: 'warn',
+        warnings: [],
+        source_mismatch: false,
+        server_workspace_mismatch: true,
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips.find(chip => chip.key === 'source-mismatch')).toBeUndefined()
+    expect(chips).toContainEqual(expect.objectContaining({
+      key: 'server-workspace-split',
+      label: 'Server/base split',
+      tone: 'muted',
+      route: { tab: 'monitoring', params: { section: 'runtime' } },
+    }))
+  })
+
   it('uses namespace truth as the configured keeper count authority in health chips', () => {
     const chips = dashboardHealthChips({
       connected: true,

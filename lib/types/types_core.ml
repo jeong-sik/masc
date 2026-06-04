@@ -474,9 +474,9 @@ type task_execution_links = {
     same fan-in-0 pattern): it was deprecated and ignored by task claim
     routing, always normalized to [[]] by [Workspace_task_classify], had no
     production reader, and the keeper turn layer rejects the [required_tools]
-    key outright (#19806, [Keeper_config_text]). The same-named fields on
-    [Tool_call_quality_benchmark] and [Dashboard_keeper_feature_catalog] are
-    unrelated types and are untouched. *)
+    key outright (#19806, [Keeper_config_text]). Later cleanup removed the
+    same-named dashboard and tool-call benchmark fields too, so the string no
+    longer names any task, dashboard, or benchmark contract surface. *)
 type task_contract = {
   strict : bool; [@default false]
   completion_contract : string list; [@default []]

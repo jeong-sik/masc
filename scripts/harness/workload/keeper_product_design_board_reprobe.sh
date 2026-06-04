@@ -42,7 +42,6 @@ KEEPER_TURN_TIMEOUT_SEC="${KEEPER_TURN_TIMEOUT_SEC:-600}"
 INIT_TIMEOUT_SEC="${INIT_TIMEOUT_SEC:-60}"
 POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-900}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
-REQUIRED_TOOLS="${REQUIRED_TOOLS:-keeper_board_post}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-product-design-board-reprobe}"
@@ -75,7 +74,6 @@ Environment:
   POLL_INTERVAL_SEC        Poll interval in seconds.
   MSG_TIMEOUT_SEC          HTTP request timeout for MCP tool calls.
   KEEPER_TURN_TIMEOUT_SEC  Per-keeper Agent.run timeout_sec sent to masc_keeper_msg.
-  REQUIRED_TOOLS           CSV required_tools sent to masc_keeper_msg.
   RUN_AUDIT=0              Skip final audit.
 EOF
 }
@@ -383,7 +381,6 @@ Required action:
 5. After the tool call, reply with one compact JSON object:
    {"run_id":"$RUN_ID","keeper":"$keeper","hearth":"product-design","keeper_board_post":true,"product_evidence":true,"design_evidence":true,"blocker":null}
 
-This prompt is sent with masc_keeper_msg.required_tools=["keeper_board_post"].
 If keeper_board_post is unavailable or policy-blocked, stop and reply with the exact blocker instead of substituting another surface.
 EOF
 }
@@ -404,9 +401,8 @@ send_prompts() {
       jq -cn \
         --arg name "$keeper" \
         --arg message "$prompt" \
-        --arg required_tools_csv "$REQUIRED_TOOLS" \
         --argjson timeout "$KEEPER_TURN_TIMEOUT_SEC" \
-        '{name:$name,message:$message,timeout_sec:$timeout,required_tools:($required_tools_csv | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | map(select(length > 0)))}'
+        '{name:$name,message:$message,timeout_sec:$timeout}'
     )"
     log "sending product/design prompt to $keeper"
     payload="$(tool_call "keeper-product-design-msg-$keeper-$RUN_ID" "masc_keeper_msg" "$args" "$MSG_TIMEOUT_SEC")"

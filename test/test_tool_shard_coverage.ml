@@ -7,7 +7,6 @@
     Pure synchronous tests — no Eio or network required. *)
 
 module Tool_shard = Masc.Tool_shard
-module Dashboard_keeper_feature_catalog = Masc.Dashboard_keeper_feature_catalog
 module Tool_shard_types = Tool_shard_types
 module Tool_shard_types_schemas_execute = Tool_shard_types_schemas_execute
 module Types = Masc_domain
@@ -28,17 +27,6 @@ let schema_description name schemas =
   match List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name) schemas with
   | Some schema -> schema.description
   | None -> Alcotest.failf "missing schema: %s" name
-;;
-
-let feature_by_id id =
-  match
-    List.find_opt
-      (fun (feature : Dashboard_keeper_feature_catalog.feature_spec) ->
-         String.equal feature.id id)
-      Dashboard_keeper_feature_catalog.tool_features
-  with
-  | Some feature -> feature
-  | None -> Alcotest.failf "missing feature: %s" id
 ;;
 
 let get_json_assoc key = function
@@ -98,15 +86,12 @@ let test_user_facing_alias_copy_is_canonical () =
     | Some shard -> shard.description
     | None -> Alcotest.fail "search_files shard not found"
   in
-  let search_feature = feature_by_id "search_files_tools" in
   let surface_text =
     String.concat
       "\n"
       [ execute_description
       ; read_description
       ; search_shard_description
-      ; search_feature.label
-      ; search_feature.next_action
       ]
   in
   List.iter

@@ -12,7 +12,7 @@ let test_resolve_bind_state_skips_read_only_lookup () =
   Alcotest.(check bool) "lookup skipped" false !called;
   Alcotest.(check bool) "read-only defaults false" false bound
 
-let test_resolve_bind_state_checks_bind_required_tools () =
+let test_resolve_bind_state_checks_bind_gated_tools () =
   let called = ref false in
   let bound =
     Masc.Mcp_server_eio_execute.resolve_bind_state
@@ -77,7 +77,7 @@ let () =
           , test_resolve_bind_state_skips_read_only_lookup )
         ; ( "resolve_bind_state checks bind-gated tools"
           , `Quick
-          , test_resolve_bind_state_checks_bind_required_tools )
+          , test_resolve_bind_state_checks_bind_gated_tools )
         ; ( "resolve_bind_state skips unknown agent"
           , `Quick
           , test_resolve_bind_state_skips_unknown_agent )

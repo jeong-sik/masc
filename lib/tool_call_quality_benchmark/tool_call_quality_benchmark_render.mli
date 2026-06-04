@@ -45,7 +45,7 @@ val summary_row_to_yojson :
 
     [provider] / [model] / [keeper_profile] (group key triple) +
     [cases_total] / [cases_passed] (count pair) +
-    [task_pass_rate] / [correct_tool_rate] / [arg_valid_rate] /
+    [task_pass_rate] / [tool_policy_rate] / [arg_valid_rate] /
     [recovery_rate] / [unnecessary_tool_rate] / [avg_tool_calls] /
     [p95_latency_ms] / [avg_input_tokens] / [avg_output_tokens] /
     [avg_cost_usd] / [composite_score] (per-row metrics) +

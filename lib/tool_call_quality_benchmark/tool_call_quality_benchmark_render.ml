@@ -62,7 +62,7 @@ let summary_row_to_yojson (row : summary_row) =
       ("cases_total", `Int row.cases_total);
       ("cases_passed", `Int row.cases_passed);
       ("task_pass_rate", `Float row.task_pass_rate);
-      ("correct_tool_rate", `Float row.correct_tool_rate);
+      ("tool_policy_rate", `Float row.tool_policy_rate);
       ("arg_valid_rate", `Float row.arg_valid_rate);
       ("recovery_rate", `Float row.recovery_rate);
       ("unnecessary_tool_rate", `Float row.unnecessary_tool_rate);
@@ -134,7 +134,7 @@ let summary_rows_to_csv ~view summary =
       "cases_total";
       "cases_passed";
       "task_pass_rate";
-      "correct_tool_rate";
+      "tool_policy_rate";
       "arg_valid_rate";
       "recovery_rate";
       "unnecessary_tool_rate";
@@ -161,7 +161,7 @@ let summary_rows_to_csv ~view summary =
       Int.to_string row.cases_total;
       Int.to_string row.cases_passed;
       Printf.sprintf "%.4f" row.task_pass_rate;
-      Printf.sprintf "%.4f" row.correct_tool_rate;
+      Printf.sprintf "%.4f" row.tool_policy_rate;
       Printf.sprintf "%.4f" row.arg_valid_rate;
       Printf.sprintf "%.4f" row.recovery_rate;
       Printf.sprintf "%.4f" row.unnecessary_tool_rate;

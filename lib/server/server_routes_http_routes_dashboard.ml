@@ -672,13 +672,6 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-feature-proof" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let n =
-           let raw = match Server_utils.query_param req "n" with
-             | Some s -> int_of_string_opt s |> Option.value ~default:5000
-             | None -> 5000
-           in
-           max 1 (min 50000 raw)
-         in
          let window_hours =
            match Server_utils.query_param req "window_hours" with
            | Some s ->
@@ -688,31 +681,19 @@ let add_routes ~sw ~clock router =
               | Some _ | None -> None)
            | None -> None
          in
-         let success_threshold_pct =
-           match Server_utils.query_param req "success_threshold_pct" with
-           | Some s ->
-             (match float_of_string_opt s with
-              | Some value when Float.is_finite value ->
-                Some (max 0.0 (min 100.0 value))
-              | Some _ | None -> None)
-           | None -> None
-         in
          let config = state.Mcp_server.workspace_config in
          let cache_key =
-           Printf.sprintf "keeper_feature_proof:%s:%d:%s:%s"
-             config.base_path n
+           Printf.sprintf "keeper_feature_proof:%s:%s"
+             config.base_path
              (match window_hours with
               | Some w -> Printf.sprintf "%.2f" w
-              | None -> "-")
-             (match success_threshold_pct with
-              | Some p -> Printf.sprintf "%.2f" p
               | None -> "-")
          in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_keeper_feature_proof.json
-                 ~config ~n ?window_hours ?success_threshold_pct ()))
+                 ~config ?window_hours ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

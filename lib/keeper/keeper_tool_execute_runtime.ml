@@ -302,6 +302,12 @@ let handle_tool_execute_typed
             ~cmd
             effective_stages
         in
+        let root_git_cwd_error =
+          match root_git_cwd_error with
+          | Some e -> Some e
+          | None ->
+            Keeper_tool_execute_command_semantics.misuse_error_of_stages effective_stages
+        in
         let input = input_with_cwd cwd input in
         let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, _sandbox_network_mode =

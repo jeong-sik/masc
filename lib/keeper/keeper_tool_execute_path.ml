@@ -7,15 +7,36 @@ let normalize_repo_cwd_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
+type currency_cache_entry =
+  { at : float
+  ; outcome : Playground_repo_readiness.currency_outcome option
+  }
+
 (* Currency-sync fetch-rate cache. [Playground_repo_readiness.ensure_current]
    fetches origin before deciding whether to fast-forward, so calling it on
    every repo-targeting tool call would refetch many times per turn. This is a
    per-clone-path rate cache for an *idempotent* operation (not a failure
    cooldown): the fetch+advance runs at most once per [currency_min_interval_sec]
    per clone, which bounds the cost to roughly once per keeper turn. *)
-let currency_last_sync : (string, float) Hashtbl.t = Hashtbl.create 64
+let currency_sync_cache : (string, currency_cache_entry) Hashtbl.t =
+  Hashtbl.create 64
 
 let currency_min_interval_sec = 30.0
+
+let log_currency_outcome ~repo_name = function
+  | Playground_repo_readiness.Up_to_date -> ()
+  | Advanced commits ->
+    Log.Keeper.info "currency: advanced sandbox repo %s by %d commit(s)"
+      repo_name commits
+  | Preserved reason ->
+    (* Local/divergent work kept. Keep this visible: otherwise a dirty or
+       task-branch sandbox looks like the runtime simply forgot to update. *)
+    Log.Keeper.info "currency: preserved sandbox repo %s (%s)" repo_name reason
+  | Skipped reason ->
+    (* Currency could not be established (missing/corrupt clone, no
+       credential, or fetch failure). Visible by default so a recurring
+       failure does not re-freeze the repo invisibly. *)
+    Log.Keeper.info "currency: skipped sandbox repo %s (%s)" repo_name reason
 
 (* Keep the keeper's sandbox clone current with origin/<default_branch> before
    code work. Best-effort: a failed advance never fails the turn, but
@@ -23,35 +44,36 @@ let currency_min_interval_sec = 30.0
    advance is fast-forward-only and work-preserving (see [Playground_repo_readiness]).
    The typed outcome is logged rather than dropped: a [Skipped] sync is the very
    "repo silently frozen" failure this exists to fix, so it stays visible. *)
-let sync_repo_currency_best_effort ~config ~meta ~repo_name =
+let repo_currency_outcome_best_effort ~config ~meta ~repo_name =
   let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
   let now = Unix.gettimeofday () in
+  let cached = Hashtbl.find_opt currency_sync_cache cpath in
   let due =
-    match Hashtbl.find_opt currency_last_sync cpath with
-    | Some last -> now -. last >= currency_min_interval_sec
+    match cached with
+    | Some { at; _ } -> now -. at >= currency_min_interval_sec
     | None -> true
   in
   if due then begin
-    Hashtbl.replace currency_last_sync cpath now;
     try
-      match Playground_repo_readiness.ensure_current ~config ~meta ~repo_name () with
-      | Playground_repo_readiness.Up_to_date -> ()
-      | Advanced commits ->
-        Log.Keeper.info "currency: advanced sandbox repo %s by %d commit(s)"
-          repo_name commits
-      | Preserved reason ->
-        (* Local/divergent work kept. Keep this visible: otherwise a dirty or
-           task-branch sandbox looks like the runtime simply forgot to update. *)
-        Log.Keeper.info "currency: preserved sandbox repo %s (%s)" repo_name reason
-      | Skipped reason ->
-        (* Currency could not be established (missing/corrupt clone, no
-           credential, or fetch failure). Visible by default so a recurring
-           failure does not re-freeze the repo invisibly. *)
-        Log.Keeper.info "currency: skipped sandbox repo %s (%s)" repo_name reason
+      let outcome =
+        Playground_repo_readiness.ensure_current ~config ~meta ~repo_name ()
+      in
+      log_currency_outcome ~repo_name outcome;
+      Hashtbl.replace currency_sync_cache cpath { at = now; outcome = Some outcome };
+      Some outcome
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> ()
+    | _ ->
+      Hashtbl.replace currency_sync_cache cpath { at = now; outcome = None };
+      None
   end
+  else
+    match cached with
+    | Some { outcome; _ } -> outcome
+    | None -> None
+
+let sync_repo_currency_best_effort ~config ~meta ~repo_name =
+  ignore (repo_currency_outcome_best_effort ~config ~meta ~repo_name)
 
 let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
   let playground =
@@ -83,6 +105,85 @@ let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
         let repo_root = normalize_repo_cwd_path repo_root in
         Some (repo_name, repo_root, repo_root, [ repo_root ])
       | _ -> None
+
+let normalize_command_name command_name =
+  let command_name = Filename.basename command_name |> String.lowercase_ascii in
+  if String.ends_with ~suffix:".exe" command_name
+  then String.sub command_name 0 (String.length command_name - String.length ".exe")
+  else command_name
+
+let git_subcommand args =
+  let rec scan = function
+    | [] -> None
+    | ("-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace") :: _value :: rest ->
+      scan rest
+    | arg :: rest
+      when String.starts_with ~prefix:"-C" arg && String.length arg > 2 ->
+      scan rest
+    | arg :: rest
+      when String.starts_with ~prefix:"--git-dir=" arg
+           || String.starts_with ~prefix:"--work-tree=" arg
+           || String.starts_with ~prefix:"--namespace=" arg ->
+      scan rest
+    | arg :: rest when String.starts_with ~prefix:"-" arg -> scan rest
+    | subcommand :: _ -> Some (String.lowercase_ascii subcommand)
+  in
+  scan args
+
+let git_subcommand_is_direct_repo_diagnostic = function
+  | "status" | "branch" | "log" | "diff" | "remote" | "rev-parse" | "fetch"
+  | "worktree" ->
+    true
+  | _ -> false
+
+let direct_repo_diagnostic_command ir =
+  match Keeper_tool_execute_command_semantics.effective_stages_of_ir ir with
+  | [ stage ] when String.equal (normalize_command_name stage.bin) "git" -> (
+    match git_subcommand stage.args with
+    | Some subcommand -> git_subcommand_is_direct_repo_diagnostic subcommand
+    | None -> false)
+  | _ -> false
+
+let repo_currency_not_ready_error ~repo_name ~reason ~cwd =
+  Printf.sprintf
+    "sandbox_repo_stale: sandbox repo root repos/%s is not current and was \
+     preserved (%s). Direct repo-root Execute is blocked so the agent does not \
+     run against stale local state. Use cwd=\"repos/%s/.worktrees/<task>\" for \
+     task work, or run diagnostic git status/branch/log/diff/remote/rev-parse/\
+     fetch/worktree and clean, stash, or repair the sandbox repo root before \
+     retrying. cwd=%s"
+    repo_name
+    reason
+    repo_name
+    cwd
+
+let validate_repo_cwd_currency_ready
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(cwd : string)
+      (ir : Masc_exec.Shell_ir.t)
+  =
+  match repo_path_context ~config ~meta cwd with
+  | None -> Ok ()
+  | Some (repo_name, repo_root, path_root, _accepted_toplevels)
+    when not
+           (String.equal
+              (normalize_repo_cwd_path repo_root)
+              (normalize_repo_cwd_path path_root)) ->
+    Ok ()
+  | Some (repo_name, _repo_root, _path_root, _accepted_toplevels) ->
+    if direct_repo_diagnostic_command ir then Ok ()
+    else
+      match repo_currency_outcome_best_effort ~config ~meta ~repo_name with
+      | Some Playground_repo_readiness.Up_to_date | Some (Advanced _) -> Ok ()
+      | Some (Preserved reason) | Some (Skipped reason) ->
+        Error (repo_currency_not_ready_error ~repo_name ~reason ~cwd)
+      | None ->
+        Error
+          (repo_currency_not_ready_error
+             ~repo_name
+             ~reason:"currency probe failed"
+             ~cwd)
 
 type execution_location_scope =
   | Playground_root

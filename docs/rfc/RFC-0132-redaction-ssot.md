@@ -111,7 +111,7 @@ Decomposed by shape:
 | `lib/keeper/keeper_unified_turn.ml` | 18 | `runtime_lane_label` |
 | `lib/keeper/keeper_agent_result.ml` | 62 | `runtime_lane_label` |
 | `lib/keeper/keeper_hooks_oas.ml` | 48 | `runtime_lane_label` |
-| `lib/keeper/keeper_hooks_oas_types.ml` | 11 | `runtime_lane_label` |
+| `lib/keeper_hooks_oas_types/keeper_hooks_oas_types.ml` | 11 | `runtime_lane_label` |
 | `lib/keeper/keeper_unified_metrics_support.ml` | 79, 187 | `runtime_lane_label`, literal |
 | `lib/keeper/keeper_status_runtime.ml` | 13, 219 | array literal members |
 

@@ -249,3 +249,26 @@ let is_board_surface_name name =
   | Some tool -> is_keeper_board_tool tool
   | None -> List.mem name legacy_masc_board_surface_names
 ;;
+
+let strip_mcp_masc_prefix name =
+  if String.starts_with ~prefix:"mcp__masc__" name
+  then String.sub name 11 (String.length name - 11)
+  else name
+;;
+
+let is_board_write_surface_name name =
+  let name = strip_mcp_masc_prefix name in
+  match of_string name with
+  | Some Board_comment
+  | Some Board_curation_submit
+  | Some Board_post
+  | Some Board_vote -> true
+  | Some _ | None ->
+    List.mem
+      name
+      [ "masc_board_comment"
+      ; "masc_board_curation_submit"
+      ; "masc_board_post"
+      ; "masc_board_vote"
+      ]
+;;

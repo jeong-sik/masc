@@ -78,8 +78,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_hooks_oas_introspection.mli` - hook-observation
 - `lib/keeper/keeper_hooks_oas_response_metrics.ml` - hook-observation
 - `lib/keeper/keeper_hooks_oas_response_metrics.mli` - hook-observation
-- `lib/keeper/keeper_hooks_oas_types.ml` - hook-observation
-- `lib/keeper/keeper_hooks_oas_types.mli` - hook-observation
+- `lib/keeper_hooks_oas_types/keeper_hooks_oas_types.ml` - hook-observation
+- `lib/keeper_hooks_oas_types/keeper_hooks_oas_types.mli` - hook-observation
 - `lib/keeper/keeper_hooks_oas.ml` - hook-observation
 - `lib/keeper/keeper_hooks_oas.mli` - hook-observation
 - `lib/keeper/keeper_sandbox_containment.ml` - sandbox-runtime

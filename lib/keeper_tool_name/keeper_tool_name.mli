@@ -72,3 +72,8 @@ val public_mcp_non_descriptor_names : string list
 (** Returns true for keeper board wrapper names and legacy public
     [masc_board_*] names without depending on the central [Tool_name] enum. *)
 val is_board_surface_name : string -> bool
+
+(** Returns true for mutating board write surfaces that require extra keeper
+    board-write guard accounting. Handles keeper-owned names, legacy
+    [masc_board_*] names, and the MCP transport prefix. *)
+val is_board_write_surface_name : string -> bool

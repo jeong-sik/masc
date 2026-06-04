@@ -258,15 +258,9 @@ let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
   || usage.cache_read_input_tokens > 0
 
 let is_keeper_board_write_tool_name tool_name =
-  match Keeper_tool_resolution.canonical_tool_name tool_name with
-  | "keeper_board_post"
-  | "keeper_board_comment"
-  | "keeper_board_vote"
-  | "keeper_board_curation_submit" -> true
-  | _ -> false
+  Keeper_tool_name.is_board_write_surface_name tool_name
 
-let current_keeper_model meta =
-  let _ = meta in
+let current_keeper_model _meta =
   runtime_lane_label
 
 let stop_reason_label_end_turn = "end_turn"

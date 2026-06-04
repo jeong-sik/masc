@@ -1365,6 +1365,8 @@
 
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
+(include stanzas/test_keeper_tool_name.inc)
+
 (include stanzas/test_keeper_failure_policy.inc)
 
 (include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)

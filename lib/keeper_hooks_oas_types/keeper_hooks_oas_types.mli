@@ -177,7 +177,7 @@ val is_keeper_board_write_tool_name : string -> bool
 (** [true] when the tool writes to the shared MASC board; subject to
     extra guard rules. *)
 
-val current_keeper_model : Keeper_meta_contract.keeper_meta -> string
+val current_keeper_model : 'a -> string
 (** Neutral runtime lane used for keeper-facing tool-call telemetry.
     Concrete provider/model identity is OAS-owned. *)
 

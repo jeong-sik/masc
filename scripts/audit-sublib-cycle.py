@@ -71,6 +71,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_hash_algo",
     "masc.keeper_container_name",
     "masc.keeper_runtime_manifest_types",
+    "masc.keeper_registry_types_kill_class",
     "masc.keeper_tool_name",
     "masc.keeper_id",
     "masc.keeper_terminal_reason",

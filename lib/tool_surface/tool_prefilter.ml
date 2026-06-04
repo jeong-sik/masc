@@ -187,13 +187,6 @@ let synonyms : (string * string list) list =
       ; "task finished"
       ; "done with task"
       ] )
-  ; ( "keeper_task_submit_for_verification"
-    , [ "submit for verification"
-      ; "request verification"
-      ; "ready for review"
-      ; "send to verification"
-      ; "handoff to verifier"
-      ] )
   ; ( "keeper_task_force_release"
     , [ "release task"
       ; "unassign task"

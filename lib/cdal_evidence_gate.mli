@@ -1,6 +1,6 @@
 (** Cdal_evidence_gate — explicit task verification evidence surface.
 
-    The evidence gate for [submit_for_verification] / [submit_pr_evidence].
+    The evidence gate for [submit_for_verification].
     Normal [Done_action] completion is LLM-reviewed by
     {!Anti_rationalization}; it is not redirected through a verifier keeper.
 

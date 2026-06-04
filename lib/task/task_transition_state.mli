@@ -94,7 +94,6 @@ type transition_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
-  | Submit_pr_evidence
 
 (** Closed-enum classification of the [InvalidState] error message.
     Derived from the [Tool_task.validate_transition] surface and the

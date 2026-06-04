@@ -74,7 +74,7 @@ let synthesize_summary_from_siblings args =
 
    Exit-class actions:
      Done_action / Cancel / Release / Submit_for_verification /
-     Submit_pr_evidence / Approve_verification / Reject_verification
+     Approve_verification / Reject_verification
    Entry-class actions (no summary required):
      Claim / Start
 
@@ -87,7 +87,6 @@ let transition_action_requires_summary : Masc_domain.task_action -> bool =
   | Masc_domain.Cancel
   | Masc_domain.Release
   | Masc_domain.Submit_for_verification
-  | Masc_domain.Submit_pr_evidence
   | Masc_domain.Approve_verification
   | Masc_domain.Reject_verification ->
     true

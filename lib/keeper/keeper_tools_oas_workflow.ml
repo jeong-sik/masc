@@ -353,17 +353,11 @@ let workflow_scope_key_of_input ~tool_name input =
                action
                task_id
                correction_marker))
-     | "keeper_task_done"
-     | "keeper_task_submit_for_verification" ->
+     | "keeper_task_done" ->
        (match task_id_part json with
         | None -> None
         | Some task_id ->
-          let correction_marker =
-            if String.equal tool_name "keeper_task_submit_for_verification"
-            then ":" ^ workflow_submit_evidence_marker json
-            else ""
-          in
-          Some (Printf.sprintf "%s:task=%s%s" tool_name task_id correction_marker))
+          Some (Printf.sprintf "%s:task=%s" tool_name task_id))
      | "keeper_task_claim" -> Some "keeper_task_claim"
      | _ -> None)
   | _ -> None

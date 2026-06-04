@@ -182,6 +182,70 @@ let manual_help_entry name =
           examples = [ "name='keeper_task_done'"; "name='masc_plan_set_task'" ];
           alternatives = [];
         }
+  | "keeper_task_done" ->
+      Some
+        {
+          name;
+          short_description =
+            "Mark your owned task done with completion notes and evidence.";
+          when_to_use =
+            "Use when the current keeper has finished an owned task and can cite concrete evidence in result/notes.";
+          key_constraints =
+            [
+              "Caller must own the task unless using a force tool.";
+              "Result should include PR, commit, file, or command evidence when applicable.";
+            ];
+          details_markdown =
+            "Completes the task directly. For PR-bearing work, include the PR URL or artifact reference in the result text instead of using a separate verification-evidence wrapper.";
+          doc_refs = [];
+          prompt_hints = [ "Prefer this over retired task verification wrapper tools." ];
+          examples =
+            [
+              "task_id='task-123' result='Opened PR https://github.com/org/repo/pull/42; checks: dune build target passed.'";
+            ];
+          alternatives = [];
+        }
+  | "keeper_memory_write" ->
+      Some
+        {
+          name;
+          short_description = "Persist a structured keeper memory entry.";
+          when_to_use =
+            "Use when a decision, constraint, open question, next step, or progress note should be searchable on later turns.";
+          key_constraints =
+            [
+              "kind must be one of the callable keeper memory kinds.";
+              "Do not use for transient scratch notes.";
+            ];
+          details_markdown =
+            "Writes a bounded structured memory note. The long_term kind is reserved for tool-result emission and is not accepted here.";
+          doc_refs = [];
+          prompt_hints = [];
+          examples =
+            [
+              "kind='decision' title='verification wrapper retired' content='Use keeper_task_done result evidence; do not call separate submit evidence wrappers.'";
+            ];
+          alternatives = [];
+        }
+  | "keeper_tasks_list" ->
+      Some
+        {
+          name;
+          short_description = "List MASC backlog tasks visible to this keeper.";
+          when_to_use =
+            "Use before claiming work, checking awaiting verification items, or diagnosing current task state.";
+          key_constraints =
+            [
+              "include_done defaults to false.";
+              "Use status to narrow the list when inspecting a specific lifecycle state.";
+            ];
+          details_markdown =
+            "Returns task_id, title, status, assignee, and priority for backlog tasks visible to the keeper.";
+          doc_refs = [];
+          prompt_hints = [];
+          examples = [ "status='todo' include_done=false limit=20" ];
+          alternatives = [];
+        }
   | "masc_tool_admin_snapshot" ->
       Some
         {

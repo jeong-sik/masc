@@ -28,8 +28,7 @@
     - [masc_transition]: only claim, start, heartbeat, done, release.
       cancel and force_* are NOT allowlisted.
     - [keeper_board_post]: any post at risk Low or Medium.
-    - [keeper_task_claim], [keeper_task_done],
-      [keeper_task_submit_for_verification]: standard autonomous flow.
+    - [keeper_task_claim], [keeper_task_done]: standard autonomous flow.
     - Structured search has no routine auto-approval rule.
 
     These rules are not persisted; they are part of the policy code surface

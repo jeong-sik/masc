@@ -41,6 +41,7 @@ Usage
 
 Exit codes: 0 = all leaves clean, 1 = boundary violation, 2 = usage/parse error.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,6 +61,8 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.attribution",
     # RFC-0056 Phase 1M: Shell IR execution policy and typed path errors.
     "masc.exec_policy",
+    # RFC-0056 Phase 1N: Keeper deterministic lifecycle FSM cluster.
+    "masc.keeper_state",
     # PR-S3 (LANE 2): Tool dispatch substrate. The gate enforces that the
     # Tool layer cannot pull keeper/runtime/telemetry back in via the mega-lib.
     "masc.masc_tool_dispatch",
@@ -169,7 +172,11 @@ def find_libraries(sexp: Sexp) -> list[Library]:
         ):
             req_node = _child(node, "requires")
             requires: tuple[str, ...] = ()
-            if req_node is not None and len(req_node) >= 2 and isinstance(req_node[1], list):
+            if (
+                req_node is not None
+                and len(req_node) >= 2
+                and isinstance(req_node[1], list)
+            ):
                 requires = tuple(u for u in req_node[1] if isinstance(u, str))
             libs.append(Library(name=name_node[1], uid=uid_node[1], requires=requires))
         for ch in node:
@@ -182,7 +189,9 @@ def find_libraries(sexp: Sexp) -> list[Library]:
 # --- core boundary check (pure; operates on a list of Library) ---------------
 
 
-def check(libs: list[Library], leaves: tuple[str, ...], mega: str = MEGA_LIB) -> list[Violation]:
+def check(
+    libs: list[Library], leaves: tuple[str, ...], mega: str = MEGA_LIB
+) -> list[Violation]:
     """Return a Violation for each leaf whose transitive requires reach mega.
 
     Pure over its inputs so the self-test can feed synthetic graphs.
@@ -250,7 +259,9 @@ def load_describe(root: str, describe_file: "str | None") -> Sexp:
             check=False,
         )
         if proc.returncode != 0:
-            raise RuntimeError(f"`dune describe` failed (rc={proc.returncode}):\n{proc.stderr.strip()}")
+            raise RuntimeError(
+                f"`dune describe` failed (rc={proc.returncode}):\n{proc.stderr.strip()}"
+            )
         text = proc.stdout
     parsed = parse(tokenize(text))
     # describe emits a single top-level sexp; unwrap if wrapped in a 1-list.
@@ -298,7 +309,9 @@ def self_test() -> int:
         ok = False
         print("SELF-TEST FAIL: buggy graph (transitive) reported NO violation")
     else:
-        print(f"self-test: buggy graph (transitive) -> violation {v_trans[0].path} (PASS)")
+        print(
+            f"self-test: buggy graph (transitive) -> violation {v_trans[0].path} (PASS)"
+        )
 
     print("SELF-TEST: ALL PASS" if ok else "SELF-TEST: FAILED")
     return 0 if ok else 1
@@ -308,11 +321,27 @@ def self_test() -> int:
 
 
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--root", default=".", help="dune project root (default: .)")
-    ap.add_argument("--describe-file", default=None, help="read a captured `dune describe` sexp instead of invoking dune")
-    ap.add_argument("--leaf", action="append", default=[], metavar="LIB", help="leaf library that must not depend on the mega-lib (repeatable; adds to defaults)")
-    ap.add_argument("--self-test", action="store_true", help="run the clean+buggy fixture dual-check and exit")
+    ap.add_argument(
+        "--describe-file",
+        default=None,
+        help="read a captured `dune describe` sexp instead of invoking dune",
+    )
+    ap.add_argument(
+        "--leaf",
+        action="append",
+        default=[],
+        metavar="LIB",
+        help="leaf library that must not depend on the mega-lib (repeatable; adds to defaults)",
+    )
+    ap.add_argument(
+        "--self-test",
+        action="store_true",
+        help="run the clean+buggy fixture dual-check and exit",
+    )
     args = ap.parse_args(argv)
 
     if args.self_test:
@@ -327,12 +356,17 @@ def main(argv: list[str]) -> int:
 
     libs = find_libraries(sexp)
     if not libs:
-        print("audit-sublib-cycle: no libraries found in describe output", file=sys.stderr)
+        print(
+            "audit-sublib-cycle: no libraries found in describe output", file=sys.stderr
+        )
         return 2
 
     violations = check(libs, leaves)
     if violations:
-        print("BOUNDARY VIOLATION: leaf library depends on the mega-library", file=sys.stderr)
+        print(
+            "BOUNDARY VIOLATION: leaf library depends on the mega-library",
+            file=sys.stderr,
+        )
         for v in violations:
             print(f"  {v.leaf}: " + " -> ".join(v.path), file=sys.stderr)
         print(
@@ -344,7 +378,9 @@ def main(argv: list[str]) -> int:
 
     checked = [name for name in leaves if any(lib.name == name for lib in libs)]
     noun = "library" if len(checked) == 1 else "libraries"
-    print(f"audit-sublib-cycle: OK - {len(checked)} leaf {noun} clean: {', '.join(checked) or '(none present)'}")
+    print(
+        f"audit-sublib-cycle: OK - {len(checked)} leaf {noun} clean: {', '.join(checked) or '(none present)'}"
+    )
     return 0
 
 

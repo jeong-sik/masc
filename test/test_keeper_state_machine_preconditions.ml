@@ -6,7 +6,7 @@
 
 open Alcotest
 
-module SM = Masc.Keeper_state_machine
+module SM = Keeper_state_machine
 module IC = Masc.Keeper_invariant_check
 module A = Attribution
 

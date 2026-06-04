@@ -5,7 +5,7 @@ open Alcotest
 
 module Audit = Masc.Keeper_transition_audit
 module KTF = Masc.Keeper_turn_fsm
-module KSM = Masc.Keeper_state_machine
+module KSM = Keeper_state_machine
 module P = Masc.Prometheus
 
 let fail = Alcotest.fail

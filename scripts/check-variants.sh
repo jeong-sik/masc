@@ -55,7 +55,7 @@ extract_ocaml_all_list() {
     ref_name=$(echo "$content" | head -1 | rg '\.([a-z_][a-zA-Z_0-9]*)' -o -r '$1' || true)
     if [ -n "$ref_module" ] && [ -n "$ref_name" ]; then
       snake_module=$(echo "$ref_module" | perl -pe 's/([A-Z])/_\L$1/g' | perl -pe 's/^_//')
-      for d in lib/keeper lib lib/workspace lib/server lib/dashboard; do
+      for d in lib/keeper_state lib/keeper lib lib/workspace lib/server lib/dashboard; do
         candidate="${REPO_ROOT}/${d}/${snake_module}.ml"
         if [ -f "$candidate" ]; then
           # Guard against infinite recursion: only follow one level.
@@ -89,7 +89,7 @@ extract_ocaml_type() {
   local include_module snake_module candidate resolved
   while IFS= read -r include_module; do
     snake_module=$(echo "$include_module" | perl -pe 's/([A-Z])/_\L$1/g' | perl -pe 's/^_//')
-    for d in lib/keeper lib lib/workspace lib/server lib/dashboard; do
+    for d in lib/keeper_state lib/keeper lib lib/workspace lib/server lib/dashboard; do
       candidate="${REPO_ROOT}/${d}/${snake_module}.ml"
       if [ -f "$candidate" ]; then
         resolved=$(extract_ocaml_type "$candidate" "$type_name")
@@ -181,7 +181,7 @@ check_pair() {
 
 echo "=== Check 1: KeeperStateMachine.phase (OCaml) vs KeeperPhase (TypeScript) ==="
 
-KSM_ML="lib/keeper/keeper_state_machine_phase.ml"
+KSM_ML="lib/keeper_state/keeper_state_machine_phase.ml"
 KP_TS="dashboard/src/types/core.ts"
 
 if [ -f "$KSM_ML" ] && [ -f "$KP_TS" ]; then

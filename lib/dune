@@ -379,6 +379,9 @@
    ;; RFC-0056 Phase 1M — Execution policy extracted to lib/exec_policy/.
    ;; Owns Shell IR command/path policy, allowlists, and typed path-check errors.
    masc.exec_policy
+   ;; RFC-0056 Phase 1N — Keeper_state_* deterministic FSM cluster extracted to
+   ;; lib/keeper_state/. Parent still references bare Keeper_state_* modules.
+   masc.keeper_state
    ;; RFC-0132 PR-1 — Boundary_redaction SSOT for external-surface
    ;; provider/model label redaction. Codemod in PR-2 routes "runtime"
    ;; literals in lib/runtime and lib/keeper through this leaf.

@@ -3,7 +3,7 @@
     Tests client-side serialization, response decoding, and transport
     selection logic without requiring a running gRPC server. *)
 
-module T = Masc.Masc_grpc_types
+module T = Masc_grpc_types
 
 (* ====== Client-side type round-trip tests ====== *)
 

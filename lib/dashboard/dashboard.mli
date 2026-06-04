@@ -59,3 +59,5 @@ val keepers_section : float -> section
 
 val generate : ?scope:scope -> Workspace_utils.config -> string
 val generate_compact : ?scope:scope -> Workspace_utils.config -> string
+
+val force_link : unit

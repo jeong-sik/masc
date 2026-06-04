@@ -1,6 +1,7 @@
 (** Namespace-truth read model and SSE snapshot broadcasting. *)
 
 open Server_dashboard_http_core
+open Server_dashboard_http_cache
 
 module Execution_surfaces = Server_dashboard_http_execution_surfaces
 module Namespace_truth_support = Server_dashboard_http_namespace_truth_support

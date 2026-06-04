@@ -233,14 +233,14 @@ let test_ws_enabled_blank_env_matches_runtime () =
     check bool "transport metrics treats blank as enabled" true
       (TM.ws_enabled ());
     check bool "runtime server treats blank as enabled" true
-      (Masc.Server_ws_standalone.is_enabled ()))
+      (Server_ws_standalone.is_enabled ()))
 
 let test_ws_enabled_normalized_env_matches_runtime () =
   with_env "MASC_WS_ENABLED" (Some " FALSE ") (fun () ->
     check bool "transport metrics normalizes false env" false
       (TM.ws_enabled ());
     check bool "runtime server normalizes false env" false
-      (Masc.Server_ws_standalone.is_enabled ()))
+      (Server_ws_standalone.is_enabled ()))
 
 let test_ws_runtime_listening_cache () =
   TM.set_ws_runtime_listening true;

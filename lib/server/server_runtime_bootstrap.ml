@@ -42,6 +42,18 @@ let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
    Only apply defaults when OCAMLRUNPARAM is not set, so operators
    can override at launch without code changes. *)
 let () =
+  ignore (Dashboard.force_link, Operator_tool.force_link);
+  Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
+  Transport_read_model.register_grpc_health_service_name Masc_grpc_server.health_service_name;
+  Transport_read_model.register_webrtc_status (fun () ->
+    { ice_server_urls = Server_webrtc_transport.configured_ice_server_urls ()
+    ; pending_offers = Server_webrtc_transport.pending_offer_count ()
+    ; active_peers = Server_webrtc_transport.active_peer_count ()
+    ; live_connections = Server_webrtc_transport.live_webrtc_count ()
+    ; connected_channels = Server_webrtc_transport.connected_channel_count ()
+    });
+  Dashboard_snapshot.register_dashboard_tools_http_json Server_dashboard_http_runtime_info.dashboard_tools_http_json;
+  Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
     let open Gc in
     let ctrl = get () in
@@ -51,6 +63,7 @@ let () =
       max_overhead = 500;                 (* compaction triggers when free memory exceeds 500% of live data *)
     }
   end
+
 
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in
@@ -706,7 +719,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
        | Masc_grpc_transport.Grpc ->
            (try
               let client = Masc_grpc_client.create_from_env ~sw ~env in
-              Keeper_keepalive.set_grpc_client ~env client;
+              Keeper_grpc_heartbeat.set_grpc_client ~env client;
               Log.Server.info "gRPC keeper client initialized"
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Server.warn "gRPC keeper client init failed: %s"

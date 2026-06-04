@@ -12,8 +12,8 @@ module Types = Masc_domain
 
 open Alcotest
 
-module Http_transport = Masc.Server_mcp_transport_http
-module Actor_injection = Masc.Server_mcp_actor_injection
+module Http_transport = Server_mcp_transport_http
+module Actor_injection = Server_mcp_actor_injection
 module Auth = Masc.Auth
 
 let setup_test_workspace () =

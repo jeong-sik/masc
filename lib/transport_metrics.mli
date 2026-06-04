@@ -310,3 +310,12 @@ val inc_agent_stale : unit -> unit
     derivation; [cluster_summary_json] is intentionally [None]
     to keep transport health metrics-only (no command-plane I/O). *)
 val transport_health_json : config:Workspace.config -> Yojson.Safe.t
+
+val register_webrtc_metrics :
+  is_enabled:(unit -> bool) ->
+  pending_count:(unit -> int) ->
+  peers_count:(unit -> int) ->
+  live_count:(unit -> int) ->
+  channels_count:(unit -> int) ->
+  ice_servers_urls:(unit -> string list) ->
+  unit

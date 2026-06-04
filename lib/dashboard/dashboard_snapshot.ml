@@ -41,6 +41,25 @@ let next_generation () = Atomic.fetch_and_add generation_counter 1 + 1
 
 let current () = Atomic.get slot
 
+let dashboard_shell_payload_json_ref :
+  (?light:bool -> Workspace.config -> Yojson.Safe.t) ref =
+  ref (fun ?light:_ _config -> `Null)
+
+let register_dashboard_shell_payload_json fn =
+  dashboard_shell_payload_json_ref := fn
+
+let dashboard_tools_http_json_ref =
+  ref (fun (_config : Workspace.config) -> `Null)
+
+let register_dashboard_tools_http_json fn =
+  dashboard_tools_http_json_ref := fn
+
+let namespace_truth_snapshot_callback =
+  ref (fun (_state : Mcp_server.server_state) -> None)
+
+let register_namespace_truth_snapshot fn =
+  namespace_truth_snapshot_callback := fn
+
 (* Bootstrap once: if no live snapshot exists, compute one synchronously
    and publish so subsequent readers do not pay the cost.  A second
    concurrent caller observing [None] races to compute; the
@@ -50,7 +69,7 @@ let current () = Atomic.get slot
 let bootstrap ~(config : Workspace.config) : t =
   let shell =
     try
-      Server_dashboard_http_core.dashboard_shell_payload_json config
+      (!dashboard_shell_payload_json_ref) config
     with exn ->
       Log.Dashboard.warn "dashboard_snapshot bootstrap shell failed: %s"
         (Printexc.to_string exn);
@@ -58,7 +77,7 @@ let bootstrap ~(config : Workspace.config) : t =
   in
   let shell_light =
     try
-      Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
+      (!dashboard_shell_payload_json_ref) ~light:true config
     with exn ->
       Log.Dashboard.warn "dashboard_snapshot bootstrap shell_light failed: %s"
         (Printexc.to_string exn);
@@ -66,7 +85,7 @@ let bootstrap ~(config : Workspace.config) : t =
   in
   let tools =
     try
-      Server_dashboard_http_runtime_info.dashboard_tools_http_json config
+      (!dashboard_tools_http_json_ref) config
     with exn ->
       Log.Dashboard.warn "dashboard_snapshot bootstrap tools failed: %s"
         (Printexc.to_string exn);
@@ -159,17 +178,17 @@ let refresh_loop
          worker's context, not the main domain's.  Do not "fix" this to
          [~light:true]; that would change [shell] to the light shape. *)
       safe "shell" (fun () ->
-        Server_dashboard_http_core.dashboard_shell_payload_json config)
+        (!dashboard_shell_payload_json_ref) config)
     in
     let shell_light =
       (* RFC-0204 section 8.3 ("A"): publish the light projection too so
          [shell?light=true] reads it wait-free. *)
       safe "shell_light" (fun () ->
-        Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config)
+        (!dashboard_shell_payload_json_ref) ~light:true config)
     in
     let tools =
       safe "tools" (fun () ->
-        Server_dashboard_http_runtime_info.dashboard_tools_http_json config)
+        (!dashboard_tools_http_json_ref) config)
     in
     let telemetry_summary =
       safe "telemetry_summary" (fun () ->
@@ -183,8 +202,7 @@ let refresh_loop
       | Some state ->
         safe "namespace_truth" (fun () ->
           match
-            Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches
-              state
+            (!namespace_truth_snapshot_callback) state
           with
           | Some json -> json
           | None -> `Null)

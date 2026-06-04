@@ -467,3 +467,13 @@ let cleanup_stale_peers ?(max_idle_s = 300.0) () =
   in
   List.iter remove_peer stale;
   List.length stale
+
+let () =
+  Transport_metrics.register_webrtc_metrics
+    ~is_enabled
+    ~pending_count:pending_offer_count
+    ~peers_count:active_peer_count
+    ~live_count:live_webrtc_count
+    ~channels_count:connected_channel_count
+    ~ice_servers_urls:configured_ice_server_urls
+

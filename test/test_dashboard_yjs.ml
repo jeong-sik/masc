@@ -1,4 +1,4 @@
-module DY = Masc.Dashboard_yjs
+module DY = Dashboard_yjs
 
 let byte_codes s =
   List.init (String.length s) (fun i -> Char.code s.[i])

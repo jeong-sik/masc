@@ -10,6 +10,25 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_core
 
+type pre_compact_event = {
+  timestamp : float;
+  keeper_name : string;
+  context_ratio : float;
+  message_count : int;
+  token_count : int;
+  strategies : string list;
+  context_window : int;
+  is_local_model : bool;
+  trigger : Compaction_trigger.t;
+}
+
+let record_pre_compact_callback : (keeper_name:string -> context_ratio:float -> message_count:int -> token_count:int -> strategies:string list -> context_window:int -> is_local_model:bool -> trigger:Compaction_trigger.t -> pre_compact_event option) ref =
+  ref (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
+
+let register_record_pre_compact (f : (keeper_name:string -> context_ratio:float -> message_count:int -> token_count:int -> strategies:string list -> context_window:int -> is_local_model:bool -> trigger:Compaction_trigger.t -> pre_compact_event option)) =
+  record_pre_compact_callback := f
+;;
+
 (** Fraction of context window at which compaction is treated as an
     emergency, bypassing the continuity-reflection cooldown gate.
     Distinct from [ratio_gate] (per-keeper compaction threshold) and
@@ -252,16 +271,15 @@ let compact_if_needed_typed
        future revision adds throwing observability calls here, wrap them. *)
     let pre_compact_event =
       try
-        Some
-          (Dashboard_harness_health.record_pre_compact
-             ~keeper_name:meta.name
-             ~context_ratio:ratio
-             ~message_count:msg_count
-             ~token_count:tok_count
-             ~strategies:strategy_names
-             ~context_window:model_meta.context_window
-             ~is_local_model:model_meta.is_local_model
-             ~trigger)
+        !record_pre_compact_callback
+          ~keeper_name:meta.name
+          ~context_ratio:ratio
+          ~message_count:msg_count
+          ~token_count:tok_count
+          ~strategies:strategy_names
+          ~context_window:model_meta.context_window
+          ~is_local_model:model_meta.is_local_model
+          ~trigger
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

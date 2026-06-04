@@ -111,7 +111,7 @@ let test_dashboard_briefing_projection () =
       in
       if Sys.file_exists delta_path then Sys.remove delta_path;
       let json =
-        Lib.Dashboard_briefing.json
+        Dashboard_briefing.json
           ~actor:"test-dashboard-projection"
           ~config
           ~sw
@@ -184,11 +184,11 @@ let test_dashboard_briefing_http_full_contract () =
       seed_workspace config session_id;
       (* Clear stale cache entries from prior tests to avoid cross-test pollution.
          Both dashboard-level and operator snapshot caches must be invalidated. *)
-      Lib.Dashboard_cache.invalidate_all ();
-      Lib.Operator_control.invalidate_snapshot_cache ();
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let json =
-        Lib.Server_dashboard_http.dashboard_briefing_http_json
+        Server_dashboard_http.dashboard_briefing_http_json
           ~state
           ~sw
           ~clock
@@ -213,7 +213,7 @@ let test_dashboard_briefing_http_default_bootstraps_first_success () =
       seed_workspace config session_id;
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let json =
-        Lib.Server_dashboard_http.dashboard_briefing_http_json
+        Server_dashboard_http.dashboard_briefing_http_json
           ~state
           ~sw
           ~clock
@@ -243,11 +243,11 @@ let test_dashboard_briefing_keeper_tool_audit_fallback () =
       with_test_env @@ fun ~clock ~sw ->
       let config = Workspace_utils.default_config dir in
       seed_workspace config session_id;
-      Lib.Dashboard_cache.invalidate_all ();
-      Lib.Operator_control.invalidate_snapshot_cache ();
+      Dashboard_cache.invalidate_all ();
+      Operator_control.invalidate_snapshot_cache ();
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       let json =
-        Lib.Server_dashboard_http.dashboard_briefing_http_json
+        Server_dashboard_http.dashboard_briefing_http_json
           ~state
           ~sw
           ~clock
@@ -294,14 +294,14 @@ let test_dashboard_briefing_http_cache_isolation () =
         request ("/api/v1/dashboard/briefing?agent_name=" ^ actor)
       in
       let json_a =
-        Lib.Server_dashboard_http.dashboard_briefing_http_json
+        Server_dashboard_http.dashboard_briefing_http_json
           ~state:state_a
           ~sw
           ~clock
           request
       in
       let json_b =
-        Lib.Server_dashboard_http.dashboard_briefing_http_json
+        Server_dashboard_http.dashboard_briefing_http_json
           ~state:state_b
           ~sw
           ~clock
@@ -322,7 +322,7 @@ let test_dashboard_briefing_keeper_tool_audit_keeps_inband_tools_without_evidenc
       with_test_env @@ fun ~clock:_ ~sw:_ ->
       let config = Workspace_utils.default_config dir in
       let briefs =
-        Lib.Dashboard_briefing_assembly.build_keeper_briefs config
+        Dashboard_briefing_assembly.build_keeper_briefs config
           [
             `Assoc
               [
@@ -373,7 +373,7 @@ let test_dashboard_briefing_keeper_tool_audit_uses_decision_log () =
             ("tools_used", `List []);
           ]);
       let briefs =
-        Lib.Dashboard_briefing_assembly.build_keeper_briefs config
+        Dashboard_briefing_assembly.build_keeper_briefs config
           [
             `Assoc
               [
@@ -444,7 +444,7 @@ let test_dashboard_briefing_keeper_brief_registry_lookup_scoped_to_base_path () 
         (Lib.Keeper_registry.register ~base_path:config_z.base_path keeper_name
            (make_meta ~tool_access:[ "keeper_board_post" ] keeper_name));
       let briefs =
-        Lib.Dashboard_briefing_assembly.build_keeper_briefs config_a
+        Dashboard_briefing_assembly.build_keeper_briefs config_a
           [
             `Assoc
               [

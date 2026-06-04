@@ -9,6 +9,16 @@ type runtime_snapshot = {
   last_error : string option;
 }
 
+let record_operator_judgment_ref =
+  ref (fun _config ~surface:_ ~target_type_str:_ ~target_id:_ ~summary:_ ~confidence:_
+           ?model_name:_ ?recommended_action:_ ~evidence_refs:_ ~disagreement_with_truth:_
+           ~generated_at:_ ~generated_at_unix:_ ~fresh_until:_ ~fresh_until_unix:_
+           ~keeper_name:_ () ->
+    ())
+
+let register_record_operator_judgment fn =
+  record_operator_judgment_ref := fn
+
 type state = {
   mutex : Eio.Mutex.t;
   mutable started : bool;
@@ -193,9 +203,8 @@ let parse_workspace_judgment ~config ~generated_at ~generated_at_unix ~model_use
         let fresh_until_unix =
           generated_at_unix +. float_of_int (workspace_ttl_sec ())
         in
-        Some
-          (Operator_judgment.record config ~surface:"command.namespace"
-             ~target_type:Operator_judgment.Workspace ~target_id:None ~summary
+        (!record_operator_judgment_ref) config ~surface:"command.namespace"
+             ~target_type_str:"workspace" ~target_id:None ~summary
              ~confidence ?model_name:None
              ?recommended_action:
                (build_recommended_action ~actor:keeper_name ~target_type:"workspace"
@@ -206,7 +215,8 @@ let parse_workspace_judgment ~config ~generated_at ~generated_at_unix ~model_use
                |> Option.value ~default:false)
              ~generated_at ~generated_at_unix
              ~fresh_until:(Masc_domain.iso8601_of_unix_seconds fresh_until_unix)
-             ~fresh_until_unix ~keeper_name ())
+             ~fresh_until_unix ~keeper_name ();
+        Some ()
   | _ -> None
 
 let compute_judgments

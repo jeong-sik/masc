@@ -12,7 +12,7 @@
      - [`PlaygroundMissing]  — keeper meta exists but dir is missing
      - [`KeeperUnknown]      — no keeper meta for the given name *)
 
-module W = Masc.Server_routes_http_routes_workspace
+module W = Server_routes_http_routes_workspace
 module P = Masc.Prometheus
 
 let project = "/repo"

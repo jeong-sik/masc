@@ -621,3 +621,37 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         tool_suffix
         board_suffix;
     ]
+
+let () =
+  Keeper_tool_in_process_runtime.register_dashboard_surface_readiness Dashboard_surface_readiness.json;
+  Tool_misc.register_dashboard_handler (fun ~tool_name:tool_name_arg ~start_time ctx args ->
+    let open Tool_result in
+    let compact =
+      match Json_util.assoc_member_opt "compact" args with
+      | Some (`Bool b) -> b
+      | _ -> false
+    in
+    let scope_arg =
+      match Json_util.assoc_member_opt "scope" args with
+      | Some (`String s) -> String.lowercase_ascii s
+      | _ -> "all"
+    in
+    match scope_of_string_opt scope_arg with
+    | None ->
+        make_err
+          ~tool_name:tool_name_arg
+          ~class_:Workflow_rejection
+          ~start_time
+          (Printf.sprintf "Invalid dashboard scope '%s' (expected: %s)"
+             scope_arg
+             (String.concat " | " valid_scope_strings))
+    | Some scope ->
+        let output =
+          if compact then generate_compact ~scope ctx.config
+          else generate ~scope ctx.config
+        in
+        make_ok ~tool_name:tool_name_arg ~start_time ~data:(`String output) ()
+  )
+
+
+let force_link = ()

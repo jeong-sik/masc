@@ -33,10 +33,18 @@ let assess_risk = Governance_pipeline_risk.assess_risk
 
 (* ── Trace ID generation ────────────────────────────────────── *)
 
+let trace_id prefix =
+  let entropy =
+    Printf.sprintf "%s|%d|%.6f|%d"
+      prefix (Unix.getpid ()) (Unix.gettimeofday ()) (Random.bits ())
+  in
+  let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
+  prefix ^ "_" ^ String.sub digest 0 16
+
 let generate_trace_id () =
   match Otel_spans.current_trace_id () with
   | Some otel_tid -> otel_tid
-  | None -> Operator_pending_confirm.trace_id "gov"
+  | None -> trace_id "gov"
 ;;
 
 (* ── Policy Decision ────────────────────────────────────────── *)

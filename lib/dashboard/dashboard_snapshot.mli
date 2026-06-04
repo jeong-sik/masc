@@ -109,3 +109,15 @@ val make_for_test :
 
 val reset_for_test : unit -> unit
 (** Test-only.  Clear the live slot back to [None]. *)
+
+val register_dashboard_shell_payload_json :
+  (?light:bool -> Workspace.config -> Yojson.Safe.t) ->
+  unit
+
+val register_dashboard_tools_http_json : (Workspace.config -> Yojson.Safe.t) -> unit
+
+val register_namespace_truth_snapshot :
+  (Mcp_server.server_state -> Yojson.Safe.t option) -> unit
+
+
+

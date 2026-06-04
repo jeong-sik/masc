@@ -8,6 +8,22 @@
     - masc_grpc_* for gRPC transport
     - masc_agent_heartbeat_* for agent liveness *)
 
+let webrtc_is_enabled_ref = Atomic.make (fun () -> false)
+let webrtc_pending_count_ref = Atomic.make (fun () -> 0)
+let webrtc_peers_count_ref = Atomic.make (fun () -> 0)
+let webrtc_live_count_ref = Atomic.make (fun () -> 0)
+let webrtc_channels_count_ref = Atomic.make (fun () -> 0)
+let webrtc_ice_servers_urls_ref = Atomic.make (fun () -> [])
+
+let register_webrtc_metrics ~is_enabled ~pending_count ~peers_count ~live_count ~channels_count ~ice_servers_urls =
+  Atomic.set webrtc_is_enabled_ref is_enabled;
+  Atomic.set webrtc_pending_count_ref pending_count;
+  Atomic.set webrtc_peers_count_ref peers_count;
+  Atomic.set webrtc_live_count_ref live_count;
+  Atomic.set webrtc_channels_count_ref channels_count;
+  Atomic.set webrtc_ice_servers_urls_ref ice_servers_urls
+;;
+
 (** {1 SSE Metrics} *)
 
 type hot_queue_session =
@@ -566,11 +582,11 @@ let transport_health_json ~config =
   let streamable_auth_policy_present =
     Env_config.Transport.http_auth_strict_env_enabled ()
   in
-  let webrtc_configured = Server_webrtc_transport.is_enabled () in
-  let webrtc_pending = Server_webrtc_transport.pending_offer_count () in
-  let webrtc_peers = Server_webrtc_transport.active_peer_count () in
-  let webrtc_live = Server_webrtc_transport.live_webrtc_count () in
-  let webrtc_channels = Server_webrtc_transport.connected_channel_count () in
+  let webrtc_configured = (Atomic.get webrtc_is_enabled_ref) () in
+  let webrtc_pending = (Atomic.get webrtc_pending_count_ref) () in
+  let webrtc_peers = (Atomic.get webrtc_peers_count_ref) () in
+  let webrtc_live = (Atomic.get webrtc_live_count_ref) () in
+  let webrtc_channels = (Atomic.get webrtc_channels_count_ref) () in
   let listener_mode = http_listener_mode () in
   let topology_summary = cluster_summary_json config in
   let workspace_id = workspace_id_from_config config in
@@ -699,7 +715,7 @@ let transport_health_json ~config =
           ; "live_connections", `Int webrtc_live
           ; "connected_channels", `Int webrtc_channels
           ; ( "ice_server_count"
-            , `Int (List.length (Server_webrtc_transport.configured_ice_server_urls ())) )
+            , `Int (List.length ((Atomic.get webrtc_ice_servers_urls_ref) ())) )
           ] )
     ; ( "streamable_http"
       , `Assoc

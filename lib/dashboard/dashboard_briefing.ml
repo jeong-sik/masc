@@ -323,7 +323,7 @@ type briefing_projection = {
 let build_projection ?actor ~config ~sw ~clock
     ~proc_mgr () =
   let actor_name = Dashboard_projection_cache.normalize_actor_name actor in
-  let ctx : _ Operator_control.context =
+  let ctx : _ Tool_operator.context =
     {
       config;
       agent_name = actor_name;
@@ -337,7 +337,7 @@ let build_projection ?actor ~config ~sw ~clock
   let snapshot_json =
     Dashboard_projection_cache.get_or_compute_snapshot_json
       ~config ~actor:(Some actor_name) (fun actor_name ->
-        Operator_control.snapshot_json
+        Dashboard_projection_cache.operator_snapshot_json
           ~actor:actor_name
           ~view:"summary"
           ~include_messages:false
@@ -349,7 +349,7 @@ let build_projection ?actor ~config ~sw ~clock
   let digest_json =
     Dashboard_projection_cache.get_or_compute_digest_json
       ~config ~actor:(Some actor_name) (fun actor_name ->
-        match Operator_control.digest_json ~actor:actor_name ctx with
+        match Dashboard_projection_cache.operator_digest_json ~actor:actor_name ctx with
         | Ok json -> json
         | Error message ->
             `Assoc

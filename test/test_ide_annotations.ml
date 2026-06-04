@@ -3,7 +3,7 @@ open Alcotest
 module Types = Ide_annotation_types
 module Store = Ide_annotations
 module Region = Ide_region_tracker
-module Lsp = Masc.Lsp_overlay_provider
+module Lsp = Lsp_overlay_provider
 
 (* Ide_annotations.create generates ids via [Uuidm.v4_gen (Random.get_state ())].
    [Random.get_state] returns a COPY of the global state, so two

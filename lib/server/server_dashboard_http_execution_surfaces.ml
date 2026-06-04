@@ -4,6 +4,9 @@
 open Server_utils
 open Server_dashboard_http_core
 
+type cached_surface = Server_dashboard_http_cache.cached_surface
+
+
 let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cache_ttl_s
 let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
@@ -131,8 +134,8 @@ let () =
   operator_digest_broadcast_ref := broadcast_cached_surface ~event_type:"operator_digest"
 ;;
 
-let execution_cache =
-  create_cached_surface
+let execution_cache : cached_surface =
+  Server_dashboard_http_cache.create_cached_surface
     (`Assoc
         [ "status", `String "initializing"
         ; "generated_at", `String (Masc_domain.now_iso ())
@@ -178,7 +181,7 @@ let invalidate_execution_cache_with_hooks_for_testing
 
 let invalidate_execution_cache () =
   invalidate_execution_cache_with_hooks_for_testing
-    ~invalidate_execution_surface:(fun () -> invalidate_cached_surface execution_cache)
+    ~invalidate_execution_surface:(fun () -> Server_dashboard_http_cache.invalidate_cached_surface execution_cache)
     ~invalidate_light_cache:(fun () ->
       Dashboard_cache.invalidate "execution:default:light")
     ()
@@ -188,13 +191,13 @@ let invalidate_execution_cache () =
     [dashboard_namespace_truth_http_json] get the full response instead of
     the "initializing" short-circuit. *)
 let seed_execution_cache_for_test () =
-  mark_cached_surface_success
+  Server_dashboard_http_cache.mark_cached_surface_success
     execution_cache
     (`Assoc [ "status", `String "seeded_for_test" ])
 ;;
 
 let transport_health_cache =
-  create_cached_surface
+  Server_dashboard_http_cache.create_cached_surface
     (`Assoc
         [ "status", `String "initializing"
         ; "generated_at", `String (Masc_domain.now_iso ())
@@ -370,10 +373,10 @@ let with_transport_health_metadata ~config ~timeout_s json =
     json
 ;;
 
-let dashboard_execution_snapshot_json () = cached_surface_json execution_cache
+let dashboard_execution_snapshot_json () = Server_dashboard_http_cache.cached_surface_json execution_cache
 
 let dashboard_transport_health_snapshot_json () =
-  cached_surface_json transport_health_cache
+  Server_dashboard_http_cache.cached_surface_json transport_health_cache
 ;;
 
 (* Issue #8396: cache patchers used to recognise only 7 lifecycle event
@@ -602,7 +605,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ~max_v:300.0
   in
   let compute () =
-    mark_cached_surface_attempt execution_cache;
+    Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
     let started_at = Unix.gettimeofday () in
     try
       run_dashboard_compute
@@ -625,7 +628,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error execution_cache exn;
+      Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
       raise exn
   in
   Proactive_refresh.start
@@ -634,15 +637,15 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
         timeout_s = execution_refresh_timeout_s
-      ; on_error = Some (mark_cached_surface_error execution_cache)
+      ; on_error = Some (Server_dashboard_http_cache.mark_cached_surface_error execution_cache)
       ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
-      mark_cached_surface_success execution_cache json;
+      Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
       broadcast_cached_surface
         ~event_type:"execution_snapshot"
-        (cached_surface_json execution_cache
+        (Server_dashboard_http_cache.cached_surface_json execution_cache
          |> with_execution_metadata
               ~config:workspace_config
               ~query:
@@ -664,11 +667,11 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
       ~max_v:transport_health_timeout_max_s
   in
   let compute () =
-    mark_cached_surface_attempt transport_health_cache;
+    Server_dashboard_http_cache.mark_cached_surface_attempt transport_health_cache;
     try Transport_metrics.transport_health_json ~config:state.Mcp_server.workspace_config with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error transport_health_cache exn;
+      Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache exn;
       raise exn
   in
   let interval_s = 30.0 in
@@ -678,15 +681,15 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
         timeout_s
-      ; on_error = Some (mark_cached_surface_error transport_health_cache)
+      ; on_error = Some (Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache)
       ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
-      mark_cached_surface_success transport_health_cache json;
+      Server_dashboard_http_cache.mark_cached_surface_success transport_health_cache json;
       broadcast_cached_surface
         ~event_type:"transport_health_snapshot"
-        (cached_surface_json transport_health_cache
+        (Server_dashboard_http_cache.cached_surface_json transport_health_cache
          |> with_transport_health_metadata
               ~config:state.Mcp_server.workspace_config
               ~timeout_s))
@@ -742,7 +745,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     (* Default light mode: stay instant after first success, but avoid
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
-    cached_surface_or_first_success_json
+    Server_dashboard_http_cache.cached_surface_or_first_success_json
       execution_cache
       ~cache_key:"execution:default:light"
       ~ttl:deep_surface_cache_ttl_s
@@ -807,7 +810,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
 ;;
 
 let transport_health_cache_diagnostics () =
-  match cached_surface_json transport_health_cache with
+  match Server_dashboard_http_cache.cached_surface_json transport_health_cache with
   | `Assoc fields ->
     (match List.assoc_opt "projection_diagnostics" fields with
      | Some (`Assoc diagnostics) -> diagnostics
@@ -823,7 +826,7 @@ let dashboard_transport_health_http_json ~state =
       ~min_v:transport_health_timeout_min_s
       ~max_v:transport_health_timeout_max_s
   in
-  let json = cached_surface_json transport_health_cache in
+  let json = Server_dashboard_http_cache.cached_surface_json transport_health_cache in
   extend_projection_diagnostics
     json
     (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())

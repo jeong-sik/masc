@@ -10,7 +10,7 @@
 
 open Alcotest
 module Workspace = Masc.Workspace
-module Dash = Masc.Dashboard_http_keeper
+module Dash = Dashboard_http_keeper
 module Keeper_config = Masc.Keeper_config
 module Keeper_fs = Masc.Keeper_fs
 module Keeper_types = Masc.Keeper_types

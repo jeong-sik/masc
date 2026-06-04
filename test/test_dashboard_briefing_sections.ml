@@ -2,8 +2,8 @@ module Types = Masc_domain
 
 open Alcotest
 
-module Dashboard_briefing_sections = Masc.Dashboard_briefing_sections
-module Briefing = Masc.Dashboard_briefing_sections.For_test
+module Dashboard_briefing_sections = Dashboard_briefing_sections
+module Briefing = Dashboard_briefing_sections.For_test
 module Workspace = Masc.Workspace
 
 let temp_dir () =

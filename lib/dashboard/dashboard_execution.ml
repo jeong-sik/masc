@@ -575,7 +575,7 @@ let message_json (message : Masc_domain.message) =
 let render_timeout_s = Env_config_runtime.Dashboard.render_timeout_sec
 
 let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
-  let ctx : _ Operator_control.context =
+  let ctx : _ Tool_operator.context =
     { config
     ; agent_name = effective_actor
     ; sw
@@ -648,7 +648,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         ~config
         ~actor:(Some effective_actor)
         (fun actor_name ->
-           Operator_control.snapshot_json
+           Dashboard_projection_cache.operator_snapshot_json
              ~actor:actor_name
              ~view:"summary"
              ~include_messages:false

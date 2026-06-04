@@ -980,3 +980,17 @@ let close_all () =
   List.iter cleanup_session ids;
   Transport_metrics.set_ws_sessions 0;
   List.length ids
+;;
+
+let () = Shutdown_hooks.register_ws_cleanup (fun () -> close_all (), session_count ())
+
+let () =
+  Mcp_server_eio_protocol.register_dashboard_ws_handlers
+    ~hello:(fun ~base_path ~session_id ?token () -> dashboard_hello ~base_path ~session_id ?token ())
+    ~subscribe:(fun ~session_id ?route ~slices () -> dashboard_subscribe ~session_id ?route ~slices ())
+    ~unsubscribe:(fun ~session_id ?slices () -> dashboard_unsubscribe ~session_id ?slices ())
+    ~ping:(fun ~session_id () -> dashboard_ping ~session_id ());
+  Mcp_server_eio_protocol.register_dashboard_ack dashboard_ack
+;;
+
+

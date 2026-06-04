@@ -262,7 +262,7 @@ let test_outcome_none_increments_counter () =
   let fb : Aek.dashboard_actor_fallback =
     { outcome = Aek.Outcome_none; token_hash_prefix = "feedface" }
   in
-  Masc.Server_auth.record_dashboard_actor_fallback fb;
+  Server_auth.record_dashboard_actor_fallback fb;
   let after =
     Prom.metric_value_or_zero
       Prom.metric_silent_dashboard_actor_fallback ~labels ()
@@ -291,7 +291,7 @@ let test_outcome_error_increments_counter_with_err_kind () =
     ; token_hash_prefix = "feedface"
     }
   in
-  Masc.Server_auth.record_dashboard_actor_fallback fb;
+  Server_auth.record_dashboard_actor_fallback fb;
   let after =
     Prom.metric_value_or_zero
       Prom.metric_silent_dashboard_actor_fallback ~labels ()

@@ -233,3 +233,6 @@ val handle_masc_keeper
 (** RFC-0182 §3.1 — [masc_surface_audit] singleton.  Pure pass-through
     to [Dashboard_surface_readiness.json]. *)
 val handle_masc_surface_audit : args:Yojson.Safe.t -> string
+
+val register_dashboard_surface_readiness : (?surface_id:string -> unit -> Yojson.Safe.t) -> unit
+

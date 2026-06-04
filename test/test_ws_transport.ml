@@ -4,7 +4,7 @@
     Sse.subscribe_external, and cleanup logic.
     HTTP upgrade integration is tested separately (E2E). *)
 
-module Ws = Masc.Server_mcp_transport_ws
+module Ws = Server_mcp_transport_ws
 module Sse = Masc.Sse
 
 (* ====== Session Registry ====== *)

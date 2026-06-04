@@ -438,6 +438,32 @@ let string_list_member key fields =
   | _ -> []
 ;;
 
+let dashboard_hello_handler =
+  ref (fun ~base_path:_ ~session_id:_ ?token:_ () -> Error "Dashboard WS not integrated")
+
+let dashboard_subscribe_handler =
+  ref (fun ~session_id:_ ?route:_ ~slices:_ () -> Error "Dashboard WS not integrated")
+
+let dashboard_unsubscribe_handler =
+  ref (fun ~session_id:_ ?slices:_ () -> Error "Dashboard WS not integrated")
+
+let dashboard_ping_handler =
+  ref (fun ~session_id:_ () -> Error "Dashboard WS not integrated")
+
+let register_dashboard_ws_handlers ~hello ~subscribe ~unsubscribe ~ping =
+  dashboard_hello_handler := hello;
+  dashboard_subscribe_handler := subscribe;
+  dashboard_unsubscribe_handler := unsubscribe;
+  dashboard_ping_handler := ping
+;;
+
+let dashboard_ack_callback =
+  ref (fun ~session_id:_ ~seq:_ ?buffered_amount:_ () -> Error "Dashboard WS not integrated")
+
+let register_dashboard_ack fn =
+  dashboard_ack_callback := fn
+
+
 let dashboard_response_or_error id = function
   | Ok result -> make_response ~id result
   | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_request msg
@@ -448,7 +474,7 @@ let handle_dashboard_hello_eio state id ?mcp_session_id params =
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/hello requires a WebSocket session"
   | Some session_id, Some (`Assoc fields) ->
     let token = optional_string_member "token" fields in
-    Server_mcp_transport_ws.dashboard_hello
+    !dashboard_hello_handler
       ~base_path:state.Mcp_server.workspace_config.base_path
       ~session_id
       ?token
@@ -466,7 +492,7 @@ let handle_dashboard_subscribe_eio state id ?mcp_session_id params =
     let slices = string_list_member "slices" fields in
     let slices = if slices = [] then [ "shell"; "namespace"; "transport" ] else slices in
     ignore state;
-    Server_mcp_transport_ws.dashboard_subscribe ~session_id ?route ~slices ()
+    !dashboard_subscribe_handler ~session_id ?route ~slices ()
     |> dashboard_response_or_error id
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
@@ -479,10 +505,10 @@ let handle_dashboard_unsubscribe_eio id ?mcp_session_id params =
   | Some session_id, Some (`Assoc fields) ->
     let slices = string_list_member "slices" fields in
     let slices_opt = if slices = [] then None else Some slices in
-    Server_mcp_transport_ws.dashboard_unsubscribe ~session_id ?slices:slices_opt ()
+    !dashboard_unsubscribe_handler ~session_id ?slices:slices_opt ()
     |> dashboard_response_or_error id
   | Some session_id, None ->
-    Server_mcp_transport_ws.dashboard_unsubscribe ~session_id ()
+    !dashboard_unsubscribe_handler ~session_id ()
     |> dashboard_response_or_error id
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
@@ -491,7 +517,7 @@ let handle_dashboard_ping_eio id ?mcp_session_id params =
   match mcp_session_id, params with
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/ping requires a WebSocket session"
   | Some session_id, None | Some session_id, Some (`Assoc _) ->
-    Server_mcp_transport_ws.dashboard_ping ~session_id ()
+    !dashboard_ping_handler ~session_id ()
     |> dashboard_response_or_error id
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
@@ -516,7 +542,7 @@ let handle_dashboard_ack_eio id ?mcp_session_id params =
       | Some (`Float f) when f >= 0.0 && Float.is_finite f -> Some (int_of_float f)
       | _ -> None
     in
-    Server_mcp_transport_ws.dashboard_ack ~session_id ~seq ?buffered_amount ()
+    (!dashboard_ack_callback) ~session_id ~seq ?buffered_amount ()
     |> dashboard_response_or_error id
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"

@@ -76,3 +76,38 @@ val compact_if_needed
   -> now_ts:float
   -> Keeper_context_core.working_context
   -> Keeper_context_core.working_context * string option * string
+
+type pre_compact_event = {
+  timestamp : float;
+  keeper_name : string;
+  context_ratio : float;
+  message_count : int;
+  token_count : int;
+  strategies : string list;
+  context_window : int;
+  is_local_model : bool;
+  trigger : Compaction_trigger.t;
+}
+
+val record_pre_compact_callback :
+  (keeper_name:string ->
+   context_ratio:float ->
+   message_count:int ->
+   token_count:int ->
+   strategies:string list ->
+   context_window:int ->
+   is_local_model:bool ->
+   trigger:Compaction_trigger.t ->
+   pre_compact_event option) ref
+
+val register_record_pre_compact :
+  (keeper_name:string ->
+   context_ratio:float ->
+   message_count:int ->
+   token_count:int ->
+   strategies:string list ->
+   context_window:int ->
+   is_local_model:bool ->
+   trigger:Compaction_trigger.t ->
+   pre_compact_event option) ->
+  unit

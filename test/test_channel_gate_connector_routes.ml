@@ -1,6 +1,6 @@
 open Alcotest
 
-module Routes = Masc.Server_routes_http_routes_channel_gate
+module Routes = Server_routes_http_routes_channel_gate
 
 let test_resolve_connector_status_name_prefers_explicit_name () =
   check (option string) "name wins and normalizes" (Some "discord")

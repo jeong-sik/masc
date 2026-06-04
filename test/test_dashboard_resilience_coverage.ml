@@ -7,7 +7,7 @@
 
 open Alcotest
 
-module Dashboard = Masc.Dashboard
+module Dashboard = Dashboard
 
 (* ============================================================
    Dashboard Constants Tests

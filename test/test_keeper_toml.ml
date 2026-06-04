@@ -4,7 +4,7 @@ module TL = Masc.Keeper_toml_loader
 module KTP = Masc.Keeper_types_profile
 module KPA = Masc.Keeper_persona_authoring
 module KEP = Masc.Keeper_tool_persona_runtime
-module Runtime = Masc.Server_routes_http_runtime
+module Runtime = Server_routes_http_runtime
 
 let contains_substring s needle =
   let s_len = String.length s in

@@ -11,7 +11,7 @@
 let () = Mirage_crypto_rng_unix.use_default ()
 
 module V = Masc.Verification
-module D = Masc.Dashboard_verification
+module D = Dashboard_verification
 module CU = Workspace_utils
 module FD = Masc.Keeper_fd_pressure
 

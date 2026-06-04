@@ -89,11 +89,24 @@ let permission_to_json tool_name =
   | Some permission -> `String (Masc_domain.permission_to_string permission)
   | None -> `Null
 
+let base_url_has_non_loopback_host () =
+  match Env_config_core.masc_http_base_url_result () with
+  | Error _ -> false
+  | Ok url -> (
+      match Uri.host (Uri.of_string url) with
+      | None -> true
+      | Some host -> not (Masc_network_defaults.is_loopback_host host))
+
+let http_auth_strict_enabled ~bind_is_loopback =
+  Env_config.Transport.http_auth_strict_env_enabled ()
+  || not bind_is_loopback
+  || base_url_has_non_loopback_host ()
+
 let auth_snapshot_json ctx =
   let cfg = Auth.load_auth_config ctx.config.base_path in
-  let bind_host = Server_auth.http_auth_bind_host () in
-  let bind_is_loopback = Server_auth.http_auth_bind_is_loopback () in
-  let http_auth_strict = Server_auth.http_auth_strict_enabled () in
+  let bind_host = Env_config_core.masc_host () in
+  let bind_is_loopback = Masc_network_defaults.is_loopback_host bind_host in
+  let http_auth_strict = http_auth_strict_enabled ~bind_is_loopback in
   let credentials =
     Auth.list_credentials ctx.config.base_path
     |> List.sort (fun (left : Masc_domain.agent_credential) right ->

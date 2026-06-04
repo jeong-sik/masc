@@ -1,7 +1,7 @@
 open Alcotest
 
 module Workspace = Masc.Workspace
-module Dashboard_http_keeper = Masc.Dashboard_http_keeper
+module Dashboard_http_keeper = Dashboard_http_keeper
 module Keeper_types = Masc.Keeper_types
 module Keeper_types_support = Masc.Keeper_types_support
 

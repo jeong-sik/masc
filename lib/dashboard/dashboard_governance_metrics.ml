@@ -228,3 +228,10 @@ let governance_tool_events_json ?(now_ts = Unix.gettimeofday ())
     ("tool_rejections", `List rejections);
     ("approval_queue", approval_queue_json approval);
   ]
+
+let () =
+  Keeper_keepalive_signal.register_record_tool_skipped (fun ~keeper_name ~tool_name ~reason_code ->
+    ignore (record_tool_skipped ~keeper_name ~tool_name ~reason_code)
+  )
+;;
+

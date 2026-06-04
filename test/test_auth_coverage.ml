@@ -254,7 +254,7 @@ let test_permission_for_tool_interrupt () =
    ============================================================ *)
 
 let test_same_origin_browser_request_rejects_missing_origin () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers = Httpun.Headers.of_list [ ("host", "127.0.0.1:8935") ] in
   let request = Httpun.Request.create ~headers `POST "/api/v1/operator/action" in
   match Server_auth.ensure_same_origin_browser_request request with
@@ -263,7 +263,7 @@ let test_same_origin_browser_request_rejects_missing_origin () =
   | Error e -> fail (Printf.sprintf "expected Unauthorized, got %s" (Masc_domain.masc_error_to_string e))
 
 let test_same_origin_browser_request_allows_matching_origin () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -277,7 +277,7 @@ let test_same_origin_browser_request_allows_matching_origin () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_browser_request_rejects_cross_origin () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -292,7 +292,7 @@ let test_same_origin_browser_request_rejects_cross_origin () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_https_tunnel_same_host () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -306,7 +306,7 @@ let test_same_origin_https_tunnel_same_host () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_allows_loopback_alias_same_port () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -320,7 +320,7 @@ let test_same_origin_allows_loopback_alias_same_port () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_allows_allowlisted_dashboard_dev_origin () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -334,7 +334,7 @@ let test_same_origin_allows_allowlisted_dashboard_dev_origin () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_rejects_non_allowlisted_loopback_cross_port () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -349,7 +349,7 @@ let test_same_origin_rejects_non_allowlisted_loopback_cross_port () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_rejects_different_explicit_port_on_public_host () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -364,7 +364,7 @@ let test_same_origin_rejects_different_explicit_port_on_public_host () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_allows_explicit_default_port_https () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -378,7 +378,7 @@ let test_same_origin_allows_explicit_default_port_https () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
 
 let test_same_origin_allows_explicit_default_port_http () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -396,7 +396,7 @@ let test_same_origin_allows_explicit_default_port_http () =
    ============================================================ *)
 
 let test_http_auth_token_from_header_only () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list [ ("authorization", "Bearer header-token") ]
   in
@@ -408,7 +408,7 @@ let test_http_auth_token_from_header_only () =
     (Server_auth.auth_token_from_request request)
 
 let test_http_auth_rejects_query_token_fallback () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let request =
     Httpun.Request.create `GET "/api/v1/tools/masc_board_vote?token=query-token"
   in
@@ -416,7 +416,7 @@ let test_http_auth_rejects_query_token_fallback () =
     (Server_auth.auth_token_from_request request)
 
 let test_http_auth_accepts_internal_keeper_header () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let headers =
     Httpun.Headers.of_list [ ("x-masc-internal-token", "internal-keeper-token") ]
   in
@@ -426,7 +426,7 @@ let test_http_auth_accepts_internal_keeper_header () =
     (Server_auth.auth_token_from_request request)
 
 let test_observer_sse_auth_accepts_query_token_fallback () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -447,7 +447,7 @@ let test_observer_sse_auth_accepts_query_token_fallback () =
       | Error e -> fail e)
 
 let test_presence_sse_auth_accepts_query_token_fallback () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -468,7 +468,7 @@ let test_presence_sse_auth_accepts_query_token_fallback () =
       | Error e -> fail e)
 
 let test_observer_sse_auth_rejects_query_token_on_non_observer_path () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -498,7 +498,7 @@ let test_observer_sse_auth_rejects_query_token_on_non_observer_path () =
    refactor cannot reintroduce silent fallback without a visible
    test failure. Spec: AuthIdentityFSM.tla I2 NoSilentRewrite. *)
 let test_verify_mcp_auth_accepts_valid_bearer () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -518,7 +518,7 @@ let test_verify_mcp_auth_accepts_valid_bearer () =
       | Error e -> fail e)
 
 let test_verify_mcp_auth_rejects_invalid_bearer () =
-  let module Server_auth = Masc.Server_auth in
+  let module Server_auth = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -657,7 +657,7 @@ let clear_env name f =
   ) f
 
 let test_base_url_non_loopback_enables_strict () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   with_env "MASC_HTTP_BASE_URL" "https://masc.crying.pictures" (fun () ->
     with_env "MASC_HOST" "127.0.0.1" (fun () ->
       clear_env "MASC_HTTP_AUTH_STRICT" (fun () ->
@@ -665,7 +665,7 @@ let test_base_url_non_loopback_enables_strict () =
           (SA.http_auth_strict_enabled ()))))
 
 let test_base_url_localhost_no_strict () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" (fun () ->
     with_env "MASC_HOST" "127.0.0.1" (fun () ->
       clear_env "MASC_HTTP_AUTH_STRICT" (fun () ->
@@ -673,7 +673,7 @@ let test_base_url_localhost_no_strict () =
           (SA.http_auth_strict_enabled ()))))
 
 let test_base_url_unset_loopback_no_strict () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   clear_env "MASC_HTTP_BASE_URL" (fun () ->
     with_env "MASC_HOST" "127.0.0.1" (fun () ->
       with_env "MASC_HTTP_PORT" "8935" (fun () ->
@@ -682,7 +682,7 @@ let test_base_url_unset_loopback_no_strict () =
             (SA.http_auth_strict_enabled ())))))
 
 let test_env_flag_overrides_all () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   with_env "MASC_HTTP_AUTH_STRICT" "true" (fun () ->
     with_env "MASC_HOST" "127.0.0.1" (fun () ->
       clear_env "MASC_HTTP_BASE_URL" (fun () ->
@@ -690,7 +690,7 @@ let test_env_flag_overrides_all () =
           (SA.http_auth_strict_enabled ()))))
 
 let test_custom_dev_origin_allows_loopback_cross_port () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   with_env "MASC_HTTP_DEV_MUTATION_ORIGINS" "http://localhost:4317" (fun () ->
     let headers =
       Httpun.Headers.of_list
@@ -705,7 +705,7 @@ let test_custom_dev_origin_allows_loopback_cross_port () =
     | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_public_read_cors_allows_matching_origin () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -720,7 +720,7 @@ let test_public_read_cors_allows_matching_origin () =
   | None -> fail "expected public-read cors origin"
 
 let test_public_read_cors_rejects_cross_origin () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let headers =
     Httpun.Headers.of_list
       [
@@ -734,7 +734,7 @@ let test_public_read_cors_rejects_cross_origin () =
   | Some origin -> fail ("unexpected reflected origin: " ^ origin)
 
 let test_public_read_cors_allows_allowlisted_loopback_origin () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   with_env "MASC_HTTP_DEV_MUTATION_ORIGINS" "http://localhost:4317" (fun () ->
     let headers =
       Httpun.Headers.of_list
@@ -751,38 +751,38 @@ let test_public_read_cors_allows_allowlisted_loopback_origin () =
     | None -> fail "expected allowlisted public-read cors origin")
 
 let test_public_read_path_allows_generic_connector_status () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   check bool "generic connector status is public read" true
     (SA.is_public_read_path "/api/v1/gate/connector/status")
 
 let test_public_read_path_rejects_generic_connector_bind () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   check bool "generic connector bind is not public read" false
     (SA.is_public_read_path "/api/v1/gate/connector/bind")
 
 let test_public_read_path_rejects_generic_connector_unbind () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   check bool "generic connector unbind is not public read" false
     (SA.is_public_read_path "/api/v1/gate/connector/unbind")
 
 (* Tier F2 — multimodal dashboard reads are public *)
 let test_public_read_path_allows_multimodal_list () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   check bool "multimodal list is public read" true
     (SA.is_public_read_path "/api/v1/multimodal/list")
 
 let test_public_read_path_allows_multimodal_get () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   check bool "multimodal get/<id> is public read" true
     (SA.is_public_read_path "/api/v1/multimodal/get/01900000-0000-7000-8000-000000000001")
 
 let test_public_read_path_allows_multimodal_provenance () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   check bool "multimodal provenance/<id> is public read" true
     (SA.is_public_read_path "/api/v1/multimodal/provenance/01900000-0000-7000-8000-000000000001")
 
 let test_public_read_path_rejects_unrelated_multimodal_subpath () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   (* If a future write endpoint lands under /api/v1/multimodal/, the
      prefix entries above must NOT cover it. Only the three known
      read paths are public; anything else stays auth-required. *)
@@ -800,7 +800,7 @@ let test_permission_for_tool_empty () =
   | Some _ -> fail "expected None for empty string"
 
 let test_resolve_agent_name_prefers_token_for_generated_actor () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -826,7 +826,7 @@ let test_resolve_agent_name_prefers_token_for_generated_actor () =
       | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_resolve_agent_name_preserves_explicit_stable_actor () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -852,7 +852,7 @@ let test_resolve_agent_name_preserves_explicit_stable_actor () =
       | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_sanitized_dashboard_actor_for_request_uses_token_owner () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -876,7 +876,7 @@ let test_sanitized_dashboard_actor_for_request_uses_token_owner () =
         (SA.sanitized_dashboard_actor_for_request ~base_path:dir request))
 
 let test_dashboard_actor_invalid_token_fallback_is_counted () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -908,7 +908,7 @@ let test_dashboard_actor_invalid_token_fallback_is_counted () =
       check bool "counter increments" true (after > before))
 
 let test_resolve_agent_name_rejects_invalid_token () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -932,7 +932,7 @@ let test_resolve_agent_name_rejects_invalid_token () =
       | Ok _ -> fail "expected invalid token failure")
 
 let test_authorize_read_request_canonicalizes_token_owner () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -958,7 +958,7 @@ let test_authorize_read_request_canonicalizes_token_owner () =
       | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_authorize_tool_request_canonicalizes_token_owner () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -987,7 +987,7 @@ let test_authorize_tool_request_canonicalizes_token_owner () =
       | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_resolve_agent_name_uses_internal_keeper_header () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)
@@ -1010,7 +1010,7 @@ let test_resolve_agent_name_uses_internal_keeper_header () =
       | Error e -> fail (Masc_domain.masc_error_to_string e))
 
 let test_resolve_agent_name_rejects_internal_keeper_without_name () =
-  let module SA = Masc.Server_auth in
+  let module SA = Server_auth in
   let dir = setup_test_workspace () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_workspace dir)

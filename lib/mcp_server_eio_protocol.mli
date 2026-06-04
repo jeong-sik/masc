@@ -182,3 +182,20 @@ val run_stdio :
     back to [Eio.Stdenv.stdout env] in the same framing.
     Cancellation propagates through [sw]; EOF / [Eio.Cancel]
     exits cleanly. *)
+
+val register_dashboard_ws_handlers :
+  hello:(base_path:string -> session_id:string -> ?token:string -> unit -> (Yojson.Safe.t, string) result) ->
+  subscribe:(session_id:string -> ?route:string -> slices:string list -> unit -> (Yojson.Safe.t, string) result) ->
+  unsubscribe:(session_id:string -> ?slices:string list -> unit -> (Yojson.Safe.t, string) result) ->
+  ping:(session_id:string -> unit -> (Yojson.Safe.t, string) result) ->
+  unit
+
+val register_dashboard_ack :
+  (session_id:string ->
+   seq:int ->
+   ?buffered_amount:int ->
+   unit ->
+   (Yojson.Safe.t, string) result) ->
+  unit
+
+

@@ -6,7 +6,6 @@
   (language c)
   (names nofile_stubs))
 (private_modules
- auth_nickname
  http_body_buffer
  http_response_payload
  error_event_type
@@ -28,29 +27,13 @@
  keeper_event_bus_drain_site
  keeper_turn_metrics_snapshot_failure_site
  keeper_metric_emit_dropped_site
-  keeper_post_turn_wirein_failure_site
-  silent_dashboard_actor_outcome
+ keeper_post_turn_wirein_failure_site
+ silent_dashboard_actor_outcome
  sse_jsonrpc_filter
- prometheus_format
- prometheus_key
- prometheus_store
- prometheus_process
- prometheus_builtin_metric_names
- prometheus_builtin_metrics_part1
- prometheus_builtin_metrics_part2
- prometheus_builtin_metrics_part3
- prometheus_builtin_metrics_part4
- prometheus_builtin_metrics_part5
- prometheus_builtin_metrics
- prometheus_transport_metric_names
- prometheus_core_metric_names
- prometheus_oas_metric_names
- prometheus_runtime_metric_names
- prometheus_policy_metric_names
  keeper_tool_call_log_context
 
-  board_prometheus_hooks
-  workspace_prometheus_hooks
+ board_prometheus_hooks
+ workspace_prometheus_hooks
 
  keeper_persona_authoring_contract
  keeper_types_profile_sandbox
@@ -91,7 +74,6 @@
    keeper_tool_dispatch_runtime
   keeper_status_metrics
   keeper_status_runtime
-  provider_tool_support
   voice_runtime_overlay
   keeper_status_detail_observability
   keeper_status_detail
@@ -129,8 +111,6 @@
   keeper_run_tools_search
   keeper_run_tools_setup
   voice_bridge_transport
-  runtime_oas_checkpoint
-  runtime_observation_query_operation
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
   keeper_turn_driver_helpers
@@ -169,7 +149,6 @@
   ;; keeper_event_queue: promoted to lib/keeper_event_queue/ sub-library
   ;; (RFC-0056 Phase 1I) — listed in (libraries) below.
   keeper_relevance_check
-  masc_event_bus
   ;; worker_container sub-modules
   worker_container_types
   worker_container
@@ -303,6 +282,13 @@
    ;; Runtime_model extracted to lib/runtime_model/.
    ;; Runtime/OAS provider projection + model-label parsing boundary.
    masc.runtime_model
+     masc.runtime
+     masc.masc_event_bus
+     masc.provider_tool_support
+     masc.keeper_internal_error
+     masc.prometheus
+     masc.auth
+     masc.fd_accountant
    ;; Model_inference_metrics facade + decomposition siblings extracted to
    ;; lib/model_inference_metrics/. Parent still references the bare facade.
    masc.model_inference_metrics

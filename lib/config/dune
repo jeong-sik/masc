@@ -19,6 +19,7 @@
    env_config_snapshot_core
    feature_flag_registry
    keeper_sandbox_config
+   masc_grpc_transport
    masc_network_defaults
    masc_time_constants
    timeout_floor

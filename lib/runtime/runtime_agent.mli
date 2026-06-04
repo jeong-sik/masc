@@ -265,3 +265,13 @@ val run_with_masc_tools :
     into the agent through [dispatch].  Used by the
     keeper-runtime path that needs to expose MCP-style
     tools to the model alongside OAS tools. *)
+
+val set_oas_tool_of_masc_hook :
+  (name:string ->
+   description:string ->
+   input_schema:Yojson.Safe.t ->
+   (Yojson.Safe.t -> Tool_result.result) ->
+   Agent_sdk.Tool.t) ->
+  unit
+(** [set_oas_tool_of_masc_hook f] registers a function to project MASC tool schemas
+    into Agent_sdk.Tool.t. Used to decouple the [Tool_bridge] module. *)

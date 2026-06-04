@@ -50,6 +50,13 @@ type slot_state =
   ; in_flight : int Atomic.t
   }
 
+let pressure_active_hook = ref (fun () -> false)
+let nofile_soft_limit_hook = ref (fun () -> None)
+
+let set_pressure_hooks ~active ~nofile_soft_limit =
+  pressure_active_hook := active;
+  nofile_soft_limit_hook := nofile_soft_limit
+
 let _state_for_kind : (kind * slot_state) list =
   List.map
     (fun kind ->
@@ -93,7 +100,7 @@ let holds_kind kind =
   List.exists (fun held -> held.kind = kind) (active_held_kinds ())
 
 let pressure_gate_needed () =
-  Keeper_fd_pressure.active () && active_held_kinds () = []
+  !pressure_active_hook () && active_held_kinds () = []
 
 let acquire_pressure_gate_if_needed () =
   if not (pressure_gate_needed ())
@@ -141,7 +148,7 @@ let acquire_lifetime_slot ~kind () =
 let configured_concurrency ~kind = (state_of kind).cap
 
 let effective_concurrency ~kind =
-  if Keeper_fd_pressure.active () then 1
+  if !pressure_active_hook () then 1
   else (state_of kind).cap
 
 let install_dated_jsonl_log_writer_guard () =
@@ -237,7 +244,7 @@ let read_fd_limit () =
   | Some value -> value
   | None ->
     let value =
-      match Keeper_fd_pressure.process_nofile_soft_limit () with
+      match !nofile_soft_limit_hook () with
       | Some n -> n
       | None -> -1
     in
@@ -256,5 +263,5 @@ let fd_snapshot () =
     per_kind = List.map (fun k -> (k, in_flight k)) all_kinds ;
     fd_open = read_fd_open () ;
     fd_limit = read_fd_limit () ;
-    pressure_active = Keeper_fd_pressure.active () ;
+    pressure_active = !pressure_active_hook () ;
   }

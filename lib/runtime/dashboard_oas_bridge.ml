@@ -1,5 +1,8 @@
 (** See [Dashboard_oas_bridge.mli]. *)
 
+let broadcast_hook = ref (fun _json -> ())
+let set_broadcast_hook f = broadcast_hook := f
+
 let per_provider_cap = 200
 let default_duration_ms = 0.0
 let default_ttfb_ms = 0.0
@@ -143,7 +146,7 @@ let broadcast_sample_entry entry =
         ("ts_unix", `Float recorded_at);
       ]
   in
-  try Sse.broadcast_to Sse.Observers json
+  try !broadcast_hook json
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -248,7 +251,7 @@ let throughput_from_response ~(usage : Agent_sdk.Types.api_usage option)
 let sample_of_response ~provider_id:_ ~model_id:_ ?total_duration_ms
     ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
     (response : Agent_sdk.Types.api_response) =
-  let usage = Agent_sdk_response.usage response in
+  let usage = response.usage in
   let total_duration_ms =
     duration_from_response ?total_duration_ms response
   in

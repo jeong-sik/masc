@@ -289,3 +289,6 @@ let oas_tool_of_masc ~name ~description ~input_schema
     to_oas_typed_result (handler json_args)
   in
   Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler
+
+let () =
+  Runtime_agent.set_oas_tool_of_masc_hook oas_tool_of_masc

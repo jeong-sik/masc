@@ -39,10 +39,31 @@ type capacity_retry_after =
   | Synthetic_default of float
   | No_retry_hint
 
+type no_tool_capable_detail = {
+  configured_labels : string list;
+  provider_rejections : (string * string) list;
+}
+
+type runtime_exhaustion_reason =
+  | Connection_refused
+  | Dns_failure
+  | No_providers_available
+  | All_providers_failed
+  | Candidates_filtered_after_cycles
+  | Max_turns_exceeded
+  | Structural_attempt_timeout of { detail : string }
+  | Capacity_exhausted
+  | No_tool_capable of no_tool_capable_detail option
+  | Other_detail of string
+
+val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
+val runtime_exhaustion_reason_to_json : runtime_exhaustion_reason -> Yojson.Safe.t
+val runtime_exhaustion_reason_of_json : Yojson.Safe.t -> runtime_exhaustion_reason option
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
-      reason : Keeper_meta_contract.runtime_exhaustion_reason;
+      reason : runtime_exhaustion_reason;
     }
   | Capacity_backpressure of {
       runtime_id : string;

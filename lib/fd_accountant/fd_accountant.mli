@@ -38,6 +38,8 @@ type kind =
           stdin/out/err + cgroup FD). Distinct from [Docker_spawn]
           which is the *container* spawn. *)
   | Log_writer
+
+val set_pressure_hooks : active:(unit -> bool) -> nofile_soft_limit:(unit -> int option) -> unit
       (** High-throughput log writer (dashboard SSE log stream,
           telemetry JSONL append). Low-throughput [Log.warn] /
           [Log.error] paths are NOT slotted — they're FD-cost

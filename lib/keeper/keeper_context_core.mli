@@ -221,7 +221,7 @@ val sanitize_checkpoint_message :
     contract block-by-block. *)
 
 val checkpoint_text_cap_marker : string
-(** Sentinel suffix appended to a Text or tool_result block when the
+(** Marker suffix appended to a Text or tool_result block when the
     sanitizer truncates it (newline followed by the [capped] marker).
     Tests assert against this literal so the marker is part of the
     public contract. *)

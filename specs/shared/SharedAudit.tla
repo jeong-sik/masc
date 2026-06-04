@@ -36,7 +36,7 @@ CONSTANTS
     Ids,            \* finite universe of envelope ids
     Categories      \* finite universe of category strings
 
-\* Sentinel for the genesis entry's prev_hash field — encoded as
+\* Marker for the genesis entry's prev_hash field — encoded as
 \* a string so the [prev_hash] type stays homogeneous.
 GenesisHash == "__genesis__"
 

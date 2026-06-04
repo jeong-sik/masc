@@ -549,11 +549,11 @@ let submit_verdict ~base_path ~req_id ~verifier ~verdict =
           | Ok _ -> Ok updated
           | Error e -> Error e
 
-(* Sentinel verifier recorded when auto_verify transitions a request to
+(* Marker verifier recorded when auto_verify transitions a request to
    Completed without a human/LLM judge. Keeps approved_by non-null in the
    dashboard projection so operators can distinguish rule-based passes
    from peer-agent verdicts ("operator:*") and peer keepers (bare names). *)
-let auto_verifier_sentinel = "auto"
+let auto_verifier_marker = "auto"
 
 let auto_verify ~base_path ~req_id =
   match load_request base_path req_id with
@@ -567,7 +567,7 @@ let auto_verify ~base_path ~req_id =
         let verifier =
           match req.verifier with
           | Some _ as v -> v
-          | None -> Some auto_verifier_sentinel
+          | None -> Some auto_verifier_marker
         in
         let updated = { req with status = Completed verdict; verifier } in
         match save_request base_path updated with

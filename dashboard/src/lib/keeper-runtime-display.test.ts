@@ -239,7 +239,7 @@ describe('keeperRuntimeBlockerHint', () => {
         runtime_blocker_class: 'no_tool_capable_provider',
         runtime_blocker_summary: 'no_tool_capable_provider',
       })),
-    ).toBe('도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.')
+    ).toBe('요구 도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.')
   })
 
   it('explains admission queue waits as keeper FIFO waits, not OAS waits', () => {

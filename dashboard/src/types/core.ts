@@ -425,6 +425,7 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'runtime_exhausted',
   'no_tool_capable_provider',
   'provider_runtime_error',
+  'tool_route_recoverable_failure',
   'fiber_unresolved',
   'stale_turn_timeout',
   'stale_termination_storm',
@@ -734,7 +735,7 @@ export interface KeeperStatusDetail {
 // Backend SSOT: `Keeper_status_runtime.pipeline_stage_of_phase`
 // (lib/keeper/keeper_status_runtime.ml:537) deterministic mapping from
 // the 13-state KeeperPhase, post-RFC-0046 (#14707). Emits 10 distinct
-// values; `unknown` is a dashboard-side sentinel for missing data
+// values; `unknown` is a dashboard-side marker for missing data
 // (`asString(row.pipeline_stage) ?? 'unknown'`). Removed legacy
 // `thinking` / `tool_use` (= trajectory content_type, never
 // pipeline_stage) and `scheduled_autonomous` (= turn channel, never

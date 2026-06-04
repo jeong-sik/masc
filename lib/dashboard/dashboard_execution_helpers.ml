@@ -11,7 +11,7 @@ type session_seed = {
   session_id : string;
   goal : string;
   namespace : string option;
-  status : string;
+  status : string option;
   health : string;
   member_names : string list;
   last_activity_at : string option;
@@ -84,7 +84,7 @@ let session_meta_json = Dashboard_utils.session_meta_json
 let session_summary_json = Dashboard_utils.session_summary_json
 let session_team_health_json = Dashboard_utils.session_team_health_json
 let session_communication_json = Dashboard_utils.session_communication_json
-let session_status_string = Dashboard_utils.session_status_string
+let session_status_opt = Dashboard_utils.session_status_opt
 let session_recent_events = Dashboard_utils.session_recent_events
 let event_detail_json = Dashboard_utils.event_detail_json
 

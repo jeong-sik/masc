@@ -135,7 +135,7 @@ val make_inline_sse_conn :
   session_id:string -> Httpun.Body.Writer.t -> sse_conn_info
 (** [make_inline_sse_conn ~session_id writer] constructs an
     [sse_conn_info] for an inline (non-registered) response.
-    Sets [client_id = -1] sentinel so {!send_raw}'s
+    Sets [client_id = -1] marker so {!send_raw}'s
     [Sse.unregister_if_current] is a no-op for these
     connections.
 

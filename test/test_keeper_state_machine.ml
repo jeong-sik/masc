@@ -1014,7 +1014,7 @@ let test_guard_plan_requires_both_alignments_low () =
    Both [goal_alignment] and [response_alignment] at 0.0 would ordinarily
    satisfy the plan gate's two [<=] comparisons, but when the snapshot was
    produced by a turn that had no user/assistant message pair (status_tick,
-   heartbeat), those zeroes are sentinels, not measurements. The guard must
+   heartbeat), those zeroes are markers, not measurements. The guard must
    fail-closed via [similarity_measurable=false] and emit [plan=false]. *)
 let test_guard_plan_fails_closed_when_similarity_unmeasurable () =
   let snap =

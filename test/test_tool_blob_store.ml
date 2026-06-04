@@ -2,8 +2,8 @@
 
     Covers:
     - Round-trip: encode then decode for both [Inline] and [Stored] variants.
-    - Backward compat: any string without sentinel decodes to [Inline].
-    - Malformed sentinel falls back to [Inline] (fail-safe).
+    - Backward compat: any string without marker decodes to [Inline].
+    - Malformed marker falls back to [Inline] (fail-safe).
     - Content-addressed: same bytes -> same sha -> idempotent put.
     - Sharding: blobs land under [<sha[0..1]>/<sha>].
     - GC: blobs not in keep_set are deleted; kept ones survive.
@@ -55,9 +55,9 @@ let test_stored_roundtrip () =
   in
   let encoded = O.encode_for_oas original in
   Alcotest.(check bool)
-    "encoded starts with sentinel"
+    "encoded starts with marker"
     true
-    (O.is_sentinel encoded);
+    (O.is_marker encoded);
   match O.decode_from_oas encoded with
   | O.Stored { sha256; bytes; preview; mime } ->
       Alcotest.(check string) "sha256" "abcd1234" sha256;
@@ -67,7 +67,7 @@ let test_stored_roundtrip () =
       Alcotest.(check string) "mime" "text/plain" mime
   | O.Inline _ -> Alcotest.fail "expected Stored"
 
-let test_decode_non_sentinel () =
+let test_decode_non_marker () =
   (* Any normal tool output decodes as Inline — backward compat for old
      checkpoints that pre-date the artifact store. *)
   let cases =
@@ -89,7 +89,7 @@ let test_decode_non_sentinel () =
           Alcotest.failf "expected Inline for %S" s)
     cases
 
-let test_decode_malformed_sentinel () =
+let test_decode_malformed_marker () =
   (* Has the prefix but body is garbage — must NOT raise, falls back to
      Inline so the keeper LLM sees the raw string instead of crashing. *)
   let bad = "[masc:blob garbage that cannot scanf]" in
@@ -226,10 +226,10 @@ let () =
         [
           Alcotest.test_case "inline" `Quick test_inline_roundtrip;
           Alcotest.test_case "stored" `Quick test_stored_roundtrip;
-          Alcotest.test_case "non-sentinel = Inline" `Quick
-            test_decode_non_sentinel;
+          Alcotest.test_case "non-marker = Inline" `Quick
+            test_decode_non_marker;
           Alcotest.test_case "malformed = Inline" `Quick
-            test_decode_malformed_sentinel;
+            test_decode_malformed_marker;
         ] );
       ( "blob store basic",
         [

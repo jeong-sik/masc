@@ -23,9 +23,9 @@
        whitespace-only the entry collapses to a single-element
        list (no fake [error_preview: ] noise).
     3. Empty / whitespace-only [error_kind] normalises to the
-       [unspecified] sentinel — pre-fix path silently produced
+       [unspecified] marker — pre-fix path silently produced
        [failure_kind: ] which would alias every empty-kind
-       failure into one bucket; the explicit sentinel keeps the
+       failure into one bucket; the explicit marker keeps the
        row queryable.
     4. The counter
        [masc_institution_episode_failure_kind_total{error_kind}]
@@ -79,7 +79,7 @@ let test_empty_error_kind_normalises_to_unspecified () =
     M.failure_learnings ~error_kind:(kind "") ~error_preview:"some preview"
   in
   check (list string)
-    "empty error_kind becomes unspecified sentinel"
+    "empty error_kind becomes unspecified marker"
     [
       "failure_kind: unspecified";
       "error_preview: some preview";

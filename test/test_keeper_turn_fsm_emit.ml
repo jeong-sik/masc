@@ -1,4 +1,4 @@
-(** test_keeper_turn_fsm_emit — Step 4b sentinel.
+(** test_keeper_turn_fsm_emit — Step 4b marker.
 
     Pins the [Keeper_turn_fsm.emit_transition] surface so a future
     refactor that drops [?prev] or renames a cancel/failure

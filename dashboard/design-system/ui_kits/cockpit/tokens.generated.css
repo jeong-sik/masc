@@ -322,7 +322,7 @@
   --ctrl-h-sm: calc(var(--density) * 20px);
   --ctrl-h: calc(var(--density) * 24px);
   --ctrl-h-lg: calc(var(--density) * 28px);
-  --_density-scope: 1;  /* scope sentinel */
+  --_density-scope: 1;  /* scope marker */
   --elev-0-bg: var(--bg-0);  /* page / inset */
   --elev-0-border: transparent;
   --elev-0-shadow: none;
@@ -493,7 +493,7 @@
   --exit-duration: var(--t-fast);  /* duration for [data-state=closed] / [data-state=leaving] */
   --enter-easing: var(--ease-out);  /* cubic-bezier on enter — decelerate-into-rest */
   --exit-easing: var(--ease-in);  /* cubic-bezier on exit — accelerate-out */
-  --_motion-scope: 1;  /* scope sentinel */
+  --_motion-scope: 1;  /* scope marker */
   --cmt-question: var(--info);
   --cmt-flag: var(--err);
   --cmt-note: var(--fg-2);

@@ -31,7 +31,7 @@ module R = Masc.Keeper_runtime
    a Pulse" branch and emit the
    [keeper supervisor sweep started] log line / counter +1.
    If a future refactor flipped the default to true (e.g. by
-   using a sentinel Pulse handle), the autoboot fix below
+   using a marker Pulse handle), the autoboot fix below
    would silently noop and #10125 would re-emerge. *)
 let test_running_predicate_false_on_fresh_base_path () =
   let bp = "/tmp/test-keeper-autoboot-sup-10125-fresh" in

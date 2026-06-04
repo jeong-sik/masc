@@ -52,6 +52,11 @@ let check_list_field json key expected_len =
   in
   check int key expected_len actual_len
 
+let check_null_field json key =
+  match get_field key json with
+  | `Null -> ()
+  | _ -> fail ("expected null field " ^ key)
+
 let find_section sections id =
   sections
   |> List.find_opt (fun json ->
@@ -192,14 +197,13 @@ let test_compact_session_json_normalizes_missing_fields () =
       ]
   in
   let compact = Briefing.compact_session_json json in
-  check_string_field compact "goal" "unassigned";
-  check_string_field compact "project" "default";
-  check_string_field compact "status" "<missing status>";
+  check_null_field compact "goal";
+  check_null_field compact "project";
+  check_null_field compact "status";
   check_list_field compact "agent_names" 0;
   check_int_field compact "active_agents_count" 0;
-  check_string_field compact "communication_mode" "<missing status>";
-  check_string_field compact "communication_summary"
-    "<missing status> · broadcast 0"
+  check_null_field compact "communication_mode";
+  check_string_field compact "communication_summary" "broadcast 0"
 
 let test_compact_keeper_json_normalizes_missing_fields () =
   let json =
@@ -213,11 +217,11 @@ let test_compact_keeper_json_normalizes_missing_fields () =
       ]
   in
   let compact = Briefing.compact_keeper_json json in
-  check_string_field compact "status" "<missing status>";
-  check_string_field compact "agent_name" "<missing status>";
-  check_string_field compact "current_task" "unassigned";
-  check_string_field compact "last_reply_status" "not_recorded";
-  check_string_field compact "last_reply_preview" "not_recorded";
+  check_null_field compact "status";
+  check_null_field compact "agent_name";
+  check_null_field compact "current_task";
+  check_null_field compact "last_reply_status";
+  check_null_field compact "last_reply_preview";
   check_list_field compact "active_goal_ids" 0
 
 let test_compact_agent_json_uses_current_focus () =
@@ -236,8 +240,8 @@ let test_compact_agent_json_uses_current_focus () =
   in
   let compact = Briefing.compact_agent_json agent in
   check_string_field compact "assignment_status" "unassigned";
-  check_string_field compact "current_focus" "unassigned";
-  check_string_field compact "goal_hint" "unassigned";
+  check_null_field compact "current_focus";
+  check_null_field compact "goal_hint";
   check_list_field compact "capabilities" 2
 
 let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =

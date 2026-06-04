@@ -228,31 +228,31 @@ and env_args_run_dune = function
 
 and opam_exec_args_run_dune = function
   | sub :: rest when String.equal (basename_word sub) "exec" ->
-    let rec after_sentinel = function
+    let rec after_marker = function
       | [] -> false
       | "--" :: rest -> command_words_run_dune rest
-      | _ :: rest -> after_sentinel rest
+      | _ :: rest -> after_marker rest
     in
-    let rec without_sentinel = function
+    let rec without_marker = function
       | [] -> false
       | word :: rest ->
         if is_env_assignment_word word
-        then without_sentinel rest
+        then without_marker rest
         else if word = "--switch" || word = "--color" || word = "--root"
                 || word = "--cli"
         then (
           match rest with
-          | _ :: rest -> without_sentinel rest
+          | _ :: rest -> without_marker rest
           | [] -> false)
         else if String.starts_with ~prefix:"--switch=" word
                 || String.starts_with ~prefix:"--color=" word
                 || String.starts_with ~prefix:"--root=" word
                 || String.starts_with ~prefix:"--cli=" word
                 || String.starts_with ~prefix:"-" word
-        then without_sentinel rest
+        then without_marker rest
         else command_words_run_dune (word :: rest)
     in
-    after_sentinel rest || without_sentinel rest
+    after_marker rest || without_marker rest
   | [] -> false
   | _ :: _ -> false
 

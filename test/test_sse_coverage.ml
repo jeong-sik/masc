@@ -263,7 +263,7 @@ let test_buffer_event_timestamps_successful_commit_after_retry () =
       Atomic.set Sse.buffer_commit_test_hook original_hook;
       Atomic.set Sse.event_buffer original_buffer)
     (fun () ->
-      Atomic.set Sse.event_buffer [ (777_000, "sentinel", Unix.gettimeofday ()) ];
+      Atomic.set Sse.event_buffer [ (777_000, "marker", Unix.gettimeofday ()) ];
       Atomic.set Sse.buffer_commit_test_hook
         (Some (fun () ->
            if Atomic.compare_and_set forced_retry false true then begin

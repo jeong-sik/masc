@@ -78,7 +78,7 @@ siblings when the first branch completes or trips.
 
 MASC currently uses the *cooperative* variant (like Go/gRPC) rather than
 forced-drop (Rust Tokio). The observability step is a prerequisite for any
-future migration to forced-drop or sentinel-based kill.
+future migration to forced-drop or marker-based kill.
 
 ## Migration plan
 

@@ -49,7 +49,7 @@ let fallback_status_json ~overall_status ~source ~reason =
       ("known_blockers", `List []);
     ]
 
-let missing_status_json ~base_path =
+let missing_runtime_status_json ~base_path =
   let candidates = status_path_candidates ~base_path in
   let source =
     dashboard_source_json "runtime_status_missing"
@@ -74,7 +74,7 @@ let first_existing_path paths =
 
 let status_json_compute ~base_path () =
   match first_existing_path (status_path_candidates ~base_path) with
-  | None -> missing_status_json ~base_path
+  | None -> missing_runtime_status_json ~base_path
   | Some path -> (
       try
         let json = Yojson.Safe.from_string (Fs_compat.load_file path) in

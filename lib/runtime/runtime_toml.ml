@@ -429,7 +429,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   : Runtime_schema.binding
   =
   let is_default = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "is-default" ] in
-  (* RFC-0058 §3.4: max-concurrent is REQUIRED. The sentinel value 0
+  (* RFC-0058 §3.4: max-concurrent is REQUIRED. The marker value 0
      here makes the omission visible to the validator instead of
      silently throttling every binding to 1. *)
   let max_concurrent =

@@ -346,7 +346,7 @@ function entryTurnGroupingDescriptor(entry: TelemetryEntry): {
 } | null {
   const turn = telemetryTurn(entry)
   const actor = telemetryTurnActor(entry)
-  // turn=0 is a "turn not tracked" sentinel in keeper telemetry (e.g.,
+  // turn=0 is a "turn not tracked" marker in keeper telemetry (e.g.,
   // trajectory tool-call records); collapsing on it would merge unrelated
   // events into a fake `actor · turn 0` group. Only group on real turn ids
   // (positive integers).

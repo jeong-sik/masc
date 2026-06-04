@@ -22,11 +22,11 @@
 open Alcotest
 open Masc
 
-(* Sentinel host-root prefix that must never appear in a
+(* Marker host-root prefix that must never appear in a
    Docker-keeper LLM-facing response.  Using a recognizable
    constant lets the assertion fail loudly in future regressions
    even if the offending path component is renamed. *)
-let host_root_sentinel = "/tmp/HOST_ROOT_SENTINEL_NEVER_LEAK"
+let host_root_marker = "/tmp/HOST_ROOT_MARKER_NEVER_LEAK"
 
 let mk_local_sandbox () : Keeper_sandbox.t =
   { keeper_name = "test-local"
@@ -35,7 +35,7 @@ let mk_local_sandbox () : Keeper_sandbox.t =
   ; sandbox_profile = "local"
   ; network_mode = "inherit"
   ; host_root_rel = ".masc/playground/test-local/"
-  ; host_root_abs = host_root_sentinel ^ "/.masc/playground/test-local"
+  ; host_root_abs = host_root_marker ^ "/.masc/playground/test-local"
   ; container_root = None
   ; root_arg = "."
   ; mind_arg = "mind"
@@ -51,7 +51,7 @@ let mk_docker_sandbox () : Keeper_sandbox.t =
   ; network_mode = "inherit"
   ; host_root_rel = ".masc/playground/docker/test-docker/"
   ; host_root_abs =
-      host_root_sentinel ^ "/.masc/playground/docker/test-docker"
+      host_root_marker ^ "/.masc/playground/docker/test-docker"
   ; container_root = Some "/home/keeper/playground/test-docker"
   ; root_arg = "."
   ; mind_arg = "mind"
@@ -63,7 +63,7 @@ let mk_docker_sandbox () : Keeper_sandbox.t =
 
 let test_local_constructor_passthrough () =
   let host_cwd =
-    host_root_sentinel ^ "/.masc/playground/test-local/repos/foo"
+    host_root_marker ^ "/.masc/playground/test-local/repos/foo"
   in
   let r = Keeper_cwd_response.local ~host_cwd in
   check string "keeper_visible == host_cwd" host_cwd
@@ -77,7 +77,7 @@ let test_local_json_emits_host_path () =
      positive check here is that [to_yojson_response] returns
      exactly the host_cwd string. *)
   let host_cwd =
-    host_root_sentinel ^ "/.masc/playground/test-local/repos/foo"
+    host_root_marker ^ "/.masc/playground/test-local/repos/foo"
   in
   let r = Keeper_cwd_response.local ~host_cwd in
   let json = Keeper_cwd_response.to_yojson_response r in
@@ -89,7 +89,7 @@ let test_local_json_emits_host_path () =
 
 let test_docker_constructor_keeper_visible_is_container () =
   let host_cwd =
-    host_root_sentinel ^ "/.masc/playground/docker/test-docker/repos/foo"
+    host_root_marker ^ "/.masc/playground/docker/test-docker/repos/foo"
   in
   let container_cwd = "/home/keeper/playground/test-docker/repos/foo" in
   let r = Keeper_cwd_response.docker ~host_cwd ~container_cwd in
@@ -101,15 +101,15 @@ let test_docker_constructor_keeper_visible_is_container () =
 
 let test_docker_json_does_not_leak_host_root () =
   let host_cwd =
-    host_root_sentinel ^ "/.masc/playground/docker/test-docker/repos/foo"
+    host_root_marker ^ "/.masc/playground/docker/test-docker/repos/foo"
   in
   let container_cwd = "/home/keeper/playground/test-docker/repos/foo" in
   let r = Keeper_cwd_response.docker ~host_cwd ~container_cwd in
   let json_str =
     Keeper_cwd_response.to_yojson_response r |> Yojson.Safe.to_string
   in
-  check bool "JSON response does NOT contain host root sentinel" false
-    (Astring.String.is_infix ~affix:host_root_sentinel json_str);
+  check bool "JSON response does NOT contain host root marker" false
+    (Astring.String.is_infix ~affix:host_root_marker json_str);
   check bool "JSON response does NOT contain host_cwd" false
     (Astring.String.is_infix ~affix:host_cwd json_str);
   check bool "JSON response contains container_cwd" true
@@ -150,8 +150,8 @@ let test_of_sandbox_docker_dispatch () =
   let json_str =
     Keeper_cwd_response.to_yojson_response r |> Yojson.Safe.to_string
   in
-  check bool "Docker JSON does not contain host sentinel" false
-    (Astring.String.is_infix ~affix:host_root_sentinel json_str)
+  check bool "Docker JSON does not contain host marker" false
+    (Astring.String.is_infix ~affix:host_root_marker json_str)
 
 (* --- Property: docker JSON never contains host_cwd ---------- *)
 
@@ -163,7 +163,7 @@ let test_property_docker_response_never_leaks_host () =
     ; ( "/Users/dancer/me/.masc/playground/docker/k/repos/long/path"
       , "/home/keeper/playground/k/repos/long/path" )
     ; "/var/HOST_ROOT/x", "/home/keeper/playground/k/x"
-    ; ( host_root_sentinel ^ "/edge/case/with spaces"
+    ; ( host_root_marker ^ "/edge/case/with spaces"
       , "/home/keeper/playground/k/edge/case/with spaces" )
     ]
   in
@@ -203,7 +203,7 @@ let () =
             "docker constructor: keeper_visible is container path"
             `Quick
             test_docker_constructor_keeper_visible_is_container
-        ; test_case "docker JSON does not leak host root sentinel"
+        ; test_case "docker JSON does not leak host root marker"
             `Quick test_docker_json_does_not_leak_host_root
         ; test_case "of_sandbox dispatches Docker to container path"
             `Quick test_of_sandbox_docker_dispatch

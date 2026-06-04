@@ -66,16 +66,14 @@ let test_string_field_wrong_type () =
   let j = `Assoc [ ("count", `Int 5) ] in
   assert (B.string_field ~default:"fallback" "count" j = "fallback")
 
-(* ─── missing status sentinel ──────────────────────────────── *)
+(* ─── missing scalar detection ─────────────────────────────── *)
 
-let test_missing_status_sentinel () =
-  assert (B.missing_status = "<missing status>");
-  assert (B.is_missing_status_or_unknown "");
-  assert (B.is_missing_status_or_unknown "   ");
-  assert (B.is_missing_status_or_unknown "unknown");
-  assert (B.is_missing_status_or_unknown "  UNKNOWN  ");
-  assert (B.is_missing_status_or_unknown "<missing status>");
-  assert (not (B.is_missing_status_or_unknown "async"))
+let test_missing_or_unknown () =
+  assert (B.is_missing_or_unknown "");
+  assert (B.is_missing_or_unknown "   ");
+  assert (B.is_missing_or_unknown "unknown");
+  assert (B.is_missing_or_unknown "  UNKNOWN  ");
+  assert (not (B.is_missing_or_unknown "async"))
 
 (* ─── string_json ──────────────────────────────────────────── *)
 
@@ -99,6 +97,15 @@ let test_string_json_default_default () =
   match B.string_json `Null with
   | `String s -> assert (s = "unknown")
   | other -> unexpected_json ~where:"string_json_default_default" other
+
+let test_string_json_opt_passthrough () =
+  match B.string_json_opt (`String "hello") with
+  | `String s -> assert (s = "hello")
+  | other -> unexpected_json ~where:"string_json_opt_passthrough" other
+
+let test_string_json_opt_missing_to_null () =
+  assert (B.string_json_opt (`String "   ") = `Null);
+  assert (B.string_json_opt (`Int 7) = `Null)
 
 (* ─── string_list_json ─────────────────────────────────────── *)
 
@@ -227,11 +234,13 @@ let () =
   test_string_field_present ();
   test_string_field_default ();
   test_string_field_wrong_type ();
-  test_missing_status_sentinel ();
+  test_missing_or_unknown ();
   test_string_json_passthrough ();
   test_string_json_empty_uses_default ();
   test_string_json_non_string_uses_default ();
   test_string_json_default_default ();
+  test_string_json_opt_passthrough ();
+  test_string_json_opt_missing_to_null ();
   test_string_list_filters_blanks ();
   test_string_list_drops_non_strings ();
   test_string_list_non_list_returns_empty ();

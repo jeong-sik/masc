@@ -325,6 +325,10 @@ function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolea
   return false
 }
 
+function toolListLabel(values: readonly string[] | null | undefined): string | null {
+  return values && values.length > 0 ? values.join(', ') : null
+}
+
 function backendRuntimeAttentionLevel(
   state: string,
   blocked: boolean,
@@ -416,9 +420,19 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
     )
   }
   if (execution.tool_contract_result === 'tool_surface_mismatch') {
-    parts.push('tool contract: tool_surface_mismatch')
+    const missingTools = toolListLabel(execution.tool_surface?.missing_required_tools)
+    parts.push(
+      missingTools
+        ? `tool contract: tool_surface_mismatch (${missingTools})`
+        : 'tool contract: tool_surface_mismatch',
+    )
   } else if (execution.tool_contract_result === 'no_tool_capable_provider') {
-    parts.push('tool contract: no_tool_capable_provider')
+    const requiredTools = toolListLabel(execution.tool_surface?.required_tools)
+    parts.push(
+      requiredTools
+        ? `tool contract: no_tool_capable_provider (${requiredTools})`
+        : 'tool contract: no_tool_capable_provider',
+    )
   } else if (execution.tool_contract_result === 'unknown' && execution.error != null) {
     parts.push('tool contract unknown with execution error')
   }
@@ -441,6 +455,12 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
     execution.tool_contract_result === 'tool_surface_mismatch' ||
     execution.tool_contract_result === 'no_tool_capable_provider'
   ) {
+    const missingTools = toolListLabel(execution.tool_surface?.missing_required_tools)
+    const requiredTools = toolListLabel(execution.tool_surface?.required_tools)
+    const toolHint = missingTools ?? requiredTools
+    if (toolHint) {
+      return `tool surface 또는 runtime lane 설정 확인: ${toolHint}`
+    }
     return 'tool surface 또는 runtime lane 설정 확인'
   }
   if (execution.terminal_reason_code === 'api_error_invalid_request') {

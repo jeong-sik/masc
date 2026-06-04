@@ -10,7 +10,7 @@ type outcome =
   | Internal_error of string
 
 (* Closed sum mirroring the in-module producer surface (5 sites in this
-   file).  [Ek_none] replaces the [Error_kind ""] sentinel previously
+   file).  [Ek_none] replaces the [Error_kind ""] marker previously
    used to encode the no-error state for [Success] and [Duplicate]
    outcomes. *)
 type error_kind =

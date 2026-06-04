@@ -351,7 +351,7 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
       ~n:100 ()
   in
   Alcotest.(check int) "limited result" 100 (List.length result.entries);
-  Alcotest.(check int) "sentinel total" 101 result.total_matching_entries;
+  Alcotest.(check int) "marker total" 101 result.total_matching_entries;
   Alcotest.(check bool) "truncated" true result.truncated;
   let indices = List.map (json_int_field "i") result.entries in
   Alcotest.(check int) "newest hot entry first" 119 (List.hd indices);
@@ -360,10 +360,10 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
     (List.init 100 (fun _ -> "hot"))
     (List.map (json_string_field "name") result.entries)
 
-let test_keeper_metrics_fast_path_sets_truncated_with_sentinel () =
+let test_keeper_metrics_fast_path_sets_truncated_with_marker () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_keeper_fast_sentinel" in
+  let dir = tmpdir "telem_keeper_fast_marker" in
   let write_keeper name ts =
     let metrics_dir = Filename.concat dir (".masc/keepers/" ^ name ^ "/metrics") in
     Fs_compat.mkdir_p metrics_dir;
@@ -386,7 +386,7 @@ let test_keeper_metrics_fast_path_sets_truncated_with_sentinel () =
       ~n:2 ()
   in
   Alcotest.(check int) "returned limit" 2 (List.length result.entries);
-  Alcotest.(check int) "sentinel total" 3 result.total_matching_entries;
+  Alcotest.(check int) "marker total" 3 result.total_matching_entries;
   Alcotest.(check bool) "truncated" true result.truncated;
   Alcotest.(check (list string)) "newest keepers"
     [ "alpha"; "beta" ]
@@ -1240,8 +1240,8 @@ let () =
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
           Alcotest.test_case "keeper metrics fast path keeps noisy top n" `Quick
             test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n;
-          Alcotest.test_case "keeper metrics fast path sentinel" `Quick
-            test_keeper_metrics_fast_path_sets_truncated_with_sentinel;
+          Alcotest.test_case "keeper metrics fast path marker" `Quick
+            test_keeper_metrics_fast_path_sets_truncated_with_marker;
           Alcotest.test_case "sorted newest first" `Quick test_sorted_newest_first;
           Alcotest.test_case "n limits output" `Quick test_n_limits_output;
           Alcotest.test_case "time window reports total before limit" `Quick

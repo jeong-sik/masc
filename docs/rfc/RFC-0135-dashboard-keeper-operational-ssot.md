@@ -297,7 +297,7 @@ PR-1 머지 후 PR-2~7 은 모두 같은 SSOT 호출자이므로 **동시 진행
   - `phase` 는 `monitoring-runtime.ts:keeperPhaseForDisplay` 에서 lifecycle terminal guard + `derivePreferredPhase` fallback 을 직접 조합.
 - **이후 패턴**: `KeeperOperationalState` 의 4 variant 모두 공통 `KeeperOperationalAxes` 를 보유:
   - `attention: KeeperAttention`
-  - `turnPhase: KeeperTurnPhase` (composite preferred → flat `pipeline_stage` fallback → `unknown` sentinel)
+  - `turnPhase: KeeperTurnPhase` (composite preferred → flat `pipeline_stage` fallback → `unknown` marker)
   - `displaySummary: string | null` (composite runtime attention reason → flat blocker summary → flat attention reason)
   - `phase: KeeperPhase | null` (terminal lifecycle guard 보존, 그 외 composite preferred)
 - **consumer closure**:

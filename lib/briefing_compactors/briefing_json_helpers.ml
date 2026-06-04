@@ -10,12 +10,9 @@ let compact_text ?(max_len = 96) raw =
 let member_assoc = Dashboard_utils.member_assoc
 let string_field = Dashboard_utils.string_field
 
-let missing_status = "<missing status>"
-
-let is_missing_status_or_unknown value =
+let is_missing_or_unknown value =
   match String.lowercase_ascii (String.trim value) with
   | "" | "unknown" -> true
-  | value when value = missing_status -> true
   | _ -> false
 
 let string_json ?(default = "unknown") ?(max_len = 96) json =
@@ -24,6 +21,14 @@ let string_json ?(default = "unknown") ?(max_len = 96) json =
       let compact = compact_text ~max_len value in
       if compact = "" then `String default else `String compact
   | _ -> `String default
+
+let string_json_opt ?(max_len = 96) json =
+  match json with
+  | `String value ->
+      compact_text ~max_len value
+      |> String_util.trim_to_option
+      |> Json_util.string_opt_to_json
+  | _ -> `Null
 
 let string_list_json json =
   match json with
@@ -58,4 +63,3 @@ let float_json ?(default = 0.0) json =
   | _ -> `Float default
 
 let take = List.take
-

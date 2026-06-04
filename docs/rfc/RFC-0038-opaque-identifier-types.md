@@ -122,7 +122,7 @@ they are stable telemetry/dashboard category labels. Example:
 
 ```ocaml
 (* lib/dashboard_runtime.ml:826 *)
-if Masc_network_defaults.is_cli_sentinel_url url then "cli"
+if Masc_network_defaults.is_cli_transport_url url then "cli"
 else if Masc_network_defaults.is_ollama_url url then "ollama"   (* ← category tag *)
 else "other"
 ```

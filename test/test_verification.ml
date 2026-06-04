@@ -329,9 +329,9 @@ let test_auto_verify () =
         | Ok updated ->
             Alcotest.(check bool) "auto-verified pass" true
               (match updated.status with V.Completed V.Pass -> true | _ -> false);
-            (* auto_verify records an "auto" sentinel so the dashboard can
+            (* auto_verify records an "auto" marker so the dashboard can
                distinguish rule-based passes from peer-agent verdicts. *)
-            Alcotest.(check (option string)) "auto sentinel recorded"
+            Alcotest.(check (option string)) "auto marker recorded"
               (Some "auto") updated.verifier)
 
 let test_auto_verify_with_custom_fails () =

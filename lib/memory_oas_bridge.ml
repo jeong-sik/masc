@@ -523,7 +523,7 @@ let store_failed_turn_episode
              it filled 97% of failure entries with no per-failure
              information, defeating the institution-memory contract.
              When neither error_kind nor error_message has signal,
-             emit the explicit [NO_LEARNING] sentinel so downstream
+             emit the explicit [NO_LEARNING] marker so downstream
              readers can distinguish absent data from a placeholder. *)
           ( "learnings",
             `List (List.map (fun s -> `String s) learnings) );

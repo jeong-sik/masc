@@ -17,7 +17,7 @@ implementation_prs: []
 
 Voice tools (`keeper_voice_speak` / `keeper_voice_listen` / `keeper_voice_agent` / `keeper_voice_session_start` / `keeper_voice_session_end` / `keeper_voice_sessions`) are **client-intercepted** in `lib/keeper/agent_tool_voice_runtime.ml` — masc dispatches them locally via `Voice_bridge.agent_speak` (ElevenLabs HTTP) without provider involvement. They do **not** require provider execution capability.
 
-Despite this, the codebase carries a redundant **keeper-side voice gate** (`voice_enabled` / `voice_channel` / `voice_agent_id` / `policy_voice_enabled` fields + `default_voice_enabled_for` / `default_voice_channel_for` / `default_voice_agent_id_for` helpers + `canonical_voice_channel` sentinel) that:
+Despite this, the codebase carries a redundant **keeper-side voice gate** (`voice_enabled` / `voice_channel` / `voice_agent_id` / `policy_voice_enabled` fields + `default_voice_enabled_for` / `default_voice_channel_for` / `default_voice_agent_id_for` helpers + `canonical_voice_channel` marker) that:
 
 1. **Conflates two categories** in `required_tool_names`: provider-executed tools (`tool_execute`, `keeper_board_post`) and client-intercepted tools (`keeper_voice_*`). The runtime pre-dispatch matcher (RFC-0157) treats both the same and rejects every candidate when voice tools are in the required set.
 2. **Duplicates the SSOT**: tool availability is already authoritative in `tool_policy.toml [groups.voice]` (RFC-0080). The per-keeper voice flag is a parallel decision surface that *overrides or invalidates* the policy grant depending on its value.
@@ -95,7 +95,7 @@ And per single-consumer condition (no other deployments depend on this surface):
 |---|---|---|---|
 | `voice_enabled` | `bool` | JSON serialize/deserialize, handoff, compaction | Duplicates `tool_policy.toml` voice-group membership |
 | `policy_voice_enabled` | `bool option` | `keeper_types_profile_defaults.ml:18,20,85` + profile.ml:444,511,565,711,712,916,917 | Per-keeper master switch for a *policy-layer* concern — wrong layer |
-| `voice_channel` | `string` (sentinel: `"text_only"` / `"voice_text"`) | profile.ml:102 (`canonical_voice_channel`), 120-121 (`default_voice_channel_for`) | Enable/disable encoded as a string sentinel; tool_policy is the truth |
+| `voice_channel` | `string` (marker: `"text_only"` / `"voice_text"`) | profile.ml:102 (`canonical_voice_channel`), 120-121 (`default_voice_channel_for`) | Enable/disable encoded as a string marker; tool_policy is the truth |
 | `voice_agent_id` | `string` (defaults to keeper name or empty) | profile.ml:123-124 (`default_voice_agent_id_for`) | `voice_config.json::agent_voices` keyed by keeper name already maps this; the field duplicates the lookup |
 
 ### 2.2 Helpers to delete
@@ -104,9 +104,9 @@ And per single-consumer condition (no other deployments depend on this surface):
 
 | Symbol | Lines | Reason |
 |---|---|---|
-| `canonical_voice_channel` | 102-106 | String-sentinel canonicalizer; sentinel itself is being removed |
+| `canonical_voice_channel` | 102-106 | String-marker canonicalizer; marker itself is being removed |
 | `default_voice_enabled_for` | 107-119 | Hardcoded per-keeper voice eligibility — duplicate of policy group membership |
-| `default_voice_channel_for` | 120-122 | Derives sentinel from `default_voice_enabled_for`; both go away |
+| `default_voice_channel_for` | 120-122 | Derives marker from `default_voice_enabled_for`; both go away |
 | `default_voice_agent_id_for` | 123-125 | Derives agent_id from `default_voice_enabled_for` + keeper name; redundant |
 
 `lib/keeper/keeper_types_profile.mli`:
@@ -182,7 +182,7 @@ This is **not** a string blacklist (cf. `feedback_telemetry_as_fix_self_recurren
 
 1. `keeper_meta.voice_enabled` field — across `keeper_types*` and all 19 files that reference it.
 2. `keeper_meta.policy_voice_enabled` field — across `keeper_types_profile.ml` (7 sites) and defaults.
-3. `keeper_meta.voice_channel` field — sentinel removal.
+3. `keeper_meta.voice_channel` field — marker removal.
 4. `keeper_meta.voice_agent_id` field — duplicate lookup.
 5. `default_voice_enabled_for` / `default_voice_channel_for` / `default_voice_agent_id_for` helpers (`keeper_types_profile.ml:107-125`).
 6. `canonical_voice_channel` helper (`keeper_types_profile.ml:102-106`).
@@ -262,7 +262,7 @@ This RFC is Implemented when:
 2. `rg` invariants in §5 all return 0 hits.
 3. `dune build` and `dune build @runtest` both pass on the resulting tree.
 4. §6.2 E2E live-fire succeeds: sangsu autonomously emits voice during a turn, audible output produced, ElevenLabs counter advances.
-5. No additional fields, flags, or sentinels added to compensate (counter to §1.3 root-fix principle).
+5. No additional fields, flags, or markers added to compensate (counter to §1.3 root-fix principle).
 
 ## §10 References
 

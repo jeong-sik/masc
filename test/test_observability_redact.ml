@@ -50,9 +50,9 @@ let test_normal_tool_output_returns_some () =
     (Option.is_some result)
 
 (* Regression: the 24+ alnum pattern used to eat the 64-hex sha256 in a blob
-   sentinel and produce "[masc:blob [REDACTED] bytes=... preview=..."
+   marker and produce "[masc:blob [REDACTED] bytes=... preview=..."
    which [Tool_output.decode_from_oas] cannot parse back. *)
-let test_blob_sentinel_preserves_structure () =
+let test_blob_marker_preserves_structure () =
   let sha = String.make 64 'a' in
   let marker =
     Tool_output.encode_for_oas
@@ -68,7 +68,7 @@ let test_blob_sentinel_preserves_structure () =
   | Tool_output.Inline _ ->
       Alcotest.fail "marker structure destroyed by redaction"
 
-let test_blob_sentinel_redacts_preview_body () =
+let test_blob_marker_redacts_preview_body () =
   let sha = String.make 64 'b' in
   let preview = {|{"api_key": "sk-proj-abc123xyz456def789ghi012jkl345"}|} in
   let marker =
@@ -82,12 +82,12 @@ let test_blob_sentinel_redacts_preview_body () =
   Alcotest.(check bool) "sha256 still present as structural field" true
     (String_util.contains_substring redacted ("sha256=" ^ sha))
 
-(* Regression: a sentinel embedded inside a JSON string field used to be
+(* Regression: a marker embedded inside a JSON string field used to be
    corrupted by callers that did [Yojson.Safe.to_string |> String.sub]
    because the top-level value looks like [{...}] not [\[masc:blob ...\]],
    so [redact_preview] took the else-branch and the 24+ alnum scrubber
    ate sha256. [preview_json_strings] walks leaves instead. *)
-let test_preview_json_strings_preserves_embedded_sentinel () =
+let test_preview_json_strings_preserves_embedded_marker () =
   let sha = String.make 64 'c' in
   let marker =
     Tool_output.encode_for_oas
@@ -106,7 +106,7 @@ let test_preview_json_strings_preserves_embedded_sentinel () =
                 Alcotest.(check int) "bytes preserved in leaf" 500 bytes;
                 Alcotest.(check string) "mime preserved in leaf" "text/plain" mime
             | Tool_output.Inline _ ->
-                Alcotest.fail "sentinel in JSON leaf was corrupted")
+                Alcotest.fail "marker in JSON leaf was corrupted")
        | _ -> Alcotest.fail "content field missing or not a string")
   | _ -> Alcotest.fail "expected Assoc root"
 
@@ -119,12 +119,12 @@ let () =
           Alcotest.test_case "URL credential redacted" `Quick test_url_credential_redacted;
           Alcotest.test_case "max length enforced" `Quick test_max_length_enforced;
           Alcotest.test_case "short input unchanged" `Quick test_short_input_unchanged;
-          Alcotest.test_case "blob sentinel preserves structure" `Quick
-            test_blob_sentinel_preserves_structure;
-          Alcotest.test_case "blob sentinel redacts preview body" `Quick
-            test_blob_sentinel_redacts_preview_body;
-          Alcotest.test_case "preview_json_strings preserves embedded sentinel"
-            `Quick test_preview_json_strings_preserves_embedded_sentinel;
+          Alcotest.test_case "blob marker preserves structure" `Quick
+            test_blob_marker_preserves_structure;
+          Alcotest.test_case "blob marker redacts preview body" `Quick
+            test_blob_marker_redacts_preview_body;
+          Alcotest.test_case "preview_json_strings preserves embedded marker"
+            `Quick test_preview_json_strings_preserves_embedded_marker;
         ] );
       ( "deny_list",
         [

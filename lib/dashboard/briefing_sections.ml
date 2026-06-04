@@ -81,7 +81,7 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
   let broadcast_total = sum_int_field "broadcast_count" sessions in
   let known_mode_count =
     count_matching_field "communication_mode" sessions ~predicate:(fun value ->
-        not (is_missing_status_or_unknown value))
+        not (is_missing_or_unknown value))
   in
   let metadata_evidence = evidence_of_metadata_gaps ~section:Communication metadata_gaps in
   let positive_signal =
@@ -145,7 +145,8 @@ let build_alignment_section ~sessions ~agents ~metadata_gaps =
   let bound_goal_count =
     List.fold_left
       (fun acc json ->
-        if String.equal (string_field "goal" json) "unassigned" then acc else acc + 1)
+        if String_util.trim_to_option (string_field "goal" json) = None then acc
+        else acc + 1)
       0 sessions
   in
   let metadata_evidence = evidence_of_metadata_gaps ~section:Alignment metadata_gaps in

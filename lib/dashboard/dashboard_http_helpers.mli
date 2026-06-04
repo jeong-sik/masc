@@ -60,7 +60,7 @@ val keeper_tail_lines_or_empty :
     explicitly instead of flowing through the removed global silent
     fallback. *)
 
-(** {1 JSON field accessors (sentinel-tolerant)} *)
+(** {1 JSON field accessors (marker-tolerant)} *)
 
 val json_list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 (** Extract a [`List] field; returns [[]] on missing/wrong-type. *)

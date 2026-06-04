@@ -7,9 +7,9 @@ type t =
       mime : string;
     }
 
-let sentinel_prefix = "[masc:blob "
+let marker_prefix = "[masc:blob "
 
-let is_sentinel s = String.starts_with ~prefix:sentinel_prefix s
+let is_marker s = String.starts_with ~prefix:marker_prefix s
 
 let encode_for_oas = function
   | Inline s -> s
@@ -18,7 +18,7 @@ let encode_for_oas = function
         sha256 bytes mime preview
 
 let decode_from_oas s =
-  if not (is_sentinel s) then Inline s
+  if not (is_marker s) then Inline s
   else
     try
       Scanf.sscanf s

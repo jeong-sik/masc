@@ -16,4 +16,5 @@
  (wrapped false)
  (flags (:standard -w +4))
  (libraries
-  yojson))
+  yojson)
+ (preprocess (pps ppx_deriving_yojson ppx_deriving.show)))

@@ -570,6 +570,20 @@ describe('AgentRoster live-only cards', () => {
     expect(text).not.toContain('파생')
   })
 
+  it('does not expose synthetic implementation labels in agent rows', async () => {
+    agents.value = [makeAgent({ name: 'runtime-shadow', synthetic: true })]
+    keepers.value = []
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('runtime-shadow')
+    expect(text).not.toContain('파생')
+  })
+
   it('renders the operations list with a selected detail pane', async () => {
     agents.value = [
       makeAgent({ name: 'alpha-agent', current_task: 'alpha task' }),

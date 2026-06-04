@@ -116,6 +116,7 @@ let test_write_ops_detected () =
     "git clone https://github.com/user/repo.git";
     "git init";
     "dune clean";
+    "make test";
     "make deploy";
     "make install";
     "npm publish";
@@ -138,7 +139,6 @@ let test_read_ops_pass () =
     "git diff HEAD";
     "scripts/dune-local.sh build";
     "scripts/dune-local.sh exec test.exe";
-    "make test";
     "npm run build";
     "npm run dev";
     "pnpm run build";

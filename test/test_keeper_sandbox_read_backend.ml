@@ -7,7 +7,6 @@
     tests. *)
 
 module Workspace = Masc.Workspace
-module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
 module Keeper_sandbox_read_backend = Masc.Keeper_sandbox_read_backend
 module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
 module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory

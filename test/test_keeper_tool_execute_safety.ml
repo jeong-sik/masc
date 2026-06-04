@@ -14,7 +14,6 @@ module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
 module Keeper_types = Keeper_types
-module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
 module Exec_program = Masc_exec.Exec_program
 module Json = Yojson.Safe.Util
 

@@ -7,7 +7,6 @@
     module. *)
 
 module Workspace = Masc.Workspace
-module Keeper_types_profile_sandbox = Masc.Keeper_types_profile_sandbox
 module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox

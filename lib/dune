@@ -25,7 +25,6 @@
  workspace_prometheus_hooks
 
  keeper_persona_authoring_contract
- keeper_types_profile_sandbox
  keeper_types_profile_persona keeper_types_profile_persona_defaults
  keeper_types_profile_oas_env
  keeper_types_profile_defaults
@@ -280,6 +279,7 @@
    masc.keeper_outcome_taxonomy
    masc.keeper_metrics
    masc.keeper_types
+   masc.keeper_types_profile_sandbox
    ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
    ;; Leaf boundary over agent_sdk.llm_provider canonical provider labels.
    masc.runtime_provider_labels

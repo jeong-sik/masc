@@ -31,7 +31,7 @@ val normalize_command : string -> string
 val destructive_patterns : (string * string) list
 (** The canonical 19-entry substring pattern catalogue used by
     [detect_destructive]. Exposed so the shell-safety classifier
-    (see [Worker_dev_tools.classify_destructive]) can enforce
+    (see [Shell_safety_types.classify_destructive]) can enforce
     a covenant that every pattern maps to a typed class. *)
 
 val detect_destructive : string -> (string * string) option

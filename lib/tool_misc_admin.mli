@@ -13,8 +13,8 @@
     Internal: \[U\] (Yojson.Safe.Util alias), \[Json_util.string_opt_to_json\],
     \[bool_arg_opt\], \[int_arg_opt\] (3 local args helpers
     duplicated from Tool_misc to avoid circular deps),
-    \[permission_to_json\], \[auth_snapshot_json\] stay private —
-    none are referenced outside this file. *)
+    \[auth_snapshot_json\] stays private — none are referenced outside this
+    file. *)
 
 (** {1 Types} *)
 

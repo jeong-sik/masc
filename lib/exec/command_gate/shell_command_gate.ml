@@ -11,11 +11,6 @@ module PD = Masc_exec.Parsed
 module ST = Masc_exec.Sandbox_target
 module BIN = Masc_exec.Exec_program
 
-type caller =
-  | Worker_dev_tools
-  | Filesystem_write
-  | Keeper_tool_execute_shell_ir
-
 type reject_reason =
   | Command_not_in_allowlist of { bin : string }
   | Pipeline_segment_disallowed of { stage : int; bin : string }
@@ -548,7 +543,7 @@ let parse_only_to_stages (parsed : SI.t PD.t) :
      | Nested_pipeline -> Error (`Too_complex Unsupported_nested_pipeline))
 ;;
 
-let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
+let gate_typed ~ir ~allowlist ~path_policy ~sandbox () : verdict =
   (* Typed callers have already crossed their schema boundary, so this
      entrypoint intentionally skips raw-string parsing while preserving
      the same policy and verdict surface as [gate_raw]. *)
@@ -558,17 +553,16 @@ let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
 ;;
 
-let gate_raw ?caller ~text ~allowlist ~path_policy ~sandbox () : verdict =
+let gate_raw ~text ~allowlist ~path_policy ~sandbox () : verdict =
   match Masc_exec_bash_parser.Bash.parse_string text with
-  | PD.Parsed ir -> gate_typed ?caller ~ir ~allowlist ~path_policy ~sandbox ()
+  | PD.Parsed ir -> gate_typed ~ir ~allowlist ~path_policy ~sandbox ()
   | PD.Parse_error _ -> Cannot_parse { reason = Parse_error }
   | PD.Parse_aborted reason -> Cannot_parse { reason = Parse_aborted reason }
   | PD.Too_complex reason ->
     Too_complex { reason = Unsupported_construct reason }
 ;;
 
-let lower_typed_pipeline ?caller:_ ~stages ~sandbox () : verdict =
-  (* See note on [gate_typed] — [caller] is API-shape-only for now. *)
+let lower_typed_pipeline ~stages ~sandbox () : verdict =
   match stages with
   | [] -> Cannot_parse { reason = Parse_error }
   | _ ->
@@ -576,12 +570,6 @@ let lower_typed_pipeline ?caller:_ ~stages ~sandbox () : verdict =
     (match make_context ~stages with
      | None -> Cannot_parse { reason = Parse_error }
      | Some context -> Allow context)
-;;
-
-let caller_tag = function
-  | Worker_dev_tools -> "worker_dev_tools"
-  | Filesystem_write -> "filesystem_write"
-  | Keeper_tool_execute_shell_ir -> "keeper_tool_execute_shell_ir"
 ;;
 
 let verdict_tag = function

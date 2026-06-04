@@ -43,7 +43,6 @@ type t = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
-  required_permission : Masc_domain.permission option;
   effect_domain : Tool_catalog.effect_domain option;
   requires_actor_binding : bool option;
 }
@@ -69,7 +68,6 @@ let create
     ?reason
     ?(allow_direct_call_when_hidden = false)
     ?title
-    ?required_permission
     ?effect_domain
     ?requires_actor_binding
     () =
@@ -77,7 +75,7 @@ let create
     is_read_only; mcp_context_required; is_destructive; is_idempotent;
     visibility; implementation_status;
     canonical_name; replacement; reason;
-    allow_direct_call_when_hidden; title; required_permission; effect_domain;
+    allow_direct_call_when_hidden; title; effect_domain;
     requires_actor_binding }
 
 (* ================================================================ *)
@@ -128,13 +126,6 @@ let register (spec : t) =
         Option.bind existing (fun (meta : Tool_catalog.metadata) ->
           meta.requires_actor_binding)
   in
-  let required_permission =
-    match spec.required_permission with
-    | Some _ as value -> value
-    | None ->
-        Option.bind existing (fun (meta : Tool_catalog.metadata) ->
-          meta.required_permission)
-  in
   Tool_catalog.register_metadata spec.name
     { Tool_catalog.visibility = effective_visibility;
       lifecycle = Tool_catalog.Active;
@@ -147,7 +138,6 @@ let register (spec : t) =
       mcp_context_required = Some spec.mcp_context_required;
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;
-      required_permission;
       effect_domain = spec.effect_domain;
       requires_actor_binding };
   (* 3. Handler binding — auto-register Direct/Shared into Tool_dispatch *)

@@ -11,8 +11,8 @@
     {!Worker_container_types} surfaces into scope (notably
     [list_masc_tools], [parse_text_tool_calls], [run_result]).
 
-    Internal: 7 helpers stay private — \[resolve_net\],
-    \[default_shell_tool_names\], \[build_execution_spec\],
+    Internal: 6 helpers stay private — \[resolve_net\],
+    \[build_execution_spec\],
     \[workspace_path_of_spec\], \[effective_model_of_resume\],
     \[dedupe_tools_by_name\], \[create_raw_trace\].  All consumed
     inside the run / preflight pipelines. *)
@@ -37,7 +37,7 @@ val run_worker_oas :
     - Resolve effective model from
       {!Worker_container.load_worker_meta} when checkpoint
       exists, otherwise from the spec.
-    - Build MASC + shell tool sets and dedupe by tool name.
+    - Build the MASC/OAS tool set and dedupe by tool name.
     - Create / open raw trace under
       [<base_path>/workers/<worker_name>/raw_trace.jsonl].
     - Dispatch to {!Worker_oas.run_worker_via_oas} (cold start)

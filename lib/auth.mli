@@ -255,8 +255,6 @@ val check_permission :
   string -> agent_name:string -> token:string option ->
   permission:permission -> (unit, masc_error) result
 
-val permission_for_tool : string -> permission option
-
 val is_tool_auth_strict_enabled : unit -> bool
 
 val authorize_tool :

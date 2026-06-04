@@ -35,17 +35,6 @@
     composition contract (G2.2) is enforced at the facade boundary
     rather than emerging as a silent behavior in dispatch. *)
 
-(** Caller identity for telemetry partition.
-
-    The optional [?caller] arg on {!gate_typed} and
-    {!lower_typed_pipeline} is part of the stable caller/verdict
-    telemetry surface. The gate verdict itself is independent of the
-    caller tag. *)
-type caller =
-  | Worker_dev_tools
-  | Filesystem_write
-  | Keeper_tool_execute_shell_ir
-
 (** Parsed-but-rejected reasons. *)
 type reject_reason =
   | Command_not_in_allowlist of { bin : string }
@@ -155,8 +144,7 @@ val host_sandbox : sandbox_context
     sandbox. *)
 
 val gate_typed
-  :  ?caller:caller
-  -> ir:Masc_exec.Shell_ir.t
+  :  ir:Masc_exec.Shell_ir.t
   -> allowlist:allowlist_policy
   -> path_policy:path_policy
   -> sandbox:sandbox_context
@@ -168,8 +156,7 @@ val gate_typed
     pipeline handling as the legacy [gate] entrypoint. *)
 
 val gate_raw
-  :  ?caller:caller
-  -> text:string
+  :  text:string
   -> allowlist:allowlist_policy
   -> path_policy:path_policy
   -> sandbox:sandbox_context
@@ -181,8 +168,7 @@ val gate_raw
     while preserving the same {!verdict} surface as {!gate_typed}. *)
 
 val lower_typed_pipeline
-  :  ?caller:caller
-  -> stages:Masc_exec.Shell_ir.simple list
+  :  stages:Masc_exec.Shell_ir.simple list
   -> sandbox:sandbox_context
   -> unit
   -> verdict
@@ -192,13 +178,10 @@ val lower_typed_pipeline
     multiple stages yield [Allow] with a non-nested
     [Pipeline]. Nested pipelines are forbidden because the input type
     already guarantees [Simple] stages — this helper exists so typed
-    input shares the {!verdict} surface with raw input.  [?caller] is
-    captured for the upcoming telemetry partition (RFC-0131 PR-3) and
-    does not affect the verdict. *)
+    input shares the {!verdict} surface with raw input. *)
 
 (** {1 Tags for telemetry} *)
 
-val caller_tag : caller -> string
 val verdict_tag : verdict -> string
 val reject_reason_tag : reject_reason -> string
 val parse_reason_tag : parse_reason -> string

@@ -3,8 +3,8 @@
     This is intentionally separate from {!Admission_queue}.  OAS/provider
     capacity still belongs to the runtime layer; this module only protects
     host-local MCP tool bottlenecks that a 24-Keeper burst can stampede:
-    shell subprocesses, GitHub/gh calls, Docker, filesystem scans/writes,
-    board/workspace JSONL writes, and web I/O. *)
+    shell subprocesses, GitHub/gh calls, Docker, filesystem scans,
+    board/workspace writes, and web I/O. *)
 
 type resource_class = Tool_resource_axis.t =
   | Ungated
@@ -12,7 +12,6 @@ type resource_class = Tool_resource_axis.t =
   | Github
   | Docker
   | Filesystem_read
-  | Filesystem_write
   | Board_write
   | Workspace_write
   | Web
@@ -34,7 +33,6 @@ type gates =
   ; github : gate
   ; docker : gate
   ; filesystem_read : gate
-  ; filesystem_write : gate
   ; board_write : gate
   ; workspace_write : gate
   ; web : gate
@@ -91,7 +89,6 @@ let make_gates () =
   ; github = make_gate Github "MASC_TOOL_GATE_GITHUB_MAX" 4
   ; docker = make_gate Docker "MASC_TOOL_GATE_DOCKER_MAX" 2
   ; filesystem_read = make_gate Filesystem_read "MASC_TOOL_GATE_FS_READ_MAX" 12
-  ; filesystem_write = make_gate Filesystem_write "MASC_TOOL_GATE_FS_WRITE_MAX" 6
   ; board_write = make_gate Board_write "MASC_TOOL_GATE_BOARD_WRITE_MAX" 8
   ; workspace_write =
       make_gate Workspace_write "MASC_TOOL_GATE_WORKSPACE_WRITE_MAX" 12
@@ -108,7 +105,6 @@ let gate_for_class = function
   | Github -> Some (!gates_ref).github
   | Docker -> Some (!gates_ref).docker
   | Filesystem_read -> Some (!gates_ref).filesystem_read
-  | Filesystem_write -> Some (!gates_ref).filesystem_write
   | Board_write -> Some (!gates_ref).board_write
   | Workspace_write -> Some (!gates_ref).workspace_write
   | Web -> Some (!gates_ref).web
@@ -121,7 +117,6 @@ let all_gates () =
   ; g.github
   ; g.docker
   ; g.filesystem_read
-  ; g.filesystem_write
   ; g.board_write
   ; g.workspace_write
   ; g.web
@@ -237,7 +232,6 @@ module For_testing = struct
       ?(github = 4)
       ?(docker = 2)
       ?(filesystem_read = 12)
-      ?(filesystem_write = 6)
       ?(board_write = 8)
       ?(workspace_write = 12)
       ?(web = 6)
@@ -260,8 +254,6 @@ module For_testing = struct
       ; docker = gate Docker "MASC_TOOL_GATE_DOCKER_MAX" docker
       ; filesystem_read =
           gate Filesystem_read "MASC_TOOL_GATE_FS_READ_MAX" filesystem_read
-      ; filesystem_write =
-          gate Filesystem_write "MASC_TOOL_GATE_FS_WRITE_MAX" filesystem_write
       ; board_write = gate Board_write "MASC_TOOL_GATE_BOARD_WRITE_MAX" board_write
       ; workspace_write =
           gate Workspace_write "MASC_TOOL_GATE_WORKSPACE_WRITE_MAX" workspace_write

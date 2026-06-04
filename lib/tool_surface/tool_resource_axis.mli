@@ -11,7 +11,6 @@ type t =
   | Github
   | Docker
   | Filesystem_read
-  | Filesystem_write
   | Board_write
   | Workspace_write
   | Web

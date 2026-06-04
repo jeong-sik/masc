@@ -411,12 +411,6 @@ let schemas = Tool_schemas_agent.schemas
 
 let tool_spec_read_only =
   [ "masc_agents"; "masc_agent_card" ]
-let tool_required_permission = function
-  | "masc_agents" | "masc_agent_fitness" | "masc_agent_card"
-  | "masc_get_metrics" ->
-      Some Masc_domain.CanReadState
-  | "masc_agent_update" -> Some Masc_domain.CanBroadcast
-  | _ -> None
 
 let () =
   List.iter
@@ -430,6 +424,5 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
-           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

@@ -40,6 +40,7 @@
   (re_export masc.worker_execution_spec)
   (re_export masc.worker_runtime_config)
   (re_export masc.otel_spans)
+  (re_export masc.telemetry_unified_source)
   (re_export masc.voice_bridge_core)
   (re_export masc.voice_config)
   (re_export masc.voice_runtime_overlay)

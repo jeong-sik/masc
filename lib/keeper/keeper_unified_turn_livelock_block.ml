@@ -27,11 +27,10 @@ let record_escalation_log ~keeper_name ~keeper_turn_id ~turn_id ~reason_string ~
       turn_id
       reason_string
   | `Repeated count ->
-    Log.Keeper.debug
+    Log.Keeper.error
       ~keeper_name
       ~turn_id:keeper_turn_id
-      "%s: keeper turn livelock guard blocked dispatch turn=%d: %s (repeat #%d, \
-       demoted from ERROR)"
+      "%s: keeper turn livelock guard blocked dispatch turn=%d: %s (repeat #%d)"
       keeper_name
       turn_id
       reason_string

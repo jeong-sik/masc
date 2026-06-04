@@ -233,14 +233,21 @@ let run_keeper_cycle
                  ()
              with
              | Keeper_turn_livelock.Blocked reason ->
-               Keeper_unified_turn_livelock_block.handle
-                 ~config
-                 ~meta
-                 ~generation
-                 ~keeper_turn_id
-                 ~turn_id
-                 ~initial_execution
-                 ~reason
+               (match Keeper_unified_turn_livelock_block.handle
+                  ~config
+                  ~meta
+                  ~generation
+                  ~keeper_turn_id
+                  ~turn_id
+                  ~initial_execution
+                  ~reason
+                with
+                | Ok () -> ()
+                | Error _ ->
+                  Log.Keeper.error (fun f ->
+                    f ~meta
+                      "%s: pre_dispatch livelock blocked (caller-level error for Repeated)"
+                      meta.name))
              | Keeper_turn_livelock.Started _ ->
                Keeper_turn_fsm.emit_transition
                  ~keeper_name:meta.name

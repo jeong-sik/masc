@@ -88,10 +88,103 @@ type capacity_retry_after =
   | Synthetic_default of float
   | No_retry_hint
 
+type no_tool_capable_detail = {
+  configured_labels : string list;
+  provider_rejections : (string * string) list;
+}
+
+type runtime_exhaustion_reason =
+  | Connection_refused
+  | Dns_failure
+  | No_providers_available
+  | All_providers_failed
+  | Candidates_filtered_after_cycles
+  | Max_turns_exceeded
+  | Structural_attempt_timeout of { detail : string }
+  | Capacity_exhausted
+  | No_tool_capable of no_tool_capable_detail option
+  | Other_detail of string
+
+let runtime_exhaustion_reason_retryable = function
+  | Candidates_filtered_after_cycles | Max_turns_exceeded | Capacity_exhausted ->
+    true
+  | Connection_refused | Dns_failure | No_providers_available | All_providers_failed ->
+    true
+  | Structural_attempt_timeout _ -> true
+  | No_tool_capable _ -> false
+  | Other_detail _ -> false
+
+let runtime_exhaustion_reason_to_json = function
+  | Connection_refused -> `String "connection_refused"
+  | Dns_failure -> `String "dns_failure"
+  | No_providers_available -> `String "no_providers_available"
+  | All_providers_failed -> `String "all_providers_failed"
+  | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
+  | Max_turns_exceeded -> `String "max_turns_exceeded"
+  | Structural_attempt_timeout { detail } ->
+    `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
+  | Capacity_exhausted -> `String "capacity_exhausted"
+  | No_tool_capable None -> `String "no_tool_capable"
+  | No_tool_capable (Some { configured_labels; provider_rejections }) ->
+    let rejections_json =
+      List.map
+        (fun (label, reason) ->
+           `Assoc [ "label", `String label; "reason", `String reason ])
+        provider_rejections
+    in
+    `Assoc
+      [ "tag", `String "no_tool_capable"
+      ; "configured_labels", Json_util.json_string_list configured_labels
+      ; "provider_rejections", `List rejections_json
+      ]
+  | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
+
+let runtime_exhaustion_reason_of_json = function
+  | `String "connection_refused" -> Some Connection_refused
+  | `String "dns_failure" -> Some Dns_failure
+  | `String "no_providers_available" -> Some No_providers_available
+  | `String "all_providers_failed" -> Some All_providers_failed
+  | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
+  | `String "max_turns_exceeded" -> Some Max_turns_exceeded
+  | `String "capacity_exhausted" -> Some Capacity_exhausted
+  | `String "no_tool_capable" -> Some (No_tool_capable None)
+  | `Assoc fields ->
+    (match List.assoc_opt "tag" fields with
+     | Some (`String "structural_attempt_timeout") ->
+       (match List.assoc_opt "detail" fields with
+         | Some (`String detail) -> Some (Structural_attempt_timeout { detail })
+         | _ -> None)
+     | Some (`String "other_detail") ->
+       (match List.assoc_opt "message" fields with
+         | Some (`String msg) -> Some (Other_detail msg)
+         | _ -> None)
+     | Some (`String "no_tool_capable") ->
+       let configured_labels =
+         match List.assoc_opt "configured_labels" fields with
+         | Some (`List xs) -> List.filter_map (function `String s -> Some s | _ -> None) xs
+         | _ -> []
+       in
+       let provider_rejections =
+         match List.assoc_opt "provider_rejections" fields with
+         | Some (`List xs) ->
+           List.filter_map
+             (function
+               | `Assoc rf ->
+                 (match List.assoc_opt "label" rf, List.assoc_opt "reason" rf with
+                   | Some (`String label), Some (`String reason) -> Some (label, reason)
+                   | _ -> None)
+               | _ -> None)
+             xs
+         | _ -> []
+       in
+       Some (No_tool_capable (Some { configured_labels; provider_rejections }))
+     | _ -> None)
+  | _ -> None
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
-      reason : Keeper_meta_contract.runtime_exhaustion_reason;
+      reason : runtime_exhaustion_reason;
     }
   | Capacity_backpressure of {
       runtime_id : string;
@@ -208,7 +301,7 @@ let masc_internal_error_to_json = function
       [
         ("kind", `String "runtime_exhausted");
         ("runtime_id", `String runtime_id);
-        ("reason", Keeper_meta_contract.runtime_exhaustion_reason_to_json reason);
+        ("reason", runtime_exhaustion_reason_to_json reason);
       ]
   | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
     let runtime_id = runtime_id_to_string runtime_id in
@@ -393,7 +486,7 @@ let summary_of_masc_internal_error = function
            is_retry
            (retry_admission_denial_to_yojson denial_reason
             |> Yojson.Safe.to_string))
-  | Runtime_exhausted { runtime_id; reason = Keeper_meta_contract.No_tool_capable (Some detail) } ->
+  | Runtime_exhausted { runtime_id; reason = No_tool_capable (Some detail) } ->
     let runtime_id = runtime_id_to_string runtime_id in
     Some
       (Printf.sprintf
@@ -506,7 +599,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               match List.assoc_opt "reason"
                       (match json with `Assoc fields -> fields | _ -> []) with
               | Some json_val ->
-                  Keeper_meta_contract.runtime_exhaustion_reason_of_json json_val
+                  runtime_exhaustion_reason_of_json json_val
               | None -> None
             in
             (match reason_opt with
@@ -568,7 +661,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                   "rejection_reasons" json
               | provider_rejections -> provider_rejections
             in
-            let detail : Keeper_meta_contract.no_tool_capable_detail =
+            let detail : no_tool_capable_detail =
               { configured_labels
               ; provider_rejections =
                   List.map (fun r -> (r.provider_label, r.reason)) rejections
@@ -578,7 +671,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               (Runtime_exhausted
                  {
                    runtime_id;
-                   reason = Keeper_meta_contract.No_tool_capable (Some detail);
+                   reason = No_tool_capable (Some detail);
                  })
           | None -> None)
       | Some (`String "accept_rejected") -> (

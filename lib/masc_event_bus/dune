@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name masc_event_bus)
+ (public_name masc.masc_event_bus)
+ (wrapped false)
+ (libraries agent_sdk))

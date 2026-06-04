@@ -8,14 +8,17 @@
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps the top-level identifier `Host_config` unchanged.
+
 (include_subdirs no)
 
 (library
  (name masc_host_config)
  (public_name masc.host_config)
  (wrapped false)
- (flags (:standard -w +4))
- (preprocess (pps ppx_deriving.show ppx_deriving.eq))
+ (flags
+  (:standard -w +4))
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq))
  (libraries
   unix
   ; RFC-0085 PR-9 — Host_config absorbs base_path normalisation

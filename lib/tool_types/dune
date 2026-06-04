@@ -16,6 +16,7 @@
 ; (wrapped false) keeps bare `Tool_args` / `Tool_result` so all
 ; 1156 external refs (Tool_args 161 bare + 4 wrapped, Tool_result
 ; 969 bare + 22 wrapped) need only the 26 wrapped refs sed'd to bare.
+
 (include_subdirs no)
 
 (library
@@ -23,4 +24,5 @@
  (public_name masc.tool_types)
  (wrapped false)
  (libraries yojson unix masc_log masc_core eio time_compat)
- (preprocess (pps ppx_deriving_yojson ppx_deriving.show)))
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show)))

@@ -10,12 +10,13 @@
 ; (wrapped false) keeps the top-level identifier `Keeper_skill_routing`
 ; unchanged for bare callers — only `Keeper_skill_routing.X`
 ; sites in tests need prefix removal.
+
 (include_subdirs no)
 
 (library
  (name masc_keeper_skill_routing)
  (public_name masc.keeper_skill_routing)
  (wrapped false)
- (flags (:standard -w +4))
- (libraries
-  masc_core))
+ (flags
+  (:standard -w +4))
+ (libraries masc_core))

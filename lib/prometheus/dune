@@ -1,0 +1,20 @@
+(include_subdirs no)
+
+(library
+ (name masc_prometheus)
+ (public_name masc.prometheus)
+ (wrapped false)
+ (libraries
+  yojson
+  unix
+  logs
+  time_compat
+  masc.masc_core
+  mtime
+  masc.config
+  eio
+  masc.masc_log
+  agent_sdk
+  agent_sdk.llm_provider)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

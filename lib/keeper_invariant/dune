@@ -10,11 +10,13 @@
 ; Track A audit (2026-05-15) flags `(wrapped false)` as Dune-discouraged
 ; pattern — RFC-0056 sub-libs all use it for G5 caller-delta minimization;
 ; Wave D RFC to migrate all to (wrapped true) + -open Tezos pattern.
+
 (include_subdirs no)
 
 (library
  (name masc_keeper_invariant)
  (public_name masc.keeper_invariant)
  (wrapped false)
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (libraries))

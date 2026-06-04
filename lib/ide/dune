@@ -5,7 +5,8 @@
  (public_name masc.ide)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (modules
   ide_annotation_types
   ide_annotations
@@ -13,10 +14,4 @@
   ide_event_types
   ide_paths
   ide_region_tracker)
- (libraries
-  unix
-  mtime
-  mtime.clock.os
-  yojson
-  uuidm
-  fs_compat))
+ (libraries unix mtime mtime.clock.os yojson uuidm fs_compat))

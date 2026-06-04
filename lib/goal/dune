@@ -6,6 +6,7 @@
 ;; mega-lib Workspace facade. Dependency direction is one-way: consumers
 ;; (workspace_goals adapter, dashboards) depend on masc_goal; masc_goal depends
 ;; only on neutral libraries below.
+
 (library
  (name masc_goal)
  (public_name masc.masc_goal)

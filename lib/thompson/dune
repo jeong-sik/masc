@@ -20,6 +20,7 @@
 ;;
 ;; (wrapped false) keeps the bare `Thompson_sampling` module name so call
 ;; sites stay `Thompson_sampling.*`.
+
 (library
  (name masc_thompson)
  (public_name masc.masc_thompson)

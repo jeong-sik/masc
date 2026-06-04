@@ -30,6 +30,7 @@
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps bare identifiers (`Tool_call_quality_benchmark`,
 ; `Reward_advice_artifact`, `Post_verifier`, ...).
+
 (include_subdirs no)
 
 (library
@@ -39,7 +40,4 @@
  ;; Drop -w +4 (fragile-match) because we are *moving* pre-existing
  ;; modules whose match patterns predate that flag. Tightening lint
  ;; here is out of scope for this RFC-0056 G2 mechanical extraction.
- (libraries
-  yojson
-  masc_core
-  time_compat))
+ (libraries yojson masc_core time_compat))

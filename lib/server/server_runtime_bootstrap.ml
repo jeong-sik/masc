@@ -435,6 +435,10 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             ~labels:[ ("op", op) ]
             seconds);
       Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
+      Fd_accountant.set_pressure_hooks
+        ~active:Keeper_fd_pressure.active
+        ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit;
+      Log.Server.info "Fd_accountant pressure hooks installed";
       (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
          any subsequent structured emits) into the masc log ring so
          they land in <base_path>/.masc/logs/system_log_*.jsonl alongside

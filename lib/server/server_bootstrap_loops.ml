@@ -136,7 +136,7 @@ let start_keeper_loops
      Only Docker keepers benefit; local keepers operate on the project root. *)
   Atomic.set Workspace_hooks.claim_post_provision_fn
     (fun config ~agent_name ~task_id ->
-       Keeper_repo_readiness.provision_worktrees_for_task
+       Playground_repo_readiness.provision_worktrees_for_task
          ~config ~agent_name ~task_id ());
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the

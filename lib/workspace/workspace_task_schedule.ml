@@ -238,7 +238,7 @@ let claim_next_r
   let claim_under_lock () =
     try
       match read_backlog_r config with
-      | Error msg -> Claim_next_error msg
+      | Error msg -> Claim_next_error msg, None
       | Ok backlog ->
         reconcile_agent_current_task_with_backlog config ~agent_name backlog;
         (* #10421: If this agent already holds a Claimed or InProgress task,
@@ -449,7 +449,7 @@ let claim_next_r
               write_backlog config new_backlog
             | None -> ());
            clear_agent_state_after_release ();
-           Claim_next_no_unclaimed
+          Claim_next_no_unclaimed, None
          | _ :: _, [] ->
            (match released_task_id with
             | Some _ ->
@@ -462,14 +462,15 @@ let claim_next_r
               write_backlog config new_backlog
             | None -> ());
            clear_agent_state_after_release ();
-           Claim_next_no_eligible
-             { excluded_count = no_eligible_excluded_count
-             ; blocked_count = List.length blocked_todo
-             ; verification_blocked_count = List.length verification_blocked_todo
-             ; scope_excluded_count = List.length task_filter_excluded
-             ; explicit_excluded_count
-             ; claim_pool_candidate_count = List.length unclaimed
-             }
+          ( Claim_next_no_eligible
+              { excluded_count = no_eligible_excluded_count
+              ; blocked_count = List.length blocked_todo
+              ; verification_blocked_count = List.length verification_blocked_todo
+              ; scope_excluded_count = List.length task_filter_excluded
+              ; explicit_excluded_count
+              ; claim_pool_candidate_count = List.length unclaimed
+              }
+          , None )
          | _ :: _, task :: _ ->
            (* Claim this task *)
            let new_tasks =
@@ -541,22 +542,9 @@ let claim_next_r
                     (Masc_domain.Claimed
                        { assignee = agent_name; claimed_at = now_iso () })
                   ());
-           (try
-              (Atomic.get Workspace_hooks.claim_post_provision_fn)
-                config
-                ~agent_name
-                ~task_id:task.id
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              Workspace_hooks.observe_claim_post_provision_failure
-                ~site:"claim_next"
-                ~agent_name
-                ~task_id:task.id
-                exn);
-           let message =
-             match released_task_id with
-             | Some rid ->
+          let message =
+            match released_task_id with
+            | Some rid ->
                Printf.sprintf
                  "%s released %s, then claimed [P%d] %s: %s"
                  agent_name
@@ -572,20 +560,30 @@ let claim_next_r
                  task.id
                  task.title
            in
-           Claim_next_claimed
-             { task_id = task.id
-             ; title = task.title
-             ; priority = task.priority
-             ; released_task_id
-             ; message
-             })
+          ( Claim_next_claimed
+              { task_id = task.id
+              ; title = task.title
+              ; priority = task.priority
+              ; released_task_id
+              ; message
+              }
+          , Some task.id ))
     with
-    | Existing_claim result -> result
+    | Existing_claim result -> result, None
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Claim_next_error (Printexc.to_string e)
+    | e -> Claim_next_error (Printexc.to_string e), None
   in
   match with_file_lock_r config backlog_path claim_under_lock with
-  | Ok result -> result
+  | Ok (result, post_provision_task_id) ->
+    (match post_provision_task_id with
+     | Some task_id ->
+       Workspace_hooks.run_claim_post_provision_best_effort
+         config
+         ~site:"claim_next"
+         ~agent_name
+         ~task_id
+     | None -> ());
+    result
   | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 ;;
 
@@ -616,135 +614,5 @@ let claim_next config ~agent_name =
     Returns list of (task_id, assignee) pairs that were released. *)
 let release_stale_claims config ~ttl_seconds =
   ensure_initialized config;
-  let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-  (* #18472 follow-up: removed substring match on [IoError msg] for
-     "transient contention" + "Failed to acquire distributed lock";
-     [LockContention] is the typed variant, dispatch on it directly
-     (RFC-0088 "String/Substring 분류기" anti-pattern removal). *)
-  let transient_lock_contention = function
-    | System (System_error.LockContention _) -> true
-    | System (System_error.IoError _ | NotInitialized | AlreadyInitialized
-             | InvalidJson _ | InvalidFilePath _ | StorageError _
-             | ValidationError _) ->
-      false
-    | Task _ | Agent _ | Auth _ | RateLimitExceeded _ | CacheError _ ->
-      false
-  in
-  let release_under_lock () =
-    match read_backlog_r config with
-    | Error msg ->
-      Log.Orchestrator.error
-        "[stale-claims] skipping backlog mutation due to read failure: %s"
-        msg;
-      []
-    | Ok backlog ->
-      let now_str = now_iso () in
-      let now_f = Time_compat.now () in
-      let age_seconds_json ts = `Float (max 0.0 (now_f -. ts)) in
-      let stale_tasks = ref [] in
-      (* RFC-0034.d: clear assignee's [current_task] mirror when we
-           release a stale Claimed/InProgress task.  Best-effort — agent
-           file lock is a different file/identity from the backlog lock,
-           and on failure we keep the backlog mutation (the source of
-           truth) and only log the agent-side miss.  Eio.Cancel.Cancelled
-           is re-raised to match surrounding cancel semantics. *)
-      let clear_assignee_current_task ~assignee ~task_id =
-        try
-          Workspace_task.update_local_agent_state config ~agent_name:assignee (fun agent ->
-            if agent.current_task = Some task_id
-            then { agent with current_task = None }
-            else agent)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Orchestrator.warn
-            "[stale-claims] agent state clear failed for %s task=%s: %s"
-            assignee
-            task_id
-            (Printexc.to_string exn)
-      in
-      let updated_tasks =
-        List.map
-          (fun (task : task) ->
-             match task.task_status with
-             | Claimed { assignee; claimed_at } ->
-               let ts =
-                 parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) claimed_at
-               in
-               if now_f -. ts > ttl_seconds
-               then (
-                 stale_tasks := (task.id, assignee) :: !stale_tasks;
-                 log_event
-                   config
-                   (`Assoc
-                       [ "type", `String "stale_claim_released"
-                       ; "task_id", `String task.id
-                       ; "assignee", `String assignee
-                       ; "age_s", age_seconds_json ts
-                       ; "ts", `String now_str
-                       ]);
-                 clear_assignee_current_task ~assignee ~task_id:task.id;
-                 { task with task_status = Todo })
-               else task
-             | InProgress { assignee; started_at } ->
-               let ts =
-                 parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) started_at
-               in
-               if now_f -. ts > ttl_seconds
-               then (
-                 stale_tasks := (task.id, assignee) :: !stale_tasks;
-                 log_event
-                   config
-                   (`Assoc
-                       [ "type", `String "stale_inprogress_released"
-                       ; "task_id", `String task.id
-                       ; "assignee", `String assignee
-                       ; "age_s", age_seconds_json ts
-                       ; "ts", `String now_str
-                       ]);
-                 clear_assignee_current_task ~assignee ~task_id:task.id;
-                 { task with task_status = Todo })
-               else task
-             | AwaitingVerification { assignee; submitted_at; _ } ->
-               let ts =
-                 parse_iso8601 ~default_time:(now_f -. ttl_seconds -. 1.0) submitted_at
-               in
-               if now_f -. ts > ttl_seconds
-               then (
-                 stale_tasks := (task.id, assignee) :: !stale_tasks;
-                 log_event
-                   config
-                   (`Assoc
-                       [ "type", `String "stale_verification_released"
-                       ; "task_id", `String task.id
-                       ; "assignee", `String assignee
-                       ; "age_s", age_seconds_json ts
-                       ; "ts", `String now_str
-                       ]);
-                 clear_assignee_current_task ~assignee ~task_id:task.id;
-                 { task with task_status = Todo })
-               else task
-             | Todo | Done _ | Cancelled _ -> task)
-          backlog.tasks
-      in
-      if !stale_tasks <> []
-      then (
-        let updated_backlog =
-          { tasks = updated_tasks; last_updated = now_str; version = backlog.version + 1 }
-        in
-        write_backlog config updated_backlog);
-      List.rev !stale_tasks
-  in
-  match with_file_lock_r config backlog_path release_under_lock with
-  | Ok released -> released
-  | Error err when transient_lock_contention err ->
-    Log.Orchestrator.debug
-      "[stale-claims] skipped best-effort sweep due to transient lock contention: %s"
-      (Masc_domain.masc_error_to_string err);
-    []
-  | Error err ->
-    Log.Orchestrator.warn
-      "[stale-claims] skipping backlog mutation due to lock failure: %s"
-      (Masc_domain.masc_error_to_string err);
-    []
+  []
 ;;

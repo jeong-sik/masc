@@ -7,7 +7,7 @@ let normalize_repo_cwd_path path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
-(* Currency-sync fetch-rate cache. [Keeper_repo_readiness.ensure_current]
+(* Currency-sync fetch-rate cache. [Playground_repo_readiness.ensure_current]
    fetches origin before deciding whether to fast-forward, so calling it on
    every repo-targeting tool call would refetch many times per turn. This is a
    per-clone-path rate cache for an *idempotent* operation (not a failure
@@ -20,11 +20,11 @@ let currency_min_interval_sec = 30.0
 (* Keep the keeper's sandbox clone current with origin/<default_branch> before
    code work. Best-effort: a failed advance never fails the turn, but
    [Eio.Cancel.Cancelled] is re-raised so turn cancellation is preserved. The
-   advance is fast-forward-only and work-preserving (see [Keeper_repo_readiness]).
+   advance is fast-forward-only and work-preserving (see [Playground_repo_readiness]).
    The typed outcome is logged rather than dropped: a [Skipped] sync is the very
    "repo silently frozen" failure this exists to fix, so it stays visible. *)
 let sync_repo_currency_best_effort ~config ~meta ~repo_name =
-  let cpath = Keeper_repo_readiness.clone_path ~config ~meta ~repo_name in
+  let cpath = Playground_repo_readiness.clone_path ~config ~meta ~repo_name in
   let now = Unix.gettimeofday () in
   let due =
     match Hashtbl.find_opt currency_last_sync cpath with
@@ -34,8 +34,8 @@ let sync_repo_currency_best_effort ~config ~meta ~repo_name =
   if due then begin
     Hashtbl.replace currency_last_sync cpath now;
     try
-      match Keeper_repo_readiness.ensure_current ~config ~meta ~repo_name () with
-      | Keeper_repo_readiness.Up_to_date -> ()
+      match Playground_repo_readiness.ensure_current ~config ~meta ~repo_name () with
+      | Playground_repo_readiness.Up_to_date -> ()
       | Advanced commits ->
         Log.Keeper.info "currency: advanced sandbox repo %s by %d commit(s)"
           repo_name commits
@@ -70,15 +70,15 @@ let repo_path_context ~(config : Workspace.config) ~(meta : keeper_meta) cwd =
       in
       match String.split_on_char '/' suffix with
       | repo_name :: ".worktrees" :: task_name :: _
-        when Keeper_repo_readiness.safe_repo_component repo_name
-             && Keeper_repo_readiness.safe_repo_component task_name ->
+        when Playground_repo_readiness.safe_repo_component repo_name
+             && Playground_repo_readiness.safe_repo_component task_name ->
         let repo_root = Filename.concat repos_root repo_name in
         let worktree_root =
           Filename.concat (Filename.concat repo_root ".worktrees") task_name
           |> normalize_repo_cwd_path
         in
         Some (repo_name, normalize_repo_cwd_path repo_root, worktree_root, [ worktree_root ])
-      | repo_name :: _ when Keeper_repo_readiness.safe_repo_component repo_name ->
+      | repo_name :: _ when Playground_repo_readiness.safe_repo_component repo_name ->
         let repo_root = Filename.concat repos_root repo_name in
         let repo_root = normalize_repo_cwd_path repo_root in
         Some (repo_name, repo_root, repo_root, [ repo_root ])
@@ -143,7 +143,7 @@ let execution_location_json
     | None -> Outside_playground, [], None, None, None
     | Some [] -> Playground_root, [], None, None, None
     | Some ("repos" :: repo_name :: rest)
-      when Keeper_repo_readiness.safe_repo_component repo_name ->
+      when Playground_repo_readiness.safe_repo_component repo_name ->
       let repo_root =
         Filename.concat (Filename.concat playground "repos") repo_name
         |> normalize_repo_cwd_path
@@ -151,7 +151,7 @@ let execution_location_json
       (match rest with
        | [] -> Repo_root, [ "repos"; repo_name ], Some repo_name, Some repo_root, None
        | ".worktrees" :: task_name :: tail
-         when Keeper_repo_readiness.safe_repo_component task_name ->
+         when Playground_repo_readiness.safe_repo_component task_name ->
          let worktree_root =
            Filename.concat (Filename.concat repo_root ".worktrees") task_name
            |> normalize_repo_cwd_path
@@ -220,8 +220,8 @@ let extract_worktree_task_name ~(config : Workspace.config) ~(meta : keeper_meta
     in
     match String.split_on_char '/' suffix with
     | repo_name :: ".worktrees" :: task_name :: _
-      when Keeper_repo_readiness.safe_repo_component repo_name
-           && Keeper_repo_readiness.safe_repo_component task_name ->
+      when Playground_repo_readiness.safe_repo_component repo_name
+           && Playground_repo_readiness.safe_repo_component task_name ->
       let worktree_root =
         Filename.concat (Filename.concat (Filename.concat repos_root repo_name) ".worktrees") task_name
         |> normalize_repo_cwd_path
@@ -241,8 +241,8 @@ let validate_repo_path_ready
     sync_repo_currency_best_effort ~config ~meta ~repo_name;
     let check_probe () =
       let top =
-        Keeper_repo_readiness.run_git
-          ~timeout_sec:Keeper_repo_readiness.read_only_probe_timeout_sec
+        Playground_repo_readiness.run_git
+          ~timeout_sec:Playground_repo_readiness.read_only_probe_timeout_sec
           ~clone_path:probe_path
           [ "rev-parse"; "--show-toplevel" ]
       in
@@ -269,7 +269,7 @@ let validate_repo_path_ready
       let worktree_result =
         match extract_worktree_task_name ~config ~meta cwd with
         | Some (wt_repo_name, task_name, worktree_root) ->
-          Keeper_repo_readiness.ensure_worktree_ready
+          Playground_repo_readiness.ensure_worktree_ready
             ~config ~meta ~repo_name:wt_repo_name ~task_name
             ~worktree_path:worktree_root ()
         | None -> Error "not a worktree path"
@@ -279,7 +279,7 @@ let validate_repo_path_ready
       | Error _ ->
         (* Fall back to repo-level reclone *)
         (match
-           Keeper_repo_readiness.ensure_ready ~config ~meta ~repo_name ()
+           Playground_repo_readiness.ensure_ready ~config ~meta ~repo_name ()
          with
          | Ok () -> check_probe ()
          | Error _repair_err -> initial_err)

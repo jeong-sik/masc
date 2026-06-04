@@ -196,7 +196,7 @@ val handle_masc_tool_shard
 (** RFC-0182 §3.1 — [handle_masc_approval] is the descriptor-projection
     cluster handler for [masc_approval_pending] / [masc_approval_get] /
     [masc_approval_resolve].  Reads from [Keeper_approval_queue]
-    directly; mirrors the logic in [Tool_inline_dispatch]. *)
+    directly; backs the inline approval dispatch ref. *)
 val handle_masc_approval
   :  name:string
   -> args:Yojson.Safe.t

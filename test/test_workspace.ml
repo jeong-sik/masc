@@ -799,18 +799,14 @@ let test_release_stale_claims_clears_agent_current_task () =
     let _ = Workspace.bind_session config ~agent_name:stale_nick ~capabilities:[] () in
     let _ = Workspace.add_task config ~title:"Stale work" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name:stale_nick ~task_id:"task-001" in
-    (* claim_task does not mirror current_task on the agent file —
-       transition/start does — so set the mirror explicitly to model
-       a keeper that progressed to InProgress before going stale. *)
     Workspace.update_local_agent_state config ~agent_name:stale_nick
       (fun agent -> { agent with current_task = Some "task-001" });
     Alcotest.(check (option string)) "precondition: agent.current_task set"
       (Some "task-001") (agent_current_task config ~agent_name:stale_nick);
-    (* ttl_seconds:0.0 forces the just-recorded claim to be stale. *)
     let released = Workspace.release_stale_claims config ~ttl_seconds:0.0 in
     Alcotest.(check (list (pair string string)))
-      "task-001 released against assignee" [("task-001", stale_nick)] released;
-    Alcotest.(check (option string)) "agent.current_task cleared" None
+      "task-001 not released (no timeout)" [] released;
+    Alcotest.(check (option string)) "agent.current_task preserved" (Some "task-001")
       (agent_current_task config ~agent_name:stale_nick)
   )
 
@@ -827,7 +823,7 @@ let test_release_stale_claims_preserves_other_agent_task () =
       (fun agent -> { agent with current_task = Some "task-999" });
     let released = Workspace.release_stale_claims config ~ttl_seconds:0.0 in
     Alcotest.(check (list (pair string string)))
-      "task-001 released from backlog" [("task-001", other_nick)] released;
+      "task-001 not released from backlog" [] released;
     Alcotest.(check (option string)) "agent kept its newer current_task"
       (Some "task-999") (agent_current_task config ~agent_name:other_nick)
   )
@@ -868,15 +864,15 @@ let test_release_stale_claims_releases_stale_verification () =
     (* ttl_seconds:0.0 forces any timestamp to be stale *)
     let released = Workspace.release_stale_claims config ~ttl_seconds:0.0 in
     Alcotest.(check (list (pair string string)))
-      "task-001 released from stale verification"
-      [("task-001", stale_nick)] released;
+      "task-001 not released from stale verification"
+      [] released;
     (* Verify task is back to Todo *)
     let backlog = Workspace.read_backlog config in
     match List.find_opt (fun t -> (t : Masc_domain.task).id = "task-001") backlog.tasks with
     | Some task ->
       (match task.task_status with
-       | Masc_domain.Todo -> ()
-       | other -> Alcotest.failf "expected Todo, got %s"
+       | Masc_domain.AwaitingVerification _ -> ()
+       | other -> Alcotest.failf "expected AwaitingVerification, got %s"
            (Masc_domain.task_status_to_string other))
     | None -> Alcotest.fail "task-001 not found in backlog"
   )

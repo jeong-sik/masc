@@ -158,7 +158,7 @@
   test_keeper_compact_policy_pure
   test_heartbeat_smart
   test_keeper_allowed_paths
-  test_keeper_repo_readiness
+  test_playground_repo_readiness
   test_keeper_tool_surface_guard
   test_playground_paths
   test_keeper_meta_cwd_resilience
@@ -415,7 +415,7 @@
   test_keeper_compact_policy_pure
   test_heartbeat_smart
   test_keeper_allowed_paths
-  test_keeper_repo_readiness
+  test_playground_repo_readiness
   test_keeper_tool_surface_guard
   test_playground_paths
   test_keeper_meta_cwd_resilience

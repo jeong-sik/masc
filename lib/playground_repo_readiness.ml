@@ -1,12 +1,12 @@
-(** Keeper repository readiness.
+(** Playground repository readiness.
 
-    This is a read-only probe for the single keeper sandbox repo clone under
-    the keeper's backend-scoped sandbox repo lane. It gives preflight callers a
-    concrete answer about whether code work can safely start from that clone. *)
+    This module owns repository clone/worktree readiness for playground repo
+    lanes. Keeper callers may ask whether a cwd-backed repo/worktree is usable,
+    but clone/fetch/worktree provisioning policy lives here instead of in
+    keeper execution code. *)
 
 open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
 
 type command_result =
   { ok : bool
@@ -26,7 +26,7 @@ let run_git ~timeout_sec ~clone_path args =
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:`Workspace_git
       ~raw_source:(String.concat " " argv)
-      ~summary:"keeper repo readiness git probe"
+      ~summary:"playground repo readiness git probe"
       ~timeout_sec argv
   in
   { ok = status = Unix.WEXITED 0; output = String.trim output; status }
@@ -40,6 +40,13 @@ let normalize_path path =
   |> Keeper_alerting_path.strip_trailing_slashes
 
 let same_path a b = String.equal (normalize_path a) (normalize_path b)
+
+let git_toplevel path =
+  let probe =
+    run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:path
+      [ "rev-parse"; "--show-toplevel" ]
+  in
+  if probe.ok then Some probe.output else None
 
 let safe_repo_component s =
   s <> "" && s <> "." && s <> ".."
@@ -369,12 +376,72 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
            "repo %s is in state %s; auto-repair not applicable"
            repo_name other)
 
+let ensure_parent_clone_for_worktree ~(config : Workspace.config) ~(meta : keeper_meta)
+    ~repo_name =
+  let repo_path = clone_path ~config ~meta ~repo_name in
+  if safe_is_dir repo_path then (
+    let inside =
+      run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
+        [ "rev-parse"; "--is-inside-work-tree" ]
+    in
+    let top =
+      if inside.ok then
+        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
+          [ "rev-parse"; "--show-toplevel" ]
+      else { inside with ok = false; output = "" }
+    in
+    if inside.ok && top.ok && same_path repo_path top.output then Ok repo_path
+    else
+      match ensure_ready ~config ~meta ~repo_name () with
+      | Ok () -> Ok repo_path
+      | Error msg -> Error msg)
+  else
+    match ensure_ready ~config ~meta ~repo_name () with
+    | Ok () -> Ok repo_path
+    | Error msg -> Error msg
+
+let best_effort_fetch_origin repo_path =
+  ignore
+    (run_git
+       ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_readiness ())
+       ~clone_path:repo_path
+       [ "fetch"; "--quiet"; "origin" ])
+
+let first_existing_ref ~repo_path refs =
+  let rec loop = function
+    | [] -> None
+    | ref_name :: rest ->
+      let probe =
+        run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
+          [ "rev-parse"; "--verify"; "--quiet"; ref_name ]
+      in
+      if probe.ok then Some ref_name else loop rest
+  in
+  loop refs
+
+let worktree_base_ref ~repo_path =
+  best_effort_fetch_origin repo_path;
+  let remote_head =
+    let probe =
+      run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path:repo_path
+        [ "symbolic-ref"; "--quiet"; "--short"; "refs/remotes/origin/HEAD" ]
+    in
+    if probe.ok then first_line_opt probe.output else None
+  in
+  let candidates =
+    List.filter_map
+      (fun x -> x)
+      [ remote_head; Some "origin/main"; Some "origin/master"; Some "origin/develop" ]
+  in
+  first_existing_ref ~repo_path candidates
+
 (** [ensure_worktree_ready ~config ~meta ~repo_name ~task_name ~worktree_path ()]
     ensures a git worktree exists at [worktree_path] inside the sandbox clone for
-    [repo_name].  If the worktree is missing, first ensures the parent repo is
-    ready (reclone if needed), then creates the worktree via
-    [git worktree add].  Returns [Ok ()] when the worktree is a valid git
-    checkout, or [Error msg] if creation failed.
+    [repo_name].  If the worktree is missing, first ensures the parent repo is a
+    valid git clone (reclone if needed), then creates the worktree from the
+    fetched default origin branch.  Parent clone dirtiness is preserved and does
+    not block creating a separate task worktree.  Returns [Ok ()] when the
+    worktree is a valid git checkout, or [Error msg] if creation failed.
 
     Root fix for the docker sandbox mount issue: when the keeper cwd targets a
     worktree path that doesn't exist in the sandbox clone (e.g. because the
@@ -396,43 +463,50 @@ let ensure_worktree_ready
     (* Fast path: worktree already exists and is a valid git checkout.
        Skip parent repo validation — the parent may be "dirty" from worktree
        metadata (.git/worktrees/), which is normal and expected. *)
-    let probe =
-      run_git ~timeout_sec:read_only_probe_timeout_sec
-        ~clone_path:worktree_path
-        [ "rev-parse"; "--show-toplevel" ]
-    in
-    if probe.ok then Ok ()
-    else
+    match git_toplevel worktree_path with
+    | Some top when same_path worktree_path top -> Ok ()
+    | Some top ->
+      Error
+        (Printf.sprintf
+           "worktree path %s is not an independent git checkout (git_toplevel=%s)"
+           worktree_path top)
+    | None ->
       (* Worktree missing or corrupt — ensure parent repo exists, then create *)
-      match ensure_ready ~config ~meta ~repo_name () with
+      match ensure_parent_clone_for_worktree ~config ~meta ~repo_name with
       | Error msg ->
-        Error (Printf.sprintf "parent repo %s not ready: %s" repo_name msg)
-      | Ok () ->
-        let repo_path = clone_path ~config ~meta ~repo_name in
-        (* [git worktree add --detach] creates a detached HEAD worktree *)
-        let add_result =
-          run_git ~timeout_sec:(read_only_probe_timeout_sec *. 2.0)
-            ~clone_path:repo_path
-            [ "worktree"; "add"; "--detach"; worktree_path ]
-        in
-        if add_result.ok then (
-          (* Create a task branch in the new worktree *)
-          let branch_name = Printf.sprintf "task/%s" task_name in
-          let checkout =
-            run_git ~timeout_sec:read_only_probe_timeout_sec
-              ~clone_path:worktree_path
-              [ "checkout"; "-b"; branch_name ]
-          in
-          if checkout.ok then Ok ()
-          else
-            (* worktree created but branch checkout failed — still usable *)
-            Ok ()
-        )
-        else
+        Error (Printf.sprintf "parent repo %s not usable for worktree: %s" repo_name msg)
+      | Ok repo_path -> (
+        match worktree_base_ref ~repo_path with
+        | None ->
           Error
             (Printf.sprintf
-               "worktree add failed for %s/%s at %s: %s"
-               repo_name task_name worktree_path add_result.output)
+               "worktree add failed for %s/%s at %s: no base ref found"
+               repo_name task_name worktree_path)
+        | Some base_ref ->
+          (* [git worktree add --detach <path> <ref>] avoids inheriting a dirty
+             parent task branch as the new task's base. *)
+          let add_result =
+            run_git ~timeout_sec:(read_only_probe_timeout_sec *. 2.0)
+              ~clone_path:repo_path
+              [ "worktree"; "add"; "--detach"; worktree_path; base_ref ]
+          in
+          if add_result.ok then (
+            (* Create a task branch in the new worktree *)
+            let branch_name = Printf.sprintf "task/%s" task_name in
+            let checkout =
+              run_git ~timeout_sec:read_only_probe_timeout_sec
+                ~clone_path:worktree_path
+                [ "checkout"; "-b"; branch_name ]
+            in
+            if checkout.ok then Ok ()
+            else
+              (* worktree created but branch checkout failed — still usable *)
+              Ok ())
+          else
+            Error
+              (Printf.sprintf
+                 "worktree add failed for %s/%s at %s from %s: %s"
+                 repo_name task_name worktree_path base_ref add_result.output))
 
 (** [provision_worktrees_for_task ~config ~agent_name ~task_id ()] scans all
     repos in the keeper's docker playground and creates a worktree for [task_id]
@@ -479,38 +553,46 @@ let provision_worktrees_for_task
                    (Filename.concat repo_path ".worktrees")
                    task_id
                in
-               (* Fast path: worktree already exists *)
-               let probe =
-                 run_git ~timeout_sec:read_only_probe_timeout_sec
-                   ~clone_path:worktree_path
-                   [ "rev-parse"; "--show-toplevel" ]
-               in
-               if probe.ok then ()
-               else
-                 (* Create worktree in the sandbox clone *)
-                 let add_result =
-                   run_git
-                     ~timeout_sec:(read_only_probe_timeout_sec *. 2.0)
-                     ~clone_path:repo_path
-                     [ "worktree"; "add"; "--detach"; worktree_path ]
-                 in
-                 if add_result.ok then (
-                   let branch_name =
-                     Printf.sprintf "task/%s" task_id
-                   in
-                   let _checkout =
-                     run_git ~timeout_sec:read_only_probe_timeout_sec
-                       ~clone_path:worktree_path
-                       [ "checkout"; "-b"; branch_name ]
-                   in
-                   Log.Workspace.info
-                     "provision_worktrees: worktree created for %s/%s"
-                     repo_name task_id
-                 )
-                 else
-                   Log.Workspace.debug
-                     "provision_worktrees: skipped %s/%s: %s"
-                     repo_name task_id add_result.output)
+               match git_toplevel worktree_path with
+               | Some top when same_path worktree_path top -> ()
+               | Some top ->
+                 Log.Workspace.debug
+                   "provision_worktrees: skipped %s/%s: %s is not an independent \
+                    git checkout (git_toplevel=%s)"
+                   repo_name task_id worktree_path top
+               | None -> (
+                   match worktree_base_ref ~repo_path with
+                   | None ->
+                     Log.Workspace.debug
+                       "provision_worktrees: skipped %s/%s: no base ref found"
+                       repo_name task_id
+                   | Some base_ref ->
+                     (* Create worktree in the sandbox clone from origin, not
+                        from whatever task branch the parent clone is currently
+                        on. *)
+                     let add_result =
+                       run_git
+                         ~timeout_sec:(read_only_probe_timeout_sec *. 2.0)
+                         ~clone_path:repo_path
+                         [ "worktree"; "add"; "--detach"; worktree_path; base_ref ]
+                     in
+                     if add_result.ok then (
+                       let branch_name =
+                         Printf.sprintf "task/%s" task_id
+                       in
+                       let _checkout =
+                         run_git ~timeout_sec:read_only_probe_timeout_sec
+                           ~clone_path:worktree_path
+                           [ "checkout"; "-b"; branch_name ]
+                       in
+                       Log.Workspace.info
+                         "provision_worktrees: worktree created for %s/%s"
+                         repo_name task_id
+                     )
+                     else
+                       Log.Workspace.debug
+                         "provision_worktrees: skipped %s/%s from %s: %s"
+                         repo_name task_id base_ref add_result.output))
         entries
 
 (* ── Sandbox repo currency (fetch + work-preserving fast-forward) ──── *)

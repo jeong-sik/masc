@@ -40,7 +40,6 @@ let test_r0_read_commands () =
   check "git log --oneline -5" Shell_ir_risk.R0_Read;
   check "gh pr view 123" Shell_ir_risk.R0_Read;
   check "dune build" Shell_ir_risk.R0_Read;
-  check "make test" Shell_ir_risk.R0_Read;
   check "npm run build" Shell_ir_risk.R0_Read
 ;;
 
@@ -56,6 +55,7 @@ let test_r1_reversible_commands () =
   check "git commit -m msg" Shell_ir_risk.R1_Reversible_mutation;
   check "git checkout branch" Shell_ir_risk.R1_Reversible_mutation;
   check "dune clean" Shell_ir_risk.R1_Reversible_mutation;
+  check "make test" Shell_ir_risk.R1_Reversible_mutation;
   check "make install" Shell_ir_risk.R1_Reversible_mutation;
   check "npm install pkg" Shell_ir_risk.R1_Reversible_mutation;
   check "truncate -s 0 file" Shell_ir_risk.R1_Reversible_mutation;

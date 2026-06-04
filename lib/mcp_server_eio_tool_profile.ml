@@ -25,12 +25,6 @@ Do not assume that the public /mcp surface and the managed-agent surface have th
 
 let managed_agent_passthrough_tool_names =
   Keeper_tool_surfaces.spawned_agent_public_tool_names
-  |> List.filter (fun name ->
-         not
-           (List.mem name
-             [
-                "masc_a2a_delegate";
-              ]))
 
 (* O(1) membership view of [managed_agent_passthrough_tool_names].
    Used by [tool_schemas_for_profile Managed_agent] to filter
@@ -233,8 +227,6 @@ let custom_tool_titles : (string * string) list = [
   (* Communication *)
   ("masc_broadcast", "Broadcast Message");
   ("masc_messages", "Read Messages");
-  ("masc_a2a_delegate", "Agent-to-Agent Delegate");
-  ("masc_a2a_subscribe", "Subscribe to Agent Events");
   (* Planning *)
   ("masc_plan_init", "Initialize Plan");
   ("masc_plan_get", "Get Plan");

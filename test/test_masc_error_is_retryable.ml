@@ -8,8 +8,8 @@
     "retryable or not" decision.
 
     Properties pinned:
-    1. {b Domain-state errors are non-retryable} — Task / Agent /
-       Portal variants.
+    1. {b Domain-state errors are non-retryable} — Task / Agent
+       variants.
     2. {b Auth — only TokenExpired retryable} — refresh-then-retry
        semantics; Unauthorized / Forbidden / InvalidToken are not.
     3. {b System — only transient I/O retryable} — IoError /

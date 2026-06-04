@@ -33,8 +33,7 @@ module Random = Stdlib.Random
    shared state can produce duplicate values or corrupt internal
    state.  The previous doc comment claiming "Fiber-safe" was
    incorrect.  Guard the shared state with an [Eio.Mutex] and route
-   every RNG access through [with_identity_rng].  Same discipline
-   used by [Lib.A2a_tools] ([a2a_rng] / [a2a_rng_mutex]). *)
+   every RNG access through [with_identity_rng]. *)
 
 module StringMap = Set_util.StringMap
 
